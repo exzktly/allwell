@@ -6,7 +6,6 @@ from well_viewer.data.metric_labels import spread_label
 
 import csv
 import re
-from pathlib import Path
 
 import theme
 
@@ -235,7 +234,7 @@ class BarBatchExportPanel(BatchExportPanel):
         ]
 
     def _run_batch(self) -> None:
-        if self._axes_block_refuses_the_run():
+        if self._run_is_refused():
             return
         groups_with_data = _groups_with_loaded_wells(
             self._groups_for_export(), self._ctx.state.dataset.well_paths,
@@ -327,7 +326,9 @@ class BarBatchExportPanel(BatchExportPanel):
                 stem = f"bar_{safe_grp}_t_multi"
             # Uniquify so same-after-sanitise group names don't overwrite.
             # Stage into write_dir (audit X3); committed to out_dir on success.
-            base = write_dir / unique_export_stem(stem, used_stems)
+            base = unique_export_stem(stem, used_stems)
+            csv_path = self._out_path(write_dir, f"{base}.csv")
+            fig_path = self._out_path(write_dir, f"{base}.{fmt}")
 
             try:
                 from well_viewer.features.barplot.controller import (
@@ -448,10 +449,11 @@ class BarBatchExportPanel(BatchExportPanel):
                     )
                     if fc_active:
                         fnames += bar_fold_change_fieldnames(band_lbl)
-                    with open(str(base) + ".csv", "w", newline="") as fh:
-                        wrt = csv.DictWriter(fh, fieldnames=fnames)
-                        wrt.writeheader()
-                        wrt.writerows(rows_csv)
+                    if csv_path is not None:
+                        with open(csv_path, "w", newline="") as fh:
+                            wrt = csv.DictWriter(fh, fieldnames=fnames)
+                            wrt.writeheader()
+                            wrt.writerows(rows_csv)
             except Exception as exc:
                 return f"{grp.name} t={tp_strs} CSV: {exc}"
 
@@ -478,12 +480,12 @@ class BarBatchExportPanel(BatchExportPanel):
                         violin_bw=violin_bw,
                     )
                 self._save_figure(
-                    fig, Path(str(base) + f".{fmt}"), fmt,
+                    fig, fig_path, fmt,
                     group=grp, title=_figure_record_title(grp, tp_strs),
                     val_col=_val_col)
             except Exception as exc:
                 return f"{grp.name} t={tp_strs} figure: {exc}"
-            self._write_cell_rows_for(grp, write_dir, Path(base).name,
+            self._write_cell_rows_for(grp, write_dir, base,
                                       val_col=_val_col, timepoints=target_ts)
             return None
 

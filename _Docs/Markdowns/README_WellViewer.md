@@ -4119,25 +4119,39 @@ data…* makes). Losing the
 files you asked for to a problem with one you merely also ticked would be the
 wrong trade.
 
-#### The extra outputs, and where each one lands
+#### Choosing where a run's figures go
 
-Three switches sit under the AXES block, on two rows, and the rows say where
-each output ends up. **Also write:** is what goes into the output folder beside
-the figures — *Raw per-cell CSV*, and *PowerPoint deck*. **Also add to:** is the
-one thing that is not a file at all — *Saved Plots gallery*, which holds records
-inside All-Well and stays with the dataset rather than with the folder.
+The first row of OUTPUT SETTINGS is **Write to:**, and it is the first question
+because everything under it is a consequence of the answer:
 
-That split is worth reading before you tick anything. A deck is an ordinary
-output file: it is written into the folder the **Folder:** row names, it is
-staged and rolled back with the figures, and a later run into the same folder
-replaces it. A gallery record is not — move or delete the output folder and the
-records are still there.
+```
+Write to:  [x] Image files   [x] PowerPoint deck   [x] Saved Plots gallery
+```
 
-All three are additions, not alternatives: the folder of figures and summary
-CSVs is written exactly as before whether you tick them or not. In particular
-*PowerPoint deck* is **not** a fifth entry in the **Format:** combo — the
-figures still come out in whatever format that combo says, and the deck is one
-more file beside them.
+Tick any combination. None of the three is privileged and none needs the
+others — a deck built from a run that wrote no image files holds exactly the
+same figures, because each destination renders its own copy from the figure in
+memory rather than from a file on disk.
+
+- **Image files** — one figure per export group in the folder below, in the
+  chosen format, with the summary CSV of its plotted numbers beside it.
+- **PowerPoint deck** — one deck in that same folder, a slide per group, each
+  figure as editable shapes rather than a picture.
+- **Saved Plots gallery** — a record per figure inside All-Well. Not a file:
+  it stays with the dataset, so a gallery-only run writes nothing to disk at
+  all and does not even create the output folder.
+
+**Folder:** and **Format:** grey out when nothing needs them. Format describes
+the image files alone; the folder is wanted by the image files and by the deck,
+but not by the gallery. Untick all three and the run is refused — it would
+produce nothing.
+
+**The summary CSVs follow the image files**, because they are files in that
+same folder. A deck-only or gallery-only run therefore saves no numbers, only
+pictures. That is a real trade and it is stated in as many words in the block
+above the Run button before you start, because afterwards it is an absence, and
+an absence is the thing nobody notices. If you want both the deck and the
+numbers, tick *Image files* as well.
 
 **Saved Plots gallery** files every exported figure in the [gallery](#saved-plots), with
 the export group's own settings, so you can browse, rename and reorder them,
@@ -4150,7 +4164,7 @@ rather than in the saved view, so the restored figure can be laid out
 differently from the file that was exported; the gallery entry says so, and so
 does the status line when you restore it.
 
-**PowerPoint deck** writes one deck beside the figures — `batch_export_line.pptx`,
+**PowerPoint deck** writes one deck into the output folder — `batch_export_line.pptx`,
 `batch_export_bar.pptx`, and so on, one per mode so exporting two modes into one
 folder leaves you two decks — with a slide per group. Each figure arrives as
 **editable PowerPoint shapes** rather than a picture, exactly as in the
@@ -4181,8 +4195,11 @@ from a fixed description of the mode, so it changes as you work: untick two
 panels and it says "3 of 4 panels" and names them; tick **Raw per-cell CSV** and
 the extra file appears in the list with a note that it is typically far larger
 than the summary CSV; tick the deck or the gallery and a closing line
-names them, in the same words their rows use — the run *writes* a deck into the
-folder, and *files* a record per figure. On the Bar and Scatter modes it also tracks
+names them, using the verb that says where each one lands — the run *writes* a
+deck into the folder, and *files* a record per figure. Untick **Image files**
+and the per-group bullets are replaced by the one line that matters then: no
+images, no CSVs, and the numbers behind each figure not saved anywhere. On the
+Bar and Scatter modes it also tracks
 the toggle that decides how many figures a group gets, so "One figure per
 selected timepoint" becomes "One figure spanning every selected timepoint" when
 you turn the spanning toggle on.

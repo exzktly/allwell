@@ -23,6 +23,13 @@ def save_export_figure(fig, fig_path, fmt: str, *, export_prefs: dict, plot_bg,
                        on_saved=None) -> None:
     """Apply *export_prefs* to *fig* and write it to *fig_path* as *fmt*.
 
+    **A *fig_path* of ``None`` styles the figure and skips the write.** That is
+    a run whose destinations are the gallery, a deck, or both, and which was
+    never asked for a folder of image files. The styling still has to happen —
+    it is what the captured figure carries — and so does *on_saved*, which is
+    where those destinations take their own copy. What is skipped is one
+    ``savefig`` into a directory the user did not ask to be filled.
+
     Wraps ``savefig`` in ``matplotlib.rc_context`` so a failed write can't leak a
     mutated ``svg``/``ps.fonttype`` into later exports (audit X17); the figure is
     always closed afterwards. PNG is written at 300 dpi.
@@ -53,7 +60,8 @@ def save_export_figure(fig, fig_path, fmt: str, *, export_prefs: dict, plot_bg,
         if fmt == "png":
             kw["dpi"] = 300
         with _mpl.rc_context(overrides):
-            fig.savefig(str(Path(fig_path)), **kw)
+            if fig_path is not None:
+                fig.savefig(str(Path(fig_path)), **kw)
         if on_saved is not None:
             on_saved(fig)
     finally:

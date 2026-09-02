@@ -6,6 +6,7 @@ from well_viewer.data.metric_labels import spread_label
 
 import csv
 import re
+import tempfile
 
 import theme
 from contextlib import contextmanager
@@ -1142,12 +1143,14 @@ class BatchExportPanel(QWidget):
     def _build_output_header_and_io(
         self, layout: QVBoxLayout, *, title: str = "OUTPUT SETTINGS",
     ) -> None:
-        """Common OUTPUT header + Folder + Format + Profile rows."""
+        """Common OUTPUT header + Write to + Folder + Format + Profile rows."""
         hdr = QHBoxLayout()
         hdr.setContentsMargins(12, 4, 12, 4)
         self._add_bold_label(hdr, title)
         hdr.addStretch(1)
         layout.addLayout(hdr)
+
+        self._build_write_to_row(layout)
 
         out_row = QHBoxLayout()
         out_row.setContentsMargins(12, 6, 12, 6)
@@ -1155,7 +1158,9 @@ class BatchExportPanel(QWidget):
         self._out_dir_edit = QLineEdit(self._out_dir_value)
         self._out_dir_edit.setMinimumWidth(_OUT_DIR_EDIT_MIN_W)
         out_row.addWidget(self._out_dir_edit, 1)
-        out_row.addWidget(btn_secondary(None, "Browse\u2026", self._browse_out_dir))
+        self._out_dir_browse_btn = btn_secondary(None, "Browse\u2026",
+                                                 self._browse_out_dir)
+        out_row.addWidget(self._out_dir_browse_btn)
         layout.addLayout(out_row)
 
         fmt_row = QHBoxLayout()
@@ -1174,6 +1179,97 @@ class BatchExportPanel(QWidget):
         self._build_export_profile_row(layout)
         if self._AXES_FOLLOW_HEADER:
             self._build_output_tail(layout)
+        self._sync_destination_widgets()
+
+    def _build_write_to_row(self, layout: QVBoxLayout) -> None:
+        """Where this run's figures go — the first question, asked first.
+
+        Three destinations, none of them privileged. A folder of image files
+        used to be the base every run paid for, with the deck and the gallery
+        as switches beneath **Format:** that could only *add* to it; so a user
+        who wanted a deck got a folder of PNGs they had not asked for, and a
+        user who wanted the gallery got the same. Nothing forced that. The
+        deck and the gallery each render their own copy straight from the
+        figure in memory (``DestinationSpool.capture``) and never open the
+        file the folder write produces, so no destination depends on another.
+
+        **Folder:** and **Format:** are consequences of this row rather than
+        settings above it, and are disabled when nothing needs them — Format
+        describes the image files alone, and the folder is needed by those and
+        by the deck, but not by the gallery, whose records live in the
+        dataset's own ``saved_plots/``.
+
+        The image-files box is what the per-group summary CSVs follow: they
+        are files in that folder like the figures are. A run without it saves
+        no numbers, which the run summary says in as many words rather than
+        leaving it to be discovered afterwards.
+        """
+        row = QHBoxLayout()
+        row.setContentsMargins(12, 2, 12, 2)
+        self._add_bold_label(row, "Write to:", min_width=_FIELD_LABEL_W)
+        self._to_files_cb = QCheckBox("Image files")
+        self._to_files_cb.setChecked(True)
+        self._to_files_cb.setToolTip(
+            "One figure per export group in the folder below, in the chosen "
+            "format, with the summary CSV of its plotted numbers beside it.\n"
+            "Untick for a run that produces only a deck or only gallery "
+            "records \u2014 no images, and no CSVs.")
+        row.addWidget(self._to_files_cb)
+        self._to_deck_cb = None
+        self._to_gallery_cb = None
+        if self._has_saved_plots():
+            self._to_deck_cb = QCheckBox("PowerPoint deck")
+            self._to_deck_cb.setToolTip(
+                "One deck in the folder below \u2014 a slide per group, each "
+                "figure as editable PowerPoint shapes rather than a "
+                "picture.\n"
+                "Named per mode (batch_export_line.pptx and so on), not per "
+                "run, so a later run into the same folder replaces it.\n"
+                "A figure whose vector capture fails is placed as a picture "
+                "and the slide says so.")
+            row.addWidget(self._to_deck_cb)
+            self._to_gallery_cb = QCheckBox("Saved Plots gallery")
+            self._to_gallery_cb.setToolTip(
+                "File each exported figure in the Saved Plots gallery, with "
+                "the export group's own settings, so it can be restored, "
+                "reordered and included in the gallery's PDF report.\n"
+                "A record, not a file: it stays with the dataset rather than "
+                "with the output folder, so a gallery-only run writes nothing "
+                "to disk at all.\n"
+                "Records are added only if the whole run succeeds.")
+            row.addWidget(self._to_gallery_cb)
+        row.addStretch(1)
+        layout.addLayout(row)
+        for box in (self._to_files_cb, self._to_deck_cb, self._to_gallery_cb):
+            if box is not None:
+                box.toggled.connect(
+                    lambda _on: self._sync_destination_widgets())
+
+    def _sync_destination_widgets(self) -> None:
+        """Grey out what the chosen destinations do not use, and re-summarise.
+
+        A control that cannot affect the run it sits above is worse than an
+        absent one: **Format:** over a gallery-only run offers four answers to
+        a question nobody asked, and the per-cell CSV is a file in a folder
+        this run is not filling. Disabled rather than hidden, because these
+        come back the moment the box above is re-ticked and a row that
+        appears and vanishes under the cursor is harder to read than one that
+        greys.
+        """
+        files = self._wants_image_files()
+        for name in ("_fmt_cb", "_fmt_hint"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setEnabled(files)
+        disk = self._wants_disk_output()
+        for name in ("_out_dir_edit", "_out_dir_browse_btn"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setEnabled(disk)
+        box = getattr(self, "_cell_rows_cb", None)
+        if box is not None:
+            box.setEnabled(files)
+        self._refresh_run_summary()
 
     #: Whether the AXES block and the "Also …" rows go straight under Format,
     #: or wait for the mode to place them.
@@ -1188,11 +1284,15 @@ class BatchExportPanel(QWidget):
     _AXES_FOLLOW_HEADER = True
 
     def _build_output_tail(self, layout: QVBoxLayout) -> None:
-        """AXES, the two destinations, the per-cell CSV, and the spread rows."""
+        """AXES, the per-cell CSV, and the spread rows."""
         self._build_axes_rows(layout)
         self._build_extra_output_rows(layout)
         if self._INCLUDES_SPREAD:
             self._build_spread_settings_rows(layout)
+        # Again here because the modes that place this block themselves build
+        # it *after* the header, so the header's own sync ran before the
+        # per-cell checkbox existed.
+        self._sync_destination_widgets()
 
     def _build_axes_rows(self, layout: QVBoxLayout) -> None:
         """The AXES block: a shared x row, then one row per panel.
@@ -1461,52 +1561,44 @@ class BatchExportPanel(QWidget):
         return (width, figure_height(height, len(self._PANELS), drawn))
 
     def _build_extra_output_rows(self, layout: QVBoxLayout) -> None:
-        """The additive outputs, grouped by **where each one lands**.
+        """What else goes into the output folder, beyond the figures.
 
-        The rows were "Also send to: [Saved Plots] [PowerPoint]" and "Also
-        write: [Raw per-cell CSV]", which put the deck on the wrong side of the
-        only distinction that matters here. A deck is not somewhere a figure is
-        *sent*: ``batch_export_line.pptx`` is written into the output folder
-        the Folder row names, beside the PNGs and the summary CSV, and it is
-        subject to the same staging and the same stale-file warning as they
-        are. The gallery is the one genuine destination — a place inside the
-        application, holding records rather than files, which survives the
-        folder being moved or deleted.
-
-        So: one row for what this run writes into the output folder, one for
-        what it adds to the application. The verbs in the run summary follow
-        the same split ("writes" versus "files"), because a user deciding
-        whether to tick something is really asking where it will be afterwards.
-
-        A second reason the deck belongs here: "PowerPoint" sat four rows under
-        a **Format:** combo offering png / svg / eps / pdf, where it reads as a
-        fifth format — as though ticking it exported *instead* as pptx. On this
-        row, next to another file, and named for the artifact rather than for
-        the application, it reads as the extra file it is.
+        Just the per-cell CSV now. The two destinations that used to live down
+        here moved up to **Write to:**, where they belong: they are answers to
+        "where does this run's output go", and asking that question after
+        Folder and Format had already been answered was what made both of them
+        read as extras bolted onto a folder of PNGs.
         """
         self._build_also_write_row(layout)
-        self._build_gallery_row(layout)
 
     def _has_saved_plots(self) -> bool:
         """Whether the deck writer and the gallery are in this build.
 
         Both are Saved Plots' code — the record, and the writer that turns a
         captured SVG into PowerPoint shapes — so in a profile without that
-        feature neither control is offered. Absent rather than disabled: a
+        feature neither destination is offered. Absent rather than disabled: a
         greyed checkbox says "not now", and this is "not in this build", which
         are different sentences and only one of them is true.
         """
         return self._ctx.features.get("Saved Plots") is not None
 
     def _build_also_write_row(self, layout: QVBoxLayout) -> None:
-        """What else this run writes into the output folder.
+        """The opt-in for the raw per-cell CSV beside each figure.
 
-        Both are additive: the figures and the summary CSV are written exactly
-        as before whether these are ticked or not, so ticking one costs a user
-        nothing they already had.
+        Its own row rather than a fourth box on **Write to:**, because it is
+        not a destination: it does not choose where the figures go, it adds a
+        file next to them. It is also the only control here that can add
+        hundreds of megabytes to a run, which is worth a row of its own to
+        say.
+
+        Off by default. The summary CSV every run already writes is the file
+        most runs want; this one is every cell of every well, and a user who
+        did not ask for it should not find their export ten times the size.
+        Greyed out when **Image files** is off, since there is then no folder
+        of files for it to sit beside.
         """
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
+        row.setContentsMargins(12, 2, 12, 6)
         self._add_bold_label(row, "Also write:", min_width=_FIELD_LABEL_W)
         self._cell_rows_cb = QCheckBox("Raw per-cell CSV")
         self._cell_rows_cb.setToolTip(
@@ -1515,45 +1607,11 @@ class BatchExportPanel(QWidget):
             "produces, with its scope block and marker columns.\n"
             "Large: one row per cell per well, not one per group.")
         row.addWidget(self._cell_rows_cb)
-        # Not inside ``_build_gallery_row``: the per-cell CSV has nothing to do
-        # with the Saved Plots feature, and nested under that check it would
-        # vanish from a profile that can perfectly well write the file.
-        self._to_deck_cb = None
-        if self._has_saved_plots():
-            self._to_deck_cb = QCheckBox("PowerPoint deck")
-            self._to_deck_cb.setToolTip(
-                "One deck in this folder — a slide per group, each figure as "
-                "editable PowerPoint shapes rather than a picture.\n"
-                "Named per mode (batch_export_line.pptx and so on), not per "
-                "run, so a later run into the same folder replaces it.\n"
-                "A figure whose vector capture fails is placed as a picture "
-                "and the slide says so.")
-            row.addWidget(self._to_deck_cb)
-        row.addStretch(1)
-        layout.addLayout(row)
-
-    def _build_gallery_row(self, layout: QVBoxLayout) -> None:
-        """The one destination that is not a file in the output folder."""
-        self._to_gallery_cb = None
-        if not self._has_saved_plots():
-            return
-        row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 6)
-        self._add_bold_label(row, "Also add to:", min_width=_FIELD_LABEL_W)
-        self._to_gallery_cb = QCheckBox("Saved Plots gallery")
-        self._to_gallery_cb.setToolTip(
-            "File each exported figure in the Saved Plots gallery, with the "
-            "export group's own settings, so it can be restored, reordered and "
-            "included in the gallery's PDF report.\n"
-            "A record, not a file: it stays with the dataset rather than with "
-            "the output folder.\n"
-            "Records are added only if the whole run succeeds.")
-        row.addWidget(self._to_gallery_cb)
         row.addStretch(1)
         layout.addLayout(row)
 
     def _refresh_run_summary(self) -> None:
-        """Rewrite "Each export group produces:" from the controls as they are.
+        """Rewrite what a run produces, from the controls as they are.
 
         It was a **static string**, and by the time this feature landed it was
         wrong in four ways at once: it named one figure and one CSV while the
@@ -1571,13 +1629,23 @@ class BatchExportPanel(QWidget):
         label = getattr(self, "_summary_lbl", None)
         if label is None:
             return
-        lines = ["Each export group produces:"]
-        for line in self._figure_summary_lines():
-            lines.append(f"  \u2022 {line}")
-        if self._wants_cell_rows():
-            lines.append("  \u2022 One raw per-cell CSV\n"
-                         "    one row per cell, typically far larger than the "
-                         "summary CSV")
+        lines = []
+        if self._wants_image_files():
+            lines.append("Each export group produces:")
+            for line in self._figure_summary_lines():
+                lines.append(f"  \u2022 {line}")
+            if self._wants_cell_rows():
+                lines.append("  \u2022 One raw per-cell CSV\n"
+                             "    one row per cell, typically far larger than "
+                             "the summary CSV")
+        else:
+            # The one shortfall a user chooses rather than suffers, and it is
+            # still a shortfall: no figure files and — because the summary CSV
+            # is a file in that same folder — none of the numbers behind them.
+            # Said here, before Run, because afterwards it is an absence, and
+            # an absence is what nobody notices.
+            lines.append("No image files, and no CSVs: the numbers behind "
+                         "each figure are not saved anywhere.")
         run_level = self._run_level_summary()
         if run_level:
             lines.append("")
@@ -1608,7 +1676,10 @@ class BatchExportPanel(QWidget):
             clauses.append("files a Saved Plots record per figure")
         if not clauses:
             return ""
-        return "The run also " + ", and ".join(clauses) + "."
+        # "also" only when there is something for it to be *also* to. On a
+        # deck-only run this is the whole of what the run does.
+        lead = "The run also " if self._wants_image_files() else "The run "
+        return lead + ", and ".join(clauses) + "."
 
     def _figure_summary_lines(self) -> list[str]:
         """The figure and CSV bullets, naming the panels this run will draw."""
@@ -1689,9 +1760,63 @@ class BatchExportPanel(QWidget):
             signal.connect(lambda *_a: self._refresh_run_summary())
         self._refresh_run_summary()
 
-    def _wants_cell_rows(self) -> bool:
-        box = getattr(self, "_cell_rows_cb", None)
+    def _wants_image_files(self) -> bool:
+        """Whether this run writes a folder of per-group figures and CSVs.
+
+        One of three destinations rather than the base every run pays for.
+        Nothing about the other two needs it: ``DestinationSpool.capture``
+        renders its own PNG and SVG straight from the in-memory figure, and
+        never opens the file this writes — so a deck or a gallery record built
+        from a run that wrote no image files is the same picture, not a
+        degraded one.
+        """
+        box = getattr(self, "_to_files_cb", None)
+        return box is None or box.isChecked()
+
+    def _wants_deck(self) -> bool:
+        box = getattr(self, "_to_deck_cb", None)
         return bool(box is not None and box.isChecked())
+
+    def _wants_gallery(self) -> bool:
+        box = getattr(self, "_to_gallery_cb", None)
+        return bool(box is not None and box.isChecked())
+
+    def _wants_disk_output(self) -> bool:
+        """Whether anything at all lands in the output folder.
+
+        False only for a gallery-only run, which is the one shape that touches
+        no directory of the user's: its records live in the dataset's own
+        ``saved_plots/``. The staging directory is still made and then
+        discarded rather than committed, because committing would create the
+        output folder and leave a manifest in it describing no files.
+        """
+        return self._wants_image_files() or self._wants_deck()
+
+    def _out_path(self, write_dir, name: str) -> Path | None:
+        """Where one of a job's files goes, or ``None`` when it writes none.
+
+        **The one place a per-group output path is built**, on every mode, so
+        "does this run produce files at all" is answered once rather than at
+        each of the nine ``open()`` calls that would otherwise each have to
+        remember — and a mode that grows a tenth gets the answer by asking
+        here. ``tests/test_batch_export_destinations.py`` holds every site to
+        it.
+
+        ``None`` means "skip this write" at every call site, rather than a
+        path into somewhere harmless: a run that was told to write no files
+        must not create one, not even a temporary one it deletes.
+        """
+        if not self._wants_image_files():
+            return None
+        return Path(write_dir) / name
+
+    def _wants_cell_rows(self) -> bool:
+        # Gated on the folder too: the per-cell CSV *is* a file in it, so a run
+        # writing no files cannot write this one either. The checkbox greys
+        # out to say so rather than staying tickable and doing nothing.
+        box = getattr(self, "_cell_rows_cb", None)
+        return bool(box is not None and box.isChecked()
+                    and self._wants_image_files())
 
     def _cell_scope_kwargs(self, *, val_col: str | None,
                            timepoints=None) -> dict:
@@ -1754,8 +1879,14 @@ class BatchExportPanel(QWidget):
                     self._note_shortfall(
                         f"{grp.name}: no cell scope — per-cell CSV not written")
                     return
-                rows = write_cell_rows(
-                    self._ctx, scope, Path(write_dir) / f"{stem}_cells.csv")
+                out = self._out_path(write_dir, f"{stem}_cells.csv")
+                if out is None:
+                    # Unreachable while ``_wants_cell_rows`` is gated on the
+                    # same predicate, and asserted rather than assumed: the two
+                    # answering differently would write a file into a folder
+                    # the run was told to leave alone.
+                    return
+                rows = write_cell_rows(self._ctx, scope, out)
         except Exception as exc:
             _logger.exception("Batch export: per-cell CSV for %r", grp.name)
             self._note_shortfall(
@@ -2554,7 +2685,16 @@ class BatchExportPanel(QWidget):
         self._run_btn.setEnabled(False)
         errors: list[str] = []
         skipped: list[str] = []
-        staging = new_staging_dir(out_dir)
+        # A gallery-only run stages nowhere near the user's folder: it never
+        # commits, and ``new_staging_dir`` creates ``out_dir`` to hold its
+        # temp directory — so a run that writes nothing to disk was still
+        # leaving an empty folder of the user's making behind it. Every other
+        # run stages inside ``out_dir``, which is what keeps the commit's
+        # ``os.replace`` calls on one filesystem.
+        if self._wants_disk_output():
+            staging = new_staging_dir(out_dir)
+        else:
+            staging = Path(tempfile.mkdtemp(prefix="allwell_batch_nodisk_"))
         # The extra destinations, read once before the first job (see
         # ``_new_destination_spool``) and cleared in the ``finally`` — so a
         # figure written outside a run, or by the next run, cannot reach this
@@ -2568,7 +2708,12 @@ class BatchExportPanel(QWidget):
         self._run_notes = []
         committed = False
         try:
-            spool.begin(out_dir)
+            # Staged beside whatever it will be copied into: the output
+            # folder for a run that writes there, and the dataset folder for a
+            # gallery-only run, whose records go to that folder's
+            # ``saved_plots/`` and which must leave ``out_dir`` untouched.
+            spool.begin(out_dir if self._wants_disk_output()
+                        else (self._ctx.state.dataset.data_dir or staging))
             for step, job in enumerate(jobs, 1):
                 self._prog_lbl.setText(progress_text_fn(job, step, len(jobs)))
                 self._prog_bar.setValue(step - 1)
@@ -2594,8 +2739,17 @@ class BatchExportPanel(QWidget):
                     self._prog_lbl.setText("Building PowerPoint deck\u2026")
                     QApplication.processEvents()
                 spool.write_deck(staging)
-                commit_staged_export(staging, out_dir)
-                spool.note_stale_deck(out_dir)
+                if self._wants_disk_output():
+                    commit_staged_export(staging, out_dir)
+                    spool.note_stale_deck(out_dir)
+                else:
+                    # A gallery-only run: the staging directory is empty by
+                    # design, and committing it would create the output folder
+                    # and leave a manifest in it describing no files — an audit
+                    # record of an export that produced nothing on disk. The
+                    # run still succeeded, which is what ``committed`` gates
+                    # below, so the gallery is still filled.
+                    discard_staging(staging)
                 committed = True
         except BaseException:
             # Never leave a half-committed export or a stray temp dir behind.
@@ -2669,7 +2823,7 @@ class BatchExportPanel(QWidget):
         self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
         self._ctx.notify.set_status(f"{status_text}{tail}")
 
-    def _save_figure(self, fig, fig_path: Path, fmt: str, *,
+    def _save_figure(self, fig, fig_path: Path | None, fmt: str, *,
                      group: BarGroup | None, title: str,
                      val_col: str | None = None) -> None:
         """Write one batch figure, and feed the run's extra destinations.
@@ -2779,7 +2933,7 @@ class BatchExportPanel(QWidget):
         xlabel: str,
         ylabel: str,
         title: str,
-        fig_path: Path,
+        fig_path: Path | None,
         fmt: str,
         group: BarGroup | None,
         legend_fontsize: int = 8,
@@ -2800,6 +2954,22 @@ class BatchExportPanel(QWidget):
         if ax.get_legend_handles_labels()[0]:
             ax.legend(loc="best", fontsize=legend_fontsize, framealpha=0.0, facecolor="none")
         self._save_figure(fig, fig_path, fmt, group=group, title=title)
+
+    def _run_is_refused(self) -> bool:
+        """Every pre-flight a run has to clear, in one call.
+
+        One entry point rather than a check per mode, because each of these
+        was added at a different time and the modes that forgot to call the
+        newest one would have failed silently in the way it exists to prevent.
+        """
+        if not self._wants_image_files() and not self._wants_deck() \
+                and not self._wants_gallery():
+            QMessageBox.warning(
+                self, "No destination",
+                "Nothing under Write to: is ticked, so this run would produce "
+                "nothing at all. Choose at least one destination.")
+            return True
+        return self._axes_block_refuses_the_run()
 
     def _axes_block_refuses_the_run(self) -> bool:
         """Refuse a run the AXES block has asked for impossibly, and say why.
@@ -2878,7 +3048,7 @@ class BatchExportPanel(QWidget):
         return list(self._groups)
 
     def _run_batch(self) -> None:
-        if self._axes_block_refuses_the_run():
+        if self._run_is_refused():
             return
         groups_with_data = [g for g in self._groups_for_export()
                             if any(w in self._ctx.state.dataset.well_paths for w in g.wells)]
@@ -2938,8 +3108,8 @@ class BatchExportPanel(QWidget):
             safe = unique_export_stem(f"batch_{safe}", used_stems)
             # Write into the staging dir (audit X3) — committed to out_dir only on
             # a fully-successful run.
-            csv_path = write_dir / f"{safe}.csv"
-            fig_path = write_dir / f"{safe}.{fmt}"
+            csv_path = self._out_path(write_dir, f"{safe}.csv")
+            fig_path = self._out_path(write_dir, f"{safe}.{fmt}")
 
             # Resolve the panel's (Channel, Property) selection into a
             # column / ratio key — independent of whatever the plot-tab
@@ -3042,10 +3212,12 @@ class BatchExportPanel(QWidget):
                                 "fold_change_control",
                                 "fold_change_outcome",
                             ]
-                        with open(csv_path, "w", newline="") as fh:
-                            writer = csv.DictWriter(fh, fieldnames=fieldnames)
-                            writer.writeheader()
-                            writer.writerows(rows_out)
+                        if csv_path is not None:
+                            with open(csv_path, "w", newline="") as fh:
+                                writer = csv.DictWriter(fh,
+                                                        fieldnames=fieldnames)
+                                writer.writeheader()
+                                writer.writerows(rows_out)
                 except OSError as exc:
                     return f"{grp.name} CSV: {exc}"
 
@@ -3071,7 +3243,7 @@ class BatchExportPanel(QWidget):
                     return f"{grp.name} figure: {exc}"
 
             self._write_cell_rows_for(grp, write_dir, safe, val_col=_val_col)
-            _logger.info("Batch: wrote %s and %s", csv_path.name, fig_path.name)
+            _logger.info("Batch: finished %s", safe)
             return None
 
         self._run_batch_jobs(

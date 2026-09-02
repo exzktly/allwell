@@ -76,6 +76,8 @@ def _fill_axes_demo(panel):
         mid_hi.setText("1")
     if getattr(panel, "_cell_rows_cb", None) is not None:
         panel._cell_rows_cb.setChecked(True)
+    if getattr(panel, "_to_files_cb", None) is not None:
+        panel._to_files_cb.setChecked(True)
     if getattr(panel, "_to_gallery_cb", None) is not None:
         panel._to_gallery_cb.setChecked(True)
     if getattr(panel, "_to_deck_cb", None) is not None:
@@ -109,10 +111,34 @@ def test_render_batch_export_panel(loaded_app, mode, stem):
     # not build, shows up as an empty or stale block.
     summary = panel._summary_lbl.text()
     assert summary.startswith("Each export group produces:"), summary
+    # And the destination row the summary is derived from really is on the
+    # panel: three boxes, none of them privileged.
+    assert panel._to_files_cb.isChecked()
+    assert panel._to_files_cb.text() == "Image files"
     assert "One raw per-cell CSV" in summary, summary
     assert ("The run also writes one PowerPoint deck into this folder, a "
             "slide per group, and files a Saved Plots record per figure."
             in summary), summary
+
+    # Untick the folder and the same real panel says what it will not save,
+    # and greys the controls that then decide nothing. Driven through the
+    # widget rather than the predicate, because the wiring between them is
+    # what the fast lane cannot see.
+    panel._to_files_cb.setChecked(False)
+    QApplication.processEvents()
+    fileless = panel._summary_lbl.text()
+    assert ("No image files, and no CSVs: the numbers behind each figure are "
+            "not saved anywhere." in fileless), fileless
+    assert not panel._fmt_cb.isEnabled()
+    assert not panel._cell_rows_cb.isEnabled()
+    assert panel._out_dir_edit.isEnabled(), "the deck still needs a folder"
+    panel._to_deck_cb.setChecked(False)
+    QApplication.processEvents()
+    assert not panel._out_dir_edit.isEnabled(), \
+        "a gallery-only run needs no output folder"
+    panel._to_files_cb.setChecked(True)
+    panel._to_deck_cb.setChecked(True)
+    QApplication.processEvents()
     if len(panel._PANELS) > 1:
         # ``_fill_axes_demo`` unticks the last panel on every stacked mode.
         kept = len(panel._PANELS) - 1

@@ -82,6 +82,56 @@ def _writer_calls():
     return found
 
 
+def _staging_path_joins():
+    """Every ``write_dir / …`` expression in the package, as ``(file, line)``.
+
+    Building a job's output path is exactly the decision ``_out_path`` owns:
+    it is where "does this run write files at all" is answered, and a site
+    that joins the staging directory itself has answered "yes" without asking.
+    Nine such sites existed across four modules before this was one function,
+    each with its own ``open()``, and converting eight of nine would have been
+    the worse outcome — one folder holding the files of a run that asked for
+    none.
+    """
+    found = []
+    for path in sorted(_BATCH_DIR.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        tree = parse_source(path)
+        owner = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                for child in ast.walk(node):
+                    owner[id(child)] = node.name
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.BinOp) or not isinstance(node.op,
+                                                                 ast.Div):
+                continue
+            left = node.left
+            name = None
+            if isinstance(left, ast.Name):
+                name = left.id
+            elif isinstance(left, ast.Call) and isinstance(left.func, ast.Name) \
+                    and left.func.id == "Path" and left.args \
+                    and isinstance(left.args[0], ast.Name):
+                # ``Path(write_dir) / …`` is the same join wearing a cast.
+                name = left.args[0].id
+            if name != "write_dir":
+                continue
+            if owner.get(id(node)) == "_out_path":
+                continue
+            found.append((rel(path), node.lineno))
+    return found
+
+
+def test_every_job_output_path_is_built_by_the_one_function():
+    sites = _staging_path_joins()
+    assert sites == [], (
+        "these build a staging path without asking whether this run writes "
+        "files; route them through self._out_path(write_dir, name): "
+        f"{sites}")
+
+
 def test_every_batch_figure_write_names_its_group_and_title():
     calls = _writer_calls()
     # The guard measures nothing if it found nothing. Four panels write
@@ -646,12 +696,21 @@ class _RunStub:
     # snapshotting fails here rather than exporting whatever the fields held at
     # the moment each figure happened to be rendered.
     _snapshot_axes = BatchExportPanel._snapshot_axes
+    # The runner asks whether anything lands on disk before it commits, so a
+    # stub answering that itself would decide the very thing under test.
+    _wants_image_files = BatchExportPanel._wants_image_files
+    _wants_deck = BatchExportPanel._wants_deck
+    _wants_disk_output = BatchExportPanel._wants_disk_output
     _PANELS = BatchExportPanel._PANELS
     _SOURCE_TAB = "Line Graphs"
     _mode_key = BatchExportPanel._mode_key
 
-    def __init__(self, data_dir, *, to_gallery=False, to_deck=False):
+    def __init__(self, data_dir, *, to_gallery=False, to_deck=False,
+                 to_files=True):
         from PySide6.QtWidgets import QCheckBox, QLabel, QProgressBar, QPushButton
+
+        self._to_files_cb = QCheckBox()
+        self._to_files_cb.setChecked(to_files)
 
         self._prog_bar = QProgressBar()
         self._prog_lbl = QLabel()
@@ -786,3 +845,67 @@ def test_a_run_with_no_destinations_stages_nothing_extra(tmp_path):
     from well_viewer.features.batch_export.service import MANIFEST_NAME
     assert sorted(p.name for p in out.iterdir()) == ["Drug A.csv", MANIFEST_NAME]
     assert panel.statuses == ["Batch export"]
+
+
+# ── a gallery-only run touches no directory of the user's ──────────────────
+
+def test_a_gallery_only_run_leaves_no_output_folder_behind(tmp_path,
+                                                           monkeypatch):
+    """Committing would create the folder and a manifest describing no files.
+
+    That manifest is an audit record of an export that produced nothing on
+    disk, in a directory the user never asked to have made. The run still
+    succeeded, so the gallery is still filled — asserted here too, because a
+    "discard instead of commit" that also skipped the filing would satisfy
+    the first half of this and quietly produce nothing at all.
+    """
+    from well_viewer.features.batch_export.service import MANIFEST_NAME
+
+    import well_viewer.features.saved_plots.controller as sp_controller
+    from well_viewer.features.batch_export import _destinations
+
+    store = _FakeStore(tmp_path / "saved_plots")
+    monkeypatch.setattr(_destinations, "_get_store", lambda ctx: store)
+    monkeypatch.setattr(sp_controller, "get_store", lambda ctx: store)
+    monkeypatch.setattr(_destinations, "_refresh_gallery", lambda ctx: None)
+
+    _qapp()
+    out = tmp_path / "out"
+    panel = _RunStub(tmp_path, to_gallery=True, to_files=False)
+
+    def _job(name, write_dir):
+        # The job writes nothing: every path it would have used came back
+        # ``None`` from ``_out_path``.
+        panel._spool.capture(_figure(), title=name)
+        return None
+
+    _run(panel, out, ["Drug A", "Drug B"], _job)
+
+    assert not (out / MANIFEST_NAME).exists()
+    assert not out.exists(), sorted(p.name for p in out.iterdir())
+    assert [r.title for r in store.records] == ["Drug A", "Drug B"]
+
+
+def test_a_deck_only_run_still_commits_because_a_deck_is_a_file(tmp_path,
+                                                               monkeypatch):
+    """The deck needs the folder; the images do not have to come with it."""
+    import json
+
+    from well_viewer.features.batch_export.service import MANIFEST_NAME
+
+    _qapp()
+    out = tmp_path / "out"
+    panel = _RunStub(tmp_path, to_deck=True, to_files=False)
+
+    def _job(name, write_dir):
+        panel._spool.capture(_figure(), title=name)
+        return None
+
+    _run(panel, out, ["Drug A"], _job)
+
+    manifest = json.loads((out / MANIFEST_NAME).read_text())
+    assert manifest["files"] == ["batch_export_line.pptx"], manifest
+    assert (out / "batch_export_line.pptx").exists()
+    # And nothing else: no PNG, no CSV, from a run that asked for neither.
+    assert sorted(p.name for p in out.iterdir()) == sorted(
+        [MANIFEST_NAME, "batch_export_line.pptx"])

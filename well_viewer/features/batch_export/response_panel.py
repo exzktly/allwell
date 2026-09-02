@@ -403,7 +403,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
                 _parse_bound(self._fit_bottom_edit.text()))
 
     def _run_batch(self) -> None:
-        if self._axes_block_refuses_the_run():
+        if self._run_is_refused():
             return
         groups_with_data = _groups_with_loaded_wells(
             self._groups_for_export(), self._ctx.state.dataset.well_paths,
@@ -460,8 +460,8 @@ class ResponseBatchExportPanel(BatchExportPanel):
         def _run_group(grp: BarGroup, write_dir: Path) -> str | None:
             safe = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
             safe = unique_export_stem(f"response_{safe}", used_stems)
-            csv_path = write_dir / f"{safe}.csv"
-            fig_path = write_dir / f"{safe}.{fmt}"
+            csv_path = self._out_path(write_dir, f"{safe}.csv")
+            fig_path = self._out_path(write_dir, f"{safe}.{fmt}")
 
             # The group's own members, and the panel's own column. Both scopes,
             # because ``collect_response`` reads the live replicate sets through
@@ -508,8 +508,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
 
             self._write_cell_rows_for(grp, write_dir, safe, val_col=val_col,
                                       timepoints=timepoints)
-            _shared_logger.info("Batch: wrote %s and %s",
-                                csv_path.name, fig_path.name)
+            _shared_logger.info("Batch: finished %s", safe)
             return None
 
         self._run_batch_jobs(
@@ -524,7 +523,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
 
     # ── helpers ──────────────────────────────────────────────────────────
     @staticmethod
-    def _discard_empty_csv(path: Path) -> None:
+    def _discard_empty_csv(path) -> None:
         """Remove the file written for a job that turned out to have no points.
 
         A CSV of nothing left beside no figure is the shortfall wearing the
@@ -532,6 +531,8 @@ class ResponseBatchExportPanel(BatchExportPanel):
         reader counting files finds the run complete. The skip note says what
         happened, and the folder should not contradict it.
         """
+        if path is None:
+            return
         try:
             Path(path).unlink()
         except OSError:
@@ -617,7 +618,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
             fits=fits)
         return fig
 
-    def _write_csv(self, csv_path: Path, grp: BarGroup, data, fits) -> None:
+    def _write_csv(self, csv_path, grp: BarGroup, data, fits) -> None:
         """The drawn points, **the members that were left out**, and the fits.
 
         The omissions are rows, not a footnote. A CSV of eight groups that lists
@@ -644,6 +645,11 @@ class ResponseBatchExportPanel(BatchExportPanel):
         # same column here as it does there — then take the group in front like
         # every other row in the file.
         rows += [[grp.name, *row] for row in _fit_rows(data, fits)]
+        if csv_path is None:
+            # A run whose destinations are the gallery and/or a deck. The rows
+            # were still built, because building them is also how the omissions
+            # and the fits get counted — only the file is skipped.
+            return
         with open(csv_path, "w", newline="") as fh:
             writer = csv.writer(fh)
             writer.writerow(header)

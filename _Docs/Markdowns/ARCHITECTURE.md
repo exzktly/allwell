@@ -2757,22 +2757,41 @@ its own words through `_SUMMARY_FIGURE_LEAD`, `_SUMMARY_FIGURE_NOTE`,
 override `_summary_figure_lead` instead, because a toggle on those panels
 decides how many figures one group gets.
 
-**The extra outputs are grouped by where each one lands.**
-`_build_extra_output_rows` builds two rows, and the split is the point: **Also
-write:** carries the per-cell CSV and the PowerPoint deck, both of which are
-files in the folder the Folder row names — staged, rolled back and replaced on
-a later run like every other output — and **Also add to:** carries the Saved
-Plots gallery, which holds records inside the application and survives the
-output folder being moved. A single "send to" row holding both would put the
-deck on the wrong side of the only distinction a user is actually making, and
-a checkbox named for the application rather than for the artifact reads as a
-fifth entry in the **Format:** combo four rows above it, which offers png /
-svg / eps / pdf. The run summary follows the same split by verb — the run
-*writes* a deck, and *files* a record — and `_run_level_summary` keeps both out
-of the per-group bullets, since forty groups produce one deck between them.
-Both Saved-Plots-backed controls are absent rather than disabled in a build
-without that feature (`_has_saved_plots`), while the per-cell CSV is offered
-regardless, since it is not that feature's code.
+**Three destinations, none of them privileged.** The **Write to:** row is the
+first thing OUTPUT SETTINGS asks, because Folder and Format are consequences of
+its answer rather than settings above it. Nothing forces a folder of image
+files to be the base a run pays for: `DestinationSpool.capture` renders its own
+PNG and SVG from the in-memory figure and never opens the file the folder write
+produces, so a deck or a gallery record from a run that wrote no images holds
+the same picture. `_wants_image_files` / `_wants_deck` / `_wants_gallery` are
+the three answers, `_wants_disk_output` is the pair that need a folder, and
+`_sync_destination_widgets` greys what the chosen set does not use — Format
+describes the image files alone, the folder is wanted by those and the deck but
+not the gallery, and the per-cell CSV is a file in that folder. A run with
+nothing ticked is refused by `_run_is_refused`, which is also the one pre-flight
+every mode's `_run_batch` opens with.
+
+`_out_path(write_dir, name)` is **the one place a job's output path is built**,
+returning `None` for a run that writes no files, and
+`save_export_figure` takes that `None` as "style the figure, skip the write,
+still call `on_saved`". Nine sites across four modules each held their own
+`open()` before this was one function, and converting eight of them would have
+been worse than converting none — one folder holding the files of a run that
+asked for none.
+`tests/test_batch_export_destinations.py::test_every_job_output_path_is_built_by_the_one_function`
+is what holds the tenth.
+
+The summary CSVs follow the image files, since they are files in the same
+folder: a deck-only or gallery-only run saves pictures and no numbers, which
+`_refresh_run_summary` states outright before the run rather than leaving as an
+absence afterwards. A gallery-only run also stages **outside** the output
+folder and discards rather than commits — `new_staging_dir` creates `out_dir`
+to hold its temp directory, so committing (or even staging there) would leave
+the user an empty folder and a manifest describing no files. `DestinationSpool.begin`
+takes the directory to stage under for the same reason: on the filesystem the
+captures will be copied *to*, which is the output folder for a run that writes
+there and the dataset folder — where `saved_plots/` lives — for one that does
+not.
 
 **The rows behind a figure** (`_cell_rows.py`). An opt-in checkbox writes the
 plot tabs' `Save cell data…` file beside each group's figure — one row per cell

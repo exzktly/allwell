@@ -627,6 +627,8 @@ class _RowsStub:
     _cell_scope_kwargs = BatchExportPanel._cell_scope_kwargs
     _note_shortfall = BatchExportPanel._note_shortfall
     _wants_cell_rows = BatchExportPanel._wants_cell_rows
+    _wants_image_files = BatchExportPanel._wants_image_files
+    _out_path = BatchExportPanel._out_path
     _app_group_scope = BatchExportPanel._app_group_scope
     _app_val_col_scope = BatchExportPanel._app_val_col_scope
     _control_selections = BatchExportPanel._control_selections

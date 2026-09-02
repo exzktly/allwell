@@ -64,6 +64,11 @@ class _FormStub:
     _summary_footnotes = BatchExportPanel._summary_footnotes
     _wants_cell_rows = BatchExportPanel._wants_cell_rows
     _run_level_summary = BatchExportPanel._run_level_summary
+    _wants_image_files = BatchExportPanel._wants_image_files
+    _wants_deck = BatchExportPanel._wants_deck
+    _wants_gallery = BatchExportPanel._wants_gallery
+    _wants_disk_output = BatchExportPanel._wants_disk_output
+    _out_path = BatchExportPanel._out_path
     _refresh_run_summary = BatchExportPanel._refresh_run_summary
 
     _PANELS = BatchExportPanel._PANELS
@@ -74,8 +79,9 @@ class _FormStub:
     _SUMMARY_CSV_LINE = BatchExportPanel._SUMMARY_CSV_LINE
 
     def __init__(self, spec, *, panels=None, cells=False, gallery=False,
-                 deck=False, sidebar=False):
+                 deck=False, sidebar=False, files=True):
         self._spec = spec
+        self._to_files_cb = _Box(files)
         if panels is not None:
             self._PANELS = panels
         self._cell_rows_cb = _Box(cells)
@@ -380,6 +386,7 @@ class _RefusalStub(_FormStub):
     """Enough of a panel for the pre-run guard, which needs a dialog parent."""
 
     _axes_block_refuses_the_run = BatchExportPanel._axes_block_refuses_the_run
+    _run_is_refused = BatchExportPanel._run_is_refused
 
 
 def test_a_run_asking_for_an_impossible_range_is_refused_before_any_job(
@@ -454,3 +461,101 @@ def test_the_axes_label_column_is_wide_enough_for_the_names_in_it(qapp):
             assert width >= widest, cls.__name__
     finally:
         host.deleteLater()
+
+
+# ── image files are one destination, not the base every run pays for ───────
+
+def test_a_run_with_no_destination_is_refused(monkeypatch):
+    """Nothing ticked produces nothing, so it is stopped before the first job.
+
+    Its own message, separate from the AXES refusals: "every panel is
+    unticked" and "no destination is ticked" send the user to two different
+    rows.
+    """
+    from well_viewer.features.batch_export import base_panel as mod
+
+    seen = []
+    monkeypatch.setattr(mod.QMessageBox, "warning",
+                        lambda *a, **k: seen.append(a))
+    stub = _RefusalStub(_spec(), files=False)
+    assert stub._run_is_refused() is True
+    assert seen[0][1] == "No destination"
+
+
+def test_one_destination_is_enough_whichever_it_is(monkeypatch):
+    """None of the three is privileged, so any one of them clears the check."""
+    from well_viewer.features.batch_export import base_panel as mod
+
+    seen = []
+    monkeypatch.setattr(mod.QMessageBox, "warning",
+                        lambda *a, **k: seen.append(a))
+    for kw in ({"files": True}, {"files": False, "deck": True},
+               {"files": False, "gallery": True}):
+        stub = _RefusalStub(_spec(), **kw)
+        assert stub._run_is_refused() is False, kw
+    assert seen == []
+
+
+def test_no_output_path_is_built_for_a_run_that_writes_no_files(tmp_path):
+    """``None`` rather than a path somewhere harmless.
+
+    A run told to write no files must not create one — not even a temporary
+    one it deletes afterwards — so every caller gets ``None`` and skips its
+    write.
+    """
+    off = _FormStub(_spec(), files=False)
+    assert off._out_path(tmp_path, "batch_Drug_A.csv") is None
+    on = _FormStub(_spec(), files=True)
+    assert on._out_path(tmp_path, "batch_Drug_A.csv") == \
+        tmp_path / "batch_Drug_A.csv"
+
+
+def test_the_per_cell_csv_follows_the_folder_it_would_sit_in():
+    """It is a file in that folder, so it cannot outlive the folder's absence.
+
+    Asserted on ``_wants_cell_rows`` rather than on the checkbox's enabled
+    state: greying the control is the cue, but the run has to agree with the
+    cue, and a run that wrote the file anyway would put it in a directory the
+    user asked to be left alone.
+    """
+    on = _FormStub(_spec(), cells=True, files=True)
+    assert on._wants_cell_rows() is True
+    off = _FormStub(_spec(), cells=True, files=False)
+    assert off._wants_cell_rows() is False
+
+
+def test_only_a_gallery_only_run_skips_the_output_folder_entirely():
+    """The deck is a file, so it still needs somewhere to go."""
+    assert _FormStub(_spec(), files=False, gallery=True)._wants_disk_output() \
+        is False
+    assert _FormStub(_spec(), files=False, deck=True)._wants_disk_output() \
+        is True
+    assert _FormStub(_spec(), files=True)._wants_disk_output() is True
+
+
+def test_a_run_that_saves_no_numbers_says_so_before_it_is_started():
+    """The one shortfall a user chooses — and still a shortfall.
+
+    An absence is what nobody notices afterwards, so it is stated in the block
+    above the Run button rather than left to be discovered in the folder.
+    """
+    stub = _FormStub(_spec(), files=False, gallery=True)
+    stub._refresh_run_summary()
+    text = stub._summary_lbl.text
+    assert ("No image files, and no CSVs: the numbers behind each figure are "
+            "not saved anywhere." in text)
+    # And the per-group bullets are gone, rather than describing files that
+    # will not exist.
+    assert "Each export group produces:" not in text
+    assert "One CSV with per-member time-series data" not in text
+    # A gallery-only run is the whole of what it does, so not "also".
+    assert "The run files a Saved Plots record per figure." in text
+
+
+def test_the_bullets_come_back_with_the_image_files():
+    stub = _FormStub(_spec(), files=True, gallery=True)
+    stub._refresh_run_summary()
+    text = stub._summary_lbl.text
+    assert "Each export group produces:" in text
+    assert "not saved anywhere" not in text
+    assert "The run also files a Saved Plots record per figure." in text

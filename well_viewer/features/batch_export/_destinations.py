@@ -168,19 +168,22 @@ class DestinationSpool:
         return f"batch_export_{self.mode_key}.pptx"
 
     # ── lifecycle ────────────────────────────────────────────────────────
-    def begin(self, out_dir) -> None:
-        """Open the spool's own staging directory under *out_dir*.
+    def begin(self, stage_under) -> None:
+        """Open the spool's own staging directory under *stage_under*.
 
-        Under *out_dir* for the same reason the export's staging dir is: the
-        captures are read back and copied from here, and a temp dir on another
-        filesystem turns that into a cross-device copy of every figure in the
+        On the same filesystem as whatever the captures are eventually copied
+        *to*, which is the point of taking the directory as an argument: a run
+        writing files is handed the output folder, and a gallery-only run — one
+        that must not create that folder at all — is handed the dataset folder,
+        which is where ``saved_plots/`` lives. A temp dir on another filesystem
+        would turn either copy into a cross-device one for every figure in the
         run.
         """
         if not self.wanted:
             return
         import tempfile
 
-        out = Path(out_dir)
+        out = Path(stage_under)
         out.mkdir(parents=True, exist_ok=True)
         self._dir = Path(tempfile.mkdtemp(prefix=".batch_dest_tmp_", dir=str(out)))
         (self._dir / _CAPTURE_DIRNAME).mkdir(parents=True, exist_ok=True)

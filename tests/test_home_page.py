@@ -13,6 +13,7 @@ whose Qt↔Python reference web is never reclaimed in-process.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +22,12 @@ from well_viewer.features.home import collect as hc
 
 def _write_run_check(app, wells: dict, **kw) -> None:
     """Put a completeness record into the loaded dataset and re-read it."""
+    app._app_state.dataset.pipeline_info["run_check"] = _record_block(wells, **kw)
+
+
+def _record_block(wells: dict, **kw) -> dict:
+    """A completeness record covering *wells*, in the shape the pipeline and the
+    Validate tool both write (``pipeline.completeness.build_block``)."""
     block = {
         "version": 1, "skipped": False, "partial_scan": False, "suspended": False,
         "finished_at": "2026-08-09T12:00:00Z", "duration_s": 3720.0,
@@ -37,7 +44,7 @@ def _write_run_check(app, wells: dict, **kw) -> None:
         "errors": {"files": 0, "by_type": {}}, "findings": [],
     }
     block.update(kw)
-    app._app_state.dataset.pipeline_info["run_check"] = block
+    return block
 
 
 def _well(health="complete", *, intent=8, covered_any=8, failed=()):
@@ -203,6 +210,50 @@ def test_repainting_twice_leaves_one_set_of_rows(loaded_app):
     refresh_home(loaded_app._ctx)
     assert loaded_app._home_health.layout().count() == first, (
         "a repaint must replace the rows, not append to them")
+
+
+def test_a_record_written_while_the_user_was_in_another_pane_reaches_the_page(
+        loaded_app, mini_dataset):
+    """The loop Home's own next step sets up, driven the way a user drives it.
+
+    "Check it now" switches to the Datasets pane, the Validate tool writes a
+    ``run_check`` block into the sidecar on disk, and the user comes back to
+    Review — where Home is still the current page, so no tab changed and no
+    activation hook fired. Without a re-read on the pane change the page that
+    sent them off goes on saying the dataset has never been checked.
+
+    Asserted on the masthead the user reads, not on the dict behind it: the
+    record can be correct in state and never reach the label.
+    """
+    from PySide6.QtWidgets import QWidget
+
+    from well_viewer.features.home.controller import refresh_home
+
+    app = loaded_app
+    app._app_state.dataset.pipeline_info.pop("run_check", None)
+    refresh_home(app._ctx)
+    assert "no completeness record" in app._home_run_meta.text(), (
+        "premise: the page starts out reporting no record")
+
+    # The panes the shell mounts around Review; a bare WellViewerApp has none,
+    # and the round trip is the whole subject of this test.
+    app.mountAnalyzePane(QWidget())
+    app.mountDatasetsPane(QWidget())
+    stack = app._central_pane_stack
+
+    stack.setCurrentIndex(2)                      # → Datasets, to run the check
+    path = Path(mini_dataset) / "pipeline_info.json"
+    on_disk = json.loads(path.read_text())
+    on_disk["run_check"] = _record_block(
+        {w: _well() for w in sorted(app._app_state.dataset.well_paths)},
+        source="validate", finished_at="2026-08-09T12:00:00Z")
+    path.write_text(json.dumps(on_disk))
+    stack.setCurrentIndex(0)                      # → back to Review, on Home
+
+    meta = app._home_run_meta.text()
+    assert "checked 2026-08-09T12:00:00Z" in meta, meta
+    assert hc.next_step(app._ctx)["action"] != "validate", (
+        "the page must stop offering the check the user just ran")
 
 
 # ── the rail, across a navigation ───────────────────────────────────────────

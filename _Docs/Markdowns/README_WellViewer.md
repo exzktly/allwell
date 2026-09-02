@@ -4436,8 +4436,9 @@ page fills in. The record says which of the two produced it, and Home words
 itself accordingly: *checked \<date\>* for this tool, *run finished \<date\>* for a
 run. That matters because they describe different moments — a run's record is
 about the run, this one is about the folder as it stood when you scanned it.
-If the dataset is already open in Review, going back to Home shows the new
-record without reloading. If the record cannot be written — a read-only volume,
+If the dataset is already open in Review, switching back to Review shows the new
+record without reloading — including when Home is the page you left from, which
+is where you started if you got here through Home's own **Check it now**. If the record cannot be written — a read-only volume,
 say — the raw log says so and the findings are unaffected.
 
 1. Pick the dataset folder. As soon as it's recognized, a status panel

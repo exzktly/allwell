@@ -513,6 +513,11 @@ def _svc_home_sync_sidebar():
     return sync_home_sidebar
 
 
+def _svc_home_refresh():
+    from well_viewer.features.home.controller import refresh_home
+    return refresh_home
+
+
 def _svc_variables_refresh():
     from well_viewer.features.home.variables.controller import refresh_variables
     return refresh_variables
@@ -929,11 +934,18 @@ def _features() -> list[FeatureDescriptor]:
         FeatureDescriptor(
             name="Home", group="Home", build=_build_home,
             states=(StateSpec("home", _state_home),),
-            # The Sample Map tab's layer switch repaints Home's chrome through
-            # this: **Import** writes selections and well labels, so it means
-            # nothing on the Variables layer, and the tab cannot import Home's
-            # controller because that controller imports the tab's.
-            services={"home.sync_sidebar": _svc_home_sync_sidebar},
+            # ``home.sync_sidebar``: the Sample Map tab's layer switch
+            # repaints Home's chrome through this — **Import** writes
+            # selections and well labels, so it means nothing on the Variables
+            # layer, and the tab cannot import Home's controller because that
+            # controller imports the tab's.
+            #
+            # ``home.refresh``: core's way to repaint this page from outside a
+            # tab change. Returning from the Datasets pane brings back a
+            # completeness record that Home reports and nothing else reads
+            # (``core/tab_controller._resync_record_on_return``).
+            services={"home.sync_sidebar": _svc_home_sync_sidebar,
+                      "home.refresh": _svc_home_refresh},
             on_activate=_activate_home,
             on_dataset_loaded=_loaded_home,
             on_selection_changed=_sel_home,

@@ -663,7 +663,31 @@ def on_central_pane_changed(ctx, idx: int) -> None:
     # it carries Review-only affordances. Show it again on Review (unless
     # the user has collapsed it). Both rules live in apply_sidebar_visibility.
     apply_sidebar_visibility(ctx)
+    if mode == "review":
+        _resync_record_on_return(ctx)
     app.modeChanged.emit(mode)
+
+
+def _resync_record_on_return(ctx) -> None:
+    """Re-read the completeness record on the way back into Review.
+
+    The Datasets pane's Validate & Repair tool writes the dataset's
+    ``run_check`` block at the end of every scan, and that scan is exactly what
+    Home's "Check it now" action sends the user off to run. Review holds the
+    sidecar it loaded with, so the record has to be re-read on the way back or
+    the page that asked for the check still reports the dataset as unchecked —
+    the fix looking, to the user, like it did nothing.
+
+    A pane change is not a tab change, so no leaf's ``on_activate`` hook runs
+    here: Home is already the current page and stays current across the round
+    trip. The repaint is therefore asked for explicitly, and only when the
+    record actually changed, so an ordinary mode toggle costs one small JSON
+    read and nothing else.
+    """
+    from well_viewer.core.record_sync import resync_run_check
+
+    if resync_run_check(ctx):
+        ctx.features.call("home.refresh", ctx)
 
 
 

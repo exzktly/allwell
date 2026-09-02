@@ -200,26 +200,47 @@ def test_home_picks_up_a_record_written_while_the_dataset_was_open(tmp_path):
     been checked, sends the user to Validate, and has to show the answer when
     they come back. Review holds the sidecar in memory, so without a re-read
     the page that prompted the scan still reports no record."""
-    from well_viewer.features.home.controller import resync_record
+    from well_viewer.core.record_sync import resync_run_check
 
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
     info = {"schema": "well_fov_timepoint", "notes": "typed but not saved"}
     ctx = SimpleNamespace(state=SimpleNamespace(
         dataset=SimpleNamespace(data_dir=tmp_path / "out", pipeline_info=info)))
 
-    resync_record(ctx)
+    resync_run_check(ctx)
     assert "run_check" not in info, "premise: nothing has recorded this dataset yet"
 
     write_record(vc.build_report(tmp_path))
-    resync_record(ctx)
+    resync_run_check(ctx)
 
     assert info["run_check"]["source"] == "validate"
     assert info["notes"] == "typed but not saved", (
         "re-reading the whole sidecar would discard edits not yet written")
 
 
+def test_the_resync_reports_whether_the_record_actually_changed(tmp_path):
+    """The answer core repaints on. A pane change happens on every mode toggle
+    and almost never brings a new record with it, so the caller repaints only
+    when this says something arrived — which means "no change" has to be the
+    answer for a re-read of the same block, not merely for a failed read."""
+    from well_viewer.core.record_sync import resync_run_check
+
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
+    info = {"schema": "well_fov_timepoint"}
+    ctx = SimpleNamespace(state=SimpleNamespace(
+        dataset=SimpleNamespace(data_dir=tmp_path / "out", pipeline_info=info)))
+
+    assert resync_run_check(ctx) is False, (
+        "nothing has recorded this dataset yet — there is nothing to repaint")
+
+    write_record(vc.build_report(tmp_path))
+    assert resync_run_check(ctx) is True, "the scan's record is new to the page"
+    assert resync_run_check(ctx) is False, (
+        "re-reading the same record is not a change, and must not cost a repaint")
+
+
 def test_a_record_deleted_on_disk_stops_being_reported(tmp_path):
-    from well_viewer.features.home.controller import resync_record
+    from well_viewer.core.record_sync import resync_run_check
 
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
     block = write_record(vc.build_report(tmp_path))
@@ -232,13 +253,13 @@ def test_a_record_deleted_on_disk_stops_being_reported(tmp_path):
     on_disk.pop("run_check")
     on_disk_path.write_text(json.dumps(on_disk))
 
-    resync_record(ctx)
+    resync_run_check(ctx)
     assert "run_check" not in info
 
 
 def test_an_unreadable_sidecar_keeps_the_record_already_loaded(tmp_path):
     """A transient read failure must not cost a record the page already has."""
-    from well_viewer.features.home.controller import resync_record
+    from well_viewer.core.record_sync import resync_run_check
 
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
     block = write_record(vc.build_report(tmp_path))
@@ -247,7 +268,7 @@ def test_an_unreadable_sidecar_keeps_the_record_already_loaded(tmp_path):
         dataset=SimpleNamespace(data_dir=tmp_path / "out", pipeline_info=info)))
 
     (tmp_path / "out" / "pipeline_info.json").write_text("{ not json")
-    resync_record(ctx)
+    resync_run_check(ctx)
     assert info["run_check"] == block
 
 

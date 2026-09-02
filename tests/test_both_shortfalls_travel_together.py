@@ -6,8 +6,8 @@ its cell is refused, so the cell looks like one nobody asked a bar for; an
 inventory that was TRUNCATED still draws real images, so the grid looks
 finished and is simply short of frames the dataset holds.
 
-Row 1 of this branch gave the bar one shared clause and reached all five
-surfaces with it. The truncated inventory reached one — and that asymmetry is
+Row 1 of this branch gave the bar one shared clause and reached all the
+surfaces of the day with it. The truncated inventory reached one — and that asymmetry is
 worse than reporting neither, because a saved-file line that names the missing
 bar and stays silent about the missing frames convinces the reader it is
 telling them what is wrong with the file.
@@ -44,6 +44,8 @@ _SURFACES = frozenset({
     "generate_status_message",
     "well_viewer/features/image_browser/image_table/export.py::"
     "image_table_export",
+    "well_viewer/features/image_browser/image_table/export.py::"
+    "image_table_export_pptx",
     "well_viewer/features/image_browser/image_table/export.py::"
     "image_table_copy_png",
     "well_viewer/features/image_browser/image_table/export.py::"

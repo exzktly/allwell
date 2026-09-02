@@ -75,15 +75,20 @@ def wire_save_to_gallery(ctx, card, tab_name: str) -> None:
 
 def save_plot_from_card(ctx, tab: str, png_bytes: bytes, panel_label: str,
                         svg_bytes: bytes = b"", *,
-                        panel_only: bool = False) -> str:
+                        panel_only: bool = False,
+                        frames_bytes: bytes = b"") -> str:
     """Persist the captured panel + its params; refresh the gallery.
 
     *svg_bytes* is the same render in vector, captured by the card at the same
     moment. It is what the PowerPoint export later draws editable shapes from,
     and it is optional: a card that could not render vector still saves, and the
-    plot exports as a picture. The default keeps that true for the callers that
-    have only a raster to hand — the Image Table composes its gallery snapshot
-    itself rather than rendering a Matplotlib figure.
+    plot exports as a picture.
+
+    *frames_bytes* is the Image Table's alternative to it: a grid is not a chart
+    and has no vector figure to capture, so it stores a per-field frame plan
+    instead — each field's pixels, and its overlays as text and geometry — which
+    the PowerPoint export places as one editable group per field. Optional in
+    the same way, and empty for every other tab.
 
     Returns a short status string (shown as a toast by ``PlotCard``)."""
     store = get_store(ctx)
@@ -101,12 +106,13 @@ def save_plot_from_card(ctx, tab: str, png_bytes: bytes, panel_label: str,
         title=title,
         png_filename=f"{pid}.png",
         svg_filename=f"{pid}.svg" if svg_bytes else "",
+        frames_filename=f"{pid}.frames.zip" if frames_bytes else "",
         panel_only=bool(panel_only),
         params=params,
         thresholds=thresholds,
         summary=build_summary(tab, params, thresholds),
     )
-    if not store.add(ctx, rec, png_bytes, svg_bytes):
+    if not store.add(ctx, rec, png_bytes, svg_bytes, frames_bytes):
         return "Save failed: could not write image"
     refresh_saved_plots_gallery(ctx)
     return f"Saved “{title}” to Saved Plots"
@@ -582,7 +588,7 @@ def export_deck_pptx(ctx) -> None:
         # The redraw phase is the slow half and the one that visibly moves the
         # app from tab to tab, so it gets its own steps rather than being folded
         # into a single "working…" that sits still for most of the export.
-        redraws = sum(1 for r in records if not r.svg_filename)
+        redraws = sum(1 for r in records if _wants_redraw(r))
         total = redraws + len(records) + 1
         _show_progress(ctx, total)
         try:
@@ -597,6 +603,7 @@ def export_deck_pptx(ctx) -> None:
                 lambda r: store.vector_path(ctx, r) or store.held_vector(r),
                 lambda r: store.image_path(ctx, r),
                 dest,
+                frames_path_for=lambda r: store.frames_path(ctx, r),
                 dataset_name=_dataset_name(ctx),
                 summary_for=lambda r: r.summary,
                 regenerated=regenerated,
@@ -682,6 +689,19 @@ class _LiveState:
             view_state.restore(ctx, dict(self.view))
 
 
+def _wants_redraw(rec) -> bool:
+    """Whether *rec* needs redrawing before the deck can make it editable.
+
+    A record with a vector capture is already editable. So is an Image Table
+    grid with a per-field frame plan — it exports as one group per field, which
+    is the editable form a grid has, and there is no chart behind it to redraw.
+    Counting those as needing repair charged the export a redraw phase for work
+    it would then throw away.
+    """
+    return not getattr(rec, "svg_filename", "") and not getattr(
+        rec, "frames_filename", "")
+
+
 def regenerate_missing_vectors(ctx, store, records, *,
                                on_progress=None) -> set[str]:
     """Redraw plots that have no vector capture, so the deck can make them editable.
@@ -708,7 +728,7 @@ def regenerate_missing_vectors(ctx, store, records, *,
     old code simply skipped the restore in that case, silently. If the snapshot
     raises, this declines the whole repair and says so.
     """
-    missing = [r for r in records if not r.svg_filename]
+    missing = [r for r in records if _wants_redraw(r)]
     if not missing:
         return set()
     cards_by_tab = ctx.runtime.saved_plots.cards_by_tab or {}

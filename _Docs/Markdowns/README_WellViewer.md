@@ -3602,7 +3602,7 @@ channel for every well).
   number you see is the number you are changing. A channel with no spot-count
   column has no count cutoff, so it keeps editing its ON threshold whatever the
   Property says · **Save ▾** (to file ·
-  Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
+  to PowerPoint · Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
   % to reset to 100) · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
   plus the **Scale bar** and **Cell labels** options below.
@@ -3627,8 +3627,22 @@ channel for every well).
   to rest instead of reverting to the plain cell tooltip.
 - **Per-cell tweak** — right-click any rendered cell to override just that cell's
   well / channel / timepoint / FOV.
-- **Exported layout** — every way out of the table (**Export to File…**, **Copy PNG**,
-  **Copy SVG**, **Save to Saved Plots**) reproduces the grid as you see it: the row and
+- **Export to PowerPoint…** — writes the grid as a slide of **editable frames**
+  rather than as a picture of it. Every field of view becomes its own PowerPoint
+  group holding that field's image, its identity label as a text box you can
+  retype, and its scale bar as a rectangle you can recolour — so a figure can be
+  rearranged, relabelled or cut down for a talk without coming back to All-Well.
+  The row and column axis labels sit outside the field groups, so moving one
+  field leaves its row header where it was. A scale bar too long for its field is
+  left out of the slide exactly as it is left out of the picture, because a bar
+  shortened to fit would state a distance nobody measured. The same slide comes
+  out of **Saved Plots → Export ▾ → PowerPoint deck** for a grid saved to the
+  gallery. A field the app could not read keeps its place and its labels and is
+  marked *(no image)*, and the slide says how many; if *no* field could be read
+  there is nothing to lay out, and the gallery deck falls back to the flat
+  picture rather than giving you a page of empty boxes.
+- **Exported layout** — the other ways out of the table (**Export to File…**, **Copy PNG**,
+  **Copy SVG**, **Save to Saved Plots**) reproduce the grid as you see it: the row and
   column axis labels, the vertical group strips, the corner label, and the extra
   spacing between groups. The saved image also reads at the same brightness as the
   grid on screen. Because the axis labels already identify every cell, the per-cell
@@ -3636,7 +3650,11 @@ channel for every well).
   them repeated above each image as well.
 - **Save to Saved Plots quality** — a per-cell/whole-grid resolution preset (**Draft**,
   **Standard**, **High**), picked either from the Export dropdown's quick-pick submenu
-  or the Export settings dialog. Save to Saved Plots pre-shrinks each cell and caps the
+  or the Export settings dialog. It also sets how large each field's own picture is
+  inside the saved grid's PowerPoint frames — a saved grid keeps one image per
+  field, so it takes noticeably more room in the dataset folder than the single
+  snapshot did, and this preset is the control over that. Save to Saved Plots
+  pre-shrinks each cell and caps the
   assembled grid's longest side before saving (Export to File / Copy PNG / Copy SVG
   always render full resolution), so a large grid saves faster at the cost of per-cell
   detail; raise it to **High** when the saved image needs to hold up in a full-page PDF
@@ -3890,7 +3908,17 @@ rather than a single panel.
     until you double-click into it. Nothing is linked back to All-Well — the
     deck is a normal `.pptx` that opens anywhere, and no add-in is needed.
 
-  The Image Table grid can be saved to the gallery and exported either way.
+  - **An Image Table grid** is neither of those, and gets its own treatment. A
+    grid is a set of photographs, so there is nothing to redraw mark by mark —
+    but there is structure worth keeping. Each **field of view arrives as its own
+    group**: that field's picture, its identity label as a text box you can
+    retype, and its scale bar as a rectangle you can recolour or move. Drag a
+    field out on its own, drop the ones you do not want, regroup the rest — all
+    on the slide, without coming back here. The row and column labels stay
+    outside the fields, so moving a field does not drag its row header along.
+
+    A grid saved before this existed still exports as a picture. Re-save it from
+    the Image Table to get the frames.
 
   Both exports show a progress bar in the status row while they run, naming what
   they are doing — redrawing an older plot, building a slide, writing the file.

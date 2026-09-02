@@ -31,8 +31,13 @@ import theme
 from well_viewer.features.saved_plots._align import (
     AnchorBox, axes_rect_points, plan_anchor,
 )
+from well_viewer.domain.image_frames import (
+    FramedGrid, FramedGridError, Rect,
+)
+from well_viewer.domain.image_frames import from_bytes as framed_grid_from_bytes
 from well_viewer.features.saved_plots._drawingml import (
-    EMU_PER_INCH, Placement, drawing_group_xml, inches_to_emu, text_box_xml,
+    EMU_PER_INCH, Placement, drawing_group_xml, filled_rect_xml, group_xml,
+    inches_to_emu, picture_xml, text_box_xml,
 )
 from well_viewer.features.saved_plots._pptx import (
     SLIDE_HEIGHT_EMU, SLIDE_WIDTH_EMU, PptxBuilder, Slide,
@@ -94,6 +99,11 @@ class DeckResult:
     slides: int = 0
     vector: int = 0
     raster: int = 0
+    #: Image Table grids placed as one group per field of view — the picture of
+    #: each field plus its overlays as editable text and a scale-bar rectangle.
+    #: A subset of ``vector``: the slide is made of shapes, and the shape at the
+    #: centre of each frame is a photograph, which is what a field of view is.
+    framed: int = 0
     #: Plots whose figure is editable but whose data layer had to be rasterized.
     #: A subset of ``vector``, counted apart for the same reason ``redrawn`` is:
     #: they carry a caveat the others do not.
@@ -132,16 +142,22 @@ class DeckResult:
             if self.missing:
                 parts.append(f"{self.missing} with no figure")
             text += " — " + ", ".join(parts)
-        elif not (self.unsupported or self.rasterized):
+        elif not (self.unsupported or self.rasterized or self.framed):
             # "all editable" is a claim about every mark in every figure, so it
             # cannot be said over a lost construct or a data layer that became a
             # picture. Both were reported *after* it and read as qualifications
-            # of a sentence that had already overstated the case.
+            # of a sentence that had already overstated the case. Nor over a
+            # framed image grid: its labels and bars are shapes and its fields
+            # are photographs, which the frame clause below says in full.
             text += ", all editable"
         # Never behind an early return: a deck can be entirely editable and
         # still have lost a hatch or an arc out of one of its figures, and
         # "all editable" said over the top of that is the shortfall being
         # hidden by the very line meant to describe it.
+        if self.framed:
+            text += (f"; {self.framed} image grid"
+                     f"{'' if self.framed == 1 else 's'} as one group per field"
+                     " (labels and scale bars editable)")
         if self.redrawn:
             text += (f"; {self.redrawn} redrawn from saved settings"
                      " (older plots, now editable)")
@@ -365,6 +381,111 @@ def _place_vector(slide: Slide, svg_bytes: bytes, *, figure_w: float,
     return ""
 
 
+class _GridFit:
+    """Maps a frame plan's inches onto the slide's body box.
+
+    The plan is measured in inches from its own top-left; the slide has a box of
+    a different size in a different place. One scale for both axes, so a field
+    stays the shape it was photographed in.
+    """
+
+    def __init__(self, grid: FramedGrid, *, x: float, y: float,
+                 w: float, h: float) -> None:
+        width = max(1e-6, float(grid.width_in))
+        height = max(1e-6, float(grid.height_in))
+        self.scale = min(w / width, h / height)
+        self.x = x + (w - width * self.scale) / 2.0
+        self.y = y + (h - height * self.scale) / 2.0
+
+    def box(self, rect: Rect) -> tuple[int, int, int, int]:
+        """One plan rectangle as ``(x, y, cx, cy)`` in EMU on the slide."""
+        return (inches_to_emu(self.x + rect.x * self.scale),
+                inches_to_emu(self.y + rect.y * self.scale),
+                inches_to_emu(rect.w * self.scale),
+                inches_to_emu(rect.h * self.scale))
+
+    def points(self, size_pt: float) -> float:
+        """A plan font size at the scale the grid is placed."""
+        return max(1.0, float(size_pt) * self.scale)
+
+
+def _bar_outline_emu() -> int:
+    """The hairline a scale bar's contrasting outline is drawn at, in EMU.
+
+    Three quarters of a point — thin enough to read as the halo the burned-in
+    bar draws around itself rather than as a border of its own.
+    """
+    return int(round(0.75 * EMU_PER_INCH / 72.0))
+
+
+def _text_mark_xml(slide: Slide, mark, fit: _GridFit) -> str:
+    x, y, cx, cy = fit.box(mark.rect)
+    return text_box_xml(
+        mark.text, slide.ids, x=x, y=y, cx=cx, cy=cy,
+        color=_hex(mark.color), size_pt=fit.points(mark.size_pt),
+        bold=bool(mark.bold), align=mark.align, anchor=mark.anchor,
+        # The plate's colour and opacity come from the mark: a label's is a
+        # translucent dark backing and a facet group strip's is a solid pale
+        # band, and one constant here would have to be wrong for one of them.
+        plate=mark.plate_color if mark.plate else "",
+        plate_alpha=mark.plate_alpha,
+        vertical=bool(mark.vertical), name=mark.name)
+
+
+def _frame_xml(slide: Slide, frame, fit: _GridFit) -> str:
+    """One field of view as a PowerPoint group: picture, labels, scale bar.
+
+    A group rather than loose shapes so the field moves, resizes and copies as a
+    unit — and ungroups, in one click, into the picture and the text a user came
+    here to edit.
+
+    ``""`` only for a frame carrying nothing at all, which the collector no
+    longer produces: a field whose picture could not be read is given the
+    figure's own ``(no image)`` placeholder, so it keeps its group, its place
+    and its labels. Dropping it would close the gap in the grid and leave
+    nothing to say a field is missing.
+    """
+    body = []
+    x, y, cx, cy = fit.box(frame.rect)
+    rel_id = slide.add_image(frame.png) if frame.png else ""
+    if rel_id:
+        body.append(picture_xml(slide.ids, rel_id, x=x, y=y, cx=cx, cy=cy,
+                                name=f"{frame.name} image"))
+    for bar in frame.bars:
+        bx, by, bcx, bcy = fit.box(bar.rect)
+        body.append(filled_rect_xml(
+            slide.ids, x=bx, y=by, cx=bcx, cy=bcy, color=_hex(bar.color),
+            outline=_hex(bar.halo), outline_w=_bar_outline_emu(),
+            name=bar.name))
+    for mark in frame.texts:
+        body.append(_text_mark_xml(slide, mark, fit))
+    if not body:
+        return ""
+    return group_xml("".join(body), slide.ids, x=x, y=y, cx=cx, cy=cy,
+                     name=frame.name)
+
+
+def _place_frames(slide: Slide, grid: FramedGrid, *, figure_w: float) -> bool:
+    """Draw an Image Table grid as one group per field. False if it held nothing.
+
+    The axis labels are placed at the top level rather than inside any field's
+    group, because they name a row or a column: a user dragging one field on the
+    slide should not take the row header with it.
+    """
+    if grid.is_empty:
+        return False
+    fit = _GridFit(grid, x=_MARGIN, y=_BODY_TOP, w=figure_w, h=_BODY_H - 0.34)
+    placed = 0
+    for frame in grid.frames:
+        body = _frame_xml(slide, frame, fit)
+        if body:
+            slide.add(body)
+            placed += 1
+    for mark in grid.labels:
+        slide.add(_text_mark_xml(slide, mark, fit))
+    return bool(placed or grid.labels)
+
+
 def _place_raster(slide: Slide, png: bytes, *, figure_w: float) -> bool:
     """Place the captured snapshot as a picture. False if there was no image."""
     if not png:
@@ -385,6 +506,39 @@ def _place_raster(slide: Slide, png: bytes, *, figure_w: float) -> bool:
         f'<a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
         '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>')
     return True
+
+
+def build_image_grid_deck(grid: FramedGrid, out_path: str | Path, *,
+                          title: str = "Image grid") -> int:
+    """Write a one-slide deck holding *grid* as one group per field of view.
+
+    The Image Table's own "export to PowerPoint", as against
+    :func:`build_saved_plots_deck`, which writes the whole gallery. Same slide
+    geometry and the same per-field groups — one placement routine serves both,
+    so a grid exported directly and the same grid exported from the gallery are
+    the same slide.
+
+    Returns the number of fields whose picture reached the slide. Raises only on
+    I/O failure writing the file.
+    """
+    builder = PptxBuilder(title=title)
+    slide = builder.new_slide()
+    slide.add(text_box_xml(
+        title, slide.ids,
+        x=inches_to_emu(_MARGIN), y=inches_to_emu(_TITLE_TOP),
+        cx=SLIDE_WIDTH_EMU - 2 * inches_to_emu(_MARGIN),
+        cy=inches_to_emu(_TITLE_H),
+        size_pt=_TITLE_PT, bold=True, color=_hex(theme.CPub.text),
+        name="Grid title"))
+    figure_w = _SLIDE_W - 2 * _MARGIN
+    _place_frames(slide, grid, figure_w=figure_w)
+    missing = sum(1 for f in grid.frames if not f.png)
+    if missing:
+        _note(slide, f"{missing} field{'' if missing == 1 else 's'} could not be "
+                     "read; each keeps its place and its labels and is marked "
+                     "\u201c(no image)\u201d.", figure_w=figure_w)
+    builder.write(out_path)
+    return sum(1 for f in grid.frames if f.png)
 
 
 def _read(source) -> bytes:
@@ -444,12 +598,55 @@ def _plan_deck_anchor(recs, svg_path_for, summary_for) -> AnchorBox | None:
                        cx=inches_to_emu(min(widths)), cy=inches_to_emu(_BODY_H))
 
 
+def _try_frames(slide: Slide, rec, frames_path_for, *, figure_w: float,
+                result: DeckResult) -> bool:
+    """Place *rec* as per-field frames when it stored a frame plan.
+
+    False when there is no plan, or the plan cannot be read — in which case the
+    caller falls through to the vector capture and then to the picture, exactly
+    as for a record that never had one. An unreadable plan is logged rather than
+    raised: the deck is still worth building, and the slide the user gets is the
+    one they would have had before.
+    """
+    if frames_path_for is None:
+        return False
+    data = _read(frames_path_for(rec))
+    if not data:
+        return False
+    try:
+        grid = framed_grid_from_bytes(data)
+    except FramedGridError as exc:
+        _logger.debug("saved_plots: frame plan unreadable: %s", exc)
+        return False
+    if not grid.has_pictures:
+        # Every field failed to encode. The flat snapshot is what the user
+        # actually saw, so placing a page of empty boxes and calling it editable
+        # would trade a picture of their grid for a picture of nothing.
+        _logger.debug("saved_plots: frame plan holds no field pictures")
+        return False
+    if not _place_frames(slide, grid, figure_w=figure_w):
+        return False
+    result.vector += 1
+    result.framed += 1
+    missing = sum(1 for f in grid.frames if not f.png)
+    if missing:
+        # A field whose picture could not be read leaves a group holding only
+        # its labels. Said on the slide, because an empty frame among full ones
+        # is otherwise indistinguishable from a field that was genuinely blank.
+        _note(slide, f"{missing} field"
+                     f"{'' if missing == 1 else 's'} on this slide could not be "
+                     "read; each keeps its place and its labels and is marked "
+                     "\u201c(no image)\u201d.", figure_w=figure_w)
+    return True
+
+
 def build_saved_plots_deck(
     records: Iterable,
     svg_path_for: Callable[[object], object],
     image_path_for: Callable[[object], object],
     out_path: str | Path,
     *,
+    frames_path_for: Callable[[object], object] | None = None,
     dataset_name: str = "",
     summary_for: Callable[[object], str] | None = None,
     regenerated: set | None = None,
@@ -457,7 +654,14 @@ def build_saved_plots_deck(
 ) -> DeckResult:
     """Write a ``.pptx`` with a cover slide and one slide per saved plot.
 
-    Each plot is drawn from its vector capture as editable PowerPoint shapes.
+    An Image Table grid that stored a frame plan (*frames_path_for*) is placed
+    first and differently: one PowerPoint group per field of view, holding that
+    field's picture, its identity label and its scale bar as separate shapes. A
+    grid is not a chart and has no vector capture to redraw — its fields are
+    photographs — so this is the form in which it is editable at all: the labels
+    can be retyped, the bars recoloured, and a field dragged out on its own.
+
+    Every other plot is drawn from its vector capture as editable PowerPoint shapes.
     Where no readable capture exists the raster snapshot is placed instead and
     the slide says so; where neither exists the slide carries the plot's title
     and parameters and states that the figure is missing, which is the one
@@ -496,6 +700,9 @@ def build_saved_plots_deck(
                         getattr(rec, "title", "") or getattr(rec, "tab", ""))
         slide = builder.new_slide()
         figure_w = _slide_chrome(slide, rec, summary=summary_for(rec))
+        if _try_frames(slide, rec, frames_path_for, figure_w=figure_w,
+                       result=result):
+            continue
         svg_bytes = _read(svg_path_for(rec))
         if svg_bytes:
             reason = _place_vector(slide, svg_bytes, figure_w=figure_w,

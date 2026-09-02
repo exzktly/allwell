@@ -16,6 +16,15 @@ from well_viewer.features.batch_export import (
 
 from PySide6.QtWidgets import QScrollArea
 
+from well_viewer.core.lazy import lazy as _lazy
+
+#: The Response mode's panel, resolved on first use. ``_offered_modes`` has
+#: already established that the Response Curves feature is in this build before
+#: anything calls it.
+_build_response_panel = _lazy(
+    "well_viewer.features.batch_export.response_panel",
+    "build_response_batch_panel")
+
 
 class _ResponsiveScroll(QScrollArea):
     """Vertical-scroll host that, on resize, pushes its viewport width into the
@@ -34,15 +43,42 @@ class _ResponsiveScroll(QScrollArea):
                 panel.apply_split_orientation(avail)
 
 
-#: The page's four modes, in bar order, paired with the key each one dispatches
-#: on. The bar carries no user data of its own — a ``QTabBar`` indexes by
-#: position — so the order here IS the mapping.
+#: The page's modes, in bar order, paired with the key each one dispatches on
+#: and the Plotting leaf each one needs in the build. The bar carries no user
+#: data of its own — a ``QTabBar`` indexes by position — so the order of the
+#: *offered* modes IS the mapping, which is why ``_offered_modes`` is asked for
+#: the list everywhere rather than this tuple being read directly.
+#:
+#: The feature name is what keeps a mode out of a build that cannot draw it.
+#: Response mode reuses Response Curves' own collector and renderer, so a
+#: profile that drops that leaf has no code to run — and a mode bar offering it
+#: anyway would build a panel whose Run button raises. ``None`` means the mode
+#: needs nothing beyond Batch Export itself, which is true of the four that
+#: draw their figures from collectors this package already reaches.
 _MODES = (
-    ("Line", "line"),
-    ("Bar", "bar"),
-    ("Scatter (cells)", "scatter_cells"),
-    ("Scatter (aggregate)", "scatter_agg"),
+    ("Line", "line", None),
+    ("Bar", "bar", None),
+    ("Scatter (cells)", "scatter_cells", None),
+    ("Scatter (aggregate)", "scatter_agg", None),
+    ("Response", "response", "Response Curves"),
 )
+
+#: The mode the page opens on, and what an unrecognised key falls back to. Line
+#: is always offered, so this is never a key that is not in the bar.
+_DEFAULT_MODE = "line"
+
+
+def _offered_modes(ctx) -> tuple[tuple[str, str], ...]:
+    """``(label, key)`` for the modes this build can actually run.
+
+    Derived from the feature registry rather than from a second list somebody
+    maintains: a mode kept in the bar after its feature was profiled out is not
+    a cosmetic mistake, it is a tab that builds and a Run button that raises.
+    """
+    return tuple(
+        (label, key) for label, key, feature in _MODES
+        if feature is None or ctx.features.get(feature) is not None
+    )
 
 
 def _refresh_mode_buttons(ctx, mode: str) -> None:
@@ -53,7 +89,8 @@ def _refresh_mode_buttons(ctx, mode: str) -> None:
     bar = state.get("mode_bar")
     if bar is None:
         return
-    idx = next((i for i, (_lbl, key) in enumerate(_MODES) if key == mode), -1)
+    modes = state.get("modes") or _offered_modes(ctx)
+    idx = next((i for i, (_lbl, key) in enumerate(modes) if key == mode), -1)
     if idx < 0 or bar.currentIndex() == idx:
         return
     blocked = bar.blockSignals(True)
@@ -63,33 +100,45 @@ def _refresh_mode_buttons(ctx, mode: str) -> None:
         bar.blockSignals(blocked)
 
 
+def _build_mode_panel(ctx, mode: str, host):
+    """The panel for *mode*. Batch Export defines its OWN export groups (the
+    left-panel editor) and deliberately does NOT default to the sidebar
+    replicate sets — replicate groups are not the right unit for batch exports
+    (reverts N10)."""
+    if mode == "bar":
+        return BarBatchExportPanel(ctx, host, use_sidebar_groups=False)
+    if mode == "scatter_cells":
+        return ScatterBatchExportPanel(
+            ctx, host, scatter_mode="cells", use_sidebar_groups=False)
+    if mode == "scatter_agg":
+        return ScatterBatchExportPanel(
+            ctx, host, scatter_mode="aggregate", use_sidebar_groups=False)
+    if mode == "response":
+        # Through a proxy rather than an import statement: the panel module
+        # reaches Response Curves' collector and renderer, and there is no
+        # reason to load either in a session that never opens the mode.
+        return _build_response_panel(ctx, host)
+    return BatchExportPanel(ctx, host, use_sidebar_groups=False)
+
+
 def _show_batch_mode(ctx, mode: str) -> None:
     state = ctx.runtime.batch_export.inline_state
     if not state:
         return
 
-    if mode not in ("line", "bar", "scatter_cells", "scatter_agg"):
-        mode = "line"
+    offered = {key for _lbl, key in (state.get("modes") or _offered_modes(ctx))}
+    if mode not in offered:
+        # Includes a mode this build does not offer — a saved view naming
+        # ``response`` in a profile without Response Curves, say. Falling back
+        # is right; falling back *silently to a mode that is in the bar* is what
+        # keeps the bar and the panel agreeing, which a raise here would not.
+        mode = _DEFAULT_MODE
 
     host = state["host"]
     host_layout = host.layout()
     panels = state["panels"]
     if mode not in panels:
-        # Batch Export defines its OWN export groups (the left-panel editor).
-        # It deliberately does NOT default to the sidebar replicate sets —
-        # replicate groups are not the right unit for batch exports (reverts N10).
-        if mode == "line":
-            panel = BatchExportPanel(ctx, host, use_sidebar_groups=False)
-        elif mode == "bar":
-            panel = BarBatchExportPanel(ctx, host, use_sidebar_groups=False)
-        elif mode == "scatter_cells":
-            panel = ScatterBatchExportPanel(
-                ctx, host, scatter_mode="cells", use_sidebar_groups=False,
-            )
-        else:
-            panel = ScatterBatchExportPanel(
-                ctx, host, scatter_mode="aggregate", use_sidebar_groups=False,
-            )
+        panel = _build_mode_panel(ctx, mode, host)
         host_layout.addWidget(panel)
         panels[mode] = panel
     for key, panel in panels.items():
@@ -128,13 +177,14 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     # Error-band / per-FOV spread controls live in each line/bar panel's OUTPUT
     # SETTINGS.
     from PySide6.QtWidgets import QTabBar
+    modes = _offered_modes(ctx)
     mode_bar = QTabBar()
     mode_bar.setObjectName("PlottingSubTabs")
     mode_bar.setExpanding(False)
     mode_bar.setElideMode(Qt.ElideNone)
     mode_bar.setUsesScrollButtons(True)
     mode_bar.setDrawBase(False)
-    for label, _key in _MODES:
+    for label, _key in modes:
         mode_bar.addTab(label)
     from well_viewer.core.app_shell_view import register_page_tabs
     register_page_tabs(ctx.window, "Batch Export", mode_bar)
@@ -142,6 +192,7 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     from well_viewer.core.plot_orchestrator import (
         open_batch_export_shim,
         open_bar_batch_export_shim,
+        open_response_batch_export_shim,
         open_scatter_cells_batch_export_shim,
         open_scatter_agg_batch_export_shim,
     )
@@ -151,10 +202,11 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
         "bar": open_bar_batch_export_shim,
         "scatter_cells": open_scatter_cells_batch_export_shim,
         "scatter_agg": open_scatter_agg_batch_export_shim,
+        "response": open_response_batch_export_shim,
     }
 
     def _on_mode_changed(idx: int) -> None:
-        mode = _MODES[idx][1] if 0 <= idx < len(_MODES) else "line"
+        mode = modes[idx][1] if 0 <= idx < len(modes) else _DEFAULT_MODE
         fn = _mode_dispatch.get(mode)
         if fn is not None:
             fn(ctx)
@@ -196,9 +248,11 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     ctx.runtime.batch_export.inline_state = {
         "host": host,
         "panels": {},
-        "mode": "line",
+        "mode": _DEFAULT_MODE,
         "mode_bar": mode_bar,
+        "modes": modes,
         "band": band,
     }
-    ctx.runtime.batch_export.set_mode = lambda mode="line": _show_batch_mode(ctx, mode)
-    ctx.runtime.batch_export.set_mode("line")
+    ctx.runtime.batch_export.set_mode = (
+        lambda mode=_DEFAULT_MODE: _show_batch_mode(ctx, mode))
+    ctx.runtime.batch_export.set_mode(_DEFAULT_MODE)

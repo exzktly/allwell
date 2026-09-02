@@ -749,6 +749,7 @@ def populate_metric_combo(
     channel = ctx.state.channel
     from well_viewer.data.metric_labels import (
         METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
+        FRACTION_LABEL,
     )
     mapped_key = channel.label_to_channel_key.get(channel_entry)
     is_ratio = bool(mapped_key and is_ratio_key(mapped_key))
@@ -768,7 +769,7 @@ def populate_metric_combo(
             return
         items = list(METRIC_ORDER)
         if include_fraction:
-            items.append("Fraction above threshold")
+            items.append(FRACTION_LABEL)
         cb.addItems(items)
         cb.setEnabled(True)
         if prev in items:

@@ -80,6 +80,10 @@ def test_the_value_column_scope_restores_a_none():
 # ── item 100: the channel and its column are read together ──────────────────
 
 class _ReadStub:
+    # The roster the two readers share, off the real class rather than
+    # respelled here: a stub that carried its own copy would go on passing
+    # after a mode joined the roster and the readers stopped agreeing.
+    _CHANNEL_COMBO_ATTRS = BatchExportPanel._CHANNEL_COMBO_ATTRS
     _selected_export_channel = BatchExportPanel._selected_export_channel
     _export_val_col_for = BatchExportPanel._export_val_col_for
     _selected_export_metric_key = BatchExportPanel._selected_export_metric_key

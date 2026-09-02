@@ -61,8 +61,29 @@ _VIOLIN_SMOOTH_SLIDER_W = 120
 _update_bar_tp_menu = _lazy("well_viewer.features.barplot.controller", "update_bar_tp_menu")
 
 
+def _figure_record_title(grp, tp_strs) -> str:
+    """What one bar job's figure is called in the gallery and on its slide.
+
+    The group **and** its timepoints, because a bar run writes one figure per
+    (group, timepoint) by default: a gallery of records all titled ``Drug A``
+    names four different figures the same, and neither the thumbnail nor the
+    slide badge distinguishes them. The file names already carry the timepoint,
+    for exactly this reason.
+    """
+    name = str(getattr(grp, "name", "") or "")
+    if not tp_strs:
+        return name
+    when = tp_strs[0] if len(tp_strs) == 1 else ", ".join(tp_strs)
+    return f"{name} — t = {when}"
+
+
 class BarBatchExportPanel(BatchExportPanel):
     """Bar-plot batch export — same group editor + timepoint multi-select."""
+
+    _SOURCE_TAB = "Bar Plots"
+
+    def _mode_key(self) -> str:
+        return "bar"
 
     def __init__(
         self,
@@ -423,7 +444,10 @@ class BarBatchExportPanel(BatchExportPanel):
                         display_mode=display_mode,
                         violin_bw=violin_bw,
                     )
-                self._save_figure(fig, Path(str(base) + f".{fmt}"), fmt)
+                self._save_figure(
+                    fig, Path(str(base) + f".{fmt}"), fmt,
+                    group=grp, title=_figure_record_title(grp, tp_strs),
+                    val_col=_val_col)
             except Exception as exc:
                 return f"{grp.name} t={tp_strs} figure: {exc}"
             return None

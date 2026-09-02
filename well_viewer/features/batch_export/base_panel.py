@@ -14,6 +14,7 @@ from collections.abc import Callable
 
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -57,9 +58,15 @@ from well_viewer.features.batch_export.service import (
     new_staging_dir,
     save_export_figure,
 )
+from well_viewer.features.batch_export._destinations import DestinationSpool
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 # Foundational-layer (core/domain/data) ctx forms — safe at module scope.
 from well_viewer.core.lazy import lazy as _lazy
+# Saved Plots is one-line removable, so its parameter capture is a proxy rather
+# than an import statement — resolved on first call, and never called at all
+# unless a run ticked one of the extra destinations.
+_capture_params = _lazy("well_viewer.features.saved_plots.collect",
+                        "capture_params")
 from well_viewer.core.ui_helpers import build_hline_separator
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
@@ -200,6 +207,38 @@ class BatchExportPanel(QWidget):
     #: controls in their OUTPUT SETTINGS; scatter panels turn this off.
     _INCLUDES_SPREAD = True
 
+    #: The Plotting leaf whose figure this mode exports. It is what a gallery
+    #: record made from a batch figure names as its originating tab, so
+    #: Restore takes the user to the tab the figure came from and the deck's
+    #: slide badge says where it was drawn. Every subclass overrides it; a
+    #: subclass that did not would file its figures under the line tab's name,
+    #: which is a wrong answer rather than a missing one, so
+    #: ``tests/test_batch_export_destinations.py`` pins the pairing.
+    _SOURCE_TAB = "Line Graphs"
+
+    #: Names this mode in the deck's file name (``batch_export_<key>.pptx``) and
+    #: in a capture's id. A method rather than an attribute because the scatter
+    #: panel is two modes in one class.
+    def _mode_key(self) -> str:
+        return "line"
+
+    #: Every attribute a ``Channel:`` combo built by ``_build_channel_row`` can
+    #: be stashed under, in the order a lookup should prefer them.
+    #:
+    #: **One roster, read by both the repopulate and the read-back**, because
+    #: they were two identical tuples written inline and a mode whose combo
+    #: joined only one of them fails in a way nothing reports: the combo is
+    #: built, it is populated on the first show and never again, so a dataset
+    #: opened after the panel silently exports against a channel list from
+    #: before the load. A subclass adding a mode extends this rather than
+    #: editing two loops.
+    _CHANNEL_COMBO_ATTRS: tuple[str, ...] = ("_line_channel_cb", "_bar_channel_cb")
+
+    #: Whether this mode's Channel row carries its own fold-change controls.
+    #: False only where the mode normalises through the shared plotting state
+    #: rather than through the panel's own — see ``_build_channel_row``.
+    _INCLUDES_FOLD_CHANGE = True
+
     def __init__(
         self,
         ctx,
@@ -263,6 +302,11 @@ class BatchExportPanel(QWidget):
         self._auto_named_group_ids: set[int] = set()
         self._drag_adding = True
         self._drag_visited: set = set()
+        #: The extra destinations for the run currently in flight, or ``None``
+        #: between runs. Owned by ``_run_batch_jobs``, which is what creates it
+        #: and what clears it, so a figure written outside a run cannot reach a
+        #: destination belonging to the previous one.
+        self._spool: DestinationSpool | None = None
 
         self._build_ui()
         if not self._use_sidebar_groups:
@@ -517,7 +561,8 @@ class BatchExportPanel(QWidget):
         self._build_run_row(layout)
         layout.addStretch(1)
 
-    def _build_channel_row(self, layout: QVBoxLayout, *, attr: str) -> None:
+    def _build_channel_row(self, layout: QVBoxLayout, *, attr: str,
+                           include_fraction: bool = False) -> None:
         """Add a Channel: <combo> + Property: <combo> row.
 
         The channel combo is populated from ``_all_export_channels()`` so
@@ -545,6 +590,14 @@ class BatchExportPanel(QWidget):
         else:
             cb.setCurrentIndex(0)
         cb.setMinimumWidth(theme.Metrics.combo_min_w)
+        # Whether this row's Property combo offers ``Fraction above threshold``
+        # — the one entry that is not an intensity column. Stashed on the combo
+        # rather than passed to ``_refresh_property_combo_for``, because that
+        # method is also called from the channel's own ``currentIndexChanged``
+        # and from ``_refresh_channel_combos``, neither of which is holding the
+        # flag. A flag only the build path knew would give the row the fraction
+        # once and drop it the first time the channel moved.
+        cb._include_fraction = bool(include_fraction)
         setattr(self, attr, cb)
         row.addWidget(cb)
 
@@ -569,6 +622,17 @@ class BatchExportPanel(QWidget):
         # Fold-change controls get their own row below the Channel/Property
         # row — keeping them on the same line caused widget overlap on
         # narrower panel widths.
+        #
+        # Not on every mode. The line, bar and scatter exports normalise through
+        # this panel's *own* fold-change state, deliberately independent of the
+        # plot tab; Response Curves normalises inside its collector, off the
+        # shared ``ctx.state.plot`` fold-change state that every plotting page
+        # shares. A panel-local control there would be a switch that does
+        # nothing — offered, moved, and silently ignored by the export it
+        # appears to configure — so that mode says where the setting lives
+        # instead of duplicating it. See ``_INCLUDES_FOLD_CHANGE``.
+        if not self._INCLUDES_FOLD_CHANGE:
+            return
         fc_row = QHBoxLayout()
         fc_row.setContentsMargins(12, 2, 12, 2)
         self._build_fold_change_widgets(fc_row)
@@ -596,6 +660,7 @@ class BatchExportPanel(QWidget):
         """
         from well_viewer.data.metric_labels import (
             METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
+            FRACTION_LABEL,
         )
         ch_cb = getattr(self, channel_attr, None)
         prop_cb = getattr(self, f"{channel_attr}_metric", None)
@@ -617,9 +682,12 @@ class BatchExportPanel(QWidget):
                 prop_cb.setCurrentIndex(0)
                 prop_cb.setEnabled(True)
                 return
-            prop_cb.addItems(METRIC_ORDER)
+            items = list(METRIC_ORDER)
+            if getattr(ch_cb, "_include_fraction", False):
+                items.append(FRACTION_LABEL)
+            prop_cb.addItems(items)
             prop_cb.setEnabled(True)
-            if prev in METRIC_ORDER:
+            if prev in items:
                 prop_cb.setCurrentText(prev)
             else:
                 fallback = METRIC_KEY_TO_LABEL.get(
@@ -651,11 +719,21 @@ class BatchExportPanel(QWidget):
         ``app._app_state.channel.active_metric`` when the combo is missing or shows
         ``Calculated Val`` (ratio path — caller resolves the column via
         :py:meth:`_export_val_col_for`)."""
-        from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
+        from well_viewer.data.metric_labels import (
+            FRACTION_LABEL, FRACTION_METRIC_KEY, METRIC_LABEL_TO_KEY,
+        )
         prop_cb = getattr(self, f"{channel_attr}_metric", None)
         if prop_cb is None:
             return self._ctx.state.channel.active_metric or "mean_intensity"
         label = str(prop_cb.currentText() or "")
+        # The fraction is not one of the intensity flavours and is absent from
+        # ``METRIC_LABEL_TO_KEY`` by design, so a plain ``.get`` on it falls
+        # through to the *shared band's* metric — a row reading "Fraction above
+        # threshold" exporting mean intensity, in a file titled for the
+        # fraction. Only the rows that offer it can produce it, so nothing else
+        # changes for the modes that do not.
+        if label == FRACTION_LABEL:
+            return FRACTION_METRIC_KEY
         return METRIC_LABEL_TO_KEY.get(
             label, self._ctx.state.channel.active_metric or "mean_intensity",
         )
@@ -832,7 +910,7 @@ class BatchExportPanel(QWidget):
         without requiring a restart.
         """
         channels = self._all_export_channels()
-        for attr in ("_line_channel_cb", "_bar_channel_cb"):
+        for attr in self._CHANNEL_COMBO_ATTRS:
             cb = getattr(self, attr, None)
             if cb is None:
                 continue
@@ -858,7 +936,7 @@ class BatchExportPanel(QWidget):
     def _selected_export_channel(self) -> str:
         """Return the channel currently picked in the channel row, falling
         back to ``app._app_state.channel.active_channel`` when the row hasn't been built."""
-        for attr in ("_line_channel_cb", "_bar_channel_cb"):
+        for attr in self._CHANNEL_COMBO_ATTRS:
             cb = getattr(self, attr, None)
             if cb is not None:
                 text = str(cb.currentText() or "").strip()
@@ -965,8 +1043,71 @@ class BatchExportPanel(QWidget):
         layout.addLayout(fmt_row)
 
         self._build_export_profile_row(layout)
+        self._build_destination_rows(layout)
         if self._INCLUDES_SPREAD:
             self._build_spread_settings_rows(layout)
+
+    def _build_destination_rows(self, layout: QVBoxLayout) -> None:
+        """Where this run's figures go **besides** their own files.
+
+        Two additive switches, not a third output format: a run with both on
+        writes its PNGs and CSVs exactly as before, and also files each figure
+        in the gallery and builds one deck of them. Neither replaces the folder
+        of files, so ticking one costs the user nothing.
+
+        Built only where Saved Plots is in the build. Both destinations are its
+        code — the gallery record, and the deck writer that turns a captured SVG
+        into PowerPoint shapes — so in a profile without that feature the
+        controls would offer something the app cannot do. Absent rather than
+        disabled: a greyed checkbox says "not now", and this is "not in this
+        build", which are different sentences and only one of them is true.
+        """
+        self._to_gallery_cb = None
+        self._to_deck_cb = None
+        if self._ctx.features.get("Saved Plots") is None:
+            return
+
+        row = QHBoxLayout()
+        row.setContentsMargins(12, 2, 12, 2)
+        self._add_bold_label(row, "Also send to:", min_width=_FIELD_LABEL_W)
+        self._to_gallery_cb = QCheckBox("Saved Plots")
+        self._to_gallery_cb.setToolTip(
+            "File each exported figure in the Saved Plots gallery, with the "
+            "export group's own settings, so it can be restored, reordered and "
+            "included in the gallery's PDF report.\n"
+            "Records are added only if the whole run succeeds.")
+        row.addWidget(self._to_gallery_cb)
+        self._to_deck_cb = QCheckBox("PowerPoint")
+        self._to_deck_cb.setToolTip(
+            "Write one PowerPoint deck beside the figures, a slide per group, "
+            "with each figure as editable shapes rather than a picture.\n"
+            "A figure whose vector capture fails is placed as a picture and the "
+            "slide says so.")
+        row.addWidget(self._to_deck_cb)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+    def _new_destination_spool(self) -> DestinationSpool:
+        """The extra destinations this run was asked for, read once.
+
+        Read here rather than inside the job loop for the same reason every
+        other control on this panel is (:class:`ScatterAxes`): the runner pumps
+        ``processEvents()`` between jobs, so a checkbox the user touches
+        mid-export would otherwise apply to some of the figures and not others,
+        and the run would produce a deck missing exactly the groups that were
+        exported before the click.
+        """
+        from well_viewer.domain.dataset_name import dataset_display_name
+
+        return DestinationSpool(
+            to_gallery=bool(self._to_gallery_cb is not None
+                            and self._to_gallery_cb.isChecked()),
+            to_deck=bool(self._to_deck_cb is not None
+                         and self._to_deck_cb.isChecked()),
+            tab=self._SOURCE_TAB,
+            mode_key=self._mode_key(),
+            dataset_name=dataset_display_name(self._ctx.state.dataset.data_dir),
+        )
 
     def _build_spread_settings_rows(self, layout: QVBoxLayout) -> None:
         """Error-band (SEM/SD) + per-FOV-points toggles as OUTPUT SETTINGS rows.
@@ -1707,7 +1848,14 @@ class BatchExportPanel(QWidget):
         errors: list[str] = []
         skipped: list[str] = []
         staging = new_staging_dir(out_dir)
+        # The extra destinations, read once before the first job (see
+        # ``_new_destination_spool``) and cleared in the ``finally`` — so a
+        # figure written outside a run, or by the next run, cannot reach this
+        # run's spool.
+        spool = self._spool = self._new_destination_spool()
+        committed = False
         try:
+            spool.begin(out_dir)
             for step, job in enumerate(jobs, 1):
                 self._prog_lbl.setText(progress_text_fn(job, step, len(jobs)))
                 self._prog_bar.setValue(step - 1)
@@ -1726,12 +1874,31 @@ class BatchExportPanel(QWidget):
                 # describes.
                 discard_staging(staging)
             else:
+                # The deck is an output file of this run, so it is staged with
+                # the figures and committed under the same manifest: a run that
+                # fails after the deck is built leaves no deck behind either.
+                self._prog_lbl.setText("Building PowerPoint deck\u2026")
+                QApplication.processEvents()
+                spool.write_deck(staging)
                 commit_staged_export(staging, out_dir)
+                committed = True
         except BaseException:
             # Never leave a half-committed export or a stray temp dir behind.
             discard_staging(staging)
             raise
         finally:
+            try:
+                # The gallery is filled only by a run that committed. Filling it
+                # as each figure is rendered would leave the gallery holding the
+                # first K figures of a run whose output directory was rolled
+                # back — half a run, presented as a run.
+                if committed:
+                    self._prog_lbl.setText("Filing figures in Saved Plots\u2026")
+                    QApplication.processEvents()
+                    spool.file_in_gallery(self._ctx)
+            finally:
+                spool.discard()
+                self._spool = None
             self._run_btn.setEnabled(True)
             self._prog_bar.setVisible(False)
 
@@ -1741,6 +1908,13 @@ class BatchExportPanel(QWidget):
             # groups that produced nothing went unmentioned in the one place
             # the user is told to look.
             _logger.info("Batch export: %s", note)
+        # What the extra destinations produced, and what they could not.
+        # Reported on every path out, including the failure ones: a run that
+        # ended in errors still wrote whatever the destinations managed, and a
+        # deck two slides short of the groups it names is exactly the shortfall
+        # a user cannot see from the deck.
+        dest_note = spool.summary()
+        dest_short = spool.shortfall()
         if errors:
             note = (f" · {len(skipped)} with no data" if skipped else "")
             self._prog_lbl.setText(
@@ -1748,32 +1922,113 @@ class BatchExportPanel(QWidget):
             self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_DANGER')};")
             for err in errors:
                 _logger.error("Batch export error: %s", err)
+            if dest_short:
+                self._ctx.notify.set_status(f"Batch export: {dest_short}")
             return
         # A skipped group is not a failure, but it is also not a success to be
         # counted silently: the headline used to report the number of groups
         # *submitted*, so a run where half of them produced nothing looked
         # identical to one where they all did.
+        tail = " · ".join(part for part in (dest_note, dest_short) if part)
+        tail = f" · {tail}" if tail else ""
         if skipped:
             done = len(jobs) - len(skipped)
             self._prog_lbl.setText(
                 f"✓ {done} group(s) → {out_dir.name}/ · {len(skipped)} with no data")
             self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
             self._ctx.notify.set_status(
-                f"{status_text} · {len(skipped)} group(s) had no data")
+                f"{status_text} · {len(skipped)} group(s) had no data{tail}")
             return
         self._prog_lbl.setText(success_text)
         self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
-        self._ctx.notify.set_status(status_text)
+        self._ctx.notify.set_status(f"{status_text}{tail}")
 
-    def _save_figure(self, fig, fig_path: Path, fmt: str) -> None:
-        # The actual render-write is the Qt-free service (audit A14); the panel
-        # just resolves this app's export-style prefs and the plot background.
+    def _save_figure(self, fig, fig_path: Path, fmt: str, *,
+                     group: BarGroup | None, title: str,
+                     val_col: str | None = None) -> None:
+        """Write one batch figure, and feed the run's extra destinations.
+
+        **The one place a batch figure is written**, on every panel — which is
+        why it is also the one place the gallery and the deck are fed from. A
+        second capture path beside it would be a second answer to "what did this
+        run produce", and the two would disagree the first time a mode grew a
+        figure the other did not know about.
+
+        *group* and *title* are required rather than defaulted, and *group* may
+        be ``None`` only for a figure that genuinely belongs to no export group.
+        A default would let a call site forget them, and a forgotten *group* is
+        not a missing record — it is a record whose parameters describe whatever
+        the live plotting tab happens to be showing, filed under this group's
+        name. ``tests/test_batch_export_destinations.py`` holds every call site
+        to passing both.
+        """
         from well_viewer.features.export.style import _ensure_export_style_prefs
+
+        spool = self._spool
+        on_saved = None
+        if spool is not None and spool.wanted:
+            params, thresholds = self._capture_group_params(group, val_col)
+
+            def on_saved(saved_fig, _t=title, _p=params, _th=thresholds):
+                spool.capture(saved_fig, title=_t, params=_p, thresholds=_th)
+
         save_export_figure(
             fig, fig_path, fmt,
             export_prefs=_ensure_export_style_prefs(self._ctx),
             plot_bg=theme.CPub.bg,
+            on_saved=on_saved,
         )
+
+    def _capture_group_params(
+        self, grp: BarGroup | None, val_col: str | None,
+    ) -> tuple[dict, dict]:
+        """The parameters that describe *grp*'s figure — not the live tab's.
+
+        Taken inside ``_app_group_scope`` + ``_app_val_col_scope``, which is the
+        whole point: ``saved_plots.collect.capture_params`` snapshots the
+        application's *live* selections and column, and during a batch run those
+        are whatever the user left the plotting tabs on. Captured outside the
+        scope, every group in the run would file identical parameters — the
+        tab's — under ten different group names, and each would restore to a
+        figure that is not the one in the gallery beside it. Captured inside, the
+        snapshot's ``selections`` are the group's own members and its column is
+        the one the panel exported with.
+
+        The scope is entered here rather than relied on from the caller because
+        the panels differ: the line mode already renders inside it, and the bar
+        mode never enters it at all (it hands the group straight to
+        ``collect_bar_items_for_group``). A capture that trusted an ambient
+        scope would be right on one panel and silently wrong on the next.
+
+        Returns ``({}, {})`` for a figure with no group, and for a capture that
+        raised. Empty rather than approximate: a record with no parameters is a
+        picture in the gallery whose Restore does nothing, which is thin; a
+        record carrying another figure's parameters restores a *different* plot
+        under this one's title.
+        """
+        if grp is None:
+            return {}, {}
+        try:
+            column = val_col or self._ctx.state.channel.active_val_col
+            with self._app_group_scope(grp), self._app_val_col_scope(column):
+                params, thresholds = _capture_params(self._ctx, self._SOURCE_TAB)
+            # Stamped so the record can say where it came from. A batch figure's
+            # parameters reproduce the *group*; Batch Export's own layout
+            # controls (bars versus beeswarm, stacked timepoints, the scatter
+            # facet mode) live on the panel and not in view state, so a Restore
+            # can draw the same data in a different arrangement. The gallery's
+            # summary and the restore's status line both read this — see
+            # ``saved_plots.collect.build_summary``.
+            params["batch_export"] = {
+                "mode": self._mode_key(),
+                "group": str(getattr(grp, "name", "") or ""),
+            }
+            return params, thresholds
+        except Exception:
+            _logger.exception(
+                "Batch export: could not capture parameters for group %r",
+                getattr(grp, "name", grp))
+            return {}, {}
 
     def _export_scatter_figure(
         self,
@@ -1784,6 +2039,7 @@ class BatchExportPanel(QWidget):
         title: str,
         fig_path: Path,
         fmt: str,
+        group: BarGroup | None,
         legend_fontsize: int = 8,
     ) -> None:
         """Render a standard 8x6 scatter/errorbar figure and save it.
@@ -1801,7 +2057,7 @@ class BatchExportPanel(QWidget):
         ax.grid(True, alpha=0.3)
         if ax.get_legend_handles_labels()[0]:
             ax.legend(loc="best", fontsize=legend_fontsize, framealpha=0.0, facecolor="none")
-        self._save_figure(fig, fig_path, fmt)
+        self._save_figure(fig, fig_path, fmt, group=group, title=title)
 
     def _groups_for_export(self) -> list[BarGroup]:
         if self._use_sidebar_groups:
@@ -1993,7 +2249,9 @@ class BatchExportPanel(QWidget):
                         grp, threshold, use_sem, band_lbl,
                         fc_state=panel_fc_state, val_col=_val_col,
                     )
-                    self._save_figure(fig, fig_path, fmt)
+                    self._save_figure(fig, fig_path, fmt,
+                                      group=grp, title=grp.name,
+                                      val_col=_val_col)
                 except Exception as exc:
                     return f"{grp.name} figure: {exc}"
 

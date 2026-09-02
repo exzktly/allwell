@@ -202,6 +202,17 @@ class ResponseData:
         return any(c.points for c in self.curves)
 
 
+def y_metric_for(draws_fraction: bool) -> str:
+    """Which quantity the curves plot: :data:`Y_FRACTION` or :data:`Y_MEAN`.
+
+    A function rather than two constants a caller picks between, so the tab and
+    Batch Export cannot disagree about which Property means "plot the fraction"
+    — and so a caller outside this feature asks a question instead of importing
+    a pair of string constants it would then compare for itself.
+    """
+    return Y_FRACTION if draws_fraction else Y_MEAN
+
+
 def omission_caption(data: ResponseData) -> str:
     """The sentence the axes carry. ``""`` when nothing was left out.
 

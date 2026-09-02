@@ -97,6 +97,18 @@ class ScatterBatchExportPanel(BatchExportPanel):
     # Scatter exports have no error-band / per-FOV spread controls.
     _INCLUDES_SPREAD = False
 
+    _SOURCE_TAB = "Scatter Plot"
+
+    def _mode_key(self) -> str:
+        """``scatter_cells`` / ``scatter_agg`` — this class is two modes.
+
+        Per mode rather than per class, because the two write different figures
+        from different columns: one deck named for the class would leave a user
+        who exported both with the aggregate deck only, silently overwritten
+        over the cells one.
+        """
+        return f"scatter_{self._scatter_mode}"
+
     def __init__(
         self,
         ctx,
@@ -263,6 +275,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         threshold`` for the agg axis)."""
         from well_viewer.data.metric_labels import (
             METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
+            FRACTION_LABEL,
         )
         from well_viewer.domain.ratio_models import is_ratio_key as _is_ratio_key
         prop_cb = getattr(ch_cb, "_paired_property_cb", None)
@@ -286,7 +299,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 return
             items = list(METRIC_ORDER)
             if include_fraction:
-                items.append("Fraction above threshold")
+                items.append(FRACTION_LABEL)
             prop_cb.addItems(items)
             prop_cb.setEnabled(True)
             if prev in items:
@@ -401,12 +414,13 @@ class ScatterBatchExportPanel(BatchExportPanel):
         """
         from well_viewer.data.metric_labels import (
             METRIC_LABEL_TO_KEY, CALCULATED_VAL_LABEL,
+            FRACTION_LABEL, FRACTION_METRIC_KEY,
         )
         label = str(prop_cb.currentText() or "")
         if label == CALCULATED_VAL_LABEL:
             return "calculated_val"
-        if label == "Fraction above threshold":
-            return "fraction_above_threshold"
+        if label == FRACTION_LABEL:
+            return FRACTION_METRIC_KEY
         return METRIC_LABEL_TO_KEY.get(label, "mean_intensity")
 
     def _warn_if_live_gates_ignored(self) -> None:
@@ -618,7 +632,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                     scatter_data, col_x=col_x, col_y=col_y, tps_list=[tp_h],
                     title=(f"{grp.name} \u2014 Scatter Cells "
                            f"({self._tp_figure_label(tp_h)})"),
-                    fig_path=fig_path, fmt=fmt,
+                    fig_path=fig_path, fmt=fmt, group=grp,
                 )
         except Exception as exc:
             return f"{grp.name} scatter-cells figure: {exc}"
@@ -626,7 +640,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
     def _render_scatter_cells_figure(
         self, scatter_data, *, col_x: str, col_y: str, tps_list, title: str,
-        fig_path: Path, fmt: str,
+        fig_path: Path, fmt: str, group: BarGroup | None,
     ) -> None:
         """Render a per-cell scatter figure by reusing the tab's own
         ``render_scatter_points`` (+ ``draw_gates``), honouring the panel's
@@ -694,7 +708,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 _panel(ax, scatter_data)
                 ax.set_xlabel(xlabel)
                 ax.set_title(title, color=theme.CPub.text)
-            self._save_figure(fig, fig_path, fmt)
+            self._save_figure(fig, fig_path, fmt, group=group, title=title)
         finally:
             (_rt.axes_cols, _rt.gate_render, _rt.metadata,
              self._ctx.state.scatter.gates_hidden,
@@ -789,7 +803,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 xlabel=_xl, ylabel=_yl,
                 title=(f"{grp.name} \u2014 Scatter Aggregate "
                        f"({self._tp_figure_label(tp_h)})"),
-                fig_path=fig_path, fmt=fmt,
+                fig_path=fig_path, fmt=fmt, group=grp,
             )
         except Exception as exc:
             return f"{grp.name} scatter-aggregate figure: {exc}"
@@ -864,7 +878,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 self._render_scatter_cells_figure(
                     fig_data, col_x=col_x, col_y=col_y, tps_list=sorted(timepoints),
                     title=f"{grp.name} \u2014 Scatter Cells (all selected tps)",
-                    fig_path=fig_path, fmt=fmt,
+                    fig_path=fig_path, fmt=fmt, group=grp,
                 )
         except Exception as exc:
             return f"{grp.name} scatter-cells figure: {exc}"
@@ -947,7 +961,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 _draw,
                 xlabel=_xl, ylabel=_yl,
                 title=f"{grp.name} \u2014 Scatter Aggregate (all selected tps)",
-                fig_path=fig_path, fmt=fmt, legend_fontsize=7,
+                fig_path=fig_path, fmt=fmt, group=grp, legend_fontsize=7,
             )
         except Exception as exc:
             return f"{grp.name} scatter-aggregate figure: {exc}"

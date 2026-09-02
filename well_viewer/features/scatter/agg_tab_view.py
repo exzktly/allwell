@@ -49,8 +49,11 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     # ``_scatter_agg_stat_x/y_cb`` combos stay as compatibility shims —
     # ``_update_scatter_menus`` still populates them so older code paths
     # (export_service, plot_orchestrator) keep working.
-    from well_viewer.data.metric_labels import METRIC_ORDER as _BASE_METRIC_ORDER
-    AGG_METRIC_ORDER = list(_BASE_METRIC_ORDER) + ["Fraction above threshold"]
+    from well_viewer.data.metric_labels import (
+        FRACTION_LABEL as _FRACTION_LABEL,
+        METRIC_ORDER as _BASE_METRIC_ORDER,
+    )
+    AGG_METRIC_ORDER = list(_BASE_METRIC_ORDER) + [_FRACTION_LABEL]
 
     agg_ch_x_cb = reg.register("_scatter_agg_ch_x_cb", QComboBox())
     agg_ch_x_cb.addItems(["GFP"])

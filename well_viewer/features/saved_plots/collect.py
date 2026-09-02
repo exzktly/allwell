@@ -251,6 +251,24 @@ def build_summary(tab: str, params: dict, thresholds: dict) -> str:
     """A compact, human-readable description of the saved plot's settings."""
     lines: list[str] = [f"Tab: {tab}"]
 
+    # Where the figure came from, when it was not the tab it names. A Batch
+    # Export record's parameters describe the *export group* — its members, its
+    # channel, its column — and restoring them puts that group on this tab. What
+    # they do not carry is the batch panel's own layout controls (bars versus
+    # beeswarm, one figure per timepoint, the scatter facet mode), which live on
+    # the panel and not in view state. So a restore reproduces the group and not
+    # necessarily the picture, and that is worth a line: a record whose Restore
+    # draws a differently laid-out figure is otherwise indistinguishable from one
+    # that restored wrong.
+    origin = params.get("batch_export")
+    if isinstance(origin, dict) and origin:
+        group = str(origin.get("group") or "")
+        mode = str(origin.get("mode") or "")
+        named = f" — group “{group}”" if group else ""
+        lines.append(f"From: Batch Export ({mode}){named}")
+        lines.append("Restore re-applies the group, not Batch Export's own "
+                     "layout options.")
+
     wells = params.get("selected_wells") or []
     if wells:
         shown = ", ".join(str(w) for w in wells[:8])

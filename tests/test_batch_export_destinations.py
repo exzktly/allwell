@@ -1,0 +1,533 @@
+"""A batch figure reaches the gallery and the deck describing its own group.
+
+Batch Export can now send each figure it renders to two destinations besides
+the file it always wrote: the Saved Plots gallery, and a PowerPoint deck of
+editable shapes. Both are fed from one capture point — ``_save_figure``, the
+single place any panel writes a figure — and the whole risk of the feature is
+concentrated there:
+
+* a call site that forgets to name its group files a record whose parameters
+  describe **whatever the plotting tab happened to be showing**, under this
+  group's name, so Restore draws a different figure from the thumbnail beside
+  it. That is not a missing record, it is a wrong one, and nothing on screen
+  would say so — hence the AST guard;
+* the parameters must be captured *inside* the group scope. The line mode
+  already renders inside it and the bar mode never enters it at all, so a
+  capture that trusted an ambient scope would be right on one panel and
+  silently wrong on the next;
+* nothing may reach either destination for a run that did not commit, since
+  the file writes are staged and rolled back as a unit and a gallery holding
+  the first K figures of a rolled-back run is half a run presented as a run.
+
+The behaviour tests drive the real functions with stubs rather than building an
+application: the defects above are in the *sequence* of reads and writes, not
+in any widget. One slow-lane test builds the Response panel through the real
+constructor — see ``test_batch_export_ctx_characterization.py``.
+"""
+from __future__ import annotations
+
+import ast
+import os
+from pathlib import Path
+from types import SimpleNamespace
+
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("MPLBACKEND", "Agg")
+
+import matplotlib  # noqa: E402
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+
+from tests._repo_scan import REPO_ROOT, parse_source, rel  # noqa: E402
+from well_viewer.features.batch_export.base_panel import (  # noqa: E402
+    BatchExportPanel,
+)
+
+_BATCH_DIR = REPO_ROOT / "well_viewer" / "features" / "batch_export"
+
+#: The two figure-writing seams every batch panel goes through. Both must be
+#: told which export group the figure belongs to, because both feed the
+#: destinations.
+_FIGURE_WRITERS = ("_save_figure", "_export_scatter_figure")
+
+
+def _figure():
+    from matplotlib.figure import Figure
+
+    fig = Figure(figsize=(3, 2), dpi=72, facecolor="#ffffff")
+    fig.add_subplot(1, 1, 1).plot([0, 1, 2], [0, 1, 4])
+    return fig
+
+
+# ── the guard: no call site may forget its group ────────────────────────────
+
+def _writer_calls():
+    """Every ``self._save_figure(...)`` / ``self._export_scatter_figure(...)``
+    call in the batch-export package, as ``(file, line, keywords)``."""
+    found = []
+    for path in sorted(_BATCH_DIR.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        for node in ast.walk(parse_source(path)):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not isinstance(func, ast.Attribute):
+                continue
+            if func.attr not in _FIGURE_WRITERS:
+                continue
+            found.append((rel(path), node.lineno,
+                          {kw.arg for kw in node.keywords if kw.arg}))
+    return found
+
+
+def test_every_batch_figure_write_names_its_group_and_title():
+    calls = _writer_calls()
+    # The guard measures nothing if it found nothing. Four panels write
+    # figures; a scan that came back empty has found a moved seam, not a clean
+    # package.
+    assert len(calls) >= 4, calls
+    missing = [(where, line, sorted(kw))
+               for where, line, kw in calls
+               if not {"group", "title"} <= kw]
+    assert not missing, (
+        "Every batch figure write must name the export group it belongs to and "
+        "the title its gallery record / deck slide carries. Without ``group=`` "
+        "the record's parameters describe the live plotting tab rather than "
+        "this group:\n  "
+        + "\n  ".join(f"{w}:{ln} passes {kw}" for w, ln, kw in missing))
+
+
+def test_every_batch_panel_declares_where_its_figures_came_from():
+    """Each panel subclass names its source tab and its mode key.
+
+    Inherited silently, a subclass would file its figures under the *line*
+    tab's name and write its deck over the line mode's file — a wrong answer
+    rather than a missing one, and one that only shows up as a gallery record
+    whose Restore lands on the wrong tab.
+    """
+    from well_viewer.features.batch_export.bar_panel import BarBatchExportPanel
+    from well_viewer.features.batch_export.base_panel import BatchExportPanel
+    from well_viewer.features.batch_export.response_panel import (
+        ResponseBatchExportPanel,
+    )
+    from well_viewer.features.batch_export.scatter_panel import (
+        ScatterBatchExportPanel,
+    )
+
+    for cls in (BarBatchExportPanel, ResponseBatchExportPanel,
+                ScatterBatchExportPanel):
+        assert "_SOURCE_TAB" in cls.__dict__, cls.__name__
+        assert "_mode_key" in cls.__dict__, cls.__name__
+    tabs = {BatchExportPanel._SOURCE_TAB, BarBatchExportPanel._SOURCE_TAB,
+            ResponseBatchExportPanel._SOURCE_TAB,
+            ScatterBatchExportPanel._SOURCE_TAB}
+    assert tabs == {"Line Graphs", "Bar Plots", "Response Curves",
+                    "Scatter Plot"}, tabs
+
+
+def test_the_mode_bar_the_dispatch_and_the_panels_agree():
+    """One key per mode, spelled the same in all three places it appears."""
+    from well_viewer.features.batch_export import tab_view
+
+    bar_keys = [key for _label, key, _feature in tab_view._MODES]
+    assert len(set(bar_keys)) == len(bar_keys), bar_keys
+    source = parse_source(_BATCH_DIR / "tab_view.py")
+    dispatch = []
+    for node in ast.walk(source):
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "_mode_dispatch"
+                for t in node.targets):
+            dispatch = [k.value for k in node.value.keys]
+    assert sorted(dispatch) == sorted(bar_keys), (dispatch, bar_keys)
+    assert tab_view._DEFAULT_MODE in bar_keys
+
+
+def test_response_mode_is_offered_only_where_the_feature_is():
+    """A mode whose feature was profiled out is absent, not disabled.
+
+    Left in the bar it would build a panel whose Run button reaches a collector
+    that is not in the build — a page that looks complete and raises on use.
+    """
+    from well_viewer.features.batch_export import tab_view
+
+    present = SimpleNamespace(features=SimpleNamespace(get=lambda name: object()))
+    absent = SimpleNamespace(features=SimpleNamespace(get=lambda name: None))
+    assert "response" in {k for _l, k in tab_view._offered_modes(present)}
+    offered_without = {k for _l, k in tab_view._offered_modes(absent)}
+    assert "response" not in offered_without
+    # The four that need no other feature stay, so the guard is measuring the
+    # gate and not an empty list.
+    assert offered_without == {"line", "bar", "scatter_cells", "scatter_agg"}
+
+
+# ── the capture point ───────────────────────────────────────────────────────
+
+def test_the_capture_callback_runs_after_the_file_and_before_the_close():
+    """``on_saved`` sees the written file and a figure that is still open.
+
+    Called first, a capture that raised would cost the user the file they
+    actually asked for. Called after the close, there is no figure left to
+    render a second time — and both mistakes leave a green test if the callback
+    is only asserted to have *run*.
+    """
+    from well_viewer.features.batch_export.service import save_export_figure
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "plot.png"
+        seen = {}
+
+        def _capture(fig):
+            seen["file_exists"] = out.exists() and out.stat().st_size > 0
+            seen["still_open"] = plt.fignum_exists(fig.number)
+
+        fig = plt.figure()
+        fig.add_subplot(111).plot([0, 1], [0, 1])
+        save_export_figure(fig, out, "png", export_prefs={},
+                           plot_bg="#ffffff", on_saved=_capture)
+        assert seen == {"file_exists": True, "still_open": True}
+        assert not plt.fignum_exists(fig.number)
+
+
+# ── the parameters describe the group, not the live tab ─────────────────────
+
+class _ParamScopeStub:
+    """The two scope helpers and the capture, off the real class."""
+
+    _app_group_scope = BatchExportPanel._app_group_scope
+    _app_val_col_scope = BatchExportPanel._app_val_col_scope
+    _control_selections = BatchExportPanel._control_selections
+    _capture_group_params = BatchExportPanel._capture_group_params
+    _mode_key = BatchExportPanel._mode_key
+    _SOURCE_TAB = "Line Graphs"
+
+    def __init__(self, live_selections):
+        self._fc_control = None
+        self._fc_control_map = {}
+        self._ctx = SimpleNamespace(
+            state=SimpleNamespace(
+                channel=SimpleNamespace(active_val_col="gfp_mean_intensity"),
+                selection=SimpleNamespace(
+                    selections=list(live_selections),
+                    current_selection_id=None,
+                    selected_wells=set()),
+            ),
+        )
+
+
+def _group(name, member_name, wells):
+    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+
+    return BarGroup(name, [ReplicateSet(member_name, list(wells))])
+
+
+def test_the_captured_parameters_describe_the_group_not_the_live_tab(monkeypatch):
+    """Captured inside the group scope, so each record is its own group's.
+
+    Outside it, ``capture_params`` snapshots the application's live selections —
+    whatever the plotting tabs are showing while the run is in flight — and
+    every group in the run would file identical parameters under a different
+    name. That is not a thin record, it is a wrong one: Restore draws a figure
+    that is not the thumbnail beside it.
+    """
+    import well_viewer.features.saved_plots.collect as sp_collect
+
+    seen = {}
+
+    def _capture(ctx, tab):
+        seen["names"] = [s.get("name") for s in ctx.state.selection.selections]
+        seen["column"] = ctx.state.channel.active_val_col
+        seen["tab"] = tab
+        return {"selections": list(ctx.state.selection.selections)}, {}
+
+    monkeypatch.setattr(sp_collect, "capture_params", _capture)
+
+    live = [{"name": "WHAT THE TAB IS SHOWING", "wells": ["A01"], "id": "live"}]
+    panel = _ParamScopeStub(live)
+    params, _thresholds = panel._capture_group_params(
+        _group("Drug A", "rep 1", ["B02", "B03"]), "mcherry_total_intensity")
+
+    assert seen["names"] == ["rep 1"], seen["names"]
+    assert seen["column"] == "mcherry_total_intensity"
+    assert seen["tab"] == "Line Graphs"
+    # And the live state is put back, so an export never leaves the batch's own
+    # column or groups on the application afterwards.
+    assert panel._ctx.state.selection.selections == live
+    assert panel._ctx.state.channel.active_val_col == "gfp_mean_intensity"
+    # Stamped, so the gallery can say where the record came from.
+    assert params["batch_export"] == {"mode": "line", "group": "Drug A"}
+
+
+def test_a_group_scope_nested_inside_itself_describes_the_same_group():
+    """The line mode already renders inside the scope, so the capture re-enters
+    it. Benign only if the inner pass rebuilds the same list — asserted rather
+    than assumed, because the inner ``_control_selections`` reads the *scoped*
+    selections rather than the live ones."""
+    panel = _ParamScopeStub(
+        [{"name": "elsewhere", "wells": ["A01"], "id": "live"}])
+    grp = _group("Drug A", "rep 1", ["B02", "B03"])
+    sel = panel._ctx.state.selection
+    with panel._app_group_scope(grp):
+        once = [(s.get("name"), tuple(s.get("wells") or ())) for s in sel.selections]
+        with panel._app_group_scope(grp):
+            twice = [(s.get("name"), tuple(s.get("wells") or ()))
+                     for s in sel.selections]
+        assert [(s.get("name"), tuple(s.get("wells") or ()))
+                for s in sel.selections] == once
+    assert twice == once == [("rep 1", ("B02", "B03"))]
+
+
+def test_a_figure_with_no_group_files_no_parameters_rather_than_the_wrong_ones():
+    panel = _ParamScopeStub([{"name": "live", "wells": ["A01"], "id": "live"}])
+    assert panel._capture_group_params(None, "gfp_mean_intensity") == ({}, {})
+
+
+# ── the spool ───────────────────────────────────────────────────────────────
+
+def _spool(tmp_path, **kwargs):
+    from well_viewer.features.batch_export._destinations import DestinationSpool
+
+    defaults = dict(to_gallery=True, to_deck=False, tab="Line Graphs",
+                    mode_key="line", dataset_name="plate")
+    defaults.update(kwargs)
+    spool = DestinationSpool(**defaults)
+    spool.begin(tmp_path)
+    return spool
+
+
+def test_a_spool_nobody_asked_for_stages_nothing(tmp_path):
+    spool = _spool(tmp_path, to_gallery=False, to_deck=False)
+    assert not spool.wanted
+    spool.capture(_figure(), title="Drug A")
+    assert spool.summary() == "" and spool.shortfall() == ""
+    # Nothing was created under the output directory, so an unticked run costs
+    # the user no I/O at all.
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_capture_stages_a_raster_and_a_vector(tmp_path):
+    spool = _spool(tmp_path)
+    spool.capture(_figure(), title="Drug A", params={"active_channel": "gfp"})
+    assert len(spool._captures) == 1
+    cap = spool._captures[0]
+    assert cap.title == "Drug A" and cap.tab == "Line Graphs"
+    assert cap.png_path.exists() and cap.png_path.stat().st_size > 0
+    # The vector twin is what makes the deck editable, so it is asserted as a
+    # real SVG rather than merely as a path that is not None.
+    assert cap.svg_path is not None and cap.svg_path.read_bytes().startswith(b"<?xml")
+    assert spool.raster_only == 0
+    assert cap.params == {"active_channel": "gfp"}
+
+
+def test_a_figure_with_no_vector_is_kept_as_a_picture_and_counted(tmp_path,
+                                                                  monkeypatch):
+    """A vector render that fails costs editability, never the record.
+
+    And it is counted: a deck where some figures are shapes and some are
+    pictures is otherwise indistinguishable from one where all of them are.
+    """
+    import widgets.fig_clipboard as fig_clipboard
+
+    monkeypatch.setattr(fig_clipboard, "render_figure_svg",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no")))
+    spool = _spool(tmp_path, to_deck=True)
+    spool.capture(_figure(), title="Drug A")
+    cap = spool._captures[0]
+    assert cap.png_path.exists() and cap.svg_path is None
+    assert spool.raster_only == 1
+    assert "picture rather than editable shapes" in spool.shortfall()
+
+
+def test_a_capture_that_cannot_be_written_is_counted_not_dropped(tmp_path,
+                                                                 monkeypatch):
+    spool = _spool(tmp_path)
+
+    class _Broken:
+        def get_facecolor(self):
+            return "#ffffff"
+
+        def savefig(self, *a, **k):
+            raise OSError("disk full")
+
+    spool.capture(_Broken(), title="Drug A")
+    assert spool._captures == []
+    assert spool.capture_failures == 1
+    assert "could not be captured" in spool.shortfall()
+
+
+def test_discard_removes_everything_staged(tmp_path):
+    spool = _spool(tmp_path)
+    spool.capture(_figure(), title="Drug A")
+    staged = spool._dir
+    assert staged is not None and staged.exists()
+    spool.discard()
+    assert not staged.exists()
+    assert spool._captures == []
+
+
+def test_the_deck_is_written_into_the_export_s_own_staging_dir(tmp_path):
+    """So it commits with the figures rather than beside a rolled-back run."""
+    spool = _spool(tmp_path, to_gallery=False, to_deck=True)
+    spool.capture(_figure(), title="Drug A")
+    spool.capture(_figure(), title="Drug B")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    spool.write_deck(staging)
+    deck = staging / "batch_export_line.pptx"
+    assert deck.exists() and deck.stat().st_size > 0
+    assert spool.deck_error == ""
+    # A .pptx is a zip of XML parts; one slide per figure plus the cover.
+    import zipfile
+    with zipfile.ZipFile(deck) as zf:
+        slides = [n for n in zf.namelist()
+                  if n.startswith("ppt/slides/slide") and n.endswith(".xml")]
+    assert len(slides) == 3, sorted(slides)
+    assert spool.summary() == "batch_export_line.pptx"
+
+
+def test_each_mode_writes_its_own_deck(tmp_path):
+    """Two modes exported into one folder leave two decks, not one.
+
+    A shared name would leave the user with whichever mode they ran second,
+    silently overwritten over the first.
+    """
+    from well_viewer.features.batch_export._destinations import DestinationSpool
+
+    names = {
+        DestinationSpool(to_gallery=False, to_deck=True, tab="t",
+                         mode_key=key).deck_name
+        for key in ("line", "bar", "scatter_cells", "scatter_agg", "response")
+    }
+    assert len(names) == 5, names
+
+
+# ── the gallery ─────────────────────────────────────────────────────────────
+
+class _FakeStore:
+    """Just enough of ``SavedPlotsStore`` to watch what the spool files."""
+
+    def __init__(self, images_dir):
+        self.records = []
+        self._images_dir = images_dir
+        self.persist_calls = 0
+        self.added = []
+
+    def ensure_loaded(self, ctx):
+        pass
+
+    def images_dir(self, ctx):
+        return self._images_dir
+
+    def add(self, ctx, rec, png, svg=b"", frames=b"", *, persist=True):
+        self.added.append((rec, png, svg, persist))
+        self.records.append(rec)
+        return True
+
+    def persist(self, ctx):
+        self.persist_calls += 1
+
+
+def test_the_gallery_is_written_once_for_a_whole_batch(tmp_path, monkeypatch):
+    """One ``persistence.json`` rewrite for the run, not one per figure.
+
+    That file also holds the view state and Batch Export's own group
+    definitions; a record-at-a-time write is a full read/write cycle of it per
+    exported group.
+    """
+    import well_viewer.features.saved_plots.controller as sp_controller
+    import well_viewer.features.saved_plots.state as sp_state
+    from well_viewer.features.batch_export import _destinations
+
+    store = _FakeStore(tmp_path / "saved_plots")
+    monkeypatch.setattr(sp_state, "get_store", lambda ctx: store)
+    monkeypatch.setattr(sp_controller, "get_store", lambda ctx: store)
+    monkeypatch.setattr(sp_controller, "refresh_saved_plots_gallery",
+                        lambda ctx: None)
+    monkeypatch.setattr(_destinations, "_refresh_gallery", lambda ctx: None)
+
+    spool = _spool(tmp_path)
+    for name in ("Drug A", "Drug B", "Drug C"):
+        spool.capture(_figure(), title=name, params={"active_channel": "gfp"})
+    spool.file_in_gallery(object())
+
+    assert spool.filed == 3
+    assert [rec.title for rec, *_ in store.added] == ["Drug A", "Drug B", "Drug C"]
+    assert all(persist is False for *_rest, persist in store.added)
+    assert store.persist_calls == 1
+    # Every record got real bytes: a record whose PNG never arrived is a blank
+    # thumbnail in the gallery, which is the failure this whole path is for.
+    assert all(png and svg for _rec, png, svg, _p in store.added)
+    assert all(rec.tab == "Line Graphs" for rec, *_ in store.added)
+    assert len({rec.id for rec, *_ in store.added}) == 3
+
+
+def test_save_figure_to_gallery_files_the_params_it_is_handed(tmp_path,
+                                                              monkeypatch):
+    """It must not snapshot the live application over what it was given.
+
+    Batch Export renders a figure the user never had on screen, so a function
+    that captured the live view state here would file ten records carrying the
+    plotting tab's parameters under ten different group names.
+    """
+    import well_viewer.features.saved_plots.controller as sp_controller
+
+    store = _FakeStore(tmp_path / "saved_plots")
+    monkeypatch.setattr(sp_controller, "get_store", lambda ctx: store)
+    monkeypatch.setattr(sp_controller, "capture_params",
+                        lambda ctx, tab: ({"NEVER": True}, {"NEVER": True}))
+    monkeypatch.setattr(sp_controller, "refresh_saved_plots_gallery",
+                        lambda ctx: None)
+
+    sp_controller.save_figure_to_gallery(
+        object(), tab="Bar Plots", title="Drug A", png_bytes=b"png",
+        svg_bytes=b"svg", params={"active_channel": "mcherry"},
+        thresholds={"fluor_gates": {}})
+    rec = store.records[0]
+    assert rec.params == {"active_channel": "mcherry"}
+    assert rec.thresholds == {"fluor_gates": {}}
+    assert rec.tab == "Bar Plots" and rec.title == "Drug A"
+
+
+def test_a_record_id_is_never_reused(tmp_path, monkeypatch):
+    """Two records filed in the same microsecond must not share a file name.
+
+    The id names the record's PNG on disk, so a collision does not clash
+    cosmetically — the second record's image overwrites the first's and the
+    gallery shows one figure twice.
+    """
+    import well_viewer.features.saved_plots.controller as sp_controller
+
+    store = _FakeStore(tmp_path / "saved_plots")
+    monkeypatch.setattr(sp_controller, "get_store", lambda ctx: store)
+    monkeypatch.setattr(sp_controller, "refresh_saved_plots_gallery",
+                        lambda ctx: None)
+
+    class _FrozenClock:
+        @staticmethod
+        def now():
+            import datetime as _dt
+            return _dt.datetime(2026, 1, 1, 12, 0, 0, 123456)
+
+    monkeypatch.setattr(sp_controller, "datetime", _FrozenClock)
+    for name in ("A", "B", "C"):
+        sp_controller.save_figure_to_gallery(
+            object(), tab="Line Graphs", title=name, png_bytes=b"png")
+    ids = [r.id for r in store.records]
+    assert len(set(ids)) == 3, ids
+
+
+def test_the_summary_says_a_record_came_from_batch_export():
+    """And that Restore re-applies the group, not the panel's layout options."""
+    from well_viewer.features.saved_plots.collect import build_summary
+
+    plain = build_summary("Bar Plots", {"active_channel": "gfp"}, {})
+    assert "Batch Export" not in plain
+
+    batched = build_summary(
+        "Bar Plots",
+        {"active_channel": "gfp",
+         "batch_export": {"mode": "bar", "group": "Drug A"}}, {})
+    assert "From: Batch Export (bar) — group “Drug A”" in batched
+    assert "not Batch Export's own layout options" in batched

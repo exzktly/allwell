@@ -174,7 +174,8 @@ class SavedPlotsStore:
 
     # ── mutations ─────────────────────────────────────────────────────────
     def add(self, ctx, rec: SavedPlot, png_bytes: bytes,
-            svg_bytes: bytes = b"", frames_bytes: bytes = b"") -> bool:
+            svg_bytes: bytes = b"", frames_bytes: bytes = b"",
+            *, persist: bool = True) -> bool:
         """Write the captured bytes and append *rec*.
 
         The PNG is the record: failing to write it fails the save. The vector
@@ -190,6 +191,15 @@ class SavedPlotsStore:
         that was never written would send the deck builder looking for frames
         that do not exist, and it would place nothing rather than fall back to
         the picture.
+
+        *persist* is the same escape hatch ``attach_vector`` carries, for the
+        same reason: a caller filing a whole batch export's figures at once
+        would otherwise read and rewrite the whole of ``persistence.json`` —
+        which also holds view state and Batch Export's own config — once per
+        figure. Such a caller passes ``persist=False`` and calls
+        :meth:`persist` once when the batch is complete. The record is in the
+        in-memory store either way, so a caller that forgets loses the records
+        at the end of the session rather than corrupting anything.
 
         Returns False when there's no dataset directory to persist into.
         """
@@ -221,7 +231,8 @@ class SavedPlotsStore:
         else:
             rec.frames_filename = ""
         self.records.append(rec)
-        self._persist(ctx)
+        if persist:
+            self._persist(ctx)
         return True
 
     def persist(self, ctx) -> None:

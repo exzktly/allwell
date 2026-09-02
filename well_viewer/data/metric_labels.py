@@ -42,6 +42,22 @@ SMFISH_SUFFIX = "_smfish_count"
 # combo collapses to this single entry.
 CALCULATED_VAL_LABEL = "Calculated Val"
 
+#: The Property entry that is not a column at all: the share of cells whose
+#: mean intensity clears the ON cutoff. Offered by the aggregate Scatter axis,
+#: by Response Curves, and by the batch exports of both — and stated once,
+#: here, because the three read the *same* user choice and a literal spelled
+#: separately in each is how one of them comes to mean something else. Its key
+#: is :data:`FRACTION_METRIC_KEY`, which the column resolvers map back to the
+#: channel's mean-intensity column.
+FRACTION_LABEL = "Fraction above threshold"
+
+#: The key :data:`FRACTION_LABEL` resolves to. Deliberately not in
+#: ``METRIC_LABEL_TO_KEY``: it is not one of the intensity flavours, and a
+#: metric combo that offered it everywhere would hand Bar, Line, Distribution
+#: and Heat Map a metric their collectors resolve to ``f"{channel}_{metric}"``
+#: and cannot read.
+FRACTION_METRIC_KEY = "fraction_above_threshold"
+
 
 def split_metric_col(col: str) -> tuple[str, str, str] | None:
     """Split ``<channel>_<metric_suffix>`` into ``(channel, metric_key, label)``.

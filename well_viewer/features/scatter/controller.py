@@ -38,6 +38,7 @@ from well_viewer.features.scatter.gating import (
 )
 
 from well_viewer.core.plot_annotations import value_label_settings
+from well_viewer.data.metric_labels import FRACTION_LABEL, FRACTION_METRIC_KEY
 from well_viewer.features.scatter._annotations import (
     annotate_agg_points,
     draw_scatter_agg_legends,
@@ -52,7 +53,7 @@ EMPTY_SELECTION_EXPORT_NOTE = "No wells selected — nothing to plot."
 
 #: Agg-scatter Property labels that map to a synthetic aggregation key rather
 #: than a metric-intensity column (mirrors ``WellViewerApp._SCATTER_AGG_METRIC_EXTRA``).
-SCATTER_AGG_METRIC_EXTRA = {"Fraction above threshold": "fraction_above_threshold"}
+SCATTER_AGG_METRIC_EXTRA = {FRACTION_LABEL: FRACTION_METRIC_KEY}
 
 
 def redraw_scatter(
@@ -728,7 +729,7 @@ def compose_scatter_agg_stat(ctx, channel_entry: str, metric_label: str) -> str:
     if ratio_key and is_ratio_key(ratio_key):
         return f"Mean Ratio {channel_entry}"
     ch_upper = (channel_entry or "").upper()
-    if metric_label == "Fraction above threshold":
+    if metric_label == FRACTION_LABEL:
         return f"Fraction On {ch_upper}"
     if metric_label == "smFISH Count":
         return f"smFISH Count {ch_upper}"

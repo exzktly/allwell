@@ -28,8 +28,8 @@ from well_viewer.features.export.style import (
     apply_export_style_to_current,
 )
 from well_viewer.core.plot_style import (
-    AXIS_LIMIT_PREF_KEYS, LOG_BASE_CHOICES, drop_bucket_limits,
-    figure_pref_is_set, figure_prefs,
+    AXIS_LIMIT_PREF_KEYS, FIGURE_SCOPED_PREF_KEYS, LOG_BASE_CHOICES,
+    drop_bucket_limits, figure_pref_is_set, figure_prefs,
 )
 
 # v2 chrome: this panel is composed from the custom widgets in ``widgets/``
@@ -1924,6 +1924,58 @@ class ExportStyleSidebar(QWidget):
         except Exception:
             swallowed()  # was: pass (silent except)
             return False
+
+    def _resync_pref_fields(self) -> None:
+        """Re-seed the fields backed by this figure's stored preferences.
+
+        The sibling of :meth:`_resync_plot_state_segments`, one layer over, and
+        it exists for the same reason: this panel is built once per figure and
+        cached for the life of the process, while the store underneath it is
+        rewritten by things the panel never hears about. Loading a dataset
+        restores ``export_axis_prefs`` from the saved state, and a dataset
+        *switch* drops every axis limit (``ExportPrefsState.
+        reset_for_new_dataset``) because a limit is in the units of the plate
+        that was open.
+
+        Without this the fields keep the previous plate's answers, and — worse
+        than a stale label — ``_persist`` writes **every** field on any edit, so
+        changing the title size would put the dropped limits straight back onto
+        the new plate. That is exactly the defect the drop exists to prevent,
+        arriving through the panel instead.
+
+        Only the figure-scoped keys: those are the ones a load rewrites out from
+        under the panel. The two shared log toggles go back through
+        :meth:`_log_toggle_seed`, so a figure with no stored answer still reads
+        its answer off the axis rather than off an unset preference.
+        """
+        self._updating = True
+        try:
+            self._axis_buckets = dict(self._prefs.get("axis_buckets") or {})
+            self._current_axis = self._default_axis_target()
+            self._axis_buckets.setdefault(
+                self._current_axis,
+                {k: self._prefs.get(k) for k in self._axis_keys},
+            )
+            bucket = self._axis_buckets.get(self._current_axis) or {}
+            for key, setter in self._setters.items():
+                if key not in FIGURE_SCOPED_PREF_KEYS or key == "axis_buckets":
+                    continue
+                if key == "axis_target":
+                    value = self._current_axis
+                elif key in ("x_log", "y_log"):
+                    value = self._log_toggle_seed(
+                        key, key[0], bool(DEFAULT_EXPORT_STYLE_PREFS.get(key)))
+                elif key in bucket and bucket[key] is not None:
+                    value = bucket[key]
+                else:
+                    value = self._prefs.get(
+                        key, DEFAULT_EXPORT_STYLE_PREFS.get(key))
+                if value is None:
+                    continue
+                with swallow(f"re-seed the Properties field for {key}"):
+                    setter(value)
+        finally:
+            self._updating = False
 
     def _resync_plot_state_segments(self) -> None:
         """Re-seed the segments that write straight to ``PlotState``.

@@ -770,13 +770,38 @@ class _FigurePrefs(MutableMapping):
 
     Behaves like a plain ``dict`` for every existing call site
     (``[]``/``get``/``in``/``dict(...)``).
+
+    **The two dicts are looked up per access, never captured.** A view can
+    outlive the dicts it reads: the Properties sidebar is built once per figure
+    and cached for the life of the process, while loading a dataset replaces
+    both stores wholesale — ``view_state.restore`` rebuilds ``axis_prefs`` as
+    ``{str(k): dict(v)}``, and ``ExportPrefsState.reset_for_new_dataset``
+    rebuilds it without the entries that emptied. A view holding the *old*
+    entry then writes every axis limit, log toggle, log base and per-axis tick
+    size into a dict nothing reads, and reports success: the panel's fields
+    keep the values, and the figure never moves. Only the controls that write
+    ``PlotState`` — the colour mode, the Show/Error-bars segments — go on
+    working, which is what a whole Properties panel looks like when it has
+    quietly come loose from its figure.
+
+    The *key* is resolved once, since it is a property of the figure's place in
+    the widget registry rather than of the store, and re-deriving it per access
+    would re-scan the registry (and re-log its diagnostic) on every read.
     """
 
-    __slots__ = ("_global", "_axis")
+    __slots__ = ("_ctx", "_key")
 
-    def __init__(self, global_prefs: dict, axis_prefs: dict) -> None:
-        self._global = global_prefs
-        self._axis = axis_prefs
+    def __init__(self, ctx, key: str) -> None:
+        self._ctx = ctx
+        self._key = key
+
+    @property
+    def _global(self) -> dict:
+        return _ensure_export_style_prefs(self._ctx)
+
+    @property
+    def _axis(self) -> dict:
+        return _ensure_axis_prefs_store(self._ctx).setdefault(self._key, {})
 
     def __getitem__(self, key):
         if key in FIGURE_SCOPED_PREF_KEYS:
@@ -817,10 +842,14 @@ def figure_prefs(ctx, fig):
     """A :class:`_FigurePrefs` view for *fig* — the shared publication style
     (typography, grid, legend, ticks) plus that figure's own axis limits, log
     scaling, and mark styling. A8 teardown: takes ``ctx``."""
-    global_prefs = _ensure_export_style_prefs(ctx)
-    store = _ensure_axis_prefs_store(ctx)
-    axis = store.setdefault(figure_pref_key(ctx, fig), {})
-    return _FigurePrefs(global_prefs, axis)
+    # Seed both stores now — a caller that only ever reads must still find the
+    # global defaults filled in — but hand the view the *key*, not the dicts it
+    # currently resolves to. See :class:`_FigurePrefs` for what capturing them
+    # costs a panel that outlives a dataset load.
+    _ensure_export_style_prefs(ctx)
+    key = figure_pref_key(ctx, fig)
+    _ensure_axis_prefs_store(ctx).setdefault(key, {})
+    return _FigurePrefs(ctx, key)
 
 
 def figure_pref_is_set(ctx, fig, key: str) -> bool:

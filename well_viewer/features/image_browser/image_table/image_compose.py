@@ -554,20 +554,18 @@ def scale_bar_refusal_report(ctx) -> list[str]:
                    if key and key[0]})
 
 
-def can_carry_bar(rgb, bar_px: int) -> bool:
-    """Will a *bar_px* bar actually be drawn into *rgb*?
+def chrome_fits(rgb) -> bool:
+    """Can :func:`draw_cell_chrome` burn **anything** into *rgb*?
 
-    :func:`bar_fits` answers the length question; this answers the whole one, by
-    also applying the array guards :func:`draw_cell_chrome` returns early on — an
-    array that is not 3-channel, and one under 4 px on a side. A 200x3 crop
-    passes the length test and draws nothing, which is the silent hole this whole
-    change exists to close, reopened one guard along.
-
-    Comparing the array before and after is not the alternative: an identity
-    label is burned in by the same call, so a labelled cell's array changes
-    whether or not its bar was drawn.
+    The array guards it returns early on, in one place: an array that is not at
+    least three-channel, and one under 4 px on a side. Separated out because
+    three callers need the same answer and had drifted to two of them —
+    :func:`draw_cell_chrome` itself, :func:`can_carry_bar` (which reports the
+    refusal), and the PowerPoint export's frame plan, which places the same
+    marks as shapes and must place *none* where the picture drew none. A 200x3
+    crop is the case: it passes every length test and takes no chrome at all.
     """
-    if rgb is None or int(bar_px) <= 0:
+    if rgb is None:
         return False
     try:
         if rgb.ndim != 3 or rgb.shape[2] < 3:
@@ -575,7 +573,25 @@ def can_carry_bar(rgb, bar_px: int) -> bool:
         h, w = rgb.shape[:2]
     except (AttributeError, IndexError, ValueError):
         return False
-    return h >= 4 and w >= 4 and bar_fits(w, h, bar_px)
+    return h >= 4 and w >= 4
+
+
+def can_carry_bar(rgb, bar_px: int) -> bool:
+    """Will a *bar_px* bar actually be drawn into *rgb*?
+
+    :func:`bar_fits` answers the length question; this answers the whole one, by
+    also applying :func:`chrome_fits`. A 200x3 crop passes the length test and
+    draws nothing, which is the silent hole this whole change exists to close,
+    reopened one guard along.
+
+    Comparing the array before and after is not the alternative: an identity
+    label is burned in by the same call, so a labelled cell's array changes
+    whether or not its bar was drawn.
+    """
+    if int(bar_px) <= 0 or not chrome_fits(rgb):
+        return False
+    h, w = rgb.shape[:2]
+    return bar_fits(w, h, bar_px)
 
 
 def scale_bar_refusal_clause(ctx) -> str:
@@ -993,6 +1009,95 @@ def bar_fits(w: int, h: int, bar_px: int) -> bool:
     return int(bar_px) > 0 and int(bar_px) <= int(w) - 2 * bar_margin(h)
 
 
+def bar_thickness_for(h: int, bar_thickness_px: int) -> int:
+    """How thick, in pixels, a scale bar is drawn into an image *h* pixels tall.
+
+    The user's value is a thickness at a nominal 240 px cell, so it scales with
+    the image exactly as the label font does; ``<= 0`` means "auto".
+    """
+    if bar_thickness_px and int(bar_thickness_px) > 0:
+        return max(1, int(round(float(bar_thickness_px) * int(h) / 240.0)))
+    return max(2, int(h) // 100)
+
+
+def bar_rect_px(w: int, h: int, *, bar_px: int, bar_corner: str = "br",
+                bar_thickness_px: int = 0) -> tuple[int, int, int, int] | None:
+    """The ``(x0, y0, x1, y1)`` box a scale bar occupies in a *w* x *h* image.
+
+    ``None`` when the bar is refused (:func:`bar_fits`) — never a shortened box,
+    for the reason ``bar_fits`` gives.
+
+    This is the geometry, separated from the drawing, because two surfaces need
+    it and they must not disagree: :func:`draw_cell_chrome` burns the bar into
+    the pixels, and the PowerPoint export re-emits the same bar as an editable
+    rectangle placed from these coordinates. A bar drawn at one length in the
+    picture and another in the deck would be two different physical scales
+    presented as one.
+    """
+    if not bar_fits(w, h, bar_px):
+        return None
+    blen = int(bar_px)
+    if blen < 1:
+        return None
+    thick = bar_thickness_for(h, bar_thickness_px)
+    margin = bar_margin(h)
+    corner = str(bar_corner or "br").strip().lower()
+    if corner in ("tl", "bl"):
+        x0 = margin
+        x1 = min(int(w), x0 + blen)
+    else:
+        x1 = int(w) - margin
+        x0 = max(0, x1 - blen)
+    if corner in ("tl", "tr"):
+        y0 = margin
+        y1 = min(int(h), y0 + thick)
+    else:
+        y1 = int(h) - margin
+        y0 = max(0, y1 - thick)
+    return x0, y0, x1, y1
+
+
+def bar_ink_rgb(rgb, rect, bar_color: str) -> tuple[int, int, int]:
+    """The colour a scale bar is actually drawn in.
+
+    A named colour is honoured as given. ``"auto"`` (the default) picks black or
+    white against the pixels the bar covers, which is what makes a bar visible on
+    the "Greys" colormap's near-white background. Shared with the PowerPoint
+    export so the editable rectangle it places is the colour the picture would
+    have used, rather than a fixed white that vanishes on half the plate.
+    """
+    if str(bar_color or "").strip().lower() not in ("", "auto"):
+        return _chrome_rgb(bar_color)
+    try:
+        import numpy as _np
+
+        a = _np.asarray(rgb)
+        h, w = a.shape[:2]
+        x0, y0, x1, y1 = rect
+        region = a[max(0, y0):min(h, y1 + 1), max(0, x0 - 1):min(w, x1 + 1), :3]
+        bright = float(region.mean()) > 140.0 if region.size else False
+    except (AttributeError, IndexError, TypeError, ValueError):
+        logger.debug("image_table: could not sample under the scale bar",
+                     exc_info=True)
+        bright = False
+    return (0, 0, 0) if bright else (255, 255, 255)
+
+
+def label_font_px_for(h: int, label_font_px: int) -> int:
+    """The identity label's pixel font size in an image *h* pixels tall.
+
+    Like the bar's thickness, the user's number is stated at a nominal 240 px
+    cell so a label reads the same on the live thumbnail and at full export
+    resolution.
+    """
+    return max(6, int(round(float(label_font_px) * int(h) / 240.0)))
+
+
+def label_margin_px(h: int) -> int:
+    """The inset a burned-in identity label keeps from the image edge."""
+    return max(2, int(h) // 40)
+
+
 def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
                      bar_color: str = "white", bar_thickness_px: int = 0,
                      label_text: str = "",
@@ -1019,54 +1124,26 @@ def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
     if rgb is None or (not bar_px and not label_text):
         return rgb
     a = _np.array(rgb, dtype=_np.uint8, copy=True)
-    if a.ndim != 3 or a.shape[2] < 3:
+    if not chrome_fits(a):
         return rgb
     H, W = a.shape[:2]
-    if H < 4 or W < 4:
-        return rgb
 
     # Scale bar — a filled rectangle with a contrasting halo for legibility.
     # A bar too long for the image is REFUSED, never shortened to fit: see
-    # :func:`bar_fits`.
-    if bar_fits(W, H, bar_px):
-        blen = int(bar_px)
-        if blen >= 1:
-            # Thickness scales with the cell (like the label font) so it's stable
-            # across live/export; user value is px-at-240, ≤0 falls back to auto.
-            if bar_thickness_px and bar_thickness_px > 0:
-                thick = max(1, int(round(float(bar_thickness_px) * H / 240.0)))
-            else:
-                thick = max(2, H // 100)
-            margin = bar_margin(H)
-            corner = str(bar_corner or "br").strip().lower()
-            if corner in ("tl", "bl"):
-                x0 = margin
-                x1 = min(W, x0 + blen)
-            else:
-                x1 = W - margin
-                x0 = max(0, x1 - blen)
-            if corner in ("tl", "tr"):
-                y0 = margin
-                y1 = min(H, y0 + thick)
-            else:
-                y1 = H - margin
-                y0 = max(0, y1 - thick)
-            # Colour: "auto" (default) picks black or white for maximum contrast
-            # against the pixels the bar covers — essential because the default
-            # "Greys" colormap renders dim fluorescence as a near-white background,
-            # where a fixed white bar is invisible. A named colour is honoured as-is.
-            if str(bar_color or "").strip().lower() in ("", "auto"):
-                region = a[y0:min(H, y1 + 1), max(0, x0 - 1):min(W, x1 + 1), :3]
-                bright = float(region.mean()) > 140.0 if region.size else False
-                col = (0, 0, 0) if bright else (255, 255, 255)
-            else:
-                col = _chrome_rgb(bar_color)
-            # A contrasting halo (≥2 px) frames the bar so it reads even against a
-            # same-toned background.
-            halo = (0, 0, 0) if col != (0, 0, 0) else (255, 255, 255)
-            pad = max(1, thick // 3)
-            a[max(0, y0 - pad):min(H, y1 + pad), max(0, x0 - pad):min(W, x1 + pad)] = halo
-            a[y0:y1, x0:x1] = col
+    # :func:`bar_fits`. The box and the ink come from :func:`bar_rect_px` /
+    # :func:`bar_ink_rgb` rather than being computed here, so the PowerPoint
+    # export's editable rectangle is the same bar in the same place.
+    rect = bar_rect_px(W, H, bar_px=bar_px, bar_corner=bar_corner,
+                       bar_thickness_px=bar_thickness_px)
+    if rect is not None:
+        x0, y0, x1, y1 = rect
+        col = bar_ink_rgb(a, rect, bar_color)
+        # A contrasting halo (≥2 px) frames the bar so it reads even against a
+        # same-toned background.
+        halo = (0, 0, 0) if col != (0, 0, 0) else (255, 255, 255)
+        pad = max(1, bar_thickness_for(H, bar_thickness_px) // 3)
+        a[max(0, y0 - pad):min(H, y1 + pad), max(0, x0 - pad):min(W, x1 + pad)] = halo
+        a[y0:y1, x0:x1] = col
 
     # Identity label — PIL text with an optional translucent dark box behind it.
     if label_text:
@@ -1074,7 +1151,7 @@ def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
             from PIL import Image, ImageDraw
         except Exception:
             return a
-        font_px = max(6, int(round(float(label_font_px) * H / 240.0)))
+        font_px = label_font_px_for(H, label_font_px)
         font = _load_chrome_font(font_px)
         img = Image.fromarray(a)
         draw = ImageDraw.Draw(img, "RGBA")
@@ -1084,7 +1161,7 @@ def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
         except Exception:
             tw, th, tox, toy = (len(label_text) * font_px // 2, font_px, 0, 0)
         pad = max(2, font_px // 4)
-        margin = max(2, H // 40)
+        margin = label_margin_px(H)
         corner = str(label_corner or "tl").strip().lower()
         if corner in ("tr", "br"):
             bx1 = W - margin
@@ -1271,11 +1348,24 @@ def mark_uncorrected(ctx, cell, rgb, overlay_chans=None):
     identity label use, so the live thumbnail and the exported figure carry it
     identically. Returns *rgb* untouched for a cell that got what it asked for.
     """
-    if rgb is None or not is_raw_fallback(ctx, cell, overlay_chans):
+    kwargs = uncorrected_mark_kwargs(ctx, cell, overlay_chans)
+    if rgb is None or kwargs is None:
         return rgb
+    return draw_cell_chrome(rgb, **kwargs)
+
+
+def uncorrected_mark_kwargs(ctx, cell, overlay_chans=None) -> dict | None:
+    """:func:`draw_cell_chrome` kwargs for *cell*'s "raw" mark, or ``None``.
+
+    Split out of :func:`mark_uncorrected` so the PowerPoint export can place the
+    same mark as an editable text box without burning it in. A cell that got the
+    corrected image it asked for carries no mark and answers ``None`` on both
+    surfaces, from this one decision.
+    """
+    if not is_raw_fallback(ctx, cell, overlay_chans):
+        return None
     st = ctx.state.image_table
-    return draw_cell_chrome(
-        rgb,
+    return dict(
         label_text=UNCORRECTED_MARK,
         label_corner=_mark_corner(st),
         label_font_px=int(getattr(st, "label_font_px", 12)),

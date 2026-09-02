@@ -4,8 +4,9 @@ A saved plot is a captured panel image plus the exact parameters/thresholds
 that produced it. Metadata (everything but the image bytes) lives in the
 consolidated ``persistence.json`` under the ``"saved_plots"`` section (via
 ``persistence._doc``); the bytes live alongside it in
-``<data_dir>/saved_plots/`` — the raster snapshot as ``<id>.png``, and the same
-render in vector as ``<id>.svg``. Both are keyed to the current dataset, so the
+``<data_dir>/saved_plots/`` — the raster snapshot as ``<id>.png``, the same
+render in vector as ``<id>.svg``, and, for an Image Table grid, a per-field
+frame plan as ``<id>.frames.zip``. All are keyed to the current dataset, so the
 gallery travels with the data and survives restarts.
 
 The vector twin is what the PowerPoint export draws from, and it is optional by
@@ -15,6 +16,14 @@ a broken record — both are a plot that exports as a picture instead of as
 editable shapes, which the deck builder states on the slide. ``svg_filename`` is
 empty in exactly those cases, so "has a vector capture" is one field to read
 rather than a guess from a filename.
+
+The frame plan is the Image Table's equivalent and is optional the same way. A
+grid has no chart to redraw as shapes — its cells are photographs — so what it
+stores instead is where every field sits, that field's pixels, and its overlays
+as text and geometry rather than burned into the picture. The deck builder turns
+that into one PowerPoint group per field. ``frames_filename`` is empty for every
+other tab and for a grid saved before the plan existed, and those export as a
+picture exactly as before.
 """
 
 from __future__ import annotations
@@ -53,6 +62,9 @@ class SavedPlot:
     png_filename: str          # basename under the images dir
     params: dict               # view_state.snapshot(app) — drives Restore
     svg_filename: str = ""     # vector twin of the PNG; "" when none was captured
+    #: Per-field frame plan for an Image Table grid (``<id>.frames.zip``); ""
+    #: for every other tab and for a grid saved before plans were written.
+    frames_filename: str = ""
     #: Whether the record is **one panel** of a multi-panel figure (the hover
     #: save) or the whole figure. A redraw renders the whole card, so a panel
     #: record redrawn comes back as every panel, shown under the panel's title
@@ -80,6 +92,7 @@ class SavedPlot:
             title=str(d.get("title", "")),
             png_filename=str(d.get("png_filename", "")),
             svg_filename=str(d.get("svg_filename", "") or ""),
+            frames_filename=str(d.get("frames_filename", "") or ""),
             panel_only=_optional_bool(d.get("panel_only")),
             params=dict(d.get("params", {}) or {}),
             thresholds=dict(d.get("thresholds", {}) or {}),
@@ -125,6 +138,19 @@ class SavedPlotsStore:
             return None
         return idir / rec.svg_filename
 
+    def frames_path(self, ctx, rec: SavedPlot) -> Path | None:
+        """Where this record's per-field frame plan lives, or ``None``.
+
+        ``None`` for a record with no ``frames_filename`` — which is every
+        record from every tab but the Image Table, and an Image Table grid saved
+        before the plan existed. Same distinction ``vector_path`` draws: a plot
+        that never had one is not a plot whose file went missing.
+        """
+        idir = self.images_dir(ctx)
+        if idir is None or not rec.frames_filename:
+            return None
+        return idir / rec.frames_filename
+
     # ── load / persist ────────────────────────────────────────────────────
     def load(self, ctx) -> None:
         """(Re)load records for the current dataset from persistence.json."""
@@ -148,7 +174,7 @@ class SavedPlotsStore:
 
     # ── mutations ─────────────────────────────────────────────────────────
     def add(self, ctx, rec: SavedPlot, png_bytes: bytes,
-            svg_bytes: bytes = b"") -> bool:
+            svg_bytes: bytes = b"", frames_bytes: bytes = b"") -> bool:
         """Write the captured bytes and append *rec*.
 
         The PNG is the record: failing to write it fails the save. The vector
@@ -158,6 +184,12 @@ class SavedPlotsStore:
         the field rather than leaving it set is the point: a name pointing at a
         file that was never written would make the deck builder report "no
         vector capture" for a record that claims to have one.
+
+        *frames_bytes* is the Image Table's per-field frame plan and is handled
+        identically, for the identical reason: a name left pointing at a file
+        that was never written would send the deck builder looking for frames
+        that do not exist, and it would place nothing rather than fall back to
+        the picture.
 
         Returns False when there's no dataset directory to persist into.
         """
@@ -179,6 +211,15 @@ class SavedPlotsStore:
                 rec.svg_filename = ""
         else:
             rec.svg_filename = ""
+        if frames_bytes and rec.frames_filename:
+            try:
+                (idir / rec.frames_filename).write_bytes(frames_bytes)
+            except OSError as exc:
+                _logger.warning(
+                    "saved_plots: failed to write frame plan: %s", exc)
+                rec.frames_filename = ""
+        else:
+            rec.frames_filename = ""
         self.records.append(rec)
         self._persist(ctx)
         return True
@@ -239,13 +280,15 @@ class SavedPlotsStore:
         return self._held.get(rec.id, b"")
 
     def _discard_files(self, ctx, rec: SavedPlot) -> None:
-        """Remove every file a record owns — the snapshot and its vector twin.
+        """Remove every file a record owns — snapshot, vector twin, frame plan.
 
-        Both, not just the PNG: a delete that took the raster and left the SVG
-        behind would leave the dataset folder accumulating vector captures for
-        plots the gallery no longer lists, with nothing left to name them.
+        Every file, not just the PNG: a delete that took the raster and left the
+        vector capture or the frame plan behind would leave the dataset folder
+        accumulating files for plots the gallery no longer lists, with nothing
+        left to name them.
         """
-        for path in (self.image_path(ctx, rec), self.vector_path(ctx, rec)):
+        for path in (self.image_path(ctx, rec), self.vector_path(ctx, rec),
+                     self.frames_path(ctx, rec)):
             if path is not None and path.exists():
                 try:
                     path.unlink()

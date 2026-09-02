@@ -19,6 +19,9 @@ hierarchy — muted per-value labels, emphasised group bands — in dark-on-ligh
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
+
 import theme
 
 #: ``gid`` stamped on every label axes, so callers that count image cells can tell
@@ -186,40 +189,80 @@ def _label_axes(fig, gs, gr: int, gc: int, rs: int, cs: int, text: str, *,
     return ax
 
 
-def draw_facet_labels(fig, gs, plan) -> None:
-    """Add the plan's top / left / corner labels to *fig* as their own axes.
+@dataclass(frozen=True)
+class FacetLabel:
+    """One axis label of the plan, with everything needed to draw it.
 
-    Each label gets a slot of the same gridspec the cells sit in, so the text stays
-    aligned with the row or column it names however the grid is sized.
+    The descriptor exists because two surfaces draw these labels: the exported
+    matplotlib figure (:func:`draw_facet_labels`) and the PowerPoint export,
+    which re-emits them as editable text boxes. Deriving both from one list is
+    what keeps a change to the label hierarchy — a colour, a weight, an
+    alignment — from reaching one surface and not the other.
     """
+
+    text: str
+    #: ``(grid_row, grid_col, rowspan, colspan)`` in the plan's own gridspec.
+    slot: tuple[int, int, int, int]
+    pt: float
+    color: str
+    weight: str = "normal"
+    rotation: int = 0
+    #: Vertical position and alignment of the text inside its slot.
+    y: float = 0.5
+    va: str = "center"
+    #: Drawn on a filled band (a group strip) rather than bare.
+    band: bool = False
+
+
+def facet_label_specs(plan) -> list[FacetLabel]:
+    """Every label the plan carries, as :class:`FacetLabel` descriptors."""
     label_pt, group_pt = px_to_pt(plan.label_pt), px_to_pt(plan.group_pt)
+    specs: list[FacetLabel] = []
 
     for text, gr, gc, rs, cs, is_group in plan.top:
         if not text:
             continue
         # The live grid bottom-aligns the innermost column labels so they sit
         # against the cells they title; the group bands centre in their strip.
-        _label_axes(fig, gs, gr, gc, rs, cs, text,
-                    pt=group_pt if is_group else label_pt,
-                    color=_GROUP_COLOR if is_group else _INNER_COLOR,
-                    weight="semibold" if is_group else "normal",
-                    y=0.5 if is_group else 0.12,
-                    va="center" if is_group else "bottom",
-                    band=is_group)
+        specs.append(FacetLabel(
+            text=str(text), slot=(gr, gc, rs, cs),
+            pt=group_pt if is_group else label_pt,
+            color=_GROUP_COLOR if is_group else _INNER_COLOR,
+            weight="semibold" if is_group else "normal",
+            y=0.5 if is_group else 0.12,
+            va="center" if is_group else "bottom",
+            band=is_group))
 
     for text, gr, gc, rs, cs, is_group in plan.left:
         if not text:
             continue
         # ``rotation=90`` reproduces ``facet_view._VLabel``'s -90° painter rotation:
         # both read bottom-to-top, the conventional vertical facet-axis orientation.
-        _label_axes(fig, gs, gr, gc, rs, cs, text,
-                    pt=group_pt if is_group else label_pt,
-                    color=_GROUP_COLOR if is_group else _INNER_COLOR,
-                    weight="semibold" if is_group else "normal",
-                    rotation=90 if is_group else 0,
-                    band=is_group)
+        specs.append(FacetLabel(
+            text=str(text), slot=(gr, gc, rs, cs),
+            pt=group_pt if is_group else label_pt,
+            color=_GROUP_COLOR if is_group else _INNER_COLOR,
+            weight="semibold" if is_group else "normal",
+            rotation=90 if is_group else 0,
+            band=is_group))
 
     if plan.corner and plan.first_row and plan.first_col:
-        _label_axes(fig, gs, 0, 0, int(plan.first_row), int(plan.first_col),
-                    plan.corner, pt=max(_MIN_PT, label_pt - 0.75),
-                    color=_CORNER_COLOR)
+        specs.append(FacetLabel(
+            text=str(plan.corner),
+            slot=(0, 0, int(plan.first_row), int(plan.first_col)),
+            pt=max(_MIN_PT, label_pt - 0.75), color=_CORNER_COLOR))
+    return specs
+
+
+def draw_facet_labels(fig, gs, plan) -> None:
+    """Add the plan's top / left / corner labels to *fig* as their own axes.
+
+    Each label gets a slot of the same gridspec the cells sit in, so the text stays
+    aligned with the row or column it names however the grid is sized.
+    """
+    for spec in facet_label_specs(plan):
+        gr, gc, rs, cs = spec.slot
+        _label_axes(fig, gs, gr, gc, rs, cs, spec.text,
+                    pt=spec.pt, color=spec.color, weight=spec.weight,
+                    rotation=spec.rotation, y=spec.y, va=spec.va,
+                    band=spec.band)

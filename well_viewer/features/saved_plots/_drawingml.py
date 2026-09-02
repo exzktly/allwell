@@ -437,28 +437,30 @@ def drawing_group_xml(drawing: Drawing, placement: Placement, ids: ShapeIds,
             rel_id = add_image(shape.png)
             if rel_id:
                 body.append(_image_shape_xml(shape, placement, ids, rel_id))
-    x = placement.origin_x
-    y = placement.origin_y
-    cx = max(_MIN_EXTENT_EMU, placement.emu_len(drawing.width_pt))
-    cy = max(_MIN_EXTENT_EMU, placement.emu_len(drawing.height_pt))
-    return (
-        "<p:grpSp><p:nvGrpSpPr>"
-        f'<p:cNvPr id="{ids.take()}" name={xml_attr(name)}/>'
-        "<p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr>"
-        f'<a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/>'
-        f'<a:chOff x="{x}" y="{y}"/><a:chExt cx="{cx}" cy="{cy}"/></a:xfrm>'
-        "</p:grpSpPr>" + "".join(body) + "</p:grpSp>"
-    )
+    return group_xml(
+        "".join(body), ids,
+        x=placement.origin_x, y=placement.origin_y,
+        cx=placement.emu_len(drawing.width_pt),
+        cy=placement.emu_len(drawing.height_pt), name=name)
 
 
 def text_box_xml(text: str, ids: ShapeIds, *, x: int, y: int, cx: int, cy: int,
                  color: str, size_pt: float = 18.0, bold: bool = False,
                  align: str = "l", family: str = "Arial", name: str = "Text",
-                 monospace: bool = False) -> str:
+                 monospace: bool = False, anchor: str = "t",
+                 plate: str = "", plate_alpha: int = 55_000,
+                 vertical: bool = False) -> str:
     """A plain editable text box — slide titles, captions, the cover block.
 
     Every line of *text* becomes its own paragraph, so a multi-line caption stays
     multi-line and stays editable line by line.
+
+    *anchor* is where the text sits vertically in its box (``t``/``ctr``/``b``),
+    *plate* an optional solid fill behind it at *plate_alpha* (the translucent
+    backing an overlay label needs to stay readable over a bright field), and
+    *vertical* makes the run read bottom-to-top for a rotated facet strip. The
+    three exist for the Image Table's per-field frames, where a label is placed
+    over a picture rather than on the slide background.
     """
     face = "Consolas" if monospace else family
     size = max(100, int(round(size_pt * 100)))
@@ -475,13 +477,84 @@ def text_box_xml(text: str, ids: ShapeIds, *, x: int, y: int, cx: int, cy: int,
         else:
             runs.append(f'<a:p><a:pPr algn="{align}"/><a:endParaRPr '
                         f'lang="en-US" sz="{size}"/></a:p>')
+    if plate:
+        alpha = max(0, min(100_000, int(plate_alpha)))
+        fill = (f'<a:solidFill><a:srgbClr val="{plate}">'
+                f'<a:alpha val="{alpha}"/></a:srgbClr></a:solidFill>')
+    else:
+        fill = "<a:noFill/>"
+    vert = ' vert="vert270"' if vertical else ""
     return (
         "<p:sp><p:nvSpPr>"
         f'<p:cNvPr id="{ids.take()}" name={xml_attr(name)}/>'
         '<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>'
         f'<a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
-        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>'
+        f'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>{fill}</p:spPr>'
         '<p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0"'
-        ' anchor="t"><a:normAutofit/></a:bodyPr><a:lstStyle/>'
+        f'{vert} anchor="{anchor}"><a:normAutofit/></a:bodyPr><a:lstStyle/>'
         + "".join(runs) + "</p:txBody></p:sp>"
+    )
+
+
+def filled_rect_xml(ids: ShapeIds, *, x: int, y: int, cx: int, cy: int,
+                    color: str, outline: str = "", outline_w: int = 0,
+                    name: str = "Rectangle") -> str:
+    """A plain filled rectangle — the scale bar, and its contrasting outline.
+
+    A shape rather than part of the picture, so the bar keeps its length when the
+    frame is resized and can be recoloured in PowerPoint like anything else on
+    the slide.
+    """
+    line = ""
+    if outline:
+        line = (f'<a:ln w="{max(_MIN_EXTENT_EMU, int(outline_w))}">'
+                f'<a:solidFill><a:srgbClr val="{outline}"/></a:solidFill>'
+                "</a:ln>")
+    return (
+        "<p:sp><p:nvSpPr>"
+        f'<p:cNvPr id="{ids.take()}" name={xml_attr(name)}/>'
+        "<p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>"
+        f'<a:xfrm><a:off x="{x}" y="{y}"/>'
+        f'<a:ext cx="{max(_MIN_EXTENT_EMU, int(cx))}" '
+        f'cy="{max(_MIN_EXTENT_EMU, int(cy))}"/></a:xfrm>'
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
+        f'<a:solidFill><a:srgbClr val="{color}"/></a:solidFill>{line}'
+        "</p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>"
+    )
+
+
+def picture_xml(ids: ShapeIds, rel_id: str, *, x: int, y: int, cx: int, cy: int,
+                name: str = "Picture") -> str:
+    """An embedded PNG placed at an explicit box."""
+    return (
+        "<p:pic><p:nvPicPr>"
+        f'<p:cNvPr id="{ids.take()}" name={xml_attr(name)}/>'
+        "<p:cNvPicPr/><p:nvPr/></p:nvPicPr>"
+        f'<p:blipFill><a:blip r:embed="{rel_id}"/>'
+        "<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>"
+        f'<a:xfrm><a:off x="{x}" y="{y}"/>'
+        f'<a:ext cx="{max(_MIN_EXTENT_EMU, int(cx))}" '
+        f'cy="{max(_MIN_EXTENT_EMU, int(cy))}"/></a:xfrm>'
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>'
+    )
+
+
+def group_xml(body: str, ids: ShapeIds, *, x: int, y: int, cx: int, cy: int,
+              name: str = "Group") -> str:
+    """Wrap already-placed shapes in one group.
+
+    The child coordinate space is set equal to the group's own, so *body* is
+    written in slide coordinates and a reader comparing the two sees the same
+    numbers rather than a second frame of reference to unpick — the same choice
+    :func:`drawing_group_xml` makes.
+    """
+    cx = max(_MIN_EXTENT_EMU, int(cx))
+    cy = max(_MIN_EXTENT_EMU, int(cy))
+    return (
+        "<p:grpSp><p:nvGrpSpPr>"
+        f'<p:cNvPr id="{ids.take()}" name={xml_attr(name)}/>'
+        "<p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr>"
+        f'<a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/>'
+        f'<a:chOff x="{x}" y="{y}"/><a:chExt cx="{cx}" cy="{cy}"/></a:xfrm>'
+        "</p:grpSpPr>" + (body or "") + "</p:grpSp>"
     )

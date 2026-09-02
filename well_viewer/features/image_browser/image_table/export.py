@@ -34,9 +34,11 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     _row_display_opts,
     cell_chrome_kwargs,
     cell_display_rgb,
+    cell_identity_label,
     apply_cell_chrome,
     mark_uncorrected,
     overlay_cell_rgb,
+    uncorrected_mark_kwargs,
     partial_scan_clause,
     scale_bar_refusal_clause,
     reset_scan_misses,
@@ -285,7 +287,54 @@ def _export_grid(fig_factory, plan, n_rows: int, n_cols: int, *,
     return fig, gs, (lambda r, c: (plan.grid_row_of[r], plan.grid_col_of[c]))
 
 
-def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
+#: Inches of each cell reserved for its per-axes title when titles are on. One
+#: number, read by the figure (which grows the cell by it) and by the frame plan
+#: (which puts the title text box in it), so the picture and the deck split a
+#: cell the same way.
+TITLE_STRIP_IN = 0.2
+
+#: Longest side, in pixels, of a field's picture inside a frame plan when the
+#: caller sets no per-cell cap. A field is about 2.6 in wide on a slide, so this
+#: is roughly 350 dpi — past what a projector or a printed page resolves, and far
+#: short of the tens of megabytes a full-resolution plate would put in the deck.
+FRAME_MAX_PX = 900
+
+
+def _cell_title(ctx, cell, overlay_chans) -> str:
+    """The per-axes title for one cell.
+
+    The identity string ``image_compose`` already builds for the burned-in label
+    and the tooltip, so a cell's title, its overlay label and its frame name are
+    one wording rather than three that drift. ``"(unset)"`` for a cell with no
+    well or timepoint, which is what the title row shows for a blank slot.
+    """
+    return cell_identity_label(ctx, cell, overlay_chans) or "(unset)"
+
+
+def _record_frame(frames, ctx, *, cell, slot, clean, chrome, overlay_chans,
+                  cell_max_px: int | None, title: str) -> None:
+    """Note one cell in the frame plan the PowerPoint export draws from.
+
+    *clean* is the cell's RGB **before** ``apply_cell_chrome`` burned the scale
+    bar and the identity label into it: the frame carries those as marks instead,
+    which is what makes them editable on the slide. The picture is pooled to
+    :data:`FRAME_MAX_PX` (or the caller's own per-cell cap, which is already
+    smaller) so a plate's worth of fields does not put its full source resolution
+    into the deck.
+    """
+    png_rgb = clean
+    if clean is not None:
+        png_rgb = _area_pool_rgb(clean, min(cell_max_px or FRAME_MAX_PX,
+                                            FRAME_MAX_PX))
+    frames.record(
+        slot, name=cell_identity_label(ctx, cell, overlay_chans) or "Field",
+        rgb=clean, png_rgb=png_rgb, chrome=chrome,
+        mark=uncorrected_mark_kwargs(ctx, cell, overlay_chans),
+        title=title, title_h_in=TITLE_STRIP_IN if title else 0.0)
+
+
+def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None,
+                         frames=None):
     """Render the current image-table contents to a matplotlib Figure.
 
     Returns ``(fig, save_kwargs)`` where *save_kwargs* are the format-agnostic
@@ -297,6 +346,13 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
     longest-side pixel budget (see :func:`_area_pool_rgb`), bounding the memory a
     96-cell plate of full-resolution RGB would otherwise take. ``None`` (file export
     / clipboard) renders full-res.
+
+    ``frames``, if given, is a ``_frames.FrameCollector`` that records each cell
+    as it is drawn — its pixels before the chrome is burned in, and its overlays
+    as marks — so the caller can build the per-field plan the PowerPoint export
+    places. Collected in this pass rather than a second one because the per-cell
+    disk reads and LUT application are the expensive half and are already
+    happening here.
 
     ``progress``, if given, is called as ``progress(done, total)`` after each
     cell is loaded/rendered/drawn — the per-cell loop below is the actual cost
@@ -409,7 +465,7 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
         cell_h = cell_w
     # Reserve extra inches per row for the per-axes title when enabled.
     if show_titles:
-        cell_h += 0.2
+        cell_h += TITLE_STRIP_IN
 
     def _make_figure(size):
         f = Figure(figsize=size, dpi=dpi, facecolor=bg_face)
@@ -456,11 +512,18 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
                 rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr) \
                     if arr is not None else None
 
+            # The frame plan keeps this cell's pixels as they are here — before
+            # the chrome below is burned into them — because the PowerPoint
+            # export re-places those overlays as text and a rectangle.
+            clean = rgb
+            chrome = None
+
             # Burn the scale bar / label into the source-res RGB, before any
             # gallery downscale, so the bar and text scale with the pixels.
             if rgb is not None:
-                ck = cell_chrome_kwargs(ctx, r, c, cell, chrome_plan, overlay_chans)
-                rgb = apply_cell_chrome(ctx, rgb, ck, cell)
+                chrome = cell_chrome_kwargs(ctx, r, c, cell, chrome_plan,
+                                            overlay_chans)
+                rgb = apply_cell_chrome(ctx, rgb, chrome, cell)
                 # A figure that dropped the uncorrected mark would leave the app
                 # carrying exactly the ambiguity the live grid no longer has.
                 # ``overlay_chans`` because an overlay cell's own token names no
@@ -478,21 +541,14 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
                     ha="center", va="center", transform=ax.transAxes, fontsize=7,
                 )
 
+            title = _cell_title(ctx, cell, overlay_chans) if show_titles else ""
             if show_titles:
-                if is_overlay and well and tp:
-                    from well_viewer.domain.selections_model import well_display_label
-                    chan_lbl = "+".join(c2.upper() for c2 in overlay_chans) or "overlay"
-                    title = f"{well_display_label(ctx, well)}  {chan_lbl}  T:{tp}"
-                    if fov:
-                        title += f"  FOV:{fov}"
-                elif well and chan and tp:
-                    from well_viewer.domain.selections_model import well_display_label
-                    title = f"{well_display_label(ctx, well)}  {chan.upper()}  T:{tp}"
-                    if fov:
-                        title += f"  FOV:{fov}"
-                else:
-                    title = "(unset)"
                 ax.set_title(title, fontsize=title_fontsize)
+            if frames is not None:
+                _record_frame(frames, ctx, cell=cell, slot=slot_of(r, c),
+                              clean=clean, chrome=chrome,
+                              overlay_chans=overlay_chans,
+                              cell_max_px=cell_max_px, title=title)
             ax.set_xticks([])
             ax.set_yticks([])
             for spine in ax.spines.values():
@@ -504,6 +560,11 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
 
     if plan is not None:
         _renderer.draw_facet_labels(fig, gs, plan)
+    if frames is not None:
+        # Closed here because this is the only place holding both the gridspec
+        # the cells were placed in and the facet plan that labelled them, and
+        # every frame's rectangle is read back off that gridspec.
+        frames.finish(fig, gs, plan)
 
     save_kwargs: dict[str, Any] = dict(
         bbox_inches="tight", pad_inches=pad_inches,
@@ -545,6 +606,74 @@ def image_table_export(ctx) -> None:
             f"{partial_scan_clause(ctx)}{scale_bar_refusal_clause(ctx)}")
     except Exception as exc:
         QMessageBox.critical(ctx.window, "Export failed", str(exc))
+
+
+def image_table_export_pptx(ctx) -> None:
+    """Export the grid to a one-slide ``.pptx``, one editable group per field.
+
+    The other file formats write a picture of the grid — a PNG is pixels, and
+    even the SVG carries each field as an embedded raster with its identity
+    label and scale bar burned into it. This writes the grid as PowerPoint
+    shapes instead: each field of view is a group holding its own picture, its
+    label as a text box the user can retype, and its scale bar as a rectangle
+    they can recolour. Fields can be dragged apart, dropped, or regrouped on the
+    slide without going back to All-Well.
+
+    The same plan the gallery stores, written straight to a deck rather than
+    into the dataset folder, so the two routes cannot produce different slides.
+    """
+    from well_viewer.domain.image_frames import FramedGrid
+    from well_viewer.features.image_browser.image_table._frames import (
+        FrameCollector,
+    )
+    from well_viewer.features.saved_plots._deck import build_image_grid_deck
+
+    collector = FrameCollector()
+    fig, _save_kwargs = _build_export_figure(ctx, cell_max_px=FRAME_MAX_PX,
+                                             frames=collector)
+    if fig is None:
+        return
+    _close_figure(fig)
+    grid = collector.grid or FramedGrid()
+    # Not merely "has frames": a grid every one of whose fields failed to decode
+    # would write a deck of empty boxes and report it as a success. Nothing to
+    # place is nothing to export, and it is said before the file dialog rather
+    # than after a file has been written.
+    if grid.is_empty or not any(f.png for f in grid.frames):
+        ctx.notify.set_status("Image Table: nothing to export to PowerPoint.")
+        return
+
+    initial_dir = str(ctx.state.dataset.data_dir) if ctx.state.dataset.data_dir else ""
+    initial = (str(Path(initial_dir) / "image_table.pptx") if initial_dir
+               else "image_table.pptx")
+    out, _ = QFileDialog.getSaveFileName(
+        ctx.window, "Export image table to PowerPoint", initial,
+        "PowerPoint presentation (*.pptx)")
+    if not out:
+        return
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
+    rows = len(cells)
+    cols = len(cells[0]) if rows and cells[0] else 0
+    title = f"Image grid ({rows}×{cols})" if rows and cols else "Image grid"
+    try:
+        fields = build_image_grid_deck(grid, out, title=title)
+    except Exception as exc:
+        QMessageBox.critical(ctx.window, "Export failed", str(exc))
+        return
+    ctx.notify.set_status(
+        f"Image table → {Path(out).name} ({fields} field"
+        f"{'' if fields == 1 else 's'}, each an editable group)"
+        f"{partial_scan_clause(ctx)}{scale_bar_refusal_clause(ctx)}")
+
+
+def _close_figure(fig) -> None:
+    """Release a figure the caller is done with. Best-effort by design."""
+    try:
+        import matplotlib.pyplot as _plt
+
+        _plt.close(fig)
+    except Exception:
+        swallowed("image_table: figure cleanup after an export")
 
 
 def image_table_copy_png(ctx) -> None:
@@ -604,6 +733,26 @@ def _downsample_dpi(orig_dpi: int, w_in: float, h_in: float,
     never above *orig_dpi* and never below *floor*."""
     longest = max(float(w_in), float(h_in), 0.1)
     return max(floor, min(int(orig_dpi), int(max_px / longest)))
+
+
+def _frame_plan_bytes(collector) -> bytes:
+    """The collected frame plan as the bytes stored beside the snapshot.
+
+    ``b""`` when there is no plan or it cannot be serialised, which makes the
+    record one that exports as a picture — the outcome every Image Table record
+    used to have. Losing the enhancement must not lose the save, so this never
+    raises into the save path.
+    """
+    from well_viewer.domain.image_frames import to_bytes
+
+    grid = getattr(collector, "grid", None)
+    if grid is None or grid.is_empty:
+        return b""
+    try:
+        return to_bytes(grid)
+    except (OSError, TypeError, ValueError):
+        swallowed("image_table: could not serialise the frame plan")
+        return b""
 
 
 def image_table_save_to_gallery(ctx) -> None:
@@ -669,7 +818,12 @@ def image_table_save_to_gallery(ctx) -> None:
         # the same user-tunable quality preset (Export ▾ → Save quality, or
         # Export settings…) so raising/lowering it actually moves the speed/
         # detail trade-off instead of just one half of it.
-        fig, save_kwargs = _build_export_figure(ctx, cell_max_px=cell_max_px, progress=_report)
+        from well_viewer.features.image_browser.image_table._frames import (
+            FrameCollector,
+        )
+        collector = FrameCollector()
+        fig, save_kwargs = _build_export_figure(
+            ctx, cell_max_px=cell_max_px, progress=_report, frames=collector)
         if fig is None:
             ctx.notify.set_status("Image table is empty — nothing to save.")
             return
@@ -706,7 +860,8 @@ def image_table_save_to_gallery(ctx) -> None:
         label = f"Image grid ({rows}×{cols})" if rows and cols else "Image grid"
 
         from well_viewer.features.saved_plots.controller import save_plot_from_card
-        status = save_plot_from_card(ctx, "Image Table", buf.getvalue(), label)
+        status = save_plot_from_card(ctx, "Image Table", buf.getvalue(), label,
+                                     frames_bytes=_frame_plan_bytes(collector))
         ctx.notify.set_status(status + partial_scan_clause(ctx)
                               + scale_bar_refusal_clause(ctx))
     finally:

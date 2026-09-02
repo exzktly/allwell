@@ -1211,6 +1211,7 @@ from well_viewer.features.image_browser.image_table.export import (  # noqa: F40
     image_table_open_export_settings,
     _build_export_figure,
     image_table_export,
+    image_table_export_pptx,
     image_table_copy_png,
     image_table_copy_svg,
     image_table_save_to_gallery,

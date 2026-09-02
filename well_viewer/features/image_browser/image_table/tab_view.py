@@ -36,6 +36,7 @@ from well_viewer.features.image_browser.image_table.controller import (
     image_table_copy_png,
     image_table_copy_svg,
     image_table_export,
+    image_table_export_pptx,
     image_table_generate,
     image_table_open_export_settings,
     image_table_refresh_empty_state,
@@ -460,6 +461,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     emenu = export_btn.menu()
     emenu.addAction("Export to File…").triggered.connect(
         lambda _=False: image_table_export(ctx))
+    emenu.addAction("Export to PowerPoint…").triggered.connect(
+        lambda _=False: image_table_export_pptx(ctx))
     emenu.addSeparator()
     emenu.addAction("Copy PNG").triggered.connect(
         lambda _=False: image_table_copy_png(ctx))

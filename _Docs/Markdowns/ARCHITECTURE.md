@@ -433,8 +433,9 @@ well_viewer/
 │   ├── qc/           controller.py, params.py, tab_view.py   ← support lib
 │   ├── export/       service.py, style.py, sidebar_view.py
 │   ├── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
-│   │                 scatter_panel.py, service.py, _common.py,
-│   │                 _line_series_runner.py
+│   │                 scatter_panel.py, response_panel.py, service.py,
+│   │                 _common.py, _line_series_runner.py,
+│   │                 _destinations.py (gallery + PowerPoint)
 │   └── registry.py   ← the FEATURES list: the sole importer of features/* (§5.3)
 └── persistence/                   ← JSON read/write, debounced save registry
 ```
@@ -741,7 +742,7 @@ and registers every centre page. The current page-list:
 | Images | **smFISH** | — |
 | Data | **Review CSV** | — |
 | Data | **Saved Plots** | — (the plot gallery; decorates every plot card with a "save to gallery" button, and exports the gallery as a PDF report or a PowerPoint deck — each chart as editable shapes, each Image Table grid as one editable group per field of view) |
-| Data | **Batch Export** | — |
+| Data | **Batch Export** | — (one figure + CSV per export group, in five modes — Line, Bar, Scatter cells, Scatter aggregate, Response — and optionally into the Saved Plots gallery and a PowerPoint deck as well as into files) |
 
 **Plotting** is a `NamedPageStack`; **Image Browser** (`QTabWidget`: the unified
 home for the disparate image-review surfaces — the review-image **Segmentation**
@@ -2564,6 +2565,108 @@ Home must paint from its **builder**, not from its `on_activate` hook:
 `tab_controller.on_tab_change` early-returns until `_line_ax_mean` exists, and
 that widget comes from Line Graphs, which is drained after startup. The hook is
 for repaints.
+
+#### Batch Export (`features/batch_export/`)
+
+The page takes a set of **export groups** — defined in its own left-hand plate
+editor, persisted in `persistence.json`, and deliberately not the Sample
+Definition replicate sets — and writes one figure and one CSV per group. Its
+modes are a page selector on the shell band, in the order `tab_view._MODES`
+declares them: Line, Bar, Scatter (cells), Scatter (aggregate), Response. Each
+is a `BatchExportPanel` subclass sharing that base's group editor, output
+settings and job runner, and each declares two things about itself — the
+`_SOURCE_TAB` whose figure it exports, and a `_mode_key()` that names it in a
+file name. Both are read by the extra destinations below, so a subclass that
+inherited them silently would file its figures under the line tab's name.
+
+A mode whose figure comes from a **removable** feature names that feature in
+`_MODES`, and `_offered_modes` derives the bar from the registry: Response mode
+reuses Response Curves' own collector and renderer, so a profile that drops that
+leaf gets four tabs rather than a fifth that builds and then raises on Run. The
+list is derived rather than written twice, and `_show_batch_mode` falls back to
+the default mode for a key this build does not offer — a saved view naming
+`response` in such a build lands on Line rather than on nothing.
+
+**One capture point.** Every panel writes its figure through
+`base_panel._save_figure`, which resolves the export-style prefs and hands the
+figure to the Qt-free `service.save_export_figure`. That single choke point is
+what makes the two extra destinations possible, and it is why `_save_figure`
+takes `group` and `title` as **required** keyword arguments: a call site that
+omitted the group would file a gallery record whose parameters describe whatever
+the plotting tab happened to be showing, under this group's name, so Restore
+would draw a different figure from the thumbnail beside it — a wrong answer
+rather than a missing one.
+`tests/test_batch_export_destinations.py` holds every call site to passing both.
+
+**The two extra destinations** (`_destinations.DestinationSpool`) are additive
+switches in OUTPUT SETTINGS, offered only where the Saved Plots feature is in
+the build, since both are its code:
+
+* **Saved Plots** files one gallery record per exported figure, so a batch run's
+  output can be browsed, reordered, renamed and swept into the gallery's own PDF
+  report.
+* **PowerPoint** writes one `batch_export_<mode>.pptx` beside the figures, a
+  slide per group, through the same `saved_plots._deck` writer the gallery's
+  Export menu uses — so each figure arrives as editable shapes, and one whose
+  vector capture failed is placed as a picture with the slide saying so. One
+  deck name per mode, because a user exporting bar and then line figures into
+  one folder wants two decks rather than the second overwriting the first.
+
+Neither replaces the per-group files. A run with both ticked writes its PNGs and
+CSVs exactly as before, *and* the deck, *and* the records.
+
+**Nothing reaches either destination for a run that did not commit.** The file
+writes are staged and committed atomically (`service.commit_staged_export`), so
+a run that fails at group K leaves the previous complete export untouched; a
+gallery that had filled with K−1 records by then would be the same defect in
+different clothes. So the spool stages its captures in a directory of its own
+and `_run_batch_jobs` files the gallery records only *after* the commit
+succeeds, while the deck is staged **inside** the export's staging directory —
+it is an ordinary output file and belongs under the same manifest as the figures
+it is built from. What the destinations produced, and what they could not, are
+reported separately: `DestinationSpool.summary()` and `.shortfall()`, because a
+deck two slides short of the groups it names cannot say so itself.
+
+A capture failure never costs the file the user actually asked for.
+`save_export_figure` calls its `on_saved` hook *after* the write and before the
+figure is closed — the only window in which a second render of the same styled
+figure exists — and a capture that raises is counted into the shortfall rather
+than aborting the export.
+
+**A record's parameters describe its group, not the live tab.**
+`_capture_group_params` takes the snapshot inside `_app_group_scope` +
+`_app_val_col_scope`, so the record's `selections` are the group's own members
+and its column is the one the panel exported with. The scope is entered by the
+capture rather than relied on from the caller, because the panels differ: the
+line mode already renders inside it and the bar mode never enters it at all, so
+a capture trusting an ambient scope would be right on one panel and silently
+wrong on the next. The snapshot is stamped `params["batch_export"] = {mode,
+group}`, which is what lets the gallery summary and
+`saved_plots.controller._report_batch_export_origin` say where the record came
+from — the parameters reproduce the *group*, while Batch Export's own layout
+controls (bars versus beeswarm, stacked timepoints, the scatter facet mode) live
+on the panel and not in view state, so a Restore can draw the same data in a
+different arrangement.
+
+**Response mode** (`response_panel.py`) renders through Response Curves' own
+`collect_response` and `draw_response` rather than a batch twin of them, with
+the export group swapped in through `_app_group_scope` — so each figure is the
+curve the tab would draw if that group were the only thing selected. Its panel
+carries its own Channel and Property (including *Fraction above threshold*), x
+variable, series split, x scale, fit model with pinned plateaus, and timepoint
+selection; its CSV is the tab's own column shape with `group` in front, carrying
+the drawn points, **the members that could not be placed with the reason each
+was left out**, and a row per fit including a refused one. A group with no
+placeable points writes nothing at all rather than blank axes beside an empty
+CSV.
+
+It is the one mode with **no fold-change controls**, and that is a decision
+rather than an omission: the other modes normalise through the panel's own
+fold-change state, while a response curve normalises inside its collector off
+the shared `ctx.state.plot` state every plotting page shares. A panel-local
+control there would be offered, moved, and silently ignored by the export it
+appears to configure, so `_INCLUDES_FOLD_CHANGE` is False and the panel's info
+text says where the setting lives instead.
 
 ### 5.3 Centre tab builders: `features/<feature>/tab_view.py`
 

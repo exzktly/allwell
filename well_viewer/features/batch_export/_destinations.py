@@ -118,6 +118,14 @@ class DestinationSpool:
         #: Figures that captured a raster but no vector. They still reach both
         #: destinations — as a picture — and the deck's own slide says so.
         self.raster_only: int = 0
+        #: How many figures were staged. A counter beside ``_captures`` rather
+        #: than ``len(_captures)``, because the staged captures are discarded
+        #: before the run reports — and a report derived from a list that has
+        #: just been emptied says a run produced nothing. That cost a status
+        #: line that named no deck, and it is what this counter is for.
+        self.captured: int = 0
+        #: Set once the deck is on disk, for the same reason.
+        self.deck_written: bool = False
         #: Set when the deck could not be written at all.
         self.deck_error: str = ""
         #: Set when filing the gallery records failed.
@@ -159,7 +167,12 @@ class DestinationSpool:
         (self._dir / _CAPTURE_DIRNAME).mkdir(parents=True, exist_ok=True)
 
     def discard(self) -> None:
-        """Remove everything staged. Safe to call twice, and always called."""
+        """Remove everything staged. Safe to call twice, and always called.
+
+        The staged *files* and the list that names them, not the counters: the
+        run reports after this has run, and a report that counted the list
+        would say a committed run had produced nothing.
+        """
         import shutil
 
         if self._dir is not None:
@@ -216,6 +229,7 @@ class DestinationSpool:
                 "as a picture", title)
         if svg_written is None:
             self.raster_only += 1
+        self.captured += 1
         self._captures.append(_Captured(
             id=f"{self.mode_key}-{stem}",
             title=str(title or ""),
@@ -247,6 +261,7 @@ class DestinationSpool:
                 dataset_name=self.dataset_name,
                 summary_for=self._summary_for,
             )
+            self.deck_written = True
         except Exception as exc:
             self.deck_error = str(exc)
             _logger.exception("Batch export: PowerPoint deck failed")
@@ -296,7 +311,7 @@ class DestinationSpool:
         parts: list[str] = []
         if self.to_gallery and self.filed:
             parts.append(f"{self.filed} to Saved Plots")
-        if self.to_deck and not self.deck_error and self._captures:
+        if self.deck_written:
             parts.append(self.deck_name)
         return " · ".join(parts)
 

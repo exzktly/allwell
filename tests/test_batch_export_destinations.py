@@ -531,3 +531,161 @@ def test_the_summary_says_a_record_came_from_batch_export():
          "batch_export": {"mode": "bar", "group": "Drug A"}}, {})
     assert "From: Batch Export (bar) — group “Drug A”" in batched
     assert "not Batch Export's own layout options" in batched
+
+
+# ── the run's ordering ──────────────────────────────────────────────────────
+#
+# The three tests below drive the real ``_run_batch_jobs`` — the orchestration
+# that decides *when* each destination is fed. Both defects it can have are
+# ordering defects, invisible to a unit test of either end: a gallery filled as
+# each figure renders holds the first K figures of a run whose output directory
+# was rolled back, and a deck written after the commit lands in the folder
+# without being under the manifest that describes it.
+
+
+class _RunStub:
+    """The runner and the spool factory, off the real class, with real widgets.
+
+    Real Qt widgets rather than stubs because ``_run_batch_jobs`` drives a
+    progress bar and pumps the event loop; a fake would answer a different
+    question from the one being asked.
+    """
+
+    _run_batch_jobs = BatchExportPanel._run_batch_jobs
+    _new_destination_spool = BatchExportPanel._new_destination_spool
+    _SOURCE_TAB = "Line Graphs"
+    _mode_key = BatchExportPanel._mode_key
+
+    def __init__(self, data_dir, *, to_gallery=False, to_deck=False):
+        from PySide6.QtWidgets import QCheckBox, QLabel, QProgressBar, QPushButton
+
+        self._prog_bar = QProgressBar()
+        self._prog_lbl = QLabel()
+        self._run_btn = QPushButton()
+        self._to_gallery_cb = QCheckBox()
+        self._to_gallery_cb.setChecked(to_gallery)
+        self._to_deck_cb = QCheckBox()
+        self._to_deck_cb.setChecked(to_deck)
+        self.statuses = []
+        self._ctx = SimpleNamespace(
+            state=SimpleNamespace(dataset=SimpleNamespace(data_dir=data_dir)),
+            notify=SimpleNamespace(set_status=self.statuses.append),
+        )
+
+    def _save_export_groups_now(self):
+        pass
+
+
+def _qapp():
+    from PySide6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])
+
+
+def _run(panel, out_dir, jobs, run_job_fn):
+    panel._run_batch_jobs(
+        jobs=jobs, progress_text_fn=lambda job, step, total: str(job),
+        run_job_fn=run_job_fn, success_text="done",
+        status_text="Batch export", out_dir=out_dir)
+
+
+def test_a_committed_run_leaves_the_deck_under_the_manifest(tmp_path,
+                                                            monkeypatch):
+    from well_viewer.features.batch_export.service import MANIFEST_NAME
+
+    _qapp()
+    out = tmp_path / "out"
+    panel = _RunStub(tmp_path, to_deck=True)
+
+    def _job(name, write_dir):
+        (write_dir / f"{name}.csv").write_text("x")
+        panel._spool.capture(_figure(), title=name)
+        return None
+
+    _run(panel, out, ["Drug A", "Drug B"], _job)
+
+    import json
+    manifest = json.loads((out / MANIFEST_NAME).read_text())
+    assert "batch_export_line.pptx" in manifest["files"], manifest
+    assert (out / "batch_export_line.pptx").exists()
+    # Named in the status line, because a file the user did not ask for by name
+    # is one they have to find.
+    assert any("batch_export_line.pptx" in s for s in panel.statuses), panel.statuses
+    # The spool's own staging is gone; only the run's outputs remain.
+    assert sorted(p.name for p in out.iterdir()) == sorted(
+        ["Drug A.csv", "Drug B.csv", MANIFEST_NAME, "batch_export_line.pptx"])
+
+
+def test_a_failed_run_files_nothing_in_the_gallery(tmp_path, monkeypatch):
+    """Not even the figures that succeeded before the failure.
+
+    The output directory is rolled back as a unit; a gallery holding the first
+    K figures of a run that produced no files is half a run presented as a run.
+    """
+    import well_viewer.features.saved_plots.controller as sp_controller
+    from well_viewer.features.batch_export import _destinations
+
+    store = _FakeStore(tmp_path / "saved_plots")
+    monkeypatch.setattr(_destinations, "_get_store", lambda ctx: store)
+    monkeypatch.setattr(sp_controller, "get_store", lambda ctx: store)
+    monkeypatch.setattr(_destinations, "_refresh_gallery", lambda ctx: None)
+
+    _qapp()
+    out = tmp_path / "out"
+    panel = _RunStub(tmp_path, to_gallery=True, to_deck=True)
+
+    def _job(name, write_dir):
+        (write_dir / f"{name}.csv").write_text("x")
+        panel._spool.capture(_figure(), title=name)
+        return None if name != "Drug B" else "Drug B blew up"
+
+    _run(panel, out, ["Drug A", "Drug B"], _job)
+
+    assert store.records == []
+    assert store.persist_calls == 0
+    # And no output at all — including no deck, which is staged with the files.
+    assert not out.exists() or list(out.iterdir()) == []
+
+
+def test_a_committed_run_files_every_figure_in_the_gallery(tmp_path,
+                                                           monkeypatch):
+    import well_viewer.features.saved_plots.controller as sp_controller
+    from well_viewer.features.batch_export import _destinations
+
+    store = _FakeStore(tmp_path / "saved_plots")
+    monkeypatch.setattr(_destinations, "_get_store", lambda ctx: store)
+    monkeypatch.setattr(sp_controller, "get_store", lambda ctx: store)
+    monkeypatch.setattr(_destinations, "_refresh_gallery", lambda ctx: None)
+
+    _qapp()
+    out = tmp_path / "out"
+    panel = _RunStub(tmp_path, to_gallery=True)
+
+    def _job(name, write_dir):
+        (write_dir / f"{name}.csv").write_text("x")
+        panel._spool.capture(_figure(), title=name)
+        return None
+
+    _run(panel, out, ["Drug A", "Drug B"], _job)
+
+    assert [r.title for r in store.records] == ["Drug A", "Drug B"]
+    assert store.persist_calls == 1
+    assert any("2 to Saved Plots" in s for s in panel.statuses), panel.statuses
+    # The run's own state is cleared, so a figure written outside a run cannot
+    # reach the spool the previous run used.
+    assert panel._spool is None
+
+
+def test_a_run_with_no_destinations_stages_nothing_extra(tmp_path):
+    _qapp()
+    out = tmp_path / "out"
+    panel = _RunStub(tmp_path)
+
+    def _job(name, write_dir):
+        (write_dir / f"{name}.csv").write_text("x")
+        return None
+
+    _run(panel, out, ["Drug A"], _job)
+    from well_viewer.features.batch_export.service import MANIFEST_NAME
+    assert sorted(p.name for p in out.iterdir()) == ["Drug A.csv", MANIFEST_NAME]
+    assert panel.statuses == ["Batch export"]

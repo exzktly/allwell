@@ -1875,8 +1875,9 @@ the next.
 The window's top row is one band: **Review / Analyze / Datasets** on the left,
 spanning the width of the panel below it, and the current page's tabs — *Bar
 Plots · Line Graphs · Scatter Plot · …*, or *Image Table · Segmentation · Cell
-Browser · Playground* — immediately to their right on the same line. Batch Export's four
-modes — *Line · Bar · Scatter (cells) · Scatter (aggregate)* — sit there too.
+Browser · Playground* — immediately to their right on the same line. Batch
+Export's modes — *Line · Bar · Scatter (cells) · Scatter (aggregate) ·
+Response* — sit there too.
 Pages without sub-tabs (Statistics, Spatial, smFISH, Review CSV, Saved Plots)
 leave that side empty; the band keeps its height so nothing below it shifts when
 you switch pages. In Split View the band is empty too — each pane draws its own
@@ -3992,13 +3993,29 @@ panel-local state so a batch run isn't tied to whatever the on-screen
 plot has set.
 
 Pick the mode from the tab strip in the window's top band — *Line · Bar ·
-Scatter (cells) · Scatter (aggregate)*, beside the Review / Analyze / Datasets
-selector, where every other page's tabs are. The groups you build are **shared
-by all four modes** — define them once and they are there whether you export
-Line, Bar, Scatter (cells) or Scatter (aggregate). They describe your plate's conditions, not the shape of
+Scatter (cells) · Scatter (aggregate) · Response*, beside the Review / Analyze /
+Datasets selector, where every other page's tabs are. The groups you build are
+**shared by every mode** — define them once and they are there whichever you
+export. They describe your plate's conditions, not the shape of
 the plot. (Datasets analysed before this carried a separate set per mode; those
 are merged on first open, with a group appearing in more than one of them kept
 just once.)
+
+**Response** exports the [Response Curves](#response-curves) figure one group at
+a time: a curve per timepoint (and per series value, if you pick a series
+variable) plotted against a Number sample variable, with the same fit models the
+tab offers. The panel carries its own Channel and Property — including *Fraction
+above threshold* — x variable, series split, x scale, fit model with optional
+pinned top and bottom, and timepoint selection, so a batch run is not tied to
+what the tab is currently showing. Its CSV holds the drawn points, **a row for
+every member that could not be placed** with the reason it was left out, and a
+row per curve's fit — including a fit that was refused, carrying the reason.
+A group with no placeable points writes nothing at all rather than an empty
+figure and an empty file.
+
+Fold change is the one setting the Response panel does not carry: response
+curves normalise through the shared fold-change setting on the plotting band,
+the same one the tabs use, so set it there. Every other mode keeps its own.
 
 Groups are built on a **plate map**, the same plate control used everywhere else
 in the app rather than a separate grid of squares. Left-drag across it to add
@@ -4021,6 +4038,37 @@ sample name** (their Well Label) rather than the raw well token, and line-graph
 batch panels carry the **timepoint ticks and x-axis label on every time panel**.
 Building a batch no longer writes to the dataset on every click — the panel edits
 are held and saved once.
+
+#### Sending a batch somewhere besides a folder
+
+OUTPUT SETTINGS carries an **Also send to:** row with two switches. Both are
+additions, not alternatives: the folder of figures and CSVs is written exactly as
+before whether you tick them or not.
+
+**Saved Plots** files every exported figure in the [gallery](#saved-plots), with
+the export group's own settings, so you can browse, rename and reorder them,
+restore one onto its plotting tab, and include them in the gallery's PDF report.
+Restoring one re-applies the group it was exported for — its members, its
+channel, its column — and puts you on the tab the figure came from. It does not
+re-apply Batch Export's own layout options (bars versus beeswarm, one figure per
+timepoint or one spanning them, the scatter facet mode), which live on the panel
+rather than in the saved view, so the restored figure can be laid out
+differently from the file that was exported; the gallery entry says so, and so
+does the status line when you restore it.
+
+**PowerPoint** writes one deck beside the figures — `batch_export_line.pptx`,
+`batch_export_bar.pptx`, and so on, one per mode so exporting two modes into one
+folder leaves you two decks — with a slide per group. Each figure arrives as
+**editable PowerPoint shapes** rather than a picture, exactly as in the
+gallery's own [PowerPoint export](#saved-plots): a bar is a rectangle you can
+recolour, an axis label a text box you can retype. A figure whose vector capture
+fails is placed as a picture and its slide says so.
+
+Both destinations are filled **only if the whole run succeeds**. A run that
+fails partway leaves your previous export untouched, and it leaves nothing in
+the gallery and no deck either — so what you find in the folder, in the gallery
+and in the deck always describes the same run. The status line at the end names
+what they produced, and separately anything they could not.
 
 ### Starting over
 

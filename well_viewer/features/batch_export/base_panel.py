@@ -1877,8 +1877,9 @@ class BatchExportPanel(QWidget):
                 # The deck is an output file of this run, so it is staged with
                 # the figures and committed under the same manifest: a run that
                 # fails after the deck is built leaves no deck behind either.
-                self._prog_lbl.setText("Building PowerPoint deck\u2026")
-                QApplication.processEvents()
+                if spool.to_deck:
+                    self._prog_lbl.setText("Building PowerPoint deck\u2026")
+                    QApplication.processEvents()
                 spool.write_deck(staging)
                 commit_staged_export(staging, out_dir)
                 committed = True
@@ -1893,8 +1894,10 @@ class BatchExportPanel(QWidget):
                 # first K figures of a run whose output directory was rolled
                 # back — half a run, presented as a run.
                 if committed:
-                    self._prog_lbl.setText("Filing figures in Saved Plots\u2026")
-                    QApplication.processEvents()
+                    if spool.to_gallery:
+                        self._prog_lbl.setText(
+                            "Filing figures in Saved Plots\u2026")
+                        QApplication.processEvents()
                     spool.file_in_gallery(self._ctx)
             finally:
                 spool.discard()

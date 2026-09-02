@@ -424,8 +424,14 @@ def _frame(n, well):
 
 
 def _cell_ctx(frames):
-    """A ctx with just what ``write_cell_rows`` reads."""
+    """A ctx with just what ``write_cell_rows`` reads.
+
+    Including ``runtime.cell_gating.worker``, which the shared gating-busy
+    predicate consults: a stub without it would have the guard raise on every
+    call, and a guard that raises is not a guard that refuses.
+    """
     return SimpleNamespace(
+        runtime=SimpleNamespace(cell_gating=SimpleNamespace(worker=None)),
         state=SimpleNamespace(
             dataset=SimpleNamespace(
                 well_paths={w: f"/tmp/{w}" for w in frames},

@@ -44,26 +44,12 @@ import threading
 # import that is not breaking a cycle is one the import budget counts for
 # nothing. Several sibling features already import it this way.
 from well_viewer.features.export import cell_scope_compute as csc
-from well_viewer.features.export.service import _scope_block, _well_labels_map
+from well_viewer.features.export.service import (
+    _gating_busy, _scope_block, _well_labels_map,
+)
 from well_viewer.features.export.worker import DONE, CellExportWriter
 
 _logger = logging.getLogger("well_viewer")
-
-
-def _gating_busy(ctx) -> bool:
-    """Whether the cell-gating worker is mid-recompute.
-
-    Read through the same runtime flag ``export/service`` consults, so the two
-    refusals cannot come to disagree about what "busy" means.
-    """
-    from well_viewer.core.safe import swallowed
-
-    try:
-        from well_viewer.features.export.service import _gating_busy as _busy
-        return bool(_busy(ctx))
-    except Exception:
-        swallowed("batch cell export: reading the gating-busy flag")
-        return False
 
 
 def write_cell_rows(ctx, scope, out_path) -> int:
@@ -84,6 +70,8 @@ def write_cell_rows(ctx, scope, out_path) -> int:
 
     if scope is None:
         return -1
+    # ``export/service``'s own predicate, imported rather than restated, so the
+    # GUI refusal and this one cannot come to disagree about what "busy" means.
     if _gating_busy(ctx):
         # The same refusal the GUI path makes, for the same reason: the gating
         # worker rewrites ``Included`` / ``Gate_Pass`` / ``Gate_On`` **in place

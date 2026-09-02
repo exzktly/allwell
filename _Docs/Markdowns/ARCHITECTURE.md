@@ -9098,6 +9098,31 @@ indistinguishable from a button wired to nothing. The log toggles and the base
 are deliberately untouched — an axis drawn in log stays in log and merely picks
 its own bounds again.
 
+**The store is replaced, not edited, so nothing may hold a piece of it.**
+`view_state.restore` rebuilds `axis_prefs` as `{str(k): dict(v)}` and
+`reset_for_new_dataset` rebuilds it without the entries that emptied, so every
+dict inside it is a different object after a dataset load. `figure_prefs`
+therefore returns a `_FigurePrefs` that resolves both the global style dict and
+the figure's own entry **per access**, from a key fixed at construction; it
+never captures the dicts. The Properties sidebar is what makes that load-bearing
+— it is built once per figure and cached for the life of the process, so a view
+that captured its entry went on writing every axis limit, log toggle, log base
+and per-axis tick size into a dict nothing read, and reported success: the
+fields kept the values and the figure never moved. Only the controls that write
+`PlotState` (the colour mode, the Show and Error-bars segments) went on working,
+which is what a whole Properties panel looks like once it has come loose from
+its figure.
+
+The panel's fields need the same catch-up its `PlotState` segments already get.
+`_resync_pref_fields`, called from `launch_export_editor` beside
+`_resync_plot_state_segments`, re-seeds every figure-scoped field from the store
+when the panel is reopened. Without it the fields keep the previous plate's
+answers, and since `_persist` writes *every* field on any edit, changing the
+title size would put the limits a dataset switch had just dropped back onto the
+new plate — the defect the drop exists to prevent, arriving through the panel
+instead. The two shared log toggles go back through `_log_toggle_seed`, so a
+figure with no stored answer still reads its answer off the axis.
+
 `view_state.restore` cannot stand in for the reset: it early-returns when the
 new plate has no saved block, which is exactly the case where the previous
 plate's settings carry over. A fold-change control naming a group of plate A's

@@ -206,6 +206,16 @@ def launch_export_editor(win, fig, default_name: str, *, plot_bg: str = "",
             sb._resync_plot_state_segments()
         except Exception:
             swallowed()  # was: pass (silent except)
+        # And the fields backed by the figure's stored preferences, for the
+        # same reason one layer over: a dataset load restores the axis-pref
+        # store and a dataset *switch* drops every axis limit from it, neither
+        # of which the cached panel hears about. A panel still showing the
+        # previous plate's limits would write them back onto the new one on the
+        # next edit, since ``_persist`` writes every field.
+        try:
+            sb._resync_pref_fields()
+        except Exception:
+            swallowed()  # was: pass (silent except)
         return _ExportEditorSession(sb)
     except Exception as exc:
         QMessageBox.warning(win if isinstance(win, QWidget) else None,

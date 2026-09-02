@@ -3635,7 +3635,7 @@ channel for every well).
   titles are off — switch **Show titles** on in the Export settings dialog if you want
   them repeated above each image as well.
 - **Save to Saved Plots quality** — a per-cell/whole-grid resolution preset (**Draft**,
-  **Standard**, **High**), picked either from the Export dropdown's quick-pick submenu
+  **Standard**, **High**), picked either from the Save menu's quick-pick submenu
   or the Export settings dialog. Save to Saved Plots pre-shrinks each cell and caps the
   assembled grid's longest side before saving (Export to File / Copy PNG / Copy SVG
   always render full resolution), so a large grid saves faster at the cost of per-cell

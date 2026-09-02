@@ -22,10 +22,12 @@ from typing import Any
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+from well_viewer.core.lazy import lazy
 from well_viewer.core.safe import swallowed
 
 from well_viewer.features.image_browser.image_table import facet_view as _facet
 from well_viewer.features.image_browser.image_table import renderer as _renderer
+from well_viewer.features.image_browser.image_table._frames import FrameCollector
 from well_viewer.features.image_browser.image_table.image_compose import (
     OVERLAY_CHAN,
     _load_array,
@@ -48,6 +50,13 @@ from well_viewer.features.image_browser.image_table.grid_layout import (
     _axis_dim_values,
     _find_ratio_for_channel,
 )
+
+
+# The PowerPoint writer, bound the way every other cross-feature call here is:
+# Saved Plots is a removable feature, and a proxy resolved on first call couples
+# nothing at import time (core/lazy.py; test_architecture_contracts).
+_build_image_grid_deck = lazy("well_viewer.features.saved_plots._deck",
+                              "build_image_grid_deck")
 
 
 # Save to Saved Plots quality presets: (cell_max_px, gallery_max_px).
@@ -623,10 +632,6 @@ def image_table_export_pptx(ctx) -> None:
     into the dataset folder, so the two routes cannot produce different slides.
     """
     from well_viewer.domain.image_frames import FramedGrid
-    from well_viewer.features.image_browser.image_table._frames import (
-        FrameCollector,
-    )
-    from well_viewer.features.saved_plots._deck import build_image_grid_deck
 
     collector = FrameCollector()
     fig, _save_kwargs = _build_export_figure(ctx, cell_max_px=FRAME_MAX_PX,
@@ -656,7 +661,7 @@ def image_table_export_pptx(ctx) -> None:
     cols = len(cells[0]) if rows and cells[0] else 0
     title = f"Image grid ({rows}×{cols})" if rows and cols else "Image grid"
     try:
-        fields = build_image_grid_deck(grid, out, title=title)
+        fields = _build_image_grid_deck(grid, out, title=title)
     except Exception as exc:
         QMessageBox.critical(ctx.window, "Export failed", str(exc))
         return
@@ -818,9 +823,6 @@ def image_table_save_to_gallery(ctx) -> None:
         # the same user-tunable quality preset (Export ▾ → Save quality, or
         # Export settings…) so raising/lowering it actually moves the speed/
         # detail trade-off instead of just one half of it.
-        from well_viewer.features.image_browser.image_table._frames import (
-            FrameCollector,
-        )
         collector = FrameCollector()
         fig, save_kwargs = _build_export_figure(
             ctx, cell_max_px=cell_max_px, progress=_report, frames=collector)

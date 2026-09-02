@@ -3649,7 +3649,7 @@ channel for every well).
   titles are off — switch **Show titles** on in the Export settings dialog if you want
   them repeated above each image as well.
 - **Save to Saved Plots quality** — a per-cell/whole-grid resolution preset (**Draft**,
-  **Standard**, **High**), picked either from the Export dropdown's quick-pick submenu
+  **Standard**, **High**), picked either from the Save menu's quick-pick submenu
   or the Export settings dialog. It also sets how large each field's own picture is
   inside the saved grid's PowerPoint frames — a saved grid keeps one image per
   field, so it takes noticeably more room in the dataset folder than the single
@@ -4464,8 +4464,9 @@ page fills in. The record says which of the two produced it, and Home words
 itself accordingly: *checked \<date\>* for this tool, *run finished \<date\>* for a
 run. That matters because they describe different moments — a run's record is
 about the run, this one is about the folder as it stood when you scanned it.
-If the dataset is already open in Review, going back to Home shows the new
-record without reloading. If the record cannot be written — a read-only volume,
+If the dataset is already open in Review, switching back to Review shows the new
+record without reloading — including when Home is the page you left from, which
+is where you started if you got here through Home's own **Check it now**. If the record cannot be written — a read-only volume,
 say — the raw log says so and the findings are unaffected.
 
 1. Pick the dataset folder. As soon as it's recognized, a status panel

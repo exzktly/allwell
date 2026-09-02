@@ -88,6 +88,37 @@ def test_render_model_is_headless_plain_data(image_table_app):
                 if "Advanced" in (b.text() or "")]
 
 
+@pytest.mark.qt
+def test_the_save_menu_button_says_save(image_table_app):
+    """One verb across the app for the same button.
+
+    Every plot tab's equivalent is built by ``ui_helpers.build_plot_save_menu``
+    and reads *Save ▾*; this tab builds its own — its menu is not a plot card's
+    and offers no CSV — and read *Export*, which is the drift that builder
+    exists to end, one tab past where it can reach.
+
+    The button is found by what its menu offers rather than by its label, so
+    the test cannot pass by finding a different button that happens to be
+    called Save.
+    """
+    from PySide6.QtWidgets import QToolButton
+
+    ctx = image_table_app._ctx
+    sub = ctx.runtime.image_browser.subtabs
+    idx = next(i for i in range(sub.count()) if sub.tabText(i) == "Image Table")
+    tab = sub.widget(idx)
+
+    buttons = [
+        b for b in tab.findChildren(QToolButton)
+        if b.menu() is not None
+        and any(a.text() == "Save to Saved Plots" for a in b.menu().actions())
+    ]
+    assert len(buttons) == 1, (
+        f"expected exactly one save menu on the Image Table, found {len(buttons)}")
+    assert buttons[0].text() == "Save", (
+        f"the button reads {buttons[0].text()!r}; every other tab's says 'Save'")
+
+
 def _controller():
     from well_viewer.features.image_browser.image_table import controller as C
     return C

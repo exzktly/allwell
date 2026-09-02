@@ -8,7 +8,6 @@ loaded with the sidecar.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 
@@ -17,6 +16,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 import theme
 from well_viewer.core.lazy import lazy
+from well_viewer.core.record_sync import resync_run_check
 from well_viewer.core.safe import swallow
 from well_viewer.core.selection_controller import (
     groups_centre_refresh, update_active_group_label,
@@ -272,7 +272,7 @@ def activate_home(ctx) -> None:
     rail body is a supported state rather than one that happens to work.
     """
     hide_rail_body(ctx)
-    resync_record(ctx)
+    resync_run_check(ctx)
     refresh_home(ctx)
     sync_home_sidebar(ctx)
     if current_subtab(ctx) in definition_subtabs(ctx):
@@ -295,45 +295,6 @@ def hide_rail_body(ctx) -> None:
     frame = ctx.widgets.get_or_none("_sidebar_main_frame")
     if frame is not None:
         frame.setVisible(False)
-
-
-def resync_record(ctx) -> None:
-    """Re-read the completeness record from the sidecar on disk.
-
-    Home reports a record rather than scanning, and the record can be replaced
-    while Review holds the dataset open — the Datasets Validate tool writes one
-    at the end of every scan, which is exactly what Home's own "Check this
-    dataset now" action sends the user off to do. Without this, coming back to
-    Home after that scan would show the same "no completeness record" line that
-    prompted it, and the fix would look like it had done nothing.
-
-    **Only ``run_check`` is taken.** Re-reading the whole sidecar would discard
-    the in-memory user-side blocks — notes, sample definitions, gating, ratios —
-    including edits typed since the load and not yet saved. One key is read
-    because one key is the one another process owns.
-
-    One small JSON read on page activation, never a scan. A dataset whose
-    sidecar has since been deleted or corrupted keeps whatever record it loaded
-    with rather than losing it to a transient read failure.
-    """
-    info = getattr(ctx.state.dataset, "pipeline_info", None)
-    data_dir = getattr(ctx.state.dataset, "data_dir", None)
-    if not isinstance(info, dict) or data_dir is None:
-        return
-    with swallow("home record resync"):
-        from well_viewer.domain.viewer_state import resolve_pipeline_info_path
-
-        path = resolve_pipeline_info_path(Path(data_dir))
-        on_disk = json.loads(path.read_text())
-        if not isinstance(on_disk, dict):
-            return
-        record = on_disk.get("run_check")
-        if isinstance(record, dict):
-            info["run_check"] = record
-        elif "run_check" in info and "run_check" not in on_disk:
-            # The record was removed on disk. Reporting a stale one as current
-            # is the failure mode this whole block exists to avoid.
-            info.pop("run_check", None)
 
 
 def on_home_dataset_loaded(ctx) -> None:

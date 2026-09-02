@@ -128,8 +128,27 @@ class DestinationSpool:
         self.deck_written: bool = False
         #: Set when the deck could not be written at all.
         self.deck_error: str = ""
-        #: Set when filing the gallery records failed.
+        #: Set when a committed run left an **earlier** run's deck for this
+        #: mode sitting in the output folder. A stale figure is named for its
+        #: group, so a group this run did not export is visible in the file
+        #: name; a deck is named for the mode, so a stale one has exactly the
+        #: name a fresh one would and reads as this run's output. It is not
+        #: deleted — nothing here removes a file the user may want — it is
+        #: named.
+        self.stale_deck: bool = False
+        #: Set when filing the gallery records failed outright.
         self.gallery_error: str = ""
+        #: Records that were offered to the gallery and did not land — a
+        #: read-only or full ``saved_plots/`` directory is the usual cause.
+        #: Counted separately from ``gallery_error``, which is the whole step
+        #: failing: a run can lose one record and file nine, and reporting
+        #: nothing then is the shortfall the destinations exist not to hide.
+        self.gallery_failures: int = 0
+        #: Figures whose parameters could not be captured, filed as a picture
+        #: with nothing to restore. Counted rather than left to look like an
+        #: ordinary record: in the gallery it is indistinguishable from one
+        #: whose Restore works, right up until somebody presses it.
+        self.undescribed: int = 0
         self.filed: int = 0
 
     @property
@@ -266,6 +285,19 @@ class DestinationSpool:
             self.deck_error = str(exc)
             _logger.exception("Batch export: PowerPoint deck failed")
 
+    def note_stale_deck(self, out_dir) -> None:
+        """Notice a previous run's deck left beside this run's output.
+
+        Called after a commit. Only where this run did **not** write one: a run
+        that did has already replaced it.
+        """
+        if self.to_deck:
+            return
+        try:
+            self.stale_deck = (Path(out_dir) / self.deck_name).exists()
+        except OSError:
+            _logger.warning("Batch export: could not check for an earlier deck")
+
     def file_in_gallery(self, ctx) -> None:
         """Add one Saved Plots record per captured figure.
 
@@ -288,13 +320,25 @@ class DestinationSpool:
                 if not png:
                     self.capture_failures += 1
                     continue
+                # Counted from the store, not from the call returning. The
+                # gallery's own writer reports a failed image write by
+                # *returning a status string* — it does not raise and it does
+                # not append a record — so incrementing here unconditionally
+                # made a run whose ``saved_plots/`` directory was read-only
+                # report "10 to Saved Plots" over an empty gallery, with
+                # nothing anywhere saying otherwise. The record landing is the
+                # fact worth asserting, and it is the one the store holds.
+                before = len(store.records)
                 _save_figure_to_gallery(
                     ctx, tab=cap.tab, title=cap.title,
                     png_bytes=png, svg_bytes=_read_bytes(cap.svg_path),
                     params=cap.params, thresholds=cap.thresholds,
                     persist=False, refresh=False,
                 )
-                self.filed += 1
+                if len(store.records) > before:
+                    self.filed += 1
+                else:
+                    self.gallery_failures += 1
             store.persist(ctx)
             _refresh_gallery(ctx)
         except Exception as exc:
@@ -323,13 +367,30 @@ class DestinationSpool:
         something says otherwise, and the deck itself cannot — the tenth slide
         is not there to carry the note.
         """
-        if not self.wanted:
-            return ""
         parts: list[str] = []
+        # Before the ``wanted`` gate, deliberately: the run this matters most
+        # to is the one that ticked nothing, came back to a folder it had
+        # exported to before, and left the earlier deck standing over new
+        # figures.
+        if self.stale_deck:
+            parts.append(f"{self.deck_name} is from an earlier run — this one "
+                         f"did not write a deck")
+        if not self.wanted:
+            return " · ".join(parts)
         if self.capture_failures:
             parts.append(f"{self.capture_failures} figure(s) could not be "
                          f"captured for the extra destinations")
-        if self.raster_only and self.to_deck:
+        if self.gallery_failures:
+            parts.append(f"{self.gallery_failures} could not be written to "
+                         f"Saved Plots")
+        if self.undescribed:
+            parts.append(f"{self.undescribed} filed without their settings, so "
+                         f"Restore will not reproduce them")
+        # Gated on the deck existing, not on it having been asked for: a run
+        # that errored discards its staging before the deck is ever built, and
+        # a status line reporting how many figures are pictures *in a deck
+        # nobody wrote* describes an artifact that is not there.
+        if self.raster_only and self.deck_written:
             parts.append(f"{self.raster_only} placed as a picture rather than "
                          f"editable shapes")
         if self.deck_error:

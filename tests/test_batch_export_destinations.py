@@ -199,6 +199,7 @@ class _ParamScopeStub:
     _app_group_scope = BatchExportPanel._app_group_scope
     _app_val_col_scope = BatchExportPanel._app_val_col_scope
     _control_selections = BatchExportPanel._control_selections
+    _fold_change_control_refs = BatchExportPanel._fold_change_control_refs
     _capture_group_params = BatchExportPanel._capture_group_params
     _mode_key = BatchExportPanel._mode_key
     _SOURCE_TAB = "Line Graphs"
@@ -337,6 +338,15 @@ def test_a_figure_with_no_vector_is_kept_as_a_picture_and_counted(tmp_path,
     cap = spool._captures[0]
     assert cap.png_path.exists() and cap.svg_path is None
     assert spool.raster_only == 1
+    # Not yet: no deck has been written, so there is no artifact for the note
+    # to be about. A run that errors discards its staging before the deck is
+    # ever built, and a status line counting pictures in a deck nobody wrote
+    # describes a file that is not there.
+    assert "picture rather than editable shapes" not in spool.shortfall()
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    spool.write_deck(staging)
+    assert spool.deck_written
     assert "picture rather than editable shapes" in spool.shortfall()
 
 
@@ -461,6 +471,84 @@ def test_the_gallery_is_written_once_for_a_whole_batch(tmp_path, monkeypatch):
     assert all(png and svg for _rec, png, svg, _p in store.added)
     assert all(rec.tab == "Line Graphs" for rec, *_ in store.added)
     assert len({rec.id for rec, *_ in store.added}) == 3
+
+
+def test_a_record_the_gallery_refused_is_not_counted_as_filed(tmp_path,
+                                                              monkeypatch):
+    """The gallery's writer reports a failed image write by *returning*.
+
+    ``SavedPlotsStore.add`` returns False on an ``OSError`` writing the PNG and
+    appends nothing; ``save_figure_to_gallery`` turns that into a status string
+    and returns it. A count taken from the call *returning* therefore reported
+    ten records filed over an empty gallery — the §7 cardinal sin, in the one
+    method whose docstring promises the opposite. The count comes from the
+    store growing instead, which is the fact that matters.
+    """
+    import well_viewer.features.saved_plots.controller as sp_controller
+    from well_viewer.features.batch_export import _destinations
+
+    class _RefusingStore(_FakeStore):
+        def add(self, ctx, rec, png, svg=b"", frames=b"", *, persist=True):
+            return False        # what a read-only saved_plots/ really produces
+
+    store = _RefusingStore(tmp_path / "saved_plots")
+    monkeypatch.setattr(_destinations, "_get_store", lambda ctx: store)
+    monkeypatch.setattr(sp_controller, "get_store", lambda ctx: store)
+    monkeypatch.setattr(_destinations, "_refresh_gallery", lambda ctx: None)
+
+    spool = _spool(tmp_path)
+    for name in ("Drug A", "Drug B", "Drug C"):
+        spool.capture(_figure(), title=name)
+    spool.file_in_gallery(object())
+
+    assert store.records == []
+    assert spool.filed == 0
+    assert spool.gallery_failures == 3
+    assert "3 could not be written to Saved Plots" in spool.shortfall()
+    assert "to Saved Plots" not in spool.summary(), spool.summary()
+
+
+def test_a_figure_filed_without_its_settings_is_counted(tmp_path):
+    """A record with no parameters restores nothing, and in the gallery it is
+    indistinguishable from one that restores correctly — until pressed."""
+    spool = _spool(tmp_path)
+    spool.undescribed = 2
+    assert "2 filed without their settings" in spool.shortfall()
+    assert "Restore will not reproduce them" in spool.shortfall()
+
+
+def test_an_earlier_run_s_deck_is_named_when_this_run_wrote_none(tmp_path):
+    """Decks are named per mode, so a stale one carries a fresh one's name.
+
+    A stale *figure* is named for its group, so a group this run did not export
+    shows in the file name. A deck does not, which is why this is said and a
+    stale PNG is not — and it is said even for a run that ticked neither
+    destination, which is exactly the run it happens to.
+    """
+    from well_viewer.features.batch_export._destinations import DestinationSpool
+
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "batch_export_line.pptx").write_bytes(b"from an earlier run")
+
+    quiet = DestinationSpool(to_gallery=False, to_deck=False, tab="Line Graphs",
+                             mode_key="line")
+    assert not quiet.wanted
+    quiet.note_stale_deck(out)
+    assert quiet.stale_deck
+    assert "batch_export_line.pptx is from an earlier run" in quiet.shortfall()
+
+    # A run that *did* write one has replaced it, so there is nothing to say.
+    fresh = DestinationSpool(to_gallery=False, to_deck=True, tab="Line Graphs",
+                             mode_key="line")
+    fresh.note_stale_deck(out)
+    assert not fresh.stale_deck
+    # And a folder with no earlier deck says nothing either, so the note is
+    # measuring the file rather than the flag.
+    empty = DestinationSpool(to_gallery=False, to_deck=False, tab="Line Graphs",
+                             mode_key="bar")
+    empty.note_stale_deck(out)
+    assert not empty.stale_deck and empty.shortfall() == ""
 
 
 def test_save_figure_to_gallery_files_the_params_it_is_handed(tmp_path,

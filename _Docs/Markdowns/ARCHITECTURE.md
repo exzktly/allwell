@@ -2627,6 +2627,24 @@ it is built from. What the destinations produced, and what they could not, are
 reported separately: `DestinationSpool.summary()` and `.shortfall()`, because a
 deck two slides short of the groups it names cannot say so itself.
 
+Four kinds of shortfall are counted rather than inferred, and each is a way this
+feature can produce less than it was asked for while looking complete. A
+**capture** that could not be rendered (`capture_failures`). A record the
+gallery **refused** (`gallery_failures`) — the gallery's writer reports a failed
+image write by *returning a status string*, so it neither raises nor appends,
+and a count taken from the call returning would have reported ten records filed
+over an empty gallery; the count comes from the store growing instead, which is
+the fact that matters. A figure filed with **no parameters** (`undescribed`),
+because `_capture_group_params` returning `({}, {})` puts a record in the
+gallery that is indistinguishable from a restorable one until somebody presses
+Restore. And an **earlier run's deck** left in the folder by a run that did not
+write one (`stale_deck`): a stale figure is named for its group, so a group this
+run did not export shows in the file name, but a deck is named for the mode and
+so a stale one carries exactly the name a fresh one would. It is named, never
+deleted. The raster-versus-vector split is reported only once a deck exists —
+a run that errored discards its staging before the deck is built, and counting
+pictures in a deck nobody wrote describes an artifact that is not there.
+
 A capture failure never costs the file the user actually asked for.
 `save_export_figure` calls its `on_saved` hook *after* the write and before the
 figure is closed — the only window in which a second render of the same styled
@@ -2667,6 +2685,20 @@ the shared `ctx.state.plot` state every plotting page shares. A panel-local
 control there would be offered, moved, and silently ignored by the export it
 appears to configure, so `_INCLUDES_FOLD_CHANGE` is False and the panel's info
 text says where the setting lives instead.
+
+That difference reaches one more place than the controls.
+`_control_selections` carries the replicate set a fold-change control names
+*into* the group scope, hidden, so a control belonging to another export group
+still resolves — and which controls those are comes from
+`_fold_change_control_refs`. The base class answers from its construction-time
+snapshot, which is right for a mode whose own Control combo edits it. Response
+overrides it to read the **live** shared state, because that is what its
+collector reads: from the snapshot, a control the user set on the plotting band
+*after* opening the mode would be absent from the scope,
+`resolve_control_wells` — which scans exactly that scope — would resolve it to
+no wells, and every point would drop out of a figure whose y axis still read
+`÷ DMSO`. Where a scope and the collector inside it touch one piece of state,
+they have to read the same copy of it.
 
 ### 5.3 Centre tab builders: `features/<feature>/tab_view.py`
 

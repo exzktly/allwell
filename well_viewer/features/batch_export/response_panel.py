@@ -138,6 +138,30 @@ class ResponseBatchExportPanel(BatchExportPanel):
     def _mode_key(self) -> str:
         return "response"
 
+    def _fold_change_control_refs(self) -> list:
+        """The **live** shared controls, not this panel's construction snapshot.
+
+        ``collect_response`` normalises through ``fold_change.fold_change_state``,
+        which reads ``ctx.state.plot`` at the moment of the call — so the
+        control this export normalises by is whatever the plotting band holds
+        when Run is pressed, not what it held when this panel was first built.
+        The base class's snapshot is right for every mode that carries its own
+        Control combo and wrong for this one, which carries none: a control set
+        on the band *after* opening this mode would be absent from the group
+        scope, ``resolve_control_wells`` would resolve it to no wells, and every
+        point would drop out of a figure whose axis label still says it was
+        normalised.
+
+        Read at scope-entry time rather than snapshotted at the top of the run:
+        one job's scope and the collector inside it must agree about the
+        control, and they are microseconds apart. What a user changes mid-run is
+        the same hazard the rest of this panel snapshots against — but the
+        collector cannot be made to read a snapshot, so the honest answer is to
+        make the scope read what the collector reads.
+        """
+        plot = self._ctx.state.plot
+        return [plot.fc_control, *(plot.fc_control_map or {}).values()]
+
     # ── UI ───────────────────────────────────────────────────────────────
     def _build_output_panel(self, layout: QVBoxLayout) -> None:
         self._build_output_header_and_io(

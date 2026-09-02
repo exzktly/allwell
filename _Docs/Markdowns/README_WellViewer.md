@@ -4068,7 +4068,16 @@ Both destinations are filled **only if the whole run succeeds**. A run that
 fails partway leaves your previous export untouched, and it leaves nothing in
 the gallery and no deck either — so what you find in the folder, in the gallery
 and in the deck always describes the same run. The status line at the end names
-what they produced, and separately anything they could not.
+what they produced, and separately anything they could not: a figure that could
+not be captured, one the gallery would not accept (a read-only or full dataset
+folder), one filed without its settings so Restore will not reproduce it, and
+how many reached the deck as a picture rather than as shapes.
+
+One thing it will also tell you: if you export the same mode into a folder
+again **without** ticking PowerPoint, the deck from your earlier run is still
+sitting there under the same name, now describing different figures. All-Well
+says so rather than deleting it — the decks are named per mode, not per run, so
+this is the one leftover you cannot spot from a file name.
 
 ### Starting over
 

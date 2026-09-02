@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from well_viewer.data.data_loading import resolve_value_series
+from well_viewer.data.metric_labels import FRACTION_METRIC_KEY
 from well_viewer.domain.metric_registry import column_gating_exempt
 from well_viewer.features.export.cell_scope_compute import CellScope, scope_from_ctx
 from well_viewer.features.scatter.collect import gates_for_axes
@@ -171,7 +172,7 @@ def agg_cell_scope(ctx) -> CellScope | None:
     # aggregation treats it as a Fraction-On over the channel's mean-intensity
     # column, so that is the column the exported cells are measured on.
     metric_x = scatter_axis_metric_key(ctx, "x", agg=True)
-    if metric_x == "fraction_above_threshold":
+    if metric_x == FRACTION_METRIC_KEY:
         metric_x = "mean_intensity"
     col_x = col_for_scatter_axis(ctx, entry_x, metric_x)
 

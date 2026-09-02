@@ -841,12 +841,16 @@ class BatchExportPanel(QWidget):
         group still resolves. Hidden, so nothing new is drawn. Their wells come
         from the pre-swap list: the group being scoped does not contain them,
         which is the whole problem.
+
+        Which controls those are comes from
+        :meth:`_fold_change_control_refs`, because the answer is not the same
+        on every mode — see that method.
         """
         from well_viewer.domain.control_ref import KIND_SET
         from well_viewer.domain.selections_model import make_selection
 
         wanted: list[str] = []
-        for ref in [self._fc_control, *(self._fc_control_map or {}).values()]:
+        for ref in self._fold_change_control_refs():
             if ref is None or getattr(ref, "kind", "") != KIND_SET:
                 continue
             if ref.name not in wanted:
@@ -869,6 +873,24 @@ class BatchExportPanel(QWidget):
                 fallback_color_idx=color_idx + i,
             ))
         return out
+
+    def _fold_change_control_refs(self) -> list:
+        """The control references this mode's export will actually normalise by.
+
+        This panel's own, seeded from the plot tab at construction and never
+        written back, because a batch job must not follow the live figure — and
+        the panel's Control combo is what edits it.
+
+        A mode with **no** fold-change controls of its own overrides this. Its
+        collector reads the shared state live, so this snapshot is not what its
+        export normalises by: taken at construction, a control the user set on
+        the plotting band *after* opening the mode would be missing from the
+        list, its replicate set would never be carried into the group scope,
+        and ``resolve_control_wells`` — which scans exactly that scope — would
+        find nothing. The figure then comes out empty under a y axis reading
+        "÷ DMSO", while the plotting tab draws the same group correctly.
+        """
+        return [self._fc_control, *(self._fc_control_map or {}).values()]
 
     def _export_val_col_for(self, channel_attr: str) -> str:
         """Resolve the (Channel, Property) pair to a CSV column / ratio key.
@@ -1882,6 +1904,7 @@ class BatchExportPanel(QWidget):
                     QApplication.processEvents()
                 spool.write_deck(staging)
                 commit_staged_export(staging, out_dir)
+                spool.note_stale_deck(out_dir)
                 committed = True
         except BaseException:
             # Never leave a half-committed export or a stray temp dir behind.
@@ -1971,6 +1994,13 @@ class BatchExportPanel(QWidget):
         on_saved = None
         if spool is not None and spool.wanted:
             params, thresholds = self._capture_group_params(group, val_col)
+            # A figure whose parameters could not be captured still reaches the
+            # gallery — the picture is worth having — but it reaches it with
+            # nothing to restore, and in the gallery that is indistinguishable
+            # from a record whose Restore works. Counted here so the run's own
+            # shortfall says how many.
+            if group is not None and not params:
+                spool.undescribed += 1
 
             def on_saved(saved_fig, _t=title, _p=params, _th=thresholds):
                 spool.capture(saved_fig, title=_t, params=_p, thresholds=_th)

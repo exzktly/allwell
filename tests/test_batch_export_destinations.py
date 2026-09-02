@@ -641,6 +641,12 @@ class _RunStub:
 
     _run_batch_jobs = BatchExportPanel._run_batch_jobs
     _new_destination_spool = BatchExportPanel._new_destination_spool
+    # The runner reads the AXES block once per run, so a stub driving it needs
+    # the real reader — borrowed rather than stubbed, so a mode that stopped
+    # snapshotting fails here rather than exporting whatever the fields held at
+    # the moment each figure happened to be rendered.
+    _snapshot_axes = BatchExportPanel._snapshot_axes
+    _PANELS = BatchExportPanel._PANELS
     _SOURCE_TAB = "Line Graphs"
     _mode_key = BatchExportPanel._mode_key
 
@@ -655,6 +661,9 @@ class _RunStub:
         self._to_deck_cb = QCheckBox()
         self._to_deck_cb.setChecked(to_deck)
         self.statuses = []
+        # No AXES rows built, which is the neutral case: ``_snapshot_axes``
+        # returns an empty spec and nothing about the run's axes changes.
+        self._panel_rows = {}
         self._ctx = SimpleNamespace(
             state=SimpleNamespace(dataset=SimpleNamespace(data_dir=data_dir)),
             notify=SimpleNamespace(set_status=self.statuses.append),

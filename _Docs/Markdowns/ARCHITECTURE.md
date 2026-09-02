@@ -435,7 +435,9 @@ well_viewer/
 │   ├── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
 │   │                 scatter_panel.py, response_panel.py, service.py,
 │   │                 _common.py, _line_series_runner.py,
-│   │                 _destinations.py (gallery + PowerPoint)
+│   │                 _destinations.py (gallery + PowerPoint),
+│   │                 _panels.py (which panels, what axes),
+│   │                 _cell_rows.py (the raw rows behind a figure)
 │   └── registry.py   ← the FEATURES list: the sole importer of features/* (§5.3)
 └── persistence/                   ← JSON read/write, debounced save registry
 ```
@@ -2665,6 +2667,71 @@ from — the parameters reproduce the *group*, while Batch Export's own layout
 controls (bars versus beeswarm, stacked timepoints, the scatter facet mode) live
 on the panel and not in view state, so a Restore can draw the same data in a
 different arrangement.
+
+**Which panels a figure draws, and what its axes are fixed to** (`_panels.py`).
+A batch figure is not one plot: the line mode stacks four panels and the bar
+mode three, each a different quantity. Each mode therefore **declares** its
+panels (`_PANELS`), and OUTPUT SETTINGS builds the AXES block from that
+declaration rather than from a list written beside it — a shared X min/max and
+scale, then per panel a keep-it checkbox, a Y min/max and a Y scale. A mode
+whose figure is a single axes declares one panel, so the controls read the same
+everywhere instead of appearing only on the stacked modes.
+
+`panel_axes` lays the figure out with **only the panels the run kept**, and
+gives each excluded panel a real axes on a throwaway figure rather than
+``None``: the shared renderers take a full bundle and paint every member of it
+— `render_line_series` calls methods on all four of its `LineAxes` — so a
+scratch axes keeps them working unchanged while nothing reaches the exported
+page. `figure_height` scales the page down with the panels it kept, and the x
+sharing re-bases on the first panel that survived, since unticking the top one
+would otherwise leave the rest sharing an axis that is not on the figure.
+
+**The limits ride in the preferences; the scale is pinned on the axes.** Every
+batch figure passes through `apply_export_style_prefs` on its way to disk, and
+that pass re-reads the *application's* export preferences — so a limit stamped
+on the axes at render time is one autoscale away from being replaced by the
+app's, silently. `AxesSpec.prefs_overlay` therefore hands that pass the run's
+own numbers, as a **copy**: `_ensure_export_style_prefs` returns the live
+dictionary the Export Style sidebar reads and writes, and merging into it would
+leave a batch run's numbers sitting in the sidebar afterwards. A stacked mode
+writes `axis_buckets` keyed by the kept panels' positions on the figure; a
+single-panel mode writes flat preferences with `axis_target` "All", because its
+one logical plot can be several axes — the faceted scatter draws one per group
+— and a bucket on the first would leave the rest autoscaled. The scale goes
+through `_aw_force_xlog` / `_aw_force_ylog`, the marker that pass checks
+*before* the shared `x_log`, which is the same mechanism the Response tab's
+dose axis already uses.
+
+Every field is optional and blank means "leave it", falling through to the
+app-wide setting; an unreadable one reads as blank rather than as a kept
+previous value, the rule the Response fit bounds already follow. **Auto is not
+linear**: the scale choice is tri-state, and pinning `False` where the user
+chose nothing would take the Response tab's derived logarithmic dose axis
+linear. A run with every panel unticked is refused before the first job —
+a figure with no panels is a blank page, and one written per group would look
+like the run had worked.
+
+**The rows behind a figure** (`_cell_rows.py`). An opt-in checkbox writes the
+plot tabs' `Save cell data…` file beside each group's figure — one row per cell
+the figure was computed from, with the scope block and the marker columns.
+Nothing is re-implemented: the scope comes from the mode's own source tab
+(`_CELL_SCOPE`, one per mode), the rows from
+`export/cell_scope_compute.build_chunk`, and the file is written by
+`export/worker.CellExportWriter`, so the batch file's columns, quoting,
+blank-versus-zero rule and atomic replace are the tab's. The writer drains a
+queue until `DONE`; the batch caller fills and closes the queue first and calls
+it inline, which is that contract used without a thread rather than in spite of
+one — the GUI path needs a thread because a user is waiting, and a batch job is
+already inside a blocking run.
+
+`_write_cell_rows_for` **enters the group scope itself**, for the reason
+`_capture_group_params` does: the scope reads the live selections through
+`cell_scope_compute.plotted_wells`, and the bar mode never enters that scope at
+all, so a writer trusting an ambient one would give every group's file the same
+wells under a different group's name. A failure there is recorded as a run
+shortfall rather than raised — the figure and the summary CSV are what the run
+was primarily asked for — and the notes are counted into the final status line
+rather than each overwriting the last.
 
 **Response mode** (`response_panel.py`) renders through Response Curves' own
 `collect_response` and `draw_response` rather than a batch twin of them, with

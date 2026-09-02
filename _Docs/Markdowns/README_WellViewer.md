@@ -4039,6 +4039,57 @@ batch panels carry the **timepoint ticks and x-axis label on every time panel**.
 Building a batch no longer writes to the dataset on every click — the panel edits
 are held and saved once.
 
+#### Fixing the axes, and choosing which panels to draw
+
+OUTPUT SETTINGS carries an **AXES** block. The top row is the shared X min, max
+and scale; below it, one row per panel the mode draws — Line has four (Value,
+Fraction above cutoff, N above cutoff, CDF), Bar has three, and Scatter and
+Response have one — each with its own Y min, Y max and Y scale.
+
+Every field is optional, and **blank means leave it alone**: that bound
+autoscales exactly as it did before, or takes whatever the Export Style sidebar
+holds. A value that will not read as a number is treated as blank rather than
+kept from a previous edit, so a mistyped `1OO` autoscales instead of quietly
+capping your axis at 100.
+
+The scale has three settings, not two. **Auto** leaves the figure to decide,
+which for a Response dose axis means the logarithmic scale it derives from the
+doses themselves; **Linear** and **Log** override it. Auto is not the same as
+Linear, which is why a plate you have never touched the control on keeps the
+axis the tab would have drawn.
+
+On the stacked modes each panel's checkbox decides whether it is **drawn at
+all**. Untick Fraction and CDF on a Line export and every group comes out as a
+two-panel figure, shorter to match, rather than a four-panel one with two empty
+frames. Untick everything and the run is refused — a figure with no panels is a
+blank page.
+
+A note on the Y rows: each panel plots a different quantity, so they take
+different ranges. One Y range across a mean, a fraction and a count would be
+meaningless on two of the three, which is why there is a row each rather than
+one for the figure. The X row is shared because the panels of a stack share
+their x axis.
+
+#### Writing the raw rows behind each figure
+
+**Also write: Raw per-cell CSV** puts the same file the plot tabs' *Save cell
+data…* produces beside each group's figure — one row per cell the figure was
+computed from, carrying the `#` scope block that names what produced it and the
+marker columns saying which cells the figure actually counted. It is the file
+to reach for when you want to re-derive a fraction, or check what a bar is a
+mean of.
+
+Off by default, and worth leaving off unless you want it: it is one row per
+cell per well rather than one per group, so it can be orders of magnitude
+larger than the summary CSV every run already writes. That summary CSV is
+unaffected either way — this is an extra file, not a replacement.
+
+If a group's rows cannot be written — no loaded wells, or a tab that declines
+to describe its population before a first draw — the figure and the summary CSV
+are still written and the run's status line says what was missed. Losing the
+files you asked for to a problem with one you merely also ticked would be the
+wrong trade.
+
 #### Sending a batch somewhere besides a folder
 
 OUTPUT SETTINGS carries an **Also send to:** row with two switches. Both are

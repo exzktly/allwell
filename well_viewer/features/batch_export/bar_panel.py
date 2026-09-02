@@ -35,6 +35,7 @@ from well_viewer.features.batch_export._common import (
     _CLR_DISABLED_WELL,
     _CLR_ERR_BAR,
 )
+from well_viewer.features.batch_export._panels import Panel
 from well_viewer.features.batch_export.base_panel import BatchExportPanel, SkippedJob
 from well_viewer.core.safe import swallow
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
@@ -81,6 +82,15 @@ class BarBatchExportPanel(BatchExportPanel):
     """Bar-plot batch export — same group editor + timepoint multi-select."""
 
     _SOURCE_TAB = "Bar Plots"
+
+    #: Three panels rather than the line mode's four: a bar figure has no CDF.
+    _PANELS = (
+        Panel("mean", "Value"),
+        Panel("frac", "Fraction above cutoff"),
+        Panel("n", "N above cutoff"),
+    )
+    _SHARE_X = ()
+    _CELL_SCOPE = "well_viewer.features.barplot.cell_scope_compute"
 
     def _mode_key(self) -> str:
         return "bar"
@@ -204,6 +214,8 @@ class BarBatchExportPanel(BatchExportPanel):
         self._build_run_row(layout)
 
     def _run_batch(self) -> None:
+        if self._panels_were_all_unticked():
+            return
         groups_with_data = _groups_with_loaded_wells(
             self._groups_for_export(), self._ctx.state.dataset.well_paths,
         )
@@ -450,6 +462,8 @@ class BarBatchExportPanel(BatchExportPanel):
                     val_col=_val_col)
             except Exception as exc:
                 return f"{grp.name} t={tp_strs} figure: {exc}"
+            self._write_cell_rows_for(grp, write_dir, Path(base).name,
+                                      val_col=_val_col)
             return None
 
         self._run_batch_jobs(
@@ -509,10 +523,14 @@ class BarBatchExportPanel(BatchExportPanel):
         _tp_titles = [_rescale_tp(t, _tp_rescale) for t in target_ts]
         tp_title = (_tp_titles[0] if len(_tp_titles) == 1
                     else f"[{', '.join(_tp_titles)}]")
-        fig = _Figure(figsize=(8, 10), dpi=300, facecolor=theme.CPub.bg)
-        ax_mean = fig.add_subplot(3, 1, 1)
-        ax_frac = fig.add_subplot(3, 1, 2)
-        ax_n = fig.add_subplot(3, 1, 3)
+        spec = self._axes_spec()
+        drawn = spec.drawn_keys() or tuple(p.key for p in self._PANELS)
+        fig = _Figure(figsize=self._panel_figsize(8, 10, len(drawn)),
+                      dpi=300, facecolor=theme.CPub.bg)
+        laid = self._panel_figure(fig)
+        ax_mean = laid.axes["mean"]
+        ax_frac = laid.axes["frac"]
+        ax_n = laid.axes["n"]
         fig.subplots_adjust(hspace=0.55, top=0.94, bottom=0.10,
                             left=0.13, right=0.97)
         fig.suptitle(f"{grp.name}  \u2014  t = {tp_title} h",

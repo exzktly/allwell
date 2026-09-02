@@ -27,6 +27,7 @@ from well_viewer.features.batch_export._common import (
     _groups_with_loaded_wells,
     unique_export_stem,
 )
+from well_viewer.features.batch_export._panels import Panel
 from well_viewer.features.batch_export.base_panel import BatchExportPanel, SkippedJob
 from well_viewer.core.plot_annotations import (
     value_label_settings as _value_label_settings,
@@ -98,6 +99,13 @@ class ScatterBatchExportPanel(BatchExportPanel):
     _INCLUDES_SPREAD = False
 
     _SOURCE_TAB = "Scatter Plot"
+
+    #: One logical panel. A faceted cells run draws one axes per group, but
+    #: they are all the same plot of the same two columns, so they take one
+    #: range and one scale between them rather than a row of controls each.
+    _PANELS = (Panel("plot", "Plot"),)
+    _SHARE_X = ()
+    _CELL_SCOPE = "well_viewer.features.scatter.cell_scope_compute"
 
     def _mode_key(self) -> str:
         """``scatter_cells`` / ``scatter_agg`` — this class is two modes.
@@ -481,6 +489,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
         )
 
     def _run_batch(self) -> None:
+        if self._panels_were_all_unticked():
+            return
         groups_with_data = _groups_with_loaded_wells(
             self._groups_for_export(), self._ctx.state.dataset.well_paths,
         )
@@ -527,10 +537,14 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 csv_path = write_dir / f"{stem}.csv"
                 fig_path = write_dir / f"{stem}.{fmt}"
                 if axes.mode == "cells":
-                    return self._run_scatter_cells_job(
+                    err = self._run_scatter_cells_job(
                         grp, tp_h, csv_path, fig_path, fmt, axes)
-                return self._run_scatter_agg_job(
-                    grp, tp_h, csv_path, fig_path, fmt, axes)
+                else:
+                    err = self._run_scatter_agg_job(
+                        grp, tp_h, csv_path, fig_path, fmt, axes)
+                if err is None:
+                    self._write_cell_rows_for(grp, write_dir, stem)
+                return err
         else:
             jobs = list(groups_with_data)
 
@@ -547,10 +561,14 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 csv_path = write_dir / f"{stem}.csv"
                 fig_path = write_dir / f"{stem}.{fmt}"
                 if axes.mode == "cells":
-                    return self._run_scatter_cells_multi_tp_job(
+                    err = self._run_scatter_cells_multi_tp_job(
                         grp, timepoints, csv_path, fig_path, fmt, axes)
-                return self._run_scatter_agg_multi_tp_job(
-                    grp, timepoints, csv_path, fig_path, fmt, axes)
+                else:
+                    err = self._run_scatter_agg_multi_tp_job(
+                        grp, timepoints, csv_path, fig_path, fmt, axes)
+                if err is None:
+                    self._write_cell_rows_for(grp, write_dir, stem)
+                return err
 
         self._run_batch_jobs(
             jobs=jobs,

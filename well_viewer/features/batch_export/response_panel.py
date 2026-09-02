@@ -53,6 +53,7 @@ from well_viewer.features.batch_export._common import (
     _logger as _shared_logger,
     unique_export_stem,
 )
+from well_viewer.features.batch_export._panels import Panel
 from well_viewer.features.batch_export.base_panel import BatchExportPanel, SkippedJob
 
 # Response Curves is a removable feature, so every symbol comes through a lazy
@@ -120,6 +121,10 @@ class ResponseBatchExportPanel(BatchExportPanel):
     """Batch exporter for Response Curves."""
 
     _SOURCE_TAB = "Response Curves"
+
+    _PANELS = (Panel("plot", "Plot"),)
+    _SHARE_X = ()
+    _CELL_SCOPE = "well_viewer.features.response.cell_scope_compute"
 
     #: The error band and the per-FOV replicate unit both reach the curves —
     #: ``collect_response`` reads ``use_sem`` and ``use_fov_replicates`` off the
@@ -396,6 +401,8 @@ class ResponseBatchExportPanel(BatchExportPanel):
                 _parse_bound(self._fit_bottom_edit.text()))
 
     def _run_batch(self) -> None:
+        if self._panels_were_all_unticked():
+            return
         groups_with_data = _groups_with_loaded_wells(
             self._groups_for_export(), self._ctx.state.dataset.well_paths,
         )
@@ -497,6 +504,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
                 except Exception as exc:
                     return f"{grp.name} figure: {exc}"
 
+            self._write_cell_rows_for(grp, write_dir, safe, val_col=val_col)
             _shared_logger.info("Batch: wrote %s and %s",
                                 csv_path.name, fig_path.name)
             return None

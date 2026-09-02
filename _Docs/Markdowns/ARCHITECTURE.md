@@ -2757,6 +2757,23 @@ its own words through `_SUMMARY_FIGURE_LEAD`, `_SUMMARY_FIGURE_NOTE`,
 override `_summary_figure_lead` instead, because a toggle on those panels
 decides how many figures one group gets.
 
+**The extra outputs are grouped by where each one lands.**
+`_build_extra_output_rows` builds two rows, and the split is the point: **Also
+write:** carries the per-cell CSV and the PowerPoint deck, both of which are
+files in the folder the Folder row names — staged, rolled back and replaced on
+a later run like every other output — and **Also add to:** carries the Saved
+Plots gallery, which holds records inside the application and survives the
+output folder being moved. A single "send to" row holding both would put the
+deck on the wrong side of the only distinction a user is actually making, and
+a checkbox named for the application rather than for the artifact reads as a
+fifth entry in the **Format:** combo four rows above it, which offers png /
+svg / eps / pdf. The run summary follows the same split by verb — the run
+*writes* a deck, and *files* a record — and `_run_level_summary` keeps both out
+of the per-group bullets, since forty groups produce one deck between them.
+Both Saved-Plots-backed controls are absent rather than disabled in a build
+without that feature (`_has_saved_plots`), while the per-cell CSV is offered
+regardless, since it is not that feature's code.
+
 **The rows behind a figure** (`_cell_rows.py`). An opt-in checkbox writes the
 plot tabs' `Save cell data…` file beside each group's figure — one row per cell
 the figure was computed from, with the scope block and the marker columns.

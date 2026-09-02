@@ -110,8 +110,9 @@ def test_render_batch_export_panel(loaded_app, mode, stem):
     summary = panel._summary_lbl.text()
     assert summary.startswith("Each export group produces:"), summary
     assert "One raw per-cell CSV" in summary, summary
-    assert "Saved Plots record per figure" in summary, summary
-    assert "one PowerPoint deck for the run" in summary, summary
+    assert ("The run also writes one PowerPoint deck into this folder, a "
+            "slide per group, and files a Saved Plots record per figure."
+            in summary), summary
     if len(panel._PANELS) > 1:
         # ``_fill_axes_demo`` unticks the last panel on every stacked mode.
         kept = len(panel._PANELS) - 1

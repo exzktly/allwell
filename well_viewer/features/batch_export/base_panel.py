@@ -1190,12 +1190,7 @@ class BatchExportPanel(QWidget):
     def _build_output_tail(self, layout: QVBoxLayout) -> None:
         """AXES, the two destinations, the per-cell CSV, and the spread rows."""
         self._build_axes_rows(layout)
-        self._build_destination_rows(layout)
-        # Outside ``_build_destination_rows``, deliberately: that method returns
-        # early in a build without Saved Plots, and the per-cell CSV has nothing
-        # to do with that feature — nested inside it, the control would vanish
-        # from a profile that can perfectly well write the file.
-        self._build_cell_rows_row(layout)
+        self._build_extra_output_rows(layout)
         if self._INCLUDES_SPREAD:
             self._build_spread_settings_rows(layout)
 
@@ -1465,61 +1460,53 @@ class BatchExportPanel(QWidget):
         """The figure size for a run that kept *drawn* of this mode's panels."""
         return (width, figure_height(height, len(self._PANELS), drawn))
 
-    def _build_destination_rows(self, layout: QVBoxLayout) -> None:
-        """Where this run's figures go **besides** their own files.
+    def _build_extra_output_rows(self, layout: QVBoxLayout) -> None:
+        """The additive outputs, grouped by **where each one lands**.
 
-        Two additive switches, not a third output format: a run with both on
-        writes its PNGs and CSVs exactly as before, and also files each figure
-        in the gallery and builds one deck of them. Neither replaces the folder
-        of files, so ticking one costs the user nothing.
+        The rows were "Also send to: [Saved Plots] [PowerPoint]" and "Also
+        write: [Raw per-cell CSV]", which put the deck on the wrong side of the
+        only distinction that matters here. A deck is not somewhere a figure is
+        *sent*: ``batch_export_line.pptx`` is written into the output folder
+        the Folder row names, beside the PNGs and the summary CSV, and it is
+        subject to the same staging and the same stale-file warning as they
+        are. The gallery is the one genuine destination — a place inside the
+        application, holding records rather than files, which survives the
+        folder being moved or deleted.
 
-        Built only where Saved Plots is in the build. Both destinations are its
-        code — the gallery record, and the deck writer that turns a captured SVG
-        into PowerPoint shapes — so in a profile without that feature the
-        controls would offer something the app cannot do. Absent rather than
-        disabled: a greyed checkbox says "not now", and this is "not in this
-        build", which are different sentences and only one of them is true.
+        So: one row for what this run writes into the output folder, one for
+        what it adds to the application. The verbs in the run summary follow
+        the same split ("writes" versus "files"), because a user deciding
+        whether to tick something is really asking where it will be afterwards.
+
+        A second reason the deck belongs here: "PowerPoint" sat four rows under
+        a **Format:** combo offering png / svg / eps / pdf, where it reads as a
+        fifth format — as though ticking it exported *instead* as pptx. On this
+        row, next to another file, and named for the artifact rather than for
+        the application, it reads as the extra file it is.
         """
-        self._to_gallery_cb = None
-        self._to_deck_cb = None
-        if self._ctx.features.get("Saved Plots") is None:
-            return
+        self._build_also_write_row(layout)
+        self._build_gallery_row(layout)
 
+    def _has_saved_plots(self) -> bool:
+        """Whether the deck writer and the gallery are in this build.
+
+        Both are Saved Plots' code — the record, and the writer that turns a
+        captured SVG into PowerPoint shapes — so in a profile without that
+        feature neither control is offered. Absent rather than disabled: a
+        greyed checkbox says "not now", and this is "not in this build", which
+        are different sentences and only one of them is true.
+        """
+        return self._ctx.features.get("Saved Plots") is not None
+
+    def _build_also_write_row(self, layout: QVBoxLayout) -> None:
+        """What else this run writes into the output folder.
+
+        Both are additive: the figures and the summary CSV are written exactly
+        as before whether these are ticked or not, so ticking one costs a user
+        nothing they already had.
+        """
         row = QHBoxLayout()
         row.setContentsMargins(12, 2, 12, 2)
-        self._add_bold_label(row, "Also send to:", min_width=_FIELD_LABEL_W)
-        self._to_gallery_cb = QCheckBox("Saved Plots")
-        self._to_gallery_cb.setToolTip(
-            "File each exported figure in the Saved Plots gallery, with the "
-            "export group's own settings, so it can be restored, reordered and "
-            "included in the gallery's PDF report.\n"
-            "Records are added only if the whole run succeeds.")
-        row.addWidget(self._to_gallery_cb)
-        self._to_deck_cb = QCheckBox("PowerPoint")
-        self._to_deck_cb.setToolTip(
-            "Write one PowerPoint deck beside the figures, a slide per group, "
-            "with each figure as editable shapes rather than a picture.\n"
-            "A figure whose vector capture fails is placed as a picture and the "
-            "slide says so.")
-        row.addWidget(self._to_deck_cb)
-        row.addStretch(1)
-        layout.addLayout(row)
-
-    def _build_cell_rows_row(self, layout: QVBoxLayout) -> None:
-        """The opt-in for the raw per-cell CSV beside each figure.
-
-        Its own row rather than a third switch on "Also send to:", because it
-        is a different kind of thing: the two above choose where a figure
-        *goes*, and this chooses what else is *written* into the same output
-        folder. It is also the only one of the three that can add hundreds of
-        megabytes to a run, which is worth a row of its own to say.
-
-        Off by default. The summary CSV every mode already writes is the file
-        most runs want; this one is every cell of every well, and a user who
-        did not ask for it should not find their export ten times the size.
-        """
-        row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 6)
         self._add_bold_label(row, "Also write:", min_width=_FIELD_LABEL_W)
         self._cell_rows_cb = QCheckBox("Raw per-cell CSV")
         self._cell_rows_cb.setToolTip(
@@ -1528,6 +1515,40 @@ class BatchExportPanel(QWidget):
             "produces, with its scope block and marker columns.\n"
             "Large: one row per cell per well, not one per group.")
         row.addWidget(self._cell_rows_cb)
+        # Not inside ``_build_gallery_row``: the per-cell CSV has nothing to do
+        # with the Saved Plots feature, and nested under that check it would
+        # vanish from a profile that can perfectly well write the file.
+        self._to_deck_cb = None
+        if self._has_saved_plots():
+            self._to_deck_cb = QCheckBox("PowerPoint deck")
+            self._to_deck_cb.setToolTip(
+                "One deck in this folder — a slide per group, each figure as "
+                "editable PowerPoint shapes rather than a picture.\n"
+                "Named per mode (batch_export_line.pptx and so on), not per "
+                "run, so a later run into the same folder replaces it.\n"
+                "A figure whose vector capture fails is placed as a picture "
+                "and the slide says so.")
+            row.addWidget(self._to_deck_cb)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+    def _build_gallery_row(self, layout: QVBoxLayout) -> None:
+        """The one destination that is not a file in the output folder."""
+        self._to_gallery_cb = None
+        if not self._has_saved_plots():
+            return
+        row = QHBoxLayout()
+        row.setContentsMargins(12, 2, 12, 6)
+        self._add_bold_label(row, "Also add to:", min_width=_FIELD_LABEL_W)
+        self._to_gallery_cb = QCheckBox("Saved Plots gallery")
+        self._to_gallery_cb.setToolTip(
+            "File each exported figure in the Saved Plots gallery, with the "
+            "export group's own settings, so it can be restored, reordered and "
+            "included in the gallery's PDF report.\n"
+            "A record, not a file: it stays with the dataset rather than with "
+            "the output folder.\n"
+            "Records are added only if the whole run succeeds.")
+        row.addWidget(self._to_gallery_cb)
         row.addStretch(1)
         layout.addLayout(row)
 
@@ -1557,19 +1578,37 @@ class BatchExportPanel(QWidget):
             lines.append("  \u2022 One raw per-cell CSV\n"
                          "    one row per cell, typically far larger than the "
                          "summary CSV")
-        extra = []
-        if getattr(self, "_to_gallery_cb", None) is not None \
-                and self._to_gallery_cb.isChecked():
-            extra.append("a Saved Plots record per figure")
-        if getattr(self, "_to_deck_cb", None) is not None \
-                and self._to_deck_cb.isChecked():
-            extra.append("one PowerPoint deck for the run")
-        if extra:
+        run_level = self._run_level_summary()
+        if run_level:
             lines.append("")
-            lines.append("Also: " + ", and ".join(extra) + ".")
+            lines.append(run_level)
         lines.append("")
         lines.extend(self._summary_footnotes())
         label.setText("\n".join(line for line in lines if line is not None))
+
+    def _run_level_summary(self) -> str:
+        """The deck and the gallery, which are per **run** rather than per group.
+
+        Kept out of the "Each export group produces:" bullets because neither
+        is one of those: forty groups produce one deck between them. Split by
+        verb rather than run together, because "writes" and "files" is the
+        whole difference between the two rows that offer them — the deck lands
+        in the output folder beside the figures, and the record lands in the
+        application and stays with the dataset.
+        """
+        deck = (getattr(self, "_to_deck_cb", None) is not None
+                and self._to_deck_cb.isChecked())
+        gallery = (getattr(self, "_to_gallery_cb", None) is not None
+                   and self._to_gallery_cb.isChecked())
+        clauses = []
+        if deck:
+            clauses.append("writes one PowerPoint deck into this folder, a "
+                           "slide per group")
+        if gallery:
+            clauses.append("files a Saved Plots record per figure")
+        if not clauses:
+            return ""
+        return "The run also " + ", and ".join(clauses) + "."
 
     def _figure_summary_lines(self) -> list[str]:
         """The figure and CSV bullets, naming the panels this run will draw."""

@@ -4119,13 +4119,27 @@ data…* makes). Losing the
 files you asked for to a problem with one you merely also ticked would be the
 wrong trade.
 
-#### Sending a batch somewhere besides a folder
+#### The extra outputs, and where each one lands
 
-OUTPUT SETTINGS carries an **Also send to:** row with two switches. Both are
-additions, not alternatives: the folder of figures and CSVs is written exactly as
-before whether you tick them or not.
+Three switches sit under the AXES block, on two rows, and the rows say where
+each output ends up. **Also write:** is what goes into the output folder beside
+the figures — *Raw per-cell CSV*, and *PowerPoint deck*. **Also add to:** is the
+one thing that is not a file at all — *Saved Plots gallery*, which holds records
+inside All-Well and stays with the dataset rather than with the folder.
 
-**Saved Plots** files every exported figure in the [gallery](#saved-plots), with
+That split is worth reading before you tick anything. A deck is an ordinary
+output file: it is written into the folder the **Folder:** row names, it is
+staged and rolled back with the figures, and a later run into the same folder
+replaces it. A gallery record is not — move or delete the output folder and the
+records are still there.
+
+All three are additions, not alternatives: the folder of figures and summary
+CSVs is written exactly as before whether you tick them or not. In particular
+*PowerPoint deck* is **not** a fifth entry in the **Format:** combo — the
+figures still come out in whatever format that combo says, and the deck is one
+more file beside them.
+
+**Saved Plots gallery** files every exported figure in the [gallery](#saved-plots), with
 the export group's own settings, so you can browse, rename and reorder them,
 restore one onto its plotting tab, and include them in the gallery's PDF report.
 Restoring one re-applies the group it was exported for — its members, its
@@ -4136,7 +4150,7 @@ rather than in the saved view, so the restored figure can be laid out
 differently from the file that was exported; the gallery entry says so, and so
 does the status line when you restore it.
 
-**PowerPoint** writes one deck beside the figures — `batch_export_line.pptx`,
+**PowerPoint deck** writes one deck beside the figures — `batch_export_line.pptx`,
 `batch_export_bar.pptx`, and so on, one per mode so exporting two modes into one
 folder leaves you two decks — with a slide per group. Each figure arrives as
 **editable PowerPoint shapes** rather than a picture, exactly as in the
@@ -4144,7 +4158,7 @@ gallery's own [PowerPoint export](#saved-plots): a bar is a rectangle you can
 recolour, an axis label a text box you can retype. A figure whose vector capture
 fails is placed as a picture and its slide says so.
 
-Both destinations are filled **only if the whole run succeeds**. A run that
+Both are produced **only if the whole run succeeds**. A run that
 fails partway leaves your previous export untouched, and it leaves nothing in
 the gallery and no deck either — so what you find in the folder, in the gallery
 and in the deck always describes the same run. The status line at the end names
@@ -4166,8 +4180,9 @@ share of the run will be. It is written from the controls as they stand, not
 from a fixed description of the mode, so it changes as you work: untick two
 panels and it says "3 of 4 panels" and names them; tick **Raw per-cell CSV** and
 the extra file appears in the list with a note that it is typically far larger
-than the summary CSV; tick either destination and a closing line names the
-Saved Plots records and the deck. On the Bar and Scatter modes it also tracks
+than the summary CSV; tick the deck or the gallery and a closing line
+names them, in the same words their rows use — the run *writes* a deck into the
+folder, and *files* a record per figure. On the Bar and Scatter modes it also tracks
 the toggle that decides how many figures a group gets, so "One figure per
 selected timepoint" becomes "One figure spanning every selected timepoint" when
 you turn the spanning toggle on.

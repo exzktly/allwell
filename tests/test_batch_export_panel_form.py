@@ -63,6 +63,7 @@ class _FormStub:
     _summary_csv_line = BatchExportPanel._summary_csv_line
     _summary_footnotes = BatchExportPanel._summary_footnotes
     _wants_cell_rows = BatchExportPanel._wants_cell_rows
+    _run_level_summary = BatchExportPanel._run_level_summary
     _refresh_run_summary = BatchExportPanel._refresh_run_summary
 
     _PANELS = BatchExportPanel._PANELS
@@ -225,21 +226,43 @@ def test_the_per_cell_csv_bullet_appears_only_when_it_is_asked_for():
     assert "One raw per-cell CSV" in on._summary_lbl.text
 
 
-def test_the_destinations_are_named_only_when_they_are_ticked():
+def test_the_two_run_level_outputs_are_named_only_when_they_are_ticked():
     none = _FormStub(_spec())
     none._refresh_run_summary()
-    assert "Also:" not in none._summary_lbl.text
+    assert "The run also" not in none._summary_lbl.text
 
     gallery = _FormStub(_spec(), gallery=True)
     gallery._refresh_run_summary()
-    assert ("Also: a Saved Plots record per figure."
+    assert ("The run also files a Saved Plots record per figure."
             in gallery._summary_lbl.text)
     assert "PowerPoint" not in gallery._summary_lbl.text
 
+    deck = _FormStub(_spec(), deck=True)
+    deck._refresh_run_summary()
+    assert ("The run also writes one PowerPoint deck into this folder, a "
+            "slide per group." in deck._summary_lbl.text)
+    assert "Saved Plots" not in deck._summary_lbl.text
+
+
+def test_the_deck_and_the_gallery_are_told_apart_by_their_verbs():
+    """"Writes" is the output folder; "files" is the application.
+
+    That is the whole distinction the two rows exist to draw — the deck is a
+    file beside the figures, subject to the same folder, the same staging and
+    the same stale-file warning, and the gallery record is not. A summary that
+    ran them together under one verb would undo the row split it describes.
+    """
     both = _FormStub(_spec(), gallery=True, deck=True)
     both._refresh_run_summary()
-    assert ("Also: a Saved Plots record per figure, and one PowerPoint deck "
-            "for the run." in both._summary_lbl.text)
+    text = both._summary_lbl.text
+    assert ("The run also writes one PowerPoint deck into this folder, a "
+            "slide per group, and files a Saved Plots record per figure."
+            in text)
+    # And neither is a bullet under "Each export group produces:", because
+    # forty groups produce one deck between them.
+    bullets = [ln for ln in text.splitlines() if ln.startswith("  \u2022")]
+    assert not any("PowerPoint" in ln or "Saved Plots" in ln
+                   for ln in bullets), bullets
 
 
 def test_the_summary_says_where_groups_come_from():

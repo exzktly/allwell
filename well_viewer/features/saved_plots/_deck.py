@@ -381,12 +381,6 @@ def _place_vector(slide: Slide, svg_bytes: bytes, *, figure_w: float,
     return ""
 
 
-#: The translucent plate behind an overlay label, in DrawingML's
-#: hundred-thousandths — the ``(0, 0, 0, 140)`` the burned-in label draws.
-_PLATE_ALPHA = int(round(140 / 255 * 100_000))
-_PLATE_COLOR = "000000"
-
-
 class _GridFit:
     """Maps a frame plan's inches onto the slide's body box.
 
@@ -430,7 +424,11 @@ def _text_mark_xml(slide: Slide, mark, fit: _GridFit) -> str:
         mark.text, slide.ids, x=x, y=y, cx=cx, cy=cy,
         color=_hex(mark.color), size_pt=fit.points(mark.size_pt),
         bold=bool(mark.bold), align=mark.align, anchor=mark.anchor,
-        plate=_PLATE_COLOR if mark.plate else "", plate_alpha=_PLATE_ALPHA,
+        # The plate's colour and opacity come from the mark: a label's is a
+        # translucent dark backing and a facet group strip's is a solid pale
+        # band, and one constant here would have to be wrong for one of them.
+        plate=mark.plate_color if mark.plate else "",
+        plate_alpha=mark.plate_alpha,
         vertical=bool(mark.vertical), name=mark.name)
 
 
@@ -441,10 +439,11 @@ def _frame_xml(slide: Slide, frame, fit: _GridFit) -> str:
     unit — and ungroups, in one click, into the picture and the text a user came
     here to edit.
 
-    ``""`` for a frame with nothing in it at all. A frame that has *marks* but no
-    picture still gets its group: its labels and its place are known, and
-    dropping it outright would close the gap in the grid and leave nothing to
-    say a field is missing.
+    ``""`` only for a frame carrying nothing at all, which the collector no
+    longer produces: a field whose picture could not be read is given the
+    figure's own ``(no image)`` placeholder, so it keeps its group, its place
+    and its labels. Dropping it would close the gap in the grid and leave
+    nothing to say a field is missing.
     """
     body = []
     x, y, cx, cy = fit.box(frame.rect)
@@ -536,8 +535,8 @@ def build_image_grid_deck(grid: FramedGrid, out_path: str | Path, *,
     missing = sum(1 for f in grid.frames if not f.png)
     if missing:
         _note(slide, f"{missing} field{'' if missing == 1 else 's'} could not be "
-                     "read and are placed as an empty frame carrying only their "
-                     "labels.", figure_w=figure_w)
+                     "read; each keeps its place and its labels and is marked "
+                     "\u201c(no image)\u201d.", figure_w=figure_w)
     builder.write(out_path)
     return sum(1 for f in grid.frames if f.png)
 
@@ -619,6 +618,12 @@ def _try_frames(slide: Slide, rec, frames_path_for, *, figure_w: float,
     except FramedGridError as exc:
         _logger.debug("saved_plots: frame plan unreadable: %s", exc)
         return False
+    if not grid.has_pictures:
+        # Every field failed to encode. The flat snapshot is what the user
+        # actually saw, so placing a page of empty boxes and calling it editable
+        # would trade a picture of their grid for a picture of nothing.
+        _logger.debug("saved_plots: frame plan holds no field pictures")
+        return False
     if not _place_frames(slide, grid, figure_w=figure_w):
         return False
     result.vector += 1
@@ -630,8 +635,8 @@ def _try_frames(slide: Slide, rec, frames_path_for, *, figure_w: float,
         # is otherwise indistinguishable from a field that was genuinely blank.
         _note(slide, f"{missing} field"
                      f"{'' if missing == 1 else 's'} on this slide could not be "
-                     "read and are placed as an empty frame carrying only their "
-                     "labels.", figure_w=figure_w)
+                     "read; each keeps its place and its labels and is marked "
+                     "\u201c(no image)\u201d.", figure_w=figure_w)
     return True
 
 

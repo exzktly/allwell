@@ -321,7 +321,7 @@ def _cell_title(ctx, cell, overlay_chans) -> str:
 
 
 def _record_frame(frames, ctx, *, cell, slot, clean, chrome, overlay_chans,
-                  cell_max_px: int | None, title: str) -> None:
+                  cell_max_px: int | None, title: str, title_pt: float) -> None:
     """Note one cell in the frame plan the PowerPoint export draws from.
 
     *clean* is the cell's RGB **before** ``apply_cell_chrome`` burned the scale
@@ -339,7 +339,8 @@ def _record_frame(frames, ctx, *, cell, slot, clean, chrome, overlay_chans,
         slot, name=cell_identity_label(ctx, cell, overlay_chans) or "Field",
         rgb=clean, png_rgb=png_rgb, chrome=chrome,
         mark=uncorrected_mark_kwargs(ctx, cell, overlay_chans),
-        title=title, title_h_in=TITLE_STRIP_IN if title else 0.0)
+        title=title, title_pt=title_pt,
+        title_h_in=TITLE_STRIP_IN if title else 0.0)
 
 
 def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None,
@@ -557,7 +558,8 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None,
                 _record_frame(frames, ctx, cell=cell, slot=slot_of(r, c),
                               clean=clean, chrome=chrome,
                               overlay_chans=overlay_chans,
-                              cell_max_px=cell_max_px, title=title)
+                              cell_max_px=cell_max_px, title=title,
+                              title_pt=title_fontsize)
             ax.set_xticks([])
             ax.set_yticks([])
             for spine in ax.spines.values():
@@ -644,7 +646,7 @@ def image_table_export_pptx(ctx) -> None:
     # would write a deck of empty boxes and report it as a success. Nothing to
     # place is nothing to export, and it is said before the file dialog rather
     # than after a file has been written.
-    if grid.is_empty or not any(f.png for f in grid.frames):
+    if grid.is_empty or not grid.has_pictures:
         ctx.notify.set_status("Image Table: nothing to export to PowerPoint.")
         return
 

@@ -3602,7 +3602,7 @@ channel for every well).
   number you see is the number you are changing. A channel with no spot-count
   column has no count cutoff, so it keeps editing its ON threshold whatever the
   Property says · **Save ▾** (to file ·
-  Copy PNG / SVG · to PowerPoint · Save to Saved Plots) · **zoom** (− · the current % · +; click the
+  to PowerPoint · Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
   % to reset to 100) · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
   plus the **Scale bar** and **Cell labels** options below.
@@ -3637,7 +3637,10 @@ channel for every well).
   left out of the slide exactly as it is left out of the picture, because a bar
   shortened to fit would state a distance nobody measured. The same slide comes
   out of **Saved Plots → Export ▾ → PowerPoint deck** for a grid saved to the
-  gallery.
+  gallery. A field the app could not read keeps its place and its labels and is
+  marked *(no image)*, and the slide says how many; if *no* field could be read
+  there is nothing to lay out, and the gallery deck falls back to the flat
+  picture rather than giving you a page of empty boxes.
 - **Exported layout** — the other ways out of the table (**Export to File…**, **Copy PNG**,
   **Copy SVG**, **Save to Saved Plots**) reproduce the grid as you see it: the row and
   column axis labels, the vertical group strips, the corner label, and the extra
@@ -3647,7 +3650,11 @@ channel for every well).
   them repeated above each image as well.
 - **Save to Saved Plots quality** — a per-cell/whole-grid resolution preset (**Draft**,
   **Standard**, **High**), picked either from the Export dropdown's quick-pick submenu
-  or the Export settings dialog. Save to Saved Plots pre-shrinks each cell and caps the
+  or the Export settings dialog. It also sets how large each field's own picture is
+  inside the saved grid's PowerPoint frames — a saved grid keeps one image per
+  field, so it takes noticeably more room in the dataset folder than the single
+  snapshot did, and this preset is the control over that. Save to Saved Plots
+  pre-shrinks each cell and caps the
   assembled grid's longest side before saving (Export to File / Copy PNG / Copy SVG
   always render full resolution), so a large grid saves faster at the cost of per-cell
   detail; raise it to **High** when the saved image needs to hold up in a full-page PDF

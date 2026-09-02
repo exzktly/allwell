@@ -29,22 +29,27 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+import theme
 from well_viewer.domain.image_frames import (
     BarMark, FramedGrid, ImageFrame, Rect, TextMark,
 )
 from well_viewer.features.image_browser.image_table import renderer as _renderer
 from well_viewer.features.image_browser.image_table.image_compose import (
-    _chrome_rgb, bar_ink_rgb, bar_rect_px, label_font_px_for, label_margin_px,
+    _chrome_rgb, bar_ink_rgb, bar_rect_px, chrome_fits, label_font_px_for,
+    label_margin_px,
 )
 
 logger = logging.getLogger(__name__)
 
 _PT_PER_IN = 72.0
 
-#: Mean glyph advance as a fraction of the font size — the same approximation
-#: ``_drawingml`` uses to size a text frame. Only the *box* depends on it; the
-#: run's own alignment does the positioning, so a box a few percent wide still
-#: puts the label on its corner.
+#: Mean glyph advance as a fraction of the font size. An independent estimate,
+#: not a shared constant — ``_drawingml`` has its own for sizing a text frame,
+#: and this module may not import it (Saved Plots is removable). Nothing holds
+#: the two equal and nothing needs to: only the *box* depends on this, and the
+#: run's own alignment does the positioning, so a box a few percent out still
+#: puts the label on its corner. What it does size exactly is the translucent
+#: plate, which is why it is estimated at all rather than left to autofit.
 _ADVANCE_FRACTION = 0.62
 
 #: How much taller than the font a single-line label's box is.
@@ -55,6 +60,28 @@ _LINE_FRACTION = 1.35
 #: hundred-thousandths.
 PLATE_COLOR = "000000"
 PLATE_ALPHA = int(round(140 / 255 * 100_000))
+
+#: Inches reserved for a per-axes title when the caller records one without
+#: saying how tall it is. Only a fallback — ``export.TITLE_STRIP_IN`` is the
+#: number the figure and the plan actually share.
+_TITLE_STRIP_IN = 0.2
+
+#: What a cell the figure could not render draws, so the frame says the same.
+_NO_IMAGE = "(no image)"
+
+
+def _token(color: str) -> str:
+    """A theme colour as the six bare hex digits a mark carries."""
+    return str(color or "").lstrip("#").upper()
+
+
+#: The exported figure's own ink, taken from the tokens rather than restated:
+#: a title is `axes.titlecolor` in publication mode and a placeholder is the
+#: colour the figure writes "(no image)" in. A literal here is a second copy of
+#: a token that then drifts (CLAUDE.md §5).
+_TITLE_COLOR = _token(theme.CPub.text)
+_PLACEHOLDER_COLOR = _token(theme.CPub.placeholder)
+_BAND_COLOR = _token(theme.CPub.band_face)
 
 
 def _hex(rgb) -> str:
@@ -77,6 +104,52 @@ def _fit(aspect: float, x: float, y: float, w: float, h: float) -> Rect:
     else:
         used_h, used_w = h, h * aspect
     return Rect(x + (w - used_w) / 2.0, y + (h - used_h) / 2.0, used_w, used_h)
+
+
+def _title_mark(cell: _Cell, image: Rect) -> TextMark:
+    """The per-axes title, in the room the figure leaves above the picture.
+
+    Enlarging the cell by :data:`export.TITLE_STRIP_IN` does not put that whole
+    strip above the picture: ``imshow(aspect="equal")`` centres the axes in the
+    taller slot, so the room above is what is left between the picture's top
+    edge and the top of the grid — measured at half the strip for a square
+    field. Reserving the full strip put the title off the top of the page, on a
+    plan that was internally consistent and therefore read as correct.
+
+    The size is the figure's own ``title_fontsize`` rather than derived from
+    that room, so the two surfaces render the same words at the same size.
+
+    A picture with nothing above it (one that fills its slot's height exactly)
+    gets its title across the top of the picture instead of losing it — a title
+    that silently disappears from some rows is the shortfall this codebase keeps
+    being bitten by.
+    """
+    strip = max(cell.title_h_in, 0.0) or _TITLE_STRIP_IN
+    top = max(0.0, image.y - strip)
+    room = image.y - top
+    rect = (Rect(image.x, top, image.w, room) if room > 1e-6
+            else Rect(image.x, image.y, image.w, min(strip, image.h)))
+    return TextMark(
+        text=cell.title, rect=rect, size_pt=max(1.0, float(cell.title_pt)),
+        color=_TITLE_COLOR, align="ctr", anchor="b", name="Field title")
+
+
+def _union(image: Rect, marks) -> Rect:
+    """The box enclosing the picture and every mark placed beside it.
+
+    The frame's rectangle becomes the PowerPoint group's own extent, so a mark
+    outside it — a per-axes title, which sits *above* the picture — would be
+    drawn but left out of the group's bounding box, its selection rectangle and
+    its resize scaling.
+    """
+    x0, y0 = image.x, image.y
+    x1, y1 = image.x + image.w, image.y + image.h
+    for mark in marks:
+        x0 = min(x0, mark.rect.x)
+        y0 = min(y0, mark.rect.y)
+        x1 = max(x1, mark.rect.x + mark.rect.w)
+        y1 = max(y1, mark.rect.y + mark.rect.h)
+    return Rect(x0, y0, x1 - x0, y1 - y0)
 
 
 def _slot_rect(gs, key, fig) -> Rect | None:
@@ -135,16 +208,22 @@ def _label_mark(chrome: dict, *, image: Rect, px_w: int, px_h: int,
     text_w = _ADVANCE_FRACTION * size_in * len(text) + 2 * pad_in
     text_h = size_in * _LINE_FRACTION + 2 * pad_in
     corner = str(chrome.get("label_corner") or "tl").strip().lower()
+    # Clamped into the field, the way ``draw_cell_chrome``'s ``max(0, …)`` /
+    # ``min(W, …)`` clamp the burned-in box. A long well label at a right-hand
+    # corner is offset left by its own estimated width, which without this puts
+    # the text outside the picture it names and outside the group around it.
+    text_w = min(text_w, image.w)
+    text_h = min(text_h, image.h)
     if corner in ("tr", "br"):
-        x = image.x + image.w - margin_in - text_w
+        x = max(image.x, image.x + image.w - margin_in - text_w)
         align = "r"
     else:
-        x = image.x + margin_in
+        x = min(image.x + margin_in, image.x + image.w - text_w)
         align = "l"
     if corner in ("bl", "br"):
-        y = image.y + image.h - margin_in - text_h
+        y = max(image.y, image.y + image.h - margin_in - text_h)
     else:
-        y = image.y + margin_in
+        y = min(image.y + margin_in, image.y + image.h - text_h)
     return TextMark(
         text=text, rect=Rect(x, y, text_w, text_h),
         size_pt=max(1.0, size_in * _PT_PER_IN),
@@ -191,6 +270,7 @@ class _Cell:
     chrome: dict | None
     mark: dict | None
     title: str
+    title_pt: float
     title_h_in: float
 
 
@@ -211,7 +291,7 @@ class FrameCollector:
 
     def record(self, slot, *, name: str, rgb, chrome: dict | None,
                mark: dict | None, png_rgb=None, title: str = "",
-               title_h_in: float = 0.0) -> None:
+               title_pt: float = 7.0, title_h_in: float = 0.0) -> None:
         """Note one cell: its gridspec slot, its pixels, and its overlays.
 
         *rgb* is the cell at source resolution and **before**
@@ -233,6 +313,7 @@ class FrameCollector:
         self._cells.append(_Cell(slot=slot, name=name, rgb=rgb,
                                  png_rgb=rgb if png_rgb is None else png_rgb,
                                  chrome=chrome, mark=mark, title=str(title or ""),
+                                 title_pt=float(title_pt),
                                  title_h_in=float(title_h_in)))
 
     def finish(self, fig, gs, plan) -> FramedGrid:
@@ -264,27 +345,30 @@ class FrameCollector:
         if slot is None:
             return None
         texts: list[TextMark] = []
-        body = slot
-        if cell.title and cell.title_h_in > 0:
-            # The per-axes title sits in the strip the cell height reserves for
-            # it, and the picture takes what is left — the same split the figure
-            # makes, so the two surfaces stack the same way.
-            strip = min(cell.title_h_in, slot.h)
-            texts.append(TextMark(
-                text=cell.title, rect=Rect(slot.x, slot.y, slot.w, strip),
-                size_pt=max(1.0, strip / _LINE_FRACTION * _PT_PER_IN),
-                color="1A1D24", align="ctr", anchor="ctr", name="Field title"))
-            body = Rect(slot.x, slot.y + strip, slot.w, slot.h - strip)
-
         px_h, px_w = _pixel_size(cell.rgb)
+        # ``imshow(aspect="equal")`` centres the axes in the **whole** slot, and
+        # ``set_title`` then draws above that axes rather than taking a strip
+        # out of the slot first. Measured against the figure: carving the strip
+        # out first put every picture 0.1 in low and the title box 0.1 in high
+        # of where the figure drew them, on a plan that was internally
+        # consistent and therefore looked right.
         if px_w and px_h:
-            image = _fit(px_w / px_h, body.x, body.y, body.w, body.h)
+            image = _fit(px_w / px_h, slot.x, slot.y, slot.w, slot.h)
         else:
-            image = body
+            image = slot
+        if cell.title:
+            texts.append(_title_mark(cell, image))
         bars: list[BarMark] = []
+        # ``chrome_fits`` is the same predicate ``draw_cell_chrome`` returns
+        # early on. Without it a field the picture could take no chrome into —
+        # a 200x3 crop, an array that is not three-channel — would get its label
+        # and its bar as shapes anyway, so the deck would show a scale the
+        # picture refused and the status line reported as refused. A wrong
+        # number on a slide, indistinguishable from a right one (CLAUDE.md §7).
+        marked = chrome_fits(cell.rgb)
         for chrome, name in ((cell.chrome, "Field label"),
                              (cell.mark, "Uncorrected mark")):
-            if not chrome:
+            if not chrome or not marked:
                 continue
             label = _label_mark(chrome, image=image, px_w=px_w, px_h=px_h,
                                 name=name)
@@ -293,9 +377,20 @@ class FrameCollector:
             bar = _bar_mark(chrome, cell.rgb, image=image, px_w=px_w, px_h=px_h)
             if bar is not None:
                 bars.append(bar)
-        return ImageFrame(name=cell.name or "Field", rect=image,
-                          png=_encode_png(cell.png_rgb), texts=tuple(texts),
-                          bars=tuple(bars))
+        png = _encode_png(cell.png_rgb)
+        if not png:
+            # The same placeholder the figure draws into a cell it could not
+            # render. Without it a field with nothing to say produced no shapes
+            # at all and was dropped from the slide, leaving a hole where the
+            # grid has a cell — while both "missing field" notes claimed such
+            # fields are placed carrying their labels.
+            texts.append(TextMark(
+                text=_NO_IMAGE, rect=image,
+                size_pt=max(1.0, min(image.h, image.w) * 0.12 * _PT_PER_IN),
+                color=_PLACEHOLDER_COLOR, align="ctr", anchor="ctr",
+                name="No image"))
+        return ImageFrame(name=cell.name or "Field", rect=_union(image, texts),
+                          png=png, texts=tuple(texts), bars=tuple(bars))
 
     # ── the axis labels around the fields ────────────────────────────────────
     @staticmethod
@@ -308,10 +403,17 @@ class FrameCollector:
                 continue
             marks.append(TextMark(
                 text=spec.text, rect=rect, size_pt=max(1.0, float(spec.pt)),
-                color=str(spec.color).lstrip("#").upper(),
+                color=_token(spec.color),
                 align="ctr", anchor="b" if spec.va == "bottom" else "ctr",
                 bold=spec.weight != "normal", vertical=bool(spec.rotation),
-                name="Axis label"))
+                # A group strip is drawn on a filled band in the figure, and
+                # ``FacetLabel.band`` exists so both surfaces read one
+                # description of the label hierarchy. Carried, not dropped —
+                # dropping it is the exact drift the descriptor was added to
+                # prevent, and it flattened the grouping the band expresses.
+                plate=bool(spec.band), plate_color=_BAND_COLOR,
+                plate_alpha=100_000,
+                name="Group band" if spec.band else "Axis label"))
         return tuple(marks)
 
 

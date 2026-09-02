@@ -554,20 +554,18 @@ def scale_bar_refusal_report(ctx) -> list[str]:
                    if key and key[0]})
 
 
-def can_carry_bar(rgb, bar_px: int) -> bool:
-    """Will a *bar_px* bar actually be drawn into *rgb*?
+def chrome_fits(rgb) -> bool:
+    """Can :func:`draw_cell_chrome` burn **anything** into *rgb*?
 
-    :func:`bar_fits` answers the length question; this answers the whole one, by
-    also applying the array guards :func:`draw_cell_chrome` returns early on — an
-    array that is not 3-channel, and one under 4 px on a side. A 200x3 crop
-    passes the length test and draws nothing, which is the silent hole this whole
-    change exists to close, reopened one guard along.
-
-    Comparing the array before and after is not the alternative: an identity
-    label is burned in by the same call, so a labelled cell's array changes
-    whether or not its bar was drawn.
+    The array guards it returns early on, in one place: an array that is not at
+    least three-channel, and one under 4 px on a side. Separated out because
+    three callers need the same answer and had drifted to two of them —
+    :func:`draw_cell_chrome` itself, :func:`can_carry_bar` (which reports the
+    refusal), and the PowerPoint export's frame plan, which places the same
+    marks as shapes and must place *none* where the picture drew none. A 200x3
+    crop is the case: it passes every length test and takes no chrome at all.
     """
-    if rgb is None or int(bar_px) <= 0:
+    if rgb is None:
         return False
     try:
         if rgb.ndim != 3 or rgb.shape[2] < 3:
@@ -575,7 +573,25 @@ def can_carry_bar(rgb, bar_px: int) -> bool:
         h, w = rgb.shape[:2]
     except (AttributeError, IndexError, ValueError):
         return False
-    return h >= 4 and w >= 4 and bar_fits(w, h, bar_px)
+    return h >= 4 and w >= 4
+
+
+def can_carry_bar(rgb, bar_px: int) -> bool:
+    """Will a *bar_px* bar actually be drawn into *rgb*?
+
+    :func:`bar_fits` answers the length question; this answers the whole one, by
+    also applying :func:`chrome_fits`. A 200x3 crop passes the length test and
+    draws nothing, which is the silent hole this whole change exists to close,
+    reopened one guard along.
+
+    Comparing the array before and after is not the alternative: an identity
+    label is burned in by the same call, so a labelled cell's array changes
+    whether or not its bar was drawn.
+    """
+    if int(bar_px) <= 0 or not chrome_fits(rgb):
+        return False
+    h, w = rgb.shape[:2]
+    return bar_fits(w, h, bar_px)
 
 
 def scale_bar_refusal_clause(ctx) -> str:
@@ -1108,11 +1124,9 @@ def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
     if rgb is None or (not bar_px and not label_text):
         return rgb
     a = _np.array(rgb, dtype=_np.uint8, copy=True)
-    if a.ndim != 3 or a.shape[2] < 3:
+    if not chrome_fits(a):
         return rgb
     H, W = a.shape[:2]
-    if H < 4 or W < 4:
-        return rgb
 
     # Scale bar — a filled rectangle with a contrasting halo for legibility.
     # A bar too long for the image is REFUSED, never shortened to fit: see

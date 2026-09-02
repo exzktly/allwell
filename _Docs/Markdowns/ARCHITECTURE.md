@@ -2162,16 +2162,59 @@ happening there. Two rules hold it to the picture beside it:
   `bar_ink_rgb`, `bar_thickness_for`, `label_font_px_for` and `label_margin_px`
   are extracted out of `draw_cell_chrome` and used by both surfaces, so the
   deck's rectangle is the same bar at the same length in the same tone. That
-  includes the refusal: a bar too long for its field is not drawn in the deck
-  either, because a bar shortened to fit states a physical scale nobody measured
-  and looks exactly like a correct one. The facet labels come from one
-  `renderer.facet_label_specs` descriptor list that the matplotlib figure and the
-  frame plan both read.
+  includes both halves of the refusal: `bar_fits` for a bar longer than its
+  field, and `chrome_fits` — the array guards `draw_cell_chrome` returns early
+  on — for a field that can take no chrome at all, such as a 200×3 crop. Gating
+  on the length alone put a rectangle on a slide as a 25 µm scale that the
+  picture had refused and the status line had reported as refused. A bar
+  shortened or invented states a physical scale nobody measured and looks
+  exactly like a correct one. The facet labels come from one
+  `renderer.facet_label_specs` descriptor list that the matplotlib figure and
+  the frame plan both read, `FacetLabel.band` included — a group strip keeps the
+  filled band the figure draws it on.
 
-The marks are measured against the **source** array and the picture is pooled to
-`export.FRAME_MAX_PX` (900 px on the longest side, ≈350 dpi over a 2.6 in field)
-before it goes into the zip. Measuring against the pooled copy would pick up its
-rounding and give the bar a different length in the deck than in the figure.
+**A per-axes title goes in the room the figure leaves, not in the strip the cell
+reserves.** Turning `show_titles` on grows each cell by `export.TITLE_STRIP_IN`,
+but `imshow(aspect="equal")` then centres the axes in the taller slot, so only
+about half that strip ends up above the picture. Carving the whole strip out of
+the slot first is internally consistent — and put every picture 0.1 in below
+where the figure drew it, which is why the test for this measures the plan
+against the axes matplotlib actually drew rather than against the slot they
+share. A frame's own rectangle is the union of its picture and its marks,
+because that rectangle becomes the PowerPoint group's extent and a title outside
+it would be drawn but left out of the group's box.
+
+**Everything read back off disk is validated at the boundary.**
+`image_frames.from_bytes` refuses a malformed plan with `FramedGridError`
+rather than half-reading it, and that now includes a colour that is not six hex
+digits and a size that is not a positive number. Both were reaching consumers
+that assume well-formed input: `_deck._hex` raises by design, since every colour
+it was written for is a theme token, so one bad colour aborted the whole
+gallery's deck; and a width that coerced to `0.0` made `_GridFit` scale every
+rectangle by five million and put the shapes off the slide with nothing said.
+`_try_frames` catches only `FramedGridError`, so the refusal is what makes the
+documented fallback — place the picture, keep the rest of the deck — actually
+happen.
+
+The marks are measured against the **source** array and the picture is pooled
+before it goes into the zip — to the smaller of the caller's own per-cell cap and
+`export.FRAME_MAX_PX` (900 px on the longest side, ≈350 dpi over a 2.6 in field).
+The gallery route passes the Save-quality preset, so in practice a saved grid's
+fields are 280, 480 or 800 px and 900 is the direct-export figure. Measuring the
+marks against the pooled copy would pick up its rounding and give the bar a
+different length in the deck than in the figure.
+
+A field's picture is stored per field, so a saved grid's `frames.zip` is
+materially larger than the single snapshot beside it — roughly the cell count
+times a pooled PNG. That is the cost of the fields being separable at all, and
+the Save-quality preset is the control over it.
+
+Both routes decline a plan in which **no field carries a picture**
+(`FramedGrid.has_pictures`): the flat snapshot is what the user actually saw, so
+placing a page of labelled blanks and reporting it as editable trades a picture
+of their grid for a picture of nothing. A grid where only *some* fields failed
+still goes through as frames — each of those keeps its place and its labels and
+carries the figure's own `(no image)` placeholder, and the slide says how many.
 
 `DeckResult.framed` counts these apart from the rest of `vector`, and the status
 line says "N image grids as one group per field" rather than folding them into

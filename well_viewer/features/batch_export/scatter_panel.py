@@ -104,6 +104,14 @@ class ScatterBatchExportPanel(BatchExportPanel):
     #: they are all the same plot of the same two columns, so they take one
     #: range and one scale between them rather than a row of controls each.
     _PANELS = (Panel("plot", "Plot"),)
+    _X_ROW_LABEL = "X range:"
+    _Y_ROW_LABEL = "Y range:"
+    _AXES_FOLLOW_HEADER = False
+    #: This mode's own ``X log`` / ``Y log`` checkboxes below apply
+    #: ``log10(v + 1)`` so cells at zero stay on the figure, which the generic
+    #: combo's plain log would drop. One control per axis, and the one kept is
+    #: the one that is not lossy.
+    _AXES_SCALE_OFFERED = False
     _SHARE_X = ()
     #: One panel, so the X row governs it. ``None`` rather than naming the key,
     #: so a mode that renames its panel does not silently stop taking X.
@@ -197,6 +205,12 @@ class ScatterBatchExportPanel(BatchExportPanel):
             )
             self._init_scatter_agg_axes()
 
+        # After the two axis rows: the AXES block's "X:" is a range on the
+        # channel those rows just chose, and above them the panel showed two
+        # rows called "X:" that meant different things. See
+        # ``_AXES_FOLLOW_HEADER``.
+        self._build_output_tail(layout)
+
         self._build_timepoints_section(layout)
         self._init_timepoint_dropdown()
 
@@ -214,15 +228,24 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
         layout.addWidget(build_hline_separator(None))
 
-        info = QLabel(
-            "Each group \u00d7 timepoint produces one scatter figure and one CSV.\n"
-            "Groups are selected with the same Batch Export group picker."
-        )
-        info.setWordWrap(True)
-        info.setContentsMargins(12, 4, 12, 4)
-        layout.addWidget(info)
-
+        self._build_summary_label(layout)
         self._build_run_row(layout, button_text="\u25b6  Run Scatter Batch Export")
+
+    # \u2500\u2500 the run summary \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    _SUMMARY_FIGURE_NOTE = ""
+    _SUMMARY_CSV_LINE = "One CSV of the points it drew"
+
+    def _summary_figure_lead(self) -> str:
+        """The split toggle decides how many figures a group gets."""
+        if self._scatter_split_tp_cb.isChecked():
+            return "One scatter figure per selected timepoint"
+        return "One scatter figure spanning every selected timepoint"
+
+    def _extra_summary_signals(self) -> list:
+        return [self._scatter_split_tp_cb.toggled]
+
+    def _summary_footnotes(self) -> list[str]:
+        return ["Groups are selected with the same Batch Export group picker."]
 
     def _build_scatter_display_options(self, layout: QVBoxLayout) -> None:
         """Display-option controls mirroring the on-tab Scatter plot.
@@ -529,7 +552,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         )
 
     def _run_batch(self) -> None:
-        if self._panels_were_all_unticked():
+        if self._axes_block_refuses_the_run():
             return
         groups_with_data = _groups_with_loaded_wells(
             self._groups_for_export(), self._ctx.state.dataset.well_paths,

@@ -51,14 +51,20 @@ def _fill_axes_demo(panel):
     values are the ones the README uses as its example, so the picture and the
     prose agree.
     """
-    panel._x_min_edit.setText("0")
-    panel._x_max_edit.setText("48")
+    # The X row is absent where the mode's x is categorical (the bar stack),
+    # and the scale combos are absent where the mode owns a lossless log of
+    # its own (the scatter modes). Both are deliberate, so the shot fills what
+    # the mode offers rather than asserting every mode offers everything.
+    if panel._x_min_edit is not None:
+        panel._x_min_edit.setText("0")
+        panel._x_max_edit.setText("48")
     rows = panel._panel_rows
     first = next(iter(rows))
     box, lo, hi, scale = rows[first]
     lo.setText("0")
     hi.setText("2500")
-    scale.setCurrentIndex(2)          # Log
+    if scale is not None:
+        scale.setCurrentIndex(2)      # Log
     if len(rows) > 1:
         keys = list(rows)
         # Untick the last panel, so the shot shows a mode with one dropped.
@@ -94,6 +100,23 @@ def test_render_batch_export_panel(loaded_app, mode, stem):
     target.adjustSize()
     target.layout().activate()
     QApplication.processEvents()
+
+    # The one assertion this slow-lane file makes about behaviour rather than
+    # about a file existing: the run summary is derived, and the fast lane
+    # drives it through a stub. Here it is the real panel, built by the real
+    # constructor, with the real controls ticked by ``_fill_axes_demo`` — so a
+    # summary that never got wired, or one wired to a control this mode does
+    # not build, shows up as an empty or stale block.
+    summary = panel._summary_lbl.text()
+    assert summary.startswith("Each export group produces:"), summary
+    assert "One raw per-cell CSV" in summary, summary
+    assert "Saved Plots record per figure" in summary, summary
+    assert "one PowerPoint deck for the run" in summary, summary
+    if len(panel._PANELS) > 1:
+        # ``_fill_axes_demo`` unticks the last panel on every stacked mode.
+        kept = len(panel._PANELS) - 1
+        assert f"{kept} of {len(panel._PANELS)} panels" in summary, summary
+        assert panel._PANELS[-1].label not in summary, summary
 
     SHOT_DIR.mkdir(parents=True, exist_ok=True)
     out = SHOT_DIR / f"{stem}.png"

@@ -180,6 +180,16 @@ _LineAxes = _lazy("well_viewer.features.lineplot.controller", "LineAxes")
 # single column (Folder / Format / Style Preset / Channel / Fold change).
 _FIELD_LABEL_W = 108
 
+#: What a ``QCheckBox``'s indicator and its gap to the text take, on top of the
+#: text itself. Qt does not offer this as a metric that is right across styles,
+#: so it is a measured constant rather than a computed one — generous by a few
+#: pixels, because the cost of being short is a clipped panel name.
+_CHECKBOX_INDICATOR_W = 26
+
+#: Slack between the widest label and the first field, so the column does not
+#: read as two words jammed together.
+_LABEL_PADDING_W = 12
+
 
 def _norm_well_token(tok: str) -> str:
     """Canonicalise a well token (``a1`` → ``A01``) for membership tests.
@@ -654,21 +664,7 @@ class BatchExportPanel(QWidget):
 
         layout.addWidget(build_hline_separator(None))
 
-        info = QLabel(
-            "Each export group produces:\n"
-            "  \u2022 One figure with one line per group member\n"
-            "    (ReplicateSet = mean of its wells, Solo well = raw)\n"
-            "  \u2022 One CSV with per-member time-series data\n\n"
-            + ("Groups come from Home → Sample Map → Replicates.\n"
-               if self._use_sidebar_groups
-               else "Groups are defined in the left panel.\n")
-            + "No statistics are computed across group members.\n"
-              "SD/SEM is only computed within a ReplicateSet."
-        )
-        info.setWordWrap(True)
-        info.setContentsMargins(12, 4, 12, 4)
-        layout.addWidget(info)
-
+        self._build_summary_label(layout)
         self._build_run_row(layout)
         layout.addStretch(1)
 
@@ -1176,6 +1172,23 @@ class BatchExportPanel(QWidget):
         layout.addLayout(fmt_row)
 
         self._build_export_profile_row(layout)
+        if self._AXES_FOLLOW_HEADER:
+            self._build_output_tail(layout)
+
+    #: Whether the AXES block and the "Also …" rows go straight under Format,
+    #: or wait for the mode to place them.
+    #:
+    #: False on the modes whose *axes are a choice* — Scatter picks a channel
+    #: per axis, Response picks the dose variable — because there the AXES
+    #: block above those rows asks for a range on an axis the user has not
+    #: chosen yet, and Scatter ends up with two rows labelled "X:" a hundred
+    #: pixels apart meaning different things. Those modes call
+    #: :meth:`_build_output_tail` themselves, after the rows that say what the
+    #: axes are.
+    _AXES_FOLLOW_HEADER = True
+
+    def _build_output_tail(self, layout: QVBoxLayout) -> None:
+        """AXES, the two destinations, the per-cell CSV, and the spread rows."""
         self._build_axes_rows(layout)
         self._build_destination_rows(layout)
         # Outside ``_build_destination_rows``, deliberately: that method returns
@@ -1202,24 +1215,81 @@ class BatchExportPanel(QWidget):
         hdr = QHBoxLayout()
         hdr.setContentsMargins(12, 6, 12, 2)
         self._add_bold_label(hdr, "AXES")
-        hint = QLabel("blank = auto")
+        # Not "blank = auto", which is what this said and is not what happens:
+        # an unfilled field falls through to whatever the app-wide Export Style
+        # sidebar holds, and that may itself be a hard limit somebody set on a
+        # different plot on a different day. A user who read "auto" and left the
+        # fields empty got a folder of figures clipped to it, with nothing
+        # saying so.
+        hint = QLabel("blank = as the Export Style sidebar has it")
         hint.setEnabled(False)
         hdr.addWidget(hint)
         hdr.addStretch(1)
         layout.addLayout(hdr)
 
+        # Column headers. Four unlabelled columns of numbers read as three
+        # numbers and a word once they are filled, because the ``min`` / ``max``
+        # placeholders disappear exactly when the block gets hard to scan.
+        head = QHBoxLayout()
+        head.setContentsMargins(12, 0, 12, 0)
+        spacer = QLabel("")
+        spacer.setFixedWidth(self._axes_label_w())
+        head.addWidget(spacer)
+        columns = [("min", _LIMIT_EDIT_W), ("max", _LIMIT_EDIT_W)]
+        if self._AXES_SCALE_OFFERED:
+            columns.append(("scale", theme.Metrics.combo_min_w))
+        for text, width in columns:
+            cap = QLabel(text)
+            cap.setEnabled(False)
+            cap.setFixedWidth(width)
+            head.addWidget(cap)
+        head.addStretch(1)
+        layout.addLayout(head)
+
+        self._x_min_edit = self._x_max_edit = self._x_scale_cb = None
+        if not self._X_IS_NUMERIC:
+            # No X row at all on a categorical axis — see ``_X_IS_NUMERIC``.
+            self._build_panel_rows(layout)
+            return
         x_row = QHBoxLayout()
         x_row.setContentsMargins(12, 2, 12, 2)
-        self._add_bold_label(x_row, "X:", min_width=_FIELD_LABEL_W)
+        # ``setFixedWidth``, not a minimum: a minimum let the widest row's
+        # label push its own fields right, so a five-row grid meant to be
+        # scanned down a column started its fields at three different x
+        # positions.
+        self._add_bold_label(x_row, self._x_row_label()).setFixedWidth(
+            self._axes_label_w())
         self._x_min_edit = self._limit_edit("min")
         x_row.addWidget(self._x_min_edit)
         self._x_max_edit = self._limit_edit("max")
         x_row.addWidget(self._x_max_edit)
-        self._x_scale_cb = self._scale_combo()
-        x_row.addWidget(self._x_scale_cb)
+        if self._AXES_SCALE_OFFERED:
+            self._x_scale_cb = self._scale_combo()
+            x_row.addWidget(self._x_scale_cb)
         x_row.addStretch(1)
         layout.addLayout(x_row)
+        self._build_panel_rows(layout)
 
+    def _axes_label_w(self) -> int:
+        """Width of the AXES block's first column, measured not guessed.
+
+        ``_FIELD_LABEL_W`` is sized for the words the rest of the column uses
+        ("Format:", "Also write:"); a panel row's label is whatever the mode
+        called its panel, and at 108 px the line stack rendered "Fraction
+        abov" and "N above cut". A clipped label is worse here than anywhere
+        else in the panel, because the whole point of the row is which panel
+        it governs — and Qt clips silently, so it reads as a name rather than
+        as a truncation.
+        """
+        metrics = self.fontMetrics()
+        widest = max((metrics.horizontalAdvance(p.label) for p in self._PANELS),
+                     default=0)
+        if len(self._PANELS) > 1:
+            widest += _CHECKBOX_INDICATOR_W
+        return max(_FIELD_LABEL_W, widest + _LABEL_PADDING_W)
+
+    def _build_panel_rows(self, layout: QVBoxLayout) -> None:
+        """One row per panel this mode declares. See ``_build_axes_rows``."""
         #: ``{panel key: (include checkbox, min edit, max edit, scale combo)}``.
         #: Built from ``_PANELS`` rather than written out, so a mode that
         #: declares a panel gets its row by declaring it.
@@ -1234,24 +1304,69 @@ class BatchExportPanel(QWidget):
             # the layout matches the stacked modes'.
             if single:
                 box = None
-                self._add_bold_label(row, f"{panel.label}:",
-                                     min_width=_FIELD_LABEL_W)
+                # "Y:", not the panel's own name. Under a row called "X:" the
+                # only reading that makes the pairing obvious is "Y:", and
+                # calling it "Plot:" actively obstructed it — nothing else in
+                # the block said these were the *y* limits.
+                label = self._add_bold_label(row, self._Y_ROW_LABEL)
+                label.setFixedWidth(self._axes_label_w())
             else:
                 box = QCheckBox(panel.label)
                 box.setChecked(True)
-                box.setMinimumWidth(_FIELD_LABEL_W)
+                box.setFixedWidth(self._axes_label_w())
                 box.setToolTip(
-                    "Draw this panel. Unticked, the figure comes out with one "
-                    "fewer row rather than with an empty frame where it was.")
+                    f"Draw the {panel.label} panel, and set its y range.\n"
+                    "Unticked, the figure comes out with one fewer row rather "
+                    "than with an empty frame where it was.")
                 row.addWidget(box)
             lo = self._limit_edit("min")
             hi = self._limit_edit("max")
-            scale = self._scale_combo()
+            scale = self._scale_combo() if self._AXES_SCALE_OFFERED else None
             for widget in (lo, hi, scale):
-                row.addWidget(widget)
+                if widget is not None:
+                    row.addWidget(widget)
+            if box is not None:
+                # F6: an unticked panel is not drawn, so its three fields mean
+                # nothing. Left enabled they were visually identical to a
+                # ticked row's, which is the one cue that says what unticking
+                # did.
+                def _sync(on, _widgets=tuple(
+                        w for w in (lo, hi, scale) if w is not None)):
+                    for w in _widgets:
+                        w.setEnabled(bool(on))
+                box.toggled.connect(_sync)
             row.addStretch(1)
             layout.addLayout(row)
             self._panel_rows[panel.key] = (box, lo, hi, scale)
+
+    #: What this mode's x axis actually is, for the X row's label. Named per
+    #: mode because "X:" over a row of numbers says nothing about what unit to
+    #: type: the line stack's x is time, Response's is the dose variable, and
+    #: Scatter's is whatever channel its X axis was pointed at.
+    _X_ROW_LABEL = "X (time, h):"
+
+    #: What the single-panel modes' one y row is called. Not the panel's own
+    #: name: under a row called "X …" the only reading that makes the pairing
+    #: obvious is "Y …", and calling it "Plot:" actively obstructed it —
+    #: nothing else in the block said these were the *y* limits.
+    _Y_ROW_LABEL = "Y:"
+
+    #: False where the mode's x is **categorical** — one position per group
+    #: member, as the bar stack draws. A numeric bound there is not a zoom, it
+    #: is three bars crushed into the left of the frame, and a log scale on it
+    #: is meaningless. The row is not offered rather than offered and ignored.
+    _X_IS_NUMERIC = True
+
+    #: False where the mode already owns a scale control that does something
+    #: this generic combo cannot. The scatter modes' ``X log`` / ``Y log``
+    #: checkboxes apply ``log10(v + 1)``, chosen so cells at zero stay on the
+    #: figure; a plain log scale drops them. Two controls for one axis is worse
+    #: than either, and the one to keep is the one that is not lossy — so the
+    #: combo is not offered there rather than offered and silently overriding.
+    _AXES_SCALE_OFFERED = True
+
+    def _x_row_label(self) -> str:
+        return self._X_ROW_LABEL
 
     @staticmethod
     def _limit_edit(which: str) -> QLineEdit:
@@ -1262,9 +1377,19 @@ class BatchExportPanel(QWidget):
         return edit
 
     @staticmethod
-    def _scale_combo() -> QComboBox:
+    def _scale_combo_labels() -> tuple[str, ...]:
+        """What this mode's scale entries are called.
+
+        Overridable because "Auto" is not equally informative everywhere: on a
+        figure that derives its own log axis from the data, saying what it
+        derives it *from* is the difference between a neutral default and a
+        stated rule.
+        """
+        return tuple(label for label, _value in _SCALE_CHOICES)
+
+    def _scale_combo(self) -> QComboBox:
         combo = QComboBox()
-        for label, _value in _SCALE_CHOICES:
+        for label in self._scale_combo_labels():
             combo.addItem(label)
         combo.setToolTip(
             "Auto leaves the scale to the figure — which for a dose axis means "
@@ -1290,13 +1415,17 @@ class BatchExportPanel(QWidget):
                           or rows[panel.key][0].isChecked()),
                 y_min=_parse_limit(rows[panel.key][1].text()),
                 y_max=_parse_limit(rows[panel.key][2].text()),
+                # ``None`` where the mode declined the column — its own control
+                # owns the scale, and Auto is what leaves that alone.
                 y_log=_scale_choice(rows[panel.key][3]),
             ))
             for panel in self._PANELS if panel.key in rows
         )
         return AxesSpec(
-            x_min=_parse_limit(self._x_min_edit.text()),
-            x_max=_parse_limit(self._x_max_edit.text()),
+            x_min=(_parse_limit(self._x_min_edit.text())
+                   if self._x_min_edit is not None else None),
+            x_max=(_parse_limit(self._x_max_edit.text())
+                   if self._x_max_edit is not None else None),
             x_log=_scale_choice(self._x_scale_cb),
             panels=panels,
         )
@@ -1401,6 +1530,125 @@ class BatchExportPanel(QWidget):
         row.addWidget(self._cell_rows_cb)
         row.addStretch(1)
         layout.addLayout(row)
+
+    def _refresh_run_summary(self) -> None:
+        """Rewrite "Each export group produces:" from the controls as they are.
+
+        It was a **static string**, and by the time this feature landed it was
+        wrong in four ways at once: it named one figure and one CSV while the
+        panel could be writing a second CSV, a slide deck and a gallery record
+        per group, and drawing three of four panels. That block is the one
+        place in the column that says in plain words what pressing Run does,
+        and it is what a user returning after three weeks reads first — so it
+        is the last text that should be guessing.
+
+        Derived, therefore, from the same reads the run itself makes. Connected
+        to every control that changes the answer (:meth:`_wire_run_summary`),
+        because a summary that is right only until something is clicked is a
+        static string with extra steps.
+        """
+        label = getattr(self, "_summary_lbl", None)
+        if label is None:
+            return
+        lines = ["Each export group produces:"]
+        for line in self._figure_summary_lines():
+            lines.append(f"  \u2022 {line}")
+        if self._wants_cell_rows():
+            lines.append("  \u2022 One raw per-cell CSV\n"
+                         "    one row per cell, typically far larger than the "
+                         "summary CSV")
+        extra = []
+        if getattr(self, "_to_gallery_cb", None) is not None \
+                and self._to_gallery_cb.isChecked():
+            extra.append("a Saved Plots record per figure")
+        if getattr(self, "_to_deck_cb", None) is not None \
+                and self._to_deck_cb.isChecked():
+            extra.append("one PowerPoint deck for the run")
+        if extra:
+            lines.append("")
+            lines.append("Also: " + ", and ".join(extra) + ".")
+        lines.append("")
+        lines.extend(self._summary_footnotes())
+        label.setText("\n".join(line for line in lines if line is not None))
+
+    def _figure_summary_lines(self) -> list[str]:
+        """The figure and CSV bullets, naming the panels this run will draw."""
+        figure = self._summary_figure_lead()
+        total = len(self._PANELS)
+        if total > 1:
+            drawn = self._snapshot_axes().drawn_keys()
+            if drawn and len(drawn) < total:
+                names = ", ".join(p.label for p in self._PANELS
+                                  if p.key in drawn)
+                figure = f"{figure} \u2014 {len(drawn)} of {total} panels ({names})"
+            else:
+                figure = f"{figure} \u2014 all {total} panels"
+        note = self._summary_figure_note()
+        if note:
+            # Its own indented line rather than a comma and forty more
+            # characters: the column this block lives in is about 800 px wide,
+            # and a bullet that needs two of those wraps back under the "•"
+            # where it reads as a second item.
+            figure = f"{figure}\n    {note}"
+        return [figure, self._summary_csv_line()]
+
+    #: What this mode's summary CSV holds, in the words its own info text used.
+    _SUMMARY_CSV_LINE = "One CSV with per-member time-series data"
+
+    #: How the figure bullet opens. A mode whose run writes more than one
+    #: figure per group says so here, because "One figure" beside a folder of
+    #: forty is the kind of quietly wrong sentence this whole block replaced.
+    _SUMMARY_FIGURE_LEAD = "One figure"
+
+    #: Appended to the figure bullet, where a mode has more to say about what
+    #: one figure *is*. The line mode's members are the thing worth naming.
+    _SUMMARY_FIGURE_NOTE = ("one line per group member (ReplicateSet = mean of "
+                            "its wells, Solo well = raw)")
+
+    def _summary_figure_lead(self) -> str:
+        """Overridden where a control decides how many figures a group gets."""
+        return self._SUMMARY_FIGURE_LEAD
+
+    def _summary_figure_note(self) -> str:
+        return self._SUMMARY_FIGURE_NOTE
+
+    def _summary_csv_line(self) -> str:
+        return self._SUMMARY_CSV_LINE
+
+    def _extra_summary_signals(self) -> list:
+        """Mode-specific signals that change what the summary says.
+
+        Connected by :meth:`_wire_run_summary` alongside the shared
+        checkboxes. A mode that derives part of its summary from one of its
+        own controls and does not list that control's signal here has written
+        a summary that is right until the control is touched, which is the
+        failure the derived block exists to end.
+        """
+        return []
+
+    def _summary_footnotes(self) -> list[str]:
+        """Mode-specific closing lines, unchanged from the old static text."""
+        return [
+            ("Groups come from Home \u2192 Sample Map \u2192 Replicates."
+             if self._use_sidebar_groups
+             else "Groups are defined in the left panel."),
+            "No statistics are computed across group members.",
+            "SD/SEM is only computed within a ReplicateSet.",
+        ]
+
+    def _wire_run_summary(self) -> None:
+        """Recompute the summary whenever something it states can change."""
+        widgets = [self._cell_rows_cb, self._to_gallery_cb, self._to_deck_cb]
+        for box in widgets:
+            if box is not None:
+                box.toggled.connect(lambda _on: self._refresh_run_summary())
+        for box, _lo, _hi, _scale in (getattr(self, "_panel_rows", None)
+                                      or {}).values():
+            if box is not None:
+                box.toggled.connect(lambda _on: self._refresh_run_summary())
+        for signal in self._extra_summary_signals():
+            signal.connect(lambda *_a: self._refresh_run_summary())
+        self._refresh_run_summary()
 
     def _wants_cell_rows(self) -> bool:
         box = getattr(self, "_cell_rows_cb", None)
@@ -1569,6 +1817,14 @@ class BatchExportPanel(QWidget):
         if not ctx.runtime.fov.btn:
             ctx.runtime.fov.btn = fov_btn
         refresh_fov_btn_state(ctx)
+
+    def _build_summary_label(self, layout: QVBoxLayout) -> None:
+        """The derived "Each export group produces:" block, above Run."""
+        self._summary_lbl = QLabel("")
+        self._summary_lbl.setWordWrap(True)
+        self._summary_lbl.setContentsMargins(12, 4, 12, 4)
+        layout.addWidget(self._summary_lbl)
+        self._wire_run_summary()
 
     def _build_run_row(
         self, layout: QVBoxLayout, *, button_text: str = "▶  Run Batch Export",
@@ -2506,20 +2762,76 @@ class BatchExportPanel(QWidget):
             ax.legend(loc="best", fontsize=legend_fontsize, framealpha=0.0, facecolor="none")
         self._save_figure(fig, fig_path, fmt, group=group, title=title)
 
-    def _panels_were_all_unticked(self) -> bool:
-        """Refuse a run whose every panel is off, and say why.
+    def _axes_block_refuses_the_run(self) -> bool:
+        """Refuse a run the AXES block has asked for impossibly, and say why.
 
-        Checked before the jobs rather than discovered inside one: a figure
-        with no panels is not a smaller figure, it is a blank page, and a run
-        that wrote one per group would look like it had worked.
+        Checked before the jobs rather than discovered inside one. Both of the
+        things it catches produce a *file*, which is what makes them worth a
+        dialog: a figure with no panels is not a smaller figure, it is a blank
+        page, and a log axis pinned from zero is a frame matplotlib quietly
+        rescales — so in each case a run would write forty of them and look
+        like it had worked.
         """
-        if not self._snapshot_axes().draws_nothing():
-            return False
-        QMessageBox.warning(
-            self, "No panels",
-            "Every panel is unticked under AXES, so there is nothing to draw. "
-            "Tick at least one.")
-        return True
+        if self._snapshot_axes().draws_nothing():
+            QMessageBox.warning(
+                self, "No panels",
+                "Every panel is unticked under AXES, so there is nothing to "
+                "draw. Tick at least one.")
+            return True
+        complaints = self._axes_complaints()
+        if complaints:
+            QMessageBox.warning(
+                self, "Axis limits",
+                "The AXES block asks for a range that cannot be drawn:\n\n  \u2022 "
+                + "\n  \u2022 ".join(complaints)
+                + "\n\nClear or correct those fields and run again.")
+            return True
+        return False
+
+    def _axes_complaints(self) -> list[str]:
+        """Every AXES field that cannot mean what it says, named by its row.
+
+        Two kinds, both of which used to go through silently:
+
+        * **min at or above max.** The columns are headed ``min`` and ``max``,
+          so this is a typo rather than a request for an inverted axis — and
+          the equal case is not even that: matplotlib expands a zero-width
+          range to an interval of its own choosing and draws a frame whose
+          numbers are nothing the user typed.
+        * **a log axis bounded at or below zero.** ``log`` of zero is not a
+          position on the axis, so matplotlib drops the bound and autoscales.
+          The figure then comes out with a range nobody asked for and no sign
+          that the field was ignored.
+
+        Reported together rather than one at a time, so a user who mistyped
+        two rows fixes both before the next run.
+        """
+        spec = self._snapshot_axes()
+        single = len(self._PANELS) == 1
+        rows = [(self._x_row_label().rstrip(":"),
+                 spec.x_min, spec.x_max, spec.x_log)]
+        for panel in self._PANELS:
+            axis = spec.for_panel(panel.key)
+            if not axis.included:
+                # An unticked panel is not drawn, so its fields describe
+                # nothing. Refusing a run over them would block it on a value
+                # that has no effect.
+                continue
+            name = self._Y_ROW_LABEL.rstrip(":") if single else panel.label
+            rows.append((name, axis.y_min, axis.y_max, axis.y_log))
+        out: list[str] = []
+        for name, low, high, log in rows:
+            if low is not None and high is not None and low >= high:
+                out.append(f"{name}: min ({low:g}) is not below max "
+                           f"({high:g}).")
+            if log:
+                below = [v for v in (low, high) if v is not None and v <= 0]
+                if below:
+                    out.append(
+                        f"{name}: a log scale has no position for "
+                        f"{below[0]:g}, so that bound would be dropped and the "
+                        f"axis autoscaled.")
+        return out
 
     def _groups_for_export(self) -> list[BarGroup]:
         if self._use_sidebar_groups:
@@ -2527,7 +2839,7 @@ class BatchExportPanel(QWidget):
         return list(self._groups)
 
     def _run_batch(self) -> None:
-        if self._panels_were_all_unticked():
+        if self._axes_block_refuses_the_run():
             return
         groups_with_data = [g for g in self._groups_for_export()
                             if any(w in self._ctx.state.dataset.well_paths for w in g.wells)]

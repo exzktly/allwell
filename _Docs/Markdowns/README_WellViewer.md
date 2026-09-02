@@ -4044,13 +4044,35 @@ are held and saved once.
 OUTPUT SETTINGS carries an **AXES** block. The top row is the shared X min, max
 and scale; below it, one row per panel the mode draws — Line has four (Value,
 Fraction above cutoff, N above cutoff, CDF), Bar has three, and Scatter and
-Response have one — each with its own Y min, Y max and Y scale.
+Response have one — each with its own Y min, Y max and Y scale. The columns are
+headed `min`, `max` and `scale`, so a row still reads as a range once its
+placeholder text is replaced by your numbers.
 
-Every field is optional, and **blank means leave it alone**: that bound
-autoscales exactly as it did before, or takes whatever the Export Style sidebar
-holds. A value that will not read as a number is treated as blank rather than
-kept from a previous edit, so a mistyped `1OO` autoscales instead of quietly
-capping your axis at 100.
+Every field is optional, and **blank means the figure keeps whatever the Export
+Style sidebar gives it** — usually an autoscaled bound, but if you have set a
+hard limit in that sidebar, that limit. It is not the same promise as "auto",
+which is what this hint used to say: leaving the fields empty is *not* a way to
+get an autoscaled figure out of a sidebar that holds a fixed range. A value
+that will not read as a number is treated as blank rather than kept from a
+previous edit, so a mistyped `1OO` falls through instead of quietly capping
+your axis at 100.
+
+Two ranges cannot be drawn, and the run is refused rather than written: a `min`
+at or above its `max` (the columns say which is which, so this is a typo, and
+matplotlib answers an equal pair by inventing a range of its own), and a **Log**
+scale bounded at or below zero (log has no position for zero, so matplotlib
+would drop the bound and autoscale). The dialog names every row it found, so
+two mistyped rows are fixed in one pass.
+
+Not every mode offers every column. The Bar modes have **no X row at all**:
+their x is one position per group member, so a numeric bound there is not a
+zoom, it is three bars crushed into the left of the frame. The Scatter modes
+have **no scale column**: their own `X log` / `Y log` checkboxes apply
+`log10(v + 1)`, chosen so cells at zero stay on the figure, and a second
+control doing a plain log would silently override the one that is not lossy.
+On the Scatter and Response modes the AXES block sits *below* the rows that
+choose what the axes are, because a range on an axis you have not picked yet is
+a question in the wrong order.
 
 The scale has three settings, not two. **Auto** leaves the figure to decide,
 which for a Response dose axis means the logarithmic scale it derives from the
@@ -4136,6 +4158,24 @@ again **without** ticking PowerPoint, the deck from your earlier run is still
 sitting there under the same name, now describing different figures. All-Well
 says so rather than deleting it — the decks are named per mode, not per run, so
 this is the one leftover you cannot spot from a file name.
+
+#### Reading what a run will produce, before running it
+
+Above the Run button, **Each export group produces:** lists what one group's
+share of the run will be. It is written from the controls as they stand, not
+from a fixed description of the mode, so it changes as you work: untick two
+panels and it says "3 of 4 panels" and names them; tick **Raw per-cell CSV** and
+the extra file appears in the list with a note that it is typically far larger
+than the summary CSV; tick either destination and a closing line names the
+Saved Plots records and the deck. On the Bar and Scatter modes it also tracks
+the toggle that decides how many figures a group gets, so "One figure per
+selected timepoint" becomes "One figure spanning every selected timepoint" when
+you turn the spanning toggle on.
+
+It is worth reading before a long run for exactly the reason it is derived: a
+folder that comes out with three times as many files as expected, or without
+the one file you were after, is usually a control that was left where the
+previous run put it.
 
 ### Starting over
 

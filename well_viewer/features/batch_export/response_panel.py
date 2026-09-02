@@ -54,7 +54,9 @@ from well_viewer.features.batch_export._common import (
     unique_export_stem,
 )
 from well_viewer.features.batch_export._panels import Panel
-from well_viewer.features.batch_export.base_panel import BatchExportPanel, SkippedJob
+from well_viewer.features.batch_export.base_panel import (
+    BatchExportPanel, SkippedJob, _scale_choice,
+)
 
 # Response Curves is a removable feature, so every symbol comes through a lazy
 # proxy — a call, not an ``import`` statement, so a build without the feature
@@ -87,19 +89,6 @@ _BOUND_EDIT_W = 90
 #: What the Series combo says when the figure is one curve per timepoint.
 _NO_SERIES = "None"
 
-#: The three answers to "is the x axis logarithmic", and what each passes to
-#: ``draw_response``. ``None`` is the renderer's own "ask the data", which turns
-#: the axis on once the positive doses span two decades — the same rule the tab
-#: applies to an untouched preference. Offered explicitly rather than inherited
-#: from the tab's per-figure preference, because a batch figure has no figure on
-#: screen for that preference to be attached to.
-_LOG_X_CHOICES = (
-    ("Auto (from the doses)", None),
-    ("On", True),
-    ("Off", False),
-)
-
-
 def _parse_bound(text: str) -> float | None:
     """A pinned plateau, or ``None`` for a blank or unreadable field.
 
@@ -127,6 +116,8 @@ class ResponseBatchExportPanel(BatchExportPanel):
     #: One panel, so the X row governs it. ``None`` rather than naming the key,
     #: so a mode that renames its panel does not silently stop taking X.
     _X_PANELS = None
+    _X_ROW_LABEL = "X (dose):"
+    _AXES_FOLLOW_HEADER = False
     _CELL_SCOPE = "well_viewer.features.response.cell_scope_compute"
 
     #: The error band and the per-FOV replicate unit both reach the curves —
@@ -183,6 +174,11 @@ class ResponseBatchExportPanel(BatchExportPanel):
 
         self._build_variable_rows(layout)
         self._build_fit_rows(layout)
+        # After the variable rows, not before: "X (dose):" is a range on
+        # whatever "X variable:" was set to, and the block asking for it first
+        # asked about an axis the user had not chosen. See
+        # ``_AXES_FOLLOW_HEADER``.
+        self._build_output_tail(layout)
 
         layout.addWidget(build_hline_separator(None))
 
@@ -191,23 +187,24 @@ class ResponseBatchExportPanel(BatchExportPanel):
 
         layout.addWidget(build_hline_separator(None))
 
-        info = QLabel(
-            "Each export group produces:\n"
-            "  • One response figure — a curve per timepoint (and per "
-            "series value, when one is chosen)\n"
-            "  • One CSV of the drawn points, the members that could not "
-            "be placed, and each curve's fit\n\n"
-            "A point is one member of the group at one dose; the x value is the "
-            "one every well of that member shares.\n"
-            "Fold change follows the shared plotting setting, not this panel — "
-            "set it on the plotting band."
-        )
-        info.setWordWrap(True)
-        info.setContentsMargins(12, 4, 12, 4)
-        layout.addWidget(info)
-
+        self._build_summary_label(layout)
         self._build_run_row(layout, button_text="▶  Run Response Batch Export")
         layout.addStretch(1)
+
+    # ── the run summary ──────────────────────────────────────────────────
+    _SUMMARY_FIGURE_LEAD = "One response figure"
+    _SUMMARY_FIGURE_NOTE = ("a curve per timepoint (and per series value, when "
+                            "one is chosen)")
+    _SUMMARY_CSV_LINE = ("One CSV of the drawn points, the members that could "
+                         "not be placed, and each curve's fit")
+
+    def _summary_footnotes(self) -> list[str]:
+        return [
+            "A point is one member of the group at one dose; the x value is "
+            "the one every well of that member shares.",
+            "Fold change follows the shared plotting setting, not this panel "
+            "\u2014 set it on the plotting band.",
+        ]
 
     def _build_variable_rows(self, layout: QVBoxLayout) -> None:
         """The x variable, the series split, and the x axis scale."""
@@ -237,19 +234,12 @@ class ResponseBatchExportPanel(BatchExportPanel):
             lambda _i: self._refresh_series_combo())
         self._refresh_variable_combos()
 
-        scale_row = QHBoxLayout()
-        scale_row.setContentsMargins(12, 2, 12, 2)
-        self._add_bold_label(scale_row, "X scale:", min_width=_FIELD_LABEL_W)
-        self._log_x_cb = QComboBox()
-        for label, _choice in _LOG_X_CHOICES:
-            self._log_x_cb.addItem(label)
-        self._log_x_cb.setToolTip(
-            "Auto turns the axis logarithmic once the positive doses span two "
-            "decades, which is the rule the tab applies to a figure nobody has "
-            "set the scale on.")
-        scale_row.addWidget(self._log_x_cb)
-        scale_row.addStretch(1)
-        layout.addLayout(scale_row)
+        # No "X scale:" row of its own. The AXES block above already carries
+        # one control for this axis, and two controls for one setting is worse
+        # than either: ``_save_figure`` pins the AXES answer *after* the render,
+        # so the AXES combo silently won while this row went on showing whatever
+        # it was left on. Its vocabulary moved into that combo instead — see
+        # ``_scale_combo_labels``.
 
     def _build_fit_rows(self, layout: QVBoxLayout) -> None:
         """The fit model and its pinned plateaus, shared by every curve."""
@@ -380,11 +370,20 @@ class ResponseBatchExportPanel(BatchExportPanel):
             combo.blockSignals(blocked)
 
     # ── the run ──────────────────────────────────────────────────────────
+    @staticmethod
+    def _scale_combo_labels() -> tuple[str, ...]:
+        """"Auto" says what it derives from on this tab.
+
+        The AXES combo's neutral entry means "leave the figure's own choice
+        alone", and on this figure that choice is a real rule rather than a
+        default: the dose axis goes logarithmic once the positive doses span
+        two decades. Naming it is what the deleted ``X scale:`` row was for.
+        """
+        return ("Auto (from the doses)", "Linear", "Log")
+
     def _selected_log_x(self) -> bool | None:
-        index = self._log_x_cb.currentIndex()
-        if 0 <= index < len(_LOG_X_CHOICES):
-            return _LOG_X_CHOICES[index][1]
-        return None
+        """The x scale this run asked for, from the AXES row."""
+        return _scale_choice(self._x_scale_cb)
 
     def _selected_fit(self) -> tuple[str, float | None, float | None]:
         """``(model, fixed_top, fixed_bottom)`` from this panel's own controls.
@@ -404,7 +403,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
                 _parse_bound(self._fit_bottom_edit.text()))
 
     def _run_batch(self) -> None:
-        if self._panels_were_all_unticked():
+        if self._axes_block_refuses_the_run():
             return
         groups_with_data = _groups_with_loaded_wells(
             self._groups_for_export(), self._ctx.state.dataset.well_paths,

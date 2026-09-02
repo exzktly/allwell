@@ -2717,9 +2717,45 @@ app-wide setting; an unreadable one reads as blank rather than as a kept
 previous value, the rule the Response fit bounds already follow. **Auto is not
 linear**: the scale choice is tri-state, and pinning `False` where the user
 chose nothing would take the Response tab's derived logarithmic dose axis
-linear. A run with every panel unticked is refused before the first job —
-a figure with no panels is a blank page, and one written per group would look
-like the run had worked.
+linear. `_axes_block_refuses_the_run` is the single pre-flight every mode's
+`_run_batch` opens with, and it refuses three things before the first job, for
+one reason: each of them *writes a file* per group that looks like every other
+file in the folder. Every panel unticked is a blank page. A `min` at or above
+its `max` is a typo under columns headed `min` and `max`, and matplotlib
+answers the equal case by expanding the range to an interval of its own. A
+`Log` scale bounded at or below zero has no position for that bound, so
+matplotlib drops it and autoscales. `_axes_complaints` names every offending
+row in one pass — a user who mistyped two rows fixes both before the next run —
+and skips the rows of unticked panels, whose numbers describe nothing that is
+drawn.
+
+**Which controls a mode offers is a declaration, not a shared form.** Three
+class attributes say so, and each exists because the generic control was wrong
+somewhere rather than merely redundant. `_X_IS_NUMERIC` is false on the bar
+modes, whose x is one position per group member: a numeric bound there is three
+bars crushed into the left of every frame, so the row is absent rather than
+offered and ignored. `_AXES_SCALE_OFFERED` is false on the scatter modes, whose
+own `X log` / `Y log` apply `log10(v + 1)` so cells at zero stay on the figure
+— two controls for one axis is worse than either, and the one kept is the one
+that is not lossy. `_AXES_FOLLOW_HEADER` is false on Scatter and Response,
+whose axes are themselves a choice: the block asking for a range sat above the
+rows that pick what the axis *is*, and Scatter carried two rows labelled "X:"
+a hundred pixels apart meaning different things. Those two modes call
+`_build_output_tail` themselves, after their axis rows. `_X_ROW_LABEL` and
+`_Y_ROW_LABEL` name each mode's axes for the same reason: "X:" over a row of
+numbers does not say what unit to type.
+
+**"Each export group produces:" is derived from the controls**, in
+`_refresh_run_summary`, and connected to every control that changes the answer
+(`_wire_run_summary`, which each mode extends through
+`_extra_summary_signals`). It was a static string, and by the time the panel
+could also write a per-cell CSV, a slide deck, a gallery record and three of
+its four panels it was wrong in four ways at once — while being the one block
+in the column that says in plain words what pressing Run does. A mode supplies
+its own words through `_SUMMARY_FIGURE_LEAD`, `_SUMMARY_FIGURE_NOTE`,
+`_SUMMARY_CSV_LINE` and `_summary_footnotes`; the bar and scatter modes
+override `_summary_figure_lead` instead, because a toggle on those panels
+decides how many figures one group gets.
 
 **The rows behind a figure** (`_cell_rows.py`). An opt-in checkbox writes the
 plot tabs' `Save cell data…` file beside each group's figure — one row per cell

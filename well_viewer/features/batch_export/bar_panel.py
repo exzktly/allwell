@@ -94,6 +94,10 @@ class BarBatchExportPanel(BatchExportPanel):
     #: row does govern all three, which is what ``_X_PANELS`` says.
     _SHARE_X = ()
     _X_PANELS = ("mean", "frac", "n")
+    #: A bar figure's x is one position per group member, so there is nothing
+    #: numeric to bound: ``xlim(0, 48)`` over three bars crushes them into the
+    #: left of every frame in the run, and a log scale on it means nothing.
+    _X_IS_NUMERIC = False
     _CELL_SCOPE = "well_viewer.features.barplot.cell_scope_compute"
 
     def _mode_key(self) -> str:
@@ -201,24 +205,37 @@ class BarBatchExportPanel(BatchExportPanel):
 
         layout.addWidget(build_hline_separator(None))
 
-        info = QLabel(
-            "Each group produces:\n"
-            "  \u2022 One bar figure per timepoint (or one figure spanning all\n"
-            "    selected timepoints when the toggle above is on)\n"
-            "  \u2022 One CSV row per member at each timepoint\n\n"
-            + ("Groups come from Home → Sample Map → Replicates.\n"
-               if self._use_sidebar_groups
-               else "Groups are defined in the left panel.\n")
-            + "SD/SEM is computed within each ReplicateSet only."
-        )
-        info.setWordWrap(True)
-        info.setContentsMargins(12, 4, 12, 4)
-        layout.addWidget(info)
-
+        self._build_summary_label(layout)
         self._build_run_row(layout)
 
+    # \u2500\u2500 the run summary \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    _SUMMARY_CSV_LINE = "One CSV row per member at each timepoint"
+    _SUMMARY_FIGURE_NOTE = ""
+
+    def _summary_figure_lead(self) -> str:
+        """Bars are the one mode whose figure *count* is a control.
+
+        With the span toggle off a group of four timepoints comes out as four
+        files, and the block said "One bar figure per timepoint" whichever way
+        the toggle was set.
+        """
+        if self._multi_tp_cb.isChecked():
+            return "One figure spanning every selected timepoint"
+        return "One figure per selected timepoint"
+
+    def _extra_summary_signals(self) -> list:
+        return [self._multi_tp_cb.toggled]
+
+    def _summary_footnotes(self) -> list[str]:
+        return [
+            ("Groups come from Home \u2192 Sample Map \u2192 Replicates."
+             if self._use_sidebar_groups
+             else "Groups are defined in the left panel."),
+            "SD/SEM is computed within each ReplicateSet only.",
+        ]
+
     def _run_batch(self) -> None:
-        if self._panels_were_all_unticked():
+        if self._axes_block_refuses_the_run():
             return
         groups_with_data = _groups_with_loaded_wells(
             self._groups_for_export(), self._ctx.state.dataset.well_paths,

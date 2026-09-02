@@ -1975,7 +1975,12 @@ row, holding five actions:
   unlabelled — so you can read a value between two labels; they are part of the
   scale rather than of the **Minor ticks** row, which governs the linear axes.
   On a view wide enough that only every other power is labelled they are left
-  off, since a tick between two unlabelled powers tells you nothing. Axis **limits**, **log-scale** and the
+  off, since a tick between two unlabelled powers tells you nothing. They are
+  also left off where the plot has chosen its own tick positions rather than
+  the powers — the Response Curves dose axis, which ticks the concentrations
+  you gave — because a subdivision belongs to the power beneath it, so under
+  ticks that are something else the marks fall unevenly between one label and
+  the next and say nothing about either. Axis **limits**, **log-scale** and the
   **line / marker styling** are scoped to the one plot — the Scatter tab's Cells and
   Wells views are separate plots here, so sizing markers for five
   aggregate points won't blow up a fifty-thousand-cell cloud. **Typography,
@@ -1983,7 +1988,14 @@ row, holding five actions:
   a whole figure set a consistent look. On the Bar Plots tab (a Value /
   Fraction / Events panel stack) axis limits are stored **per panel**, so a
   limit set on the Fraction or Events panel sticks instead of that panel
-  auto-scaling. Settings persist across redraws. The **legend keeps up**: change
+  auto-scaling. **Auto scale**, in the same Limits & Scale section, gives the
+  limits back to the plot: it clears what you typed on *every* panel of that
+  figure and redraws it, so the axes fit their data again. Clearing the four
+  boxes by hand does not do this — an axis keeps the bounds it was last given
+  until the plot is drawn again — which is what the button is for. It leaves
+  the log scaling and the log base alone: an axis you set to logarithmic stays
+  logarithmic and simply chooses its own range. Settings persist across
+  redraws. The **legend keeps up**: change
   the line width, dash, marker shape or marker size and the little sample beside
   each legend entry is redrawn to match, so the key never describes a figure you
   are no longer looking at.
@@ -2845,8 +2857,9 @@ it either way, your answer stands and the doses stop deciding.
 floor for a *fraction*, which runs 0 to 1 — on an axis you have also set to
 logarithmic, that bound cannot be drawn: the logarithm of zero is undefined.
 The upper limit you typed is kept, the floor is chosen from the data, and the
-log drawer says so. Type a small positive floor instead (`0.01`, say) or turn
-the log scale off for that axis.
+log drawer says so. Type a small positive floor instead (`0.01`, say), turn
+the log scale off for that axis, or press **Auto scale** to hand the range back
+to the plot.
 
 **Properties → Limits & Scale → Log base** sets what that axis is logarithmic
 in. **10** is the default, with **2**, **3** and **e** on the list, and you can

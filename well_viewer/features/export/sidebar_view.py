@@ -28,7 +28,8 @@ from well_viewer.features.export.style import (
     apply_export_style_to_current,
 )
 from well_viewer.core.plot_style import (
-    LOG_BASE_CHOICES, figure_pref_is_set, figure_prefs,
+    AXIS_LIMIT_PREF_KEYS, LOG_BASE_CHOICES, drop_bucket_limits,
+    figure_pref_is_set, figure_prefs,
 )
 
 # v2 chrome: this panel is composed from the custom widgets in ``widgets/``
@@ -1069,6 +1070,18 @@ class ExportStyleSidebar(QWidget):
             self._bind_getter_setter(f"{lim_key}_min", lo_edit)
             self._bind_getter_setter(f"{lim_key}_max", hi_edit)
             add_row(s_lim, label, hrow(lo_edit, QLabel("…"), hi_edit, spacing=sp.xs))
+        # Give the limits back to the plot. Typing a limit is easy and undoing
+        # it was not: blanking the four fields by hand leaves the axes exactly
+        # where they were, because the style pass only ever *sets* limits and
+        # has no way to re-enable autoscale (the same reason the Reset button
+        # redraws). ``_autoscale_axes`` does the three things that together
+        # amount to "forget them".
+        auto_btn = QPushButton("Auto scale")
+        auto_btn.setToolTip(
+            "Clear the typed limits on every panel of this figure and let the "
+            "plot scale its own axes again.")
+        auto_btn.clicked.connect(lambda _=False: self._autoscale_axes())
+        add_full(s_lim, hrow(auto_btn))
         # The per-cell scatter pins its log state to scatter-specific prefs
         # (default on) so the shared x_log/y_log — which other plot types reset
         # to linear — can't silently turn it off. Toggling triggers a redraw so
@@ -1419,6 +1432,45 @@ class ExportStyleSidebar(QWidget):
         # axes return to their natural / intentional values, then re-apply the
         # (now default) style on top via _on_fields_changed.
         self._redraw_active_plot()
+        self._on_fields_changed()
+
+    def _autoscale_axes(self) -> None:
+        """Forget every typed axis limit and let the plots scale themselves.
+
+        Three steps, and leaving any one of them out leaves the figure looking
+        exactly as it did:
+
+        * blank the four limit fields — the half the user can see;
+        * clear the limit keys out of *every* per-axis bucket, because
+          ``apply_export_style_prefs`` reads the bucket first and only falls
+          back to the flat key, so on a multi-panel figure the fields are not
+          where the drawn limit came from;
+        * redraw. The style pass only ever *sets* limits; nothing in it can
+          re-enable autoscale, so an axis keeps the last bounds it was handed
+          until its own renderer builds it again. ``_reset_defaults`` carries
+          the same note for the same reason.
+
+        The log toggles and bases are deliberately untouched: an axis drawn in
+        log stays in log, it just picks its own bounds again.
+        """
+        self._updating = True
+        try:
+            for key in AXIS_LIMIT_PREF_KEYS:
+                setter = self._setters.get(key)
+                if setter is not None:
+                    setter(DEFAULT_EXPORT_STYLE_PREFS[key])
+            drop_bucket_limits(self._axis_buckets)
+        finally:
+            self._updating = False
+        self._persist()
+        # The redraw is this button's only visible effect, so a failure nobody
+        # reported would read as a button that does nothing at all — which is
+        # indistinguishable from the defect this button exists to fix.
+        if not self._redraw_bound_figure():
+            with swallow("report that the auto-scale redraw did not run"):
+                self._app._set_status(
+                    "Axis limits cleared, but the plot could not be redrawn — "
+                    "switch tabs and back to refresh it.")
         self._on_fields_changed()
 
     def _redraw_active_plot(self) -> None:

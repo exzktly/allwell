@@ -516,10 +516,32 @@ def apply_log_minor_ticks(ax, which: str, base: float) -> None:
     scale-setting is skipped as a no-op: the restyle that follows every redraw
     can have cleared the locator (``minorticks_off`` installs a ``NullLocator``)
     since the last time the scale itself changed.
+
+    **Only where the majors are the powers.** A subdivision is defined against
+    the power it sits under, not against whatever tick happens to be drawn to
+    its left, so on an axis whose major ticks are something else the two do not
+    line up and the count between one pair of labels differs from the count
+    between the next. That is a real axis: the Response tab ticks one dose per
+    concentration the experimenter gave, and this function put matplotlib's
+    decade subdivisions back between them after every redraw — a 0.1 / 0.3 / 1
+    / 3 / 10 series read 1, 6, 1, 6 marks between its labels, and on the
+    break-and-column axis those marks read as data. So an axis whose major
+    locator is not a :class:`~matplotlib.ticker.LogLocator` has chosen its own
+    ticks and keeps them.
+
+    Declining is not enough on its own, because the locator installed by the
+    *previous* call outlives the redraw that pinned new majors — so a
+    subdivision set left over from this function is taken away again. Only that
+    one: a minor locator this function did not install belongs to whoever did,
+    and is left where it is.
     """
-    from matplotlib.ticker import LogLocator, NullFormatter
+    from matplotlib.ticker import LogLocator, NullFormatter, NullLocator
 
     axis = ax.xaxis if which == "x" else ax.yaxis
+    if not isinstance(axis.get_major_locator(), LogLocator):
+        if isinstance(axis.get_minor_locator(), LogLocator):
+            axis.set_minor_locator(NullLocator())
+        return
     axis.set_minor_locator(LogLocator(base=float(base),
                                       subs=log_minor_subs(base)))
     axis.set_minor_formatter(NullFormatter())
@@ -611,6 +633,25 @@ AXIS_SCOPED_PREF_KEYS = AXIS_LIMIT_PREF_KEYS | frozenset({
 })
 
 
+def drop_bucket_limits(buckets) -> None:
+    """Remove every axis limit from a mapping of per-panel buckets, in place.
+
+    Split out from :func:`drop_axis_limits` because one caller holds the
+    buckets without the entry around them: the Properties sidebar keeps
+    ``self._axis_buckets`` in memory for the life of the panel and writes it
+    back on the next persist, so its *Auto scale* button has to clear the
+    per-panel copies there rather than in the stored preferences. Sharing the
+    key list is the whole point — a second copy of it is how a panel comes to
+    clear three limits out of four.
+    """
+    if not isinstance(buckets, dict):
+        return
+    for bucket in buckets.values():
+        if isinstance(bucket, dict):
+            for key in AXIS_LIMIT_PREF_KEYS:
+                bucket.pop(key, None)
+
+
 def drop_axis_limits(fig_prefs) -> None:
     """Remove every axis limit from one figure's export-axis entry, in place.
 
@@ -630,12 +671,7 @@ def drop_axis_limits(fig_prefs) -> None:
         return
     for key in AXIS_LIMIT_PREF_KEYS:
         fig_prefs.pop(key, None)
-    buckets = fig_prefs.get("axis_buckets")
-    if isinstance(buckets, dict):
-        for bucket in buckets.values():
-            if isinstance(bucket, dict):
-                for key in AXIS_LIMIT_PREF_KEYS:
-                    bucket.pop(key, None)
+    drop_bucket_limits(fig_prefs.get("axis_buckets"))
 
 # Mark styling is per-figure too, for the same reason but a different argument:
 # the right mark size is a property of what the plot *draws*, not of the

@@ -216,6 +216,118 @@ def test_default_state_shows_bar_once_pixel_size_is_entered():
     assert IC.resolve_chrome_plan(app._ctx, cells)[0] > 0    # bar appears
 
 
+# ── A ticked box that draws nothing says why ────────────────────────────────
+#
+# Reported: "image table is still built without scale bar even when checked".
+# Four separate paths produced exactly that, and the only thing that ever
+# reported a missing bar — ``apply_cell_chrome`` — is guarded on a bar length
+# above zero, so by construction it cannot see a bar that was never computed.
+# The checkbox stayed ticked over a grid with no bar and no explanation in the
+# status line, the saved figure or the log.
+
+def _one_cell_app(**over):
+    app = _fake_app(wells=["A01"], channels=["gfp"])
+    st = app._app_state.image_table
+    st.scale_bar_show = True
+    st.pixel_size_um = 0.5
+    st.scale_bar_um = 50.0
+    for key, value in over.items():
+        setattr(st, key, value)
+    return app, [[{"well": "A01", "chan": "GFP", "tp": "0", "fov": ""}]]
+
+
+def test_a_planned_bar_leaves_nothing_to_explain():
+    """The paired positive: the clause must stay empty when a bar is drawn.
+
+    Without this, a note set unconditionally would satisfy every test below
+    and put a "no bar was drawn" sentence under every grid that has one.
+    """
+    app, cells = _one_cell_app()
+    bar_px, targets, _ = IC.resolve_chrome_plan(app._ctx, cells)
+    assert bar_px > 0 and targets
+    assert app._app_state.image_table.scale_bar_plan_note == ""
+    assert IC.scale_bar_refusal_clause(app._ctx) == ""
+
+
+def test_an_unset_pixel_size_is_named_not_left_silent():
+    app, cells = _one_cell_app(pixel_size_um=0.0)
+    IC.resolve_chrome_plan(app._ctx, cells)
+    said = IC.scale_bar_refusal_clause(app._ctx)
+    assert "Show scale bar is on but no bar was drawn" in said
+    assert "Pixel µm/px is not set" in said, said
+    # And it names the control to change, not merely the fact.
+    assert "enter the pixel size" in said, said
+
+
+def test_a_zero_bar_length_is_named_and_told_apart_from_an_unset_pixel_size():
+    """Two different empty fields, two different sentences.
+
+    One reason for both would send a user to check a pixel size they had
+    already set — which is the report that produced this whole change.
+    """
+    app, cells = _one_cell_app(scale_bar_um=0.0)
+    IC.resolve_chrome_plan(app._ctx, cells)
+    said = IC.scale_bar_refusal_clause(app._ctx)
+    assert "Bar length µm is 0" in said, said
+    assert "Pixel" not in said, said
+
+
+def test_a_show_on_value_this_grid_has_no_cell_for_is_named():
+    """Reachable from a saved view state carrying a code the combo no longer
+    offers: ``_corner_cell`` returns ``None`` for anything but tl/tr/bl/br, so
+    the target set comes back empty and every cell loses its bar."""
+    app, cells = _one_cell_app(scale_bar_cells="corner")
+    bar_px, targets, _ = IC.resolve_chrome_plan(app._ctx, cells)
+    assert bar_px > 0 and targets == set(), "the bar was computed but placed nowhere"
+    said = IC.scale_bar_refusal_clause(app._ctx)
+    assert "Show on" in said and "'corner'" in said, said
+
+
+def test_an_empty_grid_says_so_rather_than_blaming_a_control():
+    app, _ = _one_cell_app()
+    IC.resolve_chrome_plan(app._ctx, [])
+    said = IC.scale_bar_refusal_clause(app._ctx)
+    assert "no images to draw it on" in said, said
+
+
+def test_an_unticked_box_explains_nothing_because_nothing_was_asked_for():
+    app, cells = _one_cell_app(scale_bar_show=False)
+    IC.resolve_chrome_plan(app._ctx, cells)
+    assert app._app_state.image_table.scale_bar_plan_note == ""
+    assert IC.scale_bar_refusal_clause(app._ctx) == ""
+
+
+def test_the_note_does_not_survive_into_the_next_pass():
+    """Same per-pass lifetime as the three sets beside it.
+
+    A note left from an uncalibrated pass would sit under the next grid — one
+    that draws a bar perfectly well — saying it drew none.
+    """
+    app, cells = _one_cell_app(pixel_size_um=0.0)
+    IC.resolve_chrome_plan(app._ctx, cells)
+    assert IC.scale_bar_refusal_clause(app._ctx) != ""
+    app._app_state.image_table.pixel_size_um = 0.5
+    IC.reset_scan_misses(app._ctx)
+    assert app._app_state.image_table.scale_bar_plan_note == ""
+    IC.resolve_chrome_plan(app._ctx, cells)
+    assert IC.scale_bar_refusal_clause(app._ctx) == ""
+
+
+def test_the_per_cell_refusal_still_reports_when_a_bar_was_planned():
+    """The older half of the report must survive the newer one.
+
+    A bar that was computed and would not fit is a different failure with a
+    different fix, and folding the two into one clause is how one of them gets
+    lost.
+    """
+    app, cells = _one_cell_app()
+    IC.resolve_chrome_plan(app._ctx, cells)
+    app._app_state.image_table.scale_bar_refusals.add(("A01", "gfp", "0", ""))
+    said = IC.scale_bar_refusal_clause(app._ctx)
+    assert "longer than those cells can hold" in said, said
+    assert "A01" in said, said
+
+
 # ── Behavior: global-per-channel Auto LUT ───────────────────────────────────
 
 def test_parse_lut_uses_pooled_auto_when_channel_is_auto():

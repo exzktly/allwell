@@ -515,9 +515,8 @@ class ResponseBatchExportPanel(BatchExportPanel):
             jobs=groups_with_data,
             progress_text_fn=_progress,
             run_job_fn=_run_group,
-            success_text=f"✓ {len(groups_with_data)} group(s) → {out_dir.name}/",
-            status_text=(f"Response batch export: {len(groups_with_data)} "
-                         f"group(s) → {out_dir}"),
+            success_text=f"✓ {len(groups_with_data)} group(s)",
+            status_text=(f"Response batch export: {len(groups_with_data)} group(s)"),
             out_dir=out_dir,
         )
 

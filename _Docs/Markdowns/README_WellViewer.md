@@ -4141,6 +4141,10 @@ memory rather than from a file on disk.
   it stays with the dataset, so a gallery-only run writes nothing to disk at
   all and does not even create the output folder.
 
+The row is locked while an export is running, and the destinations a run
+started with are the ones it finishes with — a click mid-run changes the next
+run, never this one.
+
 **Folder:** and **Format:** grey out when nothing needs them. Format describes
 the image files alone; the folder is wanted by the image files and by the deck,
 but not by the gallery. Untick all three and the run is refused — it would

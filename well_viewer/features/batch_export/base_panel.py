@@ -12,6 +12,7 @@ import theme
 from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Callable
+from typing import NamedTuple
 
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -256,6 +257,13 @@ def _apply_split_sep_orientation(sep: QFrame, *, stacked: bool) -> None:
     sep.style().polish(sep)
 
 
+class _Destination(NamedTuple):
+    """The "→ …" clause in two lengths: the progress label, and the status bar."""
+
+    short: str
+    long: str
+
+
 class SkippedJob(str):
     """A job that produced nothing — a *notice*, not an error.
 
@@ -429,6 +437,9 @@ class BatchExportPanel(QWidget):
         #: Only the scatter panel fills this; declared here so the shared
         #: runner can clear it without knowing which mode it is running.
         self._run_scatter_axes = None
+        #: The destinations this run is writing to, or ``None`` between runs.
+        #: See :meth:`_destinations` for why it is a snapshot.
+        self._run_dests: frozenset | None = None
 
         self._build_ui()
         if not self._use_sidebar_groups:
@@ -1245,6 +1256,31 @@ class BatchExportPanel(QWidget):
                 box.toggled.connect(
                     lambda _on: self._sync_destination_widgets())
 
+    def _set_destination_row_enabled(self, on: bool) -> None:
+        """Lock the Write to: row (and the per-cell box) for a run's duration.
+
+        The snapshot in :meth:`_destinations` is what makes a mid-run click
+        harmless; this is what makes it *look* harmless, so the panel never
+        shows a destination that is not the one the run is using.
+        """
+        for name in ("_to_files_cb", "_to_deck_cb", "_to_gallery_cb",
+                     "_cell_rows_cb"):
+            box = getattr(self, name, None)
+            if box is not None:
+                box.setEnabled(on and (name == "_to_files_cb"
+                                       or self._enabled_when_idle(name)))
+
+    def _enabled_when_idle(self, name: str) -> bool:
+        """Whether *name* would be enabled with no run in flight.
+
+        Re-derived rather than remembered, so re-enabling after a run cannot
+        hand back a control that ``_sync_destination_widgets`` had greyed for
+        a reason that still holds.
+        """
+        if name == "_cell_rows_cb":
+            return "files" in self._ticked_destinations()
+        return True
+
     def _sync_destination_widgets(self) -> None:
         """Grey out what the chosen destinations do not use, and re-summarise.
 
@@ -1382,6 +1418,21 @@ class BatchExportPanel(QWidget):
         if len(self._PANELS) > 1:
             widest += _CHECKBOX_INDICATOR_W
         return max(_FIELD_LABEL_W, widest + _LABEL_PADDING_W)
+
+    def _axes_label_w_ceiling(self) -> int:
+        """The widest this column has any business being.
+
+        Paired with :meth:`_axes_label_w` because a lower bound alone is
+        satisfied by any number: a column nine thousand pixels wide clips
+        nothing and pushes every min/max field off the screen, which is the
+        same failure from the other side. Stated here so the guard can hold
+        both ends rather than re-deriving one of them.
+        """
+        metrics = self.fontMetrics()
+        widest = max((metrics.horizontalAdvance(p.label) for p in self._PANELS),
+                     default=0)
+        return max(_FIELD_LABEL_W,
+                   widest + _CHECKBOX_INDICATOR_W + 2 * _LABEL_PADDING_W)
 
     def _build_panel_rows(self, layout: QVBoxLayout) -> None:
         """One row per panel this mode declares. See ``_build_axes_rows``."""
@@ -1664,10 +1715,11 @@ class BatchExportPanel(QWidget):
         in the output folder beside the figures, and the record lands in the
         application and stays with the dataset.
         """
-        deck = (getattr(self, "_to_deck_cb", None) is not None
-                and self._to_deck_cb.isChecked())
-        gallery = (getattr(self, "_to_gallery_cb", None) is not None
-                   and self._to_gallery_cb.isChecked())
+        # Through the same predicates the run uses, not a second read of the
+        # checkboxes: two answers to "is the deck being written" can drift,
+        # and the summary is precisely the place a drift would be believed.
+        deck = self._wants_deck()
+        gallery = self._wants_gallery()
         clauses = []
         if deck:
             clauses.append("writes one PowerPoint deck into this folder, a "
@@ -1760,6 +1812,41 @@ class BatchExportPanel(QWidget):
             signal.connect(lambda *_a: self._refresh_run_summary())
         self._refresh_run_summary()
 
+    def _ticked_destinations(self) -> frozenset:
+        """What the checkboxes say **right now**. See :meth:`_destinations`."""
+        out = set()
+        box = getattr(self, "_to_files_cb", None)
+        if box is None or box.isChecked():
+            out.add("files")
+        for name, key in (("_to_deck_cb", "deck"),
+                          ("_to_gallery_cb", "gallery"),
+                          ("_cell_rows_cb", "cells")):
+            box = getattr(self, name, None)
+            if box is not None and box.isChecked():
+                out.add(key)
+        return frozenset(out)
+
+    def _destinations(self) -> frozenset:
+        """What **this run** is writing to, fixed for its whole life.
+
+        Snapshotted at the top of :meth:`_run_batch_jobs` for the same reason
+        the spool and the axes are, and stated here rather than left implicit
+        because getting it wrong destroys files. The runner pumps
+        ``processEvents()`` between jobs, so the Write to: row is live while
+        an export is running; read per job, unticking **Image files** halfway
+        through gave the first groups their files, the rest none, and then —
+        because the commit consults the same live answer — discarded the ones
+        already written and reported the run a success. Ticking it halfway
+        was worse: staging had been placed in a system temp dir, so the commit
+        tried to ``os.replace`` across filesystems, which is the one thing
+        ``new_staging_dir`` exists to prevent.
+
+        The row is also disabled for the duration, so the two answers cannot
+        visibly disagree; this is what makes them actually agree.
+        """
+        chosen = getattr(self, "_run_dests", None)
+        return chosen if chosen is not None else self._ticked_destinations()
+
     def _wants_image_files(self) -> bool:
         """Whether this run writes a folder of per-group figures and CSVs.
 
@@ -1770,16 +1857,13 @@ class BatchExportPanel(QWidget):
         from a run that wrote no image files is the same picture, not a
         degraded one.
         """
-        box = getattr(self, "_to_files_cb", None)
-        return box is None or box.isChecked()
+        return "files" in self._destinations()
 
     def _wants_deck(self) -> bool:
-        box = getattr(self, "_to_deck_cb", None)
-        return bool(box is not None and box.isChecked())
+        return "deck" in self._destinations()
 
     def _wants_gallery(self) -> bool:
-        box = getattr(self, "_to_gallery_cb", None)
-        return bool(box is not None and box.isChecked())
+        return "gallery" in self._destinations()
 
     def _wants_disk_output(self) -> bool:
         """Whether anything at all lands in the output folder.
@@ -1797,10 +1881,11 @@ class BatchExportPanel(QWidget):
 
         **The one place a per-group output path is built**, on every mode, so
         "does this run produce files at all" is answered once rather than at
-        each of the nine ``open()`` calls that would otherwise each have to
-        remember — and a mode that grows a tenth gets the answer by asking
-        here. ``tests/test_batch_export_destinations.py`` holds every site to
-        it.
+        each of the sites that would otherwise each have to remember — ten of
+        them across four modules, seven feeding a ``with open(...)`` and the
+        rest a ``savefig`` — and a mode that grows an eleventh gets the answer
+        by asking here. ``tests/test_batch_export_destinations.py`` holds every
+        site to it.
 
         ``None`` means "skip this write" at every call site, rather than a
         path into somewhere harmless: a run that was told to write no files
@@ -1814,9 +1899,8 @@ class BatchExportPanel(QWidget):
         # Gated on the folder too: the per-cell CSV *is* a file in it, so a run
         # writing no files cannot write this one either. The checkbox greys
         # out to say so rather than staying tickable and doing nothing.
-        box = getattr(self, "_cell_rows_cb", None)
-        return bool(box is not None and box.isChecked()
-                    and self._wants_image_files())
+        chosen = self._destinations()
+        return "cells" in chosen and "files" in chosen
 
     def _cell_scope_kwargs(self, *, val_col: str | None,
                            timepoints=None) -> dict:
@@ -1881,10 +1965,14 @@ class BatchExportPanel(QWidget):
                     return
                 out = self._out_path(write_dir, f"{stem}_cells.csv")
                 if out is None:
-                    # Unreachable while ``_wants_cell_rows`` is gated on the
-                    # same predicate, and asserted rather than assumed: the two
-                    # answering differently would write a file into a folder
-                    # the run was told to leave alone.
+                    # Unreachable while both this and ``_wants_cell_rows`` read
+                    # the run's one destination snapshot. Said rather than
+                    # returning in silence anyway, because the day they stop
+                    # agreeing is the day a user finds the file missing with
+                    # nothing anywhere saying why.
+                    self._note_shortfall(
+                        f"{grp.name}: per-cell CSV not written — this run "
+                        f"writes no files")
                     return
                 rows = write_cell_rows(self._ctx, scope, out)
         except Exception as exc:
@@ -1930,10 +2018,8 @@ class BatchExportPanel(QWidget):
         from well_viewer.domain.dataset_name import dataset_display_name
 
         return DestinationSpool(
-            to_gallery=bool(self._to_gallery_cb is not None
-                            and self._to_gallery_cb.isChecked()),
-            to_deck=bool(self._to_deck_cb is not None
-                         and self._to_deck_cb.isChecked()),
+            to_gallery=self._wants_gallery(),
+            to_deck=self._wants_deck(),
             tab=self._SOURCE_TAB,
             mode_key=self._mode_key(),
             dataset_name=dataset_display_name(self._ctx.state.dataset.data_dir),
@@ -2639,9 +2725,22 @@ class BatchExportPanel(QWidget):
             self._suppress_persist = False
 
     def _resolve_out_dir(self) -> Path | None:
+        """The folder this run writes into — created only if it writes there.
+
+        The creation is the point. A gallery-only run puts nothing in this
+        folder, and this method used to ``mkdir(parents=True)`` it anyway,
+        before the runner ever asked which destinations were chosen — so
+        pressing Run with only the gallery ticked made two levels of empty
+        directory named for an export that never touched them. The runner's
+        own care not to create it (staging elsewhere, discarding rather than
+        committing) was measured at a seam one step past this call.
+        """
         val = self._out_dir_edit.text().strip()
+        writing = self._wants_disk_output()
         if val:
             p = Path(val)
+            if not writing:
+                return p
             try:
                 p.mkdir(parents=True, exist_ok=True)
                 return p
@@ -2652,6 +2751,12 @@ class BatchExportPanel(QWidget):
         d = self._ctx.state.dataset.data_dir
         if d and d.is_dir():
             return d
+        if not writing:
+            # No folder is needed, so not having one is not a failure. The
+            # gallery lives with the dataset, and the run is about to prove it
+            # can find that; refusing here would block a run that writes
+            # nothing on a setting it does not use.
+            return Path(val) if val else Path.home()
         QMessageBox.critical(self, "No output directory",
                              "Load data or choose an output folder.")
         return None
@@ -2683,6 +2788,11 @@ class BatchExportPanel(QWidget):
         self._prog_bar.setMaximum(max(len(jobs), 1))
         self._prog_bar.setValue(0)
         self._run_btn.setEnabled(False)
+        # Fixed before the first job, and before the staging directory is
+        # chosen from it. Everything downstream — ``_out_path``, the spool, the
+        # commit, the headline — reads this one answer. See ``_destinations``.
+        self._run_dests = self._ticked_destinations()
+        self._set_destination_row_enabled(False)
         errors: list[str] = []
         skipped: list[str] = []
         # A gallery-only run stages nowhere near the user's folder: it never
@@ -2777,7 +2887,9 @@ class BatchExportPanel(QWidget):
                 self._run_scatter_axes = None
                 run_notes = list(self._run_notes or [])
                 self._run_notes = None
+                self._run_dests = None
             self._run_btn.setEnabled(True)
+            self._set_destination_row_enabled(True)
             self._prog_bar.setVisible(False)
 
         for note in skipped:
@@ -2811,17 +2923,36 @@ class BatchExportPanel(QWidget):
         # identical to one where they all did.
         tail = " · ".join(part for part in (dest_note, dest_short) if part)
         tail = f" · {tail}" if tail else ""
+        where = self._where_it_went(out_dir)
         if skipped:
             done = len(jobs) - len(skipped)
             self._prog_lbl.setText(
-                f"✓ {done} group(s) → {out_dir.name}/ · {len(skipped)} with no data")
+                f"✓ {done} group(s){where.short} · {len(skipped)} with no data")
             self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
             self._ctx.notify.set_status(
-                f"{status_text} · {len(skipped)} group(s) had no data{tail}")
+                f"{status_text}{where.long} · {len(skipped)} group(s) had no "
+                f"data{tail}")
             return
-        self._prog_lbl.setText(success_text)
+        self._prog_lbl.setText(f"{success_text}{where.short}")
         self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
-        self._ctx.notify.set_status(f"{status_text}{tail}")
+        self._ctx.notify.set_status(f"{status_text}{where.long}{tail}")
+
+    def _where_it_went(self, out_dir: Path) -> _Destination:
+        """The "→ …" clause, naming somewhere this run actually wrote.
+
+        Each mode used to build its own headline before the run, interpolating
+        the output folder unconditionally — so a gallery-only run announced
+        ``✓ 2 group(s) → out/`` and gave the status bar an absolute path to a
+        directory that does not exist and received nothing. Worse where an
+        earlier run had left a deck in that folder: the sentence then points at
+        a real directory whose only content is another run's file.
+
+        Built here, from the destinations the run actually used, because the
+        modes cannot know — the answer depends on a row none of them read.
+        """
+        if self._wants_image_files() or self._wants_deck():
+            return _Destination(f" → {out_dir.name}/", f" → {out_dir}")
+        return _Destination(" → Saved Plots", " → Saved Plots")
 
     def _save_figure(self, fig, fig_path: Path | None, fmt: str, *,
                      group: BarGroup | None, title: str,
@@ -3250,8 +3381,8 @@ class BatchExportPanel(QWidget):
             jobs=groups_with_data,
             progress_text_fn=_progress,
             run_job_fn=_run_group,
-            success_text=f"\u2713 {len(groups_with_data)} group(s) \u2192 {out_dir.name}/",
-            status_text=f"Batch export: {len(groups_with_data)} group(s) \u2192 {out_dir}",
+            success_text=f"\u2713 {len(groups_with_data)} group(s)",
+            status_text=f"Batch export: {len(groups_with_data)} group(s)",
             out_dir=out_dir,
         )
 

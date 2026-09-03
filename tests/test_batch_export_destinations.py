@@ -82,16 +82,83 @@ def _writer_calls():
     return found
 
 
+#: Directory parameters a job's writer is handed. A helper taking the staging
+#: directory under another name is the same site wearing a different label —
+#: ``_write_cell_rows_for(self, grp, write_dir, …)`` already is one — so the
+#: guard watches the names rather than the one spelling that happened to be
+#: used first.
+_DIR_NAMES = frozenset({"write_dir", "staging"})
+
+#: Functions entitled to build a staging path themselves, each for a written
+#: reason. An exemption is a row with a reason, never an absence — a site left
+#: out on purpose and one nobody remembered look identical six months later.
+_MAY_JOIN = {
+    # It is the function the rule is about.
+    "_out_path": "builds the path, and answers the question first",
+    # It makes the staging directory rather than writing into it.
+    "new_staging_dir": "creates the directory the rule is about",
+    # The run's single deck, not a per-group file, and already gated on the
+    # snapshotted ``to_deck``.
+    "write_deck": "one deck for the run, gated on the destination snapshot",
+    # A read, not a write: it looks for an earlier run's deck.
+    "note_stale_deck": "reads an existing file, writes nothing",
+}
+
+
+def _joins_a_staging_dir(node) -> bool:
+    """Whether *node* builds a path under one of :data:`_DIR_NAMES`.
+
+    Every spelling, not just ``write_dir / name``. A reviewer reverted the
+    whole nine-site consolidation by rewriting each call as
+    ``Path(write_dir).joinpath(name)`` and the guard stayed green, which is
+    the failure this function exists to end: a rule that holds one spelling
+    has not held the rule, it has held the spelling.
+    """
+    def _is_dir(expr) -> bool:
+        if isinstance(expr, ast.Name):
+            return expr.id in _DIR_NAMES
+        if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) \
+                and expr.func.id == "Path" and expr.args:
+            return _is_dir(expr.args[0])
+        if isinstance(expr, ast.Attribute):
+            return _is_dir(expr.value)
+        return False
+
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return _is_dir(node.left)
+    if isinstance(node, ast.Call):
+        func = node.func
+        # ``write_dir.joinpath(x)`` / ``Path(write_dir).joinpath(x)``
+        if isinstance(func, ast.Attribute) and func.attr == "joinpath":
+            return _is_dir(func.value)
+        # ``os.path.join(write_dir, x)``
+        if isinstance(func, ast.Attribute) and func.attr == "join" \
+                and node.args:
+            return _is_dir(node.args[0])
+    if isinstance(node, ast.JoinedStr):
+        # An f-string interpolating the directory is a path join too.
+        return any(_is_dir(part.value) for part in node.values
+                   if isinstance(part, ast.FormattedValue))
+    return False
+
+
+#: What this cannot see, said out loud rather than left to be discovered: a
+#: **local alias** (``wd = write_dir`` then ``wd / name``) needs dataflow the
+#: syntax tree does not carry. The ``_out_path`` call floor below is the other
+#: half of the rule, and it is what a wholesale reversion trips — converting
+#: the sites away removes the calls it counts.
+
+
 def _staging_path_joins():
-    """Every ``write_dir / …`` expression in the package, as ``(file, line)``.
+    """Every staging-directory path build in the package, as ``(file, line)``.
 
     Building a job's output path is exactly the decision ``_out_path`` owns:
     it is where "does this run write files at all" is answered, and a site
     that joins the staging directory itself has answered "yes" without asking.
-    Nine such sites existed across four modules before this was one function,
-    each with its own ``open()``, and converting eight of nine would have been
-    the worse outcome — one folder holding the files of a run that asked for
-    none.
+    Ten such sites existed across four modules before this was one function
+    (seven of them feeding a ``with open(...)``, the rest a ``savefig``), and
+    converting nine of ten would have been the worse outcome — one folder
+    holding the files of a run that asked for none.
     """
     found = []
     for path in sorted(_BATCH_DIR.rglob("*.py")):
@@ -104,23 +171,25 @@ def _staging_path_joins():
                 for child in ast.walk(node):
                     owner[id(child)] = node.name
         for node in ast.walk(tree):
-            if not isinstance(node, ast.BinOp) or not isinstance(node.op,
-                                                                 ast.Div):
+            if not _joins_a_staging_dir(node):
                 continue
-            left = node.left
-            name = None
-            if isinstance(left, ast.Name):
-                name = left.id
-            elif isinstance(left, ast.Call) and isinstance(left.func, ast.Name) \
-                    and left.func.id == "Path" and left.args \
-                    and isinstance(left.args[0], ast.Name):
-                # ``Path(write_dir) / …`` is the same join wearing a cast.
-                name = left.args[0].id
-            if name != "write_dir":
-                continue
-            if owner.get(id(node)) == "_out_path":
+            if owner.get(id(node)) in _MAY_JOIN:
                 continue
             found.append((rel(path), node.lineno))
+    return found
+
+
+def _out_path_calls():
+    """Every ``self._out_path(...)`` call in the package."""
+    found = []
+    for path in sorted(_BATCH_DIR.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        for node in ast.walk(parse_source(path)):
+            if isinstance(node, ast.Call) \
+                    and isinstance(node.func, ast.Attribute) \
+                    and node.func.attr == "_out_path":
+                found.append((rel(path), node.lineno))
     return found
 
 
@@ -130,6 +199,12 @@ def test_every_job_output_path_is_built_by_the_one_function():
         "these build a staging path without asking whether this run writes "
         "files; route them through self._out_path(write_dir, name): "
         f"{sites}")
+    # The positive control its sibling below already has: "the package is
+    # swept" and "the matcher matches nothing" are otherwise the same green,
+    # and a guard that found nothing has measured nothing.
+    calls = _out_path_calls()
+    assert len(calls) >= 9, (
+        f"expected the converted sites to still call _out_path: {calls}")
 
 
 def test_every_batch_figure_write_names_its_group_and_title():
@@ -698,8 +773,17 @@ class _RunStub:
     _snapshot_axes = BatchExportPanel._snapshot_axes
     # The runner asks whether anything lands on disk before it commits, so a
     # stub answering that itself would decide the very thing under test.
+    _ticked_destinations = BatchExportPanel._ticked_destinations
+    _destinations = BatchExportPanel._destinations
+    _where_it_went = BatchExportPanel._where_it_went
+    _set_destination_row_enabled = BatchExportPanel._set_destination_row_enabled
+    _enabled_when_idle = BatchExportPanel._enabled_when_idle
+    _sync_destination_widgets = BatchExportPanel._sync_destination_widgets
     _wants_image_files = BatchExportPanel._wants_image_files
     _wants_deck = BatchExportPanel._wants_deck
+    _wants_gallery = BatchExportPanel._wants_gallery
+    _wants_cell_rows = BatchExportPanel._wants_cell_rows
+    _out_path = BatchExportPanel._out_path
     _wants_disk_output = BatchExportPanel._wants_disk_output
     _PANELS = BatchExportPanel._PANELS
     _SOURCE_TAB = "Line Graphs"
@@ -844,7 +928,9 @@ def test_a_run_with_no_destinations_stages_nothing_extra(tmp_path):
     _run(panel, out, ["Drug A"], _job)
     from well_viewer.features.batch_export.service import MANIFEST_NAME
     assert sorted(p.name for p in out.iterdir()) == ["Drug A.csv", MANIFEST_NAME]
-    assert panel.statuses == ["Batch export"]
+    # The runner appends where the output went; this run wrote image files,
+    # so it names the folder it really filled.
+    assert panel.statuses == [f"Batch export \u2192 {out}"]
 
 
 # ── a gallery-only run touches no directory of the user's ──────────────────
@@ -909,3 +995,127 @@ def test_a_deck_only_run_still_commits_because_a_deck_is_a_file(tmp_path,
     # And nothing else: no PNG, no CSV, from a run that asked for neither.
     assert sorted(p.name for p in out.iterdir()) == sorted(
         [MANIFEST_NAME, "batch_export_line.pptx"])
+
+
+# ── the destinations are fixed for a run, and reported honestly ────────────
+
+def test_a_gallery_only_run_names_saved_plots_not_a_folder_it_never_wrote(
+        tmp_path, monkeypatch):
+    """The headline used to interpolate the output folder unconditionally.
+
+    So a gallery-only run announced "2 group(s) → out/" and handed the status
+    bar an absolute path to a directory that does not exist and received
+    nothing — and where an earlier run had left a deck there, to a real
+    directory whose only content belongs to another run.
+    """
+    import well_viewer.features.saved_plots.controller as sp_controller
+    from well_viewer.features.batch_export import _destinations
+
+    store = _FakeStore(tmp_path / "saved_plots")
+    monkeypatch.setattr(_destinations, "_get_store", lambda ctx: store)
+    monkeypatch.setattr(sp_controller, "get_store", lambda ctx: store)
+    monkeypatch.setattr(_destinations, "_refresh_gallery", lambda ctx: None)
+
+    _qapp()
+    out = tmp_path / "out"
+    panel = _RunStub(tmp_path, to_gallery=True, to_files=False)
+
+    def _job(name, write_dir):
+        panel._spool.capture(_figure(), title=name)
+        return None
+
+    _run(panel, out, ["Drug A", "Drug B"], _job)
+
+    assert "→ Saved Plots" in panel._prog_lbl.text()
+    assert str(out) not in panel._prog_lbl.text()
+    assert all(str(out) not in s for s in panel.statuses), panel.statuses
+    assert any("→ Saved Plots" in s for s in panel.statuses), panel.statuses
+
+
+def test_a_run_that_writes_files_still_names_the_folder(tmp_path):
+    _qapp()
+    out = tmp_path / "out"
+    panel = _RunStub(tmp_path)
+
+    def _job(name, write_dir):
+        (write_dir / f"{name}.csv").write_text("x")
+        return None
+
+    _run(panel, out, ["Drug A"], _job)
+    assert f"→ {out.name}/" in panel._prog_lbl.text()
+    assert any(str(out) in s for s in panel.statuses), panel.statuses
+
+
+def test_unticking_image_files_mid_run_cannot_discard_what_was_written(
+        tmp_path):
+    """The runner pumps the event loop between jobs, so the row is live.
+
+    Read per job, unticking Image files halfway gave the first groups their
+    files, the rest none, and then — because the commit consulted the same
+    live answer — discarded the ones already written and called the run a
+    success. Files destroyed, reported green: the exact shape CLAUDE.md §7
+    forbids.
+    """
+    from well_viewer.features.batch_export.service import MANIFEST_NAME
+
+    _qapp()
+    out = tmp_path / "out"
+    panel = _RunStub(tmp_path)
+    seen = []
+
+    def _job(name, write_dir):
+        path = panel._out_path(write_dir, f"{name}.csv")
+        seen.append(path is not None)
+        if path is not None:
+            path.write_text("x")
+        # The user clicks the box while job one is finishing.
+        panel._to_files_cb.setChecked(False)
+        return None
+
+    _run(panel, out, ["Drug A", "Drug B"], _job)
+
+    assert seen == [True, True], "the snapshot must outlast the click"
+    assert sorted(p.name for p in out.iterdir()) == sorted(
+        ["Drug A.csv", "Drug B.csv", MANIFEST_NAME])
+
+
+def test_ticking_image_files_mid_run_cannot_move_staging_across_devices(
+        tmp_path):
+    """The mirror case, which raised rather than lost data.
+
+    Staging is placed by the same answer the commit later consults: chosen as
+    a system temp dir for a gallery-only run, the commit would then
+    ``os.replace`` across filesystems — the one thing ``new_staging_dir``
+    exists to prevent — and the exception escaped into the Run slot with no
+    dialog.
+    """
+    _qapp()
+    out = tmp_path / "out"
+    panel = _RunStub(tmp_path, to_gallery=True, to_files=False)
+
+    def _job(name, write_dir):
+        panel._to_files_cb.setChecked(True)
+        assert panel._out_path(write_dir, f"{name}.csv") is None
+        return None
+
+    _run(panel, out, ["Drug A"], _job)
+    assert not out.exists()
+
+
+def test_the_destination_row_is_locked_while_a_run_is_in_flight(tmp_path):
+    """What makes the snapshot legible rather than merely correct."""
+    _qapp()
+    out = tmp_path / "out"
+    panel = _RunStub(tmp_path)
+    during = []
+
+    def _job(name, write_dir):
+        during.append((panel._to_files_cb.isEnabled(),
+                       panel._to_deck_cb.isEnabled(),
+                       panel._to_gallery_cb.isEnabled()))
+        return None
+
+    _run(panel, out, ["Drug A"], _job)
+    assert during == [(False, False, False)]
+    assert panel._to_files_cb.isEnabled()
+    assert panel._to_gallery_cb.isEnabled()

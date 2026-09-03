@@ -25,6 +25,8 @@ import os
 
 import pytest
 
+from types import SimpleNamespace
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from well_viewer.features.batch_export._panels import (  # noqa: E402
@@ -64,6 +66,8 @@ class _FormStub:
     _summary_footnotes = BatchExportPanel._summary_footnotes
     _wants_cell_rows = BatchExportPanel._wants_cell_rows
     _run_level_summary = BatchExportPanel._run_level_summary
+    _ticked_destinations = BatchExportPanel._ticked_destinations
+    _destinations = BatchExportPanel._destinations
     _wants_image_files = BatchExportPanel._wants_image_files
     _wants_deck = BatchExportPanel._wants_deck
     _wants_gallery = BatchExportPanel._wants_gallery
@@ -85,8 +89,11 @@ class _FormStub:
         if panels is not None:
             self._PANELS = panels
         self._cell_rows_cb = _Box(cells)
-        self._to_gallery_cb = _Box(gallery) if gallery is not None else None
-        self._to_deck_cb = _Box(deck) if deck is not None else None
+        # ``None`` where the build has no Saved Plots: that is the shape the
+        # real ``_build_write_to_row`` produces there, and a stub that always
+        # made two checkboxes could never take it.
+        self._to_gallery_cb = None if gallery is None else _Box(gallery)
+        self._to_deck_cb = None if deck is None else _Box(deck)
         self._use_sidebar_groups = sidebar
         self._summary_lbl = _Label()
 
@@ -205,16 +212,21 @@ def test_every_bad_row_is_reported_in_one_pass():
 # ── what the block promises ─────────────────────────────────────────────────
 
 def test_the_summary_names_the_panels_a_partial_run_will_draw():
-    panels = tuple((p.key, PanelAxis(included=(p.key != "cdf")))
+    # A *middle* panel, deliberately. Dropping the last one leaves the kept
+    # keys in ``_PANELS`` order either way, so a summary that listed the
+    # declared panels rather than the drawn ones would produce the same
+    # string — the fixture has to make the right and wrong answers differ
+    # before any assertion over it can measure anything (CLAUDE.md §7.8).
+    panels = tuple((p.key, PanelAxis(included=(p.key != "frac")))
                    for p in BatchExportPanel._PANELS)
     stub = _FormStub(AxesSpec(panels=panels))
     stub._refresh_run_summary()
-    assert ("One figure — 3 of 4 panels (Value, Fraction above cutoff, "
-            "N above cutoff)") in stub._summary_lbl.text
+    assert ("One figure — 3 of 4 panels (Value, N above cutoff, CDF)"
+            in stub._summary_lbl.text), stub._summary_lbl.text
     # And not the "all N panels" wording, which is the answer the
     # undropped run gives and would satisfy a looser assertion.
     assert "all 4 panels" not in stub._summary_lbl.text
-    assert "CDF" not in stub._summary_lbl.text
+    assert "Fraction above cutoff" not in stub._summary_lbl.text
 
 
 def test_a_run_that_keeps_every_panel_says_so_rather_than_listing_them():
@@ -369,6 +381,11 @@ def test_every_mode_can_answer_the_summary_from_its_own_declarations(cls):
     """
     assert cls._SUMMARY_CSV_LINE
     if cls is not BatchExportPanel:
+        # Declared on the mode itself, not merely truthy: inherited, all three
+        # promise "per-member time-series data" for a bar, a scatter and a
+        # dose-response CSV, and `assert cls._SUMMARY_CSV_LINE` is happy with
+        # every one of them.
+        assert "_SUMMARY_CSV_LINE" in cls.__dict__, cls.__name__
         assert (cls._SUMMARY_FIGURE_NOTE
                 != BatchExportPanel._SUMMARY_FIGURE_NOTE), cls.__name__
 
@@ -459,6 +476,11 @@ def test_the_axes_label_column_is_wide_enough_for_the_names_in_it(qapp):
                 # A stacked mode's label sits beside a checkbox indicator.
                 assert width > widest, cls.__name__
             assert width >= widest, cls.__name__
+            # And an upper bound, because ">= widest" alone is satisfied by
+            # any number: a column nine thousand pixels wide clips nothing
+            # and pushes every field off the screen instead.
+            assert width <= BatchExportPanel._axes_label_w_ceiling(host), \
+                cls.__name__
     finally:
         host.deleteLater()
 
@@ -559,3 +581,137 @@ def test_the_bullets_come_back_with_the_image_files():
     assert "Each export group produces:" in text
     assert "not saved anywhere" not in text
     assert "The run also files a Saved Plots record per figure." in text
+
+
+# ── the folder is created only by a run that writes into it ────────────────
+
+class _OutDirStub(_FormStub):
+    """``_resolve_out_dir`` off the real class, with a real line edit."""
+
+    _resolve_out_dir = BatchExportPanel._resolve_out_dir
+
+    def __init__(self, text, data_dir, **kw):
+        from PySide6.QtWidgets import QLineEdit
+
+        super().__init__(_spec(), **kw)
+        self._out_dir_edit = QLineEdit(str(text))
+        self._ctx = SimpleNamespace(
+            state=SimpleNamespace(dataset=SimpleNamespace(data_dir=data_dir)))
+
+
+def test_a_gallery_only_run_does_not_create_the_folder_it_will_not_use(
+        qapp, tmp_path):
+    """The creation happened before the runner ever asked the question.
+
+    ``_resolve_out_dir`` is called by every mode's ``_run_batch`` *before*
+    ``_run_batch_jobs``, and it used to ``mkdir(parents=True)``
+    unconditionally — so a gallery-only run made two levels of empty
+    directory named for an export that never touched them. The runner's own
+    care not to create it was measured one step past this call, which is
+    exactly the seam CLAUDE.md §7.6 warns about.
+    """
+    target = tmp_path / "exports" / "run7"
+    stub = _OutDirStub(target, tmp_path, files=False, gallery=True)
+    assert stub._resolve_out_dir() == target
+    assert not target.exists()
+    assert not target.parent.exists()
+
+
+def test_a_run_that_writes_files_still_creates_its_folder(qapp, tmp_path):
+    target = tmp_path / "exports" / "run7"
+    stub = _OutDirStub(target, tmp_path, files=True)
+    assert stub._resolve_out_dir() == target
+    assert target.is_dir()
+
+
+def test_a_deck_only_run_creates_the_folder_because_the_deck_goes_in_it(
+        qapp, tmp_path):
+    target = tmp_path / "exports" / "deck"
+    stub = _OutDirStub(target, tmp_path, files=False, deck=True)
+    assert stub._resolve_out_dir() == target
+    assert target.is_dir()
+
+
+# ── the greying is wired, not merely written ───────────────────────────────
+
+class _SyncStub(_FormStub):
+    """``_sync_destination_widgets`` with the real widgets it greys.
+
+    Real ``QCheckBox`` / ``QComboBox`` / ``QLineEdit`` rather than fakes,
+    because ``setEnabled`` is the thing under test and a fake that records the
+    call would pass against a method that called it on the wrong widget.
+    """
+
+    _sync_destination_widgets = BatchExportPanel._sync_destination_widgets
+    _set_destination_row_enabled = BatchExportPanel._set_destination_row_enabled
+    _enabled_when_idle = BatchExportPanel._enabled_when_idle
+
+    def __init__(self, **kw):
+        from PySide6.QtWidgets import (
+            QCheckBox, QComboBox, QLabel, QLineEdit, QPushButton,
+        )
+
+        super().__init__(_spec(), **kw)
+        self._to_files_cb = QCheckBox()
+        self._to_files_cb.setChecked(kw.get("files", True))
+        self._to_deck_cb = QCheckBox()
+        self._to_deck_cb.setChecked(kw.get("deck", False))
+        self._to_gallery_cb = QCheckBox()
+        self._to_gallery_cb.setChecked(kw.get("gallery", False))
+        self._cell_rows_cb = QCheckBox()
+        self._fmt_cb = QComboBox()
+        self._fmt_hint = QLabel()
+        self._out_dir_edit = QLineEdit()
+        self._out_dir_browse_btn = QPushButton()
+        self._summary_lbl = _Label()
+
+
+def test_format_is_greyed_when_no_image_files_are_written(qapp):
+    """Four answers to a question this run does not ask."""
+    stub = _SyncStub(files=False, gallery=True)
+    stub._sync_destination_widgets()
+    assert not stub._fmt_cb.isEnabled()
+    assert not stub._fmt_hint.isEnabled()
+    stub._to_files_cb.setChecked(True)
+    stub._sync_destination_widgets()
+    assert stub._fmt_cb.isEnabled(), "and it comes back"
+
+
+def test_the_folder_is_greyed_only_when_nothing_lands_in_it(qapp):
+    """The deck is a file, so it keeps the folder alive."""
+    gallery_only = _SyncStub(files=False, gallery=True)
+    gallery_only._sync_destination_widgets()
+    assert not gallery_only._out_dir_edit.isEnabled()
+    assert not gallery_only._out_dir_browse_btn.isEnabled()
+
+    with_deck = _SyncStub(files=False, deck=True)
+    with_deck._sync_destination_widgets()
+    assert with_deck._out_dir_edit.isEnabled()
+    assert with_deck._out_dir_browse_btn.isEnabled()
+
+
+def test_the_per_cell_checkbox_is_greyed_with_the_folder_it_writes_into(qapp):
+    stub = _SyncStub(files=False, gallery=True)
+    stub._sync_destination_widgets()
+    assert not stub._cell_rows_cb.isEnabled()
+    stub._to_files_cb.setChecked(True)
+    stub._sync_destination_widgets()
+    assert stub._cell_rows_cb.isEnabled()
+
+
+def test_re_enabling_after_a_run_does_not_hand_back_a_greyed_control(qapp):
+    """The row is locked for a run and unlocked after it.
+
+    Unlocking must not undo the greying that ``_sync_destination_widgets``
+    applied for a reason that still holds — the per-cell checkbox belongs to
+    a folder this run is still not writing.
+    """
+    stub = _SyncStub(files=False, gallery=True)
+    stub._sync_destination_widgets()
+    stub._set_destination_row_enabled(False)
+    assert not stub._to_files_cb.isEnabled()
+    stub._set_destination_row_enabled(True)
+    assert stub._to_files_cb.isEnabled()
+    assert stub._to_gallery_cb.isEnabled()
+    assert not stub._cell_rows_cb.isEnabled(), \
+        "still no folder for it to write into"

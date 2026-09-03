@@ -131,14 +131,29 @@ def test_render_batch_export_panel(loaded_app, mode, stem):
             "not saved anywhere." in fileless), fileless
     assert not panel._fmt_cb.isEnabled()
     assert not panel._cell_rows_cb.isEnabled()
-    assert panel._out_dir_edit.isEnabled(), "the deck still needs a folder"
-    panel._to_deck_cb.setChecked(False)
-    QApplication.processEvents()
-    assert not panel._out_dir_edit.isEnabled(), \
-        "a gallery-only run needs no output folder"
+    if panel._to_deck_cb is not None and panel._to_deck_cb.isChecked():
+        assert panel._out_dir_edit.isEnabled(), "the deck still needs a folder"
+    if panel._to_deck_cb is not None:
+        panel._to_deck_cb.setChecked(False)
+        QApplication.processEvents()
+        assert not panel._out_dir_edit.isEnabled(), \
+            "a gallery-only run needs no output folder"
+
+    # Re-tick, and check it all comes back. Without these the toggling above
+    # proved only that the controls can be turned off: a `_wants_image_files`
+    # that latched — the "works once" bug — passed every assertion here, on
+    # all five panels, and the fast lane cannot see it because each of its
+    # stubs is fresh.
     panel._to_files_cb.setChecked(True)
-    panel._to_deck_cb.setChecked(True)
+    if panel._to_deck_cb is not None:
+        panel._to_deck_cb.setChecked(True)
     QApplication.processEvents()
+    restored = panel._summary_lbl.text()
+    assert restored.startswith("Each export group produces:"), restored
+    assert "not saved anywhere" not in restored, restored
+    assert panel._fmt_cb.isEnabled()
+    assert panel._cell_rows_cb.isEnabled()
+    assert panel._out_dir_edit.isEnabled()
     if len(panel._PANELS) > 1:
         # ``_fill_axes_demo`` unticks the last panel on every stacked mode.
         kept = len(panel._PANELS) - 1

@@ -493,8 +493,8 @@ class BarBatchExportPanel(BatchExportPanel):
             jobs=jobs,
             progress_text_fn=_progress,
             run_job_fn=_run_job,
-            success_text=f"\u2713 {len(groups_with_data)}g \u00d7 {len(selected_tps)}t \u2192 {out_dir.name}/",
-            status_text=f"Bar batch export complete \u2192 {out_dir}",
+            success_text=f"\u2713 {len(groups_with_data)}g \u00d7 {len(selected_tps)}t",
+            status_text="Bar batch export complete",
             out_dir=out_dir,
         )
 

@@ -2771,6 +2771,28 @@ not the gallery, and the per-cell CSV is a file in that folder. A run with
 nothing ticked is refused by `_run_is_refused`, which is also the one pre-flight
 every mode's `_run_batch` opens with.
 
+**The chosen destinations are snapshotted for the life of a run**
+(`_destinations`, filled from `_ticked_destinations` at the top of
+`_run_batch_jobs` and cleared in its `finally`), for the same reason the spool
+and the axes are: the runner pumps `processEvents()` between jobs, so the
+Write to: row is live while an export runs. Read per job, unticking **Image
+files** halfway gave the first groups their files and the rest none, and then —
+because the commit consults the same answer — discarded the ones already
+written and reported the run a success. Ticking it halfway was worse: staging
+had been placed in a system temp dir on the earlier answer, so the commit
+attempted an `os.replace` across filesystems, the one thing `new_staging_dir`
+exists to prevent, and the exception escaped into the Run slot with no dialog.
+`_set_destination_row_enabled` disables the row for the run's duration so the
+panel cannot show a destination that is not the one in use, and re-derives
+each control's idle state on the way back rather than remembering it.
+
+The run's headline is built centrally too (`_where_it_went`): each mode used to
+interpolate the output folder into its own success and status text before the
+run, so a gallery-only run announced `✓ 2 group(s) → out/` and gave the status
+bar an absolute path to a directory that does not exist and received nothing.
+The modes now pass the group count and the runner appends where the output
+actually went.
+
 `_out_path(write_dir, name)` is **the one place a job's output path is built**,
 returning `None` for a run that writes no files, and
 `save_export_figure` takes that `None` as "style the figure, skip the write,

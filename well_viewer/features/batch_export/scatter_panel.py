@@ -637,8 +637,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
             jobs=jobs,
             progress_text_fn=_progress,
             run_job_fn=_run_job,
-            success_text=f"\u2713 {len(jobs)} group(s) \u2192 {out_dir.name}/",
-            status_text=f"Scatter batch export ({axes.mode}): {len(jobs)} group(s) \u2192 {out_dir}",
+            success_text=f"\u2713 {len(jobs)} group(s)",
+            status_text=f"Scatter batch export ({axes.mode}): {len(jobs)} group(s)",
             out_dir=out_dir,
         )
 

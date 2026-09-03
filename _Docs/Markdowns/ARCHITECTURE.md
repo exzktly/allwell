@@ -433,8 +433,11 @@ well_viewer/
 │   ├── qc/           controller.py, params.py, tab_view.py   ← support lib
 │   ├── export/       service.py, style.py, sidebar_view.py
 │   ├── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
-│   │                 scatter_panel.py, service.py, _common.py,
-│   │                 _line_series_runner.py
+│   │                 scatter_panel.py, response_panel.py, service.py,
+│   │                 _common.py, _line_series_runner.py,
+│   │                 _destinations.py (gallery + PowerPoint),
+│   │                 _panels.py (which panels, what axes),
+│   │                 _cell_rows.py (the raw rows behind a figure)
 │   └── registry.py   ← the FEATURES list: the sole importer of features/* (§5.3)
 └── persistence/                   ← JSON read/write, debounced save registry
 ```
@@ -741,7 +744,7 @@ and registers every centre page. The current page-list:
 | Images | **smFISH** | — |
 | Data | **Review CSV** | — |
 | Data | **Saved Plots** | — (the plot gallery; decorates every plot card with a "save to gallery" button, and exports the gallery as a PDF report or a PowerPoint deck — each chart as editable shapes, each Image Table grid as one editable group per field of view) |
-| Data | **Batch Export** | — |
+| Data | **Batch Export** | — (one figure + CSV per export group, in five modes — Line, Bar, Scatter cells, Scatter aggregate, Response — and optionally into the Saved Plots gallery and a PowerPoint deck as well as into files) |
 
 **Plotting** is a `NamedPageStack`; **Image Browser** (`QTabWidget`: the unified
 home for the disparate image-review surfaces — the review-image **Segmentation**
@@ -2564,6 +2567,329 @@ Home must paint from its **builder**, not from its `on_activate` hook:
 `tab_controller.on_tab_change` early-returns until `_line_ax_mean` exists, and
 that widget comes from Line Graphs, which is drained after startup. The hook is
 for repaints.
+
+#### Batch Export (`features/batch_export/`)
+
+The page takes a set of **export groups** — defined in its own left-hand plate
+editor, persisted in `persistence.json`, and deliberately not the Sample
+Definition replicate sets — and writes one figure and one CSV per group. Its
+modes are a page selector on the shell band, in the order `tab_view._MODES`
+declares them: Line, Bar, Scatter (cells), Scatter (aggregate), Response. Each
+is a `BatchExportPanel` subclass sharing that base's group editor, output
+settings and job runner, and each declares two things about itself — the
+`_SOURCE_TAB` whose figure it exports, and a `_mode_key()` that names it in a
+file name. Both are read by the extra destinations below, so a subclass that
+inherited them silently would file its figures under the line tab's name.
+
+A mode whose figure comes from a **removable** feature names that feature in
+`_MODES`, and `_offered_modes` derives the bar from the registry: Response mode
+reuses Response Curves' own collector and renderer, so a profile that drops that
+leaf gets four tabs rather than a fifth that builds and then raises on Run. The
+list is derived rather than written twice, and `_show_batch_mode` falls back to
+the default mode for a key this build does not offer — a saved view naming
+`response` in such a build lands on Line rather than on nothing.
+
+**One capture point.** Every panel writes its figure through
+`base_panel._save_figure`, which resolves the export-style prefs and hands the
+figure to the Qt-free `service.save_export_figure`. That single choke point is
+what makes the two extra destinations possible, and it is why `_save_figure`
+takes `group` and `title` as **required** keyword arguments: a call site that
+omitted the group would file a gallery record whose parameters describe whatever
+the plotting tab happened to be showing, under this group's name, so Restore
+would draw a different figure from the thumbnail beside it — a wrong answer
+rather than a missing one.
+`tests/test_batch_export_destinations.py` holds every call site to passing both.
+
+**The two extra destinations** (`_destinations.DestinationSpool`) are additive
+switches in OUTPUT SETTINGS, offered only where the Saved Plots feature is in
+the build, since both are its code:
+
+* **Saved Plots** files one gallery record per exported figure, so a batch run's
+  output can be browsed, reordered, renamed and swept into the gallery's own PDF
+  report.
+* **PowerPoint** writes one `batch_export_<mode>.pptx` beside the figures, a
+  slide per group, through the same `saved_plots._deck` writer the gallery's
+  Export menu uses — so each figure arrives as editable shapes, and one whose
+  vector capture failed is placed as a picture with the slide saying so. One
+  deck name per mode, because a user exporting bar and then line figures into
+  one folder wants two decks rather than the second overwriting the first.
+
+Neither replaces the per-group files. A run with both ticked writes its PNGs and
+CSVs exactly as before, *and* the deck, *and* the records.
+
+**Nothing reaches either destination for a run that did not commit.** The file
+writes are staged and committed atomically (`service.commit_staged_export`), so
+a run that fails at group K leaves the previous complete export untouched; a
+gallery that had filled with K−1 records by then would be the same defect in
+different clothes. So the spool stages its captures in a directory of its own
+and `_run_batch_jobs` files the gallery records only *after* the commit
+succeeds, while the deck is staged **inside** the export's staging directory —
+it is an ordinary output file and belongs under the same manifest as the figures
+it is built from. What the destinations produced, and what they could not, are
+reported separately: `DestinationSpool.summary()` and `.shortfall()`, because a
+deck two slides short of the groups it names cannot say so itself.
+
+Four kinds of shortfall are counted rather than inferred, and each is a way this
+feature can produce less than it was asked for while looking complete. A
+**capture** that could not be rendered (`capture_failures`). A record the
+gallery **refused** (`gallery_failures`) — the gallery's writer reports a failed
+image write by *returning a status string*, so it neither raises nor appends,
+and a count taken from the call returning would have reported ten records filed
+over an empty gallery; the count comes from the store growing instead, which is
+the fact that matters. A figure filed with **no parameters** (`undescribed`),
+because `_capture_group_params` returning `({}, {})` puts a record in the
+gallery that is indistinguishable from a restorable one until somebody presses
+Restore. And an **earlier run's deck** left in the folder by a run that did not
+write one (`stale_deck`): a stale figure is named for its group, so a group this
+run did not export shows in the file name, but a deck is named for the mode and
+so a stale one carries exactly the name a fresh one would. It is named, never
+deleted. The raster-versus-vector split is reported only once a deck exists —
+a run that errored discards its staging before the deck is built, and counting
+pictures in a deck nobody wrote describes an artifact that is not there.
+
+A capture failure never costs the file the user actually asked for.
+`save_export_figure` calls its `on_saved` hook *after* the write and before the
+figure is closed — the only window in which a second render of the same styled
+figure exists — and a capture that raises is counted into the shortfall rather
+than aborting the export.
+
+**A record's parameters describe its group, not the live tab.**
+`_capture_group_params` takes the snapshot inside `_app_group_scope` +
+`_app_val_col_scope`, so the record's `selections` are the group's own members
+and its column is the one the panel exported with. The scope is entered by the
+capture rather than relied on from the caller, because the panels differ: the
+line mode already renders inside it and the bar mode never enters it at all, so
+a capture trusting an ambient scope would be right on one panel and silently
+wrong on the next. The snapshot is stamped `params["batch_export"] = {mode,
+group}`, which is what lets the gallery summary and
+`saved_plots.controller._report_batch_export_origin` say where the record came
+from — the parameters reproduce the *group*, while Batch Export's own layout
+controls live on the panel and not in view state, so a Restore can draw the same
+data in a different arrangement. Those controls are: bars versus beeswarm,
+stacked timepoints, the scatter facet mode, and — since the AXES block below —
+the per-panel limits and scales and the panel selection itself. A record
+captured from a two-panel, y-limited batch figure therefore restores as a
+four-panel autoscaled one.
+
+**Which panels a figure draws, and what its axes are fixed to** (`_panels.py`).
+A batch figure is not one plot: the line mode stacks four panels and the bar
+mode three, each a different quantity. Each mode therefore **declares** its
+panels (`_PANELS`), and OUTPUT SETTINGS builds the AXES block from that
+declaration rather than from a list written beside it — a shared X min/max and
+scale, then per panel a keep-it checkbox, a Y min/max and a Y scale. A mode
+whose figure is a single axes declares one panel, so the controls read the same
+everywhere instead of appearing only on the stacked modes.
+
+The X row governs only the panels that are actually on that x — `_X_PANELS`,
+which is a different question from `_SHARE_X`'s matplotlib linking and has a
+different answer on the line mode: its CDF plots intensity where its three
+siblings plot time, so an X row filled in hours was clipping the CDF to 0–48
+intensity units and giving three correct panels beside a fourth that looked
+empty. `None` means every drawn panel, which is what a single-axes mode wants.
+
+`panel_axes` lays the figure out with **only the panels the run kept**, and
+gives each excluded panel a real axes on a throwaway figure rather than
+``None``: the shared renderers take a full bundle and paint every member of it
+— `render_line_series` calls methods on all four of its `LineAxes` — so a
+scratch axes keeps them working unchanged while nothing reaches the exported
+page. `figure_height` scales the page down with the panels it kept, and the x
+sharing re-bases on the first panel that survived, since unticking the top one
+would otherwise leave the rest sharing an axis that is not on the figure.
+
+**The limits ride in the preferences; the scale is pinned on the axes.** Every
+batch figure passes through `apply_export_style_prefs` on its way to disk, and
+that pass re-reads the *application's* export preferences — so a limit stamped
+on the axes at render time is one autoscale away from being replaced by the
+app's, silently. `AxesSpec.prefs_overlay` therefore hands that pass the run's
+own numbers, as a **copy**: `_ensure_export_style_prefs` returns the live
+dictionary the Export Style sidebar reads and writes, and merging into it would
+leave a batch run's numbers sitting in the sidebar afterwards. A stacked mode
+writes `axis_buckets` keyed by the kept panels' positions on the figure; a
+single-panel mode writes flat preferences with `axis_target` "All", because its
+one logical plot can be several axes — the faceted scatter draws one per group
+— and a bucket on the first would leave the rest autoscaled. The scale goes
+through `_aw_force_xlog` / `_aw_force_ylog`, the marker that pass checks
+*before* the shared `x_log`, which is the same mechanism the Response tab's
+dose axis already uses.
+
+Every field is optional and blank means "leave it", falling through to the
+app-wide setting; an unreadable one reads as blank rather than as a kept
+previous value, the rule the Response fit bounds already follow. **Auto is not
+linear**: the scale choice is tri-state, and pinning `False` where the user
+chose nothing would take the Response tab's derived logarithmic dose axis
+linear. `_axes_block_refuses_the_run` is the single pre-flight every mode's
+`_run_batch` opens with, and it refuses three things before the first job, for
+one reason: each of them *writes a file* per group that looks like every other
+file in the folder. Every panel unticked is a blank page. A `min` at or above
+its `max` is a typo under columns headed `min` and `max`, and matplotlib
+answers the equal case by expanding the range to an interval of its own. A
+`Log` scale bounded at or below zero has no position for that bound, so
+matplotlib drops it and autoscales. `_axes_complaints` names every offending
+row in one pass — a user who mistyped two rows fixes both before the next run —
+and skips the rows of unticked panels, whose numbers describe nothing that is
+drawn.
+
+**Which controls a mode offers is a declaration, not a shared form.** Three
+class attributes say so, and each exists because the generic control was wrong
+somewhere rather than merely redundant. `_X_IS_NUMERIC` is false on the bar
+modes, whose x is one position per group member: a numeric bound there is three
+bars crushed into the left of every frame, so the row is absent rather than
+offered and ignored. `_AXES_SCALE_OFFERED` is false on the scatter modes, whose
+own `X log` / `Y log` apply `log10(v + 1)` so cells at zero stay on the figure
+— two controls for one axis is worse than either, and the one kept is the one
+that is not lossy. `_AXES_FOLLOW_HEADER` is false on Scatter and Response,
+whose axes are themselves a choice: the block asking for a range sat above the
+rows that pick what the axis *is*, and Scatter carried two rows labelled "X:"
+a hundred pixels apart meaning different things. Those two modes call
+`_build_output_tail` themselves, after their axis rows. `_X_ROW_LABEL` and
+`_Y_ROW_LABEL` name each mode's axes for the same reason: "X:" over a row of
+numbers does not say what unit to type.
+
+**"Each export group produces:" is derived from the controls**, in
+`_refresh_run_summary`, and connected to every control that changes the answer
+(`_wire_run_summary`, which each mode extends through
+`_extra_summary_signals`). It was a static string, and by the time the panel
+could also write a per-cell CSV, a slide deck, a gallery record and three of
+its four panels it was wrong in four ways at once — while being the one block
+in the column that says in plain words what pressing Run does. A mode supplies
+its own words through `_SUMMARY_FIGURE_LEAD`, `_SUMMARY_FIGURE_NOTE`,
+`_SUMMARY_CSV_LINE` and `_summary_footnotes`; the bar and scatter modes
+override `_summary_figure_lead` instead, because a toggle on those panels
+decides how many figures one group gets.
+
+**Three destinations, none of them privileged.** The **Write to:** row is the
+first thing OUTPUT SETTINGS asks, because Folder and Format are consequences of
+its answer rather than settings above it. Nothing forces a folder of image
+files to be the base a run pays for: `DestinationSpool.capture` renders its own
+PNG and SVG from the in-memory figure and never opens the file the folder write
+produces, so a deck or a gallery record from a run that wrote no images holds
+the same picture. `_wants_image_files` / `_wants_deck` / `_wants_gallery` are
+the three answers, `_wants_disk_output` is the pair that need a folder, and
+`_sync_destination_widgets` greys what the chosen set does not use — Format
+describes the image files alone, the folder is wanted by those and the deck but
+not the gallery, and the per-cell CSV is a file in that folder. A run with
+nothing ticked is refused by `_run_is_refused`, which is also the one pre-flight
+every mode's `_run_batch` opens with.
+
+**The chosen destinations are snapshotted for the life of a run**
+(`_destinations`, filled from `_ticked_destinations` at the top of
+`_run_batch_jobs` and cleared in its `finally`), for the same reason the spool
+and the axes are: the runner pumps `processEvents()` between jobs, so the
+Write to: row is live while an export runs. Read per job, unticking **Image
+files** halfway gave the first groups their files and the rest none, and then —
+because the commit consults the same answer — discarded the ones already
+written and reported the run a success. Ticking it halfway was worse: staging
+had been placed in a system temp dir on the earlier answer, so the commit
+attempted an `os.replace` across filesystems, the one thing `new_staging_dir`
+exists to prevent, and the exception escaped into the Run slot with no dialog.
+`_set_destination_row_enabled` disables the row for the run's duration so the
+panel cannot show a destination that is not the one in use, and re-derives
+each control's idle state on the way back rather than remembering it.
+
+The run's headline is built centrally too (`_where_it_went`): each mode used to
+interpolate the output folder into its own success and status text before the
+run, so a gallery-only run announced `✓ 2 group(s) → out/` and gave the status
+bar an absolute path to a directory that does not exist and received nothing.
+The modes now pass the group count and the runner appends where the output
+actually went.
+
+`_out_path(write_dir, name)` is **the one place a job's output path is built**,
+returning `None` for a run that writes no files, and
+`save_export_figure` takes that `None` as "style the figure, skip the write,
+still call `on_saved`". Nine sites across four modules each held their own
+`open()` before this was one function, and converting eight of them would have
+been worse than converting none — one folder holding the files of a run that
+asked for none.
+`tests/test_batch_export_destinations.py::test_every_job_output_path_is_built_by_the_one_function`
+is what holds the tenth.
+
+The summary CSVs follow the image files, since they are files in the same
+folder: a deck-only or gallery-only run saves pictures and no numbers, which
+`_refresh_run_summary` states outright before the run rather than leaving as an
+absence afterwards. A gallery-only run also stages **outside** the output
+folder and discards rather than commits — `new_staging_dir` creates `out_dir`
+to hold its temp directory, so committing (or even staging there) would leave
+the user an empty folder and a manifest describing no files. `DestinationSpool.begin`
+takes the directory to stage under for the same reason: on the filesystem the
+captures will be copied *to*, which is the output folder for a run that writes
+there and the dataset folder — where `saved_plots/` lives — for one that does
+not.
+
+**The rows behind a figure** (`_cell_rows.py`). An opt-in checkbox writes the
+plot tabs' `Save cell data…` file beside each group's figure — one row per cell
+the figure was computed from, with the scope block and the marker columns.
+Nothing is re-implemented: the scope comes from the mode's own source tab
+(`_CELL_SCOPE` plus `_CELL_SCOPE_FN`, since Scatter's two modes are two
+different plots with two different scope builders), the rows from
+`export/cell_scope_compute.build_chunk`, and the file is written by
+`export/worker.CellExportWriter`, so the batch file's columns, quoting,
+blank-versus-zero rule and atomic replace are the tab's. The writer drains a
+queue until `DONE`; the batch caller fills and closes the queue first and calls
+it inline, which is that contract used without a thread rather than in spite of
+one — the GUI path needs a thread because a user is waiting, and a batch job is
+already inside a blocking run.
+
+**A tab's scope reads that tab's controls, and a batch run overrides all of
+them.** Each `cell_scope` therefore takes explicit-argument overrides —
+`val_col` and `timepoints` on Line, Bar and Response; the axis entries, the
+resolved columns and the timepoints on Scatter — each defaulting to what the
+tab itself says, so the tab's own call is unchanged. Without them the per-cell
+file described *the plot on screen*: a bar run over t=24 and t=48 wrote two
+files of whatever timepoint the Bar tab happened to be on, each internally
+consistent, each named for a timepoint it did not contain. Overriding rather
+than rebuilding is what keeps one definition of what each tab's population is —
+its markers, its gate layer, its threshold rule.
+
+The write is refused, and said, in three distinguishable cases: no loaded
+wells, no readable rows, and a gating recompute still in flight. The last is
+the refusal `export/service` already makes for the same reason — the gating
+worker rewrites verdict columns in place on the cached frames, and the runner
+pumps the event loop between jobs — and without it a run started mid-recompute
+gives its early groups one gating state and its later ones another, under one
+manifest.
+
+`_write_cell_rows_for` **enters the group scope itself**, for the reason
+`_capture_group_params` does: the scope reads the live selections through
+`cell_scope_compute.plotted_wells`, and the bar mode never enters that scope at
+all, so a writer trusting an ambient one would give every group's file the same
+wells under a different group's name. A failure there is recorded as a run
+shortfall rather than raised — the figure and the summary CSV are what the run
+was primarily asked for — and the notes are counted into the final status line
+rather than each overwriting the last.
+
+**Response mode** (`response_panel.py`) renders through Response Curves' own
+`collect_response` and `draw_response` rather than a batch twin of them, with
+the export group swapped in through `_app_group_scope` — so each figure is the
+curve the tab would draw if that group were the only thing selected. Its panel
+carries its own Channel and Property (including *Fraction above threshold*), x
+variable, series split, x scale, fit model with pinned plateaus, and timepoint
+selection; its CSV is the tab's own column shape with `group` in front, carrying
+the drawn points, **the members that could not be placed with the reason each
+was left out**, and a row per fit including a refused one. A group with no
+placeable points writes nothing at all rather than blank axes beside an empty
+CSV.
+
+It is the one mode with **no fold-change controls**, and that is a decision
+rather than an omission: the other modes normalise through the panel's own
+fold-change state, while a response curve normalises inside its collector off
+the shared `ctx.state.plot` state every plotting page shares. A panel-local
+control there would be offered, moved, and silently ignored by the export it
+appears to configure, so `_INCLUDES_FOLD_CHANGE` is False and the panel's info
+text says where the setting lives instead.
+
+That difference reaches one more place than the controls.
+`_control_selections` carries the replicate set a fold-change control names
+*into* the group scope, hidden, so a control belonging to another export group
+still resolves — and which controls those are comes from
+`_fold_change_control_refs`. The base class answers from its construction-time
+snapshot, which is right for a mode whose own Control combo edits it. Response
+overrides it to read the **live** shared state, because that is what its
+collector reads: from the snapshot, a control the user set on the plotting band
+*after* opening the mode would be absent from the scope,
+`resolve_control_wells` — which scans exactly that scope — would resolve it to
+no wells, and every point would drop out of a figure whose y axis still read
+`÷ DMSO`. Where a scope and the collector inside it touch one piece of state,
+they have to read the same copy of it.
 
 ### 5.3 Centre tab builders: `features/<feature>/tab_view.py`
 

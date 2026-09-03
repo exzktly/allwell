@@ -749,6 +749,7 @@ def populate_metric_combo(
     channel = ctx.state.channel
     from well_viewer.data.metric_labels import (
         METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
+        FRACTION_LABEL,
     )
     mapped_key = channel.label_to_channel_key.get(channel_entry)
     is_ratio = bool(mapped_key and is_ratio_key(mapped_key))
@@ -768,7 +769,7 @@ def populate_metric_combo(
             return
         items = list(METRIC_ORDER)
         if include_fraction:
-            items.append("Fraction above threshold")
+            items.append(FRACTION_LABEL)
         cb.addItems(items)
         cb.setEnabled(True)
         if prev in items:
@@ -986,6 +987,8 @@ def col_for_scatter_axis(ctx, channel_entry: str, metric_key: str) -> str:
     — that's a synthetic key that downstream aggregation code treats as a
     Fraction-On aggregation against the channel's mean-intensity column.
     """
+    from well_viewer.data.metric_labels import FRACTION_METRIC_KEY
+
     mapped_key = ctx.state.channel.label_to_channel_key.get(channel_entry)
     if mapped_key and is_ratio_key(mapped_key):
         return mapped_key
@@ -993,7 +996,7 @@ def col_for_scatter_axis(ctx, channel_entry: str, metric_key: str) -> str:
     # they carry no metric suffix, like ratios.
     if mapped_key and is_shape_column(mapped_key):
         return mapped_key
-    if metric_key in ("fraction_above_threshold", "smfish_count"):
+    if metric_key in (FRACTION_METRIC_KEY, "smfish_count"):
         # Fraction-on uses MFI as the underlying value column; smFISH
         # uses the dedicated count column. (.lower(): CSV cols are lower-case.)
         if metric_key == "smfish_count":

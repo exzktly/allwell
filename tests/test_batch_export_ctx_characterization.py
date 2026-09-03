@@ -24,12 +24,22 @@ from well_viewer.features.batch_export import (
     BarBatchExportPanel,
     ScatterBatchExportPanel,
 )
+from well_viewer.features.batch_export.response_panel import (
+    ResponseBatchExportPanel,
+)
 
 _EXPECTED_CLASS = {
     "line": BatchExportPanel,
     "bar": BarBatchExportPanel,
     "scatter_cells": ScatterBatchExportPanel,
     "scatter_agg": ScatterBatchExportPanel,
+    # Through the real constructor, which is the only thing that catches a
+    # panel that builds its own controls against a helper it calls wrongly:
+    # the fast lane drives the mode's methods off stubs and would never notice
+    # a ``_build_output_panel`` that raises. ``centre_view`` catches a failing
+    # builder and logs it, so an unbuilt page renders empty rather than
+    # failing — the class assertion below is what makes it fail here.
+    "response": ResponseBatchExportPanel,
 }
 
 

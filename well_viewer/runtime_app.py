@@ -133,6 +133,7 @@ from well_viewer.domain.ratio_models import RatioMetric
 
 # Aliased to avoid collision with the WellViewerApp._extract_well_token method below.
 from well_viewer.data.data_loading import extract_well_token as _extract_well_token
+from well_viewer.data.metric_labels import FRACTION_LABEL, FRACTION_METRIC_KEY
 
 
 # =============================================================================
@@ -777,7 +778,13 @@ class WellViewerApp(QWidget):
 
     # ── Per-axis scatter metric helpers ────────────────────────────────────
 
-    _SCATTER_AGG_METRIC_EXTRA = {"Fraction above threshold": "fraction_above_threshold"}
+    #: The one Property label that is not an intensity column, paired with the
+    #: key it resolves to. Both come from the shared metric vocabulary rather
+    #: than being spelled here: the aggregate Scatter tab, its batch export and
+    #: this shim all compare against the same string, and a copy per site is how
+    #: one of them silently stops matching. Not imported from the Scatter
+    #: feature, which is removable and reached only through lazy proxies.
+    _SCATTER_AGG_METRIC_EXTRA = {FRACTION_LABEL: FRACTION_METRIC_KEY}
 
     def _scatter_axis_metric_key(self, axis: str, *, agg = False) -> str:
         return scatter_axis_metric_key(self._ctx, axis, agg=agg)

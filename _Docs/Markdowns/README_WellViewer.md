@@ -1875,8 +1875,9 @@ the next.
 The window's top row is one band: **Review / Analyze / Datasets** on the left,
 spanning the width of the panel below it, and the current page's tabs — *Bar
 Plots · Line Graphs · Scatter Plot · …*, or *Image Table · Segmentation · Cell
-Browser · Playground* — immediately to their right on the same line. Batch Export's four
-modes — *Line · Bar · Scatter (cells) · Scatter (aggregate)* — sit there too.
+Browser · Playground* — immediately to their right on the same line. Batch
+Export's modes — *Line · Bar · Scatter (cells) · Scatter (aggregate) ·
+Response* — sit there too.
 Pages without sub-tabs (Statistics, Spatial, smFISH, Review CSV, Saved Plots)
 leave that side empty; the band keeps its height so nothing below it shifts when
 you switch pages. In Split View the band is empty too — each pane draws its own
@@ -3992,13 +3993,29 @@ panel-local state so a batch run isn't tied to whatever the on-screen
 plot has set.
 
 Pick the mode from the tab strip in the window's top band — *Line · Bar ·
-Scatter (cells) · Scatter (aggregate)*, beside the Review / Analyze / Datasets
-selector, where every other page's tabs are. The groups you build are **shared
-by all four modes** — define them once and they are there whether you export
-Line, Bar, Scatter (cells) or Scatter (aggregate). They describe your plate's conditions, not the shape of
+Scatter (cells) · Scatter (aggregate) · Response*, beside the Review / Analyze /
+Datasets selector, where every other page's tabs are. The groups you build are
+**shared by every mode** — define them once and they are there whichever you
+export. They describe your plate's conditions, not the shape of
 the plot. (Datasets analysed before this carried a separate set per mode; those
 are merged on first open, with a group appearing in more than one of them kept
 just once.)
+
+**Response** exports the [Response Curves](#response-curves) figure one group at
+a time: a curve per timepoint (and per series value, if you pick a series
+variable) plotted against a Number sample variable, with the same fit models the
+tab offers. The panel carries its own Channel and Property — including *Fraction
+above threshold* — x variable, series split, x scale, fit model with optional
+pinned top and bottom, and timepoint selection, so a batch run is not tied to
+what the tab is currently showing. Its CSV holds the drawn points, **a row for
+every member that could not be placed** with the reason it was left out, and a
+row per curve's fit — including a fit that was refused, carrying the reason.
+A group with no placeable points writes nothing at all rather than an empty
+figure and an empty file.
+
+Fold change is the one setting the Response panel does not carry: response
+curves normalise through the shared fold-change setting on the plotting band,
+the same one the tabs use, so set it there. Every other mode keeps its own.
 
 Groups are built on a **plate map**, the same plate control used everywhere else
 in the app rather than a separate grid of squares. Left-drag across it to add
@@ -4021,6 +4038,180 @@ sample name** (their Well Label) rather than the raw well token, and line-graph
 batch panels carry the **timepoint ticks and x-axis label on every time panel**.
 Building a batch no longer writes to the dataset on every click — the panel edits
 are held and saved once.
+
+#### Fixing the axes, and choosing which panels to draw
+
+OUTPUT SETTINGS carries an **AXES** block. The top row is the shared X min, max
+and scale; below it, one row per panel the mode draws — Line has four (Value,
+Fraction above cutoff, N above cutoff, CDF), Bar has three, and Scatter and
+Response have one — each with its own Y min, Y max and Y scale. The columns are
+headed `min`, `max` and `scale`, so a row still reads as a range once its
+placeholder text is replaced by your numbers.
+
+Every field is optional, and **blank means the figure keeps whatever the Export
+Style sidebar gives it** — usually an autoscaled bound, but if you have set a
+hard limit in that sidebar, that limit. It is not the same promise as "auto",
+which is what this hint used to say: leaving the fields empty is *not* a way to
+get an autoscaled figure out of a sidebar that holds a fixed range. A value
+that will not read as a number is treated as blank rather than kept from a
+previous edit, so a mistyped `1OO` falls through instead of quietly capping
+your axis at 100.
+
+Two ranges cannot be drawn, and the run is refused rather than written: a `min`
+at or above its `max` (the columns say which is which, so this is a typo, and
+matplotlib answers an equal pair by inventing a range of its own), and a **Log**
+scale bounded at or below zero (log has no position for zero, so matplotlib
+would drop the bound and autoscale). The dialog names every row it found, so
+two mistyped rows are fixed in one pass.
+
+Not every mode offers every column. The Bar modes have **no X row at all**:
+their x is one position per group member, so a numeric bound there is not a
+zoom, it is three bars crushed into the left of the frame. The Scatter modes
+have **no scale column**: their own `X log` / `Y log` checkboxes apply
+`log10(v + 1)`, chosen so cells at zero stay on the figure, and a second
+control doing a plain log would silently override the one that is not lossy.
+On the Scatter and Response modes the AXES block sits *below* the rows that
+choose what the axes are, because a range on an axis you have not picked yet is
+a question in the wrong order.
+
+The scale has three settings, not two. **Auto** leaves the figure to decide,
+which for a Response dose axis means the logarithmic scale it derives from the
+doses themselves; **Linear** and **Log** override it. Auto is not the same as
+Linear, which is why a plate you have never touched the control on keeps the
+axis the tab would have drawn.
+
+On the stacked modes each panel's checkbox decides whether it is **drawn at
+all**. Untick Fraction and CDF on a Line export and every group comes out as a
+two-panel figure, shorter to match, rather than a four-panel one with two empty
+frames. Untick everything and the run is refused — a figure with no panels is a
+blank page.
+
+A note on the Y rows: each panel plots a different quantity, so they take
+different ranges. One Y range across a mean, a fraction and a count would be
+meaningless on two of the three, which is why there is a row each rather than
+one for the figure.
+
+The X row is shared because the time panels of a stack share their x axis — but
+it does **not** reach the Line mode's CDF, whose x is intensity rather than
+time. Setting X to 0–48 hours leaves the CDF autoscaled rather than clipping it
+to intensity 0–48.
+
+#### Writing the raw rows behind each figure
+
+**Also write: Raw per-cell CSV** puts the same file the plot tabs' *Save cell
+data…* produces beside each group's figure — one row per cell the figure was
+computed from, carrying the `#` scope block that names what produced it and the
+marker columns saying which cells the figure actually counted. It is the file
+to reach for when you want to re-derive a fraction, or check what a bar is a
+mean of.
+
+Off by default, and worth leaving off unless you want it: it is one row per
+cell per well rather than one per group, so it can be orders of magnitude
+larger than the summary CSV every run already writes. That summary CSV is
+unaffected either way — this is an extra file, not a replacement.
+
+If a group's rows cannot be written, the figure and the summary CSV are still
+written and the run's status line says which of the four reasons it was: no
+loaded wells, none of their rows readable, a tab that declines to describe its
+population before a first draw, or cell gating still recomputing (the file
+would otherwise mix two gating states, which is the same refusal *Save cell
+data…* makes). Losing the
+files you asked for to a problem with one you merely also ticked would be the
+wrong trade.
+
+#### Choosing where a run's figures go
+
+The first row of OUTPUT SETTINGS is **Write to:**, and it is the first question
+because everything under it is a consequence of the answer:
+
+```
+Write to:  [x] Image files   [x] PowerPoint deck   [x] Saved Plots gallery
+```
+
+Tick any combination. None of the three is privileged and none needs the
+others — a deck built from a run that wrote no image files holds exactly the
+same figures, because each destination renders its own copy from the figure in
+memory rather than from a file on disk.
+
+- **Image files** — one figure per export group in the folder below, in the
+  chosen format, with the summary CSV of its plotted numbers beside it.
+- **PowerPoint deck** — one deck in that same folder, a slide per group, each
+  figure as editable shapes rather than a picture.
+- **Saved Plots gallery** — a record per figure inside All-Well. Not a file:
+  it stays with the dataset, so a gallery-only run writes nothing to disk at
+  all and does not even create the output folder.
+
+The row is locked while an export is running, and the destinations a run
+started with are the ones it finishes with — a click mid-run changes the next
+run, never this one.
+
+**Folder:** and **Format:** grey out when nothing needs them. Format describes
+the image files alone; the folder is wanted by the image files and by the deck,
+but not by the gallery. Untick all three and the run is refused — it would
+produce nothing.
+
+**The summary CSVs follow the image files**, because they are files in that
+same folder. A deck-only or gallery-only run therefore saves no numbers, only
+pictures. That is a real trade and it is stated in as many words in the block
+above the Run button before you start, because afterwards it is an absence, and
+an absence is the thing nobody notices. If you want both the deck and the
+numbers, tick *Image files* as well.
+
+**Saved Plots gallery** files every exported figure in the [gallery](#saved-plots), with
+the export group's own settings, so you can browse, rename and reorder them,
+restore one onto its plotting tab, and include them in the gallery's PDF report.
+Restoring one re-applies the group it was exported for — its members, its
+channel, its column — and puts you on the tab the figure came from. It does not
+re-apply Batch Export's own layout options (bars versus beeswarm, one figure per
+timepoint or one spanning them, the scatter facet mode), which live on the panel
+rather than in the saved view, so the restored figure can be laid out
+differently from the file that was exported; the gallery entry says so, and so
+does the status line when you restore it.
+
+**PowerPoint deck** writes one deck into the output folder — `batch_export_line.pptx`,
+`batch_export_bar.pptx`, and so on, one per mode so exporting two modes into one
+folder leaves you two decks — with a slide per group. Each figure arrives as
+**editable PowerPoint shapes** rather than a picture, exactly as in the
+gallery's own [PowerPoint export](#saved-plots): a bar is a rectangle you can
+recolour, an axis label a text box you can retype. A figure whose vector capture
+fails is placed as a picture and its slide says so.
+
+Both are produced **only if the whole run succeeds**. A run that
+fails partway leaves your previous export untouched, and it leaves nothing in
+the gallery and no deck either — so what you find in the folder, in the gallery
+and in the deck always describes the same run. The status line at the end names
+what they produced, and separately anything they could not: a figure that could
+not be captured, one the gallery would not accept (a read-only or full dataset
+folder), one filed without its settings so Restore will not reproduce it, and
+how many reached the deck as a picture rather than as shapes.
+
+One thing it will also tell you: if you export the same mode into a folder
+again **without** ticking PowerPoint, the deck from your earlier run is still
+sitting there under the same name, now describing different figures. All-Well
+says so rather than deleting it — the decks are named per mode, not per run, so
+this is the one leftover you cannot spot from a file name.
+
+#### Reading what a run will produce, before running it
+
+Above the Run button, **Each export group produces:** lists what one group's
+share of the run will be. It is written from the controls as they stand, not
+from a fixed description of the mode, so it changes as you work: untick two
+panels and it says "3 of 4 panels" and names them; tick **Raw per-cell CSV** and
+the extra file appears in the list with a note that it is typically far larger
+than the summary CSV; tick the deck or the gallery and a closing line
+names them, using the verb that says where each one lands — the run *writes* a
+deck into the folder, and *files* a record per figure. Untick **Image files**
+and the per-group bullets are replaced by the one line that matters then: no
+images, no CSVs, and the numbers behind each figure not saved anywhere. On the
+Bar and Scatter modes it also tracks
+the toggle that decides how many figures a group gets, so "One figure per
+selected timepoint" becomes "One figure spanning every selected timepoint" when
+you turn the spanning toggle on.
+
+It is worth reading before a long run for exactly the reason it is derived: a
+folder that comes out with three times as many files as expected, or without
+the one file you were after, is usually a control that was left where the
+previous run put it.
 
 ### Starting over
 

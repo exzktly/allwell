@@ -77,11 +77,18 @@ def _panel(ctx, control=None, control_map=None):
 
     Building a real panel needs Qt and a window; the scope needs the context,
     the control and the mapping, so those are what it gets.
+
+    ``_fold_change_control_refs`` comes off the real class rather than being
+    written out here, because *which* controls the scope carries is now a
+    decision a subclass can make — Response mode reads the live shared state
+    where every other mode reads this panel's snapshot. A stub that answered it
+    for itself would go on passing while the two modes disagreed.
     """
     stub = types.SimpleNamespace(
         _ctx=ctx, _fc_control=control, _fc_control_map=control_map or {})
-    stub._control_selections = types.MethodType(
-        BatchExportPanel._control_selections, stub)
+    for name in ("_control_selections", "_fold_change_control_refs"):
+        setattr(stub, name,
+                types.MethodType(getattr(BatchExportPanel, name), stub))
     return stub
 
 

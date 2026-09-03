@@ -3727,3 +3727,58 @@ def test_black_ink_guard_catches_an_uncoloured_artist(tmp_path, monkeypatch, sha
 def test_black_ink_guard_clears_a_coloured_or_unrelated_call(tmp_path, monkeypatch, shape):
     good = _write(tmp_path, "good_black_ink.py", shape)
     assert _run_scan(monkeypatch, _THEME_INK_GUARD, _BLACK_INK_TEST, [good]) is None
+
+
+# ── the staging-path guard ─────────────────────────────────────────────────
+#
+# Every spelling here is one a reviewer actually used to revert the nine-site
+# consolidation while the guard stayed green. The guard is
+# ``tests/test_batch_export_destinations.py::
+# test_every_job_output_path_is_built_by_the_one_function``; its
+# base-branch proof expires the day it merges, so these are what keep it
+# honest afterwards.
+STAGING_JOIN_CASES = {
+    "plain": ("csv_path = write_dir / name\n", True),
+    "path_cast": ("csv_path = Path(write_dir) / name\n", True),
+    "joinpath": ("csv_path = write_dir.joinpath(name)\n", True),
+    "path_joinpath": ("csv_path = Path(write_dir).joinpath(name)\n", True),
+    "os_path_join": ("csv_path = os.path.join(write_dir, name)\n", True),
+    "f_string": ('csv_path = Path(f"{write_dir}/{name}")\n', True),
+    "attribute": ("csv_path = write_dir.parent / name\n", True),
+    # The staging directory under the name the runner gives it.
+    "staging": ("deck = staging / name\n", True),
+    # The sanctioned route, and the two directories that are not staging.
+    "through_out_path": ("csv_path = self._out_path(write_dir, name)\n", False),
+    "other_dir": ("csv_path = other_dir / name\n", False),
+    "display_only": ('label = f"\u2192 {out_dir}"\n', False),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(STAGING_JOIN_CASES))
+def test_staging_path_guard_sees_every_spelling_of_a_join(shape):
+    import ast
+
+    body, should_fire = STAGING_JOIN_CASES[shape]
+    joins = _staging_join_predicate()
+    tree = ast.parse(body)
+    hit = any(joins(node) for node in ast.walk(tree))
+    if should_fire:
+        assert hit, f"the {shape} spelling went uncaught: {body!r}"
+    else:
+        assert not hit, f"the {shape} shape must clear: {body!r}"
+
+
+def _staging_join_predicate():
+    """The guard's own predicate, loaded from the guard rather than copied.
+
+    A copy would go on passing after the real one changed, which is the whole
+    failure this file exists to prevent.
+    """
+    from pathlib import Path as _P
+
+    src = (_P(__file__).parent / "test_batch_export_destinations.py").read_text()
+    head = src.split(
+        "def test_every_job_output_path_is_built_by_the_one_function")[0]
+    ns: dict = {}
+    exec(compile(head, "guard", "exec"), ns)  # noqa: S102 — the guard's own source
+    return ns["_joins_a_staging_dir"]

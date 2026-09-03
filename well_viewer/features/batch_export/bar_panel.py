@@ -6,7 +6,6 @@ from well_viewer.data.metric_labels import spread_label
 
 import csv
 import re
-from pathlib import Path
 
 import theme
 
@@ -35,6 +34,7 @@ from well_viewer.features.batch_export._common import (
     _CLR_DISABLED_WELL,
     _CLR_ERR_BAR,
 )
+from well_viewer.features.batch_export._panels import Panel
 from well_viewer.features.batch_export.base_panel import BatchExportPanel, SkippedJob
 from well_viewer.core.safe import swallow
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
@@ -61,8 +61,46 @@ _VIOLIN_SMOOTH_SLIDER_W = 120
 _update_bar_tp_menu = _lazy("well_viewer.features.barplot.controller", "update_bar_tp_menu")
 
 
+def _figure_record_title(grp, tp_strs) -> str:
+    """What one bar job's figure is called in the gallery and on its slide.
+
+    The group **and** its timepoints, because a bar run writes one figure per
+    (group, timepoint) by default: a gallery of records all titled ``Drug A``
+    names four different figures the same, and neither the thumbnail nor the
+    slide badge distinguishes them. The file names already carry the timepoint,
+    for exactly this reason.
+    """
+    name = str(getattr(grp, "name", "") or "")
+    if not tp_strs:
+        return name
+    when = tp_strs[0] if len(tp_strs) == 1 else ", ".join(tp_strs)
+    return f"{name} — t = {when}"
+
+
 class BarBatchExportPanel(BatchExportPanel):
     """Bar-plot batch export — same group editor + timepoint multi-select."""
+
+    _SOURCE_TAB = "Bar Plots"
+
+    #: Three panels rather than the line mode's four: a bar figure has no CDF.
+    _PANELS = (
+        Panel("mean", "Value"),
+        Panel("frac", "Fraction above cutoff"),
+        Panel("n", "N above cutoff"),
+    )
+    #: The three bar panels are drawn over one categorical axis rather than
+    #: linked by matplotlib, so nothing is shared in ``_SHARE_X`` — but the X
+    #: row does govern all three, which is what ``_X_PANELS`` says.
+    _SHARE_X = ()
+    _X_PANELS = ("mean", "frac", "n")
+    #: A bar figure's x is one position per group member, so there is nothing
+    #: numeric to bound: ``xlim(0, 48)`` over three bars crushes them into the
+    #: left of every frame in the run, and a log scale on it means nothing.
+    _X_IS_NUMERIC = False
+    _CELL_SCOPE = "well_viewer.features.barplot.cell_scope_compute"
+
+    def _mode_key(self) -> str:
+        return "bar"
 
     def __init__(
         self,
@@ -166,23 +204,38 @@ class BarBatchExportPanel(BatchExportPanel):
 
         layout.addWidget(build_hline_separator(None))
 
-        info = QLabel(
-            "Each group produces:\n"
-            "  \u2022 One bar figure per timepoint (or one figure spanning all\n"
-            "    selected timepoints when the toggle above is on)\n"
-            "  \u2022 One CSV row per member at each timepoint\n\n"
-            + ("Groups come from Home → Sample Map → Replicates.\n"
-               if self._use_sidebar_groups
-               else "Groups are defined in the left panel.\n")
-            + "SD/SEM is computed within each ReplicateSet only."
-        )
-        info.setWordWrap(True)
-        info.setContentsMargins(12, 4, 12, 4)
-        layout.addWidget(info)
-
+        self._build_summary_label(layout)
         self._build_run_row(layout)
 
+    # \u2500\u2500 the run summary \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    _SUMMARY_CSV_LINE = "One CSV row per member at each timepoint"
+    _SUMMARY_FIGURE_NOTE = ""
+
+    def _summary_figure_lead(self) -> str:
+        """Bars are the one mode whose figure *count* is a control.
+
+        With the span toggle off a group of four timepoints comes out as four
+        files, and the block said "One bar figure per timepoint" whichever way
+        the toggle was set.
+        """
+        if self._multi_tp_cb.isChecked():
+            return "One figure spanning every selected timepoint"
+        return "One figure per selected timepoint"
+
+    def _extra_summary_signals(self) -> list:
+        return [self._multi_tp_cb.toggled]
+
+    def _summary_footnotes(self) -> list[str]:
+        return [
+            ("Groups come from Home \u2192 Sample Map \u2192 Replicates."
+             if self._use_sidebar_groups
+             else "Groups are defined in the left panel."),
+            "SD/SEM is computed within each ReplicateSet only.",
+        ]
+
     def _run_batch(self) -> None:
+        if self._run_is_refused():
+            return
         groups_with_data = _groups_with_loaded_wells(
             self._groups_for_export(), self._ctx.state.dataset.well_paths,
         )
@@ -273,7 +326,9 @@ class BarBatchExportPanel(BatchExportPanel):
                 stem = f"bar_{safe_grp}_t_multi"
             # Uniquify so same-after-sanitise group names don't overwrite.
             # Stage into write_dir (audit X3); committed to out_dir on success.
-            base = write_dir / unique_export_stem(stem, used_stems)
+            base = unique_export_stem(stem, used_stems)
+            csv_path = self._out_path(write_dir, f"{base}.csv")
+            fig_path = self._out_path(write_dir, f"{base}.{fmt}")
 
             try:
                 from well_viewer.features.barplot.controller import (
@@ -394,10 +449,11 @@ class BarBatchExportPanel(BatchExportPanel):
                     )
                     if fc_active:
                         fnames += bar_fold_change_fieldnames(band_lbl)
-                    with open(str(base) + ".csv", "w", newline="") as fh:
-                        wrt = csv.DictWriter(fh, fieldnames=fnames)
-                        wrt.writeheader()
-                        wrt.writerows(rows_csv)
+                    if csv_path is not None:
+                        with open(csv_path, "w", newline="") as fh:
+                            wrt = csv.DictWriter(fh, fieldnames=fnames)
+                            wrt.writeheader()
+                            wrt.writerows(rows_csv)
             except Exception as exc:
                 return f"{grp.name} t={tp_strs} CSV: {exc}"
 
@@ -423,17 +479,22 @@ class BarBatchExportPanel(BatchExportPanel):
                         display_mode=display_mode,
                         violin_bw=violin_bw,
                     )
-                self._save_figure(fig, Path(str(base) + f".{fmt}"), fmt)
+                self._save_figure(
+                    fig, fig_path, fmt,
+                    group=grp, title=_figure_record_title(grp, tp_strs),
+                    val_col=_val_col)
             except Exception as exc:
                 return f"{grp.name} t={tp_strs} figure: {exc}"
+            self._write_cell_rows_for(grp, write_dir, base,
+                                      val_col=_val_col, timepoints=target_ts)
             return None
 
         self._run_batch_jobs(
             jobs=jobs,
             progress_text_fn=_progress,
             run_job_fn=_run_job,
-            success_text=f"\u2713 {len(groups_with_data)}g \u00d7 {len(selected_tps)}t \u2192 {out_dir.name}/",
-            status_text=f"Bar batch export complete \u2192 {out_dir}",
+            success_text=f"\u2713 {len(groups_with_data)}g \u00d7 {len(selected_tps)}t",
+            status_text="Bar batch export complete",
             out_dir=out_dir,
         )
 
@@ -485,10 +546,14 @@ class BarBatchExportPanel(BatchExportPanel):
         _tp_titles = [_rescale_tp(t, _tp_rescale) for t in target_ts]
         tp_title = (_tp_titles[0] if len(_tp_titles) == 1
                     else f"[{', '.join(_tp_titles)}]")
-        fig = _Figure(figsize=(8, 10), dpi=300, facecolor=theme.CPub.bg)
-        ax_mean = fig.add_subplot(3, 1, 1)
-        ax_frac = fig.add_subplot(3, 1, 2)
-        ax_n = fig.add_subplot(3, 1, 3)
+        spec = self._axes_spec()
+        drawn = spec.drawn_keys() or tuple(p.key for p in self._PANELS)
+        fig = _Figure(figsize=self._panel_figsize(8, 10, len(drawn)),
+                      dpi=300, facecolor=theme.CPub.bg)
+        laid = self._panel_figure(fig)
+        ax_mean = laid.axes["mean"]
+        ax_frac = laid.axes["frac"]
+        ax_n = laid.axes["n"]
         fig.subplots_adjust(hspace=0.55, top=0.94, bottom=0.10,
                             left=0.13, right=0.97)
         fig.suptitle(f"{grp.name}  \u2014  t = {tp_title} h",

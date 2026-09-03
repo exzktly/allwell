@@ -6,14 +6,17 @@ from well_viewer.data.metric_labels import spread_label
 
 import csv
 import re
+import tempfile
 
 import theme
 from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Callable
+from typing import NamedTuple
 
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -57,9 +60,19 @@ from well_viewer.features.batch_export.service import (
     new_staging_dir,
     save_export_figure,
 )
+from well_viewer.features.batch_export._cell_rows import write_cell_rows
+from well_viewer.features.batch_export._destinations import DestinationSpool
+from well_viewer.features.batch_export._panels import (
+    AxesSpec, Panel, PanelAxis, figure_height, panel_axes, pin_scales,
+)
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 # Foundational-layer (core/domain/data) ctx forms — safe at module scope.
 from well_viewer.core.lazy import lazy as _lazy
+# Saved Plots is one-line removable, so its parameter capture is a proxy rather
+# than an import statement — resolved on first call, and never called at all
+# unless a run ticked one of the extra destinations.
+_capture_params = _lazy("well_viewer.features.saved_plots.collect",
+                        "capture_params")
 from well_viewer.core.ui_helpers import build_hline_separator
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
@@ -74,12 +87,69 @@ _FC_BASELINE_COMBO_MIN_W = 160
 _FC_CTRL_COMBO_MIN_W = 160
 _LEFT_MAX_W = 560
 _LEFT_MIN_W = 420
+_LIMIT_EDIT_W = 76
 _OUT_DIR_EDIT_MIN_W = 240
 _PROG_BAR_W = 180
 _TP_LB_MIN_H = 120
 # Sibling-feature ctx forms reached through core.lazy proxies — a call, not an
 # import statement, so no module-load cycle and no deferred-import-budget hit.
 from well_viewer.domain.numeric import is_number
+
+
+#: The three answers the scale combos offer, and what each means to
+#: ``_panels.pin_scales``. ``None`` is "leave it alone" and is deliberately not
+#: the same as linear: a figure that derived a logarithmic axis from its own
+#: data — the Response tab's dose axis — keeps it, where pinning ``False``
+#: would take it linear for a user who never touched the control.
+_SCALE_CHOICES = (
+    ("Auto", None),
+    ("Linear", False),
+    ("Log", True),
+)
+
+
+def _parse_limit(text: str) -> float | None:
+    """An axis bound the user typed, or ``None`` for blank and for nonsense.
+
+    Unreadable reads as blank rather than as a kept previous value, the same
+    rule the Response panel's fit bounds follow: a user who typed ``1OO`` and
+    got an axis capped at 100 would have no way to tell the figure was not
+    answering the question they asked. Blank is the honest answer to a field
+    that says nothing, and the bound autoscales.
+    """
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _scale_choice(combo) -> bool | None:
+    """The scale a combo is on — ``None`` for Auto. See :data:`_SCALE_CHOICES`."""
+    if combo is None:
+        return None
+    index = combo.currentIndex()
+    if 0 <= index < len(_SCALE_CHOICES):
+        return _SCALE_CHOICES[index][1]
+    return None
+
+
+def _summarise_notes(notes) -> str:
+    """One clause for a run's own shortfalls, however many there were.
+
+    Counted rather than listed: forty groups that could not write a per-cell
+    file would push everything else off a status line, and each note is already
+    in the log with its group's name. The first is quoted so the sentence says
+    what *kind* of problem it was rather than only how many.
+    """
+    notes = list(notes or [])
+    if not notes:
+        return ""
+    if len(notes) == 1:
+        return notes[0]
+    return f"{notes[0]} (and {len(notes) - 1} more — see the log)"
 
 
 def _rep_sets_loaded(ctx):
@@ -111,6 +181,16 @@ _LineAxes = _lazy("well_viewer.features.lineplot.controller", "LineAxes")
 # Shared width for OUTPUT-SETTINGS row labels so the value controls line up in a
 # single column (Folder / Format / Style Preset / Channel / Fold change).
 _FIELD_LABEL_W = 108
+
+#: What a ``QCheckBox``'s indicator and its gap to the text take, on top of the
+#: text itself. Qt does not offer this as a metric that is right across styles,
+#: so it is a measured constant rather than a computed one — generous by a few
+#: pixels, because the cost of being short is a clipped panel name.
+_CHECKBOX_INDICATOR_W = 26
+
+#: Slack between the widest label and the first field, so the column does not
+#: read as two words jammed together.
+_LABEL_PADDING_W = 12
 
 
 def _norm_well_token(tok: str) -> str:
@@ -177,6 +257,13 @@ def _apply_split_sep_orientation(sep: QFrame, *, stacked: bool) -> None:
     sep.style().polish(sep)
 
 
+class _Destination(NamedTuple):
+    """The "→ …" clause in two lengths: the progress label, and the status bar."""
+
+    short: str
+    long: str
+
+
 class SkippedJob(str):
     """A job that produced nothing — a *notice*, not an error.
 
@@ -199,6 +286,78 @@ class BatchExportPanel(QWidget):
     #: Line & bar exports carry the Error-band (SEM/SD) + per-FOV-points spread
     #: controls in their OUTPUT SETTINGS; scatter panels turn this off.
     _INCLUDES_SPREAD = True
+
+    #: The Plotting leaf whose figure this mode exports. It is what a gallery
+    #: record made from a batch figure names as its originating tab, so
+    #: Restore takes the user to the tab the figure came from and the deck's
+    #: slide badge says where it was drawn. Every subclass overrides it; a
+    #: subclass that did not would file its figures under the line tab's name,
+    #: which is a wrong answer rather than a missing one, so
+    #: ``tests/test_batch_export_destinations.py`` pins the pairing.
+    _SOURCE_TAB = "Line Graphs"
+
+    #: Names this mode in the deck's file name (``batch_export_<key>.pptx``) and
+    #: in a capture's id. A method rather than an attribute because the scatter
+    #: panel is two modes in one class.
+    def _mode_key(self) -> str:
+        return "line"
+
+    #: Every attribute a ``Channel:`` combo built by ``_build_channel_row`` can
+    #: be stashed under, in the order a lookup should prefer them.
+    #:
+    #: **One roster, read by both the repopulate and the read-back**, because
+    #: they were two identical tuples written inline and a mode whose combo
+    #: joined only one of them fails in a way nothing reports: the combo is
+    #: built, it is populated on the first show and never again, so a dataset
+    #: opened after the panel silently exports against a channel list from
+    #: before the load. A subclass adding a mode extends this rather than
+    #: editing two loops.
+    _CHANNEL_COMBO_ATTRS: tuple[str, ...] = ("_line_channel_cb", "_bar_channel_cb")
+
+    #: The panels this mode's figure draws, in figure order — what the AXES
+    #: block offers a row for, and what ``_panels.panel_axes`` lays out. A mode
+    #: whose figure is a single axes declares one entry rather than none, so
+    #: the axis controls read the same on every mode instead of appearing only
+    #: on the stacked ones.
+    _PANELS: tuple[Panel, ...] = (
+        Panel("mean", "Value"),
+        Panel("frac", "Fraction above cutoff"),
+        Panel("n", "N above cutoff"),
+        Panel("cdf", "CDF"),
+    )
+
+    #: Which of those share one x axis when drawn together. The line and bar
+    #: stacks share a time axis; the CDF's x is intensity and does not.
+    _SHARE_X: tuple[str, ...] = ("mean", "frac", "n")
+
+    #: Which panels the **shared X row governs**. Not the same question as
+    #: ``_SHARE_X``, though it has the same answer here: that one is about
+    #: matplotlib's axis linking, this one about whose x the user is typing
+    #: into. They come apart on the line mode's CDF, which plots intensity
+    #: where its three siblings plot time — an X row filled in hours was
+    #: clipping it to 0–48 intensity units, giving three correct panels and a
+    #: fourth that looks empty with nothing saying why.
+    #:
+    #: ``None`` means every drawn panel, which is what a single-panel mode
+    #: wants and what a stack whose panels really are one axis wants.
+    _X_PANELS: tuple[str, ...] | None = ("mean", "frac", "n")
+
+    #: The source tab's ``cell_scope_compute`` module, for the per-cell row
+    #: export. A dotted module path rather than a proxy, because the modes'
+    #: features are removable and the module is resolved only when a run has
+    #: actually asked for the rows.
+    _CELL_SCOPE: str = "well_viewer.features.lineplot.cell_scope_compute"
+
+    #: The function in it. Named because Scatter's two modes have two: the
+    #: aggregate tab's scope is a different plot with different markers and a
+    #: different gate layer, and reading the per-cell one for it wrote a file
+    #: whose own block said it was about the other page.
+    _CELL_SCOPE_FN: str = "cell_scope"
+
+    #: Whether this mode's Channel row carries its own fold-change controls.
+    #: False only where the mode normalises through the shared plotting state
+    #: rather than through the panel's own — see ``_build_channel_row``.
+    _INCLUDES_FOLD_CHANGE = True
 
     def __init__(
         self,
@@ -263,6 +422,24 @@ class BatchExportPanel(QWidget):
         self._auto_named_group_ids: set[int] = set()
         self._drag_adding = True
         self._drag_visited: set = set()
+        #: The extra destinations for the run currently in flight, or ``None``
+        #: between runs. Owned by ``_run_batch_jobs``, which is what creates it
+        #: and what clears it, so a figure written outside a run cannot reach a
+        #: destination belonging to the previous one.
+        self._spool: DestinationSpool | None = None
+        #: This run's AXES answer, or ``None`` between runs — owned by
+        #: ``_run_batch_jobs`` exactly as ``_spool`` is, so a figure rendered
+        #: outside a run cannot pick up the previous run's axes.
+        self._run_axes: AxesSpec | None = None
+        #: Shortfalls this run has hit, or ``None`` between runs. Same
+        #: ownership as ``_spool`` and ``_run_axes``.
+        self._run_notes: list[str] | None = None
+        #: Only the scatter panel fills this; declared here so the shared
+        #: runner can clear it without knowing which mode it is running.
+        self._run_scatter_axes = None
+        #: The destinations this run is writing to, or ``None`` between runs.
+        #: See :meth:`_destinations` for why it is a snapshot.
+        self._run_dests: frozenset | None = None
 
         self._build_ui()
         if not self._use_sidebar_groups:
@@ -499,25 +676,12 @@ class BatchExportPanel(QWidget):
 
         layout.addWidget(build_hline_separator(None))
 
-        info = QLabel(
-            "Each export group produces:\n"
-            "  \u2022 One figure with one line per group member\n"
-            "    (ReplicateSet = mean of its wells, Solo well = raw)\n"
-            "  \u2022 One CSV with per-member time-series data\n\n"
-            + ("Groups come from Home → Sample Map → Replicates.\n"
-               if self._use_sidebar_groups
-               else "Groups are defined in the left panel.\n")
-            + "No statistics are computed across group members.\n"
-              "SD/SEM is only computed within a ReplicateSet."
-        )
-        info.setWordWrap(True)
-        info.setContentsMargins(12, 4, 12, 4)
-        layout.addWidget(info)
-
+        self._build_summary_label(layout)
         self._build_run_row(layout)
         layout.addStretch(1)
 
-    def _build_channel_row(self, layout: QVBoxLayout, *, attr: str) -> None:
+    def _build_channel_row(self, layout: QVBoxLayout, *, attr: str,
+                           include_fraction: bool = False) -> None:
         """Add a Channel: <combo> + Property: <combo> row.
 
         The channel combo is populated from ``_all_export_channels()`` so
@@ -545,6 +709,14 @@ class BatchExportPanel(QWidget):
         else:
             cb.setCurrentIndex(0)
         cb.setMinimumWidth(theme.Metrics.combo_min_w)
+        # Whether this row's Property combo offers ``Fraction above threshold``
+        # — the one entry that is not an intensity column. Stashed on the combo
+        # rather than passed to ``_refresh_property_combo_for``, because that
+        # method is also called from the channel's own ``currentIndexChanged``
+        # and from ``_refresh_channel_combos``, neither of which is holding the
+        # flag. A flag only the build path knew would give the row the fraction
+        # once and drop it the first time the channel moved.
+        cb._include_fraction = bool(include_fraction)
         setattr(self, attr, cb)
         row.addWidget(cb)
 
@@ -569,6 +741,17 @@ class BatchExportPanel(QWidget):
         # Fold-change controls get their own row below the Channel/Property
         # row — keeping them on the same line caused widget overlap on
         # narrower panel widths.
+        #
+        # Not on every mode. The line, bar and scatter exports normalise through
+        # this panel's *own* fold-change state, deliberately independent of the
+        # plot tab; Response Curves normalises inside its collector, off the
+        # shared ``ctx.state.plot`` fold-change state that every plotting page
+        # shares. A panel-local control there would be a switch that does
+        # nothing — offered, moved, and silently ignored by the export it
+        # appears to configure — so that mode says where the setting lives
+        # instead of duplicating it. See ``_INCLUDES_FOLD_CHANGE``.
+        if not self._INCLUDES_FOLD_CHANGE:
+            return
         fc_row = QHBoxLayout()
         fc_row.setContentsMargins(12, 2, 12, 2)
         self._build_fold_change_widgets(fc_row)
@@ -596,6 +779,7 @@ class BatchExportPanel(QWidget):
         """
         from well_viewer.data.metric_labels import (
             METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
+            FRACTION_LABEL,
         )
         ch_cb = getattr(self, channel_attr, None)
         prop_cb = getattr(self, f"{channel_attr}_metric", None)
@@ -617,9 +801,12 @@ class BatchExportPanel(QWidget):
                 prop_cb.setCurrentIndex(0)
                 prop_cb.setEnabled(True)
                 return
-            prop_cb.addItems(METRIC_ORDER)
+            items = list(METRIC_ORDER)
+            if getattr(ch_cb, "_include_fraction", False):
+                items.append(FRACTION_LABEL)
+            prop_cb.addItems(items)
             prop_cb.setEnabled(True)
-            if prev in METRIC_ORDER:
+            if prev in items:
                 prop_cb.setCurrentText(prev)
             else:
                 fallback = METRIC_KEY_TO_LABEL.get(
@@ -651,11 +838,21 @@ class BatchExportPanel(QWidget):
         ``app._app_state.channel.active_metric`` when the combo is missing or shows
         ``Calculated Val`` (ratio path — caller resolves the column via
         :py:meth:`_export_val_col_for`)."""
-        from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
+        from well_viewer.data.metric_labels import (
+            FRACTION_LABEL, FRACTION_METRIC_KEY, METRIC_LABEL_TO_KEY,
+        )
         prop_cb = getattr(self, f"{channel_attr}_metric", None)
         if prop_cb is None:
             return self._ctx.state.channel.active_metric or "mean_intensity"
         label = str(prop_cb.currentText() or "")
+        # The fraction is not one of the intensity flavours and is absent from
+        # ``METRIC_LABEL_TO_KEY`` by design, so a plain ``.get`` on it falls
+        # through to the *shared band's* metric — a row reading "Fraction above
+        # threshold" exporting mean intensity, in a file titled for the
+        # fraction. Only the rows that offer it can produce it, so nothing else
+        # changes for the modes that do not.
+        if label == FRACTION_LABEL:
+            return FRACTION_METRIC_KEY
         return METRIC_LABEL_TO_KEY.get(
             label, self._ctx.state.channel.active_metric or "mean_intensity",
         )
@@ -763,12 +960,16 @@ class BatchExportPanel(QWidget):
         group still resolves. Hidden, so nothing new is drawn. Their wells come
         from the pre-swap list: the group being scoped does not contain them,
         which is the whole problem.
+
+        Which controls those are comes from
+        :meth:`_fold_change_control_refs`, because the answer is not the same
+        on every mode — see that method.
         """
         from well_viewer.domain.control_ref import KIND_SET
         from well_viewer.domain.selections_model import make_selection
 
         wanted: list[str] = []
-        for ref in [self._fc_control, *(self._fc_control_map or {}).values()]:
+        for ref in self._fold_change_control_refs():
             if ref is None or getattr(ref, "kind", "") != KIND_SET:
                 continue
             if ref.name not in wanted:
@@ -791,6 +992,24 @@ class BatchExportPanel(QWidget):
                 fallback_color_idx=color_idx + i,
             ))
         return out
+
+    def _fold_change_control_refs(self) -> list:
+        """The control references this mode's export will actually normalise by.
+
+        This panel's own, seeded from the plot tab at construction and never
+        written back, because a batch job must not follow the live figure — and
+        the panel's Control combo is what edits it.
+
+        A mode with **no** fold-change controls of its own overrides this. Its
+        collector reads the shared state live, so this snapshot is not what its
+        export normalises by: taken at construction, a control the user set on
+        the plotting band *after* opening the mode would be missing from the
+        list, its replicate set would never be carried into the group scope,
+        and ``resolve_control_wells`` — which scans exactly that scope — would
+        find nothing. The figure then comes out empty under a y axis reading
+        "÷ DMSO", while the plotting tab draws the same group correctly.
+        """
+        return [self._fc_control, *(self._fc_control_map or {}).values()]
 
     def _export_val_col_for(self, channel_attr: str) -> str:
         """Resolve the (Channel, Property) pair to a CSV column / ratio key.
@@ -832,7 +1051,7 @@ class BatchExportPanel(QWidget):
         without requiring a restart.
         """
         channels = self._all_export_channels()
-        for attr in ("_line_channel_cb", "_bar_channel_cb"):
+        for attr in self._CHANNEL_COMBO_ATTRS:
             cb = getattr(self, attr, None)
             if cb is None:
                 continue
@@ -858,7 +1077,7 @@ class BatchExportPanel(QWidget):
     def _selected_export_channel(self) -> str:
         """Return the channel currently picked in the channel row, falling
         back to ``app._app_state.channel.active_channel`` when the row hasn't been built."""
-        for attr in ("_line_channel_cb", "_bar_channel_cb"):
+        for attr in self._CHANNEL_COMBO_ATTRS:
             cb = getattr(self, attr, None)
             if cb is not None:
                 text = str(cb.currentText() or "").strip()
@@ -935,12 +1154,14 @@ class BatchExportPanel(QWidget):
     def _build_output_header_and_io(
         self, layout: QVBoxLayout, *, title: str = "OUTPUT SETTINGS",
     ) -> None:
-        """Common OUTPUT header + Folder + Format + Profile rows."""
+        """Common OUTPUT header + Write to + Folder + Format + Profile rows."""
         hdr = QHBoxLayout()
         hdr.setContentsMargins(12, 4, 12, 4)
         self._add_bold_label(hdr, title)
         hdr.addStretch(1)
         layout.addLayout(hdr)
+
+        self._build_write_to_row(layout)
 
         out_row = QHBoxLayout()
         out_row.setContentsMargins(12, 6, 12, 6)
@@ -948,7 +1169,9 @@ class BatchExportPanel(QWidget):
         self._out_dir_edit = QLineEdit(self._out_dir_value)
         self._out_dir_edit.setMinimumWidth(_OUT_DIR_EDIT_MIN_W)
         out_row.addWidget(self._out_dir_edit, 1)
-        out_row.addWidget(btn_secondary(None, "Browse\u2026", self._browse_out_dir))
+        self._out_dir_browse_btn = btn_secondary(None, "Browse\u2026",
+                                                 self._browse_out_dir)
+        out_row.addWidget(self._out_dir_browse_btn)
         layout.addLayout(out_row)
 
         fmt_row = QHBoxLayout()
@@ -965,8 +1188,842 @@ class BatchExportPanel(QWidget):
         layout.addLayout(fmt_row)
 
         self._build_export_profile_row(layout)
+        if self._AXES_FOLLOW_HEADER:
+            self._build_output_tail(layout)
+        self._sync_destination_widgets()
+
+    def _build_write_to_row(self, layout: QVBoxLayout) -> None:
+        """Where this run's figures go — the first question, asked first.
+
+        Three destinations, none of them privileged. A folder of image files
+        used to be the base every run paid for, with the deck and the gallery
+        as switches beneath **Format:** that could only *add* to it; so a user
+        who wanted a deck got a folder of PNGs they had not asked for, and a
+        user who wanted the gallery got the same. Nothing forced that. The
+        deck and the gallery each render their own copy straight from the
+        figure in memory (``DestinationSpool.capture``) and never open the
+        file the folder write produces, so no destination depends on another.
+
+        **Folder:** and **Format:** are consequences of this row rather than
+        settings above it, and are disabled when nothing needs them — Format
+        describes the image files alone, and the folder is needed by those and
+        by the deck, but not by the gallery, whose records live in the
+        dataset's own ``saved_plots/``.
+
+        The image-files box is what the per-group summary CSVs follow: they
+        are files in that folder like the figures are. A run without it saves
+        no numbers, which the run summary says in as many words rather than
+        leaving it to be discovered afterwards.
+        """
+        row = QHBoxLayout()
+        row.setContentsMargins(12, 2, 12, 2)
+        self._add_bold_label(row, "Write to:", min_width=_FIELD_LABEL_W)
+        self._to_files_cb = QCheckBox("Image files")
+        self._to_files_cb.setChecked(True)
+        self._to_files_cb.setToolTip(
+            "One figure per export group in the folder below, in the chosen "
+            "format, with the summary CSV of its plotted numbers beside it.\n"
+            "Untick for a run that produces only a deck or only gallery "
+            "records \u2014 no images, and no CSVs.")
+        row.addWidget(self._to_files_cb)
+        self._to_deck_cb = None
+        self._to_gallery_cb = None
+        if self._has_saved_plots():
+            self._to_deck_cb = QCheckBox("PowerPoint deck")
+            self._to_deck_cb.setToolTip(
+                "One deck in the folder below \u2014 a slide per group, each "
+                "figure as editable PowerPoint shapes rather than a "
+                "picture.\n"
+                "Named per mode (batch_export_line.pptx and so on), not per "
+                "run, so a later run into the same folder replaces it.\n"
+                "A figure whose vector capture fails is placed as a picture "
+                "and the slide says so.")
+            row.addWidget(self._to_deck_cb)
+            self._to_gallery_cb = QCheckBox("Saved Plots gallery")
+            self._to_gallery_cb.setToolTip(
+                "File each exported figure in the Saved Plots gallery, with "
+                "the export group's own settings, so it can be restored, "
+                "reordered and included in the gallery's PDF report.\n"
+                "A record, not a file: it stays with the dataset rather than "
+                "with the output folder, so a gallery-only run writes nothing "
+                "to disk at all.\n"
+                "Records are added only if the whole run succeeds.")
+            row.addWidget(self._to_gallery_cb)
+        row.addStretch(1)
+        layout.addLayout(row)
+        for box in (self._to_files_cb, self._to_deck_cb, self._to_gallery_cb):
+            if box is not None:
+                box.toggled.connect(
+                    lambda _on: self._sync_destination_widgets())
+
+    def _set_destination_row_enabled(self, on: bool) -> None:
+        """Lock the Write to: row (and the per-cell box) for a run's duration.
+
+        The snapshot in :meth:`_destinations` is what makes a mid-run click
+        harmless; this is what makes it *look* harmless, so the panel never
+        shows a destination that is not the one the run is using.
+        """
+        for name in ("_to_files_cb", "_to_deck_cb", "_to_gallery_cb",
+                     "_cell_rows_cb"):
+            box = getattr(self, name, None)
+            if box is not None:
+                box.setEnabled(on and (name == "_to_files_cb"
+                                       or self._enabled_when_idle(name)))
+
+    def _enabled_when_idle(self, name: str) -> bool:
+        """Whether *name* would be enabled with no run in flight.
+
+        Re-derived rather than remembered, so re-enabling after a run cannot
+        hand back a control that ``_sync_destination_widgets`` had greyed for
+        a reason that still holds.
+        """
+        if name == "_cell_rows_cb":
+            return "files" in self._ticked_destinations()
+        return True
+
+    def _sync_destination_widgets(self) -> None:
+        """Grey out what the chosen destinations do not use, and re-summarise.
+
+        A control that cannot affect the run it sits above is worse than an
+        absent one: **Format:** over a gallery-only run offers four answers to
+        a question nobody asked, and the per-cell CSV is a file in a folder
+        this run is not filling. Disabled rather than hidden, because these
+        come back the moment the box above is re-ticked and a row that
+        appears and vanishes under the cursor is harder to read than one that
+        greys.
+        """
+        files = self._wants_image_files()
+        for name in ("_fmt_cb", "_fmt_hint"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setEnabled(files)
+        disk = self._wants_disk_output()
+        for name in ("_out_dir_edit", "_out_dir_browse_btn"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setEnabled(disk)
+        box = getattr(self, "_cell_rows_cb", None)
+        if box is not None:
+            box.setEnabled(files)
+        self._refresh_run_summary()
+
+    #: Whether the AXES block and the "Also …" rows go straight under Format,
+    #: or wait for the mode to place them.
+    #:
+    #: False on the modes whose *axes are a choice* — Scatter picks a channel
+    #: per axis, Response picks the dose variable — because there the AXES
+    #: block above those rows asks for a range on an axis the user has not
+    #: chosen yet, and Scatter ends up with two rows labelled "X:" a hundred
+    #: pixels apart meaning different things. Those modes call
+    #: :meth:`_build_output_tail` themselves, after the rows that say what the
+    #: axes are.
+    _AXES_FOLLOW_HEADER = True
+
+    def _build_output_tail(self, layout: QVBoxLayout) -> None:
+        """AXES, the per-cell CSV, and the spread rows."""
+        self._build_axes_rows(layout)
+        self._build_extra_output_rows(layout)
         if self._INCLUDES_SPREAD:
             self._build_spread_settings_rows(layout)
+        # Again here because the modes that place this block themselves build
+        # it *after* the header, so the header's own sync ran before the
+        # per-cell checkbox existed.
+        self._sync_destination_widgets()
+
+    def _build_axes_rows(self, layout: QVBoxLayout) -> None:
+        """The AXES block: a shared x row, then one row per panel.
+
+        Every field is optional and blank means "leave it as it is", falling
+        through to whatever the app-wide Export Style sidebar holds — which is
+        the range a batch figure already came out with. A blank written as a
+        number would turn "I did not set a bottom" into "the bottom is zero".
+
+        The x row is shared because the panels of a stack share their x axis:
+        the line and bar figures are one time axis read three ways, and a
+        separate x range per panel would let a user set three ranges on one
+        axis and see the last one win.
+        """
+        hdr = QHBoxLayout()
+        hdr.setContentsMargins(12, 6, 12, 2)
+        self._add_bold_label(hdr, "AXES")
+        # Not "blank = auto", which is what this said and is not what happens:
+        # an unfilled field falls through to whatever the app-wide Export Style
+        # sidebar holds, and that may itself be a hard limit somebody set on a
+        # different plot on a different day. A user who read "auto" and left the
+        # fields empty got a folder of figures clipped to it, with nothing
+        # saying so.
+        hint = QLabel("blank = as the Export Style sidebar has it")
+        hint.setEnabled(False)
+        hdr.addWidget(hint)
+        hdr.addStretch(1)
+        layout.addLayout(hdr)
+
+        # Column headers. Four unlabelled columns of numbers read as three
+        # numbers and a word once they are filled, because the ``min`` / ``max``
+        # placeholders disappear exactly when the block gets hard to scan.
+        head = QHBoxLayout()
+        head.setContentsMargins(12, 0, 12, 0)
+        spacer = QLabel("")
+        spacer.setFixedWidth(self._axes_label_w())
+        head.addWidget(spacer)
+        columns = [("min", _LIMIT_EDIT_W), ("max", _LIMIT_EDIT_W)]
+        if self._AXES_SCALE_OFFERED:
+            columns.append(("scale", theme.Metrics.combo_min_w))
+        for text, width in columns:
+            cap = QLabel(text)
+            cap.setEnabled(False)
+            cap.setFixedWidth(width)
+            head.addWidget(cap)
+        head.addStretch(1)
+        layout.addLayout(head)
+
+        self._x_min_edit = self._x_max_edit = self._x_scale_cb = None
+        if not self._X_IS_NUMERIC:
+            # No X row at all on a categorical axis — see ``_X_IS_NUMERIC``.
+            self._build_panel_rows(layout)
+            return
+        x_row = QHBoxLayout()
+        x_row.setContentsMargins(12, 2, 12, 2)
+        # ``setFixedWidth``, not a minimum: a minimum let the widest row's
+        # label push its own fields right, so a five-row grid meant to be
+        # scanned down a column started its fields at three different x
+        # positions.
+        self._add_bold_label(x_row, self._x_row_label()).setFixedWidth(
+            self._axes_label_w())
+        self._x_min_edit = self._limit_edit("min")
+        x_row.addWidget(self._x_min_edit)
+        self._x_max_edit = self._limit_edit("max")
+        x_row.addWidget(self._x_max_edit)
+        if self._AXES_SCALE_OFFERED:
+            self._x_scale_cb = self._scale_combo()
+            x_row.addWidget(self._x_scale_cb)
+        x_row.addStretch(1)
+        layout.addLayout(x_row)
+        self._build_panel_rows(layout)
+
+    def _axes_label_w(self) -> int:
+        """Width of the AXES block's first column, measured not guessed.
+
+        ``_FIELD_LABEL_W`` is sized for the words the rest of the column uses
+        ("Format:", "Also write:"); a panel row's label is whatever the mode
+        called its panel, and at 108 px the line stack rendered "Fraction
+        abov" and "N above cut". A clipped label is worse here than anywhere
+        else in the panel, because the whole point of the row is which panel
+        it governs — and Qt clips silently, so it reads as a name rather than
+        as a truncation.
+        """
+        metrics = self.fontMetrics()
+        widest = max((metrics.horizontalAdvance(p.label) for p in self._PANELS),
+                     default=0)
+        if len(self._PANELS) > 1:
+            widest += _CHECKBOX_INDICATOR_W
+        return max(_FIELD_LABEL_W, widest + _LABEL_PADDING_W)
+
+    def _axes_label_w_ceiling(self) -> int:
+        """The widest this column has any business being.
+
+        Paired with :meth:`_axes_label_w` because a lower bound alone is
+        satisfied by any number: a column nine thousand pixels wide clips
+        nothing and pushes every min/max field off the screen, which is the
+        same failure from the other side. Stated here so the guard can hold
+        both ends rather than re-deriving one of them.
+        """
+        metrics = self.fontMetrics()
+        widest = max((metrics.horizontalAdvance(p.label) for p in self._PANELS),
+                     default=0)
+        return max(_FIELD_LABEL_W,
+                   widest + _CHECKBOX_INDICATOR_W + 2 * _LABEL_PADDING_W)
+
+    def _build_panel_rows(self, layout: QVBoxLayout) -> None:
+        """One row per panel this mode declares. See ``_build_axes_rows``."""
+        #: ``{panel key: (include checkbox, min edit, max edit, scale combo)}``.
+        #: Built from ``_PANELS`` rather than written out, so a mode that
+        #: declares a panel gets its row by declaring it.
+        self._panel_rows: dict = {}
+        single = len(self._PANELS) == 1
+        for panel in self._PANELS:
+            row = QHBoxLayout()
+            row.setContentsMargins(12, 2, 12, 2)
+            # A single-panel mode has nothing to select between, so the
+            # checkbox would be one that can only be wrong: unticking it asks
+            # for a figure with no panels. Its label still names the row, so
+            # the layout matches the stacked modes'.
+            if single:
+                box = None
+                # "Y:", not the panel's own name. Under a row called "X:" the
+                # only reading that makes the pairing obvious is "Y:", and
+                # calling it "Plot:" actively obstructed it — nothing else in
+                # the block said these were the *y* limits.
+                label = self._add_bold_label(row, self._Y_ROW_LABEL)
+                label.setFixedWidth(self._axes_label_w())
+            else:
+                box = QCheckBox(panel.label)
+                box.setChecked(True)
+                box.setFixedWidth(self._axes_label_w())
+                box.setToolTip(
+                    f"Draw the {panel.label} panel, and set its y range.\n"
+                    "Unticked, the figure comes out with one fewer row rather "
+                    "than with an empty frame where it was.")
+                row.addWidget(box)
+            lo = self._limit_edit("min")
+            hi = self._limit_edit("max")
+            scale = self._scale_combo() if self._AXES_SCALE_OFFERED else None
+            for widget in (lo, hi, scale):
+                if widget is not None:
+                    row.addWidget(widget)
+            if box is not None:
+                # F6: an unticked panel is not drawn, so its three fields mean
+                # nothing. Left enabled they were visually identical to a
+                # ticked row's, which is the one cue that says what unticking
+                # did.
+                def _sync(on, _widgets=tuple(
+                        w for w in (lo, hi, scale) if w is not None)):
+                    for w in _widgets:
+                        w.setEnabled(bool(on))
+                box.toggled.connect(_sync)
+            row.addStretch(1)
+            layout.addLayout(row)
+            self._panel_rows[panel.key] = (box, lo, hi, scale)
+
+    #: What this mode's x axis actually is, for the X row's label. Named per
+    #: mode because "X:" over a row of numbers says nothing about what unit to
+    #: type: the line stack's x is time, Response's is the dose variable, and
+    #: Scatter's is whatever channel its X axis was pointed at.
+    _X_ROW_LABEL = "X (time, h):"
+
+    #: What the single-panel modes' one y row is called. Not the panel's own
+    #: name: under a row called "X …" the only reading that makes the pairing
+    #: obvious is "Y …", and calling it "Plot:" actively obstructed it —
+    #: nothing else in the block said these were the *y* limits.
+    _Y_ROW_LABEL = "Y:"
+
+    #: False where the mode's x is **categorical** — one position per group
+    #: member, as the bar stack draws. A numeric bound there is not a zoom, it
+    #: is three bars crushed into the left of the frame, and a log scale on it
+    #: is meaningless. The row is not offered rather than offered and ignored.
+    _X_IS_NUMERIC = True
+
+    #: False where the mode already owns a scale control that does something
+    #: this generic combo cannot. The scatter modes' ``X log`` / ``Y log``
+    #: checkboxes apply ``log10(v + 1)``, chosen so cells at zero stay on the
+    #: figure; a plain log scale drops them. Two controls for one axis is worse
+    #: than either, and the one to keep is the one that is not lossy — so the
+    #: combo is not offered there rather than offered and silently overriding.
+    _AXES_SCALE_OFFERED = True
+
+    def _x_row_label(self) -> str:
+        return self._X_ROW_LABEL
+
+    @staticmethod
+    def _limit_edit(which: str) -> QLineEdit:
+        edit = QLineEdit()
+        edit.setFixedWidth(_LIMIT_EDIT_W)
+        edit.setPlaceholderText(which)
+        edit.setToolTip("Leave blank to autoscale this bound.")
+        return edit
+
+    @staticmethod
+    def _scale_combo_labels() -> tuple[str, ...]:
+        """What this mode's scale entries are called.
+
+        Overridable because "Auto" is not equally informative everywhere: on a
+        figure that derives its own log axis from the data, saying what it
+        derives it *from* is the difference between a neutral default and a
+        stated rule.
+        """
+        return tuple(label for label, _value in _SCALE_CHOICES)
+
+    def _scale_combo(self) -> QComboBox:
+        combo = QComboBox()
+        for label in self._scale_combo_labels():
+            combo.addItem(label)
+        combo.setToolTip(
+            "Auto leaves the scale to the figure — which for a dose axis means "
+            "the one it derives from the doses, and elsewhere the app-wide "
+            "Export Style setting.")
+        return combo
+
+    def _snapshot_axes(self) -> AxesSpec:
+        """Read the AXES block once, for the whole of one run.
+
+        Once, for the reason :class:`ScatterAxes` is read once: the runner pumps
+        ``processEvents()`` between jobs, so a field edited mid-export would
+        apply to some of the run's figures and not others — one output
+        directory, one manifest, two different sets of axes and nothing in
+        either file saying which it got.
+        """
+        rows = getattr(self, "_panel_rows", None)
+        if not rows:
+            return AxesSpec()
+        panels = tuple(
+            (panel.key, PanelAxis(
+                included=(rows[panel.key][0] is None
+                          or rows[panel.key][0].isChecked()),
+                y_min=_parse_limit(rows[panel.key][1].text()),
+                y_max=_parse_limit(rows[panel.key][2].text()),
+                # ``None`` where the mode declined the column — its own control
+                # owns the scale, and Auto is what leaves that alone.
+                y_log=_scale_choice(rows[panel.key][3]),
+            ))
+            for panel in self._PANELS if panel.key in rows
+        )
+        return AxesSpec(
+            x_min=(_parse_limit(self._x_min_edit.text())
+                   if self._x_min_edit is not None else None),
+            x_max=(_parse_limit(self._x_max_edit.text())
+                   if self._x_max_edit is not None else None),
+            x_log=_scale_choice(self._x_scale_cb),
+            panels=panels,
+        )
+
+    def _axes_spec(self) -> AxesSpec:
+        """This run's axes answer, or a neutral one outside a run.
+
+        Neutral rather than a fresh read: a figure written outside a run — by a
+        test, or by a future caller — must not silently pick up whatever the
+        panel's fields happen to hold, which is the same ambient-state mistake
+        the destination spool is scoped to avoid.
+        """
+        return self._run_axes if self._run_axes is not None else AxesSpec()
+
+    def _panel_figure(self, fig, *, share_x: tuple[str, ...] | None = None):
+        """Lay *fig* out with this run's kept panels. See ``_panels.panel_axes``."""
+        return panel_axes(fig, self._PANELS, self._axes_spec(),
+                          share_x=self._SHARE_X if share_x is None else share_x)
+
+    def _axes_pairs(self, fig, spec: AxesSpec) -> list:
+        """``(panel key, axes)`` for every axes on *fig*.
+
+        A single-panel mode repeats its one key across however many axes the
+        figure carries, because that is what its figure is: the faceted scatter
+        draws one axes per group and they are all the same plot, so one scale
+        answer governs all of them. A stacked mode pairs its kept panels with
+        the figure's axes in order, which is the order ``panel_axes`` added
+        them in.
+        """
+        drawn = spec.drawn_keys() or tuple(p.key for p in self._PANELS)
+        if len(self._PANELS) == 1:
+            return [(self._PANELS[0].key, ax) for ax in fig.axes]
+        return list(zip(drawn, fig.axes))
+
+    def _panel_figsize(self, width: float, height: float,
+                       drawn: int) -> tuple[float, float]:
+        """The figure size for a run that kept *drawn* of this mode's panels."""
+        return (width, figure_height(height, len(self._PANELS), drawn))
+
+    def _build_extra_output_rows(self, layout: QVBoxLayout) -> None:
+        """What else goes into the output folder, beyond the figures.
+
+        Just the per-cell CSV now. The two destinations that used to live down
+        here moved up to **Write to:**, where they belong: they are answers to
+        "where does this run's output go", and asking that question after
+        Folder and Format had already been answered was what made both of them
+        read as extras bolted onto a folder of PNGs.
+        """
+        self._build_also_write_row(layout)
+
+    def _has_saved_plots(self) -> bool:
+        """Whether the deck writer and the gallery are in this build.
+
+        Both are Saved Plots' code — the record, and the writer that turns a
+        captured SVG into PowerPoint shapes — so in a profile without that
+        feature neither destination is offered. Absent rather than disabled: a
+        greyed checkbox says "not now", and this is "not in this build", which
+        are different sentences and only one of them is true.
+        """
+        return self._ctx.features.get("Saved Plots") is not None
+
+    def _build_also_write_row(self, layout: QVBoxLayout) -> None:
+        """The opt-in for the raw per-cell CSV beside each figure.
+
+        Its own row rather than a fourth box on **Write to:**, because it is
+        not a destination: it does not choose where the figures go, it adds a
+        file next to them. It is also the only control here that can add
+        hundreds of megabytes to a run, which is worth a row of its own to
+        say.
+
+        Off by default. The summary CSV every run already writes is the file
+        most runs want; this one is every cell of every well, and a user who
+        did not ask for it should not find their export ten times the size.
+        Greyed out when **Image files** is off, since there is then no folder
+        of files for it to sit beside.
+        """
+        row = QHBoxLayout()
+        row.setContentsMargins(12, 2, 12, 6)
+        self._add_bold_label(row, "Also write:", min_width=_FIELD_LABEL_W)
+        self._cell_rows_cb = QCheckBox("Raw per-cell CSV")
+        self._cell_rows_cb.setToolTip(
+            "Beside each group's figure, write every cell row the figure was "
+            "computed from — the same file the plot tabs' “Save cell data…” "
+            "produces, with its scope block and marker columns.\n"
+            "Large: one row per cell per well, not one per group.")
+        row.addWidget(self._cell_rows_cb)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+    def _refresh_run_summary(self) -> None:
+        """Rewrite what a run produces, from the controls as they are.
+
+        It was a **static string**, and by the time this feature landed it was
+        wrong in four ways at once: it named one figure and one CSV while the
+        panel could be writing a second CSV, a slide deck and a gallery record
+        per group, and drawing three of four panels. That block is the one
+        place in the column that says in plain words what pressing Run does,
+        and it is what a user returning after three weeks reads first — so it
+        is the last text that should be guessing.
+
+        Derived, therefore, from the same reads the run itself makes. Connected
+        to every control that changes the answer (:meth:`_wire_run_summary`),
+        because a summary that is right only until something is clicked is a
+        static string with extra steps.
+        """
+        label = getattr(self, "_summary_lbl", None)
+        if label is None:
+            return
+        lines = []
+        if self._wants_image_files():
+            lines.append("Each export group produces:")
+            for line in self._figure_summary_lines():
+                lines.append(f"  \u2022 {line}")
+            if self._wants_cell_rows():
+                lines.append("  \u2022 One raw per-cell CSV\n"
+                             "    one row per cell, typically far larger than "
+                             "the summary CSV")
+        else:
+            # The one shortfall a user chooses rather than suffers, and it is
+            # still a shortfall: no figure files and — because the summary CSV
+            # is a file in that same folder — none of the numbers behind them.
+            # Said here, before Run, because afterwards it is an absence, and
+            # an absence is what nobody notices.
+            lines.append("No image files, and no CSVs: the numbers behind "
+                         "each figure are not saved anywhere.")
+        run_level = self._run_level_summary()
+        if run_level:
+            lines.append("")
+            lines.append(run_level)
+        lines.append("")
+        lines.extend(self._summary_footnotes())
+        label.setText("\n".join(line for line in lines if line is not None))
+
+    def _run_level_summary(self) -> str:
+        """The deck and the gallery, which are per **run** rather than per group.
+
+        Kept out of the "Each export group produces:" bullets because neither
+        is one of those: forty groups produce one deck between them. Split by
+        verb rather than run together, because "writes" and "files" is the
+        whole difference between the two rows that offer them — the deck lands
+        in the output folder beside the figures, and the record lands in the
+        application and stays with the dataset.
+        """
+        # Through the same predicates the run uses, not a second read of the
+        # checkboxes: two answers to "is the deck being written" can drift,
+        # and the summary is precisely the place a drift would be believed.
+        deck = self._wants_deck()
+        gallery = self._wants_gallery()
+        clauses = []
+        if deck:
+            clauses.append("writes one PowerPoint deck into this folder, a "
+                           "slide per group")
+        if gallery:
+            clauses.append("files a Saved Plots record per figure")
+        if not clauses:
+            return ""
+        # "also" only when there is something for it to be *also* to. On a
+        # deck-only run this is the whole of what the run does.
+        lead = "The run also " if self._wants_image_files() else "The run "
+        return lead + ", and ".join(clauses) + "."
+
+    def _figure_summary_lines(self) -> list[str]:
+        """The figure and CSV bullets, naming the panels this run will draw."""
+        figure = self._summary_figure_lead()
+        total = len(self._PANELS)
+        if total > 1:
+            drawn = self._snapshot_axes().drawn_keys()
+            if drawn and len(drawn) < total:
+                names = ", ".join(p.label for p in self._PANELS
+                                  if p.key in drawn)
+                figure = f"{figure} \u2014 {len(drawn)} of {total} panels ({names})"
+            else:
+                figure = f"{figure} \u2014 all {total} panels"
+        note = self._summary_figure_note()
+        if note:
+            # Its own indented line rather than a comma and forty more
+            # characters: the column this block lives in is about 800 px wide,
+            # and a bullet that needs two of those wraps back under the "•"
+            # where it reads as a second item.
+            figure = f"{figure}\n    {note}"
+        return [figure, self._summary_csv_line()]
+
+    #: What this mode's summary CSV holds, in the words its own info text used.
+    _SUMMARY_CSV_LINE = "One CSV with per-member time-series data"
+
+    #: How the figure bullet opens. A mode whose run writes more than one
+    #: figure per group says so here, because "One figure" beside a folder of
+    #: forty is the kind of quietly wrong sentence this whole block replaced.
+    _SUMMARY_FIGURE_LEAD = "One figure"
+
+    #: Appended to the figure bullet, where a mode has more to say about what
+    #: one figure *is*. The line mode's members are the thing worth naming.
+    _SUMMARY_FIGURE_NOTE = ("one line per group member (ReplicateSet = mean of "
+                            "its wells, Solo well = raw)")
+
+    def _summary_figure_lead(self) -> str:
+        """Overridden where a control decides how many figures a group gets."""
+        return self._SUMMARY_FIGURE_LEAD
+
+    def _summary_figure_note(self) -> str:
+        return self._SUMMARY_FIGURE_NOTE
+
+    def _summary_csv_line(self) -> str:
+        return self._SUMMARY_CSV_LINE
+
+    def _extra_summary_signals(self) -> list:
+        """Mode-specific signals that change what the summary says.
+
+        Connected by :meth:`_wire_run_summary` alongside the shared
+        checkboxes. A mode that derives part of its summary from one of its
+        own controls and does not list that control's signal here has written
+        a summary that is right until the control is touched, which is the
+        failure the derived block exists to end.
+        """
+        return []
+
+    def _summary_footnotes(self) -> list[str]:
+        """Mode-specific closing lines, unchanged from the old static text."""
+        return [
+            ("Groups come from Home \u2192 Sample Map \u2192 Replicates."
+             if self._use_sidebar_groups
+             else "Groups are defined in the left panel."),
+            "No statistics are computed across group members.",
+            "SD/SEM is only computed within a ReplicateSet.",
+        ]
+
+    def _wire_run_summary(self) -> None:
+        """Recompute the summary whenever something it states can change."""
+        widgets = [self._cell_rows_cb, self._to_gallery_cb, self._to_deck_cb]
+        for box in widgets:
+            if box is not None:
+                box.toggled.connect(lambda _on: self._refresh_run_summary())
+        for box, _lo, _hi, _scale in (getattr(self, "_panel_rows", None)
+                                      or {}).values():
+            if box is not None:
+                box.toggled.connect(lambda _on: self._refresh_run_summary())
+        for signal in self._extra_summary_signals():
+            signal.connect(lambda *_a: self._refresh_run_summary())
+        self._refresh_run_summary()
+
+    def _ticked_destinations(self) -> frozenset:
+        """What the checkboxes say **right now**. See :meth:`_destinations`."""
+        out = set()
+        box = getattr(self, "_to_files_cb", None)
+        if box is None or box.isChecked():
+            out.add("files")
+        for name, key in (("_to_deck_cb", "deck"),
+                          ("_to_gallery_cb", "gallery"),
+                          ("_cell_rows_cb", "cells")):
+            box = getattr(self, name, None)
+            if box is not None and box.isChecked():
+                out.add(key)
+        return frozenset(out)
+
+    def _destinations(self) -> frozenset:
+        """What **this run** is writing to, fixed for its whole life.
+
+        Snapshotted at the top of :meth:`_run_batch_jobs` for the same reason
+        the spool and the axes are, and stated here rather than left implicit
+        because getting it wrong destroys files. The runner pumps
+        ``processEvents()`` between jobs, so the Write to: row is live while
+        an export is running; read per job, unticking **Image files** halfway
+        through gave the first groups their files, the rest none, and then —
+        because the commit consults the same live answer — discarded the ones
+        already written and reported the run a success. Ticking it halfway
+        was worse: staging had been placed in a system temp dir, so the commit
+        tried to ``os.replace`` across filesystems, which is the one thing
+        ``new_staging_dir`` exists to prevent.
+
+        The row is also disabled for the duration, so the two answers cannot
+        visibly disagree; this is what makes them actually agree.
+        """
+        chosen = getattr(self, "_run_dests", None)
+        return chosen if chosen is not None else self._ticked_destinations()
+
+    def _wants_image_files(self) -> bool:
+        """Whether this run writes a folder of per-group figures and CSVs.
+
+        One of three destinations rather than the base every run pays for.
+        Nothing about the other two needs it: ``DestinationSpool.capture``
+        renders its own PNG and SVG straight from the in-memory figure, and
+        never opens the file this writes — so a deck or a gallery record built
+        from a run that wrote no image files is the same picture, not a
+        degraded one.
+        """
+        return "files" in self._destinations()
+
+    def _wants_deck(self) -> bool:
+        return "deck" in self._destinations()
+
+    def _wants_gallery(self) -> bool:
+        return "gallery" in self._destinations()
+
+    def _wants_disk_output(self) -> bool:
+        """Whether anything at all lands in the output folder.
+
+        False only for a gallery-only run, which is the one shape that touches
+        no directory of the user's: its records live in the dataset's own
+        ``saved_plots/``. The staging directory is still made and then
+        discarded rather than committed, because committing would create the
+        output folder and leave a manifest in it describing no files.
+        """
+        return self._wants_image_files() or self._wants_deck()
+
+    def _out_path(self, write_dir, name: str) -> Path | None:
+        """Where one of a job's files goes, or ``None`` when it writes none.
+
+        **The one place a per-group output path is built**, on every mode, so
+        "does this run produce files at all" is answered once rather than at
+        each of the sites that would otherwise each have to remember — ten of
+        them across four modules, seven feeding a ``with open(...)`` and the
+        rest a ``savefig`` — and a mode that grows an eleventh gets the answer
+        by asking here. ``tests/test_batch_export_destinations.py`` holds every
+        site to it.
+
+        ``None`` means "skip this write" at every call site, rather than a
+        path into somewhere harmless: a run that was told to write no files
+        must not create one, not even a temporary one it deletes.
+        """
+        if not self._wants_image_files():
+            return None
+        return Path(write_dir) / name
+
+    def _wants_cell_rows(self) -> bool:
+        # Gated on the folder too: the per-cell CSV *is* a file in it, so a run
+        # writing no files cannot write this one either. The checkbox greys
+        # out to say so rather than staying tickable and doing nothing.
+        chosen = self._destinations()
+        return "cells" in chosen and "files" in chosen
+
+    def _cell_scope_kwargs(self, *, val_col: str | None,
+                           timepoints=None) -> dict:
+        """What this mode overrides on its source tab's scope.
+
+        The scope a tab builds reads that tab's own controls — its column, its
+        ticked timepoints, its axis combos — and a batch run overrides every
+        one of them. Read unmodified, the per-cell file described **the plot on
+        screen**, filed beside and named for a figure of something else: a bar
+        run over t=24 and t=48 wrote two files of whatever timepoint the Bar tab
+        happened to be on, each internally consistent, each naming a timepoint
+        it did not contain.
+
+        So each mode says what it exported, and the tab's own scope builder
+        takes it. Overriding rather than rebuilding keeps one definition of what
+        each tab's population *is* — its markers, its gate layer, its
+        threshold rule — which is the half no batch panel should be restating.
+        """
+        kwargs: dict = {}
+        if val_col is not None:
+            kwargs["val_col"] = val_col
+        if timepoints is not None:
+            kwargs["timepoints"] = tuple(float(t) for t in timepoints)
+        return kwargs
+
+    def _write_cell_rows_for(self, grp, write_dir, stem: str,
+                             *, val_col: str | None = None,
+                             timepoints=None) -> None:
+        """Write this group's per-cell CSV, if the run asked for one.
+
+        **Enters the group scope itself**, for the reason
+        :meth:`_capture_group_params` does: the scope the mode's source tab
+        builds reads the *live* selections through
+        ``cell_scope_compute.plotted_wells``, and the panels differ about
+        whether a render has already established them — the line mode renders
+        inside the scope and the bar mode never enters it at all. Relying on an
+        ambient scope would give every bar group's file the same wells under a
+        different group's name, which is a plausible file of the wrong cells.
+
+        A shortfall is recorded, never raised. The figure and the summary CSV
+        are what the run was primarily asked for, and losing them to a problem
+        with an extra file would be the wrong trade — but it is not silent
+        either: the note reaches the run's own report.
+        """
+        if not self._wants_cell_rows():
+            return
+        from importlib import import_module
+
+        try:
+            scope_module = import_module(self._CELL_SCOPE)
+            build = getattr(scope_module, self._CELL_SCOPE_FN)
+            column = val_col or self._ctx.state.channel.active_val_col
+            kwargs = self._cell_scope_kwargs(val_col=val_col,
+                                             timepoints=timepoints)
+            with self._app_group_scope(grp), self._app_val_col_scope(column):
+                scope = build(self._ctx, **kwargs)
+                if scope is None:
+                    # Some tabs decline to describe a population before a first
+                    # draw. Said rather than written as an empty file.
+                    self._note_shortfall(
+                        f"{grp.name}: no cell scope — per-cell CSV not written")
+                    return
+                out = self._out_path(write_dir, f"{stem}_cells.csv")
+                if out is None:
+                    # Unreachable while both this and ``_wants_cell_rows`` read
+                    # the run's one destination snapshot. Said rather than
+                    # returning in silence anyway, because the day they stop
+                    # agreeing is the day a user finds the file missing with
+                    # nothing anywhere saying why.
+                    self._note_shortfall(
+                        f"{grp.name}: per-cell CSV not written — this run "
+                        f"writes no files")
+                    return
+                rows = write_cell_rows(self._ctx, scope, out)
+        except Exception as exc:
+            _logger.exception("Batch export: per-cell CSV for %r", grp.name)
+            self._note_shortfall(
+                f"{grp.name}: per-cell CSV failed ({exc})")
+            return
+        if rows < 0:
+            # Three different problems with three different fixes, so three
+            # different sentences. "No loaded wells" over a corrupt cache sends
+            # the user to fix a selection that is already correct.
+            reason = {
+                -1: "no loaded wells",
+                -2: "none of the wells' rows would read",
+                -3: "cell gating is still recomputing — the file would mix "
+                    "two gating states",
+            }.get(int(rows), "no rows")
+            self._note_shortfall(
+                f"{grp.name}: {reason} — per-cell CSV not written")
+
+    def _note_shortfall(self, note: str) -> None:
+        """Record something this run could not do, for its final report.
+
+        A list rather than a status write per note: a run of forty groups that
+        could write none of their per-cell files would otherwise overwrite its
+        own message thirty-nine times and leave the last one looking like the
+        only problem.
+        """
+        _logger.warning("Batch export: %s", note)
+        if self._run_notes is not None:
+            self._run_notes.append(note)
+
+    def _new_destination_spool(self) -> DestinationSpool:
+        """The extra destinations this run was asked for, read once.
+
+        Read here rather than inside the job loop for the same reason every
+        other control on this panel is (:class:`ScatterAxes`): the runner pumps
+        ``processEvents()`` between jobs, so a checkbox the user touches
+        mid-export would otherwise apply to some of the figures and not others,
+        and the run would produce a deck missing exactly the groups that were
+        exported before the click.
+        """
+        from well_viewer.domain.dataset_name import dataset_display_name
+
+        return DestinationSpool(
+            to_gallery=self._wants_gallery(),
+            to_deck=self._wants_deck(),
+            tab=self._SOURCE_TAB,
+            mode_key=self._mode_key(),
+            dataset_name=dataset_display_name(self._ctx.state.dataset.data_dir),
+        )
 
     def _build_spread_settings_rows(self, layout: QVBoxLayout) -> None:
         """Error-band (SEM/SD) + per-FOV-points toggles as OUTPUT SETTINGS rows.
@@ -1016,6 +2073,14 @@ class BatchExportPanel(QWidget):
         if not ctx.runtime.fov.btn:
             ctx.runtime.fov.btn = fov_btn
         refresh_fov_btn_state(ctx)
+
+    def _build_summary_label(self, layout: QVBoxLayout) -> None:
+        """The derived "Each export group produces:" block, above Run."""
+        self._summary_lbl = QLabel("")
+        self._summary_lbl.setWordWrap(True)
+        self._summary_lbl.setContentsMargins(12, 4, 12, 4)
+        layout.addWidget(self._summary_lbl)
+        self._wire_run_summary()
 
     def _build_run_row(
         self, layout: QVBoxLayout, *, button_text: str = "▶  Run Batch Export",
@@ -1660,9 +2725,22 @@ class BatchExportPanel(QWidget):
             self._suppress_persist = False
 
     def _resolve_out_dir(self) -> Path | None:
+        """The folder this run writes into — created only if it writes there.
+
+        The creation is the point. A gallery-only run puts nothing in this
+        folder, and this method used to ``mkdir(parents=True)`` it anyway,
+        before the runner ever asked which destinations were chosen — so
+        pressing Run with only the gallery ticked made two levels of empty
+        directory named for an export that never touched them. The runner's
+        own care not to create it (staging elsewhere, discarding rather than
+        committing) was measured at a seam one step past this call.
+        """
         val = self._out_dir_edit.text().strip()
+        writing = self._wants_disk_output()
         if val:
             p = Path(val)
+            if not writing:
+                return p
             try:
                 p.mkdir(parents=True, exist_ok=True)
                 return p
@@ -1673,6 +2751,12 @@ class BatchExportPanel(QWidget):
         d = self._ctx.state.dataset.data_dir
         if d and d.is_dir():
             return d
+        if not writing:
+            # No folder is needed, so not having one is not a failure. The
+            # gallery lives with the dataset, and the run is about to prove it
+            # can find that; refusing here would block a run that writes
+            # nothing on a setting it does not use.
+            return Path(val) if val else Path.home()
         QMessageBox.critical(self, "No output directory",
                              "Load data or choose an output folder.")
         return None
@@ -1704,10 +2788,42 @@ class BatchExportPanel(QWidget):
         self._prog_bar.setMaximum(max(len(jobs), 1))
         self._prog_bar.setValue(0)
         self._run_btn.setEnabled(False)
+        # Fixed before the first job, and before the staging directory is
+        # chosen from it. Everything downstream — ``_out_path``, the spool, the
+        # commit, the headline — reads this one answer. See ``_destinations``.
+        self._run_dests = self._ticked_destinations()
+        self._set_destination_row_enabled(False)
         errors: list[str] = []
         skipped: list[str] = []
-        staging = new_staging_dir(out_dir)
+        # A gallery-only run stages nowhere near the user's folder: it never
+        # commits, and ``new_staging_dir`` creates ``out_dir`` to hold its
+        # temp directory — so a run that writes nothing to disk was still
+        # leaving an empty folder of the user's making behind it. Every other
+        # run stages inside ``out_dir``, which is what keeps the commit's
+        # ``os.replace`` calls on one filesystem.
+        if self._wants_disk_output():
+            staging = new_staging_dir(out_dir)
+        else:
+            staging = Path(tempfile.mkdtemp(prefix="allwell_batch_nodisk_"))
+        # The extra destinations, read once before the first job (see
+        # ``_new_destination_spool``) and cleared in the ``finally`` — so a
+        # figure written outside a run, or by the next run, cannot reach this
+        # run's spool.
+        spool = self._spool = self._new_destination_spool()
+        # Read here rather than in each mode's ``_run_batch``, so a mode gets
+        # the axes controls by declaring its panels rather than by remembering
+        # to snapshot them — and so the read happens once, before the first job,
+        # for every mode at the same point in the run.
+        self._run_axes = self._snapshot_axes()
+        self._run_notes = []
+        committed = False
         try:
+            # Staged beside whatever it will be copied into: the output
+            # folder for a run that writes there, and the dataset folder for a
+            # gallery-only run, whose records go to that folder's
+            # ``saved_plots/`` and which must leave ``out_dir`` untouched.
+            spool.begin(out_dir if self._wants_disk_output()
+                        else (self._ctx.state.dataset.data_dir or staging))
             for step, job in enumerate(jobs, 1):
                 self._prog_lbl.setText(progress_text_fn(job, step, len(jobs)))
                 self._prog_bar.setValue(step - 1)
@@ -1726,13 +2842,54 @@ class BatchExportPanel(QWidget):
                 # describes.
                 discard_staging(staging)
             else:
-                commit_staged_export(staging, out_dir)
+                # The deck is an output file of this run, so it is staged with
+                # the figures and committed under the same manifest: a run that
+                # fails after the deck is built leaves no deck behind either.
+                if spool.to_deck:
+                    self._prog_lbl.setText("Building PowerPoint deck\u2026")
+                    QApplication.processEvents()
+                spool.write_deck(staging)
+                if self._wants_disk_output():
+                    commit_staged_export(staging, out_dir)
+                    spool.note_stale_deck(out_dir)
+                else:
+                    # A gallery-only run: the staging directory is empty by
+                    # design, and committing it would create the output folder
+                    # and leave a manifest in it describing no files — an audit
+                    # record of an export that produced nothing on disk. The
+                    # run still succeeded, which is what ``committed`` gates
+                    # below, so the gallery is still filled.
+                    discard_staging(staging)
+                committed = True
         except BaseException:
             # Never leave a half-committed export or a stray temp dir behind.
             discard_staging(staging)
             raise
         finally:
+            try:
+                # The gallery is filled only by a run that committed. Filling it
+                # as each figure is rendered would leave the gallery holding the
+                # first K figures of a run whose output directory was rolled
+                # back — half a run, presented as a run.
+                if committed:
+                    if spool.to_gallery:
+                        self._prog_lbl.setText(
+                            "Filing figures in Saved Plots\u2026")
+                        QApplication.processEvents()
+                    spool.file_in_gallery(self._ctx)
+            finally:
+                spool.discard()
+                self._spool = None
+                self._run_axes = None
+                # Set by the scatter panel for the life of one run; cleared
+                # here with the rest, so a figure written outside a run cannot
+                # read the previous run's columns.
+                self._run_scatter_axes = None
+                run_notes = list(self._run_notes or [])
+                self._run_notes = None
+                self._run_dests = None
             self._run_btn.setEnabled(True)
+            self._set_destination_row_enabled(True)
             self._prog_bar.setVisible(False)
 
         for note in skipped:
@@ -1741,6 +2898,15 @@ class BatchExportPanel(QWidget):
             # groups that produced nothing went unmentioned in the one place
             # the user is told to look.
             _logger.info("Batch export: %s", note)
+        # What the extra destinations produced, and what they could not.
+        # Reported on every path out, including the failure ones: a run that
+        # ended in errors still wrote whatever the destinations managed, and a
+        # deck two slides short of the groups it names is exactly the shortfall
+        # a user cannot see from the deck.
+        dest_note = spool.summary()
+        dest_short = " · ".join(
+            part for part in (spool.shortfall(), _summarise_notes(run_notes))
+            if part)
         if errors:
             note = (f" · {len(skipped)} with no data" if skipped else "")
             self._prog_lbl.setText(
@@ -1748,32 +2914,148 @@ class BatchExportPanel(QWidget):
             self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_DANGER')};")
             for err in errors:
                 _logger.error("Batch export error: %s", err)
+            if dest_short:
+                self._ctx.notify.set_status(f"Batch export: {dest_short}")
             return
         # A skipped group is not a failure, but it is also not a success to be
         # counted silently: the headline used to report the number of groups
         # *submitted*, so a run where half of them produced nothing looked
         # identical to one where they all did.
+        tail = " · ".join(part for part in (dest_note, dest_short) if part)
+        tail = f" · {tail}" if tail else ""
+        where = self._where_it_went(out_dir)
         if skipped:
             done = len(jobs) - len(skipped)
             self._prog_lbl.setText(
-                f"✓ {done} group(s) → {out_dir.name}/ · {len(skipped)} with no data")
+                f"✓ {done} group(s){where.short} · {len(skipped)} with no data")
             self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
             self._ctx.notify.set_status(
-                f"{status_text} · {len(skipped)} group(s) had no data")
+                f"{status_text}{where.long} · {len(skipped)} group(s) had no "
+                f"data{tail}")
             return
-        self._prog_lbl.setText(success_text)
+        self._prog_lbl.setText(f"{success_text}{where.short}")
         self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
-        self._ctx.notify.set_status(status_text)
+        self._ctx.notify.set_status(f"{status_text}{where.long}{tail}")
 
-    def _save_figure(self, fig, fig_path: Path, fmt: str) -> None:
-        # The actual render-write is the Qt-free service (audit A14); the panel
-        # just resolves this app's export-style prefs and the plot background.
+    def _where_it_went(self, out_dir: Path) -> _Destination:
+        """The "→ …" clause, naming somewhere this run actually wrote.
+
+        Each mode used to build its own headline before the run, interpolating
+        the output folder unconditionally — so a gallery-only run announced
+        ``✓ 2 group(s) → out/`` and gave the status bar an absolute path to a
+        directory that does not exist and received nothing. Worse where an
+        earlier run had left a deck in that folder: the sentence then points at
+        a real directory whose only content is another run's file.
+
+        Built here, from the destinations the run actually used, because the
+        modes cannot know — the answer depends on a row none of them read.
+        """
+        if self._wants_image_files() or self._wants_deck():
+            return _Destination(f" → {out_dir.name}/", f" → {out_dir}")
+        return _Destination(" → Saved Plots", " → Saved Plots")
+
+    def _save_figure(self, fig, fig_path: Path | None, fmt: str, *,
+                     group: BarGroup | None, title: str,
+                     val_col: str | None = None) -> None:
+        """Write one batch figure, and feed the run's extra destinations.
+
+        **The one place a batch figure is written**, on every panel — which is
+        why it is also the one place the gallery and the deck are fed from. A
+        second capture path beside it would be a second answer to "what did this
+        run produce", and the two would disagree the first time a mode grew a
+        figure the other did not know about.
+
+        *group* and *title* are required rather than defaulted, and *group* may
+        be ``None`` only for a figure that genuinely belongs to no export group.
+        A default would let a call site forget them, and a forgotten *group* is
+        not a missing record — it is a record whose parameters describe whatever
+        the live plotting tab happens to be showing, filed under this group's
+        name. ``tests/test_batch_export_destinations.py`` holds every call site
+        to passing both.
+        """
         from well_viewer.features.export.style import _ensure_export_style_prefs
+
+        spec = self._axes_spec()
+        # Pinned on the axes; the limits ride in the preferences below. Two
+        # mechanisms because ``apply_export_style_prefs`` honours two: it reads
+        # ``_aw_force_*log`` before the shared ``x_log``, and it reads limits
+        # only from what it is handed. See ``_panels``.
+        pin_scales(self._axes_pairs(fig, spec), spec, x_keys=self._X_PANELS)
+        prefs = spec.prefs_overlay(_ensure_export_style_prefs(self._ctx),
+                                   spec.drawn_keys(), x_keys=self._X_PANELS)
+
+        spool = self._spool
+        on_saved = None
+        if spool is not None and spool.wanted:
+            params, thresholds = self._capture_group_params(group, val_col)
+            # A figure whose parameters could not be captured still reaches the
+            # gallery — the picture is worth having — but it reaches it with
+            # nothing to restore, and in the gallery that is indistinguishable
+            # from a record whose Restore works. Counted here so the run's own
+            # shortfall says how many.
+            if group is not None and not params:
+                spool.undescribed += 1
+
+            def on_saved(saved_fig, _t=title, _p=params, _th=thresholds):
+                spool.capture(saved_fig, title=_t, params=_p, thresholds=_th)
+
         save_export_figure(
             fig, fig_path, fmt,
-            export_prefs=_ensure_export_style_prefs(self._ctx),
+            export_prefs=prefs,
             plot_bg=theme.CPub.bg,
+            on_saved=on_saved,
         )
+
+    def _capture_group_params(
+        self, grp: BarGroup | None, val_col: str | None,
+    ) -> tuple[dict, dict]:
+        """The parameters that describe *grp*'s figure — not the live tab's.
+
+        Taken inside ``_app_group_scope`` + ``_app_val_col_scope``, which is the
+        whole point: ``saved_plots.collect.capture_params`` snapshots the
+        application's *live* selections and column, and during a batch run those
+        are whatever the user left the plotting tabs on. Captured outside the
+        scope, every group in the run would file identical parameters — the
+        tab's — under ten different group names, and each would restore to a
+        figure that is not the one in the gallery beside it. Captured inside, the
+        snapshot's ``selections`` are the group's own members and its column is
+        the one the panel exported with.
+
+        The scope is entered here rather than relied on from the caller because
+        the panels differ: the line mode already renders inside it, and the bar
+        mode never enters it at all (it hands the group straight to
+        ``collect_bar_items_for_group``). A capture that trusted an ambient
+        scope would be right on one panel and silently wrong on the next.
+
+        Returns ``({}, {})`` for a figure with no group, and for a capture that
+        raised. Empty rather than approximate: a record with no parameters is a
+        picture in the gallery whose Restore does nothing, which is thin; a
+        record carrying another figure's parameters restores a *different* plot
+        under this one's title.
+        """
+        if grp is None:
+            return {}, {}
+        try:
+            column = val_col or self._ctx.state.channel.active_val_col
+            with self._app_group_scope(grp), self._app_val_col_scope(column):
+                params, thresholds = _capture_params(self._ctx, self._SOURCE_TAB)
+            # Stamped so the record can say where it came from. A batch figure's
+            # parameters reproduce the *group*; Batch Export's own layout
+            # controls (bars versus beeswarm, stacked timepoints, the scatter
+            # facet mode) live on the panel and not in view state, so a Restore
+            # can draw the same data in a different arrangement. The gallery's
+            # summary and the restore's status line both read this — see
+            # ``saved_plots.collect.build_summary``.
+            params["batch_export"] = {
+                "mode": self._mode_key(),
+                "group": str(getattr(grp, "name", "") or ""),
+            }
+            return params, thresholds
+        except Exception:
+            _logger.exception(
+                "Batch export: could not capture parameters for group %r",
+                getattr(grp, "name", grp))
+            return {}, {}
 
     def _export_scatter_figure(
         self,
@@ -1782,8 +3064,9 @@ class BatchExportPanel(QWidget):
         xlabel: str,
         ylabel: str,
         title: str,
-        fig_path: Path,
+        fig_path: Path | None,
         fmt: str,
+        group: BarGroup | None,
         legend_fontsize: int = 8,
     ) -> None:
         """Render a standard 8x6 scatter/errorbar figure and save it.
@@ -1801,7 +3084,94 @@ class BatchExportPanel(QWidget):
         ax.grid(True, alpha=0.3)
         if ax.get_legend_handles_labels()[0]:
             ax.legend(loc="best", fontsize=legend_fontsize, framealpha=0.0, facecolor="none")
-        self._save_figure(fig, fig_path, fmt)
+        self._save_figure(fig, fig_path, fmt, group=group, title=title)
+
+    def _run_is_refused(self) -> bool:
+        """Every pre-flight a run has to clear, in one call.
+
+        One entry point rather than a check per mode, because each of these
+        was added at a different time and the modes that forgot to call the
+        newest one would have failed silently in the way it exists to prevent.
+        """
+        if not self._wants_image_files() and not self._wants_deck() \
+                and not self._wants_gallery():
+            QMessageBox.warning(
+                self, "No destination",
+                "Nothing under Write to: is ticked, so this run would produce "
+                "nothing at all. Choose at least one destination.")
+            return True
+        return self._axes_block_refuses_the_run()
+
+    def _axes_block_refuses_the_run(self) -> bool:
+        """Refuse a run the AXES block has asked for impossibly, and say why.
+
+        Checked before the jobs rather than discovered inside one. Both of the
+        things it catches produce a *file*, which is what makes them worth a
+        dialog: a figure with no panels is not a smaller figure, it is a blank
+        page, and a log axis pinned from zero is a frame matplotlib quietly
+        rescales — so in each case a run would write forty of them and look
+        like it had worked.
+        """
+        if self._snapshot_axes().draws_nothing():
+            QMessageBox.warning(
+                self, "No panels",
+                "Every panel is unticked under AXES, so there is nothing to "
+                "draw. Tick at least one.")
+            return True
+        complaints = self._axes_complaints()
+        if complaints:
+            QMessageBox.warning(
+                self, "Axis limits",
+                "The AXES block asks for a range that cannot be drawn:\n\n  \u2022 "
+                + "\n  \u2022 ".join(complaints)
+                + "\n\nClear or correct those fields and run again.")
+            return True
+        return False
+
+    def _axes_complaints(self) -> list[str]:
+        """Every AXES field that cannot mean what it says, named by its row.
+
+        Two kinds, both of which used to go through silently:
+
+        * **min at or above max.** The columns are headed ``min`` and ``max``,
+          so this is a typo rather than a request for an inverted axis — and
+          the equal case is not even that: matplotlib expands a zero-width
+          range to an interval of its own choosing and draws a frame whose
+          numbers are nothing the user typed.
+        * **a log axis bounded at or below zero.** ``log`` of zero is not a
+          position on the axis, so matplotlib drops the bound and autoscales.
+          The figure then comes out with a range nobody asked for and no sign
+          that the field was ignored.
+
+        Reported together rather than one at a time, so a user who mistyped
+        two rows fixes both before the next run.
+        """
+        spec = self._snapshot_axes()
+        single = len(self._PANELS) == 1
+        rows = [(self._x_row_label().rstrip(":"),
+                 spec.x_min, spec.x_max, spec.x_log)]
+        for panel in self._PANELS:
+            axis = spec.for_panel(panel.key)
+            if not axis.included:
+                # An unticked panel is not drawn, so its fields describe
+                # nothing. Refusing a run over them would block it on a value
+                # that has no effect.
+                continue
+            name = self._Y_ROW_LABEL.rstrip(":") if single else panel.label
+            rows.append((name, axis.y_min, axis.y_max, axis.y_log))
+        out: list[str] = []
+        for name, low, high, log in rows:
+            if low is not None and high is not None and low >= high:
+                out.append(f"{name}: min ({low:g}) is not below max "
+                           f"({high:g}).")
+            if log:
+                below = [v for v in (low, high) if v is not None and v <= 0]
+                if below:
+                    out.append(
+                        f"{name}: a log scale has no position for "
+                        f"{below[0]:g}, so that bound would be dropped and the "
+                        f"axis autoscaled.")
+        return out
 
     def _groups_for_export(self) -> list[BarGroup]:
         if self._use_sidebar_groups:
@@ -1809,6 +3179,8 @@ class BatchExportPanel(QWidget):
         return list(self._groups)
 
     def _run_batch(self) -> None:
+        if self._run_is_refused():
+            return
         groups_with_data = [g for g in self._groups_for_export()
                             if any(w in self._ctx.state.dataset.well_paths for w in g.wells)]
         if not groups_with_data:
@@ -1867,8 +3239,8 @@ class BatchExportPanel(QWidget):
             safe = unique_export_stem(f"batch_{safe}", used_stems)
             # Write into the staging dir (audit X3) — committed to out_dir only on
             # a fully-successful run.
-            csv_path = write_dir / f"{safe}.csv"
-            fig_path = write_dir / f"{safe}.{fmt}"
+            csv_path = self._out_path(write_dir, f"{safe}.csv")
+            fig_path = self._out_path(write_dir, f"{safe}.{fmt}")
 
             # Resolve the panel's (Channel, Property) selection into a
             # column / ratio key — independent of whatever the plot-tab
@@ -1971,10 +3343,12 @@ class BatchExportPanel(QWidget):
                                 "fold_change_control",
                                 "fold_change_outcome",
                             ]
-                        with open(csv_path, "w", newline="") as fh:
-                            writer = csv.DictWriter(fh, fieldnames=fieldnames)
-                            writer.writeheader()
-                            writer.writerows(rows_out)
+                        if csv_path is not None:
+                            with open(csv_path, "w", newline="") as fh:
+                                writer = csv.DictWriter(fh,
+                                                        fieldnames=fieldnames)
+                                writer.writeheader()
+                                writer.writerows(rows_out)
                 except OSError as exc:
                     return f"{grp.name} CSV: {exc}"
 
@@ -1993,19 +3367,22 @@ class BatchExportPanel(QWidget):
                         grp, threshold, use_sem, band_lbl,
                         fc_state=panel_fc_state, val_col=_val_col,
                     )
-                    self._save_figure(fig, fig_path, fmt)
+                    self._save_figure(fig, fig_path, fmt,
+                                      group=grp, title=grp.name,
+                                      val_col=_val_col)
                 except Exception as exc:
                     return f"{grp.name} figure: {exc}"
 
-            _logger.info("Batch: wrote %s and %s", csv_path.name, fig_path.name)
+            self._write_cell_rows_for(grp, write_dir, safe, val_col=_val_col)
+            _logger.info("Batch: finished %s", safe)
             return None
 
         self._run_batch_jobs(
             jobs=groups_with_data,
             progress_text_fn=_progress,
             run_job_fn=_run_group,
-            success_text=f"\u2713 {len(groups_with_data)} group(s) \u2192 {out_dir.name}/",
-            status_text=f"Batch export: {len(groups_with_data)} group(s) \u2192 {out_dir}",
+            success_text=f"\u2713 {len(groups_with_data)} group(s)",
+            status_text=f"Batch export: {len(groups_with_data)} group(s)",
             out_dir=out_dir,
         )
 
@@ -2046,11 +3423,18 @@ class BatchExportPanel(QWidget):
         _val_col = val_col if val_col is not None else self._export_val_col_for("_line_channel_cb")
 
         # Four stacked panels — identical to the tab (lineplot/tab_view.py).
-        fig = _Figure(figsize=(10, 13), dpi=300, facecolor=theme.CPub.bg)
-        ax_mean = fig.add_subplot(4, 1, 1)
-        ax_frac = fig.add_subplot(4, 1, 2, sharex=ax_mean)
-        ax_n = fig.add_subplot(4, 1, 3, sharex=ax_mean)
-        ax_cdf = fig.add_subplot(4, 1, 4)
+        spec = self._axes_spec()
+        drawn = spec.drawn_keys() or tuple(p.key for p in self._PANELS)
+        fig = _Figure(figsize=self._panel_figsize(10, 13, len(drawn)),
+                      dpi=300, facecolor=theme.CPub.bg)
+        # Only the panels this run kept reach the figure; the rest are drawn
+        # onto a scratch figure so the shared renderer — which paints all four
+        # members of its ``LineAxes`` — needs no new shape. See ``_panels``.
+        laid = self._panel_figure(fig)
+        ax_mean = laid.axes["mean"]
+        ax_frac = laid.axes["frac"]
+        ax_n = laid.axes["n"]
+        ax_cdf = laid.axes["cdf"]
         fig.subplots_adjust(hspace=0.55, top=0.93, bottom=0.06, left=0.13, right=0.97)
         fig.suptitle(grp.name, fontsize=11, fontweight="bold", color=theme.CPub.text, y=0.98)
 

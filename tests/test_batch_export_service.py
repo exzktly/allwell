@@ -50,3 +50,35 @@ def test_closes_figure_even_on_write_error(tmp_path, monkeypatch):
         pass
     # finally: plt.close(fig) ran despite the raise.
     assert not plt.fignum_exists(num)
+
+
+def test_a_none_path_styles_the_figure_and_skips_the_write(tmp_path):
+    """A run whose destinations are the gallery, a deck, or both.
+
+    Three things have to stay true, and only the third is obvious: nothing is
+    written; ``on_saved`` still fires, because that is the window the deck and
+    the gallery take their own copy in; and the export style has already been
+    applied when it does, so what they capture is the styled figure rather
+    than a raw one.
+    """
+    seen = []
+    fig = _fig()
+    save_export_figure(fig, None, "png",
+                       export_prefs={"title_size": 31.0},
+                       plot_bg="#000000",
+                       on_saved=lambda f: seen.append(
+                           f.axes[0].title.get_fontsize()))
+
+    assert seen == [31.0], seen
+    assert not list(tmp_path.iterdir()), sorted(tmp_path.iterdir())
+
+
+def test_a_none_path_still_closes_the_figure():
+    """The leak the ``finally`` exists to prevent does not depend on the path.
+
+    A batch run renders one figure per group; a skipped write that also
+    skipped the close would hold every one of them for the length of the run.
+    """
+    fig = _fig()
+    save_export_figure(fig, None, "png", export_prefs={}, plot_bg="#000000")
+    assert not plt.fignum_exists(fig.number)

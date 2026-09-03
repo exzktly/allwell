@@ -91,14 +91,52 @@ def save_plot_from_card(ctx, tab: str, png_bytes: bytes, panel_label: str,
     the same way, and empty for every other tab.
 
     Returns a short status string (shown as a toast by ``PlotCard``)."""
+    params, thresholds = capture_params(ctx, tab)
+    return save_figure_to_gallery(
+        ctx, tab=tab, title=(panel_label or "").strip(),
+        png_bytes=png_bytes, svg_bytes=svg_bytes, frames_bytes=frames_bytes,
+        params=params, thresholds=thresholds, panel_only=panel_only,
+    )
+
+
+def save_figure_to_gallery(ctx, *, tab: str, title: str,
+                           png_bytes: bytes, svg_bytes: bytes = b"",
+                           frames_bytes: bytes = b"",
+                           params: dict | None = None,
+                           thresholds: dict | None = None,
+                           panel_only: bool = False,
+                           persist: bool = True,
+                           refresh: bool = True) -> str:
+    """File one already-captured figure in the gallery.
+
+    The half of :func:`save_plot_from_card` that does not read the live
+    application: it is handed the bytes *and* the parameters rather than
+    capturing either. That split is what lets a figure the user never had on
+    screen reach the gallery — Batch Export renders one figure per export
+    group off-screen, and the parameters that describe it are the *group's*,
+    not whatever the plotting tab happens to be showing while the run is in
+    flight.
+
+    *params* / *thresholds* default to empty rather than to a snapshot of the
+    live application. A record with no parameters restores nothing, which is a
+    thin record; a record carrying somebody else's parameters restores a
+    *different figure* under this one's title, which is the silent substitution
+    the whole of §7 is about. Callers that can describe their figure pass it in;
+    callers that cannot are better off with a record that plainly has none.
+
+    *persist* and *refresh* are for a caller filing many figures at once — see
+    :meth:`SavedPlotsStore.add`. Both default to the single-figure behaviour.
+
+    Returns a short status string (shown as a toast by ``PlotCard``)."""
     store = get_store(ctx)
     store.ensure_loaded(ctx)
     if store.images_dir(ctx) is None:
         return "Save failed: load a dataset first"
 
-    params, thresholds = capture_params(ctx, tab)
-    title = (panel_label or "").strip() or tab or "Plot"
-    pid = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    params = dict(params or {})
+    thresholds = dict(thresholds or {})
+    title = (title or "").strip() or tab or "Plot"
+    pid = _fresh_plot_id(store)
     rec = SavedPlot(
         id=pid,
         created_at=datetime.now().isoformat(timespec="seconds"),
@@ -112,10 +150,31 @@ def save_plot_from_card(ctx, tab: str, png_bytes: bytes, panel_label: str,
         thresholds=thresholds,
         summary=build_summary(tab, params, thresholds),
     )
-    if not store.add(ctx, rec, png_bytes, svg_bytes, frames_bytes):
+    if not store.add(ctx, rec, png_bytes, svg_bytes, frames_bytes,
+                     persist=persist):
         return "Save failed: could not write image"
-    refresh_saved_plots_gallery(ctx)
+    if refresh:
+        refresh_saved_plots_gallery(ctx)
     return f"Saved “{title}” to Saved Plots"
+
+
+def _fresh_plot_id(store) -> str:
+    """A record id no record in *store* already holds.
+
+    The id is a timestamp to microsecond resolution and names the record's files
+    on disk, so a collision is not a cosmetic clash — the second record's PNG
+    overwrites the first's and the gallery then shows one figure twice. One save
+    a user clicks cannot collide; a batch filing forty figures in a loop of file
+    copies can, and did not have to be fast to do it: two calls inside one
+    microsecond is all it takes.
+    """
+    taken = {r.id for r in store.records}
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    candidate, n = stamp, 2
+    while candidate in taken:
+        candidate = f"{stamp}-{n}"
+        n += 1
+    return candidate
 
 
 def restore_saved_plot(ctx, plot_id: str) -> None:
@@ -149,6 +208,36 @@ def restore_saved_plot(ctx, plot_id: str) -> None:
     target = rec.params.get("active_centre_tab") or rec.tab
     _reapply_target_tab(ctx, target)
     _report_missing_tab_block(ctx, rec, target)
+    _report_batch_export_origin(ctx, rec)
+
+
+def _report_batch_export_origin(ctx, rec) -> None:
+    """Say so when the record being restored came out of a Batch Export run.
+
+    Such a record carries the export group's parameters — its members, its
+    channel, its column — so the restore puts the right group on the right tab.
+    It does not carry Batch Export's own layout controls, which live on that
+    panel rather than in view state: whether bars were drawn as a beeswarm,
+    whether the timepoints were stacked into one figure, how the scatter was
+    facetted. The restored figure can therefore be laid out differently from the
+    file that was exported, and from the thumbnail in the gallery beside it.
+
+    Left silent, that reads as a restore that went wrong, and the user re-clicks
+    Restore rather than opening Batch Export — which is the one thing that
+    reproduces the exported figure. Said last, after
+    :func:`_report_missing_tab_block`, because it is the more specific of the
+    two and a restore can legitimately have both to report.
+    """
+    origin = rec.params.get("batch_export")
+    if not isinstance(origin, dict) or not origin:
+        return
+    with swallow("report a restored plot's Batch Export origin"):
+        group = str(origin.get("group") or "")
+        named = f" (group “{group}”)" if group else ""
+        ctx.notify.set_status(
+            f"Restored “{rec.title}”{named} — it was exported by Batch Export, "
+            f"so this tab draws the group with its own display settings rather "
+            f"than the batch panel's.")
 
 
 def _report_missing_tab_block(ctx, rec, tab: str) -> None:

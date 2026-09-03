@@ -27,6 +27,7 @@ from well_viewer.features.batch_export._common import (
     _groups_with_loaded_wells,
     unique_export_stem,
 )
+from well_viewer.features.batch_export._panels import Panel
 from well_viewer.features.batch_export.base_panel import BatchExportPanel, SkippedJob
 from well_viewer.core.plot_annotations import (
     value_label_settings as _value_label_settings,
@@ -97,6 +98,73 @@ class ScatterBatchExportPanel(BatchExportPanel):
     # Scatter exports have no error-band / per-FOV spread controls.
     _INCLUDES_SPREAD = False
 
+    _SOURCE_TAB = "Scatter Plot"
+
+    #: One logical panel. A faceted cells run draws one axes per group, but
+    #: they are all the same plot of the same two columns, so they take one
+    #: range and one scale between them rather than a row of controls each.
+    _PANELS = (Panel("plot", "Plot"),)
+    _X_ROW_LABEL = "X range:"
+    _Y_ROW_LABEL = "Y range:"
+    _AXES_FOLLOW_HEADER = False
+    #: This mode's own ``X log`` / ``Y log`` checkboxes below apply
+    #: ``log10(v + 1)`` so cells at zero stay on the figure, which the generic
+    #: combo's plain log would drop. One control per axis, and the one kept is
+    #: the one that is not lossy.
+    _AXES_SCALE_OFFERED = False
+    _SHARE_X = ()
+    #: One panel, so the X row governs it. ``None`` rather than naming the key,
+    #: so a mode that renames its panel does not silently stop taking X.
+    _X_PANELS = None
+    _CELL_SCOPE = "well_viewer.features.scatter.cell_scope_compute"
+
+    def _cell_scope_kwargs(self, *, val_col=None, timepoints=None) -> dict:
+        """This run's axes and timepoints, not the Scatter tab's combos.
+
+        Both modes plot columns the panel resolved once at the top of the run
+        (:class:`ScatterAxes`), and neither of them is what the tab's own
+        ``_scatter_ch_x_cb`` holds. The cells scope also wants the channel
+        *entries* rather than only the resolved columns, because the per-axis
+        fluor floors are keyed on the channel.
+        """
+        axes = self._run_scatter_axes
+        kwargs: dict = {}
+        if timepoints is not None:
+            kwargs["timepoints"] = tuple(float(t) for t in timepoints)
+        if axes is None:
+            return kwargs
+        if axes.mode == "cells":
+            kwargs.update(entry_x=self._sc_cells_x_cb.currentText(),
+                          entry_y=self._sc_cells_y_cb.currentText(),
+                          col_x=axes.col_x, col_y=axes.col_y)
+        else:
+            kwargs.update(
+                entry_x=self._sc_agg_x_cb.currentText(),
+                metric_x=self._scatter_metric_key(self._sc_agg_metric_x_cb))
+        return kwargs
+
+    @property
+    def _CELL_SCOPE_FN(self) -> str:
+        """The aggregate page has its own scope, and it is a different plot.
+
+        Different markers, a different gate layer and a different timepoint
+        resolution — ``agg_cell_scope``'s own docstring spells out why it is
+        deliberately not derived from the per-cell one. Reading the per-cell
+        scope for an aggregate run wrote a file whose block said
+        ``# plot: scatter_cells`` over the wrong axes.
+        """
+        return "cell_scope" if self._scatter_mode == "cells" else "agg_cell_scope"
+
+    def _mode_key(self) -> str:
+        """``scatter_cells`` / ``scatter_agg`` — this class is two modes.
+
+        Per mode rather than per class, because the two write different figures
+        from different columns: one deck named for the class would leave a user
+        who exported both with the aggregate deck only, silently overwritten
+        over the cells one.
+        """
+        return f"scatter_{self._scatter_mode}"
+
     def __init__(
         self,
         ctx,
@@ -137,6 +205,12 @@ class ScatterBatchExportPanel(BatchExportPanel):
             )
             self._init_scatter_agg_axes()
 
+        # After the two axis rows: the AXES block's "X:" is a range on the
+        # channel those rows just chose, and above them the panel showed two
+        # rows called "X:" that meant different things. See
+        # ``_AXES_FOLLOW_HEADER``.
+        self._build_output_tail(layout)
+
         self._build_timepoints_section(layout)
         self._init_timepoint_dropdown()
 
@@ -154,15 +228,24 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
         layout.addWidget(build_hline_separator(None))
 
-        info = QLabel(
-            "Each group \u00d7 timepoint produces one scatter figure and one CSV.\n"
-            "Groups are selected with the same Batch Export group picker."
-        )
-        info.setWordWrap(True)
-        info.setContentsMargins(12, 4, 12, 4)
-        layout.addWidget(info)
-
+        self._build_summary_label(layout)
         self._build_run_row(layout, button_text="\u25b6  Run Scatter Batch Export")
+
+    # \u2500\u2500 the run summary \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    _SUMMARY_FIGURE_NOTE = ""
+    _SUMMARY_CSV_LINE = "One CSV of the points it drew"
+
+    def _summary_figure_lead(self) -> str:
+        """The split toggle decides how many figures a group gets."""
+        if self._scatter_split_tp_cb.isChecked():
+            return "One scatter figure per selected timepoint"
+        return "One scatter figure spanning every selected timepoint"
+
+    def _extra_summary_signals(self) -> list:
+        return [self._scatter_split_tp_cb.toggled]
+
+    def _summary_footnotes(self) -> list[str]:
+        return ["Groups are selected with the same Batch Export group picker."]
 
     def _build_scatter_display_options(self, layout: QVBoxLayout) -> None:
         """Display-option controls mirroring the on-tab Scatter plot.
@@ -263,6 +346,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         threshold`` for the agg axis)."""
         from well_viewer.data.metric_labels import (
             METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
+            FRACTION_LABEL,
         )
         from well_viewer.domain.ratio_models import is_ratio_key as _is_ratio_key
         prop_cb = getattr(ch_cb, "_paired_property_cb", None)
@@ -286,7 +370,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 return
             items = list(METRIC_ORDER)
             if include_fraction:
-                items.append("Fraction above threshold")
+                items.append(FRACTION_LABEL)
             prop_cb.addItems(items)
             prop_cb.setEnabled(True)
             if prev in items:
@@ -401,12 +485,13 @@ class ScatterBatchExportPanel(BatchExportPanel):
         """
         from well_viewer.data.metric_labels import (
             METRIC_LABEL_TO_KEY, CALCULATED_VAL_LABEL,
+            FRACTION_LABEL, FRACTION_METRIC_KEY,
         )
         label = str(prop_cb.currentText() or "")
         if label == CALCULATED_VAL_LABEL:
             return "calculated_val"
-        if label == "Fraction above threshold":
-            return "fraction_above_threshold"
+        if label == FRACTION_LABEL:
+            return FRACTION_METRIC_KEY
         return METRIC_LABEL_TO_KEY.get(label, "mean_intensity")
 
     def _warn_if_live_gates_ignored(self) -> None:
@@ -467,6 +552,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
         )
 
     def _run_batch(self) -> None:
+        if self._run_is_refused():
+            return
         groups_with_data = _groups_with_loaded_wells(
             self._groups_for_export(), self._ctx.state.dataset.well_paths,
         )
@@ -510,13 +597,17 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 stem = unique_export_stem(
                     f"scatter_{axes.mode}_{safe_grp}_t{safe_tp}", used_stems)
                 # Stage into write_dir (audit X3); committed to out_dir on success.
-                csv_path = write_dir / f"{stem}.csv"
-                fig_path = write_dir / f"{stem}.{fmt}"
+                csv_path = self._out_path(write_dir, f"{stem}.csv")
+                fig_path = self._out_path(write_dir, f"{stem}.{fmt}")
                 if axes.mode == "cells":
-                    return self._run_scatter_cells_job(
+                    err = self._run_scatter_cells_job(
                         grp, tp_h, csv_path, fig_path, fmt, axes)
-                return self._run_scatter_agg_job(
-                    grp, tp_h, csv_path, fig_path, fmt, axes)
+                else:
+                    err = self._run_scatter_agg_job(
+                        grp, tp_h, csv_path, fig_path, fmt, axes)
+                if err is None:
+                    self._write_cell_rows_for(grp, write_dir, stem)
+                return err
         else:
             jobs = list(groups_with_data)
 
@@ -530,20 +621,24 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 stem = unique_export_stem(
                     f"scatter_{axes.mode}_{safe_grp}_all_tps", used_stems)
                 # Stage into write_dir (audit X3); committed to out_dir on success.
-                csv_path = write_dir / f"{stem}.csv"
-                fig_path = write_dir / f"{stem}.{fmt}"
+                csv_path = self._out_path(write_dir, f"{stem}.csv")
+                fig_path = self._out_path(write_dir, f"{stem}.{fmt}")
                 if axes.mode == "cells":
-                    return self._run_scatter_cells_multi_tp_job(
+                    err = self._run_scatter_cells_multi_tp_job(
                         grp, timepoints, csv_path, fig_path, fmt, axes)
-                return self._run_scatter_agg_multi_tp_job(
-                    grp, timepoints, csv_path, fig_path, fmt, axes)
+                else:
+                    err = self._run_scatter_agg_multi_tp_job(
+                        grp, timepoints, csv_path, fig_path, fmt, axes)
+                if err is None:
+                    self._write_cell_rows_for(grp, write_dir, stem)
+                return err
 
         self._run_batch_jobs(
             jobs=jobs,
             progress_text_fn=_progress,
             run_job_fn=_run_job,
-            success_text=f"\u2713 {len(jobs)} group(s) \u2192 {out_dir.name}/",
-            status_text=f"Scatter batch export ({axes.mode}): {len(jobs)} group(s) \u2192 {out_dir}",
+            success_text=f"\u2713 {len(jobs)} group(s)",
+            status_text=f"Scatter batch export ({axes.mode}): {len(jobs)} group(s)",
             out_dir=out_dir,
         )
 
@@ -567,7 +662,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         return figure_timepoint_label(tp_h, _time_rescale_for(self._ctx.state.plot))
 
     def _run_scatter_cells_job(
-        self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
+        self, grp: BarGroup, tp_h: float, csv_path: Path | None, fig_path: Path | None, fmt: str,
         axes: ScatterAxes,
     ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_data as _collect_scatter_data
@@ -605,11 +700,12 @@ class ScatterBatchExportPanel(BatchExportPanel):
                         "x": f"{x:.8g}", "y": f"{y:.8g}",
                         "filename": filename, "nucleus_id": nuclear_id,
                     })
-            with open(csv_path, "w", newline="") as fh:
-                fieldnames = ["group", "member", "well", "well_name", "timepoint_h", "x", "y", "filename", "nucleus_id"]
-                writer = csv.DictWriter(fh, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(rows)
+            if csv_path is not None:
+                with open(csv_path, "w", newline="") as fh:
+                    fieldnames = ["group", "member", "well", "well_name", "timepoint_h", "x", "y", "filename", "nucleus_id"]
+                    writer = csv.DictWriter(fh, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(rows)
         except OSError as exc:
             return f"{grp.name} scatter-cells CSV: {exc}"
         try:
@@ -618,7 +714,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                     scatter_data, col_x=col_x, col_y=col_y, tps_list=[tp_h],
                     title=(f"{grp.name} \u2014 Scatter Cells "
                            f"({self._tp_figure_label(tp_h)})"),
-                    fig_path=fig_path, fmt=fmt,
+                    fig_path=fig_path, fmt=fmt, group=grp,
                 )
         except Exception as exc:
             return f"{grp.name} scatter-cells figure: {exc}"
@@ -626,7 +722,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
     def _render_scatter_cells_figure(
         self, scatter_data, *, col_x: str, col_y: str, tps_list, title: str,
-        fig_path: Path, fmt: str,
+        fig_path: Path | None, fmt: str, group: BarGroup | None,
     ) -> None:
         """Render a per-cell scatter figure by reusing the tab's own
         ``render_scatter_points`` (+ ``draw_gates``), honouring the panel's
@@ -694,7 +790,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 _panel(ax, scatter_data)
                 ax.set_xlabel(xlabel)
                 ax.set_title(title, color=theme.CPub.text)
-            self._save_figure(fig, fig_path, fmt)
+            self._save_figure(fig, fig_path, fmt, group=group, title=title)
         finally:
             (_rt.axes_cols, _rt.gate_render, _rt.metadata,
              self._ctx.state.scatter.gates_hidden,
@@ -719,7 +815,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         return stat_x + _log1p_axis_suffix(x_on), stat_y + _log1p_axis_suffix(y_on)
 
     def _run_scatter_agg_job(
-        self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
+        self, grp: BarGroup, tp_h: float, csv_path: Path | None, fig_path: Path | None, fmt: str,
         axes: ScatterAxes,
     ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_agg_data as _collect_scatter_agg_data
@@ -759,11 +855,12 @@ class ScatterBatchExportPanel(BatchExportPanel):
                     "x_err": f"{float(data['x_err'][0]):.8g}",
                     "y_err": f"{float(data['y_err'][0]):.8g}",
                 })
-            with open(csv_path, "w", newline="") as fh:
-                fieldnames = ["group", "label", "well_name", "timepoint_h", "x", "y", "x_err", "y_err"]
-                writer = csv.DictWriter(fh, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(rows)
+            if csv_path is not None:
+                with open(csv_path, "w", newline="") as fh:
+                    fieldnames = ["group", "label", "well_name", "timepoint_h", "x", "y", "x_err", "y_err"]
+                    writer = csv.DictWriter(fh, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(rows)
         except OSError as exc:
             return f"{grp.name} scatter-aggregate CSV: {exc}"
         try:
@@ -789,7 +886,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 xlabel=_xl, ylabel=_yl,
                 title=(f"{grp.name} \u2014 Scatter Aggregate "
                        f"({self._tp_figure_label(tp_h)})"),
-                fig_path=fig_path, fmt=fmt,
+                fig_path=fig_path, fmt=fmt, group=grp,
             )
         except Exception as exc:
             return f"{grp.name} scatter-aggregate figure: {exc}"
@@ -797,7 +894,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
     def _run_scatter_cells_multi_tp_job(
         self, grp: BarGroup, timepoints: list[float],
-        csv_path: Path, fig_path: Path, fmt: str,
+        csv_path: Path | None, fig_path: Path | None, fmt: str,
         axes: ScatterAxes,
     ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_data as _collect_scatter_data
@@ -840,11 +937,12 @@ class ScatterBatchExportPanel(BatchExportPanel):
             # meanings for the same return and neither looked wrong.
             return SkippedJob(f"{grp.name}: no scatter-cells data for selected timepoints")
         try:
-            with open(csv_path, "w", newline="") as fh:
-                fieldnames = ["group", "timepoint_h", "member", "well", "well_name", "x", "y", "filename", "nucleus_id"]
-                writer = csv.DictWriter(fh, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(combined_rows)
+            if csv_path is not None:
+                with open(csv_path, "w", newline="") as fh:
+                    fieldnames = ["group", "timepoint_h", "member", "well", "well_name", "x", "y", "filename", "nucleus_id"]
+                    writer = csv.DictWriter(fh, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(combined_rows)
         except OSError as exc:
             return f"{grp.name} scatter-cells CSV: {exc}"
         try:
@@ -864,7 +962,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 self._render_scatter_cells_figure(
                     fig_data, col_x=col_x, col_y=col_y, tps_list=sorted(timepoints),
                     title=f"{grp.name} \u2014 Scatter Cells (all selected tps)",
-                    fig_path=fig_path, fmt=fmt,
+                    fig_path=fig_path, fmt=fmt, group=grp,
                 )
         except Exception as exc:
             return f"{grp.name} scatter-cells figure: {exc}"
@@ -872,7 +970,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
     def _run_scatter_agg_multi_tp_job(
         self, grp: BarGroup, timepoints: list[float],
-        csv_path: Path, fig_path: Path, fmt: str,
+        csv_path: Path | None, fig_path: Path | None, fmt: str,
         axes: ScatterAxes,
     ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_agg_data as _collect_scatter_agg_data
@@ -912,11 +1010,12 @@ class ScatterBatchExportPanel(BatchExportPanel):
                     "x_err": f"{float(data['x_err'][0]):.8g}",
                     "y_err": f"{float(data['y_err'][0]):.8g}",
                 })
-            with open(csv_path, "w", newline="") as fh:
-                fieldnames = ["group", "label", "well_name", "timepoint_h", "x", "y", "x_err", "y_err"]
-                writer = csv.DictWriter(fh, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(rows)
+            if csv_path is not None:
+                with open(csv_path, "w", newline="") as fh:
+                    fieldnames = ["group", "label", "well_name", "timepoint_h", "x", "y", "x_err", "y_err"]
+                    writer = csv.DictWriter(fh, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(rows)
         except OSError as exc:
             return f"{grp.name} scatter-aggregate CSV: {exc}"
         try:
@@ -947,7 +1046,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 _draw,
                 xlabel=_xl, ylabel=_yl,
                 title=f"{grp.name} \u2014 Scatter Aggregate (all selected tps)",
-                fig_path=fig_path, fmt=fmt, legend_fontsize=7,
+                fig_path=fig_path, fmt=fmt, group=grp, legend_fontsize=7,
             )
         except Exception as exc:
             return f"{grp.name} scatter-aggregate figure: {exc}"

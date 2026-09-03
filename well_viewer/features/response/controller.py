@@ -189,11 +189,14 @@ def open_series_selector(ctx) -> None:
     menu_exec.exec_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
 
 
-#: The Property label that is not a column. Named once here rather than
-#: spelled at each comparison: it is the same string ``populate_metric_combo``
-#: appends and the aggregate Scatter tab keys on, and a second spelling of it
-#: is how one of the two sites silently stops matching.
-FRACTION_LABEL = "Fraction above threshold"
+#: The Property label that is not a column, re-exported from the shared metric
+#: vocabulary. It used to be defined here, and the aggregate Scatter tab and its
+#: batch export each spelled the same literal for themselves — three copies of a
+#: string all three compare against, which is how one of them silently stops
+#: matching. It lives in ``data.metric_labels`` now, with the key it resolves to
+#: beside it; the name stays importable from here because this tab's readers use
+#: it under that name.
+from well_viewer.data.metric_labels import FRACTION_LABEL  # noqa: E402
 
 
 def response_channel_label(ctx) -> str:
@@ -287,10 +290,12 @@ def response_metric_key(ctx) -> str:
     ``METRIC_LABEL_TO_KEY.get`` beside the first is how the two come to disagree
     about what the tab is drawing.
     """
-    from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
+    from well_viewer.data.metric_labels import (
+        FRACTION_METRIC_KEY, METRIC_LABEL_TO_KEY,
+    )
 
     label = response_metric_label(ctx)
-    return ("fraction_above_threshold" if label == FRACTION_LABEL
+    return (FRACTION_METRIC_KEY if label == FRACTION_LABEL
             else METRIC_LABEL_TO_KEY.get(label, "mean_intensity"))
 
 
@@ -639,7 +644,7 @@ def _empty_reason(ctx, data) -> str:
                         timepoints_chosen=bool(timepoints_for(ctx)))
 
 
-def _blank_if_undefined(value) -> str:
+def blank_if_undefined(value) -> str:
     """A number, or an empty cell for one that was never computed.
 
     ``err`` is deliberately NaN for a spread that could not be defined — one
@@ -686,7 +691,7 @@ def export_response_csv(ctx) -> None:
     unit = data.replicate_unit
     rows = [
         [p.member, c.series_label, f"{c.timepoint:g}", f"{p.x:g}", p.label,
-         f"{p.y:g}", _blank_if_undefined(p.err), str(p.n), unit, ""]
+         f"{p.y:g}", blank_if_undefined(p.err), str(p.n), unit, ""]
         for c in data.curves for p in c.points
     ]
     rows += [[member, "", "", "", "", "", "", "", "", reason]
@@ -698,6 +703,11 @@ def export_response_csv(ctx) -> None:
 
 
 def _fit_rows(ctx, data) -> list[list[str]]:
+    """This tab's fit rows, from the fit settings in its own popover."""
+    return response_fit_rows(data, response_fits(ctx, data))
+
+
+def response_fit_rows(data, fits: dict) -> list[list[str]]:
     """One row per fitted curve, in the columns the point rows already use.
 
     The EC50 goes in ``x`` because that is what it is — a dose on the same
@@ -707,10 +717,14 @@ def _fit_rows(ctx, data) -> list[list[str]]:
     A refused fit still gets a row, carrying its reason. Dropping it would
     leave a spreadsheet whose fits are all successful, which is the same silent
     substitution as a figure that draws five of eight groups.
+
+    *fits* is passed rather than derived so Batch Export, whose fit model and
+    pinned plateaus are its own panel's rather than this tab's popover's, writes
+    the same rows in the same columns — one CSV shape for one kind of figure.
     """
     labels = {c.key: c.series_label for c in data.curves}
     rows = []
-    for key, fit in sorted(response_fits(ctx, data).items()):
+    for key, fit in sorted(fits.items()):
         timepoint, series_id = key
         ec50 = f"{fit.ec50:g}" if fit.ok and fit.ec50 is not None else ""
         # The series goes in its own column, the same one the point rows use,
@@ -782,7 +796,7 @@ def fit_model_labels() -> list[tuple[str, str]]:
     return [(FIT_LABELS[model], model) for model in FIT_MODELS]
 
 
-def _y_label(ctx, data=None) -> str:
+def response_y_label(data=None, *, channel: str, metric_label: str) -> str:
     """The measurement axis, and the normalisation applied to it.
 
     The suffix is not decoration. A normalised value on an axis labelled with
@@ -790,8 +804,14 @@ def _y_label(ctx, data=None) -> str:
     means, which is the one thing a figure must never do — and this tab shares
     its fold-change state with the Bar and Line tabs, so the axis can become
     normalised without anything on this page being touched.
+
+    *channel* and *metric_label* are arguments rather than reads of this tab's
+    combos, because Batch Export draws the same curves from its own controls and
+    an axis label it spelled for itself would be a second vocabulary for one
+    measurement. :func:`_y_label` is the tab's own call, which supplies them
+    from the combos.
     """
-    channel = response_channel(ctx).upper()
+    channel = (channel or "").upper()
     if getattr(data, "y_metric", Y_MEAN) == Y_FRACTION:
         # Not the channel's Property. The fraction is a different quantity from
         # whatever the Property names, computed against the ON cutoff, and an
@@ -800,11 +820,16 @@ def _y_label(ctx, data=None) -> str:
         label = " ".join(part for part in (channel, "fraction above threshold")
                          if part)
     else:
-        label = " ".join(part for part in (channel,
-                                           response_metric_label(ctx).lower())
+        label = " ".join(part for part in (channel, (metric_label or "").lower())
                          if part)
     suffix = getattr(data, "normalised", "") if data is not None else ""
     return f"{label} {suffix}".strip() if suffix else label
+
+
+def _y_label(ctx, data=None) -> str:
+    """This tab's y axis label, from its own Channel and Property combos."""
+    return response_y_label(data, channel=response_channel(ctx),
+                            metric_label=response_metric_label(ctx))
 
 
 def _measurement_title(ctx, data) -> str:
@@ -823,17 +848,38 @@ def _measurement_title(ctx, data) -> str:
     already defined against the ON cutoff, and "Fraction above threshold (above
     threshold)" says the same thing twice.
     """
+    return response_measurement_title(
+        data,
+        channel=response_channel(ctx),
+        metric_label=response_metric_label(ctx),
+        metric_key=response_metric_key(ctx),
+        draws_fraction=response_draws_fraction(ctx),
+        use_sem=bool(getattr(ctx.state.plot, "use_sem", False)),
+    )
+
+
+def response_measurement_title(data, *, channel: str, metric_label: str,
+                               metric_key: str, draws_fraction: bool,
+                               use_sem: bool) -> str:
+    """:func:`_measurement_title` with the tab's combos passed in.
+
+    Batch Export renders these curves from its own Channel and Property
+    controls and has no combos to read, so it calls this. One function rather
+    than two spellings: three tabs already describe one measurement in one
+    vocabulary, and a batch figure titled differently from the tab figure of the
+    same plate is how a reader comes to believe they are two measurements.
+    """
     from well_viewer.data.metric_labels import spread_label, threshold_qualifier
 
-    channel = response_channel(ctx).upper()
-    if response_draws_fraction(ctx):
+    channel = (channel or "").upper()
+    if draws_fraction:
         measure = " ".join(part for part in (channel, FRACTION_LABEL) if part)
     else:
-        qualifier = threshold_qualifier(response_metric_key(ctx))
+        qualifier = threshold_qualifier(metric_key)
         measure = " ".join(
-            part for part in (channel, response_metric_label(ctx)) if part
+            part for part in (channel, metric_label) if part
         ) + qualifier
-    band = spread_label(bool(getattr(ctx.state.plot, "use_sem", False)))
+    band = spread_label(bool(use_sem))
     # Appended verbatim, because ``data.normalised`` **is**
     # ``fold_change_suffix_for(ctx, "response")`` — the same string the Bar and
     # Line titles append, already carrying the two spaces that separate it. Any

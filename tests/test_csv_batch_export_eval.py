@@ -699,7 +699,11 @@ def test_batch_scatter_cells_honors_display_options(ctx, tmp_path, monkeypatch):
 
     captured: dict = {}
     monkeypatch.setattr(panel, "_save_figure",
-                        lambda fig, p, f: captured.update(fig=fig))
+                        # ``**kw`` because ``_save_figure`` requires ``group``
+                        # and ``title``: a positional-only stub silently
+                        # turned every job into an error string, and this file
+                        # is slow-lane so CI never noticed.
+                        lambda fig, p, f, **kw: captured.update(fig=fig))
 
     grp = BarGroup("Cond1", members=[ReplicateSet("RepA", ["A01", "A02"])],
                    solo_wells=["B01"])
@@ -710,7 +714,7 @@ def test_batch_scatter_cells_honors_display_options(ctx, tmp_path, monkeypatch):
                                     well_colors=["#888", "#aaa", "#ccc"])
         panel._render_scatter_cells_figure(
             data, col_x=col_x, col_y=col_y, tps_list=[0.0],
-            title="t", fig_path=tmp_path / "x.png", fmt="png")
+            title="t", fig_path=tmp_path / "x.png", fmt="png", group=grp)
 
     fig = captured["fig"]
     # Separate axes → one panel per group (RepA + B01).
@@ -736,7 +740,11 @@ def test_batch_scatter_agg_honors_log_scale(ctx, tmp_path, monkeypatch):
     panel._sc_agg_ylog_cb.setChecked(False)
     captured: dict = {}
     monkeypatch.setattr(panel, "_save_figure",
-                        lambda fig, p, f: captured.update(fig=fig))
+                        # ``**kw`` because ``_save_figure`` requires ``group``
+                        # and ``title``: a positional-only stub silently
+                        # turned every job into an error string, and this file
+                        # is slow-lane so CI never noticed.
+                        lambda fig, p, f, **kw: captured.update(fig=fig))
 
     grp = BarGroup("Cond1", members=[ReplicateSet("RepA", ["A01", "A02"])],
                    solo_wells=["B01"])
@@ -775,3 +783,140 @@ def test_batch_failure_preserves_prior_export(ctx, tmp_path, monkeypatch):
     # Prior export intact, no staging dir left behind.
     assert (out_dir / "batch_Cond1.csv").read_text() == prior
     assert not any(p.name.startswith(".batch_export_tmp_") for p in out_dir.iterdir())
+
+
+# =============================================================================
+# 9. THE DESTINATIONS, THROUGH A REAL JOB BODY
+# =============================================================================
+#
+# The fast lane's runner tests drive `_run_batch_jobs` with a two-line fake job
+# that writes nothing and never calls `_out_path`. So every `_out_path` call
+# site and every `if csv_path is not None:` skip in the four real job bodies
+# was unexercised: a reviewer put `raise RuntimeError` as the first statement
+# of `base_panel._run_group` and 140 tests stayed green. These are the tests
+# that run the real thing.
+
+def _deck_only(panel, out):
+    """Image files off, deck on — the configuration that actually measures.
+
+    A **gallery-only** run proves nothing about ``_out_path``: its staging
+    directory is discarded wholesale, so a job body that ignored the gate and
+    wrote into the staging directory anyway leaves the output folder empty
+    either way. I wrote it that way first and three mutations of the gate
+    walked straight through it.
+
+    Deck-only is the case where staging is *committed*, so the gate is the
+    only thing standing between an unticked "Image files" and a folder full of
+    PNGs and CSVs.
+    """
+    panel._out_dir_edit.setText(str(out))
+    panel._to_files_cb.setChecked(False)
+    panel._to_deck_cb.setChecked(True)
+
+
+def _committed_names(out):
+    from well_viewer.features.batch_export.service import MANIFEST_NAME
+
+    return sorted(p.name for p in out.iterdir()
+                  if p.name != MANIFEST_NAME)
+
+
+def test_a_line_batch_with_image_files_off_writes_only_the_deck(ctx, tmp_path):
+    """The whole point of the destination row, through the real job body.
+
+    Asserted on the committed directory rather than on ``_out_path``'s return,
+    because what matters is what reached disk — a job body that called
+    ``_out_path``, got ``None``, and wrote through some other path would
+    satisfy every fast-lane test and fail this one.
+    """
+    from well_viewer.features.batch_export import BatchExportPanel
+
+    out = tmp_path / "nofiles"
+    panel = BatchExportPanel(ctx, None, use_sidebar_groups=False)
+    panel._groups = [_make_mixed_group("Cond1")]
+    _deck_only(panel, out)
+    panel._run_batch()
+
+    assert _committed_names(out) == ["batch_export_line.pptx"], \
+        _committed_names(out)
+
+
+def test_a_line_batch_with_no_destination_but_the_gallery_writes_nothing(
+        ctx, tmp_path):
+    """And the folder is not even created. Complementary to the deck case."""
+    from well_viewer.features.batch_export import BatchExportPanel
+
+    out = tmp_path / "gallery_only"
+    panel = BatchExportPanel(ctx, None, use_sidebar_groups=False)
+    panel._groups = [_make_mixed_group("Cond1")]
+    panel._out_dir_edit.setText(str(out))
+    panel._to_files_cb.setChecked(False)
+    panel._to_gallery_cb.setChecked(True)
+    panel._run_batch()
+
+    assert not out.exists(), sorted(p.name for p in out.iterdir())
+
+
+def test_the_same_batch_with_image_files_on_writes_them(ctx, tmp_path):
+    """The paired positive, so the test above cannot pass by exporting nothing.
+
+    Without this, a `_run_batch` that silently produced no jobs at all — a
+    group that resolved to no wells, a mode that returned early — would give
+    an empty directory and read as the feature working.
+    """
+    from well_viewer.features.batch_export import BatchExportPanel
+
+    out = tmp_path / "withfiles"
+    panel = BatchExportPanel(ctx, None, use_sidebar_groups=False)
+    panel._groups = [_make_mixed_group("Cond1")]
+    panel._out_dir_edit.setText(str(out))
+    panel._to_files_cb.setChecked(True)
+    panel._run_batch()
+
+    written = sorted(p.name for p in out.iterdir())
+    assert any(n.endswith(".png") for n in written), written
+    assert any(n.endswith(".csv") for n in written), written
+
+
+def test_a_bar_batch_with_image_files_off_writes_only_the_deck(ctx, tmp_path):
+    """The bar mode's job body is a different function with its own writes.
+
+    Its CSV path was a stem it appended two suffixes to, which is the site
+    most likely to be missed by a sweep — so it gets its own end-to-end case
+    rather than being assumed to follow the line mode.
+    """
+    from well_viewer.features.batch_export import BarBatchExportPanel
+
+    out = tmp_path / "bar_nofiles"
+    panel = BarBatchExportPanel(ctx, None, use_sidebar_groups=False)
+    panel._groups = [_make_mixed_group("Cond1")]
+    panel._out_dir_edit.setText(str(out))
+    # The bar list spells its timepoints without a decimal — see
+    # ``_run_bar_batch`` above, whose selection this mirrors.
+    panel._tp_lb.clearSelection()
+    for i in range(panel._tp_lb.count()):
+        item = panel._tp_lb.item(i)
+        if item.text() == "0":
+            item.setSelected(True)
+    panel._to_files_cb.setChecked(False)
+    panel._to_deck_cb.setChecked(True)
+    panel._run_batch()
+
+    assert _committed_names(out) == ["batch_export_bar.pptx"], \
+        _committed_names(out)
+
+
+def test_a_scatter_batch_with_image_files_off_writes_only_the_deck(ctx,
+                                                                   tmp_path):
+    from well_viewer.features.batch_export import ScatterBatchExportPanel
+
+    out = tmp_path / "scatter_nofiles"
+    panel = ScatterBatchExportPanel(ctx, None, scatter_mode="cells",
+                                    use_sidebar_groups=False)
+    panel._groups = [_make_mixed_group("Cond1")]
+    _select_tps(panel, ("0.0",))
+    _deck_only(panel, out)
+    panel._run_batch()
+
+    assert _committed_names(out) == ["batch_export_scatter_cells.pptx"], \
+        _committed_names(out)

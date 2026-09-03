@@ -11,13 +11,11 @@ from well_viewer.features.barplot._annotations import (
 from well_viewer.features.barplot._axis_fit import fit_bar_panels
 from well_viewer.domain.numeric import is_number
 from well_viewer.domain.plot_members import plot_replicate_sets
-from well_viewer.domain.selections_model import well_display_label
 from well_viewer.domain.viewer_state import parse_rc
 from widgets import menu_exec
 
 import logging
 import math
-import re
 
 from well_viewer.domain.batch_models import ReplicateSet
 from well_viewer.domain.fold_change_pairing import (
@@ -26,7 +24,6 @@ from well_viewer.domain.fold_change_pairing import (
 from well_viewer.core import debug_flags as debug_flags
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.ui_helpers import multiselect_button_text
-from well_viewer.data.data_loading import extract_well_token as _extract_well_token
 
 _logger = logging.getLogger(__name__)
 
@@ -52,6 +49,7 @@ from well_viewer.features.barplot.collect import (  # noqa: F401
     bar_err_settings,
     bar_guide_x,
     bar_idx_at_x,
+    bar_well_display_label,
     batch_members,
     batch_wells_by_key,
     cluster_x_for_group_keys,
@@ -407,14 +405,6 @@ def rep_sets_active(ctx) -> list[ReplicateSet]:
     ``ctx.state`` (no god-object)."""
     return plot_replicate_sets(ctx)
 
-
-
-def bar_well_display_label(ctx, lbl: str) -> str:
-    """Bar-plot-safe well label that avoids numeric-only tick text."""
-    disp = str(well_display_label(ctx, lbl))
-    if re.match(r"^\s*\d+\s*$", disp):
-        return _extract_well_token(lbl) or disp
-    return disp
 
 
 # ``toggle_fov_replicates`` moved to ``well_viewer.core.plot_toggles`` (A8

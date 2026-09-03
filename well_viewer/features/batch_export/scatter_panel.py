@@ -686,8 +686,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
             # meanings for the same return and neither looked wrong.
             return SkippedJob(f"{grp.name}: no scatter-cells data at t={tp_h:.1f}h")
         try:
-            from well_viewer.features.export.service import _well_labels_map, well_name_for
-            _well_labels = _well_labels_map(self._ctx)
+            from well_viewer.features.export.service import figure_names_map, well_name_for
+            _well_labels = figure_names_map(self._ctx)
             rows: list[dict] = []
             for label, data in scatter_data.items():
                 for x, y, meta in zip(data["x"], data["y"], data["metadata"]):
@@ -835,9 +835,9 @@ class ScatterBatchExportPanel(BatchExportPanel):
             return SkippedJob(f"{grp.name}: no scatter-aggregate data at t={tp_h:.1f}h")
         try:
             from well_viewer.features.export.service import (
-                _well_labels_map, _well_paths_keys, well_name_for,
+                figure_names_map, _well_paths_keys, well_name_for,
             )
-            _well_labels = _well_labels_map(self._ctx)
+            _well_labels = figure_names_map(self._ctx)
             _well_paths = _well_paths_keys(self._ctx)
             rows: list[dict] = []
             for data in scatter_data.values():
@@ -913,8 +913,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
                     fluor_gate_x=_get_fluor_gate(self._ctx, axes.ch_x_base),
                     fluor_gate_y=_get_fluor_gate(self._ctx, axes.ch_y_base),
                 )
-            from well_viewer.features.export.service import _well_labels_map, well_name_for
-            _well_labels = _well_labels_map(self._ctx)
+            from well_viewer.features.export.service import figure_names_map, well_name_for
+            _well_labels = figure_names_map(self._ctx)
             for label, data in scatter_data.items():
                 combined_series.append((tp_h, label, data))
                 for x, y, meta in zip(data["x"], data["y"], data["metadata"]):
@@ -990,9 +990,9 @@ class ScatterBatchExportPanel(BatchExportPanel):
             return SkippedJob(f"{grp.name}: no scatter-aggregate data for selected timepoints")
         try:
             from well_viewer.features.export.service import (
-                _well_labels_map, _well_paths_keys, well_name_for,
+                figure_names_map, _well_paths_keys, well_name_for,
             )
-            _well_labels = _well_labels_map(self._ctx)
+            _well_labels = figure_names_map(self._ctx)
             _well_paths = _well_paths_keys(self._ctx)
             rows: list[dict] = []
             for data in scatter_data.values():

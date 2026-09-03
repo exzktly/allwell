@@ -409,8 +409,10 @@ def name_for_wells(vset: VariableSet, wells, *, taken=()) -> str:
     and worth knowing about; it is the same staleness a hand-typed name has
     always had, on a string that now looks more authoritative.
 
-    Naming a group is the only thing this is for, so it is deliberately not a
-    display label for an arbitrary set of wells.
+    Naming a group is the only thing this is for. What one *well* is called on
+    a figure is :func:`label_for_well`, which composes its name by the same
+    rules over a set of one; an arbitrary set of wells that is neither has no
+    name here.
     """
     wells = list(wells)
     labels, complete = _resolved_labels(vset, wells)
@@ -420,6 +422,43 @@ def name_for_wells(vset: VariableSet, wells, *, taken=()) -> str:
     if complete and name not in set(taken or ()):
         return name
     return _with_wells(name, wells)
+
+
+def label_for_well(vset: VariableSet, well: str) -> str:
+    """What *well* is, said in the variables it holds, or ``""``.
+
+    ``HeLa · 10 µM`` for a well carrying one cell line and one dose. This is
+    what a tick label, a legend entry and an image caption call the well when
+    the user has not typed a label for it by hand — the Variables tab is the
+    other way of saying what a well is, and a plate annotated only that way
+    used to draw its bare tokens on every figure while the annotation sat
+    unread.
+
+    Composed by :func:`name_for_wells`' rules over a set of one, so a well and
+    a group of that well read alike. In particular a **partial** description
+    carries the well it came from: a plate where `Cell line` was filled and
+    `Dose` was not draws ``HeLa (A01)`` rather than ``HeLa``, because a bare
+    ``HeLa`` beside a neighbouring ``HeLa · 10 µM`` reads as a well that was
+    given no dose rather than one whose dose was never recorded.
+
+    Two wells holding the same values compose the same label, and that is left
+    alone: they are replicates of one condition, which is what the figure
+    should say about them. The disambiguation :func:`names_for_well_sets`
+    applies to a *batch* of groups is not applied here — it would put a well
+    token back on every tick of a plate whose replicates are drawn unpooled,
+    which is the state this function exists to get away from — and it is also
+    why this is not a call to that function: pooling the replicates is what
+    makes the labels distinct, and the plate already offers three ways to do it.
+
+    ``""`` when the plate has no variables, or when none of them resolves for
+    this well. The caller then keeps the well token, which is a true statement
+    about a well nothing else describes.
+    """
+    labels, complete = _resolved_labels(vset, [well])
+    if not labels:
+        return ""
+    name = NAME_JOIN.join(labels)
+    return name if complete else _with_wells(name, [well])
 
 
 def names_for_well_sets(vset: VariableSet, well_sets) -> list[str]:

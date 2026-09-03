@@ -3267,11 +3267,11 @@ class BatchExportPanel(QWidget):
                         collect_line_series_for_group,
                     )
                     from well_viewer.features.export.service import (
-                        _control_cell, _well_labels_map,
+                        _control_cell, figure_names_map,
                         line_metric_fieldnames, line_metric_row,
                         well_name_for, well_names_joined,
                     )
-                    _well_labels = _well_labels_map(self._ctx)
+                    _well_labels = figure_names_map(self._ctx)
                     # Two passes through the same shared collector: raw values
                     # for the standard mean / spread columns, fold-change
                     # values for the additive ``fold_change_*`` columns when

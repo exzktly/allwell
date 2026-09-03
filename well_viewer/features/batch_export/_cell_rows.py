@@ -45,7 +45,7 @@ import threading
 # nothing. Several sibling features already import it this way.
 from well_viewer.features.export import cell_scope_compute as csc
 from well_viewer.features.export.service import (
-    _gating_busy, _scope_block, _well_labels_map,
+    _gating_busy, _scope_block, figure_names_map,
 )
 from well_viewer.features.export.worker import DONE, CellExportWriter
 
@@ -108,7 +108,7 @@ def write_cell_rows(ctx, scope, out_path) -> int:
         missing_verdicts=csc.missing_verdict_layers(frames_columns),
         header_len=len(header), unreadable=unreadable)
 
-    labels = _well_labels_map(ctx)
+    labels = figure_names_map(ctx)
     chunks: queue.Queue = queue.Queue()
     for group, well in wells:
         frame = frames.get(well)

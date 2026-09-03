@@ -823,6 +823,31 @@ def wells_needing_force(ctx) -> list[str]:
     )
 
 
+def wells_named_on_figures(ctx) -> int:
+    """How many loaded wells a figure calls something other than their token.
+
+    The union of the two ways of naming a well, counted the way a tick label
+    resolves it: a label typed on the **Well Labels** tab, or the values the
+    well holds on the **Variables** tab. Both put text on an axis and in a
+    legend, so both answer :func:`next_step`'s question — is this plate's data
+    legible once it is drawn — and only one of them was being counted.
+
+    Not a row in :func:`your_work`, deliberately. That block reports one number
+    per tab, and each of its rows is the count the tab itself shows: a "wells
+    labelled" figure that counted variables would send a reader to the Well
+    Labels tab to find an editor holding none of them. This is the derived
+    fact the *nudge* needs, and it is derived where the nudge reads it.
+    """
+    from well_viewer.domain.selections_model import (
+        LABEL_FROM_TOKEN, well_display_label_and_source,
+    )
+
+    loaded = dict(getattr(getattr(ctx.state, "dataset", None),
+                          "well_paths", None) or {})
+    return sum(1 for well in loaded
+               if well_display_label_and_source(ctx, well)[1] != LABEL_FROM_TOKEN)
+
+
 def next_step(ctx) -> dict:
     """The one contextual action, chosen by what most needs doing.
 
@@ -883,12 +908,20 @@ def next_step(ctx) -> dict:
                 "action": "complete", "label": "Finish this run"}
 
     work = {row["key"]: row["count"] for row in your_work(ctx)}
-    if not work.get("labels"):
+    # **Both rungs ask what the plate has, not which tab it was typed on.**
+    # A user who filled a dose grid on the Variables tab was told "no sample
+    # labels yet" over figures already reading ``HeLa · 10 µM``, and then told
+    # "no replicate sets yet" over figures already pooling by that dose. Each
+    # sentence named the one tab it counts and called the plate empty, which is
+    # the failure this ladder exists to avoid: a nudge that is false is worse
+    # than no nudge, because the reader who follows it undoes work they have
+    # already done.
+    if not wells_named_on_figures(ctx):
         return {"severity": "accent",
                 "text": "No sample labels yet. Naming wells makes every plot "
                         "legible.",
                 "action": "samples", "label": "Define samples"}
-    if not work.get("replicates"):
+    if not work.get("replicates") and not work.get("variables"):
         return {"severity": "accent",
                 "text": "No replicate sets yet.",
                 "action": "samples", "label": "Set them up"}

@@ -1027,7 +1027,8 @@ def test_a_png_only_plot_is_redrawn_so_the_deck_can_make_it_editable(
     C.wire_save_to_gallery(ctx, card, "Bar Plots")
     # Replaying the parameters is the app's job and has its own tests; what this
     # one is about is that the redraw happens, is captured, and is kept.
-    monkeypatch.setattr(C, "restore_saved_plot", lambda ctx_, pid: None)
+    monkeypatch.setattr(C, "restore_saved_plot",
+                        lambda ctx_, pid, *, adopt_groups=False: None)
 
     rec = SavedPlot(id="old1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
                     title="Filed last week", png_filename="old1.png", params={})
@@ -1107,12 +1108,22 @@ def test_a_tab_with_no_figure_is_left_as_a_picture(qapp, tmp_path):
 # slide — and nothing about the record. Deleting the replay entirely left all 44
 # tests green. Everything below is about the part that monkeypatch removed.
 
-def _card_that_draws_what_it_is_told(ctx):
+def _card_that_draws_what_it_is_told(ctx, *, adopted=None):
     """A real PlotCard plus a stand-in restore that redraws it per record.
 
     The stand-in is the point: it makes "which record was replayed" visible in
     the captured bytes, so the assertions can be about identity and ordering
     rather than about the mechanism.
+
+    It takes ``adopt_groups`` because the real function does, and records it
+    into *adopted* when one is passed. This replay is the **only** caller
+    allowed to ask for the record's own replicate sets — the Restore button
+    leaves the user's alone — and it is allowed to because
+    ``regenerate_missing_vectors`` snapshots the live state in ``_LiveState``
+    and puts it back in a ``finally``. A stub with the older two-argument
+    signature raised ``TypeError`` inside ``_regenerate_one``'s ``swallow``, so
+    five tests here reported the repair as having produced nothing at all: a
+    double shaped to yesterday's call is §7.8's first face, in the fixture.
     """
     from well_viewer.features.saved_plots import controller as C
     from widgets.plot_card import PlotCard
@@ -1120,13 +1131,38 @@ def _card_that_draws_what_it_is_told(ctx):
     card = PlotCard(figsize=(4, 3))
     ax = card.figure.add_subplot(1, 1, 1)
 
-    def _replay(_ctx, plot_id):
+    def _replay(_ctx, plot_id, *, adopt_groups=False):
+        if adopted is not None:
+            adopted.append(adopt_groups)
         ax.clear()
         ax.bar([0, 1], [3, 5])
         ax.set_title(f"figure for {plot_id}")
 
     C.wire_save_to_gallery(ctx, card, "Bar Plots")
     return card, _replay
+
+
+@pytest.mark.qt
+def test_the_replay_asks_for_the_records_own_groups(qapp, tmp_path, monkeypatch):
+    """The repair draws each record's figure, so it needs the groups that drew
+    it — and it is the one caller that may take them, because ``_LiveState``
+    puts the user's back in a ``finally``. Without the flag every regenerated
+    slide is quietly a picture of today's groups under yesterday's title."""
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    adopted: list[bool] = []
+    card, replay = _card_that_draws_what_it_is_told(ctx, adopted=adopted)
+    monkeypatch.setattr(C, "restore_saved_plot", replay)
+    monkeypatch.setattr(C, "_gating_recompute_now", lambda c: True)
+
+    rec = SavedPlot(id="p1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Plot", png_filename="p1.png", params={})
+    assert store.add(ctx, rec, _png_bytes())
+    assert C.regenerate_missing_vectors(ctx, store, [rec]) == {"p1"}
+    assert adopted == [True], adopted
 
 
 @pytest.mark.qt
@@ -1184,8 +1220,10 @@ def test_the_gating_pass_finishes_before_the_figure_is_captured(qapp, tmp_path,
     store = SavedPlotsStore()
     card, replay = _card_that_draws_what_it_is_told(ctx)
     order = []
-    monkeypatch.setattr(C, "restore_saved_plot",
-                        lambda c, pid: (order.append("replay"), replay(c, pid))[1])
+    monkeypatch.setattr(
+        C, "restore_saved_plot",
+        lambda c, pid, *, adopt_groups=False: (
+            order.append("replay"), replay(c, pid, adopt_groups=adopt_groups))[1])
     monkeypatch.setattr(C, "_gating_recompute_now",
                         lambda c: (order.append("gating"), True)[1])
     real_capture = type(card).captureVectorSvg

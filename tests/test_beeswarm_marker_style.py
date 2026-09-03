@@ -151,6 +151,17 @@ class _FakeAx:
     def get_legend(self):
         return None
 
+    def get_children(self):
+        """A real Axes has one, and the style pass reads its legends off it.
+
+        Empty because this stand-in draws none. Left off, the stub answered
+        every question the pass asked *except* this one and failed with an
+        ``AttributeError`` the moment the pass started enumerating legends
+        properly — §7.8, face one: a fixture shaped to what the code happened
+        to read is a fixture that cannot disagree with it.
+        """
+        return []
+
     def get_xlim(self):
         return (0, 1)
 

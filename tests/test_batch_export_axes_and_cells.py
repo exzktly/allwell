@@ -459,7 +459,7 @@ def test_the_per_cell_file_names_the_wells_its_scope_asked_for(tmp_path,
     monkeypatch.setattr(cr, "get_rows", lambda ctx, w: frames[w], raising=False)
     monkeypatch.setattr("well_viewer.data.data_loading.get_rows",
                         lambda ctx, w: frames[w])
-    monkeypatch.setattr(cr, "_well_labels_map", lambda ctx: {})
+    monkeypatch.setattr(cr, "figure_names_map", lambda ctx: {})
     monkeypatch.setattr(cr, "_scope_block",
                         lambda ctx, scope, **kw: [
                             f"# wells ({len(kw['wells'])}): "

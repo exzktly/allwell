@@ -165,11 +165,17 @@ def test_capture_params_includes_live_selections(loaded_app):
     assert [s["name"] for s in params["selections"]] == ["CTRL", "DRUG"]
 
 
-def test_restore_selections_replaces_live_groups(loaded_app):
-    """Regression: restoring a saved group-driven plot must show the SAVED groups,
-    not whatever the sidebar holds now. Save 2 groups, add a third live, restore →
-    the third is gone and the saved two are back."""
-    from well_viewer.features.saved_plots.controller import _restore_selections
+def test_a_restore_leaves_the_users_groups_alone(loaded_app):
+    """The reported defect, and the test that used to assert it.
+
+    This file previously pinned the opposite — "restoring must show the SAVED
+    groups, not whatever the sidebar holds now" — and that behaviour is what
+    made opening last week's figure delete this week's replicate sets, out of
+    the session and out of ``pipeline_info.json`` with it. A replicate set is a
+    **declaration**: the user built its name, its membership and its plot order
+    by hand. Reproducing a view must not rewrite one.
+    """
+    from well_viewer.features.saved_plots.controller import _adopt_record_groups
     app = loaded_app
     _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
     saved = [dict(s) for s in app._app_state.selection.selections]
@@ -179,7 +185,14 @@ def test_restore_selections_replaces_live_groups(loaded_app):
                           ("EXTRA", ["A01", "B02"])])
     assert len(app._rep_sets_active()) == 3
 
-    _restore_selections(app._ctx, saved)
+    # The Restore button's path does not call the adopter at all; calling it
+    # here would measure the escape hatch instead of the button.
+    from well_viewer.features.saved_plots.controller import _restore_solo_wells
+    _restore_solo_wells(app._ctx, [])
+    assert [r.name for r in app._rep_sets_active()] == ["CTRL", "DRUG", "EXTRA"]
+
+    # …and the one caller that is allowed to adopt them still can.
+    _adopt_record_groups(app._ctx, saved)
     assert [r.name for r in app._rep_sets_active()] == ["CTRL", "DRUG"]
 
 
@@ -187,7 +200,7 @@ def test_capture_and_restore_active_solo_wells(loaded_app):
     """Regression: the individual wells soloed onto a group-driven plot
     (``active_solo_wells``) must survive save→restore — they were previously
     dropped, so a restored figure lost part of its well selection."""
-    from well_viewer.features.saved_plots.controller import _restore_selections
+    from well_viewer.features.saved_plots.controller import _restore_solo_wells
     app = loaded_app
     _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
     app._app_state.selection.active_solo_wells = {"A01", "B01"}
@@ -197,29 +210,30 @@ def test_capture_and_restore_active_solo_wells(loaded_app):
 
     # Simulate a diverged live state, then restore.
     app._app_state.selection.active_solo_wells = {"B02"}
-    _restore_selections(app._ctx, params.get("selections"), params.get("active_solo_wells"))
+    _restore_solo_wells(app._ctx, params.get("active_solo_wells"))
     assert app._app_state.selection.active_solo_wells == {"A01", "B01"}
 
 
 def test_restore_clears_solo_wells_when_saved_empty(loaded_app):
     """A plot saved with no soloed wells restores to an empty solo set (clears any
     stale solo wells), so the figure is reproduced exactly."""
-    from well_viewer.features.saved_plots.controller import _restore_selections
+    from well_viewer.features.saved_plots.controller import _restore_solo_wells
     app = loaded_app
     _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
     app._app_state.selection.active_solo_wells = {"A01"}  # diverged live state
-    _restore_selections(app._ctx, [dict(s) for s in app._app_state.selection.selections], [])
+    _restore_solo_wells(app._ctx, [])
     assert app._app_state.selection.active_solo_wells == set()
 
 
-def test_restore_selections_noop_without_block(loaded_app):
-    """Older saved plots have no ``selections`` block → restore leaves the live
-    groups untouched (backward compatible)."""
-    from well_viewer.features.saved_plots.controller import _restore_selections
+def test_adopting_an_empty_block_leaves_the_live_groups_alone(loaded_app):
+    """Older saved plots have no ``selections`` block. The export replay must
+    then draw with whatever is live rather than emptying the plate — a record
+    that carries no groups is not a record that says there are none."""
+    from well_viewer.features.saved_plots.controller import _adopt_record_groups
     app = loaded_app
     _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
-    _restore_selections(app._ctx, None)
-    _restore_selections(app._ctx, [])
+    _adopt_record_groups(app._ctx, None)
+    _adopt_record_groups(app._ctx, [])
     assert [r.name for r in app._rep_sets_active()] == ["CTRL", "DRUG"]
 
 

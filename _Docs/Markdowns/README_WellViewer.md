@@ -1236,7 +1236,13 @@ What is on it:
   and points at how to save one.
 
 Above all of it, one line saying what most needs doing next, and a button that
-does it.
+does it. **That line asks about the plate, not about any one tab.** It suggests
+naming your wells only when nothing on the plate names them — neither a typed
+well label nor a variable you have filled in — and suggests replicate sets only
+when there is no variable to pool by either, so a morning spent filling a dose
+grid is never answered with an invitation to go and do it again somewhere else.
+The counts in *Your work here* stay per tab, because each of them is the number
+that tab itself shows you.
 
 **When something is missing, that button finishes the run.** Failed wells,
 partial wells, wells with images but no measurements, wells that were staged and
@@ -1283,8 +1289,8 @@ wells, and none of these four is a substitute for another.
 | | The question it answers | What it does |
 |---|---|---|
 | **Group** (Home → Sample Map → Replicates) | *Which wells are replicates of one condition?* | **Pools.** Every plot, the Statistics tab and Batch Export draw one bar, trace or row per group instead of per well. A group carries a colour and a place in the plot order. |
-| **Variable** (Home → Sample Map → Variables) | *What did you change across the plate?* | **Pools, colours and splits.** A named axis with ordered values — `Dose: 0, 0.1, 1, 10` — assigned per well. Pick one as **Group by** and the plots pool by it; as **Colour by** or **Split by** and they ink or band by it. A numeric one can be a Response Curve's x axis. |
-| **Well label** (Home → Sample Map → Well Labels) | *What should this well be called on a figure?* | **Display only.** The label replaces the raw well token in legends, tick labels and exported names. It pools nothing and changes no number. |
+| **Variable** (Home → Sample Map → Variables) | *What did you change across the plate?* | **Pools, colours, splits and names.** A named axis with ordered values — `Dose: 0, 0.1, 1, 10` — assigned per well. Pick one as **Group by** and the plots pool by it; as **Colour by** or **Split by** and they ink or band by it. A numeric one can be a Response Curve's x axis. Filling variables also *names* the wells: a well with no label of its own is drawn as the values it holds — `HeLa · 10 µM` — instead of `A01`. |
+| **Well label** (Home → Sample Map → Well Labels) | *What should this well be called on a figure?* | **Display only.** The label replaces the raw well token in legends, tick labels and exported names, and wins over the name a well's variables would otherwise give it. It pools nothing and changes no number. |
 | **Saved selection** (the rail drawer under the plate map) | *Can I get these wells back later?* | **Nothing but recall.** It lights the same wells again in one click. It is not a group, it is not a replicate set, and loading one never edits a group's membership. |
 
 The one worth knowing before you start painting: **a variable is not a group,
@@ -1682,6 +1688,17 @@ your headers away.
 the same inks and the same bands as the tab on screen, so a figure you check
 once is the figure that lands in the folder.
 
+**Filling a variable also names the wells.** A well you have not given a label
+of its own is drawn as the values it holds — `HeLa · 10 µM` rather than `A01` —
+on every tick label, in every legend, on the Image Table's captions and in the
+`well_name` column of every CSV you export. Two wells holding the same values
+read the same, because they are replicates of one condition; pool them into a
+group, or with **Group by**, and the figure draws one of them. A well that one
+variable names and another does not carries the well it came from —
+`HeLa (A01)` — so a dose you have not filled in yet cannot be mistaken for a
+dose of nothing. Type a label on **Well Labels** for any well you want called
+something else.
+
 Variables are saved with the dataset, alongside your groups and well labels.
 **Reset analysis** clears them under their own heading, separately from sample
 definitions, so redoing your groups does not cost you a plate of doses.
@@ -1689,7 +1706,8 @@ definitions, so redoing your groups does not cost you a plate of doses.
 ##### Well Labels
 
 Give a **well** a human-readable name; it shows in every plot legend instead of
-the raw well token. A label pools nothing and changes no number — it is display
+the raw well token — or instead of the name the well's own variables would give
+it, since a label typed here is the one you asked for by hand and wins. A label pools nothing and changes no number — it is display
 only, and it names wells rather than groups: a group is renamed on the Replicates
 tab by typing over its name there. A label set here is what every legend names,
 [Line Graphs](#line-graphs)' included — where the on-screen legend stops after
@@ -1700,7 +1718,7 @@ wells currently selected on the plate beside the tab.
 **One place a label does reach a group.** When a group's name looks
 auto-generated — `1`, `Rep 2`, `Group 3` — figures label it with its member
 wells instead, so that an axis does not read `1, 2, 3`; and those wells are
-named by their labels. That means a label typed here can become a group's
+named the way any well is — by their labels, or by the variables they hold. That means a label typed here can become a group's
 identity on every figure. The Replicates page says so when it applies, naming each
 group and what a figure will call it, and typing a real name over the group's
 stops the substitution.
@@ -1999,7 +2017,11 @@ row, holding five actions:
   redraws. The **legend keeps up**: change
   the line width, dash, marker shape or marker size and the little sample beside
   each legend entry is redrawn to match, so the key never describes a figure you
-  are no longer looking at.
+  are no longer looking at. **Font size and Show legend reach every key on the
+  figure**, including a plot that draws more than one — the Scatter Plot's
+  aggregate view has a separate key for the wells and for the timepoints, and
+  each carries its heading at the size you set. Those two keys keep the corners
+  they are drawn in; **Location** moves the plot's main legend.
 
 #### Bar colours — Plate or Grey
 
@@ -3625,7 +3647,8 @@ channel for every well).
   per table, is a bar longer than the cells can hold — refused rather than drawn
   short, since a shortened bar is a wrong number burned into the picture.
 - **Cell labels** — set **Mode → Identity** to burn each cell's *well · channel ·
-  timepoint* label into the image (respecting custom Well Labels), with the same
+  timepoint* label into the image (calling each well what the plots call it —
+  a Well Label, or the variables it holds), with the same
   which-cell / in-image-corner / colour / background-box controls as the scale bar —
   handy for a single-panel figure where the axis strips don't apply.
 - **Matched brightness** — a channel left on **Auto** LUT now shares **one** intensity
@@ -3872,6 +3895,15 @@ rather than a single panel.
   parameters and take you to the tab it was captured from, so you arrive looking
   at the figure it recreated), **Export**, **Rename**, **Delete**, and a
   collapsible parameter summary.
+  - **A restore never edits your sample definitions.** It brings back the view —
+    the tab, the axes, the channel, the timepoints, which wells were soloed —
+    and leaves the Replicates, Variables and Well Labels tabs exactly as you
+    left them. Restoring a figure saved before you reorganised your groups
+    therefore draws it with the groups you have *now*, which may not be the
+    figure in the thumbnail; when that happens the status line names the groups
+    the plot was saved with that this dataset no longer defines, or that now
+    hold different wells, so a changed figure is never mistaken for a restore
+    that failed.
   - A saved **Image Table** grid comes back as its settings: wells, timepoints,
     channels, LUTs, layout and scope, all filled back into the shelf. The
     pictures are not re-read from disk — that tab draws when you press

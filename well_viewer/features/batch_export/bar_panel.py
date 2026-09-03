@@ -335,7 +335,7 @@ class BarBatchExportPanel(BatchExportPanel):
                     FC_STATE_OFF, collect_bar_items_for_group,
                 )
                 from well_viewer.features.export.service import (
-                    _control_cell, _well_labels_map,
+                    _control_cell, figure_names_map,
                     attach_bar_fold_change_columns,
                     bar_fold_change_fieldnames,
                     _replicate_unit_for,
@@ -345,7 +345,7 @@ class BarBatchExportPanel(BatchExportPanel):
                 _val_col = _val_col_selected
                 _ch = _ch_selected
                 _metric = _metric_selected
-                _well_labels = _well_labels_map(self._ctx)
+                _well_labels = figure_names_map(self._ctx)
                 _fluor_gates = _get_all_fluor_gates(self._ctx)
                 _per_fov_spread = bool(self._ctx.state.plot.use_fov_replicates)
 

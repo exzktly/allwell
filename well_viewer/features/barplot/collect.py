@@ -14,14 +14,20 @@ from well_viewer.data.metric_labels import spread_label
 
 from well_viewer.domain.plot_members import plot_replicate_sets
 
-from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, replicate_display_label, well_display_label)
+from well_viewer.domain.selections_model import (
+    LABEL_FROM_CUSTOM, color_for_replicate_set, color_for_well,
+    replicate_display_label, well_display_label,
+    well_display_label_and_source,
+)
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
+from well_viewer.data.data_loading import extract_well_token as _extract_well_token
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.text_columns import fov_text
 from well_viewer.domain.viewer_state import parse_rc
 
 import logging
 import math
+import re
 from collections import Counter
 from dataclasses import dataclass
 
@@ -1405,3 +1411,22 @@ def bar_err_settings(ctx) -> tuple:
     draw_err = (show_mode != "mean") and (err_kind != "none")
     ci_scale = 1.96 if err_kind == "ci95" else 1.0
     return (err_kind, ci_scale, draw_err)
+
+
+def bar_well_display_label(ctx, lbl: str) -> str:
+    """Bar-plot-safe well label that avoids numeric-only tick text.
+
+    **Only a hand-typed label is second-guessed.** The guard is for a Well
+    Labels entry of ``3``, which on a bar axis reads as a count or an index and
+    says nothing about the well. A name composed from the sample variables can
+    be numeric for the opposite reason — a `Dose` of ``10`` declared without a
+    unit is the condition, and it is the whole of what the user asked the axis
+    to say — so substituting the well token there would undo the naming on
+    exactly the plates this labelling exists for. §7.1: a domain predicate
+    applied outside its domain.
+    """
+    disp, source = well_display_label_and_source(ctx, lbl)
+    disp = str(disp)
+    if source == LABEL_FROM_CUSTOM and re.match(r"^\s*\d+\s*$", disp):
+        return _extract_well_token(lbl) or disp
+    return disp

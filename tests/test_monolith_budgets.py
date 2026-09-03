@@ -132,7 +132,12 @@ SCATTER_CONTROLLER_BUDGET = 831
 # went the other way, down into ``collect.py`` with the rest of the Qt-free
 # layout maths, so the annotations module can read it without importing back up
 # into this one.
-BARPLOT_CONTROLLER_BUDGET = 570
+# 572 -> 560: ``bar_well_display_label`` moved into ``barplot/collect.py``.
+# It decides what a bar is *called*, which is the same question the member
+# builders beside it already ask through ``well_display_label`` — and it now
+# has to know which of the naming rungs answered, so keeping it here meant this
+# module importing the naming vocabulary for one predicate.
+BARPLOT_CONTROLLER_BUDGET = 560
 # 963 -> 980: A8 ctx-seam. review_csv/tab_view stopped naming ctx.app (4 -> 0) by
 # calling refresh_review_csv[_rows] / on_review_csv_row_double_click with ctx; those
 # three fns gained thin ctx-adapter wrappers here that delegate to their unchanged

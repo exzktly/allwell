@@ -177,8 +177,18 @@ def _fresh_plot_id(store) -> str:
     return candidate
 
 
-def restore_saved_plot(ctx, plot_id: str) -> None:
-    """Re-apply a saved plot's params and navigate to its originating tab."""
+def restore_saved_plot(ctx, plot_id: str, *, adopt_groups: bool = False) -> None:
+    """Re-apply a saved plot's params and navigate to its originating tab.
+
+    *adopt_groups* writes the record's replicate sets over the live ones. It is
+    **off** for the Restore button and on for exactly one caller,
+    :func:`regenerate_missing_vectors`, which replays records to recapture their
+    vector — that caller has to draw each record's own figure, and it is the
+    only one that can, because it snapshots the user's state in
+    :class:`_LiveState` first and puts it back in a ``finally``. Restoring a
+    view must not rewrite a declaration unless something is standing by to undo
+    it; see :func:`_report_group_drift` for what the button does instead.
+    """
     rec = get_store(ctx).get(plot_id)
     if rec is None:
         return
@@ -187,13 +197,15 @@ def restore_saved_plot(ctx, plot_id: str) -> None:
     # the saved figure — the async gating worker recomputes it, and the redraws
     # below (and the worker's own completion redraw) reflect it.
     _restore_thresholds(ctx, rec.thresholds)
-    # Restore the group-driven selections so the plot's bars/traces match the
-    # saved figure (view_state doesn't snapshot them), THEN re-run the saved stats
-    # test so ``stats.pairwise`` is repopulated against those groups. Both happen
-    # before ``view_state.restore`` activates the tab and does the final redraw —
-    # which draws the significance brackets from the fresh results.
-    _restore_selections(ctx, rec.params.get("selections"),
-                        rec.params.get("active_solo_wells"))
+    # Restore the soloed wells the figure was drawn with, THEN re-run the saved
+    # stats test so ``stats.pairwise`` is repopulated against the groups this
+    # dataset actually has. Both happen before ``view_state.restore`` activates
+    # the tab and does the final redraw — which draws the significance brackets
+    # from the fresh results. The record's own replicate sets are read for the
+    # drift report at the end and are never written back over the user's.
+    _restore_solo_wells(ctx, rec.params.get("active_solo_wells"))
+    if adopt_groups:
+        _adopt_record_groups(ctx, rec.params.get("selections"))
     _restore_stats(ctx, rec.params.get("stats"))
     try:
         view_state.restore(ctx, dict(rec.params))
@@ -209,6 +221,12 @@ def restore_saved_plot(ctx, plot_id: str) -> None:
     _reapply_target_tab(ctx, target)
     _report_missing_tab_block(ctx, rec, target)
     _report_batch_export_origin(ctx, rec)
+    # Last of the three, because it is the one that describes the figure the
+    # user is now looking at rather than the record behind it. Nothing to
+    # report when the caller adopted the record's groups: the figure is then
+    # drawn from exactly what the record carried.
+    if not adopt_groups:
+        _report_group_drift(ctx, rec)
 
 
 def _report_batch_export_origin(ctx, rec) -> None:
@@ -303,32 +321,127 @@ def _restore_thresholds(ctx, block) -> None:
         _logger.debug("saved_plots: threshold restore failed", exc_info=True)
 
 
-def _restore_selections(ctx, sels, solo_wells=None) -> None:
-    """Reproduce the saved group-driven plotting selection: the replicate-set
-    ``selections`` AND the soloed individual wells (``active_solo_wells``), then
-    refresh the sidebar + plots. Each part is optional (older saved plots omit
-    them); a no-op on any error. Applied together so the single ``_rebuild_all``
-    redraw sees the full restored selection."""
+def _restore_solo_wells(ctx, solo_wells) -> None:
+    """Reproduce the soloed individual wells the figure was drawn with.
+
+    The **view** half of what a record says about the plate: which of the wells
+    already on it were being shown on their own. It is not a declaration — the
+    user did not build it on a definitions tab and nothing on disk in
+    ``sample_definitions`` holds it — so restoring it costs them nothing.
+    Optional, because older records omit it; a no-op on any error.
+
+    The record's replicate sets are deliberately **not** applied. See
+    :func:`_report_group_drift` for what happens instead and why.
+
+    Refreshed through ``refresh_sidebar_map`` rather than the master
+    ``rebuild_all`` fan-out. That fan-out ends by queueing a sample-definitions
+    autosave, because every one of its other callers has just edited a
+    definition — and firing it here is how a restore came to write
+    ``pipeline_info.json`` at all. Nothing this function changes belongs in that
+    block, the plate's statistics cannot move for a solo change either, and the
+    figure itself is redrawn a moment later by ``_reapply_target_tab``.
+    """
+    if not isinstance(solo_wells, (list, set, tuple)):
+        return
+    try:
+        paths = ctx.state.dataset.well_paths
+        ctx.state.selection.active_solo_wells = {
+            w for w in solo_wells if w in paths}
+        ctx.coordinator.refresh_sidebar_map()
+    except Exception:
+        _logger.debug("saved_plots: solo-well restore failed", exc_info=True)
+
+
+def _adopt_record_groups(ctx, sels) -> None:
+    """Put the record's replicate sets on the live state — for one caller only.
+
+    :func:`regenerate_missing_vectors` replays each record to recapture the
+    figure it drew, so it needs the groups that drew it. It is allowed to want
+    them because it takes a :class:`_LiveState` snapshot first and restores it
+    in a ``finally``; nothing else in the app has that protection, which is why
+    ``adopt_groups`` defaults to off.
+
+    **Deliberately not through ``rebuild_all``.** That fan-out ends by queueing
+    a sample-definitions autosave, so replaying a gallery of records wrote each
+    one's groups into ``pipeline_info.json`` in turn — and ``_LiveState``
+    restores the *session*, not the file, so the user's groups came back on
+    screen while the last replayed record's sat on disk until the next edit
+    happened to overwrite them. The stats cache is invalidated by hand instead,
+    because a group's membership does move every aggregate the figure is drawn
+    from, and the redraw is the one ``_reapply_target_tab`` already does.
+    """
+    if not isinstance(sels, list) or not sels:
+        return
     try:
         import copy
+
+        from well_viewer.core.selection_controller import invalidate_stats_cache
+
         sel_state = ctx.state.selection
-        changed = False
-        if isinstance(sels, list) and sels:
-            sel_state.selections = copy.deepcopy(sels)
-            sel_state.validate()  # re-mint ids / repair, and fix current_selection_id
-            first = sel_state.selections[0] if sel_state.selections else None
-            sel_state.current_selection_id = first.get("id") if first else None
-            changed = True
-        if isinstance(solo_wells, (list, set, tuple)):
-            paths = ctx.state.dataset.well_paths
-            sel_state.active_solo_wells = {w for w in solo_wells if w in paths}
-            changed = True
-        if changed:
-            # Master redraw fan-out (sidebar map + groups + bars/lines/scatter),
-            # named as a genuine app-orchestration service on the context.
-            ctx.coordinator.rebuild_all()
+        sel_state.selections = copy.deepcopy(sels)
+        sel_state.validate()  # re-mint ids / repair, and fix current_selection_id
+        first = sel_state.selections[0] if sel_state.selections else None
+        sel_state.current_selection_id = first.get("id") if first else None
+        invalidate_stats_cache(ctx)
+        ctx.coordinator.refresh_sidebar_map()
     except Exception:
-        _logger.debug("saved_plots: selection restore failed", exc_info=True)
+        _logger.debug("saved_plots: adopting the record's groups failed",
+                      exc_info=True)
+
+
+def _report_group_drift(ctx, rec) -> None:
+    """Say so when the record's own groups no longer describe this dataset.
+
+    **A restore reproduces a view; it must never rewrite a declaration.** This
+    one did. It replaced ``ctx.state.selection.selections`` — the replicate
+    sets the user built by hand on Home → Sample Map → Replicates, with their
+    names, their membership and their plot order — with the copy the record was
+    saved with, and then reached the master redraw fan-out, whose tail queues a
+    sample-definitions autosave. So opening a figure saved last week silently
+    deleted this week's groups, out of the session *and* out of
+    ``pipeline_info.json``, with nothing said and nothing to undo it.
+
+    The groups stay the user's. The figure is drawn from them, which means a
+    plate whose groups have moved on draws a figure that is not the thumbnail
+    beside it — and that has to be said, for the reason every other report in
+    this module exists: a restore that quietly produces a different picture is
+    indistinguishable from one that failed, and the user re-clicks Restore.
+
+    Named per group rather than counted, up to :data:`_DRIFT_NAMED`, because
+    "2 groups differ" tells a reader to go and diff two lists by hand while
+    "“Dose 10” holds different wells" is the whole answer.
+    """
+    from well_viewer.domain.selections_model import group_drift
+
+    with swallow("report a restored plot's group drift"):
+        missing, changed = group_drift(
+            rec.params.get("selections"), ctx.state.selection.selections)
+        if not missing and not changed:
+            return
+        parts = []
+        if missing:
+            parts.append(f"groups this dataset no longer defines "
+                         f"({_named(missing)})")
+        if changed:
+            parts.append(f"groups that now hold different wells "
+                         f"({_named(changed)})")
+        ctx.notify.set_status(
+            f"Restored “{rec.title}” — it was saved with "
+            f"{' and '.join(parts)}. The figure is drawn from your current "
+            f"groups; your sample definitions were left as they are.")
+
+
+#: How many group names the drift sentence spells out before it counts the
+#: rest. Three because the sentence sits on the status line, which is one line
+#: — naming twelve would push the point off the end of it.
+_DRIFT_NAMED = 3
+
+
+def _named(names: list[str]) -> str:
+    """*names* as a phrase — up to :data:`_DRIFT_NAMED` of them, then a count."""
+    shown = ", ".join(f"\u201c{n}\u201d" for n in names[:_DRIFT_NAMED])
+    rest = len(names) - _DRIFT_NAMED
+    return f"{shown} and {rest} more" if rest > 0 else shown
 
 
 def _restore_stats(ctx, cfg) -> None:
@@ -721,14 +834,16 @@ class _LiveState:
     """Everything ``restore_saved_plot`` mutates, captured so it can be undone.
 
     ``view_state.snapshot`` is not enough and never was. It captures twenty keys
-    and **none** of the three domains a restore actually replaces: the replicate
-    ``selections`` (``_restore_selections`` deep-copies the record's over them),
-    the cell-gating slice (``restore_gating_block`` clears every gate and writes
-    the record's), and the Statistics groups and comparisons
-    (``_restore_stats``). Restoring only what ``view_state`` knows about left the
-    user's replicate sets, their gates and their stats groups replaced by the
-    last regenerated plot's, with no way back — and the clobbered gating then
-    reached ``pipeline_info.json`` on their next gate edit.
+    and **none** of the three domains a replay actually replaces: the replicate
+    ``selections`` (``_adopt_record_groups`` deep-copies the record's over
+    them — which is what ``adopt_groups=True`` is, and this class is the reason
+    that caller is allowed to ask for it), the cell-gating slice
+    (``restore_gating_block`` clears every gate and writes the record's), and
+    the Statistics groups and comparisons (``_restore_stats``). Restoring only
+    what ``view_state`` knows about left the user's replicate sets, their gates
+    and their stats groups replaced by the last regenerated plot's, with no way
+    back — and the clobbered gating then reached ``pipeline_info.json`` on their
+    next gate edit.
 
     So this snapshots by asking what the restore touches, not by asking what the
     snapshot helper happens to cover.
@@ -948,7 +1063,7 @@ def _regenerate_one(ctx, store, rec, card) -> bool:
     """
     kept = False
     with swallow(f"saved_plots: redraw {rec.id!r} for the deck"):
-        restore_saved_plot(ctx, rec.id)
+        restore_saved_plot(ctx, rec.id, adopt_groups=True)
         # ``restore_saved_plot`` applies the record's gating by kicking a worker
         # thread and returning. Capturing here would read the *previous* pass's
         # Included flags, so the figure would be drawn under a gating that is

@@ -136,15 +136,91 @@ def color_for_replicate_set(rset: Any, selections: Iterable[Any]) -> str:
     return color_for_wells(getattr(rset, "wells", None))
 
 
+#: Where the name a figure draws for a well came from. Returned alongside the
+#: text by :func:`well_display_label_and_source`, because two callers need to
+#: know *which* of the three answers they were given and cannot tell from the
+#: string: the Bar tab's numeric-tick guard is about hand-typed labels only,
+#: and Home reports what the figures are naming.
+LABEL_FROM_CUSTOM = "custom"
+LABEL_FROM_VARIABLES = "variables"
+LABEL_FROM_TOKEN = "token"
+
+
+def figure_names_map(ctx) -> dict:
+    """``token -> what a figure calls this well``, for every well that is called
+    something other than its own token.
+
+    The map form of :func:`well_display_label_and_source`, for the callers
+    that name a whole plate at once rather than one well at a time: every
+    ``well_name`` column in every exported CSV, and the Spatial tab's summary
+    axis. Same two rungs in the same order — a name typed on the **Well
+    Labels** tab, and, for a loaded well that has none, the values it holds on
+    the **Variables** tab, composed as ``HeLa · 10 µM`` — so the rows behind a
+    figure and the figure itself cannot disagree about what a well is.
+
+    Typed labels for wells the dataset no longer holds are kept. They are what
+    ``well_name_for``'s ``strict`` mode consults to tell a well token it does
+    not recognise from a group name, and dropping them would blank the column
+    for a plate re-run over fewer wells. Composed names are only ever added for
+    loaded wells: there is no figure to name an absent one on.
+    """
+    from well_viewer.domain.sample_variables import label_for_well
+
+    out = dict(ctx.state.dataset.well_labels or {})
+    vset = getattr(getattr(ctx.state, "selection", None), "variables", None)
+    if vset is None:
+        return out
+    for well in (ctx.state.dataset.well_paths or {}):
+        if str(out.get(well, "") or "").strip():
+            continue
+        composed = label_for_well(vset, well)
+        if composed:
+            out[well] = composed
+    return out
+
+
+def well_display_label_and_source(ctx, lbl: str) -> tuple[str, str]:
+    """``(what a figure calls this well, which of the three said so)``.
+
+    The three, in the order they win:
+
+    * a label typed on the **Well Labels** tab — the user's explicit override,
+      and the only one of the three they wrote for this well alone;
+    * the **sample variables** the well holds, composed by
+      :func:`sample_variables.label_for_well` — ``HeLa · 10 µM``. A plate
+      annotated on the Variables tab and nowhere else drew its bare well
+      tokens on every tick and in every legend before this rung existed: the
+      annotation was read for pooling, for colour and for splitting, and never
+      for the one thing the user could see;
+    * the well token itself, for a well nothing describes.
+
+    A blank custom label counts as no label rather than as an empty name. The
+    persisted map cannot hold one (``_clean_labels`` drops it), so this is
+    about a label being cleared in the session that typed it — and a tick with
+    no text at all is not what clearing a label asks for.
+    """
+    from well_viewer.domain.sample_variables import label_for_well
+    from well_viewer.domain.viewer_state import extract_well_token
+    tok = extract_well_token(lbl) or lbl
+    custom = str((getattr(ctx.state.dataset, "well_labels", None) or {})
+                 .get(tok, "") or "").strip()
+    if custom:
+        return custom, LABEL_FROM_CUSTOM
+    vset = getattr(getattr(ctx.state, "selection", None), "variables", None)
+    if vset is not None:
+        composed = label_for_well(vset, tok)
+        if composed:
+            return composed, LABEL_FROM_VARIABLES
+    return tok, LABEL_FROM_TOKEN
+
+
 def well_display_label(ctx, lbl: str) -> str:
-    """Custom display label for a well token if defined, else the bare token.
+    """What a figure calls this well — see :func:`well_display_label_and_source`.
 
     A8 teardown: the pure body of ``WellViewerApp._well_display_label``, lifted to
     this low layer so ``core`` / feature renderers share it without a feature
     import (extract_well_token is itself domain)."""
-    from well_viewer.domain.viewer_state import extract_well_token
-    tok = extract_well_token(lbl) or lbl
-    return ctx.state.dataset.well_labels.get(tok, tok)
+    return well_display_label_and_source(ctx, lbl)[0]
 
 
 def replicate_display_label(ctx, rset: Any) -> str:
@@ -187,10 +263,12 @@ def groups_relabelled_on_figures(ctx) -> list[tuple[str, str]]:
     :func:`replicate_display_label` silently replaces a group's name with its
     member well labels whenever the name matches the auto-generated pattern
     (``1``, ``Rep 2``, ``Group 3``). That is the right default — an axis reading
-    ``1, 2, 3`` says nothing — but it means a label typed on the **Well Labels**
-    tab becomes a group's identity on every figure, decided by a rule the user
-    never saw and cannot find. Two of the three ways of annotating a well are
-    wired together in exactly this one place, and nothing said so.
+    ``1, 2, 3`` says nothing — but it means whatever the wells are *called*
+    becomes the group's identity on every figure, decided by a rule the user
+    never saw and cannot find. That name is a label typed on the **Well
+    Labels** tab, or, failing one, the values the well holds on the
+    **Variables** tab, so all three ways of annotating a well are wired
+    together in exactly this one place, and nothing said so.
 
     Visible groups only: a hidden one is not drawn, so nothing relabels it.
     **And none of them when a sample variable is pooling the plots**, for the
@@ -238,8 +316,9 @@ def relabelled_groups_clause(ctx) -> str:
         shown += f", and {rest} more"
     subject = ("1 group has a name that looks" if len(pairs) == 1
                else f"{len(pairs)} groups have names that look")
-    return (f"{subject} auto-generated, so figures label them with their wells "
-            f"instead: {shown}. Rename a group to choose its own label.")
+    return (f"{subject} auto-generated, so figures label them with what their "
+            f"wells are called instead: {shown}. Rename a group to choose its "
+            f"own label.")
 
 
 def active_replicate_sets(selections: Iterable[Any], well_paths: Any):
@@ -467,6 +546,56 @@ def make_selection(*, name: Any, wells: Any, replicates: Any = None,
         sel["labels"] = {str(k): str(v) for k, v in labels.items() if str(v).strip()}
     # preserve unknown keys for forward-compat
     return sel
+
+
+def group_drift(saved: Any, live: Any) -> tuple[list[str], list[str]]:
+    """``(groups the record had that are gone, groups whose wells have changed)``.
+
+    What a saved plot's own groups no longer say about this dataset. A saved
+    plot records the replicate sets its figure was drawn from, and those are
+    **declarations** — the user built their names, their membership and their
+    order by hand on Home → Sample Map → Replicates. Restoring the record used
+    to overwrite them with the plot's copy and autosave the result, so opening
+    a figure from last week deleted this week's groups off disk. Reproducing a
+    *view* must not rewrite the *data* it was drawn from, so the restore now
+    reports the difference instead of imposing it, and this is the comparison
+    behind that sentence.
+
+    Matched by **name**, not by id. Ids are re-minted by :func:`validate_repair`
+    whenever a list is loaded or repaired, so a group that has survived
+    untouched since the plot was saved routinely carries a different id — an
+    id-wise comparison would report every group on the plate as missing and the
+    sentence would be noise on every restore. The name is what the user typed,
+    what the axis draws and what a saved fold-change ``ControlRef`` is keyed on,
+    which makes it the identity everywhere else too.
+
+    Membership is compared as an **ordered** list, because the order is the
+    plot order: two groups holding the same wells in a different sequence draw
+    a different figure, and telling the user their groups match would be wrong
+    in exactly the way that matters to the picture in front of them.
+
+    Both lists come back in the record's own order, and both empty when nothing
+    has drifted — which is the common case and the one that must say nothing.
+    """
+    live_wells: dict[str, list[str]] = {}
+    for sel in (live or []):
+        if isinstance(sel, dict):
+            name = str(sel.get("name") or "")
+            if name and name not in live_wells:
+                live_wells[name] = _clean_wells(sel.get("wells"))
+    missing: list[str] = []
+    changed: list[str] = []
+    for sel in (saved or []):
+        if not isinstance(sel, dict):
+            continue
+        name = str(sel.get("name") or "")
+        if not name:
+            continue
+        if name not in live_wells:
+            missing.append(name)
+        elif live_wells[name] != _clean_wells(sel.get("wells")):
+            changed.append(name)
+    return missing, changed
 
 
 def validate_repair(selections: Any, *, palette: Sequence[str] | None = None,

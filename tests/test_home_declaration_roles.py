@@ -241,7 +241,7 @@ def test_the_clause_names_the_exact_substitution():
                labels={"A01": "shCtrl", "A02": "shA"})
     assert relabelled_groups_clause(ctx) == (
         "1 group has a name that looks auto-generated, so figures label them "
-        "with their wells instead: “1” → “shCtrl,shA”. "
+        "with what their wells are called instead: “1” → “shCtrl,shA”. "
         "Rename a group to choose its own label."
     )
 

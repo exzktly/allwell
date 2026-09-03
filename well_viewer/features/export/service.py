@@ -27,6 +27,8 @@ from well_viewer.features.export import cell_scope_compute as csc
 from well_viewer.features.export.worker import DONE, CellExportWriter
 # Bound lazily so export imports without scatter / barplot present — keeps those
 # features deletable. Each proxy resolves its target on first call.
+from well_viewer.domain.selections_model import figure_names_map
+
 _scatter_collect_agg_data = _lazy("well_viewer.features.scatter.collect", "collect_scatter_agg_data")
 _scatter_collect_data = _lazy("well_viewer.features.scatter.collect", "collect_scatter_data")
 _scatter_points_gated = _lazy("well_viewer.features.scatter.collect", "scatter_points_gated")
@@ -38,11 +40,6 @@ resolve_bar_timepoints = _lazy("well_viewer.features.barplot.renderer", "resolve
 _collect_bar_items_for_app = _lazy("well_viewer.features.barplot.collect", "collect_bar_items_for_app")
 
 
-
-
-def _well_labels_map(ctx) -> dict:
-    """Snapshot of the Home → Well Labels map (token → name)."""
-    return dict(ctx.state.dataset.well_labels or {})
 
 
 def _well_paths_keys(ctx) -> set:
@@ -387,7 +384,7 @@ def export_plot_data(ctx) -> None:
     use_sem = bool(ctx.state.plot.use_sem)
     band_lbl = spread_label(use_sem)
     fluor_gates = get_all_fluor_gates(ctx)
-    well_labels = _well_labels_map(ctx)
+    well_labels = figure_names_map(ctx)
     include_repset_col = bool(well_to_repset)
 
     fc = _fc.fold_change_state(ctx)
@@ -523,7 +520,7 @@ def export_bar_plot_data(ctx) -> None:
     metric = ctx.state.channel.active_metric
     threshold = on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col, channel=ch)
-    well_labels = _well_labels_map(ctx)
+    well_labels = figure_names_map(ctx)
     well_paths = _well_paths_keys(ctx)
     rows_out = []
     id_cols = (["name", "well_name"] if use_groups else ["well", "well_name"])
@@ -680,7 +677,7 @@ def export_scatter_data(ctx) -> None:
     )
 
     name_x, name_y = _axis_column_names(col_x, col_y)
-    well_labels = dict(ctx.state.dataset.well_labels or {})
+    well_labels = figure_names_map(ctx)
     well_paths = set(ctx.state.dataset.well_paths or {})
     rows_out = []
     for label, data in scatter_data.items():
@@ -760,7 +757,7 @@ def export_scatter_agg_data(ctx) -> None:
     )
 
     name_x, name_y = _axis_column_names(stat_x, stat_y)
-    well_labels = dict(ctx.state.dataset.well_labels or {})
+    well_labels = figure_names_map(ctx)
     well_paths = set(ctx.state.dataset.well_paths or {})
     rows_out = []
     for label, data in scatter_data.items():
@@ -828,7 +825,7 @@ def export_heatmap_data(ctx) -> None:
     metric_cb = ctx.widgets.get_or_none("_heatmap_metric_cb")
     metric = str(metric_cb.currentText()) if metric_cb else "metric"
     col_name = f"{ch}_{metric.lower().replace(' ', '_')}"
-    well_labels = _well_labels_map(ctx)
+    well_labels = figure_names_map(ctx)
     rows_out = []
     for r in range(layout.rows):
         for c in range(layout.cols):
@@ -882,7 +879,7 @@ def export_distribution_data(ctx) -> None:
     tp_filter = tp_h if _math.isfinite(tp_h) else None
 
     ch = ctx.state.channel.active_channel
-    well_labels = _well_labels_map(ctx)
+    well_labels = figure_names_map(ctx)
     well_paths = _well_paths_keys(ctx)
     import pandas as pd
     chunks = []
@@ -1087,7 +1084,7 @@ def export_cell_data(ctx, scope) -> None:
                                missing_verdicts=missing, header_len=len(header),
                                unreadable=unreadable)
 
-    well_labels = _well_labels_map(ctx)
+    well_labels = figure_names_map(ctx)
     well_paths = _well_paths_keys(ctx)
     chunks: queue.Queue = queue.Queue(maxsize=2)
     cancel = threading.Event()

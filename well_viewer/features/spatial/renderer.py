@@ -23,6 +23,7 @@ from well_viewer.domain.time_rescale import axis_label as time_axis_label
 from well_viewer.domain.time_rescale import format_scaled as format_scaled_tp
 from well_viewer.domain.time_rescale import OFF as tr_OFF
 from well_viewer.domain.time_rescale import rescale_for as time_rescale_for
+from well_viewer.domain.selections_model import figure_names_map
 from well_viewer.features.spatial import state as sp_state
 
 _logger = logging.getLogger("well_viewer")
@@ -56,7 +57,11 @@ def render_spatial(ctx) -> None:
                 # what resolves it.
                 _draw_message(fig, "Press Recompute to build the summary.")
             else:
-                _render_summary_panel(fig, st, time_rescale_for(ctx.state.plot))
+                # The names, not the ctx: the renderer stays Qt- and
+                # app-free, and the one figure in this tab that names wells
+                # names them the way every other figure does.
+                _render_summary_panel(fig, st, time_rescale_for(ctx.state.plot),
+                                      names=figure_names_map(ctx))
         elif not st.frames:
             # The per-frame levels are placeholder-gated, so an empty selection
             # never reaches here: this is wells chosen whose frames would not
@@ -539,7 +544,7 @@ def sp_state_metric_catalog():
     return SUMMARY_METRICS
 
 
-def _render_summary_panel(fig, st, rescale=tr_OFF) -> None:
+def _render_summary_panel(fig, st, rescale=tr_OFF, *, names=None) -> None:
     payload = st.last_result
     key = payload.get("summary_metric_key") or "nnd_median"
     display = payload.get("summary_display") or sp_state.SUMMARY_DISPLAY_HEATMAP
@@ -552,11 +557,26 @@ def _render_summary_panel(fig, st, rescale=tr_OFF) -> None:
     label, units = _summary_metric_label(key)
     ylabel = f"{label} ({units})" if units else label
 
+    # One name per well for both displays, so the heatmap's y axis and the
+    # line legend cannot call the same well two different things.
+    shown = _shown_wells(wells, names)
     if display == sp_state.SUMMARY_DISPLAY_HEATMAP:
-        _render_summary_heatmap(fig, matrix, wells, tps, label, units,
+        _render_summary_heatmap(fig, matrix, shown, tps, label, units,
                                 rescale)
     else:
-        _render_summary_lines(fig, matrix, wells, tps, ylabel, rescale)
+        _render_summary_lines(fig, matrix, shown, tps, ylabel, rescale)
+
+
+def _shown_wells(wells, names) -> list[str]:
+    """*wells*, each said the way the rest of the app says it.
+
+    *names* is ``features.export.service.figure_names_map``'s answer — a typed
+    Well Labels entry, or the values the well holds on the Variables tab — and
+    a well it does not name keeps its token. ``None`` for a caller with no ctx
+    to build one from, which is every test of the pure renderer.
+    """
+    lookup = dict(names or {})
+    return [str(lookup.get(w) or w) for w in wells]
 
 
 def _render_summary_heatmap(fig, matrix, wells, tps, label, units,

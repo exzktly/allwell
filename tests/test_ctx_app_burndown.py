@@ -393,7 +393,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              fully threaded to ctx (state/set_status/domain leaves/ctx.runtime.
 #              heatmap/ctx.widgets/ctx.window) matching the scatter exporters; the
 #              4 plot-tab Export-CSV buttons call export_*_data(ctx). Shared
-#              helpers _well_labels_map/_ask_save_csv take ctx; _warn/_error param
+#              helpers figure_names_map/_ask_save_csv take ctx; _warn/_error param
 #              renamed app->parent (Qt parent only). batch_export panels bridge
 #              via self._app._ctx.
 #   64 -> 62    review_image nav layer -> ctx: image_browser show_image_browser_subtab,

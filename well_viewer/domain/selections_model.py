@@ -548,6 +548,56 @@ def make_selection(*, name: Any, wells: Any, replicates: Any = None,
     return sel
 
 
+def group_drift(saved: Any, live: Any) -> tuple[list[str], list[str]]:
+    """``(groups the record had that are gone, groups whose wells have changed)``.
+
+    What a saved plot's own groups no longer say about this dataset. A saved
+    plot records the replicate sets its figure was drawn from, and those are
+    **declarations** — the user built their names, their membership and their
+    order by hand on Home → Sample Map → Replicates. Restoring the record used
+    to overwrite them with the plot's copy and autosave the result, so opening
+    a figure from last week deleted this week's groups off disk. Reproducing a
+    *view* must not rewrite the *data* it was drawn from, so the restore now
+    reports the difference instead of imposing it, and this is the comparison
+    behind that sentence.
+
+    Matched by **name**, not by id. Ids are re-minted by :func:`validate_repair`
+    whenever a list is loaded or repaired, so a group that has survived
+    untouched since the plot was saved routinely carries a different id — an
+    id-wise comparison would report every group on the plate as missing and the
+    sentence would be noise on every restore. The name is what the user typed,
+    what the axis draws and what a saved fold-change ``ControlRef`` is keyed on,
+    which makes it the identity everywhere else too.
+
+    Membership is compared as an **ordered** list, because the order is the
+    plot order: two groups holding the same wells in a different sequence draw
+    a different figure, and telling the user their groups match would be wrong
+    in exactly the way that matters to the picture in front of them.
+
+    Both lists come back in the record's own order, and both empty when nothing
+    has drifted — which is the common case and the one that must say nothing.
+    """
+    live_wells: dict[str, list[str]] = {}
+    for sel in (live or []):
+        if isinstance(sel, dict):
+            name = str(sel.get("name") or "")
+            if name and name not in live_wells:
+                live_wells[name] = _clean_wells(sel.get("wells"))
+    missing: list[str] = []
+    changed: list[str] = []
+    for sel in (saved or []):
+        if not isinstance(sel, dict):
+            continue
+        name = str(sel.get("name") or "")
+        if not name:
+            continue
+        if name not in live_wells:
+            missing.append(name)
+        elif live_wells[name] != _clean_wells(sel.get("wells")):
+            changed.append(name)
+    return missing, changed
+
+
 def validate_repair(selections: Any, *, palette: Sequence[str] | None = None,
                     id_factory: Callable[[], str] = _default_id_factory) -> list[dict]:
     """Coerce an arbitrary list into a well-formed ``selections`` list.

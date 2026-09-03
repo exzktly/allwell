@@ -1883,6 +1883,40 @@ the restore has just made false. The refresh sits in its own helper outside the
 caller's `except`, so a repaint failure is not reported as "the stats re-run
 failed"; they are different problems and the second is the misleading one.
 
+**A restore reproduces a view; it never rewrites a declaration.** Which wells
+are soloed is a view, and `_restore_solo_wells` puts them back. A replicate set
+is a declaration — the user built its name, its membership and its plot order by
+hand on Home → Sample Map → Replicates — and the restore leaves it exactly where
+it is. It did not: it deep-copied the record's `selections` over the live ones
+and then reached `selection_controller.rebuild_all`, whose tail queues a
+sample-definitions autosave because every *other* caller of it has just edited a
+definition. Opening a figure saved last week therefore replaced this week's
+groups and wrote the replacement into `pipeline_info.json`, with nothing said and
+nothing to undo it. The app already treated that as destructive in the one other
+place it replays a record — `regenerate_missing_vectors` snapshots the live state
+in `_LiveState` and puts it back in a `finally`, and declines the whole repair
+when the snapshot fails — and the button had no such guard.
+
+What the button does instead is say so. `_report_group_drift` compares the
+record's groups against the live ones through `selections_model.group_drift` and
+names, on the status line, the ones this dataset no longer defines and the ones
+that now hold different wells, adding that the figure is drawn from the current
+groups and the definitions were left alone. Matched by **name** rather than by
+id, because `validate_repair` re-mints ids whenever a list is loaded or repaired
+and an id-wise comparison would report every group as missing on every restore;
+membership is compared as an **ordered** list, because the order is the plot
+order. Nothing is said when nothing has drifted, which is the common case.
+
+`restore_saved_plot` still takes `adopt_groups`, off by default and passed by
+exactly one caller: `regenerate_missing_vectors`, which has to draw each
+record's own figure and is the only caller that can, because of the `_LiveState`
+snapshot around it. Even there the groups go on through `_adopt_record_groups`
+rather than through `rebuild_all` — replaying a gallery of records used to write
+each one's groups to disk in turn, and `_LiveState` restores the session rather
+than the file, so the user's groups came back on screen while the last replayed
+record's sat in `pipeline_info.json` until some later edit happened to overwrite
+them.
+
 Two other ways that restore can look like it did nothing. A tab that renders on
 demand rather than on every state change comes back with its controls restored
 and its picture untouched — that is the Image Table, which does not regenerate
@@ -2082,7 +2116,8 @@ filed before the app captured vector is a PNG and nothing else, and no amount of
 reading it produces shapes — but it carries the parameters that drew it, and the
 app can draw them again. `controller.regenerate_missing_vectors` runs before the
 deck is built: for each such record it replays the parameters onto the tab
-(`restore_saved_plot`), captures the live figure through
+(`restore_saved_plot`, the one caller that passes `adopt_groups=True`), captures
+the live figure through
 `PlotCard.captureVectorSvg` — the same publication-mode render a save uses — and
 keeps the result on the record via `store.attach_vector`. The repair is therefore
 a one-off: every later export of that plot is editable without paying for it

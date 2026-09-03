@@ -3895,6 +3895,15 @@ rather than a single panel.
   parameters and take you to the tab it was captured from, so you arrive looking
   at the figure it recreated), **Export**, **Rename**, **Delete**, and a
   collapsible parameter summary.
+  - **A restore never edits your sample definitions.** It brings back the view —
+    the tab, the axes, the channel, the timepoints, which wells were soloed —
+    and leaves the Replicates, Variables and Well Labels tabs exactly as you
+    left them. Restoring a figure saved before you reorganised your groups
+    therefore draws it with the groups you have *now*, which may not be the
+    figure in the thumbnail; when that happens the status line names the groups
+    the plot was saved with that this dataset no longer defines, or that now
+    hold different wells, so a changed figure is never mistaken for a restore
+    that failed.
   - A saved **Image Table** grid comes back as its settings: wells, timepoints,
     channels, LUTs, layout and scope, all filled back into the shelf. The
     pictures are not re-read from disk — that tab draws when you press

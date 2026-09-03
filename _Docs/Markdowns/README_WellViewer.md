@@ -3614,6 +3614,16 @@ channel for every well).
   **thickness**, and its colour (**Auto** picks black or white for contrast against
   the pixels underneath). The bar is drawn into the pixels, so the live grid and the
   exported figure match exactly.
+
+  **If the box is ticked and no bar appears, the status line says why.** There are
+  four reasons a bar is asked for and not drawn, and each names the control that
+  would change it: no pixel size (the one value the pipeline cannot supply, so an
+  uncalibrated table never shows a bar rather than showing one at the wrong
+  scale); a bar length of 0; a **Show on** setting naming a cell this grid does
+  not have, which a view saved by an older layout can carry; and a grid with no
+  images in it. A fifth, reported separately because it is per cell rather than
+  per table, is a bar longer than the cells can hold — refused rather than drawn
+  short, since a shortened bar is a wrong number burned into the picture.
 - **Cell labels** — set **Mode → Identity** to burn each cell's *well · channel ·
   timepoint* label into the image (respecting custom Well Labels), with the same
   which-cell / in-image-corner / colour / background-box controls as the scale bar —

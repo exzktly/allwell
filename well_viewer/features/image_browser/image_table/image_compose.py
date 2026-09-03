@@ -489,6 +489,9 @@ def reset_scan_misses(ctx) -> None:
         rec = getattr(st, attr, None)
         if isinstance(rec, set):
             rec.clear()
+    # Not a set, same lifetime — see ``scale_bar_plan_note``.
+    if hasattr(st, "scale_bar_plan_note"):
+        st.scale_bar_plan_note = ""
 
 
 def _scan_misses(ctx) -> set:
@@ -602,6 +605,14 @@ def scale_bar_refusal_clause(ctx) -> str:
     controls that would change it. Only the framing around it differs, and that
     is the caller's sentence rather than this clause.
     """
+    st = getattr(getattr(ctx, "state", None), "image_table", None)
+    planned = str(getattr(st, "scale_bar_plan_note", "") or "")
+    if planned:
+        # No bar was planned at all, so no cell reached the per-cell refusal
+        # below. Reported first and on its own: the two are different failures
+        # with different fixes, and this one is about a control rather than
+        # about a cell.
+        return f" Show scale bar is on but no bar was drawn — {planned}."
     wells = scale_bar_refusal_report(ctx)
     if not wells:
         return ""
@@ -1225,12 +1236,49 @@ def resolve_chrome_plan(ctx, cells):
     sb = float(getattr(st, "scale_bar_um", 0.0) or 0.0)
     if show and ps > 0 and sb > 0:
         bar_px = max(1, int(round(sb / ps)))
-    bar_targets = (_chrome_target_cells(rows, cols, getattr(st, "scale_bar_cells", "br"),
-                                        occupied) if bar_px else set())
+    cells_code = getattr(st, "scale_bar_cells", "br")
+    bar_targets = (_chrome_target_cells(rows, cols, cells_code, occupied)
+                   if bar_px else set())
+    _note_bar_plan(st, show=show, ps=ps, sb=sb, bar_px=bar_px,
+                   cells_code=cells_code, targets=bar_targets, occupied=occupied)
     label_on = str(getattr(st, "label_mode", "none")).strip().lower() == "identity"
     label_targets = (_chrome_target_cells(rows, cols, getattr(st, "label_cells", "all"),
                                           occupied) if label_on else set())
     return bar_px, bar_targets, label_targets
+
+
+def _note_bar_plan(st, *, show, ps, sb, bar_px, cells_code, targets,
+                   occupied) -> None:
+    """Record why a ticked **Show scale bar** planned no bar, if it did.
+
+    Every reason a bar goes undrawn now reaches the user. Four of them used to
+    reach nobody: this function decides them, and the only thing that reported
+    a missing bar sat one layer down in ``apply_cell_chrome``, behind an
+    ``if bar_px > 0`` that by construction cannot see a bar that was never
+    computed. So a ticked checkbox over a grid with no bar had no explanation
+    anywhere — in the log, the status line, or the figure — which is the
+    shortfall-indistinguishable-from-success rule in ``CLAUDE.md`` §7.
+
+    Silent when the box is unticked (nothing was asked for) or a bar was
+    planned (there is nothing to explain).
+    """
+    if not hasattr(st, "scale_bar_plan_note"):
+        return
+    note = ""
+    if show and not bar_px:
+        if ps <= 0:
+            note = ("Pixel µm/px is not set, so the bar has no length to be "
+                    "drawn at — enter the pixel size to calibrate it")
+        elif sb <= 0:
+            note = "Bar length µm is 0 — enter the length the bar should mark"
+    elif show and bar_px and not targets:
+        code = str(cells_code or "").strip().lower()
+        if not occupied:
+            note = "the grid holds no images to draw it on"
+        else:
+            note = (f"“Show on” is set to {code!r}, which is not a cell this "
+                    f"grid has — set it to All cells or a corner")
+    st.scale_bar_plan_note = note
 
 
 def cell_chrome_kwargs(ctx, r: int, c: int, cell, plan, overlay_chans=None) -> dict | None:

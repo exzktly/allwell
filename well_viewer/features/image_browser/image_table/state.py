@@ -183,6 +183,17 @@ class ImageTableState:
     # records above.
     scale_bar_refusals: set = field(default_factory=set)
 
+    #: Why this pass planned **no bar at all**, or ``""`` when it planned one.
+    #:
+    #: The set above records a bar that was computed per cell and would not fit.
+    #: It cannot record the other half — a bar that was never computed, because
+    #: the pixel size is unset, the length is zero, or "Show on" names no cell —
+    #: since the code that records it is guarded on a bar length above zero. So
+    #: those cases drew nothing, said nothing, and left **Show scale bar** ticked
+    #: above a grid with no bar and no explanation anywhere. Same per-pass
+    #: lifetime as the records above.
+    scale_bar_plan_note: str = ""
+
     def clear_caches(self) -> None:
         """Drop the per-generate render / image caches (call on dataset swap)."""
         self.last_render.clear()
@@ -193,6 +204,7 @@ class ImageTableState:
         self.raw_fallbacks.clear()
         self.partial_scans.clear()
         self.scale_bar_refusals.clear()
+        self.scale_bar_plan_note = ""
 
     def effective_row_dims(self) -> list:
         """Ordered row dimensions — ``row_dims`` if set, else ``[row_axis]``.

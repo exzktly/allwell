@@ -1883,11 +1883,23 @@ the restore has just made false. The refresh sits in its own helper outside the
 caller's `except`, so a repaint failure is not reported as "the stats re-run
 failed"; they are different problems and the second is the misleading one.
 
-**A restore reproduces a view; it never rewrites a declaration.** Which wells
-are soloed is a view, and `_restore_solo_wells` puts them back. A replicate set
-is a declaration — the user built its name, its membership and its plot order by
-hand on Home → Sample Map → Replicates — and the restore leaves it exactly where
-it is. It did not: it deep-copied the record's `selections` over the live ones
+**A restore reproduces a view; it never rewrites a declaration.** A declaration
+is what `features/home/collect.DECLARATION_ROLES` says it is — the four ways of
+saying what a well *is* — and the restore leaves all four alone. Which wells are
+soloed is a view, and `_restore_solo_wells` puts them back. A replicate set is a
+declaration: the user built its name, its membership and its plot order by hand
+on Home → Sample Map → Replicates, and the restore leaves it exactly where it
+is.
+
+The cell-gating block is the documented exception, and it is one because the
+roster above already excludes it: a gate is a threshold, not a statement about
+what a well is. It also changes the *numbers* the saved figure was drawn from,
+so `_restore_thresholds` re-applies it — a restored figure under today's gates
+would be a different measurement wearing the saved figure's title, which is the
+silent substitution §7 is about. It stays a session change: nothing on that path
+writes `pipeline_info.json`, so reloading the dataset brings the user's gates
+back. Nothing in a restore writes to disk at all any more, which is the property
+worth keeping when the next domain is added to this function. It did not: it deep-copied the record's `selections` over the live ones
 and then reached `selection_controller.rebuild_all`, whose tail queues a
 sample-definitions autosave because every *other* caller of it has just edited a
 definition. Opening a figure saved last week therefore replaced this week's

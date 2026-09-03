@@ -335,3 +335,41 @@ def test_the_replay_asking_for_them_still_gets_them(tmp_path, monkeypatch):
     sp.restore_saved_plot(ctx, "p1", adopt_groups=True)
     assert [s["name"] for s in ctx.state.selection.selections] == [
         "From the plot"]
+
+
+def test_the_gating_block_is_still_re_applied(tmp_path, monkeypatch):
+    """The documented exception, pinned so the rule is not over-applied later.
+
+    A gate is a threshold, not a statement about what a well is — which is why
+    ``home/collect.DECLARATION_ROLES`` leaves Cell Gating out of the four ways
+    of annotating a well in the first place. It also changes the *numbers* the
+    saved figure was drawn from, so a restore that left today's gates in place
+    would draw a different measurement under the saved figure's title. It stays
+    a session change: nothing on this path writes ``pipeline_info.json``.
+    """
+    from well_viewer.core.cell_gating_state import CellGatingState
+    from well_viewer.features.saved_plots import controller as sp
+
+    ctx, _statuses, _calls = _ctx(tmp_path)
+    ctx.state.cell_gating = CellGatingState()
+    ctx.state.cell_gating.fluor_gates = {"gfp": 500.0}   # the user's own gate
+    ctx.runtime = SimpleNamespace(
+        view_state=SimpleNamespace(pending=None, absent_wells=set(),
+                                   absent_solo=set()),
+        saved_plots=SimpleNamespace(cards_by_tab={}))
+    ctx.features = SimpleNamespace(call=lambda *a, **k: None,
+                                   redraw=lambda *a, **k: None)
+    record = SimpleNamespace(
+        id="p1", title="Fig 1", tab="Bar Plots",
+        thresholds={"fluor_gates": {"gfp": 120.0}},
+        params={"active_centre_tab": "Bar Plots"})
+    monkeypatch.setattr(
+        sp, "get_store",
+        lambda _ctx: SimpleNamespace(get=lambda pid: record if pid == "p1" else None),
+        raising=True)
+
+    sp.restore_saved_plot(ctx, "p1")
+    assert ctx.state.cell_gating.fluor_gates == {"gfp": 120.0}
+    # …and the file is still the user's.
+    assert _on_disk(tmp_path)["sample_definitions"]["well_labels"] == {
+        "A01": "shCtrl", "A02": "shA"}

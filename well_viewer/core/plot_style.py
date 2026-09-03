@@ -203,6 +203,30 @@ def sync_legend_handles(ax) -> None:
                 swallowed("plot_style: a legend swatch refused a trace property")
 
 
+def legends_on(ax) -> list:
+    """Every legend drawn on *ax*, in the order matplotlib holds them.
+
+    Two kinds, and only one of them is reachable through ``ax.get_legend()``:
+    the legend ``ax.legend()`` builds, which is stored as ``ax.legend_``, and
+    any number of standalone ``Legend`` artists a caller made itself and passed
+    to ``ax.add_artist``. The second kind exists here for a reason —
+    ``scatter/_annotations.draw_scatter_agg_legends`` draws a wells key and a
+    timepoint key side by side, and keeping them off ``ax.legend_`` is what
+    stops the style pass repositioning both to ``legend_loc`` and stacking one
+    on the other — but the consequence nobody wrote down is that everything
+    else the style pass does to a legend skipped them too.
+
+    Read off ``get_children``, which holds both kinds, rather than from
+    ``ax.legend_`` plus ``ax.artists``: the second spelling is a second roster,
+    and a legend added by some future route that lands in neither list is
+    exactly the silent omission this function exists to end. Returns a list so
+    a caller can ask whether there are any without walking the children twice.
+    """
+    from matplotlib.legend import Legend
+
+    return [child for child in ax.get_children() if isinstance(child, Legend)]
+
+
 def style_legend(leg, ax) -> None:
     """Recolour a legend's entry + title text to the axes' primary foreground.
 
@@ -1381,24 +1405,46 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         if _tick_minor or _log_axes:
             ax.tick_params(which="minor", length=max(1.0, length * 0.6), direction=direction)
 
-        leg = ax.get_legend()
-        if leg is not None:
-            show_leg = bool(prefs.get("legend_show", True))
+        # **Every legend on the axes, not only the one ``ax.legend()`` made.**
+        # A legend added with ``add_artist`` is not ``ax.legend_``, so
+        # ``get_legend()`` never returns it and this pass used to walk straight
+        # past it — the aggregate scatter's two keys are built that way on
+        # purpose, and they were the one place in the app where Properties →
+        # Legend → Font size did nothing at all.
+        legends = legends_on(ax)
+        show_leg = bool(prefs.get("legend_show", True))
+        for leg in legends:
             leg.set_visible(show_leg)
-            if show_leg:
-                loc_name = str(prefs.get("legend_loc", "best"))
+        # **Position is the primary legend's alone.** The standalone keys pin
+        # their own corners precisely so this pass cannot move them: relocating
+        # both to ``legend_loc`` would drop one on top of the other, which is
+        # the reason they are off ``ax.legend_`` in the first place.
+        primary = ax.get_legend()
+        if primary is not None and show_leg:
+            loc_name = str(prefs.get("legend_loc", "best"))
+            try:
+                primary.set_loc(loc_name)
+            except Exception:
                 try:
-                    leg.set_loc(loc_name)
+                    from matplotlib.legend import Legend as _Legend
+                    primary._loc = _Legend.codes.get(loc_name, 0)
                 except Exception:
-                    try:
-                        from matplotlib.legend import Legend as _Legend
-                        leg._loc = _Legend.codes.get(loc_name, 0)
-                    except Exception:
-                        swallowed()  # was: pass (silent except)
+                    swallowed()  # was: pass (silent except)
+        for leg in legends:
             for txt in leg.get_texts():
                 txt.set_fontsize(float(prefs.get("legend_font_size", 9)))
                 txt.set_color(_title_fg)
                 txt.set_fontfamily(_plot_font_family())
+            # The title is legend text too. Left out, a key headed "Well /
+            # group" or "Timepoint" kept whatever size it was created at while
+            # its own entries resized underneath it, so raising the size made
+            # the heading the smaller of the two.
+            title = leg.get_title()
+            if title is not None and title.get_text():
+                title.set_fontsize(float(prefs.get("legend_font_size", 9)))
+                title.set_color(_title_fg)
+                title.set_fontfamily(_plot_font_family())
+        if primary is not None:
             # Last, so the swatches copy the traces *after* this pass has
             # finished restyling them. Run earlier and the legend would faithfully
             # reproduce the widths the lines had a moment ago.

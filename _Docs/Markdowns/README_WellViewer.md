@@ -2017,7 +2017,11 @@ row, holding five actions:
   redraws. The **legend keeps up**: change
   the line width, dash, marker shape or marker size and the little sample beside
   each legend entry is redrawn to match, so the key never describes a figure you
-  are no longer looking at.
+  are no longer looking at. **Font size and Show legend reach every key on the
+  figure**, including a plot that draws more than one — the Scatter Plot's
+  aggregate view has a separate key for the wells and for the timepoints, and
+  each carries its heading at the size you set. Those two keys keep the corners
+  they are drawn in; **Location** moves the plot's main legend.
 
 #### Bar colours — Plate or Grey
 

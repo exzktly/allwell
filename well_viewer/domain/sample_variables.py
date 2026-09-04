@@ -492,7 +492,8 @@ def names_for_well_sets(vset: VariableSet, well_sets) -> list[str]:
             for (_labels, complete), name, wells in zip(resolved, names, sets)]
 
 
-def labels_for_axis_lines(vset: VariableSet, line_wells) -> list[str]:
+def labels_for_axis_lines(vset: VariableSet, line_wells, *,
+                          fallbacks=()) -> list[str]:
     """One tick label per line of a grid, said in the variables that line holds.
 
     *line_wells* is one list of well tokens per tick — every well in a heat-map
@@ -530,6 +531,21 @@ def labels_for_axis_lines(vset: VariableSet, line_wells) -> list[str]:
     naming a group and wrong for a tick: ``10 µM (A01/A02/A03/A04)`` is a tick
     nobody can read, and the axis it sits on already says which wells are
     under it.
+
+    *fallbacks* is what each tick is called without this — the grid's own row
+    letter or column number — and it is what a composed name that **two ticks
+    share** takes as its suffix, exactly as :func:`names_for_well_sets`
+    appends the wells to two groups that compose one name. The rule above
+    stops a variable that is constant across the *whole* axis from naming
+    anything; it cannot stop one that is constant across a *run* of it, and
+    that run is the more common plate: rows A–D HeLa and E–H U2OS resolve two
+    distinct values, so the variable is kept, and the y axis then reads
+    ``HeLa`` four times over with ``A``–``H`` gone — row 0 no longer
+    distinguishable from row 1, which is the failure the rule exists to
+    prevent. With the suffix those ticks read ``HeLa (A)`` … ``U2OS (H)``,
+    which says both things and loses neither. Passing no *fallbacks* leaves a
+    collision undisambiguated, so a caller with nothing to fall back on still
+    gets the composed names.
     """
     lines = [list(wells) for wells in line_wells]
     if not lines:
@@ -548,7 +564,16 @@ def labels_for_axis_lines(vset: VariableSet, line_wells) -> list[str]:
             label = variable.display_label(value_id).strip()
             if label:
                 parts[i].append(label)
-    return [NAME_JOIN.join(p) for p in parts]
+    names = [NAME_JOIN.join(p) for p in parts]
+    clashing = {name for name in names if name and names.count(name) > 1}
+    fallback_list = list(fallbacks)
+    return [
+        name if not name or name not in clashing
+        else (f"{name} ({fallback_list[i]})"
+              if i < len(fallback_list) and str(fallback_list[i]).strip()
+              else name)
+        for i, name in enumerate(names)
+    ]
 
 
 def assign(vset: VariableSet, variable_id: str, wells, value_id: str | None) -> VariableSet:

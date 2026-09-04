@@ -3037,26 +3037,49 @@ place cells in a grid that mirrors your plate or your experimental design.
   - **Show ± error** — print each cell's spread across its replicates under its
     value. It is the same error the bar and line plots draw for the same set:
     the replicates are wells, or fields of view when the app-wide **per-FOV
-    spread** toggle is on, and the figure is marked **SD** or **SEM** in its
-    title to match the choice in **Properties → Statistics**. Three kinds of cell print no error, and the difference
-    matters: a cell holding a **single replicate** has no spread to measure
-    (which is not the same as a spread of zero, and is never shown as one), the
-    **Cell count** aggregation is a total rather than an average and so has
-    none at all, and a cell whose value could not be computed draws nothing in
-    the first place. **Save plot data…** writes the same numbers to an
-    `err_SD` / `err_SEM` column, left blank on exactly those cells.
+    spread** toggle is on, and the interval is whichever one you picked under
+    **Properties → Statistics → Error bars**. All four choices govern the cell,
+    not just two — **SEM** and **SD** as you would expect, **95% CI** scaling it
+    by the same 1.96 the whisker is scaled by, and **None** silencing the cell
+    annotation just as it hides the whisker. The title names which one you are
+    looking at (`± SEM`, `± SD`, `± 95% CI`), because three different intervals
+    over the same replicates look identical printed on a cell.
+
+    Three kinds of cell print no error, and the difference matters: a cell
+    holding a **single replicate** has no spread to measure (which is not the
+    same as a spread of zero, and is never shown as one), the **Cell count**
+    aggregation is a total rather than an average and so has none at all, and a
+    cell whose value could not be computed draws nothing in the first place. A
+    real but tiny spread is never rounded down to `0.00` either — it switches to
+    two significant figures rather than print a zero it is not, since a cell
+    with nothing to report prints nothing at all. **Save plot data…** writes
+    the same numbers to an `err_SD` / `err_SEM` / `err_95CI` column, left
+    blank on exactly the cells that show none.
   - **Label ticks from sample map** — name each row and column by the values
     every well on it shares, from
     [Home → Sample Map → Variables](#variables). A plate with the dose changing
     across the columns and the cell line changing down the rows labels itself
-    `1 µM` / `10 µM` and `HeLa` / `U2OS` instead of `1`–`12` and `A`–`H`. Two
-    rules keep the labels worth reading: a variable that is the **same
-    everywhere** names nothing, because a tick label is there to tell its tick
-    from the others; and a row or column whose wells **disagree**, or which
-    holds a well you never annotated, keeps its own grid label while its
-    neighbours take theirs from the sample map. On by default — a plate with no
-    variables draws exactly what it always drew — and one click to turn off if
-    you want the plate coordinates back.
+    `1 µM` / `10 µM` and `HeLa` / `U2OS` instead of `1`–`12` and `A`–`H`. Three
+    rules keep the labels worth reading:
+    - a **name you typed yourself** on a tick always wins. Double-clicking a row
+      or column header still renames it, and the sample map will not overwrite
+      what you wrote — clear the name and the tick goes back to being one the
+      sample map can speak for;
+    - a variable that is the **same everywhere** names nothing, because a tick
+      label is there to tell its tick from the others. Where a variable is the
+      same across only *part* of an axis — rows A–D HeLa, rows E–H U2OS — the
+      ticks that would otherwise read alike carry their row letter or column
+      number too (`HeLa (A)`, `HeLa (B)`, …), so you never lose track of which
+      row is which;
+    - a row or column whose wells **disagree**, or which holds a well you never
+      annotated, keeps its own grid label while its neighbours take theirs from
+      the sample map.
+
+    Long names lean over and shrink slightly rather than overlapping, and are
+    never shortened — a truncated condition name is a figure stating the wrong
+    condition. On by default (a plate with no variables draws exactly what it
+    always drew), and one click to turn off if you want the plate coordinates
+    back.
 
   And elsewhere:
   - **Value format** (in the **Properties** panel, under *Cell values*) — a

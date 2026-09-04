@@ -261,3 +261,121 @@ def test_the_toggle_off_restores_the_grid_labels(drawn):
     layout.col_labels = ["1", "2"]
     ax = drawn(layout=layout, vset=_dose_and_line_plate(), from_sample_map=False)
     assert [t.get_text() for t in ax.get_xticklabels()] == ["1", "2"]
+
+
+# ── a name the user typed is not overwritten ─────────────────────────────────
+
+def test_a_typed_tick_name_outranks_the_sample_map(drawn):
+    """A rename that redraws as something else is a control that does not work.
+
+    The sample-map rung ships **on**, so nobody opted into having their labels
+    replaced; and ``_on_label_double_click`` writes into the same
+    ``col_labels`` slot the plate default lives in, which is why the layout
+    records *which* ticks the user named rather than inferring it from the
+    text (a user may perfectly well type ``A``).
+    """
+    layout = _block_layout()
+    layout.col_labels = ["Vehicle", "Treated"]
+    layout.mark_label_typed("col", 0)
+    ax = drawn(layout=layout, vset=_dose_and_line_plate())
+
+    # Column 0 was named by the user; column 1 was not, so the dose speaks.
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["Vehicle", "10 µM"]
+
+
+def test_clearing_a_typed_name_hands_the_tick_back_to_the_sample_map(drawn):
+    layout = _block_layout()
+    layout.col_labels = ["Vehicle", "Treated"]
+    layout.mark_label_typed("col", 0)
+    layout.mark_label_typed("col", 0, False)
+    ax = drawn(layout=layout, vset=_dose_and_line_plate())
+
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["1 µM", "10 µM"]
+
+
+def test_a_typed_name_is_kept_on_a_plate_with_no_variables(drawn):
+    """The marker changes precedence; it never invents a label of its own."""
+    layout = _block_layout()
+    layout.col_labels = ["Vehicle", "Treated"]
+    layout.mark_label_typed("col", 0)
+    ax = drawn(layout=layout, vset=VariableSet())
+
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["Vehicle", "Treated"]
+
+
+# ── two ticks that compose one name are still told apart ─────────────────────
+
+def _run_plate() -> VariableSet:
+    """Rows A–D HeLa, rows E–H U2OS — a variable constant across a *run*."""
+    line = Variable(
+        id="v_line", name="Cell line",
+        values=(VariableValue(id="hela", label="HeLa"),
+                VariableValue(id="u2os", label="U2OS")),
+    )
+    return VariableSet(
+        variables=(line,),
+        assignments={"v_line": {
+            f"{r}{c:02d}": ("hela" if r in "ABCD" else "u2os")
+            for r in "ABCDEFGH" for c in range(1, 13)
+        }},
+    )
+
+
+def test_a_run_of_one_value_takes_the_grid_label_as_its_suffix():
+    """Four rows reading ``HeLa`` cannot be told apart, which is the whole job.
+
+    The drop rule catches a variable constant across the *whole* axis. A run of
+    it resolves two distinct values, so the variable is kept and the axis went
+    ``HeLa ×4, U2OS ×4`` with ``A``–``H`` gone — row 0 indistinguishable from
+    row 1. The suffix is the same answer ``names_for_well_sets`` gives to two
+    groups that compose one name.
+    """
+    rows = list("ABCDEFGH")
+    lines = [[f"{r}{c:02d}" for c in range(1, 13)] for r in rows]
+
+    assert labels_for_axis_lines(_run_plate(), lines, fallbacks=rows) == [
+        "HeLa (A)", "HeLa (B)", "HeLa (C)", "HeLa (D)",
+        "U2OS (E)", "U2OS (F)", "U2OS (G)", "U2OS (H)",
+    ]
+
+
+def test_a_name_only_one_tick_carries_takes_no_suffix():
+    """The suffix marks a collision; it is not decoration on every tick."""
+    vset = _dose_and_line_plate()
+
+    assert labels_for_axis_lines(
+        vset, [["A01", "B01"], ["A02", "B02"]], fallbacks=["1", "2"]) == [
+        "1 µM", "10 µM"]
+
+
+def test_replicate_columns_of_one_dose_stay_distinguishable(drawn):
+    """The per-well layout *Auto-populate* builds with Rep-set avg off.
+
+    Two columns holding different replicates of one dose composed the same
+    string and lost their numbers, so the axis said which dose each column was
+    and no longer said which column.
+    """
+    layout = HeatmapLayout(name="Reps", rows=1, cols=4)
+    for c, well in enumerate(["A01", "B01", "A02", "B02"]):
+        layout.assign(0, c, [well])
+    ax = drawn(layout=layout, vset=_dose_and_line_plate())
+
+    # Two doses over four replicate columns: the variable varies along the
+    # axis, so it is kept — and each pair then needs its column number back.
+    assert [t.get_text() for t in ax.get_xticklabels()] == [
+        "1 µM (1)", "1 µM (2)", "10 µM (3)", "10 µM (4)"]
+
+
+def test_a_variable_with_one_value_across_the_axis_still_names_nothing(drawn):
+    """The drop rule, not the suffix, answers the fully-constant case.
+
+    Both columns here are 1 µM, so the dose distinguishes neither and the grid
+    numbers stay — rather than the axis reading ``1 µM (1)``, ``1 µM (2)``,
+    which is the column number wearing a word that adds nothing.
+    """
+    layout = HeatmapLayout(name="Same", rows=1, cols=2)
+    layout.assign(0, 0, ["A01"])
+    layout.assign(0, 1, ["B01"])   # both 1 µM
+    ax = drawn(layout=layout, vset=_dose_and_line_plate())
+
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["1", "2"]

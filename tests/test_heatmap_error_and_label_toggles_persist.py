@@ -113,8 +113,17 @@ def test_a_saved_block_reaches_both_the_slice_and_the_checkboxes():
 
 
 def test_a_file_written_before_these_keys_restores_each_ones_own_default():
-    """The one asymmetry: the error is off by default, the tick labels are on."""
+    """The one asymmetry: the error is off by default, the tick labels are on.
+
+    The slice is seeded to the *opposite* of each default first, so the
+    assertions measure the restore rather than the dataclass. Handing in a
+    fresh ``HeatmapState`` and asserting its own defaults back is a test that
+    passes when ``apply_persisted_settings`` never touches the slice at all —
+    which was this test's first version, and is CLAUDE.md §7.8 face two.
+    """
     ctx, app, hm = _built_session({"cmap": "magma"})
+    hm.show_error = True
+    hm.label_from_sample_map = False
     hl.apply_persisted_settings(ctx)
 
     assert hm.show_error is False
@@ -132,3 +141,52 @@ def test_the_two_defaults_are_not_the_same_value():
     """
     fresh = HeatmapState()
     assert fresh.show_error != fresh.label_from_sample_map
+
+
+def test_a_reset_moves_the_checkboxes_with_the_slice():
+    """``reset_view`` restores the slice; the controls have to follow it.
+
+    ``label_from_sample_map`` is the first setting here that defaults to
+    **True**, so a reset that moved only the slice turned the sample-map tick
+    labels back on underneath an unchecked box — a control that has stopped
+    describing what the figure is drawn with. The slice is seeded to the
+    opposite of every default so each assertion measures the sync.
+    """
+    ctx, app, hm = _built_session({})
+    hm.show_error = True
+    hm.label_from_sample_map = False
+    hm.log_scale = True
+    hm.repset_avg = True
+    app._heatmap_show_error_cb.setChecked(True)
+    app._heatmap_sample_labels_cb.setChecked(False)
+    app._heatmap_log_scale_cb.setChecked(True)
+    app._heatmap_repset_avg_cb.setChecked(True)
+
+    from well_viewer.domain.state_defaults import restore_defaults
+    restore_defaults(hm)
+    hl.sync_widgets_to_slice(ctx)
+
+    assert app._heatmap_show_error_cb.isChecked() is False
+    assert app._heatmap_sample_labels_cb.isChecked() is True
+    assert app._heatmap_log_scale_cb.isChecked() is False
+    assert app._heatmap_repset_avg_cb.isChecked() is False
+
+
+def test_the_reset_path_calls_that_sync():
+    """The seam above is worthless if ``reset_view`` does not reach it.
+
+    Asserting the helper works is not asserting the reset uses it — the same
+    gap that left the helper unwritten for as long as it did.
+    """
+    import ast
+    import inspect
+
+    from well_viewer.persistence import reset_scopes
+
+    src = inspect.getsource(reset_scopes.reset_view)
+    names = {n.func.attr if isinstance(n.func, ast.Attribute) else
+             getattr(n.func, "id", "")
+             for n in ast.walk(ast.parse(src.strip()))
+             if isinstance(n, ast.Call)}
+
+    assert "sync_widgets_to_slice" in names

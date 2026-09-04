@@ -19,6 +19,50 @@ from dataclasses import dataclass, field
 from well_viewer.domain.control_ref import KIND_SET, ControlRef
 
 
+def error_bar_settings(ctx) -> tuple[str, float, bool]:
+    """``(err_kind, ci_scale, draw_err)`` — **the** reading of Properties →
+    Statistics' error-bar controls, for every surface that draws one.
+
+    ``err_kind`` is the user's pick from that panel: ``"none"`` / ``"sem"`` /
+    ``"sd"`` / ``"ci95"``. ``draw_err`` is False when they asked for no error
+    bar, or when the Bar tab's Show mode is "Mean" (bars only). ``ci_scale`` is
+    1.96 for the 95% CI option — a normal-approx interval built from the SEM
+    the spreads are already computed as — and 1.0 otherwise.
+
+    **It lives here, not beside the bars, because the panel is app-wide.** The
+    control offers four kinds and ``PlotState.use_sem`` records only two of
+    them: a surface reading ``use_sem`` alone reads ``"ci95"`` as plain SEM and
+    ``"none"`` as SEM too, so it draws a different interval from the bar chart
+    beside it and says nothing about the difference. That is the silent
+    substitution §7 of ``CLAUDE.md`` is about, and it is why the Heat Map's
+    per-cell ``±`` asks this rather than reading the boolean.
+
+    With no ``ctx`` (a renderer called directly from a unit test) the legacy
+    behaviour — SEM, unscaled, always drawn — is preserved.
+    """
+    if ctx is None or not hasattr(ctx, "state"):
+        return ("sem", 1.0, True)
+    plot = ctx.state.plot
+    err_kind = str(getattr(plot, "bar_err_kind", "sem") or "sem")
+    show_mode = str(getattr(plot, "bar_show_mode", "mean_spread") or "mean_spread")
+    draw_err = (show_mode != "mean") and (err_kind != "none")
+    ci_scale = 1.96 if err_kind == "ci95" else 1.0
+    return (err_kind, ci_scale, draw_err)
+
+
+def spread_kind_label(err_kind: str, use_sem: bool) -> str:
+    """What a ``±`` drawn under :func:`error_bar_settings` is measuring.
+
+    ``"95% CI"`` for the scaled option, else the two words
+    ``metric_labels.spread_label`` gives. A figure that draws a 1.96×SEM
+    interval and calls it ``SEM`` is off by that factor to anyone reading it,
+    which is the whole reason the label is derived rather than written out.
+    """
+    if str(err_kind) == "ci95":
+        return "95% CI"
+    return "SEM" if use_sem else "SD"
+
+
 def _default_legend() -> dict[str, bool]:
     return {"mean": True, "frac": True, "cdf": True, "n": True}
 

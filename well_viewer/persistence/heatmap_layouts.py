@@ -141,6 +141,68 @@ def load_from_data_dir(ctx) -> None:
     apply_persisted_settings(ctx)
 
 
+def sync_widgets_to_slice(ctx) -> None:
+    """Push the heat-map slice's current display settings into its widgets.
+
+    The slice and the controls have to agree, and only one of the two paths
+    that write the slice was pushing. ``apply_persisted_settings`` sets both as
+    it reads a saved block; ``reset_scopes.reset_view`` called
+    ``restore_slice_defaults`` and stopped, so after a Reset View every heat-map
+    control still showed what the user had set while the slice held the
+    default. That was survivable for as long as every setting defaulted to
+    ``False`` — a checked box over a ``False`` slice is a control that has
+    stopped working, but the *figure* was at least drawn from the default.
+    ``label_from_sample_map`` is the first setting on this slice that defaults
+    to ``True``, so the same gap now turns a feature back **on** underneath an
+    unchecked box, which reads as the feature ignoring its own control.
+
+    Safe before the tab is built: every handle resolves through
+    ``ctx.widgets`` and a missing one is skipped. Signals are blocked
+    throughout — this reflects state the caller has already decided, and a
+    handler firing here would persist and redraw in the middle of it.
+    """
+    hm = ctx.state.feature_slice("heatmap")
+    if hm is None:
+        return
+
+    def _check(name: str, value: bool) -> None:
+        cb = ctx.widgets.get_or_none(name)
+        if cb is None:
+            return
+        blocked = cb.blockSignals(True)
+        try:
+            cb.setChecked(bool(value))
+        finally:
+            cb.blockSignals(blocked)
+
+    _check("_heatmap_repset_avg_cb", hm.repset_avg)
+    _check("_heatmap_log_scale_cb", hm.log_scale)
+    _check("_heatmap_show_error_cb", hm.show_error)
+    _check("_heatmap_sample_labels_cb", hm.label_from_sample_map)
+
+    scale_cb = ctx.widgets.get_or_none("_heatmap_scale_cb")
+    if scale_cb is not None:
+        idx = scale_cb.findText(str(hm.scale_mode or "Auto"))
+        if idx >= 0:
+            blocked = scale_cb.blockSignals(True)
+            try:
+                scale_cb.setCurrentIndex(idx)
+            finally:
+                scale_cb.blockSignals(blocked)
+
+    for name, value in (("_heatmap_vmin_edit", hm.vmin),
+                        ("_heatmap_vmax_edit", hm.vmax)):
+        edit = ctx.widgets.get_or_none(name)
+        if edit is None:
+            continue
+        blocked = edit.blockSignals(True)
+        try:
+            edit.setText("" if value is None or not math.isfinite(float(value))
+                         else f"{float(value):g}")
+        finally:
+            edit.blockSignals(blocked)
+
+
 def apply_persisted_settings(ctx) -> None:
     """Push any settings loaded from disk into the heatmap UI widgets.
 

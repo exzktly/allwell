@@ -2,7 +2,7 @@
 
 This tab is the reason the export is defined as a *population plus markers*
 rather than as the rows behind a drawn point. Its cells are not one statistic
-over one row set: ``controller._cell_value`` dispatches on metric, and the
+over one row set: ``controller._cell_stat`` dispatches on metric, and the
 metrics disagree about what they are computed from. The count metric is a
 pooled total over every well in the cell; the mean, fraction and ratio metrics
 go through ``_repset_mean_of_means``, which is a mean of **per-well means** and

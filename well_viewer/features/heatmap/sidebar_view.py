@@ -12,8 +12,10 @@ State of truth: ``app._heatmap_layouts``. The sidebar maintains exactly
 one layout named ``SIDEBAR_LAYOUT_NAME`` and synchronises the table
 widget to its ``cells`` dict on every change. Dragging a well in puts
 that one well in a cell, but a cell can hold several — "Auto-populate
-from selection" builds one cell per replicate set when **Rep-set avg**
-is on. Those cells show as ``A01+3`` (the members in the tooltip) and
+from selection" builds one cell per *entry* when **Rep-set avg** is on,
+and an entry is a visible replicate set **or** a well the user soloed
+onto the plot, because a plate is very often a mixture of the two.
+Those cells show as ``A01+3`` (the members in the tooltip) and
 move as a unit; the well token behind a cell is carried in
 ``_CELL_TOKEN_ROLE`` so the summary text never reaches the model.
 """

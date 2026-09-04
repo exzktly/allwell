@@ -47,7 +47,7 @@ _POINTS = {
 }
 
 
-def _stats_ctx(*, use_sem: bool = True):
+def _stats_ctx(*, use_sem: bool = True, err_kind: str = "sem"):
     """A ctx whose aggregator is the map above and whose wells are both loaded."""
     def _well(label, **_kw):
         return _POINTS[label]
@@ -63,7 +63,9 @@ def _stats_ctx(*, use_sem: bool = True):
         state=types.SimpleNamespace(
             dataset=types.SimpleNamespace(well_paths={"A01": "a", "A02": "b"}),
             channel=types.SimpleNamespace(ratio_index={}, active_val_col=_VAL),
-            plot=types.SimpleNamespace(use_fov_replicates=False, use_sem=use_sem),
+            plot=types.SimpleNamespace(
+                use_fov_replicates=False, use_sem=use_sem,
+                bar_err_kind=err_kind, bar_show_mode="mean_spread"),
             heatmap=types.SimpleNamespace(repset_avg=False),
             cell_gating=types.SimpleNamespace(
                 use_scatter_thresh=False, use_scatter_gates=False,
@@ -139,7 +141,7 @@ def drawn(monkeypatch):
 
     _CELL = {(0, 0): (6.0, 4.0), (0, 1): (2.0, float("nan"))}
 
-    def _draw(*, show_error, metric=HM.METRIC_MEAN):
+    def _draw(*, show_error, metric=HM.METRIC_MEAN, err_kind="sem"):
         fig = Figure()
         ax = fig.add_subplot(1, 1, 1)
         layout = HeatmapLayout(name="Pair", rows=1, cols=2)
@@ -160,7 +162,9 @@ def drawn(monkeypatch):
                 channel=types.SimpleNamespace(
                     active_val_col=_VAL, active_channel="GFP",
                     active_metric="mean_intensity", ratio_index={}),
-                plot=types.SimpleNamespace(use_fov_replicates=False, use_sem=True),
+                plot=types.SimpleNamespace(
+                    use_fov_replicates=False, use_sem=(err_kind != "sd"),
+                    bar_err_kind=err_kind, bar_show_mode="mean_spread"),
                 selection=types.SimpleNamespace(selected_wells=set(), variables=None),
                 cell_gating=types.SimpleNamespace(
                     use_scatter_thresh=False, use_scatter_gates=False,
@@ -227,3 +231,94 @@ def test_a_grid_with_no_measurable_spread_does_not_claim_one_in_its_title(drawn)
     ax = drawn(show_error=True, metric=HM.METRIC_COUNT)
     assert "±" not in ax.get_title()
     assert [t for t in _texts(ax) if t.startswith("±")] == []
+
+
+def test_the_three_lines_of_a_cell_do_not_land_on_each_other(drawn):
+    """The ``±`` is given room; it does not print on top of the value.
+
+    Asserting the strings are present passes just as well against a layout
+    that stacks all three at the cell's centre — which is what a mutation
+    setting both offsets to ``float(r)`` proves, and why this measures the
+    positions instead (CLAUDE.md §7.8 rule 1).
+    """
+    ax = drawn(show_error=True)
+    ys = {round(t.get_position()[1], 3) for t in ax.texts
+          if t.get_position()[0] == 0}
+
+    assert len(ys) == 3
+
+
+def test_a_cell_without_an_error_keeps_the_two_line_layout_it_always_had(drawn):
+    """Turning the toggle on must not shift the cells that print no error."""
+    with_err = drawn(show_error=True)
+    without = drawn(show_error=False)
+
+    def _ys(ax, col):
+        return sorted(round(t.get_position()[1], 3) for t in ax.texts
+                      if t.get_position()[0] == col)
+
+    # Column 1 has no measurable spread under either setting.
+    assert _ys(with_err, 1) == _ys(without, 1)
+
+
+# ── the interval is the one the bar chart draws ──────────────────────────────
+
+def test_the_95_percent_ci_option_scales_the_cell_the_way_it_scales_the_bar(drawn):
+    """``Properties → Statistics`` offers four kinds, and ``use_sem`` holds two.
+
+    Reading the boolean alone drew a plain SEM under a panel set to 95% CI and
+    titled it ``SEM`` — the same replicates, two intervals differing by 1.96,
+    with neither figure saying so. ``core.plot_state.error_bar_settings`` is
+    the one reading of that panel, and the bar's ``ci_scale`` and this come
+    from it.
+    """
+    value, spread = _stat(_stats_ctx(err_kind="ci95"), ["A01", "A02"],
+                          HM.METRIC_MEAN)
+
+    assert value == pytest.approx(6.0)
+    assert spread == pytest.approx(4.0 * 1.96)
+    # And the figure says which interval it is, rather than calling it SEM.
+    assert drawn(show_error=True, err_kind="ci95").get_title().endswith(
+        "(± 95% CI)")
+
+
+def test_asking_for_no_error_bars_silences_the_cell_annotation_too(drawn):
+    """*Error bars: None* is a request, not a bar-tab-only preference."""
+    ax = drawn(show_error=True, err_kind="none")
+
+    assert [t for t in _texts(ax) if t.startswith("±")] == []
+    assert "±" not in ax.get_title()
+
+
+def test_the_sd_option_is_neither_scaled_nor_mislabelled(drawn):
+    _value, spread = _stat(_stats_ctx(use_sem=False, err_kind="sd"),
+                           ["A01", "A02"], HM.METRIC_MEAN)
+
+    assert spread == pytest.approx(8.0 / math.sqrt(2.0))
+    assert drawn(show_error=True, err_kind="sd").get_title().endswith("(± SD)")
+
+
+# ── a spread never prints as a zero it is not ────────────────────────────────
+
+@pytest.mark.parametrize("value,metric,fmt,expected", [
+    # The automatic fraction format is two decimals, which flattens this.
+    (0.004, HM.METRIC_FRACTION, "", "0.004"),
+    # A user format can be coarser still.
+    (0.004, HM.METRIC_MEAN, "%d", "0.004"),
+    # A spread the chosen format renders honestly is left alone.
+    (0.25, HM.METRIC_FRACTION, "", "0.25"),
+    (12.5, HM.METRIC_MEAN, "", "12.50"),
+    # A measured zero really is zero, and says so.
+    (0.0, HM.METRIC_FRACTION, "", "0.00"),
+])
+def test_a_small_spread_is_never_rendered_as_zero(value, metric, fmt, expected):
+    """``± 0.00`` for a real 0.004 is the conflation this whole feature removes.
+
+    A cell with no measurable spread already prints nothing at all, so a ``±``
+    reading zero on the grid is a claim that the replicates agreed exactly.
+    """
+    assert HM._format_cell_error(value, metric, fmt) == expected
+
+
+def test_an_undefined_spread_still_prints_nothing():
+    assert HM._format_cell_error(float("nan"), HM.METRIC_MEAN, "") == ""

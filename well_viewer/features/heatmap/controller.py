@@ -38,12 +38,12 @@ from well_viewer.domain.stats_compute import (
 )
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
+from well_viewer.core.plot_state import error_bar_settings, spread_kind_label
 from well_viewer.core.channel_state_controller import (
     active_channel_label,
     get_all_fluor_gates,
     on_cutoff_for_column,
 )
-from well_viewer.data.metric_labels import spread_label
 from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
 from well_viewer.domain.tp_match import tp_close
 
@@ -68,6 +68,17 @@ from well_viewer.domain.heatmap_metrics import (  # noqa: F401
 # reusing it here would make a selected well indistinguishable from a drop
 # target while dragging over it.
 _SELECTION_OUTLINE_COLOR = theme.Colors.heatmap_selection
+
+#: Tick text longer than this leans over and shrinks (see ``redraw_heatmap``).
+#: Sized to the widest label the grid drew before sample-map names existed —
+#: a plate column reads ``12``, a row ``H`` — plus the room a short typed name
+#: like ``Ctrl`` needs, so annotating a plate is what changes the axis and
+#: renaming one tick is not.
+_TICK_WIDE_CHARS = 6
+
+#: Title lift, in points, when the column ticks are rotated. The flat value is
+#: 8; rotated 8pt text over twelve columns stands about twice that.
+_TITLE_PAD_ROTATED = 18
 
 
 def _contrast_ink(rgba: tuple[float, float, float, float]) -> str:
@@ -237,7 +248,7 @@ def _repset_name_for_wells(ctx, wells: Iterable[str]) -> str | None:
 
 
 #: Which :class:`ReplicateStat` field each averaging metric reduces. ``METRIC_COUNT``
-#: is absent on purpose — it is a total, not an average (see ``_cell_value``).
+#: is absent on purpose — it is a total, not an average (see ``_cell_stat``).
 _METRIC_FIELD = {
     METRIC_MEAN: "mean",
     METRIC_MEAN_ALL: "mean_all",
@@ -265,8 +276,12 @@ def _repset_mean_of_means(
     when the toggle is on the plots average per-FOV means, and a heatmap
     averaging per-well means would disagree with them again in the other
     direction. The spread is the SD or the SEM of the same replicates,
-    following the app-wide Properties → Statistics choice, so a cell's ``±``
-    and the whisker on the bar for the same set measure one thing.
+    following the app-wide Properties → Statistics choice — all four of its
+    kinds, through :func:`core.plot_state.error_bar_settings`, so the 95% CI
+    option scales this the 1.96 it scales the whisker by. Reading
+    ``PlotState.use_sem`` alone would have drawn a plain SEM under a panel set
+    to 95% CI and labelled it ``SEM``: the same set, two intervals, neither
+    figure saying so.
 
     Both halves are ``NaN`` for a set with no replicates, and the spread alone
     is ``NaN`` for a set with exactly one — an undefined spread, which is not
@@ -283,10 +298,12 @@ def _repset_mean_of_means(
     )
     if not reps:
         return float("nan"), float("nan")
-    return replicate_mean_and_spread(
+    _kind, ci_scale, _draw = error_bar_settings(ctx)
+    mean, spread = replicate_mean_and_spread(
         reps, _METRIC_FIELD[metric],
         use_sem=bool(getattr(ctx.state.plot, "use_sem", True)),
     )
+    return mean, spread * ci_scale
 
 
 def _cell_stat(
@@ -378,7 +395,8 @@ def _cell_value(
     return value
 
 
-def _sample_map_axis_labels(ctx, layout) -> tuple[list[str], list[str]]:
+def _sample_map_axis_labels(ctx, layout, grid_row_labels,
+                            grid_col_labels) -> tuple[list[str], list[str]]:
     """``(row labels, col labels)`` taken from the sample map, ``""`` per tick
     where it describes nothing.
 
@@ -397,6 +415,13 @@ def _sample_map_axis_labels(ctx, layout) -> tuple[list[str], list[str]]:
     same as a missing entry: the caller falls back **per tick**, so one mixed
     column on an otherwise annotated axis keeps its grid label instead of
     blanking the whole axis or blanking that one tick.
+
+    *grid_row_labels* / *grid_col_labels* are what each tick is called without
+    the sample map — the typed name, the plate default, or the 1-based index —
+    and they serve twice: as the per-tick fallback the caller applies, and,
+    passed through to :func:`sample_variables.labels_for_axis_lines`, as the
+    suffix that tells two ticks apart when the sample map composes one name
+    for both of them.
 
     Both lists are blank when the toggle is off or the plate has no variables,
     which is what makes this change nothing for a plate nobody annotated.
@@ -418,8 +443,12 @@ def _sample_map_axis_labels(ctx, layout) -> tuple[list[str], list[str]]:
         [w for r in range(layout.rows) for w in cells.get((r, c), [])]
         for c in range(layout.cols)
     ]
-    return (labels_for_axis_lines(vset, row_wells),
-            labels_for_axis_lines(vset, col_wells))
+    # The grid's own labels go in as the disambiguator for two ticks that
+    # compose one name — the plate whose rows are HeLa×4 then U2OS×4, where
+    # the composed names alone would leave row 0 indistinguishable from row 1
+    # and take ``A``–``H`` away in exchange.
+    return (labels_for_axis_lines(vset, row_wells, fallbacks=grid_row_labels),
+            labels_for_axis_lines(vset, col_wells, fallbacks=grid_col_labels))
 
 
 def _resolve_color_scale(arr: np.ndarray, ctx) -> tuple[float | None, float | None]:
@@ -605,8 +634,9 @@ def redraw_heatmap(ctx) -> None:
     ctx.runtime.heatmap.cell_well_index = cell_well_index
     ctx.runtime.heatmap.array = arr
     ctx.runtime.heatmap.spread = err
-    ctx.runtime.heatmap.spread_label = spread_label(
-        bool(getattr(ctx.state.plot, "use_sem", True)))
+    _err_kind, _ci_scale, _draw_err = error_bar_settings(ctx)
+    ctx.runtime.heatmap.spread_label = spread_kind_label(
+        _err_kind, bool(getattr(ctx.state.plot, "use_sem", True)))
     ctx.runtime.heatmap.layout_active = layout
 
     # Pool min/max across every timepoint so the colormap stays consistent
@@ -675,27 +705,60 @@ def redraw_heatmap(ctx) -> None:
     # mismatch ValueError when matplotlib's FixedLocator validates them.
     raw_row_labels = list(layout.row_labels or [])
     raw_col_labels = list(layout.col_labels or [])
-    # The sample map wins where it describes a whole line; the layout's own
-    # label is the fallback for the ticks it cannot describe, and the 1-based
-    # index the fallback for a layout that carries no labels at all.
-    sm_row_labels, sm_col_labels = _sample_map_axis_labels(ctx, layout)
-    row_labels = [
-        str(sm_row_labels[i]) if i < len(sm_row_labels) and sm_row_labels[i]
-        else str(raw_row_labels[i]) if i < len(raw_row_labels) and raw_row_labels[i]
+    # What each tick is called without the sample map: the layout's own label,
+    # or the 1-based index for a layout that carries none.
+    grid_row_labels = [
+        str(raw_row_labels[i]) if i < len(raw_row_labels) and raw_row_labels[i]
         else str(i + 1)
         for i in range(layout.rows)
     ]
-    col_labels = [
-        str(sm_col_labels[i]) if i < len(sm_col_labels) and sm_col_labels[i]
-        else str(raw_col_labels[i]) if i < len(raw_col_labels) and raw_col_labels[i]
+    grid_col_labels = [
+        str(raw_col_labels[i]) if i < len(raw_col_labels) and raw_col_labels[i]
         else str(i + 1)
         for i in range(layout.cols)
     ]
+    # Three rungs, in this order: a name the **user typed** for this tick, then
+    # what the sample map composes for the line, then the grid's own label. The
+    # typed name is first because a rename that redraws as something else is a
+    # control that does not work — and the sample-map rung is on by default, so
+    # nobody opted into having their labels overwritten.
+    sm_row_labels, sm_col_labels = _sample_map_axis_labels(
+        ctx, layout, grid_row_labels, grid_col_labels)
+    row_labels = [
+        grid_row_labels[i] if layout.label_typed("row", i)
+        else str(sm_row_labels[i]) if i < len(sm_row_labels) and sm_row_labels[i]
+        else grid_row_labels[i]
+        for i in range(layout.rows)
+    ]
+    col_labels = [
+        grid_col_labels[i] if layout.label_typed("col", i)
+        else str(sm_col_labels[i]) if i < len(sm_col_labels) and sm_col_labels[i]
+        else grid_col_labels[i]
+        for i in range(layout.cols)
+    ]
+    # Tick text used to be one or two characters (``A``–``H``, ``1``–``12``);
+    # a sample-map name is a composed string like ``HeLa · 10 µM``, and there
+    # can be 32 of them across. Horizontal at 8pt they overlap and then run off
+    # the axis, which is a figure that has silently stopped being readable. So
+    # a long label leans over and shrinks a little — chosen over eliding it,
+    # because a truncated condition name is a figure that states the wrong
+    # condition, and over leaving it horizontal, because overlapping ticks are
+    # unreadable in a way a reader cannot repair.
+    long_cols = max((len(t) for t in col_labels), default=0) > _TICK_WIDE_CHARS
+    long_rows = max((len(t) for t in row_labels), default=0) > _TICK_WIDE_CHARS
+    col_fs = 7 if long_cols else 8
+    row_fs = 7 if long_rows else 8
     ax.set_xticks(range(layout.cols))
-    ax.set_xticklabels(col_labels, fontsize=8)
+    if long_cols:
+        # ``ha="left"`` because these ticks sit above the grid: a right-anchored
+        # rotation would walk the text into the cells it labels.
+        ax.set_xticklabels(col_labels, fontsize=col_fs, rotation=30, ha="left",
+                           rotation_mode="anchor")
+    else:
+        ax.set_xticklabels(col_labels, fontsize=col_fs)
     ax.xaxis.tick_top()
     ax.set_yticks(range(layout.rows))
-    ax.set_yticklabels(row_labels, fontsize=8)
+    ax.set_yticklabels(row_labels, fontsize=row_fs)
     setattr(ax, "_categorical_xaxis", True)
     setattr(ax, "_categorical_yaxis", True)
     for spine in ax.spines.values():
@@ -719,7 +782,9 @@ def redraw_heatmap(ctx) -> None:
 
     # Cell text annotations. Resolve the user's number format once, not per cell.
     value_fmt = _cell_value_format(ctx, fig)
-    show_error = bool(ctx.state.heatmap.show_error)
+    # ``draw_err`` is the same gate the bars use, so *Error bars: None* silences
+    # the cell annotation as well: a panel set to draw no error, drawing one.
+    show_error = bool(ctx.state.heatmap.show_error) and _draw_err
     for (r, c), wells in cell_well_index.items():
         v = arr[r, c]
         if not math.isfinite(v):
@@ -753,7 +818,7 @@ def redraw_heatmap(ctx) -> None:
         if draw_error:
             ax.text(
                 c, r + 0.06,
-                f"± {_format_cell_value(e, metric, value_fmt)}",
+                f"± {_format_cell_error(e, metric, value_fmt)}",
                 ha="center", va="center",
                 fontsize=6.5, color=ink, alpha=0.85,
             )
@@ -817,13 +882,17 @@ def redraw_heatmap(ctx) -> None:
     if show_error and np.isfinite(err).any():
         # Which spread the ``±`` under each value is, in the same two words
         # every other error-bearing figure in the app uses. A grid whose cells
-        # carry an unlabelled ``±`` is the ambiguity ``spread_label`` exists to
-        # remove — SD and SEM differ by √n and look identical on the cell.
+        # carry an unlabelled ``±`` is the ambiguity ``spread_kind_label``
+        # exists to remove — SD, SEM and a 95% CI are three different intervals
+        # over one set of replicates and look identical on the cell.
         title = f"{title} (± {ctx.runtime.heatmap.spread_label})"
     # ``pad`` lifts the title away from the heatmap rows so the descenders
     # never overlap the top row of cells; the figure's top=0.88 margin
     # reserves enough room for the lifted title.
-    ax.set_title(title, fontsize=9, color=_title_fg, pad=8)
+    # Rotated column ticks stand taller than flat ones, so the title lifts off
+    # them by the same amount rather than landing in the middle of the text.
+    ax.set_title(title, fontsize=9, color=_title_fg,
+                 pad=_TITLE_PAD_ROTATED if long_cols else 8)
 
     # Apply the Export Style sidebar prefs (font sizes, grid, log scale, …)
     # so toggling those in the configurator survives a redraw.
@@ -871,6 +940,42 @@ def _format_cell_value(v: float, metric: str, fmt: str = "") -> str:
     if abs(v) >= 1:
         return f"{v:.2f}"
     return f"{v:.3g}"
+
+
+def _format_cell_error(v: float, metric: str, fmt: str = "") -> str:
+    """The ``± err`` a cell prints, which may never read as a zero it is not.
+
+    The spread goes through the same format as the value it sits under, so a
+    grid the user has set to two decimals does not print its value at two and
+    its error at five. But a *format* chosen for the value can be too coarse
+    for the error beside it — a fraction's automatic ``%.2f`` renders a real
+    spread of ``0.004`` as ``0.00``, and a user's ``%d`` renders it as ``0`` —
+    and a spread printed as zero is indistinguishable from replicates that
+    agreed exactly. That is the measured-zero-versus-undefined conflation §7 of
+    ``CLAUDE.md`` is about, re-created inside the feature added to remove it:
+    a cell with no measurable spread already prints nothing at all, so a ``±
+    0.00`` on the grid is a claim that the replicates agreed.
+
+    So a non-zero spread that the chosen format flattens to zero falls back to
+    two significant figures, which is the smallest rendering that cannot. The
+    fallback is per cell rather than per grid: only the cells that would have
+    lied change, and a grid whose errors are all comfortably above its
+    precision is formatted exactly like its values.
+    """
+    if not math.isfinite(v):
+        return ""
+    text = _format_cell_value(v, metric, fmt)
+    if v == 0.0:
+        return text
+    try:
+        if float(text) != 0.0:
+            return text
+    except ValueError:
+        # A format that produced something unparseable (a suffix, a unit) is
+        # not one this can second-guess — it is also not one that can have
+        # silently rounded to a bare zero.
+        return text
+    return f"{v:.2g}"
 
 
 def _cell_value_format(ctx, fig) -> str:

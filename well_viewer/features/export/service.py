@@ -825,13 +825,20 @@ def export_heatmap_data(ctx) -> None:
     metric_cb = ctx.widgets.get_or_none("_heatmap_metric_cb")
     metric = str(metric_cb.currentText()) if metric_cb else "metric"
     col_name = f"{ch}_{metric.lower().replace(' ', '_')}"
-    # The spread the figure drew, carried across rather than recomputed: the
-    # grid on screen and the file behind it must not be able to disagree about
-    # what a cell's error is. ``spread`` is absent on a heat map drawn before
-    # this column existed, and its header names SD or SEM because those differ
-    # by √n and an unlabelled ``err`` column is unusable in a paper.
+    # The spread the last redraw *computed*, carried across rather than
+    # reduced a second time, so the number in the file and the number on the
+    # grid cannot drift apart. Not the same as what the figure *drew*: the
+    # Display toggle and an "Error bars: None" both hide the annotation
+    # without making the measurement go away, and a column of real errors is
+    # worth having in a file whose reader is going to plot it elsewhere.
+    # ``spread`` is absent on a heat map drawn before this column existed.
     spread = ctx.runtime.heatmap.spread
-    err_name = f"err_{ctx.runtime.heatmap.spread_label or 'SD'}"
+    # The column names the interval, in a token a spreadsheet and a parser can
+    # both hold: the figure's "95% CI" would put a space and a percent sign in
+    # a CSV header. Non-alphanumerics go, so SEM and SD pass through unchanged
+    # and 95% CI becomes CI95.
+    _label = str(ctx.runtime.heatmap.spread_label or "SD")
+    err_name = "err_" + ("".join(ch for ch in _label if ch.isalnum()) or "SD")
     well_labels = figure_names_map(ctx)
     rows_out = []
     for r in range(layout.rows):

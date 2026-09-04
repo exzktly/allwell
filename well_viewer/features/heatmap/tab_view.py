@@ -106,11 +106,14 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed(ctx))
     band.add_scope("", tp_cb)
 
-    # ── Display popover: everything about how the grid is coloured ──────────
+    # ── Display popover: everything about how the grid is drawn ─────────────
     # These change the figure's appearance rather than what it is showing, and
     # they are set once and left. One click is the right price for the row.
+    # Not only colour any more: the per-cell ``±`` and the sample-map tick
+    # labels are appearance by the same test and live here too.
     display_btn, disp, disp_l = make_popover_button("Display ▾", band)
-    display_btn.setToolTip("Colour map, scale and layout options")
+    display_btn.setToolTip(
+        "Colour map, scale, layout, per-cell error and tick labels")
 
     disp_l.addWidget(QLabel("Color map:", disp))
     # v2: LutSelector (gradient strip + name + searchable popover + reverse-LUT
@@ -540,6 +543,13 @@ def _on_label_double_click(ctx, evt) -> None:
         while len(layout.col_labels) < layout.cols:
             layout.col_labels.append(str(len(layout.col_labels) + 1))
         layout.col_labels[idx] = new_text or str(idx + 1)
+    # Record that this tick's name is the user's, which is what makes it
+    # outrank the one the sample map would compose for the same tick. Without
+    # it the rename is a control that runs, writes, redraws, and shows the
+    # user something else — and on an annotated plate that is every rename.
+    # An emptied dialog clears the mark along with the name: the tick is back
+    # to the grid's own label, which the sample map may speak for again.
+    layout.mark_label_typed(kind, idx, bool(new_text))
     _persist_and_redraw(ctx)
 
 

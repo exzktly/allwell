@@ -1393,24 +1393,16 @@ def bar_guide_x(xs: list[float] | None, tgt: int, src: int, n: int) -> float:
 
 
 def bar_err_settings(ctx) -> tuple:
-    """``(err_kind, ci_scale, draw_err)`` for the bar error bars, derived from
-    the Properties → Statistics controls (``PlotState.bar_err_kind`` /
-    ``bar_show_mode``).
+    """The Bar tab's name for :func:`core.plot_state.error_bar_settings`.
 
-    ``draw_err`` is False when the Show mode is "Mean" (bars only) or the
-    error-bar type is "None". ``ci_scale`` is 1.96 for the 95% CI option (a
-    normal-approx CI built from the SEM the spreads are already computed as),
-    else 1.0. With no ``ctx`` (e.g. unit tests calling the renderer directly)
-    the legacy behaviour — always draw — is preserved.
+    The rule moved to ``core`` when the Heat Map's per-cell ``±`` started
+    asking it too: the Properties → Statistics panel is app-wide, and a second
+    reading of it would let one figure draw a 95% CI while its neighbour drew
+    the SEM it was built from. This stays as the name five call sites already
+    use, and holds no logic of its own.
     """
-    if ctx is None or not hasattr(ctx, "state"):
-        return ("sem", 1.0, True)
-    plot = ctx.state.plot
-    err_kind = str(getattr(plot, "bar_err_kind", "sem") or "sem")
-    show_mode = str(getattr(plot, "bar_show_mode", "mean_spread") or "mean_spread")
-    draw_err = (show_mode != "mean") and (err_kind != "none")
-    ci_scale = 1.96 if err_kind == "ci95" else 1.0
-    return (err_kind, ci_scale, draw_err)
+    from well_viewer.core.plot_state import error_bar_settings
+    return error_bar_settings(ctx)
 
 
 def bar_well_display_label(ctx, lbl: str) -> str:

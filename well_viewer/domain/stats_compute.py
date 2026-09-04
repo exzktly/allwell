@@ -326,6 +326,24 @@ def replicate_mean(reps, field: str) -> float:
     return mean
 
 
+def replicate_mean_and_spread(reps, field: str, *, use_sem: bool) -> tuple[float, float]:
+    """``(mean, SD-or-SEM)`` across a per-replicate field, from one reduction.
+
+    The public name for the whole of :func:`_reduce_reps`, for a surface that
+    draws the central value and its error together — the Heat Map's per-cell
+    ``± err`` is the caller this was named for. Calling
+    :func:`replicate_mean` and then reducing the list a second time for the
+    spread would give the same answer at twice the cost, and would leave two
+    call sites free to drift apart about which replicates are skipped.
+
+    ``use_sem`` is the app-wide Properties → Statistics choice
+    (``ctx.state.plot.use_sem``), so a cell's error bar and the bar chart's
+    whisker for the same set measure the same thing. The spread of a
+    single-replicate set is ``NaN``, never ``0.0`` — see :func:`_reduce_reps`.
+    """
+    return _reduce_reps(reps, field, use_sem=use_sem)
+
+
 def _thresh_on_col(ctx) -> str | None:
     """Return ``"Gate_On"`` when scatter-gate *thresholding* is active (mode on
     and a gate selected), else ``None``.

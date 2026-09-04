@@ -165,6 +165,33 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     log_scale_cb.toggled.connect(lambda _v: _on_log_scale_changed(ctx))
     disp_l.addWidget(log_scale_cb)
 
+    show_error_cb = reg.register("_heatmap_show_error_cb", QCheckBox("Show ± error", disp))
+    show_error_cb.setToolTip(
+        "Print each cell's spread across replicates under its value — the same "
+        "replicates and the same SD/SEM choice the bar and line plots use, so "
+        "the per-FOV toggle governs it here too. Cells with a single replicate "
+        "have no spread and print none; the Cell count metric is a total rather "
+        "than an average and never prints one."
+    )
+    show_error_cb.toggled.connect(lambda _v: _on_show_error_changed(ctx))
+    disp_l.addWidget(show_error_cb)
+
+    sample_labels_cb = reg.register(
+        "_heatmap_sample_labels_cb", QCheckBox("Label ticks from sample map", disp))
+    sample_labels_cb.setToolTip(
+        "Name each row and column by the sample-map values every well on it "
+        "shares — the dose that changes across the columns, the cell line that "
+        "changes down the rows. A variable that is the same everywhere names "
+        "nothing, and a row or column whose wells disagree keeps its grid label."
+    )
+    # Seeded before the connection, not after: this is the one toggle in the
+    # popover whose state default is True, and a ``setChecked`` after the
+    # ``connect`` would fire the handler during the build — persisting a
+    # setting and redrawing a figure that does not exist yet.
+    sample_labels_cb.setChecked(bool(ctx.state.heatmap.label_from_sample_map))
+    sample_labels_cb.toggled.connect(lambda _v: _on_sample_labels_changed(ctx))
+    disp_l.addWidget(sample_labels_cb)
+
     band.add_action(display_btn)
 
     export_btn, export_menu, _export_data_act = build_plot_save_menu(
@@ -206,10 +233,12 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     divider = make_axes_locatable(ax)
     reg.register("_heatmap_cax", divider.append_axes("right", size="4%", pad=0.08))
     canvas = reg.register("_heatmap_canvas", card.canvas)
-    # Heatmap never draws error bands or per-FOV spread — it shows a
-    # single aggregated value per grid cell. The shared band controls
-    # would only mislead the user, so leave the card's controls row
-    # empty.
+    # No shared band controls on the card. The heat map does report a spread —
+    # ``Display ▾ → Show ± error`` prints each cell's, across the same
+    # replicates and under the same SD/SEM choice the bar and line plots use —
+    # but it draws no *band*, and both settings that govern it are app-wide and
+    # already reachable from this tab's Properties → Statistics. Duplicating
+    # them on the card would put two controls for one setting on one screen.
     card.setControlsWidget(None)
     # NOTE: don't trigger a redraw on theme change — heatmap_controller doesn't
     # use plot_style.apply_ax_style (it has its own inline ax styling), so a
@@ -399,6 +428,22 @@ def _on_log_scale_changed(ctx) -> None:
     cb = ctx.widgets.get_or_none("_heatmap_log_scale_cb")
     if cb is not None:
         ctx.state.heatmap.log_scale = bool(cb.isChecked())
+    _persist_settings(ctx)
+    _redraw(ctx)
+
+
+def _on_show_error_changed(ctx) -> None:
+    cb = ctx.widgets.get_or_none("_heatmap_show_error_cb")
+    if cb is not None:
+        ctx.state.heatmap.show_error = bool(cb.isChecked())
+    _persist_settings(ctx)
+    _redraw(ctx)
+
+
+def _on_sample_labels_changed(ctx) -> None:
+    cb = ctx.widgets.get_or_none("_heatmap_sample_labels_cb")
+    if cb is not None:
+        ctx.state.heatmap.label_from_sample_map = bool(cb.isChecked())
     _persist_settings(ctx)
     _redraw(ctx)
 

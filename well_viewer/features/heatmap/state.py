@@ -21,12 +21,26 @@ class HeatmapState:
     ``scale_mode`` — ``"Auto"`` (colour range fit to the data each redraw) or
     ``"Fixed"`` (use the vmin/vmax edits). ``repset_avg`` — show the rep-set
     average per cell instead of the single well. ``log_scale`` — colour on a log
-    scale (values ≤ 0 masked).
+    scale (values ≤ 0 masked). ``show_error`` — draw each cell's spread across
+    replicates under its value. ``label_from_sample_map`` — take the row/column
+    ticks from the sample map wherever it describes a whole line.
     """
 
     scale_mode: str = "Auto"
     repset_avg: bool = False
     log_scale: bool = False
+    # Draw ``± err`` under each cell's value, measured across the same
+    # replicates Bar and Line reduce (per well, or per FOV when the app-wide
+    # per-FOV toggle is on) and using the same SD/SEM choice. Off by default:
+    # the grid is dense and a third line of text in every cell is a change to
+    # every saved layout's appearance, so it is opt-in per layout like the two
+    # toggles above.
+    show_error: bool = False
+    # Take the row/column tick labels from the sample map where it describes a
+    # whole line, instead of the layout's own grid labels. On by default — it
+    # only ever changes a tick the sample map has something to say about, so a
+    # plate with no variables draws exactly what it drew before.
+    label_from_sample_map: bool = True
     # Name of the active heat-map layout (``None`` ⇒ first / plate default).
     # Was the loose ``app._active_heatmap_layout_name`` — a poor fit for the
     # ``_heatmap_`` runtime prefix, so it lives here as typed state (A8).

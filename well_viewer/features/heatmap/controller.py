@@ -34,7 +34,7 @@ from well_viewer.domain.stats_compute import (
     _gate_cache_sig,
     aggregate_group,
     group_replicate_stats,
-    replicate_mean,
+    replicate_mean_and_spread,
 )
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
@@ -43,6 +43,7 @@ from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
     on_cutoff_for_column,
 )
+from well_viewer.data.metric_labels import spread_label
 from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
 from well_viewer.domain.tp_match import tp_close
 
@@ -254,15 +255,24 @@ def _repset_mean_of_means(
     val_col: str,
     threshold: float,
     fluor_gates: dict[str, float],
-) -> float:
-    """Mean across replicates of *metric*, from the canonical replicate list.
+) -> tuple[float, float]:
+    """``(mean, spread)`` across replicates of *metric*, from the canonical list.
 
     ``group_replicate_stats`` is the one producer Bar, Line and the Statistics
-    test reduce, and ``replicate_mean`` is the same reducer they use, so this
-    cannot describe a different quantity from the bar drawn beside it. The
-    replicate unit follows the app's per-FOV toggle for the same reason: when
-    the toggle is on the plots average per-FOV means, and a heatmap averaging
-    per-well means would disagree with them again in the other direction.
+    test reduce, and ``replicate_mean_and_spread`` is the same reducer they use,
+    so this cannot describe a different quantity from the bar drawn beside it.
+    The replicate unit follows the app's per-FOV toggle for the same reason:
+    when the toggle is on the plots average per-FOV means, and a heatmap
+    averaging per-well means would disagree with them again in the other
+    direction. The spread is the SD or the SEM of the same replicates,
+    following the app-wide Properties → Statistics choice, so a cell's ``±``
+    and the whisker on the bar for the same set measure one thing.
+
+    Both halves are ``NaN`` for a set with no replicates, and the spread alone
+    is ``NaN`` for a set with exactly one — an undefined spread, which is not
+    the same fact as replicates that agreed exactly, and is what stops a
+    single-well cell from drawing a ``± 0.00`` beside neighbours whose error
+    was measured.
     """
     reps = group_replicate_stats(
         ctx, wells, target_t,
@@ -272,11 +282,14 @@ def _repset_mean_of_means(
         fluor_gates=fluor_gates,
     )
     if not reps:
-        return float("nan")
-    return replicate_mean(reps, _METRIC_FIELD[metric])
+        return float("nan"), float("nan")
+    return replicate_mean_and_spread(
+        reps, _METRIC_FIELD[metric],
+        use_sem=bool(getattr(ctx.state.plot, "use_sem", True)),
+    )
 
 
-def _cell_value(
+def _cell_stat(
     ctx,
     wells: Iterable[str],
     target_t: float,
@@ -284,8 +297,8 @@ def _cell_value(
     val_col: str,
     threshold: float,
     fluor_gates: dict[str, float],
-) -> float:
-    """Compute the heatmap cell value for *wells* at *target_t*.
+) -> tuple[float, float]:
+    """``(value, spread)`` for the heatmap cell holding *wells* at *target_t*.
 
     **The averaging metrics are the mean of each replicate's mean**, which is
     what Bar, Line and Stats draw for the same set. They all reduce the one
@@ -302,12 +315,16 @@ def _cell_value(
     ``METRIC_COUNT`` is deliberately **not** converted. It reports how many
     cells the set contains, which is a total rather than an average, and the
     mean of the per-well counts would be a different quantity rather than a
-    more consistent one. It stays the pooled total and says so on the cell.
+    more consistent one. It stays the pooled total and says so on the cell —
+    and its spread is ``NaN``, because a total has none: the replicates were
+    summed rather than averaged, so there is nothing for a ``±`` to be the
+    spread *of*. A number invented there would be the silent substitution §7
+    of ``CLAUDE.md`` forbids, in the one metric whose value is not a mean.
     """
     expanded = _expand_repset_wells(ctx, wells)
     valid_wells = [w for w in expanded if w in ctx.state.dataset.well_paths]
     if not valid_wells:
-        return float("nan")
+        return float("nan"), float("nan")
 
     if metric == METRIC_COUNT:
         # Use aggregate to apply gate logic consistently, then read n_total.
@@ -321,38 +338,88 @@ def _cell_value(
         # cell count, and returning zero coloured it as a real, empty well —
         # indistinguishable from one the pipeline genuinely measured as having
         # no cells. The two sibling metrics below already return NaN here.
-        return float(matched[0][5]) if matched else float("nan")
+        total = float(matched[0][5]) if matched else float("nan")
+        return total, float("nan")
 
-    if metric == METRIC_FRACTION:
-        return _repset_mean_of_means(
-            ctx, valid_wells, target_t, metric,
-            val_col=val_col, threshold=threshold, fluor_gates=fluor_gates,
-        )
+    if metric == METRIC_RATIO and not is_ratio_key(val_col):
+        return float("nan"), float("nan")
 
-    if metric == METRIC_RATIO:
-        if not is_ratio_key(val_col):
-            return float("nan")
-        return _repset_mean_of_means(
-            ctx, valid_wells, target_t, metric,
-            val_col=val_col, threshold=threshold, fluor_gates=fluor_gates,
-        )
-
-    if metric == METRIC_MEAN_ALL:
-        # Mean across every included cell at the target timepoint — no
-        # per-channel ThreshFracOn filter applied. Useful for non-MFI
-        # properties (Total / Max / Min / Std) where the MFI threshold is
-        # semantically irrelevant. Averaged per replicate, like its siblings.
-        return _repset_mean_of_means(
-            ctx, valid_wells, target_t, metric,
-            val_col=val_col, threshold=threshold, fluor_gates=fluor_gates,
-        )
-
-    # METRIC_MEAN (and fallback)
+    # METRIC_FRACTION, METRIC_RATIO, METRIC_MEAN_ALL and METRIC_MEAN all reduce
+    # the one replicate list; only the ``ReplicateStat`` field differs, and
+    # ``_METRIC_FIELD`` holds that mapping. ``METRIC_MEAN_ALL`` reads the mean
+    # across every included cell — no per-channel ThreshFracOn filter — which is
+    # what makes it useful for the non-MFI properties (Total / Max / Min / Std)
+    # where the MFI threshold is semantically irrelevant.
     return _repset_mean_of_means(
         ctx, valid_wells, target_t,
         metric if metric in _METRIC_FIELD else METRIC_MEAN,
         val_col=val_col, threshold=threshold, fluor_gates=fluor_gates,
     )
+
+
+def _cell_value(
+    ctx,
+    wells: Iterable[str],
+    target_t: float,
+    metric: str,
+    val_col: str,
+    threshold: float,
+    fluor_gates: dict[str, float],
+) -> float:
+    """The heatmap cell value alone — :func:`_cell_stat` without its spread.
+
+    The colour-scale sweep in :func:`_compute_global_range` pools values over
+    every timepoint and has no use for the error, and reading the pair's first
+    element there would put the tuple's shape into a second module.
+    """
+    value, _spread = _cell_stat(
+        ctx, wells, target_t, metric, val_col, threshold, fluor_gates,
+    )
+    return value
+
+
+def _sample_map_axis_labels(ctx, layout) -> tuple[list[str], list[str]]:
+    """``(row labels, col labels)`` taken from the sample map, ``""`` per tick
+    where it describes nothing.
+
+    This is the one place the Heat Map reads the Variables layer of Home →
+    Sample Map. Every other plotting surface already names a well by what the
+    user said it is — ``selections_model.figure_names_map`` for the exported
+    rows and ``well_display_label_and_source`` for a tick on Bar or Line — and
+    this grid was the holdout, drawing ``A``–``H`` and ``1``–``12`` (or a bare
+    ``1``, ``2``, ``3`` on a layout built by *Auto-populate from selection*)
+    over a plate whose doses and cell lines were fully annotated.
+
+    A line is described by :func:`sample_variables.labels_for_axis_lines`,
+    which rolls the variables up over every well on that row or column and
+    keeps only the variables that actually vary along the axis. The empty
+    string it returns for an undescribable line is deliberate and is not the
+    same as a missing entry: the caller falls back **per tick**, so one mixed
+    column on an otherwise annotated axis keeps its grid label instead of
+    blanking the whole axis or blanking that one tick.
+
+    Both lists are blank when the toggle is off or the plate has no variables,
+    which is what makes this change nothing for a plate nobody annotated.
+    """
+    blank = ([""] * int(layout.rows), [""] * int(layout.cols))
+    if not bool(ctx.state.heatmap.label_from_sample_map):
+        return blank
+    vset = getattr(getattr(ctx.state, "selection", None), "variables", None)
+    if vset is None or not getattr(vset, "variables", ()):
+        return blank
+    from well_viewer.domain.sample_variables import labels_for_axis_lines
+
+    cells = layout.cells or {}
+    row_wells = [
+        [w for c in range(layout.cols) for w in cells.get((r, c), [])]
+        for r in range(layout.rows)
+    ]
+    col_wells = [
+        [w for r in range(layout.rows) for w in cells.get((r, c), [])]
+        for c in range(layout.cols)
+    ]
+    return (labels_for_axis_lines(vset, row_wells),
+            labels_for_axis_lines(vset, col_wells))
 
 
 def _resolve_color_scale(arr: np.ndarray, ctx) -> tuple[float | None, float | None]:
@@ -515,6 +582,7 @@ def redraw_heatmap(ctx) -> None:
     cmap_name = _selected_cmap(ctx)
 
     arr = np.full((layout.rows, layout.cols), np.nan, dtype=float)
+    err = np.full((layout.rows, layout.cols), np.nan, dtype=float)
     cell_well_index: dict[tuple[int, int], list[str]] = {}
 
     for (r, c), wells in layout.cells.items():
@@ -522,17 +590,23 @@ def redraw_heatmap(ctx) -> None:
             continue
         cell_well_index[(r, c)] = list(wells)
         try:
-            arr[r, c] = _cell_value(
+            arr[r, c], err[r, c] = _cell_stat(
                 ctx, wells, tp, metric, val_col,
                 threshold, fluor_gates,
             )
         except Exception:
             arr[r, c] = float("nan")
+            err[r, c] = float("nan")
 
     # Cache for click/hover handlers (stamped onto ``app._heatmap_*`` by the
     # runtime namespace so the app-native mouse handlers keep resolving).
+    # ``spread`` rides along for the CSV export, which writes the same ``±``
+    # the figure draws rather than recomputing it from a second reduction.
     ctx.runtime.heatmap.cell_well_index = cell_well_index
     ctx.runtime.heatmap.array = arr
+    ctx.runtime.heatmap.spread = err
+    ctx.runtime.heatmap.spread_label = spread_label(
+        bool(getattr(ctx.state.plot, "use_sem", True)))
     ctx.runtime.heatmap.layout_active = layout
 
     # Pool min/max across every timepoint so the colormap stays consistent
@@ -601,12 +675,20 @@ def redraw_heatmap(ctx) -> None:
     # mismatch ValueError when matplotlib's FixedLocator validates them.
     raw_row_labels = list(layout.row_labels or [])
     raw_col_labels = list(layout.col_labels or [])
+    # The sample map wins where it describes a whole line; the layout's own
+    # label is the fallback for the ticks it cannot describe, and the 1-based
+    # index the fallback for a layout that carries no labels at all.
+    sm_row_labels, sm_col_labels = _sample_map_axis_labels(ctx, layout)
     row_labels = [
-        str(raw_row_labels[i]) if i < len(raw_row_labels) and raw_row_labels[i] else str(i + 1)
+        str(sm_row_labels[i]) if i < len(sm_row_labels) and sm_row_labels[i]
+        else str(raw_row_labels[i]) if i < len(raw_row_labels) and raw_row_labels[i]
+        else str(i + 1)
         for i in range(layout.rows)
     ]
     col_labels = [
-        str(raw_col_labels[i]) if i < len(raw_col_labels) and raw_col_labels[i] else str(i + 1)
+        str(sm_col_labels[i]) if i < len(sm_col_labels) and sm_col_labels[i]
+        else str(raw_col_labels[i]) if i < len(raw_col_labels) and raw_col_labels[i]
+        else str(i + 1)
         for i in range(layout.cols)
     ]
     ax.set_xticks(range(layout.cols))
@@ -637,6 +719,7 @@ def redraw_heatmap(ctx) -> None:
 
     # Cell text annotations. Resolve the user's number format once, not per cell.
     value_fmt = _cell_value_format(ctx, fig)
+    show_error = bool(ctx.state.heatmap.show_error)
     for (r, c), wells in cell_well_index.items():
         v = arr[r, c]
         if not math.isfinite(v):
@@ -649,16 +732,31 @@ def redraw_heatmap(ctx) -> None:
         else:
             text = f"{wells[0]}+{len(wells) - 1}"
         ink = _contrast_ink(im.to_rgba(v))
+        e = err[r, c]
+        # A cell with an error to draw gives up a little of its height to it,
+        # so the three lines stay inside one square. A cell without one is laid
+        # out exactly as it was — the whole grid must not shift because one
+        # cell in it happens to hold two replicates.
+        draw_error = show_error and math.isfinite(e)
+        value_y = r - 0.20 if draw_error else r - 0.05
+        name_y = r + 0.34 if draw_error else r + 0.32
         ax.text(
-            c, r + 0.32, text,
+            c, name_y, text,
             ha="center", va="center",
             fontsize=6, color=ink, alpha=0.8,
         )
         ax.text(
-            c, r - 0.05, _format_cell_value(v, metric, value_fmt),
+            c, value_y, _format_cell_value(v, metric, value_fmt),
             ha="center", va="center",
             fontsize=8, color=ink,
         )
+        if draw_error:
+            ax.text(
+                c, r + 0.06,
+                f"± {_format_cell_value(e, metric, value_fmt)}",
+                ha="center", va="center",
+                fontsize=6.5, color=ink, alpha=0.85,
+            )
 
     # Selection rectangles.
     selected = set(ctx.state.selection.selected_wells or set())
@@ -716,6 +814,12 @@ def redraw_heatmap(ctx) -> None:
         f"{active_channel_label(ctx)}"
         f" — {metric} — t = {tp:g} h"
     )
+    if show_error and np.isfinite(err).any():
+        # Which spread the ``±`` under each value is, in the same two words
+        # every other error-bearing figure in the app uses. A grid whose cells
+        # carry an unlabelled ``±`` is the ambiguity ``spread_label`` exists to
+        # remove — SD and SEM differ by √n and look identical on the cell.
+        title = f"{title} (± {ctx.runtime.heatmap.spread_label})"
     # ``pad`` lifts the title away from the heatmap rows so the descenders
     # never overlap the top row of cells; the figure's top=0.88 margin
     # reserves enough room for the lifted title.

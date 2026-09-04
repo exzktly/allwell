@@ -3023,7 +3023,7 @@ place cells in a grid that mirrors your plate or your experimental design.
     which hour was missing, rather than putting up a neighbouring one that would
     look exactly like the one you saved.
 
-  Under **Display ▾**, since these set how the grid is coloured rather than what
+  Under **Display ▾**, since these set how the grid is drawn rather than what
   it shows:
   - **Color map** (e.g. *Greys*, *RdYlBu_r*, *Muted*).
   - **Scale** — *Auto*, or *Fixed* with explicit **vmin** / **vmax**.
@@ -3034,6 +3034,29 @@ place cells in a grid that mirrors your plate or your experimental design.
   - **⇄ Transpose** — swap the rows and columns of the layout.
   - **Rep-set avg** — show the whole rep-set's average in a cell whose well
     belongs to one, instead of that single well.
+  - **Show ± error** — print each cell's spread across its replicates under its
+    value. It is the same error the bar and line plots draw for the same set:
+    the replicates are wells, or fields of view when the app-wide **per-FOV
+    spread** toggle is on, and the figure is marked **SD** or **SEM** in its
+    title to match the choice in **Properties → Statistics**. Three kinds of cell print no error, and the difference
+    matters: a cell holding a **single replicate** has no spread to measure
+    (which is not the same as a spread of zero, and is never shown as one), the
+    **Cell count** aggregation is a total rather than an average and so has
+    none at all, and a cell whose value could not be computed draws nothing in
+    the first place. **Save plot data…** writes the same numbers to an
+    `err_SD` / `err_SEM` column, left blank on exactly those cells.
+  - **Label ticks from sample map** — name each row and column by the values
+    every well on it shares, from
+    [Home → Sample Map → Variables](#variables). A plate with the dose changing
+    across the columns and the cell line changing down the rows labels itself
+    `1 µM` / `10 µM` and `HeLa` / `U2OS` instead of `1`–`12` and `A`–`H`. Two
+    rules keep the labels worth reading: a variable that is the **same
+    everywhere** names nothing, because a tick label is there to tell its tick
+    from the others; and a row or column whose wells **disagree**, or which
+    holds a well you never annotated, keeps its own grid label while its
+    neighbours take theirs from the sample map. On by default — a plate with no
+    variables draws exactly what it always drew — and one click to turn off if
+    you want the plate coordinates back.
 
   And elsewhere:
   - **Value format** (in the **Properties** panel, under *Cell values*) — a
@@ -3068,8 +3091,9 @@ place cells in a grid that mirrors your plate or your experimental design.
   **Scale** to *Fixed* vmin/vmax so frames are comparable, then step through
   the **Timepoint** dropdown to watch the metric evolve.
 - **A session that never opens this tab leaves its saved settings alone.** The
-  colour map, the scale mode and its vmin/vmax, the log-scale and rep-set-average
-  toggles and the timepoint are all stored with the dataset, and they are
+  colour map, the scale mode and its vmin/vmax, the log-scale, rep-set-average,
+  ± error and sample-map tick-label toggles and the timepoint are all stored
+  with the dataset, and they are
   rewritten from the controls only once the controls exist. So opening a plate,
   working entirely on other tabs and closing it leaves them exactly as you left
   them last time. Resetting the view clears them, as it does the rest of the

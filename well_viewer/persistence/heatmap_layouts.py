@@ -1,7 +1,8 @@
 """Heatmap layout persistence — ``heatmap_layouts`` section of ``persistence.json``.
 
 The section wraps the layouts in an object so visual settings (cmap, scale
-mode, vmin/vmax, rep-set average toggle, selected timepoint) persist alongside.
+mode, vmin/vmax, rep-set average, log scale, the per-cell ``±`` error, the
+sample-map tick labels and the selected timepoint) persist alongside.
 Legacy ``heatmap_layouts.json`` sidecars are migrated on first load by ``_doc``.
 
 The timepoint is stored as a value, not as a position in the combo: adding
@@ -82,6 +83,13 @@ def _collect_settings(app) -> dict:
         "vmax": _f(hm.vmax) if hm is not None else None,
         "repset_avg": bool(hm.repset_avg if hm is not None else False),
         "log_scale": bool(hm.log_scale if hm is not None else False),
+        "show_error": bool(hm.show_error if hm is not None else False),
+        # Written even though it defaults to True, so a user who turned it off
+        # gets it back off. The *read* side is what carries the default: a file
+        # saved before this key existed has no opinion about it, and the tab
+        # should behave for that plate the way it does for a new one.
+        "label_from_sample_map": bool(
+            hm.label_from_sample_map if hm is not None else True),
         # Selected timepoint, by value. ``tp_index`` is still written for
         # older builds reading this file, and is what a file written before
         # ``tp_value`` existed restores from; the value wins whenever it is
@@ -218,6 +226,33 @@ def apply_persisted_settings(ctx) -> None:
             log_cb.setChecked(log_scale)
         finally:
             log_cb.blockSignals(blocked)
+
+    # The per-cell ``±`` and the sample-map tick labels. The defaults here are
+    # the dataclass defaults on ``HeatmapState`` and differ from each other —
+    # a file that predates either key restores the tab's own behaviour rather
+    # than a blanket False, which for the tick labels would silently turn the
+    # feature off for every plate saved before it existed.
+    show_error = bool(settings.get("show_error", False))
+    if hm is not None:
+        hm.show_error = show_error
+    err_cb = ctx.widgets.get_or_none("_heatmap_show_error_cb")
+    if err_cb is not None:
+        blocked = err_cb.blockSignals(True)
+        try:
+            err_cb.setChecked(show_error)
+        finally:
+            err_cb.blockSignals(blocked)
+
+    from_sample_map = bool(settings.get("label_from_sample_map", True))
+    if hm is not None:
+        hm.label_from_sample_map = from_sample_map
+    sm_cb = ctx.widgets.get_or_none("_heatmap_sample_labels_cb")
+    if sm_cb is not None:
+        blocked = sm_cb.blockSignals(True)
+        try:
+            sm_cb.setChecked(from_sample_map)
+        finally:
+            sm_cb.blockSignals(blocked)
 
     # Selected timepoint. The combo's items are populated by
     # ``refresh_heatmap_timepoints`` (called just before this on tab build);

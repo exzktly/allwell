@@ -53,14 +53,19 @@ def error_bar_settings(ctx) -> tuple[str, float, bool]:
 def spread_kind_label(err_kind: str, use_sem: bool) -> str:
     """What a ``±`` drawn under :func:`error_bar_settings` is measuring.
 
-    ``"95% CI"`` for the scaled option, else the two words
-    ``metric_labels.spread_label`` gives. A figure that draws a 1.96×SEM
-    interval and calls it ``SEM`` is off by that factor to anyone reading it,
-    which is the whole reason the label is derived rather than written out.
+    ``"95% CI"`` for the scaled option, and otherwise whatever
+    :func:`data.metric_labels.spread_label` says — asked, not re-spelled, which
+    is what ``tests/test_one_spelling_for_the_plot_title_words.py`` is for: a
+    second copy of ``"SEM" if use_sem else "SD"`` is a second place for the
+    vocabulary to drift from the eight titles that already share one. A figure
+    that draws a 1.96×SEM interval and calls it ``SEM`` is off by that factor
+    to anyone reading it, which is the whole reason this is derived at all.
     """
+    from well_viewer.data.metric_labels import spread_label
+
     if str(err_kind) == "ci95":
         return "95% CI"
-    return "SEM" if use_sem else "SD"
+    return spread_label(use_sem)
 
 
 def _default_legend() -> dict[str, bool]:

@@ -492,6 +492,90 @@ def names_for_well_sets(vset: VariableSet, well_sets) -> list[str]:
             for (_labels, complete), name, wells in zip(resolved, names, sets)]
 
 
+def labels_for_axis_lines(vset: VariableSet, line_wells, *,
+                          fallbacks=()) -> list[str]:
+    """One tick label per line of a grid, said in the variables that line holds.
+
+    *line_wells* is one list of well tokens per tick — every well in a heat-map
+    row, or every well in a heat-map column — in tick order. The answer is one
+    string per line, ``""`` for a line the sample map cannot describe, so a
+    caller can fall back per tick rather than per axis.
+
+    Two rules, and the axis reads wrong without either:
+
+    * **A line is described only by what all of its wells agree on.** That is
+      :func:`roll_up`'s answer, with its two refusals intact: wells that hold
+      different values, and a well that was never annotated, both contribute
+      nothing. A column of eight wells where seven say ``1 µM`` and one says
+      nothing is not a ``1 µM`` column, for the reason :func:`roll_up`
+      documents — a tick is a claim about everything under it.
+    * **A variable that does not vary along this axis contributes nothing.** A
+      tick label exists to tell its tick from the others, and a plate whose
+      every well is ``HeLa`` would otherwise print ``HeLa`` on all eight rows
+      and all twelve columns — strictly less informative than the ``A``–``H``
+      it displaced. So a variable is dropped from an axis when two or more of
+      its lines resolve it and they all resolve it to the same value. This is
+      what makes the usual plate read the way it is laid out: a dose that
+      changes by column labels the columns, a cell line that changes by row
+      labels the rows, and neither appears on the other axis.
+
+      The test is *not* "at least two distinct values", which is the same rule
+      for a plate laid out in full and the wrong one at its edges: an axis
+      where one column is a clean ``10 µM`` and its neighbour spans two doses
+      resolves exactly one value, and that column is told apart from its
+      neighbour by carrying it. Dropping the variable there would blank the
+      one tick the sample map could describe.
+
+    No well-token suffix. :func:`name_for_wells` completes a partial
+    description with the wells it came from, which is right for a legend entry
+    naming a group and wrong for a tick: ``10 µM (A01/A02/A03/A04)`` is a tick
+    nobody can read, and the axis it sits on already says which wells are
+    under it.
+
+    *fallbacks* is what each tick is called without this — the grid's own row
+    letter or column number — and it is what a composed name that **two ticks
+    share** takes as its suffix, exactly as :func:`names_for_well_sets`
+    appends the wells to two groups that compose one name. The rule above
+    stops a variable that is constant across the *whole* axis from naming
+    anything; it cannot stop one that is constant across a *run* of it, and
+    that run is the more common plate: rows A–D HeLa and E–H U2OS resolve two
+    distinct values, so the variable is kept, and the y axis then reads
+    ``HeLa`` four times over with ``A``–``H`` gone — row 0 no longer
+    distinguishable from row 1, which is the failure the rule exists to
+    prevent. With the suffix those ticks read ``HeLa (A)`` … ``U2OS (H)``,
+    which says both things and loses neither. Passing no *fallbacks* leaves a
+    collision undisambiguated, so a caller with nothing to fall back on still
+    gets the composed names.
+    """
+    lines = [list(wells) for wells in line_wells]
+    if not lines:
+        return []
+    parts: list[list[str]] = [[] for _ in lines]
+    for variable in vset.variables:
+        if not _annotates_anything(vset, variable):
+            continue
+        rolled = [roll_up(vset, variable.id, wells) for wells in lines]
+        resolved = [v for v in rolled if v is not None and v != MIXED]
+        if len(resolved) > 1 and len(set(resolved)) == 1:
+            continue
+        for i, value_id in enumerate(rolled):
+            if value_id is None or value_id == MIXED:
+                continue
+            label = variable.display_label(value_id).strip()
+            if label:
+                parts[i].append(label)
+    names = [NAME_JOIN.join(p) for p in parts]
+    clashing = {name for name in names if name and names.count(name) > 1}
+    fallback_list = list(fallbacks)
+    return [
+        name if not name or name not in clashing
+        else (f"{name} ({fallback_list[i]})"
+              if i < len(fallback_list) and str(fallback_list[i]).strip()
+              else name)
+        for i, name in enumerate(names)
+    ]
+
+
 def assign(vset: VariableSet, variable_id: str, wells, value_id: str | None) -> VariableSet:
     """*vset* with *wells* set to *value_id*, or cleared when it is ``None``.
 

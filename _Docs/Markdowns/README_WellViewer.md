@@ -3023,7 +3023,7 @@ place cells in a grid that mirrors your plate or your experimental design.
     which hour was missing, rather than putting up a neighbouring one that would
     look exactly like the one you saved.
 
-  Under **Display ▾**, since these set how the grid is coloured rather than what
+  Under **Display ▾**, since these set how the grid is drawn rather than what
   it shows:
   - **Color map** (e.g. *Greys*, *RdYlBu_r*, *Muted*).
   - **Scale** — *Auto*, or *Fixed* with explicit **vmin** / **vmax**.
@@ -3034,6 +3034,52 @@ place cells in a grid that mirrors your plate or your experimental design.
   - **⇄ Transpose** — swap the rows and columns of the layout.
   - **Rep-set avg** — show the whole rep-set's average in a cell whose well
     belongs to one, instead of that single well.
+  - **Show ± error** — print each cell's spread across its replicates under its
+    value. It is the same error the bar and line plots draw for the same set:
+    the replicates are wells, or fields of view when the app-wide **per-FOV
+    spread** toggle is on, and the interval is whichever one you picked under
+    **Properties → Statistics → Error bars**. All four choices govern the cell,
+    not just two — **SEM** and **SD** as you would expect, **95% CI** scaling it
+    by the same 1.96 the whisker is scaled by, and **None** silencing the cell
+    annotation just as it hides the whisker. The title names which one you are
+    looking at (`± SEM`, `± SD`, `± 95% CI`), because three different intervals
+    over the same replicates look identical printed on a cell.
+
+    Three kinds of cell print no error, and the difference matters: a cell
+    holding a **single replicate** has no spread to measure (which is not the
+    same as a spread of zero, and is never shown as one), the **Cell count**
+    aggregation is a total rather than an average and so has none at all, and a
+    cell whose value could not be computed draws nothing in the first place. A
+    real but tiny spread is never rounded down to `0.00` either — it switches to
+    two significant figures rather than print a zero it is not, since a cell
+    with nothing to report prints nothing at all. **Save plot data…** writes
+    the same numbers to an `err_SD` / `err_SEM` / `err_95CI` column, left
+    blank on exactly the cells that show none.
+  - **Label ticks from sample map** — name each row and column by the values
+    every well on it shares, from
+    [Home → Sample Map → Variables](#variables). A plate with the dose changing
+    across the columns and the cell line changing down the rows labels itself
+    `1 µM` / `10 µM` and `HeLa` / `U2OS` instead of `1`–`12` and `A`–`H`. Three
+    rules keep the labels worth reading:
+    - a **name you typed yourself** on a tick always wins. Double-clicking a row
+      or column header still renames it, and the sample map will not overwrite
+      what you wrote — clear the name and the tick goes back to being one the
+      sample map can speak for;
+    - a variable that is the **same everywhere** names nothing, because a tick
+      label is there to tell its tick from the others. Where a variable is the
+      same across only *part* of an axis — rows A–D HeLa, rows E–H U2OS — the
+      ticks that would otherwise read alike carry their row letter or column
+      number too (`HeLa (A)`, `HeLa (B)`, …), so you never lose track of which
+      row is which;
+    - a row or column whose wells **disagree**, or which holds a well you never
+      annotated, keeps its own grid label while its neighbours take theirs from
+      the sample map.
+
+    Long names lean over and shrink slightly rather than overlapping, and are
+    never shortened — a truncated condition name is a figure stating the wrong
+    condition. On by default (a plate with no variables draws exactly what it
+    always drew), and one click to turn off if you want the plate coordinates
+    back.
 
   And elsewhere:
   - **Value format** (in the **Properties** panel, under *Cell values*) — a
@@ -3051,25 +3097,31 @@ place cells in a grid that mirrors your plate or your experimental design.
   **Auto-populate from selection** for bulk work. You can also click a heatmap
   cell to select its wells; **Shift**-click adds to the selection and
   **Ctrl**-click (**Cmd** on macOS) toggles individual wells in and out.
-- **Auto-populate from selection** fills the grid from whichever selection is
-  live, and with Sample Definition groups defined the **Rep-set avg** toggle
-  decides what a cell stands for:
-  - *Rep-set avg on* — **one cell per visible replicate set**, holding all of
-    that set's loaded wells, so the heat map shows one averaged value per set.
-    A multi-well cell shows as `A01+3` in the layout editor (hover for the full
+- **Auto-populate from selection** fills the grid with exactly the wells the
+  plate is showing as active — which, with Sample Definition groups defined,
+  means **every visible group *and* every well you clicked on individually**.
+  A plate is very often mixed like that: a few replicate pairs plus some wells
+  that stand alone, and both halves belong on the map. The **Rep-set avg**
+  toggle decides what a cell stands for:
+  - *Rep-set avg on* — **one cell per group**, holding all of that group's
+    loaded wells so the heat map shows one averaged value per group, and **one
+    cell per solo well** beside them. That is the same mixture of group
+    averages and single wells the Bar Plots tab draws for the same plate. A
+    multi-well cell shows as `A01+3` in the layout editor (hover for the full
     membership) and moves as a unit when dragged.
   - *Rep-set avg off* — **one cell per well**, in plate order, across every
-    visible set. The map is per-well, so the grid is too.
+    visible group and every solo well. The map is per-well, so the grid is too.
 
   With no groups defined it lays out one cell per selected well, in plate order.
   Either way the grid grows (up to 32×32) if the selection needs more cells than
-  it currently has.
+  it currently has, and nothing the plate shows as active is left out of it.
 - **Optimal use** — build a layout once that matches your plate, pin the colour
   **Scale** to *Fixed* vmin/vmax so frames are comparable, then step through
   the **Timepoint** dropdown to watch the metric evolve.
 - **A session that never opens this tab leaves its saved settings alone.** The
-  colour map, the scale mode and its vmin/vmax, the log-scale and rep-set-average
-  toggles and the timepoint are all stored with the dataset, and they are
+  colour map, the scale mode and its vmin/vmax, the log-scale, rep-set-average,
+  ± error and sample-map tick-label toggles and the timepoint are all stored
+  with the dataset, and they are
   rewritten from the controls only once the controls exist. So opening a plate,
   working entirely on other tabs and closing it leaves them exactly as you left
   them last time. Resetting the view clears them, as it does the rest of the

@@ -370,6 +370,15 @@ def reset_view(ctx) -> None:
     hm = ctx.state.feature_slice("heatmap")
     if hm is not None:
         restore_slice_defaults(hm, "heatmap")
+        # The slice is only half of that tab's state: its controls hold the
+        # other half, and a reset that moves one and not the other leaves a
+        # checkbox describing a setting the figure is no longer drawn with.
+        # It matters in both directions now — ``label_from_sample_map``
+        # defaults to True, so without this a reset turns the sample-map tick
+        # labels back on while their box stays unchecked.
+        from well_viewer.persistence.heatmap_layouts import sync_widgets_to_slice
+        with _swallow("sync the heat-map controls to the reset defaults"):
+            sync_widgets_to_slice(ctx)
     _save(ctx, "heatmap_layouts")
 
     mv = ctx.state.feature_slice("multivariate")

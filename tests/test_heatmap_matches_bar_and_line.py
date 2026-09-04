@@ -7,8 +7,9 @@ only when every well in the set has the same cell count — and diverge silently
 whenever confluence differs, which is most real plates.
 
 Both surfaces now reduce the one replicate list ``group_replicate_stats``
-produces, through the same ``replicate_mean`` reducer, so they cannot describe
-different quantities again.
+produces, through the same ``_reduce_reps`` — the heat map reaches it through
+``replicate_mean_and_spread``, which returns the spread beside the mean — so
+they cannot describe different quantities again.
 
 The fixture gives the two wells deliberately different cell counts, because a
 set whose wells have equal counts cannot tell the two conventions apart — a

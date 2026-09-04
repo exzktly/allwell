@@ -320,13 +320,17 @@ def test_a_heatmap_cell_with_no_point_is_undefined_not_zero():
     empty one. Its two sibling metrics already returned NaN."""
     src = (REPO_ROOT / "well_viewer" / "features" / "heatmap" / "controller.py").read_text()
     tree = ast.parse(src)
-    zero_returns = [
+    # Anchored on the conditional itself rather than on a ``return`` holding
+    # one: the cell now answers with its spread beside its value, so the
+    # expression is bound to a name and returned as half of a pair. What the
+    # guard is for is the ``else`` branch, and that is in the conditional
+    # wherever the conditional sits.
+    count_choices = [
         n for n in ast.walk(tree)
-        if isinstance(n, ast.Return) and isinstance(n.value, ast.IfExp)
-        and "matched[0][5]" in ast.unparse(n.value)
+        if isinstance(n, ast.IfExp) and "matched[0][5]" in ast.unparse(n)
     ]
-    assert zero_returns, "the count metric no longer reads n_total"
-    assert all("nan" in ast.unparse(n).lower() for n in zero_returns), (
+    assert count_choices, "the count metric no longer reads n_total"
+    assert all("nan" in ast.unparse(n).lower() for n in count_choices), (
         "an unmatched count cell is reported as a measured zero")
 
 

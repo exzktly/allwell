@@ -106,11 +106,14 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed(ctx))
     band.add_scope("", tp_cb)
 
-    # ── Display popover: everything about how the grid is coloured ──────────
+    # ── Display popover: everything about how the grid is drawn ─────────────
     # These change the figure's appearance rather than what it is showing, and
     # they are set once and left. One click is the right price for the row.
+    # Not only colour any more: the per-cell ``±`` and the sample-map tick
+    # labels are appearance by the same test and live here too.
     display_btn, disp, disp_l = make_popover_button("Display ▾", band)
-    display_btn.setToolTip("Colour map, scale and layout options")
+    display_btn.setToolTip(
+        "Colour map, scale, layout, per-cell error and tick labels")
 
     disp_l.addWidget(QLabel("Color map:", disp))
     # v2: LutSelector (gradient strip + name + searchable popover + reverse-LUT
@@ -165,6 +168,33 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     log_scale_cb.toggled.connect(lambda _v: _on_log_scale_changed(ctx))
     disp_l.addWidget(log_scale_cb)
 
+    show_error_cb = reg.register("_heatmap_show_error_cb", QCheckBox("Show ± error", disp))
+    show_error_cb.setToolTip(
+        "Print each cell's spread across replicates under its value — the same "
+        "replicates and the same SD/SEM choice the bar and line plots use, so "
+        "the per-FOV toggle governs it here too. Cells with a single replicate "
+        "have no spread and print none; the Cell count metric is a total rather "
+        "than an average and never prints one."
+    )
+    show_error_cb.toggled.connect(lambda _v: _on_show_error_changed(ctx))
+    disp_l.addWidget(show_error_cb)
+
+    sample_labels_cb = reg.register(
+        "_heatmap_sample_labels_cb", QCheckBox("Label ticks from sample map", disp))
+    sample_labels_cb.setToolTip(
+        "Name each row and column by the sample-map values every well on it "
+        "shares — the dose that changes across the columns, the cell line that "
+        "changes down the rows. A variable that is the same everywhere names "
+        "nothing, and a row or column whose wells disagree keeps its grid label."
+    )
+    # Seeded before the connection, not after: this is the one toggle in the
+    # popover whose state default is True, and a ``setChecked`` after the
+    # ``connect`` would fire the handler during the build — persisting a
+    # setting and redrawing a figure that does not exist yet.
+    sample_labels_cb.setChecked(bool(ctx.state.heatmap.label_from_sample_map))
+    sample_labels_cb.toggled.connect(lambda _v: _on_sample_labels_changed(ctx))
+    disp_l.addWidget(sample_labels_cb)
+
     band.add_action(display_btn)
 
     export_btn, export_menu, _export_data_act = build_plot_save_menu(
@@ -206,10 +236,12 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     divider = make_axes_locatable(ax)
     reg.register("_heatmap_cax", divider.append_axes("right", size="4%", pad=0.08))
     canvas = reg.register("_heatmap_canvas", card.canvas)
-    # Heatmap never draws error bands or per-FOV spread — it shows a
-    # single aggregated value per grid cell. The shared band controls
-    # would only mislead the user, so leave the card's controls row
-    # empty.
+    # No shared band controls on the card. The heat map does report a spread —
+    # ``Display ▾ → Show ± error`` prints each cell's, across the same
+    # replicates and under the same SD/SEM choice the bar and line plots use —
+    # but it draws no *band*, and both settings that govern it are app-wide and
+    # already reachable from this tab's Properties → Statistics. Duplicating
+    # them on the card would put two controls for one setting on one screen.
     card.setControlsWidget(None)
     # NOTE: don't trigger a redraw on theme change — heatmap_controller doesn't
     # use plot_style.apply_ax_style (it has its own inline ax styling), so a
@@ -403,6 +435,22 @@ def _on_log_scale_changed(ctx) -> None:
     _redraw(ctx)
 
 
+def _on_show_error_changed(ctx) -> None:
+    cb = ctx.widgets.get_or_none("_heatmap_show_error_cb")
+    if cb is not None:
+        ctx.state.heatmap.show_error = bool(cb.isChecked())
+    _persist_settings(ctx)
+    _redraw(ctx)
+
+
+def _on_sample_labels_changed(ctx) -> None:
+    cb = ctx.widgets.get_or_none("_heatmap_sample_labels_cb")
+    if cb is not None:
+        ctx.state.heatmap.label_from_sample_map = bool(cb.isChecked())
+    _persist_settings(ctx)
+    _redraw(ctx)
+
+
 def _on_cmap_changed(ctx) -> None:
     cb = ctx.widgets.get_or_none("_heatmap_cmap_cb")
     if cb is not None:
@@ -495,6 +543,13 @@ def _on_label_double_click(ctx, evt) -> None:
         while len(layout.col_labels) < layout.cols:
             layout.col_labels.append(str(len(layout.col_labels) + 1))
         layout.col_labels[idx] = new_text or str(idx + 1)
+    # Record that this tick's name is the user's, which is what makes it
+    # outrank the one the sample map would compose for the same tick. Without
+    # it the rename is a control that runs, writes, redraws, and shows the
+    # user something else — and on an annotated plate that is every rename.
+    # An emptied dialog clears the mark along with the name: the tick is back
+    # to the grid's own label, which the sample map may speak for again.
+    layout.mark_label_typed(kind, idx, bool(new_text))
     _persist_and_redraw(ctx)
 
 

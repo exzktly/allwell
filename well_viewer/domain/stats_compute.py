@@ -314,16 +314,23 @@ def _reduce_reps(reps, field: str, use_sem: bool) -> tuple[float, float]:
     return m, (sd / math.sqrt(n) if use_sem else sd)
 
 
-def replicate_mean(reps, field: str) -> float:
-    """The mean across a per-replicate field — the value Bar and Line draw.
+def replicate_mean_and_spread(reps, field: str, *, use_sem: bool) -> tuple[float, float]:
+    """``(mean, SD-or-SEM)`` across a per-replicate field, from one reduction.
 
-    A public name for the reduction half of :func:`_reduce_reps`, for consumers
-    that want the central value and not the spread. Sharing the reducer is the
-    point: it skips non-finite replicates the same way, so a surface using this
-    cannot disagree with a bar drawn from the same replicate list.
+    The public name for :func:`_reduce_reps` — the shared reducer behind every
+    rep-set error bar and the stats spread — for a surface that draws the
+    central value and its error together. The Heat Map's per-cell ``± err`` is
+    the caller it was named for, and it took over from a ``replicate_mean``
+    that answered with the mean alone: two calls to reduce one list is the same
+    answer at twice the cost, and two call sites free to drift apart about
+    which replicates are skipped.
+
+    ``use_sem`` is the app-wide Properties → Statistics choice
+    (``ctx.state.plot.use_sem``), so a cell's error bar and the bar chart's
+    whisker for the same set measure the same thing. The spread of a
+    single-replicate set is ``NaN``, never ``0.0`` — see :func:`_reduce_reps`.
     """
-    mean, _spread = _reduce_reps(reps, field, use_sem=False)
-    return mean
+    return _reduce_reps(reps, field, use_sem=use_sem)
 
 
 def _thresh_on_col(ctx) -> str | None:

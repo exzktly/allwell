@@ -23,6 +23,37 @@ class HeatmapLayout:
     cells: dict[tuple[int, int], list[str]] = field(default_factory=dict)
     row_labels: list[str] | None = None
     col_labels: list[str] | None = None
+    # The tick indices whose label the **user typed** (the canvas double-click
+    # rename). ``row_labels`` alone cannot answer that question: it holds the
+    # plate default's ``A``–``H`` and a hand-typed name in the same slot, and a
+    # user is perfectly entitled to type ``A``. The distinction is load-bearing
+    # because the Heat Map also derives tick names from the sample map, and a
+    # derived name may replace a *default* while never replacing a name the
+    # user wrote — a rename that redraws as something else is a control that
+    # does not work.
+    row_labels_typed: list[int] = field(default_factory=list)
+    col_labels_typed: list[int] = field(default_factory=list)
+
+    def label_typed(self, kind: str, index: int) -> bool:
+        """Whether the user named tick *index* on the ``"row"`` / ``"col"`` axis."""
+        typed = self.row_labels_typed if kind == "row" else self.col_labels_typed
+        return int(index) in set(typed or ())
+
+    def mark_label_typed(self, kind: str, index: int, typed: bool = True) -> None:
+        """Record (or clear) that the user named tick *index* on that axis.
+
+        Clearing is what an emptied rename dialog does: the label falls back to
+        the grid's own, which is a default again and may be spoken for by the
+        sample map once more.
+        """
+        store = self.row_labels_typed if kind == "row" else self.col_labels_typed
+        index = int(index)
+        if typed:
+            if index not in store:
+                store.append(index)
+                store.sort()
+        elif index in store:
+            store.remove(index)
 
     # ── basic editing helpers ────────────────────────────────────────────────
 
@@ -57,6 +88,10 @@ class HeatmapLayout:
         self.rows = new_rows
         self.cols = new_cols
         self.cells = new_cells
+        # A marker for a tick the grid no longer has would come back to life,
+        # attached to a different row, the next time the grid grew.
+        self.row_labels_typed = [i for i in self.row_labels_typed if i < new_rows]
+        self.col_labels_typed = [i for i in self.col_labels_typed if i < new_cols]
         return dropped
 
     def transpose(self) -> None:
@@ -64,6 +99,11 @@ class HeatmapLayout:
         self.cells = {(c, r): list(wells) for (r, c), wells in self.cells.items()}
         self.rows, self.cols = int(self.cols), int(self.rows)
         self.row_labels, self.col_labels = self.col_labels, self.row_labels
+        # The markers follow their labels across the swap. Left behind they
+        # would protect whichever ticks now sit at those indices on the other
+        # axis, which is a rename the user never made.
+        self.row_labels_typed, self.col_labels_typed = (
+            self.col_labels_typed, self.row_labels_typed)
 
     def reorder_rows(self, src: int, dst: int) -> None:
         """Move row *src* to position *dst* (insert-at semantics)."""
@@ -82,6 +122,12 @@ class HeatmapLayout:
             while len(self.row_labels) < self.rows:
                 self.row_labels.append(str(len(self.row_labels) + 1))
             self.row_labels = [self.row_labels[old_r] for old_r in order]
+        # A marker names a position, so a move has to renumber it with the
+        # label it belongs to — otherwise dragging a renamed row leaves the
+        # protection behind on whatever row took its place.
+        self.row_labels_typed = sorted(
+            new_r for new_r, old_r in enumerate(order)
+            if old_r in set(self.row_labels_typed or ()))
 
     def reorder_cols(self, src: int, dst: int) -> None:
         """Move column *src* to position *dst* (insert-at semantics)."""
@@ -100,6 +146,9 @@ class HeatmapLayout:
             while len(self.col_labels) < self.cols:
                 self.col_labels.append(str(len(self.col_labels) + 1))
             self.col_labels = [self.col_labels[old_c] for old_c in order]
+        self.col_labels_typed = sorted(
+            new_c for new_c, old_c in enumerate(order)
+            if old_c in set(self.col_labels_typed or ()))
 
     # ── serialization ────────────────────────────────────────────────────────
 
@@ -114,6 +163,8 @@ class HeatmapLayout:
             ],
             "row_labels": list(self.row_labels) if self.row_labels else None,
             "col_labels": list(self.col_labels) if self.col_labels else None,
+            "row_labels_typed": [int(i) for i in self.row_labels_typed],
+            "col_labels_typed": [int(i) for i in self.col_labels_typed],
         }
 
     @classmethod
@@ -134,6 +185,29 @@ class HeatmapLayout:
                 cells[(r, c)] = wells
         row_labels = data.get("row_labels")
         col_labels = data.get("col_labels")
+
+        def _typed(key: str, limit: int) -> list[int]:
+            """The in-range tick indices under *key*, deduplicated and sorted.
+
+            A layout saved before this key existed has none, which is the right
+            answer for it: nothing in that file distinguishes a typed label
+            from the grid's own, so treating them all as typed would freeze
+            every plate default against the sample map, and treating none as
+            typed loses at most the protection on a label the user can re-type.
+            """
+            raw = data.get(key)
+            if not isinstance(raw, list):
+                return []
+            out: set[int] = set()
+            for entry in raw:
+                try:
+                    i = int(entry)
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= i < limit:
+                    out.add(i)
+            return sorted(out)
+
         return cls(
             name=str(data.get("name", "") or "").strip() or "layout",
             rows=rows,
@@ -141,6 +215,8 @@ class HeatmapLayout:
             cells=cells,
             row_labels=list(row_labels) if isinstance(row_labels, list) and row_labels else None,
             col_labels=list(col_labels) if isinstance(col_labels, list) and col_labels else None,
+            row_labels_typed=_typed("row_labels_typed", rows),
+            col_labels_typed=_typed("col_labels_typed", cols),
         )
 
 

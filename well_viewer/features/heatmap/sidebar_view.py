@@ -12,8 +12,10 @@ State of truth: ``app._heatmap_layouts``. The sidebar maintains exactly
 one layout named ``SIDEBAR_LAYOUT_NAME`` and synchronises the table
 widget to its ``cells`` dict on every change. Dragging a well in puts
 that one well in a cell, but a cell can hold several — "Auto-populate
-from selection" builds one cell per replicate set when **Rep-set avg**
-is on. Those cells show as ``A01+3`` (the members in the tooltip) and
+from selection" builds one cell per *entry* when **Rep-set avg** is on,
+and an entry is a visible replicate set **or** a well the user soloed
+onto the plot, because a plate is very often a mixture of the two.
+Those cells show as ``A01+3`` (the members in the tooltip) and
 move as a unit; the well token behind a cell is carried in
 ``_CELL_TOKEN_ROLE`` so the summary text never reaches the model.
 """
@@ -466,43 +468,51 @@ def _sorted_by_plate(ctx, wells) -> list[str]:
 def _autopopulate_cells(ctx) -> list[list[str]]:
     """The list of cells "Auto-populate from selection" should build, in order.
 
-    Which selection it reads depends on the mode the plate is in, because the
-    two modes express a selection in different places:
+    **What the selection *is* comes from
+    ``data_loading.plot_group_well_lists``, never from a second reading of the
+    stores.** That function's own docstring says which wells a plot is about is
+    decided there and nowhere else, and warns that a second implementation of
+    the rule "produces a plausible result with the wrong wells in it: right
+    schema, right-looking counts, no error". This tab was that second
+    implementation, and it went wrong in exactly that way on a **mixed plate**.
 
-    * **replicate mode** (Sample Definition groups defined) — the selection
-      lives in ``selection.selections`` and ``selected_wells`` is empty or stale,
-      so reading the latter produced a grid of whichever individual wells
-      happened to be left in it. The *visible* replicate sets are the selection;
-      how they are laid out follows the **Rep-set avg** toggle, because that is
-      what decides whether a cell means a set or a well:
+    Replicate mode does not mean every well is in a group. The plate expresses
+    its active set as *the visible groups' wells **plus** the wells toggled on
+    individually* (``selection.active_solo_wells``) — that is what
+    ``on_sidebar_plate_well_activated`` writes when a click lands on a well no
+    group claims, and what the plate paints as selected. Reading the replicate
+    sets alone answered with the grouped half and dropped the other, so a plate
+    of two replicate pairs and three solo wells auto-populated four cells out
+    of seven: the solo wells were simply not in the grid, with nothing said and
+    a full-looking layout to show for it.
 
-      - checked — each set becomes ONE cell holding all of its loaded wells, so
-        the map shows one averaged value per set.
-      - unchecked — every well of every visible set becomes its own cell, in
-        plate order. Grouping them anyway put a whole set in one cell, which the
-        sidebar grid can only render as its first well and the map drew as a
-        pooled mean — the toggle looked like it did nothing and the other
-        members looked dropped.
-    * **plain mode** — each individually selected well becomes its own cell, in
-      plate order.
+    The **Rep-set avg** toggle still decides the *shape* of the plan, because
+    it is what decides whether a cell means a set or a well:
+
+    * checked — one cell per entry: a replicate set becomes ONE cell holding
+      all of its loaded wells and shows the set's average, and a solo well
+      becomes a one-well cell beside it, which is the same mixture of
+      set-averages and single wells the bar chart draws for that plate.
+    * unchecked — every well of every entry becomes its own cell, in plate
+      order. Grouping them anyway put a whole set in one cell, which the
+      sidebar grid can only render as its first well and the map drew as a
+      pooled mean — the toggle looked like it did nothing and the other
+      members looked dropped.
+
+    With no groups defined the producer answers with one entry per selected
+    well, which is the plain-mode behaviour unchanged; ``fallback_to_all=False``
+    keeps "nothing selected" meaning an empty plan rather than the whole plate.
     """
-    from well_viewer.domain.plot_members import plot_replicate_sets
+    from well_viewer.data.data_loading import plot_group_well_lists
 
-    rep_sets = plot_replicate_sets(ctx)
-    if rep_sets:
-        loaded = ctx.state.dataset.well_paths
-        cells = [[w for w in (getattr(rs, "wells", None) or []) if w in loaded]
-                 for rs in rep_sets]
-        cells = [wells for wells in cells if wells]
-        if bool(ctx.state.heatmap.repset_avg):
-            return cells
-        return [[w] for w in _sorted_by_plate(ctx, dict.fromkeys(
-            w for wells in cells for w in wells))]
-
-    selected = list(ctx.state.selection.selected_wells or [])
-    if not selected:
+    entries = [wells for _name, wells, _rset
+               in plot_group_well_lists(ctx, fallback_to_all=False) if wells]
+    if not entries:
         return []
-    return [[w] for w in _sorted_by_plate(ctx, selected)]
+    if bool(ctx.state.heatmap.repset_avg):
+        return [list(wells) for wells in entries]
+    return [[w] for w in _sorted_by_plate(ctx, dict.fromkeys(
+        w for wells in entries for w in wells))]
 
 
 def _on_autopopulate(ctx) -> None:

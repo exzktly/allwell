@@ -825,11 +825,28 @@ def export_heatmap_data(ctx) -> None:
     metric_cb = ctx.widgets.get_or_none("_heatmap_metric_cb")
     metric = str(metric_cb.currentText()) if metric_cb else "metric"
     col_name = f"{ch}_{metric.lower().replace(' ', '_')}"
+    # The spread the last redraw *computed*, carried across rather than
+    # reduced a second time, so the number in the file and the number on the
+    # grid cannot drift apart. Not the same as what the figure *drew*: the
+    # Display toggle and an "Error bars: None" both hide the annotation
+    # without making the measurement go away, and a column of real errors is
+    # worth having in a file whose reader is going to plot it elsewhere.
+    # ``spread`` is absent on a heat map drawn before this column existed.
+    spread = ctx.runtime.heatmap.spread
+    # The column names the interval, in a token a spreadsheet and a parser can
+    # both hold: the figure's "95% CI" would put a space and a percent sign in
+    # a CSV header. Non-alphanumerics go, so SEM and SD pass through unchanged
+    # and 95% CI becomes CI95.
+    _label = str(ctx.runtime.heatmap.spread_label or "SD")
+    err_name = "err_" + ("".join(ch for ch in _label if ch.isalnum()) or "SD")
     well_labels = figure_names_map(ctx)
     rows_out = []
     for r in range(layout.rows):
         for c in range(layout.cols):
             val = float(arr[r, c]) if not _math.isnan(arr[r, c]) else ""
+            e = ""
+            if spread is not None and not _math.isnan(spread[r, c]):
+                e = float(spread[r, c])
             wells = sorted((cell_index or {}).get((r, c), []))
             wells_str = ";".join(wells)
             rows_out.append({
@@ -839,6 +856,10 @@ def export_heatmap_data(ctx) -> None:
                 "well_names": well_names_joined(wells_str, well_labels),
                 "timepoint_h": f"{tp:g}" if tp is not None else "",
                 col_name: f"{val:.6f}" if val != "" else "",
+                # Blank, not 0, for an undefined spread — a single-replicate
+                # cell has no error, which is not the same fact as one whose
+                # replicates agreed exactly (``stats_compute._reduce_reps``).
+                err_name: f"{e:.6f}" if e != "" else "",
             })
     if not rows_out:
         _warn(ctx.window, "Export", "No heatmap cells to export.")
@@ -850,7 +871,8 @@ def export_heatmap_data(ctx) -> None:
     )
     if not out_path:
         return
-    fieldnames = ["row", "col", "wells", "well_names", "timepoint_h", col_name]
+    fieldnames = ["row", "col", "wells", "well_names", "timepoint_h", col_name,
+                  err_name]
     try:
         with open(out_path, "w", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)

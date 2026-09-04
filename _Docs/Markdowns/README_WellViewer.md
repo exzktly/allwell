@@ -3074,19 +3074,24 @@ place cells in a grid that mirrors your plate or your experimental design.
   **Auto-populate from selection** for bulk work. You can also click a heatmap
   cell to select its wells; **Shift**-click adds to the selection and
   **Ctrl**-click (**Cmd** on macOS) toggles individual wells in and out.
-- **Auto-populate from selection** fills the grid from whichever selection is
-  live, and with Sample Definition groups defined the **Rep-set avg** toggle
-  decides what a cell stands for:
-  - *Rep-set avg on* — **one cell per visible replicate set**, holding all of
-    that set's loaded wells, so the heat map shows one averaged value per set.
-    A multi-well cell shows as `A01+3` in the layout editor (hover for the full
+- **Auto-populate from selection** fills the grid with exactly the wells the
+  plate is showing as active — which, with Sample Definition groups defined,
+  means **every visible group *and* every well you clicked on individually**.
+  A plate is very often mixed like that: a few replicate pairs plus some wells
+  that stand alone, and both halves belong on the map. The **Rep-set avg**
+  toggle decides what a cell stands for:
+  - *Rep-set avg on* — **one cell per group**, holding all of that group's
+    loaded wells so the heat map shows one averaged value per group, and **one
+    cell per solo well** beside them. That is the same mixture of group
+    averages and single wells the Bar Plots tab draws for the same plate. A
+    multi-well cell shows as `A01+3` in the layout editor (hover for the full
     membership) and moves as a unit when dragged.
   - *Rep-set avg off* — **one cell per well**, in plate order, across every
-    visible set. The map is per-well, so the grid is too.
+    visible group and every solo well. The map is per-well, so the grid is too.
 
   With no groups defined it lays out one cell per selected well, in plate order.
   Either way the grid grows (up to 32×32) if the selection needs more cells than
-  it currently has.
+  it currently has, and nothing the plate shows as active is left out of it.
 - **Optimal use** — build a layout once that matches your plate, pin the colour
   **Scale** to *Fixed* vmin/vmax so frames are comparable, then step through
   the **Timepoint** dropdown to watch the metric evolve.

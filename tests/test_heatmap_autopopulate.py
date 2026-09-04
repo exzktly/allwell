@@ -2,18 +2,27 @@
 
 The plate expresses a selection in two different places depending on mode. In
 plain mode it is ``selection.selected_wells``; in replicate mode (Sample
-Definition groups defined) it is ``selection.selections``, and
+Definition groups defined) it is the visible entries of
+``selection.selections`` together with ``selection.active_solo_wells``, and
 ``selected_wells`` is empty or holds whatever individual wells were left in it
 from an earlier plain-mode click. Auto-populate read only ``selected_wells``,
 so with replicate sets chosen it built a grid of those stale individual wells —
 the wrong count, and one cell per well rather than one per set.
 
-In replicate mode the layout then follows the **Rep-set avg** toggle, since
-that is what decides whether a cell stands for a set or for a well: checked
-gives one multi-well cell per set (the map averages it), unchecked gives one
-cell per well. Grouping regardless of the toggle put a whole set in a single
-cell that the sidebar grid could only render as its first well, so the other
-members looked dropped and the toggle looked inert.
+The planner no longer decides any of that itself: it asks
+``data_loading.plot_group_well_lists``, the one function that answers which
+wells a plot is about, and chooses only the *shape* to lay the answer out in.
+The solo half of that answer is what these fixtures could not see, and
+``tests/test_heatmap_autopopulate_mixed_plate.py`` is where a mixed plate is
+pinned; the stub below carries ``active_solo_wells`` so it cannot silently
+stop resembling the object the planner is handed.
+
+In replicate mode the layout follows the **Rep-set avg** toggle, since that is
+what decides whether a cell stands for a set or for a well: checked gives one
+multi-well cell per set (the map averages it), unchecked gives one cell per
+well. Grouping regardless of the toggle put a whole set in a single cell that
+the sidebar grid could only render as its first well, so the other members
+looked dropped and the toggle looked inert.
 
 These exercise the pure cell-planner, so they need no application fixture.
 """
@@ -25,16 +34,25 @@ import types
 from well_viewer.features.heatmap.sidebar_view import _autopopulate_cells
 
 
-def _ctx(*, selections, selected_wells, well_paths, repset_avg=True):
-    """Minimal stand-in for the frozen ViewerContext this planner reads."""
+def _ctx(*, selections, selected_wells, well_paths, repset_avg=True,
+         active_solo_wells=()):
+    """Minimal stand-in for the frozen ViewerContext this planner reads.
+
+    ``active_solo_wells`` defaults to empty rather than being absent: the real
+    ``SelectionState`` always has the field, and a stub that omits it is a stub
+    that agrees with whichever half of the selection the planner happens to
+    read (CLAUDE.md §7.8).
+    """
     return types.SimpleNamespace(
         state=types.SimpleNamespace(
             selection=types.SimpleNamespace(
                 selections=selections,
                 selected_wells=selected_wells,
+                active_solo_wells=set(active_solo_wells),
             ),
             dataset=types.SimpleNamespace(well_paths=well_paths),
             heatmap=types.SimpleNamespace(repset_avg=repset_avg),
+            plot=types.SimpleNamespace(group_by_variable=""),
         ),
         window=types.SimpleNamespace(),
     )

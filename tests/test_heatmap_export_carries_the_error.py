@@ -34,7 +34,7 @@ from well_viewer.features.heatmap.models import HeatmapLayout
 def exported(tmp_path, monkeypatch):
     """Run ``export_heatmap_data`` over a stamped runtime and read the rows back."""
 
-    def _run(*, array, spread, spread_label="SEM"):
+    def _run(*, array, spread, spread_label="SEM", per_fov=False):
         layout = HeatmapLayout(name="Row", rows=1, cols=3)
         layout.assign(0, 0, ["A01", "A02"])
         layout.assign(0, 1, ["B01"])
@@ -45,6 +45,9 @@ def exported(tmp_path, monkeypatch):
             state=types.SimpleNamespace(
                 heatmap=types.SimpleNamespace(tp_values=[24.0]),
                 channel=types.SimpleNamespace(active_channel="GFP"),
+                # ``_repset_mean_of_means`` follows this toggle, so the same
+                # cell is a spread over wells or over fields depending on it.
+                plot=types.SimpleNamespace(use_fov_replicates=per_fov),
             ),
             runtime=types.SimpleNamespace(heatmap=types.SimpleNamespace(
                 array=np.asarray(array, dtype=float),
@@ -123,3 +126,23 @@ def test_a_heatmap_drawn_without_a_spread_still_exports(exported):
 
     assert [r["err_SEM"] for r in rows] == ["", "", ""]
     assert rows[0]["GFP_mean_above_threshold"] == "6.000000"
+
+
+def test_the_row_says_what_its_spread_is_over(exported):
+    """SD across wells and SD across fields are different numbers.
+
+    The column name says *which interval* (SD / SEM / CI95) and this says *what
+    it is over*, the way the Response CSV's ``spread_unit`` and the bar and
+    line CSVs' ``n_above_replicate_unit`` do. Without it a reader turning SEM
+    back into SD as ``SEM x sqrt(n)`` takes an ``n`` from one denominator and a
+    spread from another.
+    """
+    rows = exported(array=[[6.0, 2.0, np.nan]], spread=[[4.0, np.nan, np.nan]])
+    assert rows[0]["spread_unit"] == "well"
+    assert rows[1]["spread_unit"] == "well"
+    # A cell holding no well has nothing for a replicate to be.
+    assert rows[2]["spread_unit"] == ""
+
+    fov = exported(array=[[6.0, 2.0, np.nan]], spread=[[4.0, np.nan, np.nan]],
+                   per_fov=True)
+    assert fov[0]["spread_unit"] == "fov"

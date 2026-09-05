@@ -246,6 +246,20 @@ def _finite_positive(v) -> bool:
     return 0.0 < f < float("inf")  # finite & positive (NaN/inf compare False)
 
 
+def whiskers_or_none(errs):
+    """The sequence to hand ``errorbar``, or ``None`` when it would draw noise.
+
+    ``capsize`` draws a cap at every point even where the bar has zero length,
+    so a group with no computable spread came out wearing a cross at the centre
+    of its marker that reads as a measured error of zero. The tab has always
+    passed ``None`` in that case; the Batch Export twin of this figure passed
+    the raw sequence, so the same points that carry no whisker on screen carried
+    phantom caps in the exported file.
+    """
+    seq = list(errs or [])
+    return seq if any(_finite_positive(e) for e in seq) else None
+
+
 def redraw_scatter_agg(
     ctx,
     stat_x: str,
@@ -328,8 +342,8 @@ def redraw_scatter_agg(
             # bar. Passing None hides both the bar and its caps.
             x_err_seq = data.get('x_err') or []
             y_err_seq = data.get('y_err') or []
-            xerr = x_err_seq if any(_finite_positive(e) for e in x_err_seq) else None
-            yerr = y_err_seq if any(_finite_positive(e) for e in y_err_seq) else None
+            xerr = whiskers_or_none(x_err_seq)
+            yerr = whiskers_or_none(y_err_seq)
             container = ax_agg.errorbar(
                 data['x'],
                 data['y'],

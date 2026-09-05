@@ -9942,6 +9942,29 @@ cell in every one of these columns, never `0.000000`: a lone well with
 Aggregate-FOVs off has one sample of the fraction and nothing to vary across,
 and a zero would read as replicates that agreed exactly.
 
+That blank-for-undefined rule is `export/service.spread_cell`, and it is one
+function because the writers that had their own answer got it wrong: the
+scatter aggregate formatted its errors with a bare f-string on the tab and in
+both of its Batch Export jobs, so a group of one replicate — a single selected
+well, the commonest case there — wrote the literal `nan`. A spreadsheet reads
+that cell as text, so the column stops being numeric for every row below it.
+`tests/test_a_spread_reaches_a_csv_as_a_number_or_a_blank.py` is the guard: a
+dict entry whose key names a spread column may not be an unconditional
+`JoinedStr`, since a bare f-string has no branch in which to say "not computed".
+
+Beside the interval, every file that carries one names **what it is over**:
+`n_above_replicate_unit` on the bar and line CSVs, `spread_unit` on the Heat
+Map, scatter-aggregate and Response ones. `export/service.spread_unit_for` asks
+`stats_compute.replicate_unit` rather than re-spelling the FOV rule, so an
+exported column cannot disagree with the statistic the plot drew. The scatter
+file adds `spread_kind` (`SD` / `SEM`) because neither its columns nor its
+figure title said which interval its whiskers were. `_replicate_unit_for` — the
+bar CSV's version of the same question — keys on the Aggregate-FOVs toggle for
+the same reason the line row does: with the toggle on, `collect_bar_items` puts
+the per-FOV mean in `n_above` for a lone well too, and keying the unit on
+`n_above_total` alone left that row stating a per-FOV mean under an empty unit
+with its spread blanked.
+
 Stacking when both axes are active is **ΔΔCt-style**:
 ```
    Y(t) = (X(t) / C(t)) / (X(0) / C(0))
@@ -10088,6 +10111,14 @@ CSV output (additive in both line and bar paths):
    the bar, collect_line_series / collect_line_series_for_group for
    the line: one with FC_STATE_OFF for the raw columns and one with
    the active state for the fold-change columns.
+
+   The scatter-aggregate CSVs (on-tab and both batch jobs) carry
+   the same two error columns plus spread_kind / spread_unit, and
+   their figures share the tab's whisker rule
+   (scatter/controller.whiskers_or_none): capsize draws a cap at
+   every point even where the bar has zero length, so a group with
+   no computable spread came out of Batch Export wearing a cross
+   the tab does not draw.
 
    A row is therefore one DRAWN member at one timepoint, on both
    tabs and on both paths. export_plot_data used to re-aggregate

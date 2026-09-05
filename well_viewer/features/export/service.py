@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
+from well_viewer.data.metric_labels import spread_label
 from well_viewer.domain.numeric import is_number
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
@@ -212,15 +213,58 @@ def line_metric_row(pt, *, ch: str, metric: str, threshold: float,
 def _replicate_unit_for(item, *, per_fov: bool) -> str:
     """What ``n_above_replicate_mean`` averages over, for the CSV.
 
-    ``fov`` when Aggregate-FOVs is on, ``well`` for a pooled replicate set,
-    and empty for a single well — where the drawn value is the count itself
-    and there is nothing to average. Recorded because no other column in the
-    row says whether the FOV toggle was on, which would leave the mean and its
-    spread ambiguous.
+    ``fov`` whenever Aggregate-FOVs is on — for a lone well as much as for a
+    replicate set, because a well's fields are its replicates and
+    ``collect_bar_items`` puts the per-FOV mean in ``n_above`` on both
+    branches. Keying this on ``n_above_total`` alone left a solo well's row
+    stating a per-FOV mean under an empty unit with its spread blanked, while
+    ``err_n_above_<band>`` two columns away carried that same spread; and the
+    Line tab's row, which decides this from the toggle, then said ``fov`` for
+    the very same well.
+
+    ``well`` for a pooled replicate set with the toggle off, and empty for a
+    single well there — the drawn value is the count itself and there is
+    nothing to average. Recorded because no other column in the row says
+    whether the FOV toggle was on, which would leave the mean and its spread
+    ambiguous.
     """
+    if per_fov:
+        return "fov" if is_number(item.n_above) else ""
     if item.n_above_total is None:
         return ""
-    return "fov" if per_fov else "well"
+    return "well"
+
+
+def spread_cell(value, fmt: str = ".6f") -> str:
+    """A spread as a CSV cell: the number, or **empty** when undefined.
+
+    The one rule every exporter follows, in one place so the sibling writers
+    cannot drift from it. ``float("nan")`` formatted with an f-string renders
+    the literal ``nan``, which a spreadsheet reads as *text* — the column stops
+    being numeric for every row below it, and a chart built on it silently
+    drops the series. Zero is different and is written: it says the replicates
+    agreed exactly, which is a measurement.
+    """
+    return f"{float(value):{fmt}}" if is_number(value) else ""
+
+
+def spread_unit_for(ctx, n_wells: int = 1) -> str:
+    """What one replicate is for the spreads in this file: ``fov`` or ``well``.
+
+    The app-wide Aggregate-FOVs rule, asked of ``stats_compute.replicate_unit``
+    rather than re-spelled, so an exported ``spread_unit`` column cannot
+    disagree with the statistic the plot drew. Empty for a row covering no
+    loaded well, where there is nothing for a replicate to be.
+
+    Every exporter that writes an error column needs it: SD across wells and SD
+    across fields are different numbers, and a reader reconstructing one from
+    the other — SD as SEM x sqrt(n) — otherwise takes two columns that do not
+    share a denominator.
+    """
+    from well_viewer.domain.stats_compute import replicate_unit
+
+    unit = replicate_unit(int(n_wells), bool(ctx.state.plot.use_fov_replicates))
+    return "" if unit == "none" else unit
 
 
 def bar_metric_fieldnames(ch: str, metric: str, band_lbl: str) -> list:
@@ -790,6 +834,11 @@ def export_scatter_agg_data(ctx) -> None:
     name_x, name_y = _axis_column_names(stat_x, stat_y)
     well_labels = figure_names_map(ctx)
     well_paths = set(ctx.state.dataset.well_paths or {})
+    # ``collect_scatter_agg_data`` reduces its replicates with a plain SD/SEM
+    # (``_reduce_reps``), so the band is the app's Statistics choice and the
+    # unit is the Aggregate-FOVs one.
+    band_lbl = spread_label(bool(ctx.state.plot.use_sem))
+    spread_unit = spread_unit_for(ctx)
     rows_out = []
     for label, data in scatter_data.items():
         x_val = data['x'][0]
@@ -805,9 +854,16 @@ def export_scatter_agg_data(ctx) -> None:
                                        well_paths=well_paths, strict=True),
             "timepoint_h": f"{tp:.4f}",
             name_x: f"{x_val:.6f}",
-            f"{name_x}_error": f"{x_err:.6f}",
+            # ``spread_cell``, not an f-string: a group of one replicate has an
+            # undefined spread, which reached this file as the literal ``nan``
+            # — and a single well is the commonest selection on this tab.
+            f"{name_x}_error": spread_cell(x_err),
             name_y: f"{y_val:.6f}",
-            f"{name_y}_error": f"{y_err:.6f}",
+            f"{name_y}_error": spread_cell(y_err),
+            # What the two error columns are, which nothing else in the file
+            # (or on the figure) said: SD or SEM, over wells or over fields.
+            "spread_kind": band_lbl,
+            "spread_unit": spread_unit,
         })
 
     if not rows_out:
@@ -828,7 +884,8 @@ def export_scatter_agg_data(ctx) -> None:
     try:
         with open(out_path, "w", newline="") as fh:
             fieldnames = ["replicate_well", "well_name", "timepoint_h",
-                          name_x, f"{name_x}_error", name_y, f"{name_y}_error"]
+                          name_x, f"{name_x}_error", name_y, f"{name_y}_error",
+                          "spread_kind", "spread_unit"]
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows_out)
@@ -891,6 +948,12 @@ def export_heatmap_data(ctx) -> None:
                 # cell has no error, which is not the same fact as one whose
                 # replicates agreed exactly (``stats_compute._reduce_reps``).
                 err_name: f"{e:.6f}" if e != "" else "",
+                # The column name says SD / SEM / CI95; this says what those
+                # are *over*. ``_repset_mean_of_means`` follows the app-wide
+                # Aggregate-FOVs toggle, so the same cell is a spread across
+                # wells or across fields depending on a control the file
+                # otherwise does not record.
+                "spread_unit": spread_unit_for(ctx, len(wells)),
             })
     if not rows_out:
         _warn(ctx.window, "Export", "No heatmap cells to export.")
@@ -903,7 +966,7 @@ def export_heatmap_data(ctx) -> None:
     if not out_path:
         return
     fieldnames = ["row", "col", "wells", "well_names", "timepoint_h", col_name,
-                  err_name]
+                  err_name, "spread_unit"]
     try:
         with open(out_path, "w", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)

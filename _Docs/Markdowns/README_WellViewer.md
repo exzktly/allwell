@@ -2412,6 +2412,20 @@ same pair on the line and bar CSVs. It is empty, never `0.000000`, when nothing
 could be computed: one well with Aggregate-FOVs off has a single sample of the
 fraction and nothing to vary across.
 
+**Every error column in every export follows one rule.** A spread that was
+measured is written, including a spread of exactly `0` — that says the
+replicates agreed. A spread that could not be computed is an **empty cell**,
+never `0` and never the word `nan`: a spreadsheet reads `nan` as text, which
+stops the whole column being numeric and quietly drops the series from any
+chart built on it. This holds for the line, bar, Heat Map, Scatter (Wells view)
+and Response CSVs alike, from the tab's own Save menu and from Batch Export.
+
+**And every file says what its error is over.** SD across wells and SD across
+fields are different numbers, so a file carrying one names the unit: the line
+and bar CSVs in `n_above_replicate_unit`, the Heat Map, Scatter (Wells view)
+and Response CSVs in `spread_unit`. The Scatter file also carries `spread_kind`
+(`SD` or `SEM`), which nothing on that tab's figure states either.
+
 **Statistical consistency.** The control denominator uses the same
 averaging statistic as the displayed bar / curve — mean-of-per-well-means
 for rep-set controls, single-well aggregation for solo wells, per-FOV
@@ -2984,6 +2998,12 @@ cells it kept.
 - **Aggregate controls** — X-axis / Y-axis pickers over aggregate metrics
   (e.g. *Mean Fluorescence*, *Fraction above threshold*) with an **error band**
   (SEM / SD) on the points.
+- **What the Wells view exports.** One row per well (or replicate set) per
+  timepoint, with each axis's value and its error, plus `spread_kind` (`SD` or
+  `SEM`) and `spread_unit` (`well` or `fov`) saying what that error is. A point
+  with one replicate — a single well, with **Spread** left on wells — has no
+  error to report, so its cells are **empty**; the same points draw no whisker
+  on the figure, in a batch export as well as on the tab.
 - **Gates (definition).** Each gate you draw is auto-named (`Gate 1`, `Gate 2`,
   …), shown on the plot, and renameable in Properties — where each entry also
   states the x and y metrics that gate was drawn on, so a list built up across
@@ -3073,7 +3093,10 @@ place cells in a grid that mirrors your plate or your experimental design.
     two significant figures rather than print a zero it is not, since a cell
     with nothing to report prints nothing at all. **Save plot data…** writes
     the same numbers to an `err_SD` / `err_SEM` / `err_95CI` column, left
-    blank on exactly the cells that show none.
+    blank on exactly the cells that show none, and a `spread_unit` column
+    beside it saying whether that interval is across the cell's wells or
+    across their fields — the **Spread** toggle changes which, and nothing
+    else in the file recorded it.
   - **Label ticks from sample map** — name each row and column by the values
     every well on it shares, from
     [Home → Sample Map → Variables](#variables). A plate with the dose changing

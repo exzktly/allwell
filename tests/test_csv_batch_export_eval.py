@@ -397,6 +397,10 @@ def test_batch_line_replicates_and_single_wells(ctx, tmp_path):
     assert rep[0]["wells"] == "A01;A02" and rep[0]["n_wells"] == "2"
     assert solo[0]["wells"] == "B01" and solo[0]["n_wells"] == "1"
 
+    # The replicate set's fraction spread reaches the batch CSV: two wells at
+    # 0.4 and 0.6 have one, and the line schema had no column for it at all.
+    assert all(r["err_frac_SEM"] != "" for r in rep), [r["err_frac_SEM"] for r in rep]
+    assert all(r["n_above_replicate_unit"] == "well" for r in rep)
     rep_by_t = {r["time_h"]: r["mean_gfp_mean_intensity"] for r in rep}
     # Mean-of-per-well-means (the tab's rep-set statistic): mean(A01, A02).
     # Equals pool-of-cells here only because the fixture has equal cell counts.
@@ -461,6 +465,9 @@ def test_batch_line_solo_well_error_matches_within_well(ctx, tmp_path):
     # Within-well SEM across B01's 6 cells is > 0 (a 1-well replicate spread
     # would be exactly 0).
     assert any(float(r["sem_gfp_mean_intensity"]) > 0 for r in solo)
+    # A solo well with Aggregate-FOVs off has one sample of the fraction, so
+    # its spread is undefined — blank, not 0.000000.
+    assert all(r["err_frac_SEM"] == "" for r in solo)
 
 
 # =============================================================================
@@ -728,8 +735,17 @@ def test_batch_scatter_agg_replicates_and_single_wells(ctx, tmp_path):
     assert by_label["RepA"]["x"] == "108.5"           # pooled/per-well-mean GFP
     assert by_label["RepA"]["x_err"] == "5"           # SEM of per-well means
     assert by_label["B01"]["x"] == "123.5"            # solo well GFP
-    # Undefined, not zero — one replicate has no spread to measure.
-    assert by_label["B01"]["x_err"] in ("", "nan"), by_label["B01"]["x_err"]
+    # Undefined, not zero — one replicate has no spread to measure — and an
+    # EMPTY cell, not the string "nan", which this assertion used to accept.
+    # A spreadsheet reads "nan" as text, so the column stops being numeric for
+    # every row below it and a chart built on it drops the series; the line and
+    # bar CSVs have always blanked it, and these three writers had their own
+    # answer (``export/service.spread_cell`` is the one rule now).
+    assert by_label["B01"]["x_err"] == "", by_label["B01"]["x_err"]
+    # What the error columns are and what they are over — nothing else in the
+    # file, or on the figure, said either.
+    assert by_label["RepA"]["spread_kind"] == "SEM"
+    assert by_label["RepA"]["spread_unit"] == "well"
 
 
 def test_batch_scatter_cells_honors_display_options(ctx, tmp_path, monkeypatch):

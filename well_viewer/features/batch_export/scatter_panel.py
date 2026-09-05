@@ -846,7 +846,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
             # Same two columns the on-tab aggregate CSV carries, because it is
             # the same statistic: without them an ``x_err`` says neither which
             # interval it is nor what it is over.
-            _band = spread_label(bool(self._ctx.state.plot.use_sem))
+            _band = spread_label(bool(self._ctx.state.plot.use_sem)).lower()
             _unit = spread_unit_for(self._ctx)
             rows: list[dict] = []
             for data in scatter_data.values():
@@ -863,16 +863,15 @@ class ScatterBatchExportPanel(BatchExportPanel):
                     "y": f"{float(data['y'][0]):.8g}",
                     # ``spread_cell``: an undefined spread — a group of one
                     # replicate — used to reach the file as the literal ``nan``.
-                    "x_err": spread_cell(data['x_err'][0], ".8g"),
-                    "y_err": spread_cell(data['y_err'][0], ".8g"),
-                    "spread_kind": _band,
+                    f"x_{_band}": spread_cell(data['x_err'][0], ".8g"),
+                    f"y_{_band}": spread_cell(data['y_err'][0], ".8g"),
                     "spread_unit": _unit,
                 })
             if csv_path is not None:
                 with open(csv_path, "w", newline="") as fh:
                     fieldnames = ["group", "label", "well_name", "timepoint_h",
-                                  "x", "y", "x_err", "y_err",
-                                  "spread_kind", "spread_unit"]
+                                  "x", "y", f"x_{_band}", f"y_{_band}",
+                                  "spread_unit"]
                     writer = csv.DictWriter(fh, fieldnames=fieldnames)
                     writer.writeheader()
                     writer.writerows(rows)
@@ -1015,7 +1014,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
             # Same two columns the on-tab aggregate CSV carries, because it is
             # the same statistic: without them an ``x_err`` says neither which
             # interval it is nor what it is over.
-            _band = spread_label(bool(self._ctx.state.plot.use_sem))
+            _band = spread_label(bool(self._ctx.state.plot.use_sem)).lower()
             _unit = spread_unit_for(self._ctx)
             rows: list[dict] = []
             for data in scatter_data.values():
@@ -1032,16 +1031,15 @@ class ScatterBatchExportPanel(BatchExportPanel):
                     "y": f"{float(data['y'][0]):.8g}",
                     # ``spread_cell``: an undefined spread — a group of one
                     # replicate — used to reach the file as the literal ``nan``.
-                    "x_err": spread_cell(data['x_err'][0], ".8g"),
-                    "y_err": spread_cell(data['y_err'][0], ".8g"),
-                    "spread_kind": _band,
+                    f"x_{_band}": spread_cell(data['x_err'][0], ".8g"),
+                    f"y_{_band}": spread_cell(data['y_err'][0], ".8g"),
                     "spread_unit": _unit,
                 })
             if csv_path is not None:
                 with open(csv_path, "w", newline="") as fh:
                     fieldnames = ["group", "label", "well_name", "timepoint_h",
-                                  "x", "y", "x_err", "y_err",
-                                  "spread_kind", "spread_unit"]
+                                  "x", "y", f"x_{_band}", f"y_{_band}",
+                                  "spread_unit"]
                     writer = csv.DictWriter(fh, fieldnames=fieldnames)
                     writer.writeheader()
                     writer.writerows(rows)

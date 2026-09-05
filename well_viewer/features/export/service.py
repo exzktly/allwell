@@ -94,23 +94,27 @@ def well_names_joined(tokens, well_labels: dict, *,
 def line_metric_fieldnames(ch: str, metric: str, band_lbl: str) -> list:
     """CSV columns for a single line-plot timepoint row, in order.
 
-    ``err_frac_{band}`` sits beside ``fraction_above`` for the same reason the
-    bar CSV carries it: the Fraction panel draws an error band, and a file that
-    reports the fraction without the spread behind it cannot reproduce the
-    figure it was exported from. The name matches the bar CSV's column exactly,
-    so one reader handles both.
+    Every name says what the cell holds, and the bar CSV spells each of them
+    the same way: ``events_total`` is the integer count, the
+    ``events_per_replicate_*`` pair is the value the N panel draws with its
+    spread, ``replicate_unit`` says whether a replicate is a well or a field,
+    and each spread carries its band (``sem`` / ``sd``) in its own name.
+    ``fraction_{band}`` sits beside ``fraction_above_threshold`` because a file
+    that reports the fraction without the spread behind it cannot reproduce the
+    figure it was exported from.
     """
+    band = band_lbl.lower()
     return [
-        "time_h",
+        "timepoint_h",
         f"mean_{ch}_{metric}",
-        f"{band_lbl.lower()}_{ch}_{metric}",
-        "n_above_threshold",
-        "n_above_replicate_mean",
-        f"err_n_above_replicate_{band_lbl}",
-        "n_above_replicate_unit",
-        "fraction_above",
-        f"err_frac_{band_lbl}",
-        "n_total",
+        f"{band}_{ch}_{metric}",
+        "events_total",
+        "events_per_replicate_mean",
+        f"events_per_replicate_{band}",
+        "replicate_unit",
+        "fraction_above_threshold",
+        f"fraction_{band}",
+        "cells_total",
         "threshold",
         "metric",
     ]
@@ -129,10 +133,9 @@ def line_metric_row(pt, *, ch: str, metric: str, threshold: float,
     data represents.
 
     The three Events columns are the bar CSV's, for the same reason: the
-    integer ``n_above_threshold`` and the fractional
-    ``n_above_replicate_mean`` are different numbers, and without
-    ``n_above_replicate_unit`` naming what the mean is over, nothing else in
-    the row records whether Aggregate-FOVs was on.
+    integer ``events_total`` and the fractional ``events_per_replicate_mean``
+    are different numbers, and without ``replicate_unit`` naming what the mean
+    is over, nothing else in the row records whether Aggregate-FOVs was on.
 
     *per_fov* is the Aggregate-FOVs toggle, and it selects **which fields the
     row reports**, exactly as ``_paint_series`` selects which fields the Events
@@ -169,14 +172,15 @@ def line_metric_row(pt, *, ch: str, metric: str, threshold: float,
         rep_spread = n_above_rep_spread if is_replicate else None
         rep_unit = "well" if is_replicate else ""
 
+    band = band_lbl.lower()
     return {
-        "time_h": f"{t:.4f}",
+        "timepoint_h": f"{t:.4f}",
         f"mean_{ch}_{metric}": f"{mean:.6f}" if not math.isnan(mean) else "",
         # Empty, not the string "nan". The bar CSV's own writer blanks a
         # non-finite spread here, and a spreadsheet reads a literal ``nan``
         # cell as text — so the column stops being numeric for every row below
         # it, and a chart built on it silently drops the series.
-        f"{band_lbl.lower()}_{ch}_{metric}": (
+        f"{band}_{ch}_{metric}": (
             f"{spread:.6f}" if is_number(spread) else ""),
         # An integer count, and it stays one. ``LinePoint.as_aggpoint`` floats
         # index 4 so the drawn per-well mean of a replicate set is not
@@ -185,26 +189,27 @@ def line_metric_row(pt, *, ch: str, metric: str, threshold: float,
         # ``nan``. Fold change scales this field into a ratio, which is
         # genuinely fractional and keeps six decimals like every other
         # non-integer column.
-        "n_above_threshold": (
+        "events_total": (
             int(n_above_total) if n_above_total is not None
             else "" if not is_number(n_above)
             else int(n_above) if float(n_above).is_integer()
             else f"{float(n_above):.6f}"),
-        "n_above_replicate_mean": (
+        "events_per_replicate_mean": (
             f"{float(rep_mean):.6f}" if is_number(rep_mean) else ""),
         # A spread of exactly 0.0 is written, because it is a measurement —
         # the replicates agreed. Blank means nothing was computed, and the
         # unit column beside it is what says which of the two an empty cell is.
-        f"err_n_above_replicate_{band_lbl}": (
+        f"events_per_replicate_{band}": (
             f"{float(rep_spread):.6f}"
             if rep_unit and is_number(rep_spread) else ""),
-        "n_above_replicate_unit": rep_unit,
-        "fraction_above": f"{frac:.6f}" if not math.isnan(frac) else "",
+        "replicate_unit": rep_unit,
+        "fraction_above_threshold": (
+            f"{frac:.6f}" if not math.isnan(frac) else ""),
         # The spread the Fraction panel bands the curve with. Blank when it was
         # never computed — a single well with Aggregate-FOVs off has no second
         # sample of the fraction to vary across — and never 0.000000, which
         # would read as replicates that agreed exactly.
-        f"err_frac_{band_lbl}": (
+        f"fraction_{band}": (
             f"{float(frac_spread):.6f}"
             if not math.isnan(frac) and is_number(frac_spread) else ""),
         # The cells behind this row: one well's at a timepoint, or the sum
@@ -214,27 +219,26 @@ def line_metric_row(pt, *, ch: str, metric: str, threshold: float,
         # so a zero can only be a placeholder, and printing it says the member
         # held no cells where it plainly held some.
         #
-        # It is a **count of cells**, not the denominator of ``fraction_above``
-        # on a replicate-set row: a set's fraction is the mean of its wells'
-        # fractions, so ``n_above_threshold / n_total`` equals it only when the
-        # wells contributed equally many cells.
-        "n_total": n_total if n_total else "",
+        # It is a **count of cells**, not the denominator of
+        # ``fraction_above_threshold`` on a replicate-set row: a set's fraction
+        # is the mean of its wells' fractions, so ``events_total / cells_total``
+        # equals it only when the wells contributed equally many cells.
+        "cells_total": n_total if n_total else "",
         "threshold": f"{threshold:.4f}",
         "metric": metric,
     }
 
 
 def _replicate_unit_for(item, *, per_fov: bool) -> str:
-    """What ``n_above_replicate_mean`` averages over, for the CSV.
+    """What ``events_per_replicate_mean`` averages over, for the CSV.
 
     ``fov`` whenever Aggregate-FOVs is on — for a lone well as much as for a
     replicate set, because a well's fields are its replicates and
     ``collect_bar_items`` puts the per-FOV mean in ``n_above`` on both
     branches. Keying this on ``n_above_total`` alone left a solo well's row
-    stating a per-FOV mean under an empty unit with its spread blanked, while
-    ``err_n_above_<band>`` two columns away carried that same spread; and the
-    Line tab's row, which decides this from the toggle, then said ``fov`` for
-    the very same well.
+    stating a per-FOV mean under an empty unit with its spread blanked, while a
+    sibling column carried that same spread; and the Line tab's row, which
+    decides this from the toggle, then said ``fov`` for the very same well.
 
     ``well`` for a pooled replicate set with the toggle off, and empty for a
     single well there — the drawn value is the count itself and there is
@@ -290,18 +294,27 @@ def spread_unit_for(ctx, n_wells: int = 1) -> str:
 
 
 def bar_metric_fieldnames(ch: str, metric: str, band_lbl: str) -> list:
-    """CSV columns for a single bar-plot timepoint row, in order."""
+    """CSV columns for a single bar-plot timepoint row, in order.
+
+    The same names the line CSV writes, so one reader handles both files. The
+    bar CSV used to spell its mean's spread ``err_<band>_<ch>_<metric>`` where
+    the line CSV spelled it ``<band>_<ch>_<metric>``, and to carry a second
+    Events spread column holding the number
+    ``events_per_replicate_<band>`` already held — the collectors put the drawn
+    spread in one field on both branches, so the two were never different
+    numbers.
+    """
+    band = band_lbl.lower()
     return [
         "timepoint_h",
         f"mean_{ch}_{metric}",
-        f"err_{band_lbl}_{ch}_{metric}",
-        "fraction_above",
-        f"err_frac_{band_lbl}",
-        "n_above_threshold",
-        f"err_n_above_{band_lbl}",
-        "n_above_replicate_mean",
-        f"err_n_above_replicate_{band_lbl}",
-        "n_above_replicate_unit",
+        f"{band}_{ch}_{metric}",
+        "fraction_above_threshold",
+        f"fraction_{band}",
+        "events_total",
+        "events_per_replicate_mean",
+        f"events_per_replicate_{band}",
+        "replicate_unit",
         "threshold",
         "metric",
     ]
@@ -327,21 +340,21 @@ def bar_metric_row(
     """Metric-column dict for one bar-plot bar at a single timepoint.
 
     The arguments mirror the per-bar values used by both ``_collect_bar_items``
-    (per-tab) and direct ``_aggregate_*`` calls (batch). ``n_above_spread > 0``
-    indicates per-FOV spread is in use, which switches *n_above* to a float
-    and exposes the per-FOV error column.
+    (per-tab) and direct ``_aggregate_*`` calls (batch).
 
     Two quantities are reported for Events, because they are different
-    numbers. ``n_above_threshold`` is the integer count this column has always
-    carried — for a replicate set, the total across its wells, supplied as
-    *n_above_total*. ``n_above_replicate_mean`` is what the panel actually
-    draws: the mean of the per-well counts, with its cross-well spread. A
-    two-well set holding 7 and 8 events reports 15 and 7.5 respectively, and
-    neither is a rounding of the other.
+    numbers. ``events_total`` is the integer count — for a replicate set, the
+    total across its wells, supplied as *n_above_total*.
+    ``events_per_replicate_mean`` is what the panel actually draws: the mean of
+    the per-well counts, with its spread across them. A two-well set holding 7
+    and 8 events reports 15 and 7.5 respectively, and neither is a rounding of
+    the other.
 
-    *replicate_unit* names what the mean is over (``well`` / ``fov``, empty for
-    a single well). Without it the two new columns are ambiguous, since nothing
-    else in the row records whether Aggregate-FOVs was on.
+    *replicate_unit* names what that mean is over (``well`` / ``fov``, empty
+    for a single well with Aggregate-FOVs off). Without it the pair is
+    ambiguous, since nothing else in the row records whether the toggle was on;
+    it also decides whether ``events_total`` prints as an integer count or as
+    the per-FOV mean it becomes under the toggle.
     """
     # An undefined spread is written as an EMPTY cell, never as 0.000000 — the
     # zero reads as "the replicates agreed exactly" when in fact there was only
@@ -351,13 +364,15 @@ def bar_metric_row(
     def _num(v) -> str:
         return f"{float(v):.6f}" if (v is not None and math.isfinite(float(v))) else ""
 
+    band = band_lbl.lower()
     return {
         "timepoint_h": tp_str,
         f"mean_{ch}_{metric}": _num(mean) if has else "",
-        f"err_{band_lbl}_{ch}_{metric}": _num(spread) if has else "",
-        "fraction_above": _num(frac) if has else "",
-        f"err_frac_{band_lbl}": _num(frac_spread) if has and not math.isnan(frac) else "",
-        "n_above_threshold": (
+        f"{band}_{ch}_{metric}": _num(spread) if has else "",
+        "fraction_above_threshold": _num(frac) if has else "",
+        f"fraction_{band}": (
+            _num(frac_spread) if has and not math.isnan(frac) else ""),
+        "events_total": (
             "" if not has or not math.isfinite(float(n_above))
             # A replicate set reports its cross-well total, which is what this
             # column has always meant. A single well has no total — the
@@ -374,27 +389,18 @@ def bar_metric_row(
             else f"{n_above:.6f}" if replicate_unit == "fov"
             else f"{int(n_above)}"
         ),
-        # Same statistic as ``err_n_above_replicate_<band>`` beside it — the
-        # collectors put the drawn Events spread in ``n_above_spread`` on both
-        # branches — and now the same rule. ``> 0`` was a *mode flag* ("is
-        # per-FOV spread in use?") standing in for a *value* test, from before
-        # the per-well branch had a cross-well spread of its own; it blanked a
-        # spread of exactly zero, which is a measurement (the replicates
-        # agreed) and which the column two places along was writing.
-        f"err_n_above_{band_lbl}": (
-            spread_cell(n_above_spread) if has and replicate_unit else ""),
-        "n_above_replicate_mean": _num(n_above) if has else "",
+        "events_per_replicate_mean": _num(n_above) if has else "",
         # A two-well set holding 5 and 5 events has a spread of exactly 0.0,
         # which is a measurement. Blanking it here conflated "the replicates
         # agreed" with "there was one replicate and nothing could be computed"
         # — the second is what the header row's own documentation promises the
         # blank means. The unit column beside it says which case it is: empty
         # there, and only there, means there was nothing to spread over.
-        f"err_n_above_replicate_{band_lbl}": (
+        f"events_per_replicate_{band}": (
             _num(n_above_spread)
             if has and replicate_unit and math.isfinite(float(n_above_spread))
             else ""),
-        "n_above_replicate_unit": replicate_unit,
+        "replicate_unit": replicate_unit,
         "threshold": f"{threshold:.4f}",
         "metric": metric,
     }
@@ -903,7 +909,7 @@ def export_scatter_agg_data(ctx) -> None:
     # ``collect_scatter_agg_data`` reduces its replicates with a plain SD/SEM
     # (``_reduce_reps``), so the band is the app's Statistics choice and the
     # unit is the Aggregate-FOVs one.
-    band_lbl = spread_label(bool(ctx.state.plot.use_sem))
+    band = spread_label(bool(ctx.state.plot.use_sem)).lower()
     spread_unit = spread_unit_for(ctx)
     rows_out = []
     for label, data in scatter_data.items():
@@ -923,12 +929,12 @@ def export_scatter_agg_data(ctx) -> None:
             # ``spread_cell``, not an f-string: a group of one replicate has an
             # undefined spread, which reached this file as the literal ``nan``
             # — and a single well is the commonest selection on this tab.
-            f"{name_x}_error": spread_cell(x_err),
+            f"{name_x}_{band}": spread_cell(x_err),
             name_y: f"{y_val:.6f}",
-            f"{name_y}_error": spread_cell(y_err),
-            # What the two error columns are, which nothing else in the file
-            # (or on the figure) said: SD or SEM, over wells or over fields.
-            "spread_kind": band_lbl,
+            f"{name_y}_{band}": spread_cell(y_err),
+            # Which replicate the two spreads are over — wells or fields. The
+            # interval itself (SD / SEM) is in their names, as it is on every
+            # other export, so no column has to restate it.
             "spread_unit": spread_unit,
         })
 
@@ -950,8 +956,8 @@ def export_scatter_agg_data(ctx) -> None:
     try:
         with open(out_path, "w", newline="") as fh:
             fieldnames = ["replicate_well", "well_name", "timepoint_h",
-                          name_x, f"{name_x}_error", name_y, f"{name_y}_error",
-                          "spread_kind", "spread_unit"]
+                          name_x, f"{name_x}_{band}",
+                          name_y, f"{name_y}_{band}", "spread_unit"]
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows_out)
@@ -987,12 +993,15 @@ def export_heatmap_data(ctx) -> None:
     # worth having in a file whose reader is going to plot it elsewhere.
     # ``spread`` is absent on a heat map drawn before this column existed.
     spread = ctx.runtime.heatmap.spread
-    # The column names the interval, in a token a spreadsheet and a parser can
-    # both hold: the figure's "95% CI" would put a space and a percent sign in
-    # a CSV header. Non-alphanumerics go, so SEM and SD pass through unchanged
-    # and 95% CI becomes CI95.
+    # The spread column carries the value column's name plus the interval, the
+    # way every other export names a spread — ``gfp_mean_intensity_sem`` rather
+    # than a bare ``err_SEM`` that says nothing about what it is the spread OF.
+    # The interval token is one a spreadsheet and a parser can both hold: the
+    # figure's "95% CI" would put a space and a percent sign in a CSV header,
+    # so non-alphanumerics go and it becomes ``ci95``.
     _label = str(ctx.runtime.heatmap.spread_label or "SD")
-    err_name = "err_" + ("".join(ch for ch in _label if ch.isalnum()) or "SD")
+    _band = ("".join(ch for ch in _label if ch.isalnum()) or "SD").lower()
+    err_name = f"{col_name}_{_band}"
     well_labels = figure_names_map(ctx)
     rows_out = []
     for r in range(layout.rows):

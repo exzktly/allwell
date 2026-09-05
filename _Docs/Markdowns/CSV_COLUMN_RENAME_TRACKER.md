@@ -36,15 +36,15 @@ plainly).
 
 | # | site | state |
 |---|---|---|
-| 1 | `export/service.line_metric_fieldnames` / `line_metric_row` | todo |
-| 2 | `export/service.bar_metric_fieldnames` / `bar_metric_row` | todo |
-| 3 | `export/service.export_heatmap_data` | todo |
-| 4 | `export/service.export_scatter_agg_data` | todo |
-| 5 | `batch_export/scatter_panel` — both aggregate jobs | todo |
-| 6 | `batch_export/base_panel` / `bar_panel` — fieldname lists they build themselves | todo |
+| 1 | `export/service.line_metric_fieldnames` / `line_metric_row` | **done** |
+| 2 | `export/service.bar_metric_fieldnames` / `bar_metric_row` | **done** |
+| 3 | `export/service.export_heatmap_data` | **done** |
+| 4 | `export/service.export_scatter_agg_data` | **done** |
+| 5 | `batch_export/scatter_panel` — both aggregate jobs | **done** |
+| 6 | `batch_export/base_panel` / `bar_panel` — fieldname lists they build themselves | **done** |
 | 7 | every test asserting an old name (15 files) | todo |
 | 8 | `README_WellViewer.md` + `ARCHITECTURE.md` | todo |
 | 9 | full fast lane + the slow `test_csv_batch_export_eval.py` | todo |
 | 10 | grep for stale old names in code, tests and docs (`scripts/rename_sweep_check.sh` per pair) | todo |
 
-0 of 10 done.
+6 of 10 done.

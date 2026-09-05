@@ -7,7 +7,7 @@ exports, and each failure was invisible in the file itself — a blank cell and 
 * the **fraction spread**. The Fraction panel bands its curve with the SD/SEM
   at AggPoint index 6, and the line CSV had no column for it at all, on the
   per-tab export and the batch one alike. The bar CSV has carried
-  ``err_frac_<band>`` all along, so the same figure exported from the two tabs
+  ``fraction_<band>`` all along, so the same figure exported from the two tabs
   disagreed about whether the number exists.
 * the **Events replicate columns** under Aggregate-FOVs. ``line_metric_row``
   read the per-well count and its cross-well spread (indices 4 / 9)
@@ -19,7 +19,7 @@ exports, and each failure was invisible in the file itself — a blank cell and 
 * the **on-tab export's aggregation**. It re-aggregated each selected well
   with a bare ``aggregate_well`` instead of asking the tab's collector, so the
   points were plain 9-tuples: Aggregate-FOVs was ignored, no fraction spread
-  was ever computed, and ``err_n_above_replicate_*`` / ``n_above_replicate_unit``
+  was ever computed, and ``events_per_replicate_<band>`` / ``replicate_unit``
   could not be anything but empty on any plate — which is how the bug was
   reported.
 
@@ -133,24 +133,24 @@ def _exported(ctx, tmp_path, name="line") -> list[dict]:
 
 def test_the_line_csv_has_a_fraction_spread_column():
     cols = line_metric_fieldnames("gfp", "mean_intensity", "SEM")
-    assert "err_frac_SEM" in cols
+    assert "fraction_sem" in cols
     # Beside the value it is the spread of, the way the bar CSV orders them.
-    assert cols.index("err_frac_SEM") == cols.index("fraction_above") + 1
+    assert cols.index("fraction_sem") == cols.index("fraction_above_threshold") + 1
 
 
 def test_the_fraction_spread_the_panel_bands_with_reaches_the_csv():
     """The Fraction panel draws 0.5 ± 0.1 here; the CSV said only 0.5."""
     row = _row_for(_set_app(per_fov=False), per_fov=False)
-    assert row["fraction_above"] == "0.500000"
-    assert row["err_frac_SEM"] == f"{DRAWN_FRAC_SEM:.6f}"
+    assert row["fraction_above_threshold"] == "0.500000"
+    assert row["fraction_sem"] == f"{DRAWN_FRAC_SEM:.6f}"
 
 
 def test_an_uncomputed_fraction_spread_is_an_empty_cell():
     """A lone well with Aggregate-FOVs off has no second sample of the
     fraction, so nothing was computed — and 0.000000 would claim otherwise."""
     row = _row_for(_solo_app(per_fov=False), per_fov=False)
-    assert row["fraction_above"] == "0.400000"
-    assert row["err_frac_SEM"] == ""
+    assert row["fraction_above_threshold"] == "0.400000"
+    assert row["fraction_sem"] == ""
 
 
 # ── the Events columns under Aggregate-FOVs ─────────────────────────────────
@@ -165,18 +165,18 @@ def test_the_row_reads_the_per_fov_pair_and_not_the_per_well_one():
     """
     row = line_metric_row(DISTINCT_PT, ch="gfp", metric="mean_intensity",
                           threshold=0.0, band_lbl="SEM", per_fov=True)
-    assert row["n_above_replicate_mean"] == "3.250000"
-    assert row["err_n_above_replicate_SEM"] == "0.750000"
-    assert row["n_above_replicate_unit"] == "fov"
+    assert row["events_per_replicate_mean"] == "3.250000"
+    assert row["events_per_replicate_sem"] == "0.750000"
+    assert row["replicate_unit"] == "fov"
 
     off = line_metric_row(DISTINCT_PT, ch="gfp", metric="mean_intensity",
                           threshold=0.0, band_lbl="SEM", per_fov=False)
-    assert off["n_above_replicate_mean"] == "7.500000"
-    assert off["err_n_above_replicate_SEM"] == "0.500000"
-    assert off["n_above_replicate_unit"] == "well"
+    assert off["events_per_replicate_mean"] == "7.500000"
+    assert off["events_per_replicate_sem"] == "0.500000"
+    assert off["replicate_unit"] == "well"
 
     # Either way the integer column keeps meaning the cross-well total.
-    assert row["n_above_threshold"] == off["n_above_threshold"] == 15
+    assert row["events_total"] == off["events_total"] == 15
 
 
 def test_a_replicate_set_in_fov_mode_reports_the_drawn_events():
@@ -187,28 +187,28 @@ def test_a_replicate_set_in_fov_mode_reports_the_drawn_events():
     can still tell apart even though its two pairs coincide.
     """
     row = _row_for(_set_app(per_fov=True), per_fov=True)
-    assert row["n_above_replicate_mean"] not in ("", "0.000000")
-    assert row["err_n_above_replicate_SEM"] != ""
-    assert row["n_above_replicate_unit"] == "fov"
+    assert row["events_per_replicate_mean"] not in ("", "0.000000")
+    assert row["events_per_replicate_sem"] != ""
+    assert row["replicate_unit"] == "fov"
     # The integer column keeps meaning the cross-well total.
-    assert row["n_above_threshold"] == 15
+    assert row["events_total"] == 15
 
 
 def test_a_replicate_set_without_fov_mode_reports_the_per_well_mean():
     row = _row_for(_set_app(per_fov=False), per_fov=False)
-    assert row["n_above_replicate_mean"] == f"{DRAWN_EVENTS_WELL:.6f}"
-    assert row["err_n_above_replicate_SEM"] == f"{DRAWN_EVENTS_WELL_SEM:.6f}"
-    assert row["n_above_replicate_unit"] == "well"
+    assert row["events_per_replicate_mean"] == f"{DRAWN_EVENTS_WELL:.6f}"
+    assert row["events_per_replicate_sem"] == f"{DRAWN_EVENTS_WELL_SEM:.6f}"
+    assert row["replicate_unit"] == "well"
 
 
 def test_a_solo_well_in_fov_mode_reports_its_per_field_mean():
     """Its fields are its replicates: the panel draws 3.5 ± 0.5, not the 7
     events the well holds in total."""
     row = _row_for(_solo_app(per_fov=True), per_fov=True)
-    assert row["n_above_replicate_mean"] == "3.500000"
-    assert row["err_n_above_replicate_SEM"] == "0.500000"
-    assert row["n_above_replicate_unit"] == "fov"
-    assert row["n_above_threshold"] == 7
+    assert row["events_per_replicate_mean"] == "3.500000"
+    assert row["events_per_replicate_sem"] == "0.500000"
+    assert row["replicate_unit"] == "fov"
+    assert row["events_total"] == 7
 
 
 def test_a_solo_well_without_fov_mode_is_unchanged():
@@ -217,11 +217,11 @@ def test_a_solo_well_without_fov_mode_is_unchanged():
     row = line_metric_row(
         (0.0, 100.0, 0.0, 0.5, 9, 20, float("nan"), 0.0, 0.0),
         ch="gfp", metric="mean_intensity", threshold=0.0, band_lbl="SEM")
-    assert row["n_above_threshold"] == 9
-    assert row["n_above_replicate_mean"] == "9.000000"
-    assert row["err_n_above_replicate_SEM"] == ""
-    assert row["n_above_replicate_unit"] == ""
-    assert row["err_frac_SEM"] == ""
+    assert row["events_total"] == 9
+    assert row["events_per_replicate_mean"] == "9.000000"
+    assert row["events_per_replicate_sem"] == ""
+    assert row["replicate_unit"] == ""
+    assert row["fraction_sem"] == ""
 
 
 def test_a_replicate_spread_of_zero_is_written():
@@ -230,9 +230,9 @@ def test_a_replicate_spread_of_zero_is_written():
     row = line_metric_row(
         (0.0, 100.0, 1.0, 0.5, 5.0, 20, 0.0, 0.0, 0.0, 0.0, 10),
         ch="gfp", metric="mean_intensity", threshold=0.0, band_lbl="SEM")
-    assert row["err_n_above_replicate_SEM"] == "0.000000"
-    assert row["err_frac_SEM"] == "0.000000"
-    assert row["n_above_replicate_unit"] == "well"
+    assert row["events_per_replicate_sem"] == "0.000000"
+    assert row["fraction_sem"] == "0.000000"
+    assert row["replicate_unit"] == "well"
 
 
 # ── the on-tab exporter, driven for real ─────────────────────────────────────
@@ -247,19 +247,19 @@ def test_the_on_tab_export_writes_one_row_per_drawn_set(tmp_path):
     assert row["wells"] == "A01;A02"
     assert row["n_wells"] == "2"
     assert row["mean_gfp_mean_intensity"] == "105.000000"
-    assert row["n_above_replicate_mean"] == f"{DRAWN_EVENTS_WELL:.6f}"
-    assert row["err_n_above_replicate_SEM"] == f"{DRAWN_EVENTS_WELL_SEM:.6f}"
-    assert row["n_above_replicate_unit"] == "well"
-    assert row["err_frac_SEM"] == f"{DRAWN_FRAC_SEM:.6f}"
+    assert row["events_per_replicate_mean"] == f"{DRAWN_EVENTS_WELL:.6f}"
+    assert row["events_per_replicate_sem"] == f"{DRAWN_EVENTS_WELL_SEM:.6f}"
+    assert row["replicate_unit"] == "well"
+    assert row["fraction_sem"] == f"{DRAWN_FRAC_SEM:.6f}"
 
 
 def test_the_on_tab_export_honours_aggregate_fovs(tmp_path):
     """The toggle used to reach neither the aggregation nor the columns."""
     rows = _exported(_set_app(per_fov=True), tmp_path, "sets_fov")
     assert len(rows) == 1
-    assert rows[0]["n_above_replicate_mean"] not in ("", "0.000000")
-    assert rows[0]["err_n_above_replicate_SEM"] != ""
-    assert rows[0]["n_above_replicate_unit"] == "fov"
+    assert rows[0]["events_per_replicate_mean"] not in ("", "0.000000")
+    assert rows[0]["events_per_replicate_sem"] != ""
+    assert rows[0]["replicate_unit"] == "fov"
 
 
 def test_the_on_tab_export_of_selected_wells_keeps_its_well_columns(tmp_path):
@@ -269,8 +269,8 @@ def test_the_on_tab_export_of_selected_wells_keeps_its_well_columns(tmp_path):
     assert rows[0]["well"] == "A01"
     assert "replicate_set" not in rows[0]
     assert rows[0]["mean_gfp_mean_intensity"] == "100.000000"
-    assert rows[0]["fraction_above"] == "0.400000"
-    assert rows[0]["err_frac_SEM"] == ""
+    assert rows[0]["fraction_above_threshold"] == "0.400000"
+    assert rows[0]["fraction_sem"] == ""
 
 
 def test_the_on_tab_export_refuses_an_empty_selection(tmp_path):
@@ -311,14 +311,14 @@ def test_the_event_count_keeps_its_integer_form_through_as_aggpoint():
     assert point.as_aggpoint()[4] == 3.0        # the shape under test
     row = line_metric_row(point.as_aggpoint(), ch="gfp", metric="mean_intensity",
                           threshold=0.0, band_lbl="SEM")
-    assert row["n_above_threshold"] == 3
+    assert row["events_total"] == 3
 
     # A count that was never computed is blank, not the word "nan".
     missing = LinePoint(t=0.0, mean=nan, spread=0.0, frac=nan, n_above=nan,
                         n_total=20)
     assert line_metric_row(missing.as_aggpoint(), ch="gfp",
                            metric="mean_intensity", threshold=0.0,
-                           band_lbl="SEM")["n_above_threshold"] == ""
+                           band_lbl="SEM")["events_total"] == ""
 
     # Fold change scales this field into a ratio, which is genuinely
     # fractional and must not be rounded to an integer.
@@ -326,7 +326,7 @@ def test_the_event_count_keeps_its_integer_form_through_as_aggpoint():
                        n_total=20)
     assert line_metric_row(scaled.as_aggpoint(), ch="gfp",
                            metric="mean_intensity", threshold=0.0,
-                           band_lbl="SEM")["n_above_threshold"] == "0.500000"
+                           band_lbl="SEM")["events_total"] == "0.500000"
 
 
 def test_a_row_with_no_cell_count_leaves_it_empty():
@@ -335,11 +335,11 @@ def test_a_row_with_no_cell_count_leaves_it_empty():
     printing it says the member held no cells where it plainly held some."""
     placeholder = (0.0, 105.0, 5.0, 0.5, 7.5, 0, 0.1, 0.0, 0.0, 0.5, 15)
     assert line_metric_row(placeholder, ch="gfp", metric="mean_intensity",
-                           threshold=0.0, band_lbl="SEM")["n_total"] == ""
+                           threshold=0.0, band_lbl="SEM")["cells_total"] == ""
 
     well_pt = (0.0, 100.0, 1.0, 0.4, 7, 20, float("nan"), 0.0, 0.0)
     assert line_metric_row(well_pt, ch="gfp", metric="mean_intensity",
-                           threshold=0.0, band_lbl="SEM")["n_total"] == 20
+                           threshold=0.0, band_lbl="SEM")["cells_total"] == 20
 
 
 def test_a_replicate_set_reports_the_cells_it_pooled(tmp_path):
@@ -353,9 +353,9 @@ def test_a_replicate_set_reports_the_cells_it_pooled(tmp_path):
     rows = _exported(_set_app(per_fov=False), tmp_path, "cells")
     assert len(rows) == 1
     # A01 and A02 hold 20 cells each at t=0.
-    assert rows[0]["n_total"] == "40"
+    assert rows[0]["cells_total"] == "40"
     # And the events count beside it is the same pooling: 7 + 8.
-    assert rows[0]["n_above_threshold"] == "15"
+    assert rows[0]["events_total"] == "15"
 
 
 def test_a_blanked_fold_change_point_writes_no_spread_on_the_tab_export(tmp_path):
@@ -490,3 +490,53 @@ def test_no_fold_change_columns_appear_when_it_is_off(tmp_path):
     rows = _exported(_solo_app(per_fov=False), tmp_path, "no_fc")
     assert "fold_change_mean" not in rows[0]
     assert "fold_change_outcome" not in rows[0]
+
+
+# ── the schema itself, stated once ──────────────────────────────────────────
+
+def test_the_two_tabs_write_the_same_column_names():
+    """One vocabulary across the plotting exports.
+
+    The bar CSV used to spell the mean's spread ``err_SEM_gfp_mean_intensity``
+    where the line CSV spelled it ``sem_gfp_mean_intensity``, and to carry a
+    second Events spread column holding the number
+    ``events_per_replicate_sem`` already held. A reader of one file could not
+    read the other, and a column existed whose only distinction from its
+    neighbour was a different rule for blanking.
+    """
+    from well_viewer.features.export.service import bar_metric_fieldnames
+
+    line = line_metric_fieldnames("gfp", "mean_intensity", "SEM")
+    bar = bar_metric_fieldnames("gfp", "mean_intensity", "SEM")
+
+    assert line == [
+        "timepoint_h",
+        "mean_gfp_mean_intensity",
+        "sem_gfp_mean_intensity",
+        "events_total",
+        "events_per_replicate_mean",
+        "events_per_replicate_sem",
+        "replicate_unit",
+        "fraction_above_threshold",
+        "fraction_sem",
+        "cells_total",
+        "threshold",
+        "metric",
+    ]
+    # The bar file has no cell count and orders its panels differently, but
+    # every name it shares with the line file is spelled the same way.
+    assert set(bar) < set(line)
+    assert set(line) - set(bar) == {"cells_total"}
+
+
+def test_the_band_travels_in_the_column_name():
+    """SD and SEM are different intervals, so they are different columns."""
+    from well_viewer.features.export.service import bar_metric_fieldnames
+
+    sd = line_metric_fieldnames("gfp", "mean_intensity", "SD")
+    assert "sd_gfp_mean_intensity" in sd
+    assert "events_per_replicate_sd" in sd
+    assert "fraction_sd" in sd
+    assert not any(c.endswith("_sem") for c in sd)
+    assert not any(c.endswith("_sem") for c in
+                   bar_metric_fieldnames("gfp", "mean_intensity", "SD"))

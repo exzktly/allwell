@@ -764,7 +764,7 @@ def compute_rep_n_above_total(ctx, rset: ReplicateSet, target_t: float,
                               threshold: float | None = None) -> int:
     """Cross-well **total** events-above-threshold for *rset* at *target_t*.
 
-    A reporting figure, not a plotted one. The CSV's ``n_above_threshold``
+    A reporting figure, not a plotted one. The CSV's ``events_total``
     column has always carried the number of cells that exceeded the threshold
     across the whole replicate set, and downstream scripts read it as an
     integer count.

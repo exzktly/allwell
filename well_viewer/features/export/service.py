@@ -274,6 +274,23 @@ def spread_cell(value, fmt: str = ".6f") -> str:
     return f"{float(value):{fmt}}" if is_number(value) else ""
 
 
+def spread_band_token(label: str) -> str:
+    """A spread label as a column-name suffix: ``sem``, ``sd``, ``ci95``.
+
+    The figure says ``95% CI``; a CSV header cannot hold a space or a percent
+    sign, so the non-alphanumerics go. What is left starts with a digit, and a
+    name segment that opens with one reads as a number rather than as a word —
+    ``gfp_mean_intensity_95ci`` — so leading digits move behind the letters.
+    ``SEM`` and ``SD`` pass straight through, lowercased like every other
+    column name.
+    """
+    token = "".join(ch for ch in str(label) if ch.isalnum()) or "SD"
+    head = "".join(ch for ch in token if ch.isdigit())
+    if token[:1].isdigit():
+        token = token[len(head):] + head
+    return token.lower()
+
+
 def spread_unit_for(ctx, n_wells: int = 1) -> str:
     """What one replicate is for the spreads in this file: ``fov`` or ``well``.
 
@@ -502,7 +519,7 @@ def export_plot_data(ctx) -> None:
     bare ``aggregate_well``, which produced a plain 9-tuple with Aggregate-FOVs
     ignored: the fraction spread the Fraction panel bands its curve with was
     never computed, and the Events replicate columns
-    (``err_n_above_replicate_*`` / ``n_above_replicate_unit``) could not be
+    (``events_per_replicate_<band>`` / ``replicate_unit``) could not be
     anything but empty on any plate, because a per-well point has no replicate
     aggregation behind it to report.
 
@@ -995,13 +1012,12 @@ def export_heatmap_data(ctx) -> None:
     spread = ctx.runtime.heatmap.spread
     # The spread column carries the value column's name plus the interval, the
     # way every other export names a spread — ``gfp_mean_intensity_sem`` rather
-    # than a bare ``err_SEM`` that says nothing about what it is the spread OF.
+    # than a bare ``err_SEM`` that says nothing about what it is a spread OF.
     # The interval token is one a spreadsheet and a parser can both hold: the
     # figure's "95% CI" would put a space and a percent sign in a CSV header,
     # so non-alphanumerics go and it becomes ``ci95``.
     _label = str(ctx.runtime.heatmap.spread_label or "SD")
-    _band = ("".join(ch for ch in _label if ch.isalnum()) or "SD").lower()
-    err_name = f"{col_name}_{_band}"
+    err_name = f"{col_name}_{spread_band_token(_label)}"
     well_labels = figure_names_map(ctx)
     rows_out = []
     for r in range(layout.rows):

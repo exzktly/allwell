@@ -215,9 +215,9 @@ def test_the_bar_row_says_fov_for_a_lone_well_under_aggregate_fovs():
         replicate_unit=_replicate_unit_for(solo, per_fov=True),
         ch="gfp", metric="mean_intensity", tp_str="0",
         threshold=0.0, band_lbl="SEM")
-    assert row["n_above_replicate_mean"] == "3.500000"
-    assert row["err_n_above_replicate_SEM"] == "0.500000"
-    assert row["n_above_replicate_unit"] == "fov"
+    assert row["events_per_replicate_mean"] == "3.500000"
+    assert row["events_per_replicate_sem"] == "0.500000"
+    assert row["replicate_unit"] == "fov"
 
 
 def test_the_bar_row_still_leaves_a_lone_well_empty_without_the_toggle():
@@ -239,8 +239,8 @@ def test_the_bar_row_still_leaves_a_lone_well_empty_without_the_toggle():
         replicate_unit=_replicate_unit_for(solo, per_fov=False),
         ch="gfp", metric="mean_intensity", tp_str="0",
         threshold=0.0, band_lbl="SEM")
-    assert row["err_n_above_replicate_SEM"] == ""
-    assert row["n_above_replicate_unit"] == ""
+    assert row["events_per_replicate_sem"] == ""
+    assert row["replicate_unit"] == ""
 
 
 # ── the scatter aggregate's whiskers, on the tab and in the batch figure ─────
@@ -318,7 +318,7 @@ def test_the_scatter_aggregate_blanks_an_undefined_error(tmp_path, monkeypatch):
                        x_err=float("nan"), y_err=float("nan"))
     assert len(rows) == 1
     row = rows[0]
-    err_cols = [c for c in row if c.endswith("_error")]
+    err_cols = [c for c in row if c.endswith("_sem")]
     assert len(err_cols) == 2, sorted(row)
     assert all(row[c] == "" for c in err_cols), row
 
@@ -326,24 +326,27 @@ def test_the_scatter_aggregate_blanks_an_undefined_error(tmp_path, monkeypatch):
 def test_the_scatter_aggregate_keeps_a_measured_error(tmp_path, monkeypatch):
     rows = _agg_export(tmp_path, monkeypatch, x_err=4.0, y_err=0.0)
     row = rows[0]
-    x_col = next(c for c in row if c.endswith("_error") and "fraction" not in c.lower())
+    x_col = next(c for c in row if c.endswith("_sem") and "fraction" not in c.lower())
     assert row[x_col] == "4.000000"
     # A measured zero survives: the replicates agreed.
-    y_col = next(c for c in row if c.endswith("_error") and c != x_col)
+    y_col = next(c for c in row if c.endswith("_sem") and c != x_col)
     assert row[y_col] == "0.000000"
 
 
 def test_the_scatter_aggregate_says_which_interval_and_over_what(tmp_path,
                                                                  monkeypatch):
-    """Neither the figure nor the file said whether ``x_err`` was an SD or a
-    SEM, or whether it was taken over wells or over fields."""
+    """Neither the figure nor the file said whether the error was an SD or a
+    SEM, or whether it was taken over wells or over fields. The interval is in
+    the column name, as it is on every other export, and the unit is a column
+    of its own because no name can carry it."""
     rows = _agg_export(tmp_path, monkeypatch, x_err=4.0, y_err=1.0)
-    assert rows[0]["spread_kind"] == "SEM"
+    assert any(c.endswith("_sem") for c in rows[0]), sorted(rows[0])
     assert rows[0]["spread_unit"] == "well"
 
     sd_fov = _agg_export(tmp_path, monkeypatch, x_err=4.0, y_err=1.0,
                          per_fov=True, use_sem=False)
-    assert sd_fov[0]["spread_kind"] == "SD"
+    assert any(c.endswith("_sd") for c in sd_fov[0]), sorted(sd_fov[0])
+    assert not any(c.endswith("_sem") for c in sd_fov[0])
     assert sd_fov[0]["spread_unit"] == "fov"
 
 
@@ -378,19 +381,21 @@ def test_a_bar_that_measured_nothing_names_no_unit_and_no_spread():
         replicate_unit=_replicate_unit_for(absent, per_fov=True),
         ch="gfp", metric="mean_intensity", tp_str="0",
         threshold=0.0, band_lbl="SEM")
-    assert row["err_n_above_replicate_SEM"] == ""
-    assert row["err_n_above_SEM"] == ""
-    assert row["n_above_replicate_unit"] == ""
-    assert row["n_above_replicate_mean"] == ""
-    assert row["n_above_threshold"] == ""
+    assert row["events_per_replicate_sem"] == ""
+    assert row["replicate_unit"] == ""
+    assert row["events_per_replicate_mean"] == ""
+    assert row["events_total"] == ""
 
 
-def test_the_two_events_error_columns_agree_about_a_measured_zero():
-    """They hold the same statistic — the collectors put the drawn Events
-    spread in ``n_above_spread`` on both branches — so they cannot disagree
-    about whether zero is a measurement. ``err_n_above_<band>`` keyed on
-    ``spread > 0``, a mode flag standing in for a value test, and blanked the
-    zero its neighbour wrote."""
+def test_the_events_spread_records_a_measured_zero():
+    """Fields that agreed exactly have a spread, and it is 0.
+
+    The bar CSV used to carry a second Events spread column holding this same
+    number under a different blanking rule — keyed on ``spread > 0``, a mode
+    flag standing in for a value test — so one row stated both that the spread
+    was zero and that there was none. That column is gone; the survivor keeps
+    the measurement.
+    """
     from well_viewer.features.export.service import bar_metric_row
 
     row = bar_metric_row(
@@ -398,8 +403,8 @@ def test_the_two_events_error_columns_agree_about_a_measured_zero():
         n_above=6.0, n_above_spread=0.0, n_above_total=12,
         replicate_unit="fov", ch="gfp", metric="mean_intensity",
         tp_str="0", threshold=0.0, band_lbl="SEM")
-    assert row["err_n_above_SEM"] == "0.000000"
-    assert row["err_n_above_replicate_SEM"] == "0.000000"
+    assert row["events_per_replicate_sem"] == "0.000000"
+    assert not any(k.startswith("err_") for k in row), sorted(row)
 
 
 # ── the fold-change columns ─────────────────────────────────────────────────

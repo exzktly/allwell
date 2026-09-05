@@ -1,6 +1,7 @@
 """The Heat Map's CSV carries the same ``±`` the grid drew, blank where undefined.
 
-``export_heatmap_data`` gained an ``err_SD`` / ``err_SEM`` column, and the
+``export_heatmap_data`` gained a spread column — named for the value column it
+belongs to, ``<channel>_<metric>_<band>`` — and the
 promise attached to it is the one this repository keeps having to re-learn: an
 **undefined** spread is written as an empty cell, never as ``0``. A
 single-replicate set exported ``err_SD = 0.000000`` once before
@@ -28,6 +29,11 @@ pytest.importorskip("PySide6")
 
 from well_viewer.features.export import service as EX
 from well_viewer.features.heatmap.models import HeatmapLayout
+
+#: The spread column for this fixture's value column, which is built from the
+#: channel and the metric the way the export builds it: the name says what the
+#: interval is the spread OF, not merely which interval it is.
+ERR = "GFP_mean_above_threshold_sem"
 
 
 @pytest.fixture
@@ -75,15 +81,15 @@ def exported(tmp_path, monkeypatch):
 def test_a_measured_spread_is_written_out(exported):
     rows = exported(array=[[6.0, 2.0, np.nan]], spread=[[4.0, np.nan, np.nan]])
 
-    assert rows[0]["err_SEM"] == "4.000000"
+    assert rows[0][ERR] == "4.000000"
 
 
 def test_an_undefined_spread_is_blank_and_not_a_zero(exported):
     """The single-replicate cell. ``0.000000`` here is the defect, not the value."""
     rows = exported(array=[[6.0, 2.0, np.nan]], spread=[[4.0, np.nan, np.nan]])
 
-    assert rows[1]["err_SEM"] == ""
-    assert rows[2]["err_SEM"] == ""
+    assert rows[1][ERR] == ""
+    assert rows[2][ERR] == ""
 
 
 def test_a_measured_zero_spread_is_written_as_a_zero(exported):
@@ -94,7 +100,7 @@ def test_a_measured_zero_spread_is_written_as_a_zero(exported):
     """
     rows = exported(array=[[6.0, 2.0, np.nan]], spread=[[0.0, np.nan, np.nan]])
 
-    assert rows[0]["err_SEM"] == "0.000000"
+    assert rows[0][ERR] == "0.000000"
 
 
 def test_the_column_names_which_spread_it_holds(exported):
@@ -102,7 +108,8 @@ def test_the_column_names_which_spread_it_holds(exported):
     rows = exported(array=[[6.0, 2.0, np.nan]], spread=[[4.0, np.nan, np.nan]],
                     spread_label="SD")
 
-    assert "err_SD" in rows[0] and "err_SEM" not in rows[0]
+    assert "GFP_mean_above_threshold_sd" in rows[0]
+    assert ERR not in rows[0]
 
 
 def test_the_column_name_survives_a_label_with_punctuation_in_it(exported):
@@ -115,8 +122,8 @@ def test_the_column_name_survives_a_label_with_punctuation_in_it(exported):
     rows = exported(array=[[6.0, 2.0, np.nan]], spread=[[4.0, np.nan, np.nan]],
                     spread_label="95% CI")
 
-    assert "err_95CI" in rows[0]
-    assert rows[0]["err_95CI"] == "4.000000"
+    assert "GFP_mean_above_threshold_ci95" in rows[0]
+    assert rows[0]["GFP_mean_above_threshold_ci95"] == "4.000000"
     assert not any(" " in k or "%" in k for k in rows[0])
 
 
@@ -124,7 +131,7 @@ def test_a_heatmap_drawn_without_a_spread_still_exports(exported):
     """``spread`` is absent on a runtime stamped before this column existed."""
     rows = exported(array=[[6.0, 2.0, np.nan]], spread=[[np.nan] * 3])
 
-    assert [r["err_SEM"] for r in rows] == ["", "", ""]
+    assert [r[ERR] for r in rows] == ["", "", ""]
     assert rows[0]["GFP_mean_above_threshold"] == "6.000000"
 
 
@@ -133,7 +140,7 @@ def test_the_row_says_what_its_spread_is_over(exported):
 
     The column name says *which interval* (SD / SEM / CI95) and this says *what
     it is over*, the way the Response CSV's ``spread_unit`` and the bar and
-    line CSVs' ``n_above_replicate_unit`` do. Without it a reader turning SEM
+    line CSVs' ``replicate_unit`` do. Without it a reader turning SEM
     back into SD as ``SEM x sqrt(n)`` takes an ``n`` from one denominator and a
     spread from another.
     """
@@ -143,7 +150,7 @@ def test_the_row_says_what_its_spread_is_over(exported):
     # cell of a Cell count heat map, where the value is a total and has no
     # spread by construction — names no denominator: a unit beside a blank
     # error asserts a statistic nobody took.
-    assert rows[1]["err_SEM"] == "" and rows[1]["spread_unit"] == ""
+    assert rows[1][ERR] == "" and rows[1]["spread_unit"] == ""
     assert rows[2]["spread_unit"] == ""
 
     fov = exported(array=[[6.0, 2.0, np.nan]], spread=[[4.0, np.nan, np.nan]],

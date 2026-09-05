@@ -42,9 +42,9 @@ plainly).
 | 4 | `export/service.export_scatter_agg_data` | **done** |
 | 5 | `batch_export/scatter_panel` — both aggregate jobs | **done** |
 | 6 | `batch_export/base_panel` / `bar_panel` — fieldname lists they build themselves | **done** |
-| 7 | every test asserting an old name (15 files) | todo |
-| 8 | `README_WellViewer.md` + `ARCHITECTURE.md` | todo |
+| 7 | every test asserting an old name | **done** — 10 files; the schema itself is now pinned by `test_the_two_tabs_write_the_same_column_names` |
+| 8 | `README_WellViewer.md` + `ARCHITECTURE.md` | **done** |
 | 9 | full fast lane + the slow `test_csv_batch_export_eval.py` | todo |
-| 10 | grep for stale old names in code, tests and docs (`scripts/rename_sweep_check.sh` per pair) | todo |
+| 10 | grep for stale old names in code, tests and docs | **done** — the sweep also caught prose in six modules that named the old columns |
 
-6 of 10 done.
+9 of 10 done.

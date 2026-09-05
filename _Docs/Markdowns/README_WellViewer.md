@@ -2409,15 +2409,15 @@ fold-change is active:
 the normalized value; downstream tools that depended on that behaviour
 should switch to reading the `fold_change_mean` column.)
 
-**Events columns.** `n_above_threshold` keeps its long-standing meaning — the
+**Events columns.** `events_total` keeps its long-standing meaning — the
 integer count of events, summed across a replicate set's wells. The number the
 Events panel *draws* is a mean, which is a different quantity and gets its own
 columns:
 
-* `n_above_replicate_mean` — the plotted value
-* `err_n_above_replicate_<band>` — its spread across replicates, empty when
+* `events_per_replicate_mean` — the plotted value
+* `events_per_replicate_<band>` — its spread across replicates, empty when
   there was only one and nothing could be computed
-* `n_above_replicate_unit` — `well` or `fov`, and empty on a row where nothing
+* `replicate_unit` — `well` or `fov`, and empty on a row where nothing
   was measured: a single well with Aggregate-FOVs off, or a member that has no
   point at that timepoint at all
 
@@ -2431,15 +2431,16 @@ columns describe the fields: the mean is the per-FOV mean the panel draws, its
 spread is the field-to-field one, and the unit reads `fov` — for a single well
 as much as for a set, since a well's fields are its replicates.
 
-**`n_total` is a cell count, not a denominator.** It is the cells the row was
+**`cells_total` is a cell count, not a denominator.** It is the cells the row was
 computed from: one well's at that timepoint, or the sum across a replicate
-set's wells. On a set's row it is **not** what `fraction_above` was divided by
+set's wells. On a set's row it is **not** what `fraction_above_threshold` was
+divided by
 — a set's fraction is the mean of its wells' fractions, so
-`n_above_threshold / n_total` matches it only when the wells contributed
+`events_total / cells_total` matches it only when the wells contributed
 equally many cells. The cell is empty only where there is no count to report.
 
-**Fraction columns.** `fraction_above` is the plotted fraction and
-`err_frac_<band>` is the spread the Fraction panel bands the curve with — the
+**Fraction columns.** `fraction_above_threshold` is the plotted fraction and
+`fraction_<band>` is the spread the Fraction panel bands the curve with — the
 same pair on the line and bar CSVs. It is empty, never `0.000000`, when nothing
 could be computed: one well with Aggregate-FOVs off has a single sample of the
 fraction and nothing to vary across.
@@ -2464,9 +2465,10 @@ than reporting the placeholder its collector carries.
 
 **And every file says what its error is over.** SD across wells and SD across
 fields are different numbers, so a file carrying one names the unit: the line
-and bar CSVs in `n_above_replicate_unit`, the Heat Map, Scatter (Wells view)
-and Response CSVs in `spread_unit`. The Scatter file also carries `spread_kind`
-(`SD` or `SEM`), which nothing on that tab's figure states either.
+and bar CSVs in `replicate_unit`, the Heat Map, Scatter (Wells view)
+and Response CSVs in `spread_unit`. Which interval it is — SD, SEM, or a 95%
+CI — is in the spread column's own name (`fraction_sem`,
+`gfp_mean_intensity_sd`, `x_ci95`), so no file has to restate it.
 
 **Statistical consistency.** The control denominator uses the same
 averaging statistic as the displayed bar / curve — mean-of-per-well-means
@@ -3041,8 +3043,9 @@ cells it kept.
   (e.g. *Mean Fluorescence*, *Fraction above threshold*) with an **error band**
   (SEM / SD) on the points.
 - **What the Wells view exports.** One row per well (or replicate set) per
-  timepoint, with each axis's value and its error, plus `spread_kind` (`SD` or
-  `SEM`) and `spread_unit` (`well` or `fov`) saying what that error is. A point
+  timepoint, with each axis's value and its error — the error column is the
+  value column's name plus the interval, `…_sem` or `…_sd` — and a
+  `spread_unit` column (`well` or `fov`) saying what that error is over. A point
   with one replicate — a single well, with **Spread** left on wells — has no
   error to report, so its cells are **empty**; the same points draw no whisker
   on the figure, in a batch export as well as on the tab.
@@ -3147,7 +3150,7 @@ place cells in a grid that mirrors your plate or your experimental design.
     real but tiny spread is never rounded down to `0.00` either — it switches to
     two significant figures rather than print a zero it is not, since a cell
     with nothing to report prints nothing at all. **Save plot data…** writes
-    the same numbers to an `err_SD` / `err_SEM` / `err_95CI` column, left
+    the same numbers to an `<value column>_sd` / `_sem` / `_ci95` column, left
     blank on exactly the cells that show none, and a `spread_unit` column
     beside it saying whether that interval is across the cell's wells or
     across their fields — the **Spread** toggle changes which, and nothing

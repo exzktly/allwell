@@ -8,7 +8,7 @@ answer differently on purpose:
   statistic the Mean and Fraction panels beside it use, and because a set
   normalised against itself has to land on 1.0.
 * ``compute_rep_n_above_total`` — the cross-well sum. The CSV's
-  ``n_above_threshold`` column has always carried this, and downstream scripts
+  ``events_total`` column carries this, and downstream scripts
   read it as an integer count.
 
 Picking the wrong one is not hypothetical. A predecessor named

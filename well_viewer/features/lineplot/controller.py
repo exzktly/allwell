@@ -90,7 +90,7 @@ class LinePoint:
     frac_spread: float = 0.0
     n_above_pf_mean: float = 0.0
     n_above_pf_spread: float = 0.0
-    #: Cross-well total events, for the CSV's integer ``n_above_threshold``
+    #: Cross-well total events, for the CSV's integer ``events_total``
     #: column. ``n_above`` is the plotted value and is a per-well mean for a
     #: replicate set, so the two differ and the CSV needs its own. ``None``
     #: for a non-aggregated row, never ``0``.

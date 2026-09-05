@@ -90,7 +90,7 @@ class BarItem:
         substitutes the per-FOV mean and spread. For a single well it is
         that well's own count.
       * ``n_above_total`` — the cross-well **total**, for the CSV's
-        ``n_above_threshold`` column, which has always been an integer
+        ``events_total`` column, which has always been an integer
         count. ``None`` for a row that is not a replicate aggregation,
         never ``0`` — nothing computed is not the same as counted zero.
       * ``fc_control`` — the control reference **this bar** was divided
@@ -634,7 +634,7 @@ def collect_bar_items(
                 # beside a spread of ``0.000000``, which reads as "the
                 # replicates agreed" for a row that had no replicates — and made
                 # the integer total win over the per-FOV mean in
-                # ``n_above_threshold``. The count itself is still what this
+                # ``events_total``. The count itself is still what this
                 # bar draws with Aggregate-FOVs off.
                 n_above_total = None
                 own_count = float(pt[4])

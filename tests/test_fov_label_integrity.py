@@ -186,10 +186,10 @@ def test_export_writes_a_blank_cell_for_an_undefined_spread():
         ch="gfp", metric="mean_intensity", tp_str="8", threshold=250.0,
         band_lbl="SEM",
     )
-    assert row["err_SEM_gfp_mean_intensity"] == ""
-    assert row["err_frac_SEM"] == ""
-    assert row["n_above_threshold"] == ""
-    assert row["err_n_above_SEM"] == ""
+    assert row["sem_gfp_mean_intensity"] == ""
+    assert row["fraction_sem"] == ""
+    assert row["events_total"] == ""
+    assert row["events_per_replicate_sem"] == ""
     # A real spread still exports. ``replicate_unit`` is what the row's own
     # callers pass (both go through ``_replicate_unit_for``), and it is what
     # says this count is a per-FOV *mean* and so keeps its decimals. Omitting
@@ -201,9 +201,9 @@ def test_export_writes_a_blank_cell_for_an_undefined_spread():
         n_above=87.0, n_above_spread=24.0, ch="gfp", metric="mean_intensity",
         tp_str="8", threshold=250.0, band_lbl="SEM", replicate_unit="fov",
     )
-    assert ok["err_SEM_gfp_mean_intensity"] == "31.100000"
-    assert ok["n_above_threshold"] == "87.000000"
-    assert ok["err_n_above_SEM"] == "24.000000"
+    assert ok["sem_gfp_mean_intensity"] == "31.100000"
+    assert ok["events_total"] == "87.000000"
+    assert ok["events_per_replicate_sem"] == "24.000000"
 
     # Without the toggle the same column is the integer count it says it is.
     counted = bar_metric_row(
@@ -211,7 +211,7 @@ def test_export_writes_a_blank_cell_for_an_undefined_spread():
         n_above=87.0, n_above_spread=24.0, ch="gfp", metric="mean_intensity",
         tp_str="8", threshold=250.0, band_lbl="SEM", replicate_unit="well",
     )
-    assert counted["n_above_threshold"] == "87"
+    assert counted["events_total"] == "87"
 
 
 def test_fold_change_keeps_an_undefined_spread_undefined():

@@ -3026,11 +3026,24 @@ place cells in a grid that mirrors your plate or your experimental design.
   Under **Display ▾**, since these set how the grid is drawn rather than what
   it shows:
   - **Color map** (e.g. *Greys*, *RdYlBu_r*, *Muted*).
-  - **Scale** — *Auto*, or *Fixed* with explicit **vmin** / **vmax**.
+  - **Scale** — *Auto*, or *Fixed* with explicit **vmin** / **vmax**. The two
+    fields are read one at a time: fill in both to pin the whole colour range,
+    or fill in one and leave the other blank to pin that end alone and let the
+    data set the other — a **vmax** on its own caps a plate whose brightest
+    well would otherwise flatten the rest. Any number is a limit, **zero
+    included**; only an empty field means "take this end from the data". Typing
+    into either field switches **Scale** to *Fixed* for you, so a range you
+    entered is never sitting in the boxes unused. A pair that cannot describe a
+    range — a **vmax** at or below the **vmin** it ends up beside — is refused
+    and the status line says so, rather than drawing the automatic range as
+    though nothing had been typed.
   - **Log scale** toggle — colours the map across orders of magnitude (values at
     or below zero drop out), and the colour bar beside it is labelled on the same
     log scale. Needs at least two distinct positive values; when the data can't
-    support it the status line says so and the linear scale stays.
+    support it the status line says so and the linear scale stays. A log scale
+    has no floor at zero, so a *Fixed* limit at or below zero cannot be used
+    for one: the map falls back to the log range of the data's own positive
+    values and the status line says that too.
   - **⇄ Transpose** — swap the rows and columns of the layout.
   - **Rep-set avg** — show the whole rep-set's average in a cell whose well
     belongs to one, instead of that single well.

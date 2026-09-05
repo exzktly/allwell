@@ -451,24 +451,34 @@ def _sample_map_axis_labels(ctx, layout, grid_row_labels,
             labels_for_axis_lines(vset, col_wells, fallbacks=grid_col_labels))
 
 
-def _resolve_color_scale(arr: np.ndarray, ctx) -> tuple[float | None, float | None]:
-    """Pick (vmin, vmax) for the heatmap.
+def _fixed_limit(value) -> float | None:
+    """The Fixed-scale limit the user typed, or ``None`` for a blank field.
 
-    Mode is read from ``ctx.state.heatmap.scale_mode`` (Auto/Fixed). For Fixed we
-    read the persisted ``ctx.state.heatmap.vmin`` / ``.vmax``. For Auto we use the
-    global range pre-computed across every timepoint (kept on
-    ``ctx.runtime.heatmap.global_vmin`` / ``.global_vmax``) so the colormap
-    stays stable while scrubbing the timepoint slider.
+    A blank vmin/vmax edit is stored as ``nan`` (and is ``None`` before the user
+    has ever set one); both mean "no opinion, take this end from the data".
+    Every other finite number is an opinion — **zero included**. Zero is the
+    whole reason this is a function rather than an inline truthiness test:
+    ``float(vmin or nan)`` reads a typed ``0`` as a blank field, so the most
+    ordinary lower bound anyone types threw the entire Fixed range away and the
+    grid went on drawing the automatic one.
     """
-    mode = str(ctx.state.heatmap.scale_mode or "Auto")
-    if mode == "Fixed":
-        vmin = float((ctx.state.heatmap.vmin if ctx.state.heatmap.vmin is not None
-                      else float("nan")) or float("nan"))
-        vmax = float((ctx.state.heatmap.vmax if ctx.state.heatmap.vmax is not None
-                      else float("nan")) or float("nan"))
-        if math.isfinite(vmin) and math.isfinite(vmax) and vmax > vmin:
-            return vmin, vmax
-    # Auto: prefer the global range across all timepoints.
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _auto_color_scale(arr: np.ndarray, ctx) -> tuple[float | None, float | None]:
+    """The automatic (data-derived) colour range.
+
+    Prefers the range pooled across every timepoint (``ctx.runtime.heatmap.
+    global_vmin`` / ``.global_vmax``) so the colormap stays put while the
+    timepoint combo is scrubbed, and falls back to this timepoint's own finite
+    values when no global range has been computed.
+    """
     g_vmin = ctx.runtime.heatmap.global_vmin
     g_vmax = ctx.runtime.heatmap.global_vmax
     if (
@@ -480,6 +490,42 @@ def _resolve_color_scale(arr: np.ndarray, ctx) -> tuple[float | None, float | No
     if finite.size == 0:
         return None, None
     return float(finite.min()), float(finite.max())
+
+
+def _resolve_color_scale(arr: np.ndarray, ctx) -> tuple[float | None, float | None]:
+    """Pick (vmin, vmax) for the heatmap.
+
+    Mode is read from ``ctx.state.heatmap.scale_mode`` (Auto/Fixed). Under Auto
+    the range is entirely ``_auto_color_scale``'s.
+
+    Under Fixed the two edits are read **independently**: an end carrying a
+    finite number is used verbatim, and an end left blank falls back to the
+    automatic one. Filling in only vmax to cap a saturating plate is a complete
+    instruction rather than half of one, and it used to be discarded along with
+    the blank vmin beside it.
+
+    A pair that cannot describe a colour range — ``vmax`` at or below ``vmin``
+    once both ends are known — is refused rather than handed to matplotlib,
+    which would either raise or paint the grid one flat colour. The refusal
+    says so on the status line: a Fixed range that is ignored draws exactly the
+    same figure as a Fixed range that was never entered.
+    """
+    mode = str(ctx.state.heatmap.scale_mode or "Auto")
+    auto_vmin, auto_vmax = _auto_color_scale(arr, ctx)
+    if mode != "Fixed":
+        return auto_vmin, auto_vmax
+
+    fixed_vmin = _fixed_limit(ctx.state.heatmap.vmin)
+    fixed_vmax = _fixed_limit(ctx.state.heatmap.vmax)
+    vmin = fixed_vmin if fixed_vmin is not None else auto_vmin
+    vmax = fixed_vmax if fixed_vmax is not None else auto_vmax
+    if vmin is not None and vmax is not None and vmax <= vmin:
+        ctx.notify.set_status(
+            f"Heat Map: the fixed colour scale needs vmax above vmin "
+            f"(got vmin {vmin:g}, vmax {vmax:g}) — showing the automatic range."
+        )
+        return auto_vmin, auto_vmax
+    return vmin, vmax
 
 
 def _compute_global_range(
@@ -676,6 +722,17 @@ def redraw_heatmap(ctx) -> None:
         # User-fixed vmin/vmax win when they're positive.
         if (vmin is not None and vmin > 0) and (vmax is not None and vmax > vmin):
             log_vmin, log_vmax = float(vmin), float(vmax)
+        elif str(ctx.state.heatmap.scale_mode or "Auto") == "Fixed" and (
+            _fixed_limit(ctx.state.heatmap.vmin) is not None
+            or _fixed_limit(ctx.state.heatmap.vmax) is not None
+        ):
+            # A Fixed range a log scale cannot use: a limit at or below zero.
+            # The grid still draws — on the data's own positive range — so
+            # without this the fixed numbers are ignored and nothing says so.
+            ctx.notify.set_status(
+                "Heat Map: a log colour scale needs both fixed limits above "
+                "zero — showing the automatic log range instead."
+            )
         if log_vmin is not None and log_vmax is not None and log_vmax > log_vmin > 0:
             norm = LogNorm(vmin=log_vmin, vmax=log_vmax)
             # Mask non-positive entries so LogNorm doesn't choke.

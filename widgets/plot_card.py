@@ -173,7 +173,19 @@ def apply_axes_style(ax, mode: str = "screen") -> None:
     ax.yaxis.label.set_color(sec)
     if ax.get_title():
         ax.title.set_color(fg)
-    ax.grid(True, color=grid, linewidth=0.7, linestyle="-")
+    # The grid's **colour** is a theme decision; whether it is drawn, and in
+    # what dash and opacity, is the user's (Properties → Grid). This pass runs
+    # on every ``setPlotTheme`` — which is every Screen/Publication switch and,
+    # through ``_publication_capture``, every Save figure, Copy panel, Copy as
+    # vector and gallery capture — so switching the grid back on here made
+    # ``Show grid`` look broken the moment the theme moved, and put gridlines
+    # into every exported figure of a plot the user had turned them off on.
+    # ``ax.grid(color=…)`` is not an option either: matplotlib reads line
+    # properties with no visibility argument as "style the grid, and turn it
+    # on". So the artists are recoloured directly, the way ``_apply_rcparams``
+    # already recolours them, and the switch is left where it was.
+    for gridline in (*ax.get_xgridlines(), *ax.get_ygridlines()):
+        gridline.set_color(grid)
     ax.set_axisbelow(True)
 
 

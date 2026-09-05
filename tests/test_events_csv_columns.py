@@ -126,10 +126,10 @@ def test_the_bar_csv_row_reports_both_numbers(uneven_set):
         n_above_total=it.n_above_total, replicate_unit="well",
         ch="gfp", metric="mean_intensity", tp_str="0",
         threshold=0.0, band_lbl="SEM")
-    assert row["n_above_threshold"] == str(CROSS_WELL_TOTAL)
-    assert row["n_above_replicate_mean"] == f"{DRAWN_MEAN:.6f}"
-    assert row["err_n_above_replicate_SEM"] == f"{DRAWN_SPREAD:.6f}"
-    assert row["n_above_replicate_unit"] == "well"
+    assert row["events_total"] == str(CROSS_WELL_TOTAL)
+    assert row["events_per_replicate_mean"] == f"{DRAWN_MEAN:.6f}"
+    assert row["events_per_replicate_sem"] == f"{DRAWN_SPREAD:.6f}"
+    assert row["replicate_unit"] == "well"
 
 
 def test_the_line_csv_row_reports_both_numbers(uneven_set):
@@ -138,8 +138,8 @@ def test_the_line_csv_row_reports_both_numbers(uneven_set):
     row = line_metric_row(
         series[0].points[0].as_aggpoint(),
         ch="gfp", metric="mean_intensity", threshold=0.0, band_lbl="SEM")
-    assert row["n_above_threshold"] == CROSS_WELL_TOTAL
-    assert row["n_above_replicate_mean"] == f"{DRAWN_MEAN:.6f}"
+    assert row["events_total"] == CROSS_WELL_TOTAL
+    assert row["events_per_replicate_mean"] == f"{DRAWN_MEAN:.6f}"
 
 
 def test_a_single_well_row_is_unchanged(uneven_set):
@@ -147,8 +147,8 @@ def test_a_single_well_row_is_unchanged(uneven_set):
     row = line_metric_row(
         (0.0, 100.0, 0.0, 0.5, 9, 20, 0.0, 0.0, 0.0),
         ch="gfp", metric="mean_intensity", threshold=0.0, band_lbl="SEM")
-    assert row["n_above_threshold"] == 9
-    assert row["n_above_replicate_mean"] == "9.000000"
+    assert row["events_total"] == 9
+    assert row["events_per_replicate_mean"] == "9.000000"
 
 
 def test_an_undefined_spread_stays_an_empty_cell(uneven_set):
@@ -158,4 +158,4 @@ def test_an_undefined_spread_stays_an_empty_cell(uneven_set):
         n_above=9.0, n_above_spread=0.0, n_above_total=9,
         ch="gfp", metric="mean_intensity", tp_str="0",
         threshold=0.0, band_lbl="SEM")
-    assert row["err_n_above_replicate_SEM"] == ""
+    assert row["events_per_replicate_sem"] == ""

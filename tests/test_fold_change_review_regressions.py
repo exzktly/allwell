@@ -270,7 +270,7 @@ def test_a_replicate_spread_of_zero_is_written_as_zero():
         n_above=5.0, n_above_spread=0.0, n_above_total=10,
         replicate_unit="well", ch="GFP", metric="mean_intensity",
         tp_str="0", threshold=0.0, band_lbl="SD")
-    assert row["err_n_above_replicate_SD"] == "0.000000"
+    assert row["events_per_replicate_sd"] == "0.000000"
 
 
 def test_a_single_well_row_leaves_the_replicate_columns_empty():
@@ -283,8 +283,8 @@ def test_a_single_well_row_leaves_the_replicate_columns_empty():
         n_above=5.0, n_above_spread=0.0, n_above_total=None,
         replicate_unit="", ch="GFP", metric="mean_intensity",
         tp_str="0", threshold=0.0, band_lbl="SD")
-    assert row["err_n_above_replicate_SD"] == ""
-    assert row["n_above_replicate_unit"] == ""
+    assert row["events_per_replicate_sd"] == ""
+    assert row["replicate_unit"] == ""
 
 
 # ── the editor's colour chip ─────────────────────────────────────────────────

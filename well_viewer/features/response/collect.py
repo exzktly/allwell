@@ -438,7 +438,7 @@ def collect_response(ctx, variable_id: str, timepoints,
     stats_for = compute_rep_per_fov_stats if per_fov else compute_rep_stats
     # The canonical spelling, from the one rule the plots reduce by, so the
     # CSV's ``spread_unit`` cell reads the same word here as it does in the
-    # Heat Map and scatter-aggregate files and as ``n_above_replicate_unit``
+    # Heat Map and scatter-aggregate files and as ``replicate_unit``
     # does on Bar and Line. One well is enough for a unit to exist — the
     # figure-wide statement does not depend on how many any one member has —
     # and the caption below renders it for prose rather than storing a second

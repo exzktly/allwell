@@ -160,11 +160,16 @@ def collect_line_series_for_group(
             continue
         rset_per_fov = replicate_unit(len(valid_wells), rep_per_fov) == "fov"
         all_tps: set = set()
+        # Cells the set holds at each timepoint, pooled across its wells — the
+        # CSV's ``n_total``. Summed from the same walk that collects the
+        # timepoints, as the tab's collector does it.
+        cells_at: dict = {}
         for lbl in valid_wells:
-            for t, *_ in aggregate_well(ctx, lbl, threshold=threshold,
-                                        use_sem=False, val_col=val_col,
-                                        fluor_gates=fluor_gates):
-                all_tps.add(t)
+            for pt in aggregate_well(ctx, lbl, threshold=threshold,
+                                     use_sem=False, val_col=val_col,
+                                     fluor_gates=fluor_gates):
+                all_tps.add(pt[0])
+                cells_at[pt[0]] = cells_at.get(pt[0], 0) + int(pt[5])
         raw_pts: list = []
         for t in sorted(all_tps):
             # Index 10 carries the cross-well total for the CSV's integer
@@ -188,7 +193,8 @@ def collect_line_series_for_group(
                 gnpf_m, gnpf_s = 0.0, 0.0
             if not (isinstance(gm, float) and math.isnan(gm)):
                 raw_pts.append((
-                    t, gm, gerr, gf, n_above_val, 0, gfe, gnpf_m, gnpf_s,
+                    t, gm, gerr, gf, n_above_val, cells_at.get(t, 0),
+                    gfe, gnpf_m, gnpf_s,
                     n_above_spread, n_above_total,
                 ))
         points = [_aggpoint_to_linepoint(pt) for pt in _normalize(raw_pts, rset.name)]

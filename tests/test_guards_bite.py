@@ -3814,7 +3814,7 @@ SPREAD_BAD = {
 SPREAD_GOOD = {
     # The two shapes the app actually uses.
     "conditional": ('def row(s):\n'
-                    '    return {"err_frac_SD": f"{s:.6f}" if s == s else ""}\n'),
+                    '    return {"fraction_sd": f"{s:.6f}" if s == s else ""}\n'),
     "helper call": 'def row(s):\n    return {"x_err": spread_cell(s)}\n',
     # The metadata columns beside them are strings, not intervals.
     "metadata": 'def row(band):\n    return {"spread_kind": f"{band}"}\n',

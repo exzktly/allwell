@@ -90,7 +90,7 @@ class LinePoint:
     frac_spread: float = 0.0
     n_above_pf_mean: float = 0.0
     n_above_pf_spread: float = 0.0
-    #: Cross-well total events, for the CSV's integer ``n_above_threshold``
+    #: Cross-well total events, for the CSV's integer ``events_total``
     #: column. ``n_above`` is the plotted value and is a per-well mean for a
     #: replicate set, so the two differ and the CSV needs its own. ``None``
     #: for a non-aggregated row, never ``0``.
@@ -298,13 +298,22 @@ def collect_line_series(
             rset_per_fov = replicate_unit(len(valid_wells), rep_per_fov) == "fov"
             all_tps: set = set()
             cdf_parts: list = []
+            # Cells the set holds at each timepoint, pooled across its wells.
+            # The per-well aggregation is already being walked for the
+            # timepoint list and is cached, so the sum is free — and without it
+            # the CSV's ``n_total`` had nothing to report for a set at all: the
+            # point built below carried a placeholder there, which the exporter
+            # (rightly) refused to print, leaving the column empty on every row
+            # of a replicate-set file.
+            cells_at: dict = {}
             for lbl in valid_wells:
-                for t, *_ in aggregate_well_cached(ctx,
+                for _pt in aggregate_well_cached(ctx,
                     lbl, threshold=threshold, use_sem=False,
                     val_col=val_col,
                     fluor_gates=fluor_gates,
                 ):
-                    all_tps.add(t)
+                    all_tps.add(_pt[0])
+                    cells_at[_pt[0]] = cells_at.get(_pt[0], 0) + int(_pt[5])
                 if include_cdf and all_fluor_values_filtered is not None:
                     # Collect the arrays and concatenate once. ``.extend`` here
                     # boxed every value into a Python float, four times the
@@ -351,7 +360,8 @@ def collect_line_series(
                     # to draw and fell back to shading the area under the line.
                     _raw_pts.append((
                         t, gm, gerr, gf,
-                        _n_above_val if not rset_per_fov else 0, 0,
+                        _n_above_val if not rset_per_fov else 0,
+                        cells_at.get(t, 0),
                         gfe, gnpf_m, gnpf_s,
                         _n_above_spread if not rset_per_fov else 0.0,
                         _n_above_total,

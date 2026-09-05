@@ -262,7 +262,7 @@ def test_blank_point_can_blank_one_panel():
 # — which keys off ``is None`` — reported a unit of ``well`` beside a spread of
 # 0.000000, the "the replicates agreed" reading the column documentation says is
 # impossible for one well. The same non-None value also beat the per-FOV branch
-# in ``n_above_threshold``.
+# in ``events_total``.
 
 def _solo_app():
     return MockApp(
@@ -296,9 +296,9 @@ def test_a_single_well_row_leaves_the_replicate_columns_empty():
         band_lbl="SD", n_above_total=item.n_above_total,
         replicate_unit=_replicate_unit_for(item, per_fov=False),
     )
-    assert row["n_above_replicate_unit"] == ""
-    assert row["err_n_above_replicate_SD"] == ""
-    assert row["n_above_threshold"] == "4"
+    assert row["replicate_unit"] == ""
+    assert row["events_per_replicate_sd"] == ""
+    assert row["events_total"] == "4"
 
 
 def test_a_single_well_row_keeps_the_per_fov_float_form():
@@ -318,7 +318,7 @@ def test_a_single_well_row_keeps_the_per_fov_float_form():
         band_lbl="SD", n_above_total=item.n_above_total,
         replicate_unit=_replicate_unit_for(item, per_fov=True),
     )
-    assert row["n_above_threshold"] == "4.500000"
+    assert row["events_total"] == "4.500000"
 
 
 # ── the line CSV's Events columns ────────────────────────────────────────────
@@ -328,23 +328,23 @@ def test_the_line_csv_carries_all_three_events_columns():
         line_metric_fieldnames, line_metric_row,
     )
     cols = line_metric_fieldnames("gfp", "mean_intensity", "SD")
-    assert "n_above_replicate_mean" in cols
-    assert "err_n_above_replicate_SD" in cols
-    assert "n_above_replicate_unit" in cols
+    assert "events_per_replicate_mean" in cols
+    assert "events_per_replicate_sd" in cols
+    assert "replicate_unit" in cols
 
     rset_pt = (0.0, 100.0, 3.0, 0.5, 5.0, 10, 0.1, 0.0, 0.0, 1.4, 10)
     row = line_metric_row(rset_pt, ch="gfp", metric="mean_intensity",
                           threshold=1.0, band_lbl="SD")
-    assert row["n_above_threshold"] == 10
-    assert row["n_above_replicate_mean"] == "5.000000"
-    assert row["err_n_above_replicate_SD"] == "1.400000"
-    assert row["n_above_replicate_unit"] == "well"
+    assert row["events_total"] == 10
+    assert row["events_per_replicate_mean"] == "5.000000"
+    assert row["events_per_replicate_sd"] == "1.400000"
+    assert row["replicate_unit"] == "well"
 
     solo_pt = (0.0, 100.0, 3.0, 0.5, 4, 10, 0.1, 0.0, 0.0)
     solo = line_metric_row(solo_pt, ch="gfp", metric="mean_intensity",
                            threshold=1.0, band_lbl="SD")
-    assert solo["err_n_above_replicate_SD"] == ""
-    assert solo["n_above_replicate_unit"] == ""
+    assert solo["events_per_replicate_sd"] == ""
+    assert solo["replicate_unit"] == ""
 
 
 # ── the axis phrase for "on, and nothing resolved" ───────────────────────────

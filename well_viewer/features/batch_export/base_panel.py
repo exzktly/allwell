@@ -221,9 +221,13 @@ def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
     fmean = npt[1] if len(npt) > 1 else float("nan")
     fspread = npt[2] if len(npt) > 2 else 0.0
     has_mean = is_number(fmean)
-    has_spread = is_number(fspread)
+    # Only a point that HAS a normalized value reports a spread for it.
+    # ``fold_change.blank_point`` blanks the mean and leaves the spread at 0.0,
+    # so guarding the two independently put ``0.000000`` beside an empty mean
+    # on exactly the rows whose outcome says the control never resolved.
     row["fold_change_mean"] = f"{fmean:.6f}" if has_mean else ""
-    row[f"fold_change_{band_lbl.lower()}"] = f"{fspread:.6f}" if has_spread else ""
+    row[f"fold_change_{band_lbl.lower()}"] = (
+        f"{fspread:.6f}" if has_mean and is_number(fspread) else "")
     parts: list = []
     if vs_control:
         parts.append("control")
@@ -900,9 +904,22 @@ class BatchExportPanel(QWidget):
         represented as single-well selections so the mode-exclusive collectors
         (rep-sets *or* raw ``selected_wells``, never both) still include them:
         ``active_replicate_sets`` treats any non-hidden selection with a loaded
-        well as a rep-set, and a one-well rep-set's stat equals the raw well's,
-        so solos are numerically unchanged while pooled members get the tab's
-        mean-of-per-well-means.
+        well as a rep-set, and a one-well rep-set's *mean* equals the raw
+        well's, so a solo's drawn value is unchanged while pooled members get
+        the tab's mean-of-per-well-means.
+
+        Its **spread** is not the same statistic, and one path can see the
+        difference: a one-well set has no cross-well spread, while the well
+        itself has a within-well one. The member's own numerator is unaffected
+        — ``collect_line_series_for_group`` aggregates a solo with
+        ``aggregate_well`` rather than through this list — but a fold-change
+        control naming that well as a **legacy bare label** is classified by
+        set-before-well precedence (``fold_change.classify_control_label``) and
+        so takes the pseudo-set's denominator here and the well's on the tab,
+        which changes the propagated ``fold_change_<band>``. A control saved
+        the way the app writes them today — a ``ControlRef`` that states its
+        own kind — is immune, because ``resolve_control`` never guesses for
+        one; ``tests/test_batch_export_fold_change.py`` pins that.
 
         The swap **replaces** the list rather than adding to it, which is what
         made a fold-change control naming a replicate set in a *different* batch
@@ -3290,6 +3307,15 @@ class BatchExportPanel(QWidget):
                             fc_state=panel_fc_state,
                         )
                         fc_series_by_key = {s.key: s for s in series_fc}
+                        # The raw pass runs with fold change off and so cannot
+                        # know which members the control render mode hides;
+                        # the fold-change pass is the one that does. Without
+                        # this the exported figure drew one curve while the CSV
+                        # beside it carried rows for a hidden control, its
+                        # fold-change cells blank — see the same guard in
+                        # ``export/service.export_plot_data``.
+                        series_raw = [s for s in series_raw
+                                      if s.key in fc_series_by_key]
                     else:
                         fc_series_by_key = {}
                     rows_out: list[dict] = []

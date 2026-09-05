@@ -3792,6 +3792,18 @@ _SPREAD_GUARD = ("tests.test_a_spread_reaches_a_csv_as_a_number_or_a_blank",
 SPREAD_BAD = {
     # The shape that shipped in the scatter aggregate exporters.
     "plain key": 'def row(x_err):\n    return {"x_err": f"{float(x_err):.8g}"}\n',
+    # Three shapes an earlier draft of the guard walked straight past, each of
+    # them a real site in this repo: the fold-change columns are appended by
+    # subscript assignment (which is where a literal ``nan`` was found), the
+    # Heat Map keys its error column by a variable, and the Line CSV's own
+    # spread column is an f-string key whose fixed text is only "__".
+    "subscript": ('def row(r, band, spread):\n'
+                  '    r[f"fold_change_{band}"] = f"{spread:.6f}"\n'),
+    "name key": ('def row(err_name, e):\n'
+                 '    return {err_name: f"{e:.6f}"}\n'),
+    "key with no fixed text": ('def row(band, ch, metric, spread):\n'
+                               '    return {f"{band}_{ch}_{metric}": f"{spread:.6f}"}\n'),
+    "band-prefixed key": 'def row(v):\n    return {"sem_gfp_mean_intensity": f"{v:.6f}"}\n',
     # The line and bar writers build their headers from the band label, so a
     # future violation is as likely to be keyed by an f-string as by a literal.
     "f-string key": ('def row(s, band):\n'
@@ -3808,6 +3820,14 @@ SPREAD_GOOD = {
     "metadata": 'def row(band):\n    return {"spread_kind": f"{band}"}\n',
     # A value column formatted unconditionally is none of this guard's business.
     "a value": 'def row(v):\n    return {"mean_gfp": f"{v:.6f}"}\n',
+    # A payload key spelled exactly ``error`` carries a failure message, not an
+    # error bar — ``spatial/controller.py`` writes one from an exception, and
+    # the first draft of the guard flagged it.
+    "an error message": ('def run(payload, exc):\n'
+                         '    payload["error"] = f"Analysis failed: {exc}"\n'),
+    # The subscript shape done right.
+    "subscript, guarded": ('def row(r, band, spread):\n'
+                           '    r[f"fold_change_{band}"] = spread_cell(spread)\n'),
 }
 
 

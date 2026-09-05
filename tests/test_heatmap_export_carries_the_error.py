@@ -139,8 +139,11 @@ def test_the_row_says_what_its_spread_is_over(exported):
     """
     rows = exported(array=[[6.0, 2.0, np.nan]], spread=[[4.0, np.nan, np.nan]])
     assert rows[0]["spread_unit"] == "well"
-    assert rows[1]["spread_unit"] == "well"
-    # A cell holding no well has nothing for a replicate to be.
+    # A cell whose spread was never computed — one replicate here, and every
+    # cell of a Cell count heat map, where the value is a total and has no
+    # spread by construction — names no denominator: a unit beside a blank
+    # error asserts a statistic nobody took.
+    assert rows[1]["err_SEM"] == "" and rows[1]["spread_unit"] == ""
     assert rows[2]["spread_unit"] == ""
 
     fov = exported(array=[[6.0, 2.0, np.nan]], spread=[[4.0, np.nan, np.nan]],

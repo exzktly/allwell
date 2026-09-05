@@ -2394,7 +2394,9 @@ columns:
 * `n_above_replicate_mean` — the plotted value
 * `err_n_above_replicate_<band>` — its spread across replicates, empty when
   there was only one and nothing could be computed
-* `n_above_replicate_unit` — `well` or `fov`
+* `n_above_replicate_unit` — `well` or `fov`, and empty on a row where nothing
+  was measured: a single well with Aggregate-FOVs off, or a member that has no
+  point at that timepoint at all
 
 The unit column matters because nothing else in the row records whether
 Aggregate-FOVs was on, which would leave the other two ambiguous. With the
@@ -2419,6 +2421,16 @@ never `0` and never the word `nan`: a spreadsheet reads `nan` as text, which
 stops the whole column being numeric and quietly drops the series from any
 chart built on it. This holds for the line, bar, Heat Map, Scatter (Wells view)
 and Response CSVs alike, from the tab's own Save menu and from Batch Export.
+
+The rule reaches the **fold-change** columns too. `fold_change_<band>` is
+written only for a row that has a `fold_change_mean`: where the control could
+not be resolved the normalization did not happen, so both cells are empty and
+`fold_change_outcome` says why. An infinity — which dividing by a control that
+reads zero can produce — is not a measurement either, and is blank in both.
+
+And a row that measured **nothing** says nothing: a member with no data at a
+timepoint leaves every value, every spread and every unit cell empty rather
+than reporting the placeholder its collector carries.
 
 **And every file says what its error is over.** SD across wells and SD across
 fields are different numbers, so a file carrying one names the unit: the line

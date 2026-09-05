@@ -31,9 +31,27 @@ from tests._repo_scan import parse_source, python_sources, rel
 #: These are the column names that carry an interval rather than a value.
 _SPREAD_KEY = ("err", "error", "spread", "_sd", "_sem")
 
+#: The same idea with the band in front, which is how the line CSV spells its
+#: own spread column (``sem_gfp_mean_intensity``) and how several locals read.
+_SPREAD_PREFIX = ("err", "sem_", "sd_", "spread")
+
 #: Keys that name *what* the interval is rather than holding one. They are
 #: strings by construction ("SEM", "fov"), and blanking them would be wrong.
-_METADATA_KEYS = frozenset({"spread_kind", "spread_unit", "err_kind"})
+_METADATA_KEYS = frozenset({
+    "spread_kind", "spread_unit", "err_kind", "spread_label",
+    # NOT ``err_name``: that is the variable holding the Heat Map's column
+    # name, and the cell it keys is the spread itself. Exempting it here — the
+    # first draft did — put the one Name-keyed spread column in the app back
+    # out of the guard's sight, which is the reason ``_key_text`` reads a Name
+    # at all.
+    # A payload key spelled exactly ``error`` is a failure *message*, not an
+    # error *bar* — ``spatial/controller.py`` sets one from an exception, and
+    # blanking it would delete the reason a panel is empty. Every real spread
+    # column in this repo carries the band or the axis with it
+    # (``x_err``, ``err_frac_SEM``, ``gfp_mean_intensity_error``), so the bare
+    # word is safe to exempt and a suffixed one is still caught.
+    "error", "errors", "error_message",
+})
 
 
 def _key_text(node) -> str:
@@ -43,14 +61,66 @@ def _key_text(node) -> str:
     if isinstance(node, ast.JoinedStr):
         return "".join(v.value for v in node.values
                        if isinstance(v, ast.Constant) and isinstance(v.value, str))
+    if isinstance(node, ast.Name):
+        # ``err_name: f"…"`` — the Heat Map builds its column name first. The
+        # variable's own name is the only thing there is to read, and it is
+        # exactly as informative as a literal would have been.
+        return node.id
     return ""
 
 
-def _names_a_spread(key_text: str) -> bool:
-    low = key_text.lower()
+def _names_a_spread(text: str) -> bool:
+    """Whether *text* — a column name or a variable name — holds an interval."""
+    low = text.lower()
     if low in _METADATA_KEYS:
         return False
-    return any(token in low for token in _SPREAD_KEY)
+    if any(token in low for token in _SPREAD_KEY):
+        return True
+    # The repo spells its line-CSV spread columns and its locals with the band
+    # in FRONT: ``sem_gfp_mean_intensity``, ``sd_gfp_mean_intensity``. A
+    # substring test for ``_sem`` sees neither.
+    return any(low.startswith(prefix) for prefix in _SPREAD_PREFIX)
+
+
+def _formats_a_spread(value) -> bool:
+    """Whether *value* is an f-string interpolating a spread-named expression.
+
+    The other half of the rule, and the half that survives a key the guard
+    cannot read: ``f"{spread:.6f}"`` says what it is formatting whatever the
+    column is called. It is what makes the Line CSV's own spread cell — keyed
+    ``f"{band_lbl.lower()}_{ch}_{metric}"``, whose constant parts are just
+    ``"__"`` — visible to this guard at all.
+    """
+    if not isinstance(value, ast.JoinedStr):
+        return False
+    for part in ast.walk(value):
+        if not isinstance(part, ast.FormattedValue):
+            continue
+        for inner in ast.walk(part.value):
+            name = (inner.id if isinstance(inner, ast.Name)
+                    else inner.attr if isinstance(inner, ast.Attribute) else "")
+            if name and _names_a_spread(name):
+                return True
+    return False
+
+
+def _row_cells(tree):
+    """Every ``(name, value)`` pair a row-building statement writes.
+
+    Two shapes, both live in this repo: a dict literal (``{"x_err": …}``) and a
+    subscript assignment onto an existing row (``row[f"fold_change_{band}"] =
+    …``), which is how the fold-change columns are appended and which a
+    dict-only scan walked straight past.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if key is not None:
+                    yield _key_text(key), value
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Subscript):
+                    yield _key_text(target.slice), node.value
 
 
 def test_no_exporter_formats_a_spread_without_a_blank_for_undefined():
@@ -60,23 +130,30 @@ def test_no_exporter_formats_a_spread_without_a_blank_for_undefined():
     (``spread_cell(v)``, ``_num(v)``, ``blank_if_undefined(v)``) both have a
     branch for the undefined case; an unconditional ``JoinedStr`` does not, and
     ``f"{float('nan'):.6f}"`` is the string ``nan``.
+
+    A cell is caught by its **column name** or by the **expression it
+    formats**, because neither alone sees every site: the Heat Map's column
+    name is a variable, the Line CSV's is an f-string with no fixed text in it,
+    and a batch writer's is a plain literal.
+
+    What this cannot see, stated rather than left to be discovered: a row built
+    as a **list** and handed to ``csv.writer`` — the Response CSVs
+    (``response/controller.py``, ``batch_export/response_panel.py``) are that
+    shape, and their cells are positional, so nothing in the syntax says which
+    element is a spread. Both go through ``blank_if_undefined``, and
+    ``tests/test_response_collect.py`` pins that; a third list-shaped exporter
+    would need its own test rather than this guard.
     """
     offenders: list[str] = []
     for path in python_sources():
         tree = parse_source(path)
         if tree is None:
             continue
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Dict):
+        for name, value in _row_cells(tree):
+            if not isinstance(value, ast.JoinedStr):
                 continue
-            for key, value in zip(node.keys, node.values):
-                if key is None:
-                    continue
-                text = _key_text(key)
-                if not text or not _names_a_spread(text):
-                    continue
-                if isinstance(value, ast.JoinedStr):
-                    offenders.append(f"{rel(path)}:{value.lineno} {text!r}")
+            if (name and _names_a_spread(name)) or _formats_a_spread(value):
+                offenders.append(f"{rel(path)}:{value.lineno} {name or '?'!r}")
     assert not offenders, (
         "a spread column is written with an unconditional f-string, so an "
         "undefined spread reaches the CSV as the literal 'nan':\n  "
@@ -268,3 +345,107 @@ def test_the_scatter_aggregate_says_which_interval_and_over_what(tmp_path,
                          per_fov=True, use_sem=False)
     assert sd_fov[0]["spread_kind"] == "SD"
     assert sd_fov[0]["spread_unit"] == "fov"
+
+
+# ── what a row with no data may say ─────────────────────────────────────────
+
+def test_a_bar_that_measured_nothing_names_no_unit_and_no_spread():
+    """A member with no point at this timepoint still reaches the writer.
+
+    ``collect_bar_items``'s no-data branch fills the item with placeholders —
+    ``n_above=0.0``, ``n_above_spread=0.0``, ``has_mean=False`` — so a unit
+    keyed on the *value* answered "fov" for a zero nobody measured, and the
+    spread cell, which keys on the unit, then printed ``0.000000`` on a row
+    whose every other cell is blank. That is the fabricated whisker this file
+    exists to prevent, and it arrived by way of its own fix.
+    """
+    from well_viewer.features.barplot.collect import BarItem
+    from well_viewer.features.export.service import (
+        _replicate_unit_for, bar_metric_row,
+    )
+
+    absent = BarItem(
+        key="B01", display="B01", color="#000", tp="0",
+        mean=float("nan"), spread=0.0, has_mean=False,
+        frac=float("nan"), frac_spread=0.0, has_frac=False,
+        n_above=0.0, n_above_spread=0.0, n_above_total=None)
+    assert _replicate_unit_for(absent, per_fov=True) == ""
+    row = bar_metric_row(
+        mean=absent.mean, spread=absent.spread, frac=absent.frac,
+        frac_spread=absent.frac_spread, has=absent.has_mean,
+        n_above=float(absent.n_above), n_above_spread=float(absent.n_above_spread),
+        n_above_total=absent.n_above_total,
+        replicate_unit=_replicate_unit_for(absent, per_fov=True),
+        ch="gfp", metric="mean_intensity", tp_str="0",
+        threshold=0.0, band_lbl="SEM")
+    assert row["err_n_above_replicate_SEM"] == ""
+    assert row["err_n_above_SEM"] == ""
+    assert row["n_above_replicate_unit"] == ""
+    assert row["n_above_replicate_mean"] == ""
+    assert row["n_above_threshold"] == ""
+
+
+def test_the_two_events_error_columns_agree_about_a_measured_zero():
+    """They hold the same statistic — the collectors put the drawn Events
+    spread in ``n_above_spread`` on both branches — so they cannot disagree
+    about whether zero is a measurement. ``err_n_above_<band>`` keyed on
+    ``spread > 0``, a mode flag standing in for a value test, and blanked the
+    zero its neighbour wrote."""
+    from well_viewer.features.export.service import bar_metric_row
+
+    row = bar_metric_row(
+        mean=1.0, spread=0.1, frac=0.5, frac_spread=0.0, has=True,
+        n_above=6.0, n_above_spread=0.0, n_above_total=12,
+        replicate_unit="fov", ch="gfp", metric="mean_intensity",
+        tp_str="0", threshold=0.0, band_lbl="SEM")
+    assert row["err_n_above_SEM"] == "0.000000"
+    assert row["err_n_above_replicate_SEM"] == "0.000000"
+
+
+# ── the fold-change columns ─────────────────────────────────────────────────
+
+def test_the_bar_fold_change_spread_is_blank_when_it_is_undefined():
+    """``fc_has`` is the MEAN's flag. ``scale_bar_value`` returns a finite
+    value with a NaN spread whenever the denominator's own spread was
+    undefined, so gating the spread on it wrote the literal ``nan`` — in the
+    same row where ``err_<band>_<ch>_<metric>`` was correctly blank, and
+    against a Line CSV that blanks the identical cell."""
+    from well_viewer.features.export.service import attach_bar_fold_change_columns
+
+    row: dict = {}
+    attach_bar_fold_change_columns(
+        row, fc_mean=1.0, fc_spread=float("nan"), fc_has=True, band_lbl="SEM",
+        vs_control=True, vs_t0=False, control_label="A01")
+    assert row["fold_change_mean"] == "1.000000"
+    assert row["fold_change_sem"] == ""
+
+    # An infinity is not a measurement either — a control that vanishes can
+    # produce one, and ``inf`` in a cell is as unusable as ``nan``.
+    infinite: dict = {}
+    attach_bar_fold_change_columns(
+        infinite, fc_mean=float("inf"), fc_spread=float("inf"), fc_has=True,
+        band_lbl="SEM", vs_control=True, vs_t0=False, control_label="A01")
+    assert infinite["fold_change_mean"] == ""
+    assert infinite["fold_change_sem"] == ""
+
+    # A measured zero still exports.
+    agreed: dict = {}
+    attach_bar_fold_change_columns(
+        agreed, fc_mean=1.25, fc_spread=0.0, fc_has=True, band_lbl="SEM",
+        vs_control=True, vs_t0=False, control_label="A01")
+    assert agreed["fold_change_sem"] == "0.000000"
+
+
+def test_a_blanked_fold_change_point_reports_no_spread_either():
+    """``fold_change.blank_point`` blanks the mean and leaves the spread at
+    0.0, so guarding the two independently wrote ``0.000000`` beside an empty
+    ``fold_change_mean`` on exactly the rows whose outcome says the control
+    never resolved. Both line writers, on-tab and batch."""
+    from well_viewer.features.batch_export.base_panel import _attach_fc_row
+
+    row: dict = {}
+    blanked = (0.0, float("nan"), 0.0, float("nan"), 0.0, 0)
+    _attach_fc_row(row, blanked, "SEM", True, False, "A01", "control_unresolved")
+    assert row["fold_change_mean"] == ""
+    assert row["fold_change_sem"] == ""
+    assert row["fold_change_outcome"] == "control_unresolved"

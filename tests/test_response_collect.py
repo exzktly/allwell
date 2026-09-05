@@ -715,7 +715,17 @@ def test_a_single_replicate_member_is_counted_as_having_no_spread(stub_stats, mo
     assert data.solo_spread == 1, "the lone replicate was not counted"
     assert data.undefined_spread == 0, "it was blamed on a control that does not exist"
     caption = rc.omission_caption(data)
-    assert "a single replicate has no spread" in caption
+    # "well", not "replicate": the caption names the unit because "add another
+    # well" and "add another field" are different fixes, and the generic word
+    # named neither. It is rendered from the same value the CSV's
+    # ``spread_unit`` column carries (``well`` / ``fov``), so the sentence and
+    # the file cannot drift apart.
+    assert "a single well has no spread" in caption
+    # The value the CSV's ``spread_unit`` column carries is the app-wide
+    # vocabulary — ``well`` / ``fov``, from ``stats_compute.replicate_unit`` —
+    # rather than a second pair of words. Concatenating a Response file with a
+    # Heat Map one used to give a column reading FOV, fov, replicate and well.
+    assert data.replicate_unit == "well"
     assert "control" not in caption
 
 
@@ -1053,6 +1063,9 @@ def test_a_missing_fov_spread_is_captioned_as_a_lone_fov(monkeypatch):
     caption = rc.omission_caption(data)
     assert data.solo_spread == 1
     assert "a single FOV has no spread" in caption, caption
+    # The sentence says FOV; the file says fov. One stored value, rendered for
+    # each audience, so the caption and the CSV cannot name different units.
+    assert data.replicate_unit == "fov"
 
 
 # ── fraction above threshold on y ───────────────────────────────────────────
@@ -1137,6 +1150,9 @@ def test_a_per_fov_spread_that_is_undefined_blames_the_fov_not_a_control(
 
     assert data.solo_spread == 1 and data.undefined_spread == 0
     assert "a single FOV has no spread" in caption, caption
+    # The sentence says FOV; the file says fov. One stored value, rendered for
+    # each audience, so the caption and the CSV cannot name different units.
+    assert data.replicate_unit == "fov"
     assert "control" not in caption, caption
 
 

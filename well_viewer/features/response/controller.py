@@ -12,6 +12,7 @@ import logging
 
 from well_viewer.core.channel_state_controller import col_for_scatter_axis
 from well_viewer.core.csv_export import write_csv_rows
+from well_viewer.domain.numeric import is_number
 from well_viewer.core.safe import swallow
 from well_viewer.domain.sample_variables import NAME_JOIN, NUMBER
 from well_viewer.features.response.collect import (
@@ -651,12 +652,18 @@ def blank_if_undefined(value) -> str:
     replicate has no spread, and §7's rule is that undefined must not be written
     as zero. ``f"{nan:g}"`` renders the literal ``nan``, which is a third token
     for the same idea: the rest of the app's exports blank the cell
-    (``features/export/service._num``), and two guards already pin that —
-    ``test_events_csv_columns`` and ``test_fov_label_integrity``. One exporter
-    with its own spelling is how a reader ends up believing the two mean
-    different things.
+    (``features/export/service._num`` / ``spread_cell``), and two guards
+    already pin that — ``test_events_csv_columns`` and
+    ``test_fov_label_integrity``. One exporter with its own spelling is how a
+    reader ends up believing the two mean different things.
+
+    The test is ``domain.numeric.is_number``, the same predicate those
+    exporters use, rather than a hand-rolled ``value != value``: that catches a
+    NaN and passes an **infinity** straight through as the literal ``inf``,
+    which is no more a measured spread than a NaN is and which a division by a
+    vanishing denominator can produce.
     """
-    return "" if value is None or value != value else f"{value:g}"
+    return f"{float(value):g}" if is_number(value) else ""
 
 
 def export_response_csv(ctx) -> None:

@@ -178,8 +178,18 @@ def line_metric_row(pt, *, ch: str, metric: str, threshold: float,
         # it, and a chart built on it silently drops the series.
         f"{band_lbl.lower()}_{ch}_{metric}": (
             f"{spread:.6f}" if is_number(spread) else ""),
+        # An integer count, and it stays one. ``LinePoint.as_aggpoint`` floats
+        # index 4 so the drawn per-well mean of a replicate set is not
+        # truncated, and writing that value through unchanged turned a plain
+        # well's count from ``3`` into ``3.0`` — and a NaN one into the literal
+        # ``nan``. Fold change scales this field into a ratio, which is
+        # genuinely fractional and keeps six decimals like every other
+        # non-integer column.
         "n_above_threshold": (
-            int(n_above_total) if n_above_total is not None else n_above),
+            int(n_above_total) if n_above_total is not None
+            else "" if not is_number(n_above)
+            else int(n_above) if float(n_above).is_integer()
+            else f"{float(n_above):.6f}"),
         "n_above_replicate_mean": (
             f"{float(rep_mean):.6f}" if is_number(rep_mean) else ""),
         # A spread of exactly 0.0 is written, because it is a measurement —
@@ -228,6 +238,14 @@ def _replicate_unit_for(item, *, per_fov: bool) -> str:
     whether the FOV toggle was on, which would leave the mean and its spread
     ambiguous.
     """
+    if not getattr(item, "has_mean", True):
+        # A member with no point at this timepoint still arrives as a
+        # ``BarItem``, carrying the collector's placeholder ``n_above=0.0``
+        # (``barplot/collect.py``'s no-data branch). ``is_number`` says yes to
+        # that zero, so keying on the value alone claimed a unit — and with it
+        # a ``0.000000`` replicate spread — on a row whose every other cell is
+        # blank. Nothing was measured, so nothing is named.
+        return ""
     if per_fov:
         return "fov" if is_number(item.n_above) else ""
     if item.n_above_total is None:
@@ -343,10 +361,24 @@ def bar_metric_row(
             # which is the count itself with Aggregate-FOVs off and the
             # per-FOV mean, in the historic float form, with it on.
             else f"{int(n_above_total)}" if n_above_total is not None
-            else f"{n_above:.6f}" if math.isfinite(float(n_above_spread)) and n_above_spread > 0
+            # The last reader of ``n_above_spread`` as a mode flag. Under
+            # Aggregate-FOVs this cell is a per-FOV *mean*, which is what the
+            # float form is for, and ``replicate_unit`` is the row's own
+            # statement of that — a zero spread (the fields agreed) used to
+            # send a mean back through ``int()`` on the strength of its
+            # whisker.
+            else f"{n_above:.6f}" if replicate_unit == "fov"
             else f"{int(n_above)}"
         ),
-        f"err_n_above_{band_lbl}": f"{n_above_spread:.6f}" if n_above_spread > 0 else "",
+        # Same statistic as ``err_n_above_replicate_<band>`` beside it — the
+        # collectors put the drawn Events spread in ``n_above_spread`` on both
+        # branches — and now the same rule. ``> 0`` was a *mode flag* ("is
+        # per-FOV spread in use?") standing in for a *value* test, from before
+        # the per-well branch had a cross-well spread of its own; it blanked a
+        # spread of exactly zero, which is a measurement (the replicates
+        # agreed) and which the column two places along was writing.
+        f"err_n_above_{band_lbl}": (
+            spread_cell(n_above_spread) if has and replicate_unit else ""),
         "n_above_replicate_mean": _num(n_above) if has else "",
         # A two-well set holding 5 and 5 events has a spread of exactly 0.0,
         # which is a measurement. Blanking it here conflated "the replicates
@@ -355,8 +387,9 @@ def bar_metric_row(
         # blank means. The unit column beside it says which case it is: empty
         # there, and only there, means there was nothing to spread over.
         f"err_n_above_replicate_{band_lbl}": (
-            _num(n_above_spread) if replicate_unit and math.isfinite(
-                float(n_above_spread)) else ""),
+            _num(n_above_spread)
+            if has and replicate_unit and math.isfinite(float(n_above_spread))
+            else ""),
         "n_above_replicate_unit": replicate_unit,
         "threshold": f"{threshold:.4f}",
         "metric": metric,
@@ -421,11 +454,21 @@ def attach_bar_fold_change_columns(
     ``fold_change_mean`` empty, and a reader with only that column cannot tell
     a normalization that failed from one that was never asked for.
     """
+    # ``fc_has`` is the MEAN's flag (``BarItem.has_mean``), and it says nothing
+    # about the spread beside it: ``fold_change.scale_bar_value`` returns a
+    # finite value with a NaN spread whenever the denominator's own spread was
+    # undefined, which is its documented output. Gating the spread on it wrote
+    # the literal ``nan`` into ``fold_change_<band>`` — the one shape
+    # ``spread_cell`` exists to prevent, in the same row where
+    # ``err_<band>_<ch>_<metric>`` was correctly blank, and disagreeing with the
+    # Line CSV, which blanks the identical cell. ``is_number`` also blanks an
+    # infinity, which a division by a vanishing control can produce and which is
+    # no more a measurement than a NaN is.
     row["fold_change_mean"] = (
-        f"{fc_mean:.6f}" if fc_has and not math.isnan(fc_mean) else ""
+        f"{fc_mean:.6f}" if fc_has and is_number(fc_mean) else ""
     )
     row[f"fold_change_{band_lbl.lower()}"] = (
-        f"{fc_spread:.6f}" if fc_has else ""
+        spread_cell(fc_spread) if fc_has else ""
     )
     row["fold_change_mode"] = _fc_mode_str(vs_control, vs_t0)
     row["fold_change_control"] = control_label if vs_control else ""
@@ -486,6 +529,17 @@ def export_plot_data(ctx) -> None:
         fc_by_key = {s.key: s for s in series_fc}
     else:
         fc_by_key = {}
+    if fc_active:
+        # The raw pass is collected with fold change OFF, and a control the
+        # user has set to *Plotted controls: hidden* is dropped by the
+        # **fold-change** resolver (``ControlDenominators.hidden_members``),
+        # which that pass has no idea about. So the figure showed one curve and
+        # the file carried rows for two, the hidden one's fold-change cells
+        # blank — indistinguishable from a normalization that failed. The
+        # fold-change pass is the one that knows, so it decides membership; it
+        # drops nothing else (a member whose control cannot be resolved is
+        # still present, with its points blanked).
+        series_raw = [s for s in series_raw if s.key in fc_by_key]
     if not series_raw:
         _warn(ctx.window, "Export",
               "No wells selected. Select wells in the picker, or define a replicate set.")
@@ -518,11 +572,19 @@ def export_plot_data(ctx) -> None:
                 threshold=threshold, band_lbl=band_lbl, per_fov=per_fov))
             if fc_active and i < len(fc_points):
                 npt = fc_points[i]
+                # The spread is reported only for a point that HAS a
+                # normalized value. ``fold_change.blank_point`` blanks the mean
+                # and leaves the spread at 0.0, so guarding the two
+                # independently wrote ``fold_change_sem = 0.000000`` beside an
+                # empty ``fold_change_mean`` and an outcome saying the control
+                # never resolved — a measured-looking zero for a division that
+                # did not happen.
+                fc_has = is_number(npt.mean)
                 row["fold_change_mean"] = (
-                    f"{npt.mean:.6f}" if is_number(npt.mean) else ""
+                    f"{npt.mean:.6f}" if fc_has else ""
                 )
                 row[f"fold_change_{band_lbl.lower()}"] = (
-                    f"{npt.spread:.6f}" if is_number(npt.spread) else ""
+                    spread_cell(npt.spread) if fc_has else ""
                 )
                 row["fold_change_mode"] = _fc_mode_str(fc_vs_ctrl, fc_vs_t0)
                 row["fold_change_control"] = (
@@ -953,7 +1015,16 @@ def export_heatmap_data(ctx) -> None:
                 # Aggregate-FOVs toggle, so the same cell is a spread across
                 # wells or across fields depending on a control the file
                 # otherwise does not record.
-                "spread_unit": spread_unit_for(ctx, len(wells)),
+                #
+                # It names a denominator only where there is an interval to
+                # have one. A single-replicate cell, an empty cell, and the
+                # Cell count aggregation (a total, which has no spread by
+                # construction) all leave the error blank, and a unit written
+                # beside a blank error asserts a statistic that was never
+                # taken — the whole column would read ``well`` on a Cell count
+                # heat map that measured no spread anywhere.
+                "spread_unit": (spread_unit_for(ctx, len(wells))
+                                if e != "" else ""),
             })
     if not rows_out:
         _warn(ctx.window, "Export", "No heatmap cells to export.")

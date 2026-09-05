@@ -9952,11 +9952,48 @@ that cell as text, so the column stops being numeric for every row below it.
 dict entry whose key names a spread column may not be an unconditional
 `JoinedStr`, since a bare f-string has no branch in which to say "not computed".
 
+The same rule governs the fold-change pair. `fold_change_<band>` is written
+only where `fold_change_mean` is: `fold_change.blank_point` blanks a mean whose
+control did not resolve and leaves the spread at `0.0`, so guarding the two
+independently put a measured-looking zero beside an empty mean on exactly the
+rows whose `fold_change_outcome` says the division never happened. The bar
+writer's `fc_has` is the **mean's** flag (`BarItem.has_mean`) and says nothing
+about the spread beside it — `scale_bar_value` returns a finite value with a
+NaN spread whenever the denominator's own spread was undefined — so gating the
+spread on it wrote the literal `nan` into a row whose raw `err_<band>` cell was
+correctly blank.
+
+A row that measured nothing states nothing, either. A member with no point at
+the timepoint still reaches the writer as a `BarItem`, carrying the collector's
+placeholder `n_above=0.0` with `has_mean=False`; `_replicate_unit_for` keys on
+`has_mean` before the value, because `is_number` says yes to that placeholder
+and a unit claimed there brought a `0.000000` replicate spread with it onto an
+otherwise-empty row.
+
+`n_above_threshold` is an integer count and stays one. `LinePoint.as_aggpoint`
+floats index 4 so a replicate set's drawn mean survives, and writing that value
+through unchanged turned a plain well's `3` into `3.0` and a NaN one into
+`nan`; the row formats an integral value as an integer, a fold-changed ratio
+with six decimals, and an undefined one as blank. On the bar side the same
+column's float form is chosen by `replicate_unit == "fov"` — the row's own
+statement that this cell is a per-FOV mean — rather than by the sign of the
+whisker beside it, which sent a mean back through `int()` whenever the fields
+agreed exactly. That `> 0` test was the last of the mode flags standing in for
+a value test: `err_n_above_<band>` carried it too, and blanked a spread of zero
+that `err_n_above_replicate_<band>` two columns along was writing.
+
 Beside the interval, every file that carries one names **what it is over**:
 `n_above_replicate_unit` on the bar and line CSVs, `spread_unit` on the Heat
 Map, scatter-aggregate and Response ones. `export/service.spread_unit_for` asks
 `stats_compute.replicate_unit` rather than re-spelling the FOV rule, so an
-exported column cannot disagree with the statistic the plot drew. The scatter
+exported column cannot disagree with the statistic the plot drew; the Response
+collector asks the same function rather than keeping the hard-coded
+`"FOV"` / `"replicate"` pair it had, which put four vocabularies under one
+column name across three files. The word a *sentence* wants is rendered from
+that one value at the caption, not stored beside it. A `spread_unit` cell is
+written only where there is an interval to have a denominator — a Heat Map of
+cell counts measures no spread anywhere, and a column of `well` beside an empty
+error column asserts a statistic nobody took. The scatter
 file adds `spread_kind` (`SD` / `SEM`) because neither its columns nor its
 figure title said which interval its whiskers were. `_replicate_unit_for` — the
 bar CSV's version of the same question — keys on the Aggregate-FOVs toggle for

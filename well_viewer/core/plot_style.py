@@ -1315,8 +1315,18 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                     except Exception:
                         swallowed()  # was: pass (silent except)
 
-        show_grid = bool(prefs.get("grid_show", True))
-        ax.grid(show_grid, alpha=float(prefs.get("grid_alpha", 0.25)), linestyle=str(prefs.get("grid_style", "--")))
+        # **Off means off.** ``ax.grid(False, alpha=…, linestyle=…)`` does not
+        # hide the grid: matplotlib reads line properties beside a false first
+        # argument as "style the grid", turns it back **on**, and says so in a
+        # ``UserWarning`` — so Properties → Grid → Show grid did nothing on any
+        # plot in the app, whichever way it was moved. The styling kwargs only
+        # go in when the grid is actually being drawn.
+        if bool(prefs.get("grid_show", True)):
+            ax.grid(True,
+                    alpha=float(prefs.get("grid_alpha", 0.25)),
+                    linestyle=str(prefs.get("grid_style", "--")))
+        else:
+            ax.grid(False)
 
         # Axis limits are applied per-panel (each axis reads its own bucketed
         # limit), not just to the targeted axis — so a limit set on any panel of a

@@ -329,19 +329,33 @@ def test_the_event_count_keeps_its_integer_form_through_as_aggpoint():
                            band_lbl="SEM")["n_above_threshold"] == "0.500000"
 
 
-def test_a_replicate_row_leaves_the_cell_count_empty():
-    """Index 5 is a placeholder on a replicate-set point — the set's statistic
-    is a mean over its wells and never counted their cells — and a real
-    per-well point always has at least one cell, because the aggregator emits
-    no point for a timepoint with none. Printing the placeholder said the set
-    held no cells at a timepoint where it plainly held some."""
-    rset_pt = (0.0, 105.0, 5.0, 0.5, 7.5, 0, 0.1, 0.0, 0.0, 0.5, 15)
-    assert line_metric_row(rset_pt, ch="gfp", metric="mean_intensity",
+def test_a_row_with_no_cell_count_leaves_it_empty():
+    """A real point always has at least one cell — the aggregator emits none
+    for a timepoint with no rows — so a zero can only be a placeholder, and
+    printing it says the member held no cells where it plainly held some."""
+    placeholder = (0.0, 105.0, 5.0, 0.5, 7.5, 0, 0.1, 0.0, 0.0, 0.5, 15)
+    assert line_metric_row(placeholder, ch="gfp", metric="mean_intensity",
                            threshold=0.0, band_lbl="SEM")["n_total"] == ""
 
     well_pt = (0.0, 100.0, 1.0, 0.4, 7, 20, float("nan"), 0.0, 0.0)
     assert line_metric_row(well_pt, ch="gfp", metric="mean_intensity",
                            threshold=0.0, band_lbl="SEM")["n_total"] == 20
+
+
+def test_a_replicate_set_reports_the_cells_it_pooled(tmp_path):
+    """``n_total`` is the set's own cell count, summed across its wells.
+
+    The collector used to leave a placeholder there, so the exporter — which
+    refuses to print a placeholder — left the column empty on **every** row of
+    a replicate-set file. The number was always available: the per-well
+    aggregation the collector already walks for its timepoint list carries it.
+    """
+    rows = _exported(_set_app(per_fov=False), tmp_path, "cells")
+    assert len(rows) == 1
+    # A01 and A02 hold 20 cells each at t=0.
+    assert rows[0]["n_total"] == "40"
+    # And the events count beside it is the same pooling: 7 + 8.
+    assert rows[0]["n_above_threshold"] == "15"
 
 
 def test_a_blanked_fold_change_point_writes_no_spread_on_the_tab_export(tmp_path):

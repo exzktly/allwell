@@ -2431,6 +2431,13 @@ columns describe the fields: the mean is the per-FOV mean the panel draws, its
 spread is the field-to-field one, and the unit reads `fov` — for a single well
 as much as for a set, since a well's fields are its replicates.
 
+**`n_total` is a cell count, not a denominator.** It is the cells the row was
+computed from: one well's at that timepoint, or the sum across a replicate
+set's wells. On a set's row it is **not** what `fraction_above` was divided by
+— a set's fraction is the mean of its wells' fractions, so
+`n_above_threshold / n_total` matches it only when the wells contributed
+equally many cells. The cell is empty only where there is no count to report.
+
 **Fraction columns.** `fraction_above` is the plotted fraction and
 `err_frac_<band>` is the spread the Fraction panel bands the curve with — the
 same pair on the line and bar CSVs. It is empty, never `0.000000`, when nothing

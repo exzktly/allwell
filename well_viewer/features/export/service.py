@@ -207,13 +207,17 @@ def line_metric_row(pt, *, ch: str, metric: str, threshold: float,
         f"err_frac_{band_lbl}": (
             f"{float(frac_spread):.6f}"
             if not math.isnan(frac) and is_number(frac_spread) else ""),
-        # Blank rather than ``0`` for a row that has no cell count: a
-        # replicate-set point carries a placeholder at index 5, because the
-        # set's statistic is a mean over its wells and never counted their
-        # cells. A real per-well point always has at least one cell — the
-        # aggregator emits no point for a timepoint with none — so a zero here
-        # can only be the placeholder, and printing it says the set held no
-        # cells at a timepoint where it plainly held some.
+        # The cells behind this row: one well's at a timepoint, or the sum
+        # across a replicate set's wells. Blank rather than ``0`` where there
+        # is no count to report, because a real point always has at least one
+        # cell — the aggregator emits no point for a timepoint with no rows —
+        # so a zero can only be a placeholder, and printing it says the member
+        # held no cells where it plainly held some.
+        #
+        # It is a **count of cells**, not the denominator of ``fraction_above``
+        # on a replicate-set row: a set's fraction is the mean of its wells'
+        # fractions, so ``n_above_threshold / n_total`` equals it only when the
+        # wells contributed equally many cells.
         "n_total": n_total if n_total else "",
         "threshold": f"{threshold:.4f}",
         "metric": metric,

@@ -9992,6 +9992,13 @@ that cell as text, so the column stops being numeric for every row below it.
 dict entry whose key names a spread column may not be an unconditional
 `JoinedStr`, since a bare f-string has no branch in which to say "not computed".
 
+`n_total` on a replicate-set row is the cells its wells hold at that
+timepoint, summed by the collectors from the per-well aggregation they already
+walk to build the timepoint list. It was a placeholder zero there, and the
+exporter's refusal to print a placeholder then left the column empty on every
+row of a replicate-set file. It is a cell count and not the denominator of
+`fraction_above`, which on a set is the mean of its wells' fractions.
+
 The same rule governs the fold-change pair. `fold_change_<band>` is written
 only where `fold_change_mean` is: `fold_change.blank_point` blanks a mean whose
 control did not resolve and leaves the spread at `0.0`, so guarding the two

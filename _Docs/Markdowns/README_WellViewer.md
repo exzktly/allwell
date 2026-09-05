@@ -2014,7 +2014,13 @@ row, holding five actions:
   until the plot is drawn again — which is what the button is for. It leaves
   the log scaling and the log base alone: an axis you set to logarithmic stays
   logarithmic and simply chooses its own range. Settings persist across
-  redraws. The **legend keeps up**: change
+  redraws — and across the **Screen / Publication** switch, which decides
+  colours and nothing else. **Show grid** in particular reaches the files you
+  export: a figure saved, copied, filed in Saved Plots or sent through Batch
+  Export carries the grid exactly as the plot on screen carries it, in the same
+  dash and opacity. It did not: every capture flips the figure into the
+  publication look for the moment it is written, and that flip switched the
+  grid back on, so a plot drawn without one was exported with one. The **legend keeps up**: change
   the line width, dash, marker shape or marker size and the little sample beside
   each legend entry is redrawn to match, so the key never describes a figure you
   are no longer looking at. **Font size and Show legend reach every key on the

@@ -3653,6 +3653,20 @@ kept the *screen* theme's near-white ink and went onto white paper — the
 significance brackets were reported that way, `#E6E9EF` on `#FFFFFF`, roughly
 1.1:1.
 
+**The theme pass owns colour, and only colour.** `apply_axes_style` runs on
+every `setPlotTheme` — every Screen/Publication switch, and every capture, since
+`_publication_capture` flips the theme for the duration of a Save figure, a Copy
+panel, a Copy as vector and a gallery capture. It used to end with
+`ax.grid(True, color=…, linewidth=0.7, linestyle="-")`, which is three
+Properties settings decided by a colour pass: the grid came back on the moment
+the theme moved, so **Show grid** looked broken, and every figure exported from
+a plot drawn without a grid carried one. It recolours the existing gridline
+artists instead, the way `_apply_rcparams` beside it already did —
+`ax.grid(color=…)` is not available for that, because matplotlib reads line
+properties with no visibility argument as "style the grid, and switch it on".
+Whether a grid is drawn, and in what dash and opacity, is
+`apply_export_style_prefs`'s to say.
+
 `plot_style.follows_theme(artist, muted=…)` is the tag (`_aw_theme_ink`, defined
 in `widgets/plot_card.py` because the repaint that honours it is
 `setPlotTheme`'s), and `repaint_theme_ink` applies it over each axes and over the

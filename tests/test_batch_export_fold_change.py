@@ -293,3 +293,34 @@ def test_one_well_aggregates_to_that_well_verbatim():
         ["A01"], threshold=0.0, use_sem=True,
         val_col="gfp_mean_intensity", fluor_gates=None)
     assert got == app.per_well_pts["A01"]
+
+
+def test_a_typed_well_control_is_not_captured_by_the_batch_scope():
+    """The batch group scope registers each solo well as a single-well
+    selection, so a bare label naming that well hits set-before-well precedence
+    and takes a one-well set's denominator — which has no cross-well spread —
+    where the tab takes the well's own within-well one. The propagated
+    ``fold_change_<band>`` then differs between the two paths for the same
+    member at the same timepoint.
+
+    A control saved the way the app writes them today states its own kind, and
+    ``resolve_control`` never guesses for one. That is the guarantee this pins;
+    the legacy shape is recorded beside it so a change of precedence cannot
+    quietly widen the divergence.
+    """
+    from well_viewer.domain.control_ref import KIND_WELL, ControlRef
+    from well_viewer.domain.fold_change import resolve_control
+
+    from tests.conftest import MockApp, make_agg
+
+    app = MockApp(
+        per_well_pts={"A01": [make_agg(0.0, 100.0)], "B01": [make_agg(0.0, 120.0)]},
+        # What ``_app_group_scope`` installs for a group holding solo well B01.
+        selections=[{"name": "B01", "wells": ["B01"], "hidden": False}],
+    )
+    ctx = getattr(app, "_ctx", app)
+
+    assert resolve_control(ctx, ControlRef(KIND_WELL, "B01")) == ("well", "B01")
+    assert resolve_control(ctx, "B01 (well)") == ("well", "B01")
+    # The legacy bare label, and the precedence it was saved under.
+    assert resolve_control(ctx, "B01") == ("set", "B01")

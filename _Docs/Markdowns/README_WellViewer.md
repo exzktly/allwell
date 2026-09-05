@@ -2411,21 +2411,55 @@ should switch to reading the `fold_change_mean` column.)
 
 **Events columns.** `n_above_threshold` keeps its long-standing meaning — the
 integer count of events, summed across a replicate set's wells. The number the
-Events panel *draws* is the per-well mean, which is a different quantity and
-gets its own columns:
+Events panel *draws* is a mean, which is a different quantity and gets its own
+columns:
 
 * `n_above_replicate_mean` — the plotted value
 * `err_n_above_replicate_<band>` — its spread across replicates, empty when
   there was only one and nothing could be computed
-* `n_above_replicate_unit` — `well` or `fov`, empty for a single well
+* `n_above_replicate_unit` — `well` or `fov`, and empty on a row where nothing
+  was measured: a single well with Aggregate-FOVs off, or a member that has no
+  point at that timepoint at all
 
 The unit column matters because nothing else in the row records whether
-Aggregate-FOVs was on, which would leave the other two ambiguous. A single well
-is not a replicate aggregation, so its row leaves the spread and the unit
-**empty** — a `0.000000` there would read as "the replicates agreed" on a row
-that had no replicates — and reports the count itself under both
-`n_above_threshold` and `n_above_replicate_mean` (the per-FOV mean under both,
-with Aggregate-FOVs on).
+Aggregate-FOVs was on, which would leave the other two ambiguous. With the
+toggle **off**, the mean is over the set's wells (`well`), and a single well —
+which is not a replicate aggregation — reports its own count with the spread and
+the unit left **empty**; a `0.000000` there would read as "the replicates
+agreed" on a row that had no replicates. With the toggle **on**, all three
+columns describe the fields: the mean is the per-FOV mean the panel draws, its
+spread is the field-to-field one, and the unit reads `fov` — for a single well
+as much as for a set, since a well's fields are its replicates.
+
+**Fraction columns.** `fraction_above` is the plotted fraction and
+`err_frac_<band>` is the spread the Fraction panel bands the curve with — the
+same pair on the line and bar CSVs. It is empty, never `0.000000`, when nothing
+could be computed: one well with Aggregate-FOVs off has a single sample of the
+fraction and nothing to vary across.
+
+**Every error column in every export follows one rule.** A spread that was
+measured is written, including a spread of exactly `0` — that says the
+replicates agreed. A spread that could not be computed is an **empty cell**,
+never `0` and never the word `nan`: a spreadsheet reads `nan` as text, which
+stops the whole column being numeric and quietly drops the series from any
+chart built on it. This holds for the line, bar, Heat Map, Scatter (Wells view)
+and Response CSVs alike, from the tab's own Save menu and from Batch Export.
+
+The rule reaches the **fold-change** columns too. `fold_change_<band>` is
+written only for a row that has a `fold_change_mean`: where the control could
+not be resolved the normalization did not happen, so both cells are empty and
+`fold_change_outcome` says why. An infinity — which dividing by a control that
+reads zero can produce — is not a measurement either, and is blank in both.
+
+And a row that measured **nothing** says nothing: a member with no data at a
+timepoint leaves every value, every spread and every unit cell empty rather
+than reporting the placeholder its collector carries.
+
+**And every file says what its error is over.** SD across wells and SD across
+fields are different numbers, so a file carrying one names the unit: the line
+and bar CSVs in `n_above_replicate_unit`, the Heat Map, Scatter (Wells view)
+and Response CSVs in `spread_unit`. The Scatter file also carries `spread_kind`
+(`SD` or `SEM`), which nothing on that tab's figure states either.
 
 **Statistical consistency.** The control denominator uses the same
 averaging statistic as the displayed bar / curve — mean-of-per-well-means
@@ -2593,6 +2627,17 @@ still exported (see below).
   the Batch Export tab. You may notice the plot flicker as it redraws during an
   export; that is the full-detail repaint, and the screen version comes back
   afterwards.
+- **What the exported data file holds.** The tab's **Save ▾ → Save plot
+  data…** writes one row per **drawn curve** per timepoint, so a file describes
+  the figure beside it. With replicate sets active a row is one set, and the
+  `replicate_set` / `wells` / `well_names` / `n_wells` columns say which wells
+  it pooled; with wells selected directly a row is one well, under `well` /
+  `well_name`. Beside the mean and its spread each row carries the fraction and
+  its spread, the integer event count, the mean event count with its spread and
+  the unit that mean is over — the same quantities the Bar Plots tab reports,
+  under the same column names a Batch Export line run writes, so a script that
+  reads one line CSV reads them all. Their exact meanings are under
+  [Fold-change normalization](#fold-change-normalization).
 - **When a spread can't be computed** — a bar or band with only one replicate
   has no spread to show. That is *not* zero, and the app no longer draws it as
   though it were: the bar carries a small **`n/a`** marker, and the exported CSV
@@ -2988,6 +3033,12 @@ cells it kept.
 - **Aggregate controls** — X-axis / Y-axis pickers over aggregate metrics
   (e.g. *Mean Fluorescence*, *Fraction above threshold*) with an **error band**
   (SEM / SD) on the points.
+- **What the Wells view exports.** One row per well (or replicate set) per
+  timepoint, with each axis's value and its error, plus `spread_kind` (`SD` or
+  `SEM`) and `spread_unit` (`well` or `fov`) saying what that error is. A point
+  with one replicate — a single well, with **Spread** left on wells — has no
+  error to report, so its cells are **empty**; the same points draw no whisker
+  on the figure, in a batch export as well as on the tab.
 - **Gates (definition).** Each gate you draw is auto-named (`Gate 1`, `Gate 2`,
   …), shown on the plot, and renameable in Properties — where each entry also
   states the x and y metrics that gate was drawn on, so a list built up across
@@ -3090,7 +3141,10 @@ place cells in a grid that mirrors your plate or your experimental design.
     two significant figures rather than print a zero it is not, since a cell
     with nothing to report prints nothing at all. **Save plot data…** writes
     the same numbers to an `err_SD` / `err_SEM` / `err_95CI` column, left
-    blank on exactly the cells that show none.
+    blank on exactly the cells that show none, and a `spread_unit` column
+    beside it saying whether that interval is across the cell's wells or
+    across their fields — the **Spread** toggle changes which, and nothing
+    else in the file recorded it.
   - **Label ticks from sample map** — name each row and column by the values
     every well on it shares, from
     [Home → Sample Map → Variables](#variables). A plate with the dose changing

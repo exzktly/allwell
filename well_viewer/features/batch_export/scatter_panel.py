@@ -52,6 +52,8 @@ _render_scatter_points = _lazy("well_viewer.features.scatter.gating", "render_sc
 _draw_gates = _lazy("well_viewer.features.scatter.gating", "draw_gates")
 _log1p_axis_suffix = _lazy("well_viewer.features.scatter._layout", "log1p_axis_suffix")
 _compose_scatter_agg_stat = _lazy("well_viewer.features.scatter.controller", "compose_scatter_agg_stat")
+# The tab's own whisker rule: a spread that was never computed draws no cap.
+_whiskers_or_none = _lazy("well_viewer.features.scatter.controller", "whiskers_or_none")
 
 
 _logger = logging.getLogger(__name__)
@@ -835,10 +837,17 @@ class ScatterBatchExportPanel(BatchExportPanel):
             return SkippedJob(f"{grp.name}: no scatter-aggregate data at t={tp_h:.1f}h")
         try:
             from well_viewer.features.export.service import (
-                figure_names_map, _well_paths_keys, well_name_for,
+                figure_names_map, _well_paths_keys, spread_cell,
+                spread_unit_for, well_name_for,
             )
+            from well_viewer.data.metric_labels import spread_label
             _well_labels = figure_names_map(self._ctx)
             _well_paths = _well_paths_keys(self._ctx)
+            # Same two columns the on-tab aggregate CSV carries, because it is
+            # the same statistic: without them an ``x_err`` says neither which
+            # interval it is nor what it is over.
+            _band = spread_label(bool(self._ctx.state.plot.use_sem))
+            _unit = spread_unit_for(self._ctx)
             rows: list[dict] = []
             for data in scatter_data.values():
                 lbl = data.get("label", "")
@@ -852,12 +861,18 @@ class ScatterBatchExportPanel(BatchExportPanel):
                     "timepoint_h": f"{float(data.get('timepoint', tp_h)):.4f}",
                     "x": f"{float(data['x'][0]):.8g}",
                     "y": f"{float(data['y'][0]):.8g}",
-                    "x_err": f"{float(data['x_err'][0]):.8g}",
-                    "y_err": f"{float(data['y_err'][0]):.8g}",
+                    # ``spread_cell``: an undefined spread — a group of one
+                    # replicate — used to reach the file as the literal ``nan``.
+                    "x_err": spread_cell(data['x_err'][0], ".8g"),
+                    "y_err": spread_cell(data['y_err'][0], ".8g"),
+                    "spread_kind": _band,
+                    "spread_unit": _unit,
                 })
             if csv_path is not None:
                 with open(csv_path, "w", newline="") as fh:
-                    fieldnames = ["group", "label", "well_name", "timepoint_h", "x", "y", "x_err", "y_err"]
+                    fieldnames = ["group", "label", "well_name", "timepoint_h",
+                                  "x", "y", "x_err", "y_err",
+                                  "spread_kind", "spread_unit"]
                     writer = csv.DictWriter(fh, fieldnames=fieldnames)
                     writer.writeheader()
                     writer.writerows(rows)
@@ -870,7 +885,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 for data in scatter_data.values():
                     ax.errorbar(
                         data["x"], data["y"],
-                        xerr=data["x_err"], yerr=data["y_err"],
+                        xerr=_whiskers_or_none(data["x_err"]),
+                        yerr=_whiskers_or_none(data["y_err"]),
                         label=data.get("label", ""),
                         color=data["color"], marker=data.get("marker", "o"),
                         linestyle="none", capsize=5, alpha=0.75,
@@ -990,10 +1006,17 @@ class ScatterBatchExportPanel(BatchExportPanel):
             return SkippedJob(f"{grp.name}: no scatter-aggregate data for selected timepoints")
         try:
             from well_viewer.features.export.service import (
-                figure_names_map, _well_paths_keys, well_name_for,
+                figure_names_map, _well_paths_keys, spread_cell,
+                spread_unit_for, well_name_for,
             )
+            from well_viewer.data.metric_labels import spread_label
             _well_labels = figure_names_map(self._ctx)
             _well_paths = _well_paths_keys(self._ctx)
+            # Same two columns the on-tab aggregate CSV carries, because it is
+            # the same statistic: without them an ``x_err`` says neither which
+            # interval it is nor what it is over.
+            _band = spread_label(bool(self._ctx.state.plot.use_sem))
+            _unit = spread_unit_for(self._ctx)
             rows: list[dict] = []
             for data in scatter_data.values():
                 lbl = data.get("label", "")
@@ -1007,12 +1030,18 @@ class ScatterBatchExportPanel(BatchExportPanel):
                     "timepoint_h": f"{float(data.get('timepoint', float('nan'))):.4f}",
                     "x": f"{float(data['x'][0]):.8g}",
                     "y": f"{float(data['y'][0]):.8g}",
-                    "x_err": f"{float(data['x_err'][0]):.8g}",
-                    "y_err": f"{float(data['y_err'][0]):.8g}",
+                    # ``spread_cell``: an undefined spread — a group of one
+                    # replicate — used to reach the file as the literal ``nan``.
+                    "x_err": spread_cell(data['x_err'][0], ".8g"),
+                    "y_err": spread_cell(data['y_err'][0], ".8g"),
+                    "spread_kind": _band,
+                    "spread_unit": _unit,
                 })
             if csv_path is not None:
                 with open(csv_path, "w", newline="") as fh:
-                    fieldnames = ["group", "label", "well_name", "timepoint_h", "x", "y", "x_err", "y_err"]
+                    fieldnames = ["group", "label", "well_name", "timepoint_h",
+                                  "x", "y", "x_err", "y_err",
+                                  "spread_kind", "spread_unit"]
                     writer = csv.DictWriter(fh, fieldnames=fieldnames)
                     writer.writeheader()
                     writer.writerows(rows)
@@ -1025,7 +1054,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 for data in scatter_data.values():
                     ax.errorbar(
                         data["x"], data["y"],
-                        xerr=data["x_err"], yerr=data["y_err"],
+                        xerr=_whiskers_or_none(data["x_err"]),
+                        yerr=_whiskers_or_none(data["y_err"]),
                         label=data.get("label", ""),
                         # ``color`` is the whole point of the multi-timepoint
                         # figure: ``collect_scatter_agg_data`` paints each point

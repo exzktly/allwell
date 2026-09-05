@@ -3782,3 +3782,64 @@ def _staging_join_predicate():
     ns: dict = {}
     exec(compile(head, "guard", "exec"), ns)  # noqa: S102 — the guard's own source
     return ns["_joins_a_staging_dir"]
+
+
+# ── a spread cell that cannot say "not computed" ────────────────────────────
+
+_SPREAD_GUARD = ("tests.test_a_spread_reaches_a_csv_as_a_number_or_a_blank",
+                 "test_no_exporter_formats_a_spread_without_a_blank_for_undefined")
+
+SPREAD_BAD = {
+    # The shape that shipped in the scatter aggregate exporters.
+    "plain key": 'def row(x_err):\n    return {"x_err": f"{float(x_err):.8g}"}\n',
+    # Three shapes an earlier draft of the guard walked straight past, each of
+    # them a real site in this repo: the fold-change columns are appended by
+    # subscript assignment (which is where a literal ``nan`` was found), the
+    # Heat Map keys its error column by a variable, and the Line CSV's own
+    # spread column is an f-string key whose fixed text is only "__".
+    "subscript": ('def row(r, band, spread):\n'
+                  '    r[f"fold_change_{band}"] = f"{spread:.6f}"\n'),
+    "name key": ('def row(err_name, e):\n'
+                 '    return {err_name: f"{e:.6f}"}\n'),
+    "key with no fixed text": ('def row(band, ch, metric, spread):\n'
+                               '    return {f"{band}_{ch}_{metric}": f"{spread:.6f}"}\n'),
+    "band-prefixed key": 'def row(v):\n    return {"sem_gfp_mean_intensity": f"{v:.6f}"}\n',
+    # The line and bar writers build their headers from the band label, so a
+    # future violation is as likely to be keyed by an f-string as by a literal.
+    "f-string key": ('def row(s, band):\n'
+                     '    return {f"err_frac_{band}": f"{float(s):.6f}"}\n'),
+    "error spelling": 'def row(e):\n    return {"gfp_error": f"{e:.6f}"}\n',
+}
+
+SPREAD_GOOD = {
+    # The two shapes the app actually uses.
+    "conditional": ('def row(s):\n'
+                    '    return {"err_frac_SD": f"{s:.6f}" if s == s else ""}\n'),
+    "helper call": 'def row(s):\n    return {"x_err": spread_cell(s)}\n',
+    # The metadata columns beside them are strings, not intervals.
+    "metadata": 'def row(band):\n    return {"spread_kind": f"{band}"}\n',
+    # A value column formatted unconditionally is none of this guard's business.
+    "a value": 'def row(v):\n    return {"mean_gfp": f"{v:.6f}"}\n',
+    # A payload key spelled exactly ``error`` carries a failure message, not an
+    # error bar — ``spatial/controller.py`` writes one from an exception, and
+    # the first draft of the guard flagged it.
+    "an error message": ('def run(payload, exc):\n'
+                         '    payload["error"] = f"Analysis failed: {exc}"\n'),
+    # The subscript shape done right.
+    "subscript, guarded": ('def row(r, band, spread):\n'
+                           '    r[f"fold_change_{band}"] = spread_cell(spread)\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(SPREAD_BAD))
+def test_spread_guard_catches_an_unconditional_format(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_spread_{shape.replace(' ', '_')}.py", SPREAD_BAD[shape])
+    exc = _run_scan(monkeypatch, *_SPREAD_GUARD, [bad])
+    assert exc is not None, f"the {shape} spelling went uncaught"
+    assert "bad_spread" in str(exc)
+
+
+@pytest.mark.parametrize("shape", sorted(SPREAD_GOOD))
+def test_spread_guard_clears_the_sanctioned_shapes(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, f"good_spread_{shape.replace(' ', '_')}.py", SPREAD_GOOD[shape])
+    assert _run_scan(monkeypatch, *_SPREAD_GUARD, [good]) is None

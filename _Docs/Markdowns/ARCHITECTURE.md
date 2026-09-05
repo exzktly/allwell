@@ -9958,9 +9958,89 @@ rather than 1.0.
 
 The bar and line CSVs therefore report both: `n_above_threshold` (the integer
 count) alongside `n_above_replicate_mean`, `err_n_above_replicate_<band>` and
-`n_above_replicate_unit` (`well` / `fov`, empty for a single well). The unit
-column is not decoration — nothing else in the row records whether
-Aggregate-FOVs was on, which would leave the mean and its spread ambiguous.
+`n_above_replicate_unit`. The unit column is not decoration — nothing else in
+the row records whether Aggregate-FOVs was on, which would leave the mean and
+its spread ambiguous.
+
+Which AggPoint fields those three read is decided by the Aggregate-FOVs toggle,
+and it is the same decision `_paint_series` makes when it draws the Events
+panel: with the toggle **on** the value and spread are the per-FOV mean and its
+spread (indices 7 / 8) and the unit is `fov`, for a lone well as much as for a
+replicate set — a well's fields are its replicates; with it **off** they are the
+per-well count and its cross-well spread (indices 4 / 9), and the unit is `well`
+for a replicate set and empty for a single well, which has nothing to average
+over. `line_metric_row` read indices 4 / 9 unconditionally, so every FOV-mode
+row of the line CSV reported `0.000000` events with a `0.000000` spread — index
+4 is a placeholder on the collectors' FOV branch — beside a panel drawing the
+real mean.
+
+Both CSVs also carry `err_frac_<band>`, the spread the Fraction panel bands its
+curve with (AggPoint index 6). The line CSV had no such column at all while the
+bar CSV had carried one all along, so one figure exported from the two tabs
+disagreed about whether the number exists. An undefined spread is an **empty**
+cell in every one of these columns, never `0.000000`: a lone well with
+Aggregate-FOVs off has one sample of the fraction and nothing to vary across,
+and a zero would read as replicates that agreed exactly.
+
+That blank-for-undefined rule is `export/service.spread_cell`, and it is one
+function because the writers that had their own answer got it wrong: the
+scatter aggregate formatted its errors with a bare f-string on the tab and in
+both of its Batch Export jobs, so a group of one replicate — a single selected
+well, the commonest case there — wrote the literal `nan`. A spreadsheet reads
+that cell as text, so the column stops being numeric for every row below it.
+`tests/test_a_spread_reaches_a_csv_as_a_number_or_a_blank.py` is the guard: a
+dict entry whose key names a spread column may not be an unconditional
+`JoinedStr`, since a bare f-string has no branch in which to say "not computed".
+
+The same rule governs the fold-change pair. `fold_change_<band>` is written
+only where `fold_change_mean` is: `fold_change.blank_point` blanks a mean whose
+control did not resolve and leaves the spread at `0.0`, so guarding the two
+independently put a measured-looking zero beside an empty mean on exactly the
+rows whose `fold_change_outcome` says the division never happened. The bar
+writer's `fc_has` is the **mean's** flag (`BarItem.has_mean`) and says nothing
+about the spread beside it — `scale_bar_value` returns a finite value with a
+NaN spread whenever the denominator's own spread was undefined — so gating the
+spread on it wrote the literal `nan` into a row whose raw `err_<band>` cell was
+correctly blank.
+
+A row that measured nothing states nothing, either. A member with no point at
+the timepoint still reaches the writer as a `BarItem`, carrying the collector's
+placeholder `n_above=0.0` with `has_mean=False`; `_replicate_unit_for` keys on
+`has_mean` before the value, because `is_number` says yes to that placeholder
+and a unit claimed there brought a `0.000000` replicate spread with it onto an
+otherwise-empty row.
+
+`n_above_threshold` is an integer count and stays one. `LinePoint.as_aggpoint`
+floats index 4 so a replicate set's drawn mean survives, and writing that value
+through unchanged turned a plain well's `3` into `3.0` and a NaN one into
+`nan`; the row formats an integral value as an integer, a fold-changed ratio
+with six decimals, and an undefined one as blank. On the bar side the same
+column's float form is chosen by `replicate_unit == "fov"` — the row's own
+statement that this cell is a per-FOV mean — rather than by the sign of the
+whisker beside it, which sent a mean back through `int()` whenever the fields
+agreed exactly. That `> 0` test was the last of the mode flags standing in for
+a value test: `err_n_above_<band>` carried it too, and blanked a spread of zero
+that `err_n_above_replicate_<band>` two columns along was writing.
+
+Beside the interval, every file that carries one names **what it is over**:
+`n_above_replicate_unit` on the bar and line CSVs, `spread_unit` on the Heat
+Map, scatter-aggregate and Response ones. `export/service.spread_unit_for` asks
+`stats_compute.replicate_unit` rather than re-spelling the FOV rule, so an
+exported column cannot disagree with the statistic the plot drew; the Response
+collector asks the same function rather than keeping the hard-coded
+`"FOV"` / `"replicate"` pair it had, which put four vocabularies under one
+column name across three files. The word a *sentence* wants is rendered from
+that one value at the caption, not stored beside it. A `spread_unit` cell is
+written only where there is an interval to have a denominator — a Heat Map of
+cell counts measures no spread anywhere, and a column of `well` beside an empty
+error column asserts a statistic nobody took. The scatter
+file adds `spread_kind` (`SD` / `SEM`) because neither its columns nor its
+figure title said which interval its whiskers were. `_replicate_unit_for` — the
+bar CSV's version of the same question — keys on the Aggregate-FOVs toggle for
+the same reason the line row does: with the toggle on, `collect_bar_items` puts
+the per-FOV mean in `n_above` for a lone well too, and keying the unit on
+`n_above_total` alone left that row stating a per-FOV mean under an empty unit
+with its spread blanked.
 
 Stacking when both axes are active is **ΔΔCt-style**:
 ```
@@ -10103,10 +10183,30 @@ CSV output (additive in both line and bar paths):
        fold_change_control          — the control THIS row was divided by
        fold_change_outcome          — why the row is what it is
 
-   The bar CSV is implemented via two calls to collect_bar_items
-   (or collect_bar_items_for_group): one with FC_STATE_OFF for the
-   raw columns and one with the active state for the fold-change
-   columns. The aggregation helpers are cached so the second call
+   Both CSVs are implemented via two calls to their tab's own
+   collector — collect_bar_items / collect_bar_items_for_group for
+   the bar, collect_line_series / collect_line_series_for_group for
+   the line: one with FC_STATE_OFF for the raw columns and one with
+   the active state for the fold-change columns.
+
+   The scatter-aggregate CSVs (on-tab and both batch jobs) carry
+   the same two error columns plus spread_kind / spread_unit, and
+   their figures share the tab's whisker rule
+   (scatter/controller.whiskers_or_none): capsize draws a cap at
+   every point even where the bar has zero length, so a group with
+   no computable spread came out of Batch Export wearing a cross
+   the tab does not draw.
+
+   A row is therefore one DRAWN member at one timepoint, on both
+   tabs and on both paths. export_plot_data used to re-aggregate
+   each selected well itself with a bare aggregate_well, which
+   returned a plain 9-tuple: Aggregate-FOVs was ignored, the
+   fraction spread was never computed, and the Events replicate
+   columns could not be anything but empty on any plate, because a
+   per-well point is not an aggregation of anything. In
+   replicate-set mode its identifying columns are
+   replicate_set / wells / well_names / n_wells; in per-well mode
+   they stay well / well_name. The aggregation helpers are cached so the second call
    is cheap. Pre-refactor the bar CSV used to overwrite the raw mean
    column with the normalized value when fold-change was active —
    that was inconsistent with the line CSV's additive schema and

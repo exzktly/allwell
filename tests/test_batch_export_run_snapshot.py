@@ -188,8 +188,16 @@ def test_the_multi_tp_scatter_aggregate_draws_each_point_in_its_timepoint_colour
             pass
 
     class _Stub:
-        _ctx = SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(
-            well_labels={"A01": "A01"}, well_paths={"A01": "/x"})))
+        # ``state.plot`` is not optional on a real ctx — ``PlotState`` declares
+        # ``use_sem`` and ``use_fov_replicates`` as fields — and the CSV this
+        # job writes names both (which interval, and what it is over). The stub
+        # carried only what the code happened to read at the time, which is the
+        # shape CLAUDE.md §7.8 warns about: a fixture that cannot disagree with
+        # the implementation it was written beside.
+        _ctx = SimpleNamespace(state=SimpleNamespace(
+            dataset=SimpleNamespace(
+                well_labels={"A01": "A01"}, well_paths={"A01": "/x"}),
+            plot=SimpleNamespace(use_sem=True, use_fov_replicates=False)))
         _sc_agg_x_cb = _sc_agg_metric_x_cb = None
         _sc_agg_y_cb = _sc_agg_metric_y_cb = None
 

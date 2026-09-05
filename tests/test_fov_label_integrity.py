@@ -190,14 +190,28 @@ def test_export_writes_a_blank_cell_for_an_undefined_spread():
     assert row["err_frac_SEM"] == ""
     assert row["n_above_threshold"] == ""
     assert row["err_n_above_SEM"] == ""
-    # A real spread still exports.
+    # A real spread still exports. ``replicate_unit`` is what the row's own
+    # callers pass (both go through ``_replicate_unit_for``), and it is what
+    # says this count is a per-FOV *mean* and so keeps its decimals. Omitting
+    # it here described a row the app cannot produce — a per-FOV spread with no
+    # unit naming it — and the float form was then being held up by the
+    # whisker's sign rather than by the statistic.
     ok = bar_metric_row(
         mean=590.0, spread=31.1, frac=0.02, frac_spread=0.0033, has=True,
         n_above=87.0, n_above_spread=24.0, ch="gfp", metric="mean_intensity",
-        tp_str="8", threshold=250.0, band_lbl="SEM",
+        tp_str="8", threshold=250.0, band_lbl="SEM", replicate_unit="fov",
     )
     assert ok["err_SEM_gfp_mean_intensity"] == "31.100000"
     assert ok["n_above_threshold"] == "87.000000"
+    assert ok["err_n_above_SEM"] == "24.000000"
+
+    # Without the toggle the same column is the integer count it says it is.
+    counted = bar_metric_row(
+        mean=590.0, spread=31.1, frac=0.02, frac_spread=0.0033, has=True,
+        n_above=87.0, n_above_spread=24.0, ch="gfp", metric="mean_intensity",
+        tp_str="8", threshold=250.0, band_lbl="SEM", replicate_unit="well",
+    )
+    assert counted["n_above_threshold"] == "87"
 
 
 def test_fold_change_keeps_an_undefined_spread_undefined():

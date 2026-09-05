@@ -186,7 +186,10 @@ class ResponseData:
     #: ``"FOV"`` with the Spread: FOV toggle on. A point with no error bar is
     #: explained by a different fix in each case, and the caption used to name
     #: only the first.
-    replicate_unit: str = "replicate"
+    #: What one replicate is for every spread in this figure: ``well`` or
+    #: ``fov`` (``stats_compute.replicate_unit``'s vocabulary, shared with the
+    #: other tabs' exports). Rendered as ``FOV`` where a sentence wants it.
+    replicate_unit: str = "well"
     #: The series variable's name (``"Cell line"``), or ``""`` when the figure
     #: is one curve per timepoint. Carried so the legend and the empty state can
     #: name it without the renderer reaching back into ctx for it.
@@ -254,7 +257,10 @@ def omission_caption(data: ResponseData) -> str:
                      f"reads 0 there ({names}{more}) — use subtract, or plot "
                      f"the raw value")
     if data.solo_spread:
-        unit = data.replicate_unit
+        # ``fov`` is the file's word; ``FOV`` is the sentence's. "Add another
+        # well" and "add another field" are different fixes, which is why the
+        # caption names the unit at all.
+        unit = "FOV" if data.replicate_unit == "fov" else data.replicate_unit
         parts.append(f"{data.solo_spread} point(s) with no error bar: "
                      f"a single {unit} has no spread")
     if data.undefined_spread:
@@ -392,6 +398,7 @@ def collect_response(ctx, variable_id: str, timepoints,
     from well_viewer.domain.plot_members import response_members
     from well_viewer.domain.stats_compute import (
         compute_rep_per_fov_stats, compute_rep_stats,
+        replicate_unit as _replicate_unit,
     )
 
     vset = getattr(ctx.state.selection, "variables", None)
@@ -429,7 +436,14 @@ def collect_response(ctx, variable_id: str, timepoints,
     # only what counts as a replicate differs.
     per_fov = bool(getattr(ctx.state.plot, "use_fov_replicates", False))
     stats_for = compute_rep_per_fov_stats if per_fov else compute_rep_stats
-    data.replicate_unit = "FOV" if per_fov else "replicate"
+    # The canonical spelling, from the one rule the plots reduce by, so the
+    # CSV's ``spread_unit`` cell reads the same word here as it does in the
+    # Heat Map and scatter-aggregate files and as ``n_above_replicate_unit``
+    # does on Bar and Line. One well is enough for a unit to exist — the
+    # figure-wide statement does not depend on how many any one member has —
+    # and the caption below renders it for prose rather than storing a second
+    # word for the same fact.
+    data.replicate_unit = _replicate_unit(1, per_fov)
     data.y_metric = y_metric if y_metric in Y_METRICS else Y_MEAN
 
     members = list(response_members(ctx))

@@ -179,28 +179,47 @@ def test_ontab_line_single_wells(ctx, tmp_path):
         "well", "well_name", "time_h", "mean_gfp_mean_intensity",
         "sem_gfp_mean_intensity", "n_above_threshold",
         "n_above_replicate_mean", "err_n_above_replicate_SEM",
-        "n_above_replicate_unit", "fraction_above",
+        "n_above_replicate_unit", "fraction_above", "err_frac_SEM",
         "n_total", "threshold", "metric",
     }
     assert a01[0]["err_n_above_replicate_SEM"] == ""
     assert a01[0]["n_above_replicate_unit"] == ""
+    # One well with Aggregate-FOVs off has one sample of the fraction, so its
+    # spread was never computed — blank, not 0.000000.
+    assert a01[0]["err_frac_SEM"] == ""
 
 
 def test_ontab_line_replicate_set_fallback(ctx, tmp_path):
-    """No manual selection but replicate sets defined → export falls back to
-    the rep-set members and adds a ``replicate_set`` column tagging each row."""
+    """No manual selection but replicate sets defined → the export describes
+    the curves the tab draws: one row per set per timepoint, carrying the
+    replicate statistic and the wells behind it.
+
+    It used to emit the members' own per-well rows instead. Nothing in that
+    file could report the replicate spread the Events panel draws, or the unit
+    it is over, because a per-well point is not an aggregation of anything —
+    both columns were empty on every plate.
+    """
     from well_viewer.features.export.service import export_plot_data
 
     _define_replicate_sets(ctx, [("CTRL", ["A01", "A02"])])
     rows = _run_ontab_export(ctx, export_plot_data, tmp_path, "line_rep")
     assert rows is not None
 
-    assert "replicate_set" in rows[0]
-    assert {r["well"] for r in rows} == {"A01", "A02"}
-    assert all(r["replicate_set"] == "CTRL" for r in rows)
-    # values are still the raw per-well means (rep-set only tags grouping)
-    a02_tp48 = next(r for r in rows if r["well"] == "A02" and r["time_h"] == "48.0000")
-    assert a02_tp48["mean_gfp_mean_intensity"] == "209.500000"
+    assert {r["replicate_set"] for r in rows} == {"CTRL"}
+    assert "well" not in rows[0]        # a row is the set, not one of its wells
+    assert len(rows) == 3               # three timepoints, one set
+    assert all(r["wells"] == "A01;A02" and r["n_wells"] == "2" for r in rows)
+    # The set's drawn value is the mean of its wells' means: (103.5+113.5)/2.
+    tp0 = next(r for r in rows if r["time_h"] == "0.0000")
+    assert tp0["mean_gfp_mean_intensity"] == "108.500000"
+    # Two wells is two replicates, so the Events columns are populated — the
+    # reported defect was that they never could be.
+    assert tp0["n_above_replicate_unit"] == "well"
+    assert tp0["err_n_above_replicate_SEM"] != ""
+    assert tp0["err_frac_SEM"] != ""
+    # The last timepoint is the set's mean there too: (199.5+209.5)/2.
+    tp48 = next(r for r in rows if r["time_h"] == "48.0000")
+    assert tp48["mean_gfp_mean_intensity"] == "204.500000"
 
 
 def test_batch_line_solo_well_uses_sample_label(ctx):
@@ -378,6 +397,10 @@ def test_batch_line_replicates_and_single_wells(ctx, tmp_path):
     assert rep[0]["wells"] == "A01;A02" and rep[0]["n_wells"] == "2"
     assert solo[0]["wells"] == "B01" and solo[0]["n_wells"] == "1"
 
+    # The replicate set's fraction spread reaches the batch CSV: two wells at
+    # 0.4 and 0.6 have one, and the line schema had no column for it at all.
+    assert all(r["err_frac_SEM"] != "" for r in rep), [r["err_frac_SEM"] for r in rep]
+    assert all(r["n_above_replicate_unit"] == "well" for r in rep)
     rep_by_t = {r["time_h"]: r["mean_gfp_mean_intensity"] for r in rep}
     # Mean-of-per-well-means (the tab's rep-set statistic): mean(A01, A02).
     # Equals pool-of-cells here only because the fixture has equal cell counts.
@@ -442,6 +465,9 @@ def test_batch_line_solo_well_error_matches_within_well(ctx, tmp_path):
     # Within-well SEM across B01's 6 cells is > 0 (a 1-well replicate spread
     # would be exactly 0).
     assert any(float(r["sem_gfp_mean_intensity"]) > 0 for r in solo)
+    # A solo well with Aggregate-FOVs off has one sample of the fraction, so
+    # its spread is undefined — blank, not 0.000000.
+    assert all(r["err_frac_SEM"] == "" for r in solo)
 
 
 # =============================================================================
@@ -541,6 +567,37 @@ def test_cross_path_solo_well_bytes_match(ctx, tmp_path):
     for col in metric_cols:
         assert ontab_a01[col] == batch_a01[col], (
             f"{col}: on-tab={ontab_a01[col]!r} batch={batch_a01[col]!r}")
+
+
+def test_cross_path_line_solo_well_bytes_match(ctx, tmp_path):
+    """The same for the line CSV, which now shares more than its row builder.
+
+    Both paths build their rows from a ``LineSeries`` collected by the tab's
+    own collector, so a solo well's metric columns must agree cell for cell.
+    The on-tab exporter used to re-aggregate the well itself, and the two
+    disagreed on every column the plain 9-tuple cannot carry."""
+    from well_viewer.features.export.service import export_plot_data
+    from well_viewer.domain.batch_models import BarGroup
+
+    _select_single_wells(ctx, ["A01"])
+    ontab = _run_ontab_export(ctx, export_plot_data, tmp_path, "xl_ontab")
+    ontab_t0 = next(r for r in ontab if r["time_h"] == "0.0000")
+
+    out_dir = tmp_path / "xl_batch"
+    _run_line_batch(ctx, [BarGroup("G", members=[], solo_wells=["A01"])], out_dir)
+    batch = _parse_csv((out_dir / "batch_G.csv").read_text())
+    batch_t0 = next(r for r in batch
+                    if r["member"] == "A01" and r["time_h"] == "0.0000")
+
+    metric_cols = [
+        "time_h", "mean_gfp_mean_intensity", "sem_gfp_mean_intensity",
+        "n_above_threshold", "n_above_replicate_mean",
+        "err_n_above_replicate_SEM", "n_above_replicate_unit",
+        "fraction_above", "err_frac_SEM", "n_total", "threshold", "metric",
+    ]
+    for col in metric_cols:
+        assert ontab_t0[col] == batch_t0[col], (
+            f"{col}: on-tab={ontab_t0[col]!r} batch={batch_t0[col]!r}")
 
 
 # =============================================================================
@@ -678,8 +735,17 @@ def test_batch_scatter_agg_replicates_and_single_wells(ctx, tmp_path):
     assert by_label["RepA"]["x"] == "108.5"           # pooled/per-well-mean GFP
     assert by_label["RepA"]["x_err"] == "5"           # SEM of per-well means
     assert by_label["B01"]["x"] == "123.5"            # solo well GFP
-    # Undefined, not zero — one replicate has no spread to measure.
-    assert by_label["B01"]["x_err"] in ("", "nan"), by_label["B01"]["x_err"]
+    # Undefined, not zero — one replicate has no spread to measure — and an
+    # EMPTY cell, not the string "nan", which this assertion used to accept.
+    # A spreadsheet reads "nan" as text, so the column stops being numeric for
+    # every row below it and a chart built on it drops the series; the line and
+    # bar CSVs have always blanked it, and these three writers had their own
+    # answer (``export/service.spread_cell`` is the one rule now).
+    assert by_label["B01"]["x_err"] == "", by_label["B01"]["x_err"]
+    # What the error columns are and what they are over — nothing else in the
+    # file, or on the figure, said either.
+    assert by_label["RepA"]["spread_kind"] == "SEM"
+    assert by_label["RepA"]["spread_unit"] == "well"
 
 
 def test_batch_scatter_cells_honors_display_options(ctx, tmp_path, monkeypatch):

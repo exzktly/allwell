@@ -932,9 +932,21 @@ def redraw_heatmap(ctx) -> None:
         except Exception:
             ctx.runtime.heatmap.colorbar = None
 
+    # The timepoint through the app-wide time correction (Properties → Time),
+    # not the raw filename hour. ``figure_timepoint_label`` is the helper for a
+    # figure whose title is the only place a timepoint appears — this grid has
+    # no time axis to hang the marker on — so the correction is stated here or
+    # nowhere, and it carries its own "filename value × N" marker so a corrected
+    # title cannot read like real hours. Drawing the raw number left this tab
+    # naming a different hour from the Bar, Line, Spatial and batch-export
+    # figures of the same plate, with nothing on either figure to say which.
+    from well_viewer.domain.time_rescale import (
+        figure_timepoint_label as _tp_label,
+        rescale_for as _rescale_for,
+    )
     title = (
         f"{active_channel_label(ctx)}"
-        f" — {metric} — t = {tp:g} h"
+        f" — {metric} — {_tp_label(tp, _rescale_for(ctx.state.plot))}"
     )
     if show_error and np.isfinite(err).any():
         # Which spread the ``±`` under each value is, in the same two words

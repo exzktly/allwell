@@ -77,6 +77,56 @@ _FIGURE_OWNING_FEATURES = (
     ("_response_fig", "Response Curves"),
 )
 
+#: Style facets a figure does not have, keyed by the ``app`` attribute that
+#: names that figure. A figure with no row here supports everything, and a facet
+#: absent from a figure's row is supported by it — so the panel goes on showing
+#: every section to every plot except where somebody has *measured* that it does
+#: nothing, and the cost of forgetting a figure is a dead control rather than a
+#: working one taken away.
+#:
+#: Each entry carries its reason, because a bare facet name in a roster is
+#: indistinguishable six months later from one added to make something go away.
+#: The reasons here were established by drawing the figure, changing the pref,
+#: re-applying ``apply_export_style_prefs`` and comparing the rendered PNG —
+#: ``tests/test_properties_hides_what_it_cannot_do.py`` re-measures them, so a
+#: row that stops being true fails rather than quietly misleading.
+_STYLE_FACETS_A_FIGURE_LACKS: dict[str, dict[str, str]] = {
+    "_heatmap_fig": {
+        "legend": (
+            "A heat map draws no legend. Its colour bar is the key, and that is "
+            "the mappable's, not an ``ax.legend()`` this section can reach."
+        ),
+        "marks": (
+            "There are no lines or markers in the grid — ``ax.lines`` is empty "
+            "and no collection is tagged ``_aw_marker_collection``, so every "
+            "control in Lines & Markers styles artists that do not exist."
+        ),
+        "plot_overlays": (
+            "The renderer reads neither ``show_threshold_line`` nor "
+            "``show_value_labels``. The number in a cell is drawn by the heat "
+            "map itself and formatted by Cell values, one section above."
+        ),
+        "bar_show_mode": (
+            "``bar_show_mode`` is read by the bar renderer alone. A cell is one "
+            "value; there is no Mean / Mean+spread / All points to choose "
+            "between. The Error bars and Across rows beside it *are* live — "
+            "they pick the interval the per-cell ``±`` prints."
+        ),
+        "group_labels": (
+            "``group_label_size`` sizes the bar plot's group labels. A heat map "
+            "names its rows and columns with ordinary ticks, which Tick label "
+            "size already governs."
+        ),
+        "log_axes": (
+            "Both axes are marked ``_categorical_xaxis`` / "
+            "``_categorical_yaxis``: they carry row and column positions, not "
+            "values, so the log pass skips them and always did. Colouring on a "
+            "log scale is Display ▾ → Log scale, which acts on the norm."
+        ),
+    },
+}
+
+
 #: The same features, named by *tab* rather than by figure, for the reset path
 #: (``_redraw_active_plot``), which dispatches on the tab in view.
 _FEATURES_THAT_REDRAW_THEMSELVES = tuple(
@@ -526,7 +576,14 @@ class ExportStyleSidebar(QWidget):
         # ── Axes (incl. ticks) ──────────────────────────────────────────────
         s_axes = section("Axes", expanded=True)
         axis_cb = QComboBox()
-        axis_cb.addItems(["All", *[str(i + 1) for i in range(len(self._fig.axes))]])
+        # **The colour bar is not a panel to target.** ``fig.axes`` includes it,
+        # so the Heat Map offered an "Axis 2" that selected the bar — and every
+        # per-axis pass in ``apply_export_style_prefs`` skips a ``_aw_colorbar``
+        # axis by design, so choosing it moved nothing at all. Its numbering is
+        # still the figure's, not a renumbering of what is left: axis 1 is the
+        # first axes of the figure whether or not a colour bar sits at 2, which
+        # is what every stored ``axis_buckets`` key already means.
+        axis_cb.addItems(["All", *self._targetable_axis_numbers()])
         axis_cb.setCurrentText(self._current_axis)
         # Getter/setter only (no auto-apply): switching the target axis must
         # not push the currently displayed limits onto the new one.
@@ -547,13 +604,17 @@ class ExportStyleSidebar(QWidget):
             except Exception:
                 self._axis_pick_cid = None
         from widgets.stepper import Stepper as _Stepper
-        for key, label, lo, hi in [
+        _axis_size_rows = [
             ("axis_label_size", "Axis label size", 1, 96),
             ("tick_label_size", "Tick label size", 1, 96),
             ("title_size", "Title size", 1, 128),
             ("x_tick_angle", "X tick angle°", 0, 90),
-            ("group_label_size", "Group label size", 1, 96),
-        ]:
+        ]
+        # Group labels are the bar plot's second tier of x ticks. A figure that
+        # draws none has nothing for this to size — see the facet table.
+        if self._supports("group_labels"):
+            _axis_size_rows.append(("group_label_size", "Group label size", 1, 96))
+        for key, label, lo, hi in _axis_size_rows:
             spin = _Stepper(minimum=lo, maximum=hi, single_step=1,
                             value=float(self._prefs[key]), decimals=0)
             add_row(s_axes, label, spin, key)
@@ -706,10 +767,14 @@ class ExportStyleSidebar(QWidget):
         # PlotState.bar_show_mode, consumed by the bar renderer.
         _show_init = str(getattr(self._app._app_state.plot, "bar_show_mode", "mean_spread")
                          or "mean_spread")
+        # Only where there is a bar to draw one of the three ways — see the
+        # facet table. Skipping the build rather than hiding the widget is what
+        # keeps ``_show_seg`` unset, so the re-seed in
+        # ``_resync_plot_state_segments`` steps over it too.
         show_sc = _seg(
             [("Mean", "mean"), ("Mean+spread", "mean_spread"), ("All points", "all_pts")],
             current=_show_init,
-        )
+        ) if self._supports("bar_show_mode") else None
         if show_sc is not None:
             _stats_state["show"] = show_sc.currentData() or "mean_spread"
 
@@ -734,96 +799,103 @@ class ExportStyleSidebar(QWidget):
         axis_cb.currentTextChanged.connect(lambda t, _l=_axes_preview: _l.setText(t))
 
         # ── Legend ──────────────────────────────────────────────────────────
-        s_leg = section("Legend", expanded=False)
-        leg_show = ToggleSwitch("Show legend")
-        leg_show.setChecked(bool(self._prefs["legend_show"]))
-        add_row(s_leg, "", leg_show, "legend_show")
-        _leg_preview = QLabel("On" if leg_show.isChecked() else "Off")
-        _leg_preview.setObjectName("Muted")
-        s_leg.setValueWidget(_leg_preview)
-        leg_show.toggled.connect(lambda on, _l=_leg_preview: _l.setText("On" if on else "Off"))
-        leg_sz = _Stepper(minimum=6, maximum=24, single_step=1,
-                          value=float(self._prefs["legend_font_size"]), decimals=0)
-        add_row(s_leg, "Font size", leg_sz, "legend_font_size")
-        leg_loc = QComboBox()
-        leg_loc.addItems(["best", "upper right", "upper left", "lower right", "lower left"])
-        leg_loc.setCurrentText(str(self._prefs["legend_loc"]))
-        add_row(s_leg, "Location", leg_loc, "legend_loc")
+        # Only where the figure draws a legend this section can reach —
+        # see the facet table.
+        if self._supports("legend"):
+            s_leg = section("Legend", expanded=False)
+            leg_show = ToggleSwitch("Show legend")
+            leg_show.setChecked(bool(self._prefs["legend_show"]))
+            add_row(s_leg, "", leg_show, "legend_show")
+            _leg_preview = QLabel("On" if leg_show.isChecked() else "Off")
+            _leg_preview.setObjectName("Muted")
+            s_leg.setValueWidget(_leg_preview)
+            leg_show.toggled.connect(lambda on, _l=_leg_preview: _l.setText("On" if on else "Off"))
+            leg_sz = _Stepper(minimum=6, maximum=24, single_step=1,
+                              value=float(self._prefs["legend_font_size"]), decimals=0)
+            add_row(s_leg, "Font size", leg_sz, "legend_font_size")
+            leg_loc = QComboBox()
+            leg_loc.addItems(["best", "upper right", "upper left", "lower right", "lower left"])
+            leg_loc.setCurrentText(str(self._prefs["legend_loc"]))
+            add_row(s_leg, "Location", leg_loc, "legend_loc")
 
         # ── Overlays ────────────────────────────────────────────────────────
         # Cross-plot threshold marker (off by default). Drives
         # PlotState.show_threshold_line, read by the Distribution / line-CDF /
         # smFISH / bar-Fraction renderers.
-        s_over = section("Overlays", expanded=False)
-        thr_tog = ToggleSwitch("Show threshold line")
-        thr_tog.setChecked(bool(getattr(
-            self._app._app_state.plot, "show_threshold_line", False)))
-        thr_tog.setToolTip(
-            "Overlay the ON/OFF threshold marker on plots — the line/band at "
-            "ThreshFracOn on the Distribution, line-plot CDF and smFISH plots, "
-            "and the 0.5 reference + 'threshold=' label on the bar Fraction "
-            "panel.")
+        # Both overlays are drawn by renderers that read them off
+        # ``PlotState``; a figure whose renderer reads neither shows
+        # neither — see the facet table.
+        if self._supports("plot_overlays"):
+            s_over = section("Overlays", expanded=False)
+            thr_tog = ToggleSwitch("Show threshold line")
+            thr_tog.setChecked(bool(getattr(
+                self._app._app_state.plot, "show_threshold_line", False)))
+            thr_tog.setToolTip(
+                "Overlay the ON/OFF threshold marker on plots — the line/band at "
+                "ThreshFracOn on the Distribution, line-plot CDF and smFISH plots, "
+                "and the 0.5 reference + 'threshold=' label on the bar Fraction "
+                "panel.")
 
-        def _on_threshold_line_toggle(on: bool) -> None:
-            self._app._app_state.plot.show_threshold_line = bool(on)
-            try:
-                self._redraw_active_plot()
-            except Exception:
-                swallowed()
-        thr_tog.toggled.connect(_on_threshold_line_toggle)
-        add_row(s_over, "", thr_tog)
+            def _on_threshold_line_toggle(on: bool) -> None:
+                self._app._app_state.plot.show_threshold_line = bool(on)
+                try:
+                    self._redraw_active_plot()
+                except Exception:
+                    swallowed()
+            thr_tog.toggled.connect(_on_threshold_line_toggle)
+            add_row(s_over, "", thr_tog)
 
-        # Value labels: the "12.34 ± 1.20" text above each bar / marker. Drives
-        # PlotState.show_value_labels + .value_label_format, read by the Bar,
-        # Line and Scatter-aggregate renderers (and their Batch Export twins)
-        # through ``core.plot_annotations``. Global rather than per-figure, like
-        # the threshold marker beside it: it states the plotted statistic, which
-        # is the same statistic on whichever tab is showing it. The per-cell
-        # Scatter view has no statistic under a point and says so on the figure
-        # rather than drawing nothing.
-        val_tog = ToggleSwitch("Show value labels")
-        val_tog.setChecked(bool(getattr(
-            self._app._app_state.plot, "show_value_labels", False)))
-        val_tog.setToolTip(
-            "Print each point's value beside it on the Bar, Line and "
-            "Scatter → Aggregate plots — the mean, and ± the spread whenever "
-            "an error bar is drawn for it; an aggregate scatter point states "
-            "both of its coordinates. A bar whose spread could not be computed "
-            "is labelled with its mean alone (the 'n/a' mark already says the "
-            "spread is missing). The per-cell scatter takes none: one point "
-            "there is one cell, not a statistic.")
+            # Value labels: the "12.34 ± 1.20" text above each bar / marker. Drives
+            # PlotState.show_value_labels + .value_label_format, read by the Bar,
+            # Line and Scatter-aggregate renderers (and their Batch Export twins)
+            # through ``core.plot_annotations``. Global rather than per-figure, like
+            # the threshold marker beside it: it states the plotted statistic, which
+            # is the same statistic on whichever tab is showing it. The per-cell
+            # Scatter view has no statistic under a point and says so on the figure
+            # rather than drawing nothing.
+            val_tog = ToggleSwitch("Show value labels")
+            val_tog.setChecked(bool(getattr(
+                self._app._app_state.plot, "show_value_labels", False)))
+            val_tog.setToolTip(
+                "Print each point's value beside it on the Bar, Line and "
+                "Scatter → Aggregate plots — the mean, and ± the spread whenever "
+                "an error bar is drawn for it; an aggregate scatter point states "
+                "both of its coordinates. A bar whose spread could not be computed "
+                "is labelled with its mean alone (the 'n/a' mark already says the "
+                "spread is missing). The per-cell scatter takes none: one point "
+                "there is one cell, not a statistic.")
 
-        def _on_value_labels_toggle(on: bool) -> None:
-            self._app._app_state.plot.show_value_labels = bool(on)
-            try:
-                self._redraw_active_plot()
-            except Exception:
-                swallowed()
-        val_tog.toggled.connect(_on_value_labels_toggle)
-        add_row(s_over, "", val_tog)
+            def _on_value_labels_toggle(on: bool) -> None:
+                self._app._app_state.plot.show_value_labels = bool(on)
+                try:
+                    self._redraw_active_plot()
+                except Exception:
+                    swallowed()
+            val_tog.toggled.connect(_on_value_labels_toggle)
+            add_row(s_over, "", val_tog)
 
-        val_fmt = QLineEdit(str(getattr(
-            self._app._app_state.plot, "value_label_format", "") or ""))
-        val_fmt.setPlaceholderText("auto")
-        val_fmt.setToolTip(
-            "printf-style format for the value labels — %.2f for two decimals, "
-            "%.1e for scientific notation, %d for a whole number. Leave blank "
-            "to pick a format from each value's magnitude. Both halves of a "
-            "label share the format, except a spread it would round to zero — "
-            "that keeps its own precision rather than reading as a measured "
-            "zero.")
+            val_fmt = QLineEdit(str(getattr(
+                self._app._app_state.plot, "value_label_format", "") or ""))
+            val_fmt.setPlaceholderText("auto")
+            val_fmt.setToolTip(
+                "printf-style format for the value labels — %.2f for two decimals, "
+                "%.1e for scientific notation, %d for a whole number. Leave blank "
+                "to pick a format from each value's magnitude. Both halves of a "
+                "label share the format, except a spread it would round to zero — "
+                "that keeps its own precision rather than reading as a measured "
+                "zero.")
 
-        def _on_value_label_format() -> None:
-            self._app._app_state.plot.value_label_format = val_fmt.text().strip()
-            if not bool(getattr(self._app._app_state.plot,
-                                "show_value_labels", False)):
-                return
-            try:
-                self._redraw_active_plot()
-            except Exception:
-                swallowed()
-        val_fmt.editingFinished.connect(_on_value_label_format)
-        add_row(s_over, "Value format", val_fmt)
+            def _on_value_label_format() -> None:
+                self._app._app_state.plot.value_label_format = val_fmt.text().strip()
+                if not bool(getattr(self._app._app_state.plot,
+                                    "show_value_labels", False)):
+                    return
+                try:
+                    self._redraw_active_plot()
+                except Exception:
+                    swallowed()
+            val_fmt.editingFinished.connect(_on_value_label_format)
+            add_row(s_over, "Value format", val_fmt)
 
         # ── Time ─────────────────────────────────────────────────────
         # The time-axis label correction: an interval multiplier and a fixed
@@ -972,76 +1044,80 @@ class ExportStyleSidebar(QWidget):
         _time_preview.setText(_time_preview_text())
 
         # ── Lines & Markers ─────────────────────────────────────────────────
-        s_lm = section("Lines & Markers", expanded=False)
-        ls_cb = QComboBox()
-        # Pair each matplotlib value with a glyphic preview so the combo
-        # doesn't show bare punctuation. Items carry the mpl token in
-        # ``Qt.UserRole`` and a human-facing label.
-        _LINE_STYLES = [
-            ("Solid (—)",       "-"),
-            ("Dashed (––)",     "--"),
-            ("Dotted (·)",      ":"),
-            ("Dash-dot (-·)",   "-."),
-            ("None",            "none"),
-        ]
-        for label, val in _LINE_STYLES:
-            ls_cb.addItem(label, val)
-        _ls_cur = str(self._prefs.get("line_style", "-"))
-        _ls_idx = next(
-            (i for i, (_, v) in enumerate(_LINE_STYLES) if v == _ls_cur), 0,
-        )
-        ls_cb.setCurrentIndex(_ls_idx)
-        add_row(s_lm, "Line style", ls_cb)
-        self._getters["line_style"] = lambda cb=ls_cb: cb.currentData() or "-"
-        self._setters["line_style"] = lambda v, cb=ls_cb: cb.setCurrentIndex(
-            next((i for i in range(cb.count()) if cb.itemData(i) == v), 0)
-        )
-        ls_cb.currentIndexChanged.connect(lambda _i: self._on_fields_changed())
+        # Everything here styles ``ax.lines`` and the marker collections
+        # tagged for it; a figure holding neither shows none of it —
+        # see the facet table.
+        if self._supports("marks"):
+            s_lm = section("Lines & Markers", expanded=False)
+            ls_cb = QComboBox()
+            # Pair each matplotlib value with a glyphic preview so the combo
+            # doesn't show bare punctuation. Items carry the mpl token in
+            # ``Qt.UserRole`` and a human-facing label.
+            _LINE_STYLES = [
+                ("Solid (—)",       "-"),
+                ("Dashed (––)",     "--"),
+                ("Dotted (·)",      ":"),
+                ("Dash-dot (-·)",   "-."),
+                ("None",            "none"),
+            ]
+            for label, val in _LINE_STYLES:
+                ls_cb.addItem(label, val)
+            _ls_cur = str(self._prefs.get("line_style", "-"))
+            _ls_idx = next(
+                (i for i, (_, v) in enumerate(_LINE_STYLES) if v == _ls_cur), 0,
+            )
+            ls_cb.setCurrentIndex(_ls_idx)
+            add_row(s_lm, "Line style", ls_cb)
+            self._getters["line_style"] = lambda cb=ls_cb: cb.currentData() or "-"
+            self._setters["line_style"] = lambda v, cb=ls_cb: cb.setCurrentIndex(
+                next((i for i in range(cb.count()) if cb.itemData(i) == v), 0)
+            )
+            ls_cb.currentIndexChanged.connect(lambda _i: self._on_fields_changed())
 
-        for key, label, lo, hi, step in [
-            ("line_width", "Line width", 0.1, 8.0, 0.1),
-        ]:
-            dsp = _Stepper(minimum=lo, maximum=hi, single_step=step,
-                           value=float(self._prefs[key]), decimals=1)
-            add_row(s_lm, label, dsp, key)
+            for key, label, lo, hi, step in [
+                ("line_width", "Line width", 0.1, 8.0, 0.1),
+            ]:
+                dsp = _Stepper(minimum=lo, maximum=hi, single_step=step,
+                               value=float(self._prefs[key]), decimals=1)
+                add_row(s_lm, label, dsp, key)
 
-        ms_cb = QComboBox()
-        _MARKER_STYLES = [
-            ("Circle (●)",        "o"),
-            ("Open circle (○)",   "o_open"),
-            ("Square (■)",        "s"),
-            ("Triangle ▲",        "^"),
-            ("Triangle ▼",        "v"),
-            ("Diamond (◆)",       "D"),
-            ("Plus (+)",          "+"),
-            ("Cross (×)",         "x"),
-            ("Star (★)",          "*"),
-            ("Point (·)",         "."),
-            ("Pentagon",          "p"),
-            ("Hexagon",           "h"),
-            ("None",              "none"),
-        ]
-        for label, val in _MARKER_STYLES:
-            ms_cb.addItem(label, val)
-        _ms_cur = str(self._prefs.get("marker_style", "o"))
-        _ms_idx = next(
-            (i for i, (_, v) in enumerate(_MARKER_STYLES) if v == _ms_cur), 0,
-        )
-        ms_cb.setCurrentIndex(_ms_idx)
-        add_row(s_lm, "Marker style", ms_cb)
-        self._getters["marker_style"] = lambda cb=ms_cb: cb.currentData() or "o"
-        self._setters["marker_style"] = lambda v, cb=ms_cb: cb.setCurrentIndex(
-            next((i for i in range(cb.count()) if cb.itemData(i) == v), 0)
-        )
-        ms_cb.currentIndexChanged.connect(lambda _i: self._on_fields_changed())
+            ms_cb = QComboBox()
+            _MARKER_STYLES = [
+                ("Circle (●)",        "o"),
+                ("Open circle (○)",   "o_open"),
+                ("Square (■)",        "s"),
+                ("Triangle ▲",        "^"),
+                ("Triangle ▼",        "v"),
+                ("Diamond (◆)",       "D"),
+                ("Plus (+)",          "+"),
+                ("Cross (×)",         "x"),
+                ("Star (★)",          "*"),
+                ("Point (·)",         "."),
+                ("Pentagon",          "p"),
+                ("Hexagon",           "h"),
+                ("None",              "none"),
+            ]
+            for label, val in _MARKER_STYLES:
+                ms_cb.addItem(label, val)
+            _ms_cur = str(self._prefs.get("marker_style", "o"))
+            _ms_idx = next(
+                (i for i, (_, v) in enumerate(_MARKER_STYLES) if v == _ms_cur), 0,
+            )
+            ms_cb.setCurrentIndex(_ms_idx)
+            add_row(s_lm, "Marker style", ms_cb)
+            self._getters["marker_style"] = lambda cb=ms_cb: cb.currentData() or "o"
+            self._setters["marker_style"] = lambda v, cb=ms_cb: cb.setCurrentIndex(
+                next((i for i in range(cb.count()) if cb.itemData(i) == v), 0)
+            )
+            ms_cb.currentIndexChanged.connect(lambda _i: self._on_fields_changed())
 
-        for key, label, lo, hi, step in [
-            ("marker_size", "Marker size", 0.0, 20.0, 0.5),
-            ("marker_edge_width", "Marker edge width", 0.0, 5.0, 0.1),
-        ]:
-            dsp = _Stepper(minimum=lo, maximum=hi, single_step=step,
-                           value=float(self._prefs[key]), decimals=1)
-            add_row(s_lm, label, dsp, key)
+            for key, label, lo, hi, step in [
+                ("marker_size", "Marker size", 0.0, 20.0, 0.5),
+                ("marker_edge_width", "Marker edge width", 0.0, 5.0, 0.1),
+            ]:
+                dsp = _Stepper(minimum=lo, maximum=hi, single_step=step,
+                               value=float(self._prefs[key]), decimals=1)
+                add_row(s_lm, label, dsp, key)
 
         # ── Grid ────────────────────────────────────────────────────────────
         s_grid = section("Grid", expanded=False)
@@ -1082,81 +1158,88 @@ class ExportStyleSidebar(QWidget):
             "plot scale its own axes again.")
         auto_btn.clicked.connect(lambda _=False: self._autoscale_axes())
         add_full(s_lim, hrow(auto_btn))
-        # The per-cell scatter pins its log state to scatter-specific prefs
-        # (default on) so the shared x_log/y_log — which other plot types reset
-        # to linear — can't silently turn it off. Toggling triggers a redraw so
-        # the axis re-tags itself; other figures keep the shared keys.
-        _is_scatter = self._is_scatter_cells_fig()
-        _xkey = "scatter_x_log" if _is_scatter else "x_log"
-        _ykey = "scatter_y_log" if _is_scatter else "y_log"
-        _xdef = True if _is_scatter else False
-        xlog_cb = ToggleSwitch("X log")
-        xlog_cb.setChecked(self._log_toggle_seed(_xkey, "x", _xdef))
-        ylog_cb = ToggleSwitch("Y log")
-        ylog_cb.setChecked(self._log_toggle_seed(_ykey, "y", _xdef))
-        self._bind_getter_setter(_xkey, xlog_cb)
-        self._bind_getter_setter(_ykey, ylog_cb)
-        # **A redraw, not a restyle.** The restyle path can only set the scale
-        # of an axis that is already drawn; it cannot re-decide anything the
-        # renderer chose from the data, and on a tab that pins its own log state
-        # (``_aw_force_xlog`` — Response Curves, the scatter) it is overruled
-        # outright, which is how the Response tab's X log toggle came to do
-        # nothing at all. Every figure redraws here for the same reason, and
-        # each redraw ends in a restyle anyway, so the lightweight path is not
-        # lost — it is merely no longer the only thing that runs.
-        xlog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
-        ylog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
-        add_stacked(s_lim, "Log scale", hrow(xlog_cb, ylog_cb))
+        # The log toggles, their bases, and the section summary that
+        # reports them. A figure whose axes carry positions rather than
+        # values shows none of the three — see the facet table. The
+        # summary goes with them because it exists to say which of these
+        # toggles is on; left behind it would read "linear" for ever on a
+        # figure with no scale to state.
+        if self._supports("log_axes"):
+            # The per-cell scatter pins its log state to scatter-specific prefs
+            # (default on) so the shared x_log/y_log — which other plot types reset
+            # to linear — can't silently turn it off. Toggling triggers a redraw so
+            # the axis re-tags itself; other figures keep the shared keys.
+            _is_scatter = self._is_scatter_cells_fig()
+            _xkey = "scatter_x_log" if _is_scatter else "x_log"
+            _ykey = "scatter_y_log" if _is_scatter else "y_log"
+            _xdef = True if _is_scatter else False
+            xlog_cb = ToggleSwitch("X log")
+            xlog_cb.setChecked(self._log_toggle_seed(_xkey, "x", _xdef))
+            ylog_cb = ToggleSwitch("Y log")
+            ylog_cb.setChecked(self._log_toggle_seed(_ykey, "y", _xdef))
+            self._bind_getter_setter(_xkey, xlog_cb)
+            self._bind_getter_setter(_ykey, ylog_cb)
+            # **A redraw, not a restyle.** The restyle path can only set the scale
+            # of an axis that is already drawn; it cannot re-decide anything the
+            # renderer chose from the data, and on a tab that pins its own log state
+            # (``_aw_force_xlog`` — Response Curves, the scatter) it is overruled
+            # outright, which is how the Response tab's X log toggle came to do
+            # nothing at all. Every figure redraws here for the same reason, and
+            # each redraw ends in a restyle anyway, so the lightweight path is not
+            # lost — it is merely no longer the only thing that runs.
+            xlog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
+            ylog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
+            add_stacked(s_lim, "Log scale", hrow(xlog_cb, ylog_cb))
 
-        # The base each log axis is drawn in. Editable rather than a fixed list:
-        # ``LOG_BASE_CHOICES`` are what almost everyone wants and are one click
-        # away, but a base this panel does not offer is still a base, and
-        # refusing to type it would be a control that answers a narrower
-        # question than the one asked. Anything at or below 1 is not a base at
-        # all and falls back to 10 (``plot_style.log_base_value``) rather than
-        # taking the axis down.
-        _xbase_cb = QComboBox()
-        _xbase_cb.setEditable(True)
-        _xbase_cb.addItems(list(LOG_BASE_CHOICES))
-        _xbase_cb.setCurrentText(str(self._prefs.get("x_log_base", "10")))
-        _xbase_cb.setToolTip(
-            "Base of the X log axis — 10, 2, 3, e, or any number above 1.")
-        _ybase_cb = QComboBox()
-        _ybase_cb.setEditable(True)
-        _ybase_cb.addItems(list(LOG_BASE_CHOICES))
-        _ybase_cb.setCurrentText(str(self._prefs.get("y_log_base", "10")))
-        _ybase_cb.setToolTip(
-            "Base of the Y log axis — 10, 2, 3, e, or any number above 1.")
-        self._bind_getter_setter("x_log_base", _xbase_cb)
-        self._bind_getter_setter("y_log_base", _ybase_cb)
-        # Same argument as the toggles: a tab that positions anything against
-        # the axis's steps (the Response tab puts its zero-dose column one step
-        # below the lowest real dose) can only re-place it by drawing again.
-        _xbase_cb.currentTextChanged.connect(
-            lambda _t: self._redraw_for_a_user_edit())
-        _ybase_cb.currentTextChanged.connect(
-            lambda _t: self._redraw_for_a_user_edit())
-        add_stacked(s_lim, "Log base", hrow(QLabel("X"), _xbase_cb,
-                                            QLabel("Y"), _ybase_cb,
-                                            spacing=sp.xs))
+            # The base each log axis is drawn in. Editable rather than a fixed list:
+            # ``LOG_BASE_CHOICES`` are what almost everyone wants and are one click
+            # away, but a base this panel does not offer is still a base, and
+            # refusing to type it would be a control that answers a narrower
+            # question than the one asked. Anything at or below 1 is not a base at
+            # all and falls back to 10 (``plot_style.log_base_value``) rather than
+            # taking the axis down.
+            _xbase_cb = QComboBox()
+            _xbase_cb.setEditable(True)
+            _xbase_cb.addItems(list(LOG_BASE_CHOICES))
+            _xbase_cb.setCurrentText(str(self._prefs.get("x_log_base", "10")))
+            _xbase_cb.setToolTip(
+                "Base of the X log axis — 10, 2, 3, e, or any number above 1.")
+            _ybase_cb = QComboBox()
+            _ybase_cb.setEditable(True)
+            _ybase_cb.addItems(list(LOG_BASE_CHOICES))
+            _ybase_cb.setCurrentText(str(self._prefs.get("y_log_base", "10")))
+            _ybase_cb.setToolTip(
+                "Base of the Y log axis — 10, 2, 3, e, or any number above 1.")
+            self._bind_getter_setter("x_log_base", _xbase_cb)
+            self._bind_getter_setter("y_log_base", _ybase_cb)
+            # Same argument as the toggles: a tab that positions anything against
+            # the axis's steps (the Response tab puts its zero-dose column one step
+            # below the lowest real dose) can only re-place it by drawing again.
+            _xbase_cb.currentTextChanged.connect(
+                lambda _t: self._redraw_for_a_user_edit())
+            _ybase_cb.currentTextChanged.connect(
+                lambda _t: self._redraw_for_a_user_edit())
+            add_stacked(s_lim, "Log base", hrow(QLabel("X"), _xbase_cb,
+                                                QLabel("Y"), _ybase_cb,
+                                                spacing=sp.xs))
 
-        def _lim_preview_text() -> str:
-            tags = []
-            if xlog_cb.isChecked():
-                tags.append(f"X log{_base_suffix(_xbase_cb.currentText())}")
-            if ylog_cb.isChecked():
-                tags.append(f"Y log{_base_suffix(_ybase_cb.currentText())}")
-            return ", ".join(tags) if tags else "linear"
+            def _lim_preview_text() -> str:
+                tags = []
+                if xlog_cb.isChecked():
+                    tags.append(f"X log{_base_suffix(_xbase_cb.currentText())}")
+                if ylog_cb.isChecked():
+                    tags.append(f"Y log{_base_suffix(_ybase_cb.currentText())}")
+                return ", ".join(tags) if tags else "linear"
 
-        _lim_preview = QLabel(_lim_preview_text())
-        _lim_preview.setObjectName("Muted")
-        s_lim.setValueWidget(_lim_preview)
-        for _w in (xlog_cb, ylog_cb):
-            _w.toggled.connect(
-                lambda *_a, _l=_lim_preview: _l.setText(_lim_preview_text()))
-        for _w in (_xbase_cb, _ybase_cb):
-            _w.currentTextChanged.connect(
-                lambda *_a, _l=_lim_preview: _l.setText(_lim_preview_text()))
+            _lim_preview = QLabel(_lim_preview_text())
+            _lim_preview.setObjectName("Muted")
+            s_lim.setValueWidget(_lim_preview)
+            for _w in (xlog_cb, ylog_cb):
+                _w.toggled.connect(
+                    lambda *_a, _l=_lim_preview: _l.setText(_lim_preview_text()))
+            for _w in (_xbase_cb, _ybase_cb):
+                _w.currentTextChanged.connect(
+                    lambda *_a, _l=_lim_preview: _l.setText(_lim_preview_text()))
 
         # ── Layout (+ draw order) ───────────────────────────────────────────
         s_layout = section("Layout", expanded=False)
@@ -1304,6 +1387,20 @@ class ExportStyleSidebar(QWidget):
                     for k in _PER_AXIS_STYLE_KEYS:
                         b.pop(k, None)
         self._prefs["axis_buckets"] = self._axis_buckets
+
+    def _targetable_axis_numbers(self) -> list[str]:
+        """The 1-based numbers of the axes an "Axis #" edit can actually reach.
+
+        Every axes of the figure except the colour bars, which the style pass
+        deliberately leaves alone (their scale, ticks and limits belong to the
+        mappable that made them). Numbering stays positional so a number means
+        the same axes here, in ``axis_buckets`` and in the style pass.
+        """
+        return [
+            str(i)
+            for i, ax in enumerate(getattr(self._fig, "axes", ()) or (), start=1)
+            if not bool(getattr(ax, "_aw_colorbar", False))
+        ]
 
     def _default_axis_target(self) -> str:
         """The axis the panel targets by default: the subplot showing the active
@@ -1705,13 +1802,23 @@ class ExportStyleSidebar(QWidget):
         """True only for the Heat Map figure (the cell-value format applies there)."""
         return getattr(self._app, "_heatmap_fig", None) is self._fig
 
+    def _supports(self, facet: str) -> bool:
+        """Whether this figure has the thing *facet* names.
+
+        Reads ``_STYLE_FACETS_A_FIGURE_LACKS``, which lists only the exceptions,
+        so an unlisted figure supports everything. A section built behind this
+        registers no getters and no setters, which is what the rest of the panel
+        needs: ``_persist`` writes the keys it holds, ``_resync_pref_fields``
+        re-seeds the setters it holds, and both iterate rather than assume.
+        """
+        for attr, missing in _STYLE_FACETS_A_FIGURE_LACKS.items():
+            if getattr(self._app, attr, None) is self._fig:
+                return facet not in missing
+        return True
+
     def _is_bar_fig(self) -> bool:
         """True only for the Bar plot figure (the colour mode applies there)."""
         return getattr(self._app, "_bar_fig", None) is self._fig
-
-    def _is_response_fig(self) -> bool:
-        """True only for the Response Curves figure (its colour mode applies)."""
-        return getattr(self._app, "_response_fig", None) is self._fig
 
     def _on_cell_format_changed(self) -> None:
         """Persist the Heat Map cell format, then redraw.

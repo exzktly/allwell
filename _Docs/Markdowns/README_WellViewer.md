@@ -2023,6 +2023,25 @@ row, holding five actions:
   each carries its heading at the size you set. Those two keys keep the corners
   they are drawn in; **Location** moves the plot's main legend.
 
+  **The panel shows a figure only the sections it can change.** Most of it is
+  shared across every plot, but a section that would style something a
+  particular figure does not draw is left out of that figure's panel rather
+  than offered and left inert — the same rule the **Colours**, **Density**,
+  **Gates** and **Cell values** sections already followed. On the Heat Map that
+  means no **Legend** (the colour bar is the key, and it is not a legend this
+  panel reaches), no **Lines & Markers** (there are no lines or markers in a
+  grid of cells), no **Overlays** (the threshold marker and the value labels
+  are drawn by the bar, line and distribution renderers; the number in a cell
+  is formatted under **Cell values**), no **Group label size** (that sizes the
+  bar plot's second row of x ticks), no **Show: Mean / Mean+spread / All
+  points** (a cell is one value), and no **Log scale** or **Log base** rows —
+  the two axes carry row and column positions rather than values, and colouring
+  the grid on a log scale is **Display ▾ → Log scale**, which acts on the
+  colours. Everything the Heat Map does use is still there, including
+  **Statistics → Error bars** and **Across**, which pick the interval the
+  per-cell `±` prints. The **Axis #** picker lists the figure's plot panels and
+  leaves out its colour bar, which no setting in this panel has ever moved.
+
 #### Bar colours — Plate or Grey
 
 The Bar Plots tab's Properties sidebar carries a **Colours** section with two
@@ -2246,15 +2265,19 @@ corrected figure can't be mistaken for one drawn on the hours the run recorded.
 Both values are saved with the rest of the view state.
 
 Applies to the Line Graphs panels, the Bar Plots tick labels and panel titles,
-the Spatial summary panel, and every Batch Export figure — including the scatter
-figures, which have no time axis and so name the timepoint in their title
-instead. Batch **CSV** columns and output **filenames** are unaffected: those hold
-what the pipeline measured and what you picked from the timepoint list, so a
-downstream script reads the same numbers whatever these are set to.
+the Spatial summary panel, and every Batch Export figure. Batch **CSV** columns
+and output **filenames** are unaffected: those hold what the pipeline measured
+and what you picked from the timepoint list, so a downstream script reads the
+same numbers whatever these are set to.
 
-The Heat Map and Distribution tabs pick a timepoint from a menu rather than
-drawing a time axis, so their titles keep naming the filename's own value,
-matching the menu the choice came from.
+**A figure with no time axis names the corrected hour in its title.** The Heat
+Map, the Distribution tab and the Batch Export scatter figures all pick one
+timepoint from a menu rather than drawing an axis of them, so the title is the
+only place the hour appears — which makes it the only place the correction can
+be stated, not a reason to leave it out. Each of those titles carries the whole
+correction beside the number, the way a corrected axis carries it in its axis
+label: `t=24 h, filename value × 4`. Set nothing and they read the plain
+`t=6 h` they always read.
 
 #### Fold-change normalization
 

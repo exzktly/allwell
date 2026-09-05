@@ -7,7 +7,6 @@ ratio-aware (handled transparently by ``data_loading.resolve_value_series``).
 
 from __future__ import annotations
 
-from well_viewer.data.metric_labels import timepoint_title
 
 import math
 from collections.abc import Iterable, Sequence
@@ -651,9 +650,24 @@ def _xlabel_for(ctx) -> str:
 
 
 def _title_for(ctx, tp_h: float, n_cells: int, n_groups: int) -> str:
+    """The figure title, naming the timepoint the rest of the app names.
+
+    The hour goes through the app-wide time correction (Properties → Time) via
+    ``figure_timepoint_label`` — the helper for a figure with no time axis to
+    hang the marker on, so the correction is stated in the title or nowhere.
+    Drawing the raw filename hour left this tab naming a different hour from
+    the Bar, Line, Spatial and batch-export figures of the same plate, with
+    nothing on either figure to say which. The marker rides along, so a
+    corrected title cannot be read as hours the run recorded.
+    """
+    from well_viewer.domain.time_rescale import (
+        figure_timepoint_label as _tp_label,
+        rescale_for as _rescale_for,
+    )
+
     label = active_channel_label(ctx)
     if math.isfinite(tp_h):
-        tp_str = timepoint_title([tp_h], f"{tp_h:g}")
+        tp_str = _tp_label(tp_h, _rescale_for(ctx.state.plot))
     else:
         tp_str = "all timepoints"
     return f"{label} distribution — {tp_str} ({n_cells} cells, {n_groups} groups)"

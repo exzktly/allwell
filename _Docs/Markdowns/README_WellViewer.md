@@ -2388,21 +2388,29 @@ should switch to reading the `fold_change_mean` column.)
 
 **Events columns.** `n_above_threshold` keeps its long-standing meaning — the
 integer count of events, summed across a replicate set's wells. The number the
-Events panel *draws* is the per-well mean, which is a different quantity and
-gets its own columns:
+Events panel *draws* is a mean, which is a different quantity and gets its own
+columns:
 
 * `n_above_replicate_mean` — the plotted value
 * `err_n_above_replicate_<band>` — its spread across replicates, empty when
   there was only one and nothing could be computed
-* `n_above_replicate_unit` — `well` or `fov`, empty for a single well
+* `n_above_replicate_unit` — `well` or `fov`
 
 The unit column matters because nothing else in the row records whether
-Aggregate-FOVs was on, which would leave the other two ambiguous. A single well
-is not a replicate aggregation, so its row leaves the spread and the unit
-**empty** — a `0.000000` there would read as "the replicates agreed" on a row
-that had no replicates — and reports the count itself under both
-`n_above_threshold` and `n_above_replicate_mean` (the per-FOV mean under both,
-with Aggregate-FOVs on).
+Aggregate-FOVs was on, which would leave the other two ambiguous. With the
+toggle **off**, the mean is over the set's wells (`well`), and a single well —
+which is not a replicate aggregation — reports its own count with the spread and
+the unit left **empty**; a `0.000000` there would read as "the replicates
+agreed" on a row that had no replicates. With the toggle **on**, all three
+columns describe the fields: the mean is the per-FOV mean the panel draws, its
+spread is the field-to-field one, and the unit reads `fov` — for a single well
+as much as for a set, since a well's fields are its replicates.
+
+**Fraction columns.** `fraction_above` is the plotted fraction and
+`err_frac_<band>` is the spread the Fraction panel bands the curve with — the
+same pair on the line and bar CSVs. It is empty, never `0.000000`, when nothing
+could be computed: one well with Aggregate-FOVs off has a single sample of the
+fraction and nothing to vary across.
 
 **Statistical consistency.** The control denominator uses the same
 averaging statistic as the displayed bar / curve — mean-of-per-well-means
@@ -2570,6 +2578,17 @@ still exported (see below).
   the Batch Export tab. You may notice the plot flicker as it redraws during an
   export; that is the full-detail repaint, and the screen version comes back
   afterwards.
+- **What the exported data file holds.** The tab's **Save ▾ → Save plot
+  data…** writes one row per **drawn curve** per timepoint, so a file describes
+  the figure beside it. With replicate sets active a row is one set, and the
+  `replicate_set` / `wells` / `well_names` / `n_wells` columns say which wells
+  it pooled; with wells selected directly a row is one well, under `well` /
+  `well_name`. Beside the mean and its spread each row carries the fraction and
+  its spread, the integer event count, the mean event count with its spread and
+  the unit that mean is over — the same quantities the Bar Plots tab reports,
+  under the same column names a Batch Export line run writes, so a script that
+  reads one line CSV reads them all. Their exact meanings are under
+  [Fold-change normalization](#fold-change-normalization).
 - **When a spread can't be computed** — a bar or band with only one replicate
   has no spread to show. That is *not* zero, and the app no longer draws it as
   though it were: the bar carries a small **`n/a`** marker, and the exported CSV

@@ -9918,9 +9918,29 @@ rather than 1.0.
 
 The bar and line CSVs therefore report both: `n_above_threshold` (the integer
 count) alongside `n_above_replicate_mean`, `err_n_above_replicate_<band>` and
-`n_above_replicate_unit` (`well` / `fov`, empty for a single well). The unit
-column is not decoration — nothing else in the row records whether
-Aggregate-FOVs was on, which would leave the mean and its spread ambiguous.
+`n_above_replicate_unit`. The unit column is not decoration — nothing else in
+the row records whether Aggregate-FOVs was on, which would leave the mean and
+its spread ambiguous.
+
+Which AggPoint fields those three read is decided by the Aggregate-FOVs toggle,
+and it is the same decision `_paint_series` makes when it draws the Events
+panel: with the toggle **on** the value and spread are the per-FOV mean and its
+spread (indices 7 / 8) and the unit is `fov`, for a lone well as much as for a
+replicate set — a well's fields are its replicates; with it **off** they are the
+per-well count and its cross-well spread (indices 4 / 9), and the unit is `well`
+for a replicate set and empty for a single well, which has nothing to average
+over. `line_metric_row` read indices 4 / 9 unconditionally, so every FOV-mode
+row of the line CSV reported `0.000000` events with a `0.000000` spread — index
+4 is a placeholder on the collectors' FOV branch — beside a panel drawing the
+real mean.
+
+Both CSVs also carry `err_frac_<band>`, the spread the Fraction panel bands its
+curve with (AggPoint index 6). The line CSV had no such column at all while the
+bar CSV had carried one all along, so one figure exported from the two tabs
+disagreed about whether the number exists. An undefined spread is an **empty**
+cell in every one of these columns, never `0.000000`: a lone well with
+Aggregate-FOVs off has one sample of the fraction and nothing to vary across,
+and a zero would read as replicates that agreed exactly.
 
 Stacking when both axes are active is **ΔΔCt-style**:
 ```
@@ -10063,10 +10083,22 @@ CSV output (additive in both line and bar paths):
        fold_change_control          — the control THIS row was divided by
        fold_change_outcome          — why the row is what it is
 
-   The bar CSV is implemented via two calls to collect_bar_items
-   (or collect_bar_items_for_group): one with FC_STATE_OFF for the
-   raw columns and one with the active state for the fold-change
-   columns. The aggregation helpers are cached so the second call
+   Both CSVs are implemented via two calls to their tab's own
+   collector — collect_bar_items / collect_bar_items_for_group for
+   the bar, collect_line_series / collect_line_series_for_group for
+   the line: one with FC_STATE_OFF for the raw columns and one with
+   the active state for the fold-change columns.
+
+   A row is therefore one DRAWN member at one timepoint, on both
+   tabs and on both paths. export_plot_data used to re-aggregate
+   each selected well itself with a bare aggregate_well, which
+   returned a plain 9-tuple: Aggregate-FOVs was ignored, the
+   fraction spread was never computed, and the Events replicate
+   columns could not be anything but empty on any plate, because a
+   per-well point is not an aggregation of anything. In
+   replicate-set mode its identifying columns are
+   replicate_set / wells / well_names / n_wells; in per-well mode
+   they stay well / well_name. The aggregation helpers are cached so the second call
    is cheap. Pre-refactor the bar CSV used to overwrite the raw mean
    column with the normalized value when fold-change was active —
    that was inconsistent with the line CSV's additive schema and

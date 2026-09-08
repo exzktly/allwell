@@ -212,6 +212,107 @@ def test_the_batch_export_title_reads_the_same_correction():
     assert title.count("filename value") == 1, title
 
 
+# ── the drawn figure, which is the only thing the user reads ────────────────
+#
+# Everything above this line calls a labelling function and hands it the
+# correction. That cannot see whether ``draw_response`` *threads* the correction
+# to those functions — and it does not: an adversarial review deleted the one
+# line in the renderer that reads it and the whole fast lane stayed green
+# (8904 passed), on a tree printing raw hours in every legend entry, in the
+# ``No fit at …`` note and in the omission caption, under a corrected title.
+#
+# That is the within-figure disagreement this file exists to prevent, and the
+# test named "the title and the legend agree on one figure" could not see it,
+# because it built both halves itself and handed each the same rescale. A test
+# that supplies the value under test is not measuring who supplies it.
+#
+# So these drive ``redraw_response`` and read the artists off the axes — the
+# boundary (CLAUDE.md §7.4 #1).
+
+def _drawn(tab, *, scale=1.0, offset=0.0, timepoints=(6.0, 12.0)):  # noqa: F811
+    """Draw the real figure under a correction and hand back its axes.
+
+    Every timepoint is ticked on, because a curve per timepoint is the shape
+    this whole file is about and the picker opens with one.
+    """
+    from well_viewer.features.response import controller as rctl
+
+    _one_dose_plate(tab, timepoints=timepoints)
+    slice_ = tab.ctx.state.feature_slice("response")
+    slice_.tp_selections = {f"{t:g}": True for t in timepoints}
+    tab.ctx.state.plot.time_scale = scale
+    tab.ctx.state.plot.time_offset = offset
+    rctl.redraw_response(tab.ctx)
+    return tab.ax
+
+
+def _legend_texts(ax) -> list[str]:
+    return list(ax.get_legend_handles_labels()[1])
+
+
+def test_the_drawn_legend_carries_the_corrected_hours(tab):  # noqa: F811
+    """The assertion the review's mutation had to fail and did not.
+
+    Deleting the renderer's ``_rescale`` read makes this read ``['t=6', 't=12']``.
+    """
+    ax = _drawn(tab, scale=4.0)
+    assert _legend_texts(ax) == ["t=24", "t=48"], _legend_texts(ax)
+
+
+def test_the_drawn_legend_is_untouched_with_no_correction(tab):  # noqa: F811
+    """The other half: a renderer that always corrected would pass the first."""
+    ax = _drawn(tab)
+    assert _legend_texts(ax) == ["t=6", "t=12"], _legend_texts(ax)
+
+
+def test_the_drawn_title_and_the_drawn_legend_name_the_same_hours(tab):  # noqa: F811
+    """Both halves read off **one** drawn figure, neither supplied by the test.
+
+    This is what the earlier same-named test claimed to do. It built the title
+    and the legend separately and gave each the correction by hand, so the one
+    thing it could never catch was a renderer that failed to apply it.
+    """
+    from well_viewer.features.response import controller as rctl
+
+    ax = _drawn(tab, scale=4.0)
+    # The ``tab`` fixture stubs ``apply_ax_style``, which is what puts a title on
+    # the axes, so the title comes from the builder the renderer is handed. The
+    # legend still comes off the drawn artists, which is the half that was
+    # unmeasured.
+    title = rctl._figure_title(tab.ctx, rctl.response_data(tab.ctx))
+    for entry in _legend_texts(ax):
+        number = entry.rsplit("=", 1)[-1]
+        assert number in title, (title, _legend_texts(ax))
+
+
+def test_the_drawn_caption_carries_the_corrected_hour(tab):  # noqa: F811
+    """The omission caption is drawn on the axes and travels with a saved figure.
+
+    Reached through the renderer rather than by calling ``omission_caption``
+    directly, for the same reason as the legend above.
+    """
+    from well_viewer.features.response import collect as rc
+    from well_viewer.features.response import controller as rctl
+
+    _one_dose_plate(tab, timepoints=(6.0,))
+    tab.ctx.state.plot.time_scale = 4.0
+    real = rc.omission_caption
+
+    def _with_a_gap(data, **kwargs):
+        data.control_gaps = [("A01", 6.0)]
+        return real(data, **kwargs)
+
+    import well_viewer.features.response.renderer as R
+    saved = R.omission_caption
+    R.omission_caption = _with_a_gap
+    try:
+        rctl.redraw_response(tab.ctx)
+    finally:
+        R.omission_caption = saved
+    drawn = " ".join(t.get_text() for t in tab.ax.texts)
+    assert "A01 t=24" in drawn, drawn
+
+
 # ── the guard: no fifth site arrives uncorrected ────────────────────────────
 
 #: Sites that print an hour somewhere the *correction does not apply* — the

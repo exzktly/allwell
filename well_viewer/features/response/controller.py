@@ -918,11 +918,19 @@ def _figure_title(ctx, data) -> str:
     *artifact*.
     """
     from well_viewer.core.group_by_controller import group_by_shortfall
-    from well_viewer.data.metric_labels import timepoint_title
+    from well_viewer.domain.time_rescale import (
+        figure_timepoints_label as _tp_label,
+        rescale_for as _rescale_for,
+    )
 
     drawn = timepoints_for(ctx)
     parts = [_measurement_title(ctx, data)]
-    when = timepoint_title(drawn, ", ".join(f"{t:g}" for t in drawn))
+    # The corrected hours, and the correction stated once. This figure draws a
+    # curve per timepoint and has no time axis to hang the marker on — its x is
+    # dose — so the title is the only place either can appear. The legend
+    # entries beside it are corrected by the renderer from the same read, so
+    # the title and the key cannot name one curve two different ways.
+    when = _tp_label(drawn, _rescale_for(ctx.state.plot))
     if when:
         parts.append(when)
     if data.variable_name:

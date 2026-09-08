@@ -1,7 +1,7 @@
 """The Response figure's title says the same things the other plots' titles do.
 
 A reader moving between the plotting tabs should not have to work out that
-``Response vs Dose`` and ``GFP Mean Intensity ± SEM — t = 24 h`` are describing
+``Response vs Dose`` and ``GFP Mean Intensity ± SEM — t=24 h`` are describing
 the same plate. This tab's title said only what its x axis was, so the two facts
 needed to compare one saved figure against another — **which measurement** and
 **which moment** — were on the page and not in the artifact, which is where they
@@ -24,9 +24,12 @@ from __future__ import annotations
 import pytest
 
 from well_viewer.data.metric_labels import (
-    spread_label, threshold_qualifier, timepoint_title,
+    spread_label, threshold_qualifier,
 )
 from well_viewer.domain import sample_variables as sv
+from well_viewer.domain.time_rescale import (
+    TimeRescale, figure_timepoints_label,
+)
 from well_viewer.features.response import controller as rctl
 from tests.test_response_tab import (  # noqa: F401 — the fixture is the point
     _load, _variable, tab,
@@ -66,7 +69,7 @@ def test_the_title_names_the_measurement_the_way_the_bar_tab_does(tab):
     expected_measure = (
         f"{channel} {metric}{threshold_qualifier(rctl.response_metric_key(tab.ctx))}"
         f" ± {spread_label(True)}")
-    assert _title(tab) == f"{expected_measure} — t = 24 h — vs Dose"
+    assert _title(tab) == f"{expected_measure} — t=24 h — vs Dose"
 
 
 @pytest.mark.parametrize("use_sem,word", [(True, "SEM"), (False, "SD")])
@@ -109,14 +112,19 @@ def test_the_normalisation_rides_in_the_title_as_the_other_tabs_spell_it(tab):
 # ── the timepoints ───────────────────────────────────────────────────────────
 
 def test_one_timepoint_reads_singular_and_several_read_as_a_list():
-    """Through the shared helper the Bar titles use, so the two cannot diverge.
+    """Through ``time_rescale.figure_timepoints_label``, which this tab shares
+    with nothing else — a figure that draws a curve *per* timepoint and has no
+    time axis is its own shape, and the helper exists because of it.
 
     A bare list of one is a figure claiming to overlay something it does not,
-    which is why the singular form exists at all.
+    which is why the singular form exists at all. The bracket and the singular
+    follow ``metric_labels.timepoint_title``, which the Bar titles still use;
+    what differs is that these numbers carry the time correction and that one.
     """
-    assert timepoint_title([24.0], "24") == "t = 24 h"
-    assert timepoint_title([24.0, 48.0], "24, 48") == "t = [24, 48] h"
-    assert timepoint_title([], "") == ""
+    off = TimeRescale(factor=1.0, offset=0.0)
+    assert figure_timepoints_label([24.0], off) == "t=24 h"
+    assert figure_timepoints_label([24.0, 48.0], off) == "t=[24, 48] h"
+    assert figure_timepoints_label([], off) == ""
 
 
 def test_a_figure_with_no_timepoint_drawn_says_nothing_about_when(tab):
@@ -147,7 +155,7 @@ def test_the_title_names_the_timepoints_that_were_drawn(tab):
     drawn = rctl.timepoints_for(tab.ctx)
     assert drawn == [24.0, 48.0], drawn
     title = rctl._figure_title(tab.ctx, data)
-    assert "— t = [24, 48] h —" in title, title
+    assert "— t=[24, 48] h —" in title, title
 
 
 # ── what was already there stays there ───────────────────────────────────────

@@ -56,10 +56,25 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
     was refused goes under the axes, where it travels with a saved figure.
     """
     ax.clear()
+    # The time correction, resolved once and threaded down. Every hour this
+    # figure prints — the legend entries, the no-fit caption and the omission
+    # caption — is corrected from this one read, so no two surfaces of one
+    # figure can name the same curve differently. The title is the caller's and
+    # goes through ``time_rescale.figure_timepoints_label``, which carries the
+    # marker; nothing below repeats it.
+    #
+    # Read defensively for the same reason ``rescale_for`` itself is: this
+    # renderer is handed a bare stand-in ctx — and ``None`` — by tests that are
+    # about the axis and not about the clock. Resolved above the empty-state
+    # return because that path draws the omission caption too, and that caption
+    # names hours whenever a member had no control at one.
+    from well_viewer.domain.time_rescale import rescale_for as _rescale_for
+    _rescale = _rescale_for(
+        getattr(getattr(ctx, "state", None), "plot", None))
     reason = empty_reason(data, variable_chosen=variable_chosen,
                           timepoints_chosen=timepoints_chosen)
     if reason:
-        _draw_empty_state(ax, reason, omission_caption(data))
+        _draw_empty_state(ax, reason, omission_caption(data, rescale=_rescale))
         ax._aw_force_xlog = False
         from well_viewer.core.plot_style import apply_ax_style
         apply_ax_style(ax, title, "")
@@ -75,7 +90,7 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
     marks = _curve_styles(ctx, data)
     drew_off_scale = False
     for curve in data.curves:
-        if _draw_one_curve(ax, data, curve, fits, marks,
+        if _draw_one_curve(ax, data, curve, fits, marks, rescale=_rescale,
                            use_log=use_log, off_scale_x=off_scale_x):
             drew_off_scale = True
 
@@ -107,7 +122,8 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
         ax.legend(fontsize="small", title=data.series_name or None)
 
     caption = " · ".join(
-        part for part in (omission_caption(data), _fit_caption(fits, data))
+        part for part in (omission_caption(data, rescale=_rescale),
+                          _fit_caption(fits, data, rescale=_rescale))
         if part)
     if caption:
         # Under the axes rather than in the title: it is a note about the
@@ -130,6 +146,23 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
 
     from well_viewer.core.plot_style import apply_ax_style
     apply_ax_style(ax, title, ylabel)
+
+
+def _scaled_tp(value, rescale) -> str:
+    """One timepoint, corrected and formatted the way the whole app formats one.
+
+    Every place this tab prints an hour goes through here — the legend entry,
+    the no-fit caption, and (via ``time_rescale.figure_timepoints_label``) the
+    title — so the four surfaces of one figure cannot name the same curve two
+    different ways. With no correction in force it is byte-identical to the
+    ``%g`` these sites used to write.
+
+    The *marker* is deliberately not here. It belongs once per figure, on the
+    title, rather than on every legend entry beside every number.
+    """
+    from well_viewer.domain.time_rescale import format_scaled
+
+    return format_scaled(value, rescale) or f"{value:g}"
 
 
 def _errorbar_colour(container) -> str | None:
@@ -167,7 +200,7 @@ def _draw_fit_line(ax, fit, xs, use_log: bool, colour) -> None:
             zorder=1)
 
 
-def _fit_caption(fits: dict | None, data=None) -> str:
+def _fit_caption(fits: dict | None, data=None, *, rescale=None) -> str:
     """Why each refused fit was refused, for under the axes.
 
     In the caption as well as the legend because the legend has room for
@@ -184,15 +217,21 @@ def _fit_caption(fits: dict | None, data=None) -> str:
                if not f.ok and f.reason]
     if not refused:
         return ""
-    return " ".join(f"No fit at {_curve_name(key, labels)}: {reason}"
+    return " ".join(f"No fit at {_curve_name(key, labels, rescale=rescale)}: {reason}"
                     for key, reason in refused)
 
 
-def _curve_name(key, labels: dict) -> str:
-    """``t=24`` or ``HeLa t=24`` — enough to pick the curve out of the legend."""
+def _curve_name(key, labels: dict, *, rescale=None) -> str:
+    """``t=24`` or ``HeLa t=24`` — enough to pick the curve out of the legend.
+
+    The hour is the corrected one, because this sentence names a curve *by* its
+    legend entry: printing a raw hour here would point at an entry that does
+    not exist on the figure.
+    """
     timepoint, _series_id = key
     series = labels.get(key) or ""
-    return f"{series} t={timepoint:g}" if series else f"t={timepoint:g}"
+    stamp = f"t={_scaled_tp(timepoint, rescale)}"
+    return f"{series} {stamp}" if series else stamp
 
 
 def _draw_empty_state(ax, reason: str, caption: str) -> None:
@@ -388,7 +427,7 @@ def _series_styles(ctx, data, *, dash_is_spent: bool) -> dict | None:
     return series_styles(mode, ids, cycle, dash_is_spent=dash_is_spent)
 
 
-def _curve_label(data, curve) -> str:
+def _curve_label(data, curve, *, rescale=None) -> str:
     """The legend entry: the series, the timepoint, or both.
 
     Only what distinguishes this curve from the others on the figure. A single
@@ -400,7 +439,7 @@ def _curve_label(data, curve) -> str:
     if curve.series_label and data.series_name:
         parts.append(curve.series_label)
     if len({c.timepoint for c in data.curves if c.points}) > 1 or not parts:
-        parts.append(f"t={curve.timepoint:g}")
+        parts.append(f"t={_scaled_tp(curve.timepoint, rescale)}")
     return " · ".join(parts)
 
 
@@ -481,7 +520,8 @@ class _CurveStyles(NamedTuple):
 
 
 def _draw_one_curve(ax, data, curve, fits, marks: _CurveStyles, *,
-                    use_log: bool, off_scale_x: float | None) -> bool:
+                    use_log: bool, off_scale_x: float | None,
+                    rescale=None) -> bool:
     """Draw *curve* and its fit. Returns whether it put anything off-scale.
 
     Split out of :func:`draw_response` to keep that function under the
@@ -495,7 +535,7 @@ def _draw_one_curve(ax, data, curve, fits, marks: _CurveStyles, *,
     on_axis = [p for p in curve.points if not (use_log and p.x <= 0)]
     off = [p for p in curve.points if use_log and p.x <= 0]
 
-    label = _curve_label(data, curve)
+    label = _curve_label(data, curve, rescale=rescale)
     fit = (fits or {}).get(curve.key)
     if fit is not None:
         # The EC50 rides in the legend entry rather than in a box of its own,

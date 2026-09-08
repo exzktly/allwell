@@ -60,6 +60,7 @@ __all__ = [
     "displayed_interval",
     "factor_for_interval",
     "figure_timepoint_label",
+    "figure_timepoints_label",
     "format_scaled",
     "is_active",
     "observed_interval",
@@ -361,6 +362,39 @@ def figure_timepoint_label(value, rescale, *, unit: str = "h") -> str:
     if not text:
         return ""
     body = f"t={text}{' ' + unit if unit else ''}"
+    marker = describe(rescale)
+    return f"{body}, {marker}" if marker else body
+
+
+def figure_timepoints_label(values, rescale, *, unit: str = "h") -> str:
+    """Several timepoints named in a figure *title*, carrying one marker.
+
+    The plural of :func:`figure_timepoint_label`, for a figure that draws a
+    curve or a series **per** timepoint rather than picking one: ``"t=24 h"``
+    for a single value and ``"t=[24, 48] h"`` for several, with the correction
+    appended once — ``"t=[24, 48] h, filename value × 4"``. The bracket for the
+    plural and the bare number for the singular follow
+    :func:`data.metric_labels.timepoint_title`, because a bare list of one is a
+    figure claiming to overlay something it does not.
+
+    One marker, however many numbers: the correction is a property of the plate,
+    not of each timepoint, and repeating it per value would read as several
+    different corrections.
+
+    Values that do not survive the rescale are dropped rather than printed
+    empty, and a list that empties returns ``""`` — the same answer the caller
+    gets for no timepoints at all, which is what a title clause has to be
+    absent for rather than reading ``t=[] h``.
+    """
+    texts = [t for t in (format_scaled(v, rescale) for v in (values or ())) if t]
+    if not texts:
+        return ""
+    if len(texts) == 1:
+        body = f"t={texts[0]}"
+    else:
+        body = f"t=[{', '.join(texts)}]"
+    if unit:
+        body = f"{body} {unit}"
     marker = describe(rescale)
     return f"{body}, {marker}" if marker else body
 

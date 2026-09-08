@@ -216,13 +216,24 @@ def y_metric_for(draws_fraction: bool) -> str:
     return Y_FRACTION if draws_fraction else Y_MEAN
 
 
-def omission_caption(data: ResponseData) -> str:
+def omission_caption(data: ResponseData, *, rescale=None) -> str:
     """The sentence the axes carry. ``""`` when nothing was left out.
 
     On the figure and not only in the status line, because a saved figure
     outlives the session that drew it and a reader months later has no way to
     learn that three groups were dropped.
+
+    *rescale* corrects the hours this sentence names. It names them to identify
+    a curve — "A01 t=24 without a control" points at a legend entry — so a raw
+    hour here would point at an entry the figure does not carry. Left ``None``
+    the numbers are the filename's, byte-identical to what this wrote before,
+    which is what the callers with no plot state to read want.
     """
+    from well_viewer.domain.time_rescale import format_scaled
+
+    def _tp(value) -> str:
+        return format_scaled(value, rescale) or f"{value:g}"
+
     parts = []
     # Split by reason, not pooled. ``data.omitted`` carries ``(member, reason)``
     # with reason in {NO_VALUE, MIXED_VALUE}, and the reason used to be
@@ -244,13 +255,13 @@ def omission_caption(data: ResponseData) -> str:
         names = ", ".join(data.non_numeric[:3])
         parts.append(f"{len(data.non_numeric)} off-scale: {names}")
     if data.control_gaps:
-        names = ", ".join(f"{m} t={t:g}" for m, t in data.control_gaps[:3])
+        names = ", ".join(f"{m} t={_tp(t)}" for m, t in data.control_gaps[:3])
         more = (f" and {len(data.control_gaps) - 3} more"
                 if len(data.control_gaps) > 3 else "")
         parts.append(f"{len(data.control_gaps)} without a control "
                      f"({names}{more})")
     if data.zero_control:
-        names = ", ".join(f"{m} t={t:g}" for m, t in data.zero_control[:3])
+        names = ", ".join(f"{m} t={_tp(t)}" for m, t in data.zero_control[:3])
         more = (f" and {len(data.zero_control) - 3} more"
                 if len(data.zero_control) > 3 else "")
         parts.append(f"{len(data.zero_control)} not divisible: the control "

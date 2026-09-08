@@ -340,11 +340,20 @@ def describe(rescale) -> str:
     return " ".join(parts)
 
 
+#: The one spelling of the timepoint clause. ``t = 24 h`` — spaces around the
+#: ``=`` — because ``data.metric_labels.timepoint_title`` has always spelled the
+#: Bar and Line titles that way, and two spellings on one plate's figures is a
+#: reader wondering whether they mean different things. The pair below and
+#: ``timepoint_title`` are the only three places a figure's timepoint clause is
+#: built, and ``tests/test_one_spelling_for_the_plot_title_words.py`` holds them
+#: to it.
+
+
 def figure_timepoint_label(value, rescale, *, unit: str = "h") -> str:
     """A timepoint named in a figure *title*, carrying its own marker.
 
-    Returns the whole parenthetical body — ``"t=4 h"`` while the rescale is off,
-    ``"t=4 h, filename value × 4"`` while it is on — so a caller writes
+    Returns the whole parenthetical body — ``"t = 4 h"`` while the rescale is
+    off, ``"t = 4 h, filename value × 4"`` while it is on — so a caller writes
     ``f"… ({figure_timepoint_label(tp, rescale)})"`` and the unit stays beside
     the number instead of ending up outside the bracket.
 
@@ -361,7 +370,7 @@ def figure_timepoint_label(value, rescale, *, unit: str = "h") -> str:
     text = format_scaled(value, rescale)
     if not text:
         return ""
-    body = f"t={text}{' ' + unit if unit else ''}"
+    body = f"t = {text}{' ' + unit if unit else ''}"
     marker = describe(rescale)
     return f"{body}, {marker}" if marker else body
 
@@ -402,9 +411,9 @@ def figure_timepoints_label(values, rescale, *, unit: str = "h") -> str:
     if not texts:
         return ""
     if len(texts) == 1:
-        body = f"t={texts[0]}"
+        body = f"t = {texts[0]}"
     else:
-        body = f"t=[{', '.join(texts)}]"
+        body = f"t = [{', '.join(texts)}]"
     if unit:
         body = f"{body} {unit}"
     marker = describe(rescale)

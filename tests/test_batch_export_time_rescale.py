@@ -79,14 +79,14 @@ def _tp_label(factor, tp_h):
 
 
 def test_scatter_title_timepoint_is_unchanged_when_the_factor_is_off():
-    assert _tp_label(1, 1.0) == "t=1 h"
+    assert _tp_label(1, 1.0) == "t = 1 h"
 
 
 def test_scatter_title_timepoint_follows_the_factor():
     """A scatter figure has no time axis — x and y are both metrics — so before
     this a batch run wrote a bar figure titled ``t = 4 h`` beside a scatter
-    figure titled ``t=1.0h`` for the same data."""
-    assert _tp_label(4, 1.0).startswith("t=4 h")
+    figure titled ``t = 1.0h`` for the same data."""
+    assert _tp_label(4, 1.0).startswith("t = 4 h")
 
 
 def test_scatter_title_says_it_was_rescaled():
@@ -96,7 +96,7 @@ def test_scatter_title_says_it_was_rescaled():
 def test_scatter_title_composes_into_the_shipped_title_text():
     label = _tp_label(4, 2.0)
     assert f"Ctrl — Scatter Cells ({label})" == (
-        "Ctrl — Scatter Cells (t=8 h, filename value × 4)")
+        "Ctrl — Scatter Cells (t = 8 h, filename value × 4)")
 
 
 # ── every batch figure builder marks itself ────────────────────────────────
@@ -118,7 +118,7 @@ def test_a_batch_figure_builder_that_scales_also_marks(path, name):
     ``_render_bar_group_figure`` builds its own ``Figure`` rather than going
     through the on-tab renderer, so it inherited the rescaled tick labels (they
     come from the collector) but not the marker the renderer adds — a saved batch
-    PNG read ``t=4``, ``t=8`` with nothing on it saying those were not the hours
+    PNG read ``t = 4``, ``t = 8`` with nothing on it saying those were not the hours
     the run recorded.
     """
     names = _names_in(_fn(Path(path), name))

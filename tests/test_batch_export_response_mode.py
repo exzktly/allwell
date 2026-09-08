@@ -207,7 +207,7 @@ def test_the_figure_title_names_the_group_and_what_is_plotted():
         draws_fraction=False, use_sem=True, variable_name="Dose",
         timepoints=[24.0])
     assert title == ("Drug A — GFP Mean Intensity (above threshold) ± SEM "
-                     "— t=24 h — vs Dose")
+                     "— t = 24 h — vs Dose")
 
 
 def test_the_fraction_title_is_the_fraction_not_the_property():
@@ -220,7 +220,7 @@ def test_the_fraction_title_is_the_fraction_not_the_property():
         draws_fraction=True, use_sem=False, variable_name="Dose",
         timepoints=[24.0, 48.0])
     assert title == (
-        "Drug A — GFP Fraction above threshold ± SD — t=[24, 48] h — vs Dose")
+        "Drug A — GFP Fraction above threshold ± SD — t = [24, 48] h — vs Dose")
 
 
 def test_the_rendered_figure_carries_that_title_and_its_y_label():
@@ -238,7 +238,7 @@ def test_the_rendered_figure_carries_that_title_and_its_y_label():
     ax = fig.axes[0]
     assert ax.get_title() == (
         "Drug A — GFP Mean Intensity (above threshold) ± SEM "
-        "— t=24 h — vs Dose")
+        "— t = 24 h — vs Dose")
     assert ax.get_ylabel() == "GFP mean intensity"
     assert ax.get_xlabel() == "Dose (nM)"
     # The points actually reached the axes — a renderer handed the right

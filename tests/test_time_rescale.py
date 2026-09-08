@@ -138,14 +138,14 @@ def test_the_marker_states_the_factor_the_labels_actually_used():
 # ── a timepoint named in a figure title ─────────────────────────────────────
 
 def test_figure_timepoint_label_is_bare_when_the_factor_is_off():
-    assert tr.figure_timepoint_label(1.0, 1) == "t=1 h"
-    assert tr.figure_timepoint_label(0, 1) == "t=0 h"
+    assert tr.figure_timepoint_label(1.0, 1) == "t = 1 h"
+    assert tr.figure_timepoint_label(0, 1) == "t = 0 h"
 
 
 def test_figure_timepoint_label_carries_its_own_marker():
     """A scatter figure has no time axis to hang a label on, so the title is the
     only place the timepoint appears and has to say it was rescaled."""
-    assert tr.figure_timepoint_label(1.0, 4) == "t=4 h, filename value × 4"
+    assert tr.figure_timepoint_label(1.0, 4) == "t = 4 h, filename value × 4"
 
 
 def test_figure_timepoint_label_agrees_with_the_other_two_helpers():
@@ -164,7 +164,7 @@ def test_figure_timepoint_label_composes_inside_a_parenthetical():
     """The caller writes ``f"… ({label})"``, so the unit has to stay beside the
     number rather than ending up outside the bracket."""
     title = f"Ctrl — Scatter Cells ({tr.figure_timepoint_label(1.0, 4)})"
-    assert title == "Ctrl — Scatter Cells (t=4 h, filename value × 4)"
+    assert title == "Ctrl — Scatter Cells (t = 4 h, filename value × 4)"
 
 
 def test_figure_timepoint_label_survives_a_non_numeric_value():
@@ -172,7 +172,7 @@ def test_figure_timepoint_label_survives_a_non_numeric_value():
 
 
 def test_figure_timepoint_label_unit_is_overridable():
-    assert tr.figure_timepoint_label(1.0, 1, unit="") == "t=1"
+    assert tr.figure_timepoint_label(1.0, 1, unit="") == "t = 1"
 
 
 # ── the offset ──────────────────────────────────────────────────────────────
@@ -281,7 +281,7 @@ def test_a_figure_title_carries_the_whole_correction():
     """A scatter figure has no time axis, so the title is the only place the
     timepoint appears — and the only place that can say it was corrected."""
     rs = tr.TimeRescale(factor=4, offset=-2)
-    assert tr.figure_timepoint_label(1.0, rs) == "t=2 h, filename value × 4 − 2"
+    assert tr.figure_timepoint_label(1.0, rs) == "t = 2 h, filename value × 4 − 2"
 
 
 def test_zero_still_prints_as_zero_under_an_offset():

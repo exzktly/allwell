@@ -9,7 +9,7 @@ number in four places at once.
 
 That made it the worst of the group rather than merely the last. A tab whose
 title, legend, no-fit caption and omission caption all name hours cannot be
-half-corrected: a title reading ``t=[24, 48] h`` over a legend reading ``t=6``
+half-corrected: a title reading ``t = [24, 48] h`` over a legend reading ``t=6``
 is not a smaller version of the original defect, it is a new one *inside a
 single figure*. So the four move together, and
 :func:`test_no_response_site_formats_an_hour_outside_the_helpers` is the guard
@@ -42,43 +42,43 @@ X4 = TimeRescale(factor=4.0, offset=0.0)
 # ── the helper the titles go through ────────────────────────────────────────
 
 def test_a_single_timepoint_reads_singular():
-    assert figure_timepoints_label([6.0], OFF) == "t=6 h"
+    assert figure_timepoints_label([6.0], OFF) == "t = 6 h"
 
 
 def test_several_timepoints_read_as_a_list():
-    assert figure_timepoints_label([6.0, 12.0], OFF) == "t=[6, 12] h"
+    assert figure_timepoints_label([6.0, 12.0], OFF) == "t = [6, 12] h"
 
 
 def test_the_interval_corrects_every_number_in_the_list():
-    assert figure_timepoints_label([6.0, 12.0], X4).startswith("t=[24, 48] h")
+    assert figure_timepoints_label([6.0, 12.0], X4).startswith("t = [24, 48] h")
 
 
 def test_the_offset_composes_after_the_interval():
     """``filename × interval + offset``, in that order — 6 × 4 − 2 = 22."""
     rescale = TimeRescale(factor=4.0, offset=-2.0)
-    assert figure_timepoints_label([6.0], rescale).startswith("t=22 h")
+    assert figure_timepoints_label([6.0], rescale).startswith("t = 22 h")
 
 
 def test_the_marker_is_stated_once_however_many_timepoints():
     """Three numbers, one correction. A marker per value would read as three."""
     label = figure_timepoints_label([6.0, 12.0, 18.0], X4)
-    assert label == "t=[24, 48, 72] h, filename value × 4"
+    assert label == "t = [24, 48, 72] h, filename value × 4"
     assert label.count("filename value") == 1
 
 
 def test_an_uncorrected_label_carries_no_marker():
-    assert figure_timepoints_label([6.0, 12.0], OFF) == "t=[6, 12] h"
+    assert figure_timepoints_label([6.0, 12.0], OFF) == "t = [6, 12] h"
 
 
 def test_a_timepoint_the_rescale_cannot_format_is_still_counted():
     """A tidy string that misstates the figure is worse than an ugly honest one.
 
-    Dropping the value made the count lie: two curves gave ``t=24 h``, naming
+    Dropping the value made the count lie: two curves gave ``t = 24 h``, naming
     one, in the singular form this helper reserves for a genuine single, while
     the legend beside it read ``t=nan`` and ``t=24``. The fallback matches
     ``renderer._scaled_tp``, which has always kept the raw rendering.
     """
-    assert figure_timepoints_label([float("nan"), 6.0], X4).startswith("t=[nan, 24] h")
+    assert figure_timepoints_label([float("nan"), 6.0], X4).startswith("t = [nan, 24] h")
 
 
 def test_a_numpy_array_of_timepoints_is_accepted():
@@ -86,24 +86,49 @@ def test_a_numpy_array_of_timepoints_is_accepted():
     a ``domain/`` helper and a caller will hand it an array eventually."""
     import numpy as np
 
-    assert figure_timepoints_label(np.array([6.0, 12.0]), X4).startswith("t=[24, 48] h")
+    assert figure_timepoints_label(np.array([6.0, 12.0]), X4).startswith("t = [24, 48] h")
 
 
 def test_no_timepoints_names_nothing():
-    """Rather than ``t=[] h``, which reads as a figure whose numbers went
+    """Rather than ``t = [] h``, which reads as a figure whose numbers went
     missing instead of one with no timepoint to name."""
     assert figure_timepoints_label([], X4) == ""
 
 
-def test_the_off_state_matches_what_the_sites_used_to_print():
-    """The conversion has to be invisible until a correction is set.
+def test_the_off_state_reads_exactly_as_the_bar_and_line_titles_do():
+    """One spelling of the timepoint clause across every tab.
 
-    Every site swapped here wrote ``f"{t:g}"``. If the helper formatted even
-    one ordinary value differently, this change would silently reword every
-    Response figure in the app for users who never touch the Time controls.
+    Asserted against ``metric_labels.timepoint_title`` — the builder the Bar and
+    Line titles use — rather than against a literal, because a literal is what
+    let this go wrong: the first version of this test asserted the *new*
+    spelling this branch introduced, so the wrong implementation that passed it
+    was the one that shipped. Comparing the two builders cannot drift: whichever
+    of them changes, this fails.
+
+    The conversion also has to be invisible until a correction is set — every
+    site swapped in this branch wrote ``f"{t:g}"`` — so the values go wide.
     """
-    for value in (0.0, 1.0, 1.5, 6.0, 24.0, 100.0, 0.25):
-        assert figure_timepoints_label([value], OFF) == f"t={value:g} h"
+    from well_viewer.data.metric_labels import timepoint_title
+
+    for value in (0.0, 1.0, 1.5, 6.0, 24.0, 100.0, 0.25, 1e-7, 1e20):
+        assert (figure_timepoints_label([value], OFF)
+                == timepoint_title([value], f"{value:g}"))
+    for values in ([24.0, 48.0], [1.0, 2.0, 3.0]):
+        assert (figure_timepoints_label(values, OFF)
+                == timepoint_title(values, ", ".join(f"{v:g}" for v in values)))
+
+
+def test_the_singular_helper_reads_the_same_way():
+    """``figure_timepoint_label`` sits beside the plural and serves the Heat Map,
+    the Distribution tab and the batch-export scatter. Two near-identically
+    named helpers disagreeing about their one output format is CLAUDE.md §7.6
+    #4's hazard by construction, so they are held together here."""
+    from well_viewer.data.metric_labels import timepoint_title
+    from well_viewer.domain.time_rescale import figure_timepoint_label
+
+    for value in (0.0, 6.0, 24.0, 1.5):
+        assert (figure_timepoint_label(value, OFF)
+                == timepoint_title([value], f"{value:g}"))
 
 
 # ── the four surfaces of one figure ─────────────────────────────────────────
@@ -196,7 +221,7 @@ def test_the_tabs_own_title_carries_the_correction(tab):  # noqa: F811
     tab.ctx.state.plot.time_scale = 4.0
     tab.ctx.state.plot.time_offset = 0.0
     title = rctl._figure_title(tab.ctx, rctl.response_data(tab.ctx))
-    assert "t=96 h" in title, title
+    assert "t = 96 h" in title, title
     assert "filename value × 4" in title, title
 
 
@@ -206,7 +231,7 @@ def test_the_tabs_own_title_is_untouched_with_no_correction(tab):  # noqa: F811
 
     _one_dose_plate(tab)
     title = rctl._figure_title(tab.ctx, rctl.response_data(tab.ctx))
-    assert "t=24 h" in title, title
+    assert "t = 24 h" in title, title
     assert "filename value" not in title, title
 
 
@@ -227,7 +252,7 @@ def test_the_batch_export_title_reads_the_same_correction():
         channel="gfp", metric_key="mean_intensity",
         metric_label="Mean Intensity", draws_fraction=False, use_sem=True,
         variable_name="Dose", timepoints=[6.0, 12.0])
-    assert "t=[24, 48] h" in title, title
+    assert "t = [24, 48] h" in title, title
     assert title.count("filename value") == 1, title
 
 
@@ -272,7 +297,7 @@ def _legend_texts(ax) -> list[str]:
 def test_the_drawn_legend_carries_the_corrected_hours(tab):  # noqa: F811
     """The assertion the review's mutation had to fail and did not.
 
-    Deleting the renderer's ``_rescale`` read makes this read ``['t=6', 't=12']``.
+    Deleting the renderer's ``_rescale`` read makes this read ``['t = 6', 't = 12']``.
     """
     ax = _drawn(tab, scale=4.0)
     assert _legend_texts(ax) == ["t=24", "t=48"], _legend_texts(ax)
@@ -332,6 +357,72 @@ def test_the_drawn_caption_carries_the_corrected_hour(tab):  # noqa: F811
     assert "A01 t=24" in drawn, drawn
 
 
+# ── the fold-change suffix, which lands in the same title string ────────────
+
+def test_the_fold_change_baseline_hour_agrees_with_the_timepoint_clause(tab):  # noqa: F811
+    """One title, one reading of the same moment.
+
+    The normalisation suffix is built by ``domain/fold_change`` and appended to
+    a title that names its own timepoints corrected, so a raw baseline hour put
+    the same moment on one title twice — ``fold change vs t=6h`` beside
+    ``t = [24, 48] h`` for a plate imaged every four hours. Worse than the state
+    it replaced: before this branch the whole title was raw and at least
+    internally consistent.
+
+    Asserted on the whole title rather than on the suffix, because the defect is
+    the disagreement between two clauses and only the assembled string holds
+    both.
+    """
+    from well_viewer.features.response import controller as rctl
+
+    _one_dose_plate(tab, timepoints=(6.0, 12.0))
+    slice_ = tab.ctx.state.feature_slice("response")
+    slice_.tp_selections = {"6": True, "12": True}
+    plot = tab.ctx.state.plot
+    plot.time_scale, plot.time_offset = 4.0, 0.0
+    plot.fc_vs_t0_on, plot.fc_baseline_tp, plot.fc_op_t0 = True, "6", "ratio"
+
+    title = rctl._figure_title(tab.ctx, rctl.response_data(tab.ctx))
+    assert "vs t=24h" in title, title
+    assert "t = [24, 48] h" in title, title
+    assert "t=6h" not in title, title
+
+
+def test_the_fold_change_baseline_hour_is_raw_with_no_correction(tab):  # noqa: F811
+    """The other half — a suffix that always corrected would pass the first."""
+    from well_viewer.features.response import controller as rctl
+
+    _one_dose_plate(tab, timepoints=(6.0, 12.0))
+    slice_ = tab.ctx.state.feature_slice("response")
+    slice_.tp_selections = {"6": True, "12": True}
+    plot = tab.ctx.state.plot
+    plot.fc_vs_t0_on, plot.fc_baseline_tp, plot.fc_op_t0 = True, "6", "ratio"
+
+    title = rctl._figure_title(tab.ctx, rctl.response_data(tab.ctx))
+    assert "vs t=6h" in title, title
+    assert "t = [6, 12] h" in title, title
+
+
+def test_the_fold_change_suffix_carries_no_marker_of_its_own(tab):  # noqa: F811
+    """The correction is stated once per figure, in the timepoint clause.
+
+    Bar and Line append this same suffix and state it on their axis label
+    instead; a copy inside the suffix would read as a second correction on
+    every one of them.
+    """
+    from well_viewer.features.response import controller as rctl
+
+    _one_dose_plate(tab, timepoints=(6.0,))
+    slice_ = tab.ctx.state.feature_slice("response")
+    slice_.tp_selections = {"6": True}
+    plot = tab.ctx.state.plot
+    plot.time_scale = 4.0
+    plot.fc_vs_t0_on, plot.fc_baseline_tp, plot.fc_op_t0 = True, "6", "ratio"
+
+    title = rctl._figure_title(tab.ctx, rctl.response_data(tab.ctx))
+    assert title.count("filename value") == 1, title
+
+
 # ── the guard: no fifth site arrives uncorrected ────────────────────────────
 
 #: The files a Response figure's text can come from. Not the feature package
@@ -348,26 +439,17 @@ _SCANNED = (
     RESPONSE.parent.parent / "domain" / "fold_change.py",
 )
 
-#: Sites entitled to print a filename hour, keyed by the **function** that holds
-#: them rather than by line number: a line number is invalidated by any edit
-#: above it, which makes an unrelated change to another part of the file fail
-#: this one (CLAUDE.md §7.5 #10).
+#: Empty, and that is the point: every hour a Response figure names now goes
+#: through a correcting helper. The roster stays because the guard needs
+#: somewhere to record a site that legitimately keeps a filename hour — a menu
+#: entry or a CSV column — and because an exemption must be a row with a written
+#: reason rather than an absence.
 #:
-#: Two kinds live here and they are not the same kind. The pickers and the CSV
-#: rows are *entitled* to the raw hour — the correction is labels-only, and
-#: nothing another part of All-Well reads is touched by it. The last row is not
-#: entitled to anything: it is a known defect, recorded here so the guard stays
-#: green while the decision it needs is outstanding, and it names the tracker
-#: row rather than pretending to be a reason.
-_KEEPS_FILENAME_HOURS = {
-    ("fold_change.py", "fold_change_suffix_for"):
-        "KNOWN DEFECT, not an entitlement — see PR907_REVIEW_TRACKER.md row D2. "
-        "This builds 't=6h' into the fold-change suffix appended to the Response "
-        "title beside the corrected 't=[24, 48] h', so one title names the same "
-        "timepoints twice, once corrected and once not. The suffix is shared "
-        "verbatim with the Bar and Line titles, so correcting it is a three-tab "
-        "change and the decision is the author's, not this guard's.",
-}
+#: The one row this held came off by measurement, not by memory: it recorded
+#: `fold_change.fold_change_suffix_for` as a known defect, that defect was
+#: fixed, and the liveness test below said the entry no longer described a real
+#: site on the very next run.
+_KEEPS_FILENAME_HOURS: dict[tuple[str, str], str] = {}
 
 #: An hour interpolated after a ``t=``. Deliberately wider than the one shape
 #: the sweep converted (``f"t={x:g}"``): a reviewer found this guard walking

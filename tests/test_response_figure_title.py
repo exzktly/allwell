@@ -1,7 +1,7 @@
 """The Response figure's title says the same things the other plots' titles do.
 
 A reader moving between the plotting tabs should not have to work out that
-``Response vs Dose`` and ``GFP Mean Intensity ± SEM — t=24 h`` are describing
+``Response vs Dose`` and ``GFP Mean Intensity ± SEM — t = 24 h`` are describing
 the same plate. This tab's title said only what its x axis was, so the two facts
 needed to compare one saved figure against another — **which measurement** and
 **which moment** — were on the page and not in the artifact, which is where they
@@ -69,7 +69,7 @@ def test_the_title_names_the_measurement_the_way_the_bar_tab_does(tab):
     expected_measure = (
         f"{channel} {metric}{threshold_qualifier(rctl.response_metric_key(tab.ctx))}"
         f" ± {spread_label(True)}")
-    assert _title(tab) == f"{expected_measure} — t=24 h — vs Dose"
+    assert _title(tab) == f"{expected_measure} — t = 24 h — vs Dose"
 
 
 @pytest.mark.parametrize("use_sem,word", [(True, "SEM"), (False, "SD")])
@@ -122,8 +122,8 @@ def test_one_timepoint_reads_singular_and_several_read_as_a_list():
     what differs is that these numbers carry the time correction and that one.
     """
     off = TimeRescale(factor=1.0, offset=0.0)
-    assert figure_timepoints_label([24.0], off) == "t=24 h"
-    assert figure_timepoints_label([24.0, 48.0], off) == "t=[24, 48] h"
+    assert figure_timepoints_label([24.0], off) == "t = 24 h"
+    assert figure_timepoints_label([24.0, 48.0], off) == "t = [24, 48] h"
     assert figure_timepoints_label([], off) == ""
 
 
@@ -155,7 +155,7 @@ def test_the_title_names_the_timepoints_that_were_drawn(tab):
     drawn = rctl.timepoints_for(tab.ctx)
     assert drawn == [24.0, 48.0], drawn
     title = rctl._figure_title(tab.ctx, data)
-    assert "— t=[24, 48] h —" in title, title
+    assert "— t = [24, 48] h —" in title, title
 
 
 # ── what was already there stays there ───────────────────────────────────────

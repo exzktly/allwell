@@ -29,6 +29,8 @@ from types import SimpleNamespace
 
 
 from well_viewer.domain.time_rescale import TimeRescale, figure_timepoints_label
+from tests.test_response_figure_title import _one_dose_plate
+from tests.test_response_tab import tab  # noqa: F401 — the fixture is the point
 
 RESPONSE = Path(__file__).resolve().parent.parent / "well_viewer" / "features" / "response"
 
@@ -157,6 +159,57 @@ def test_the_title_and_the_legend_agree_on_one_figure():
     for entry in legend:
         number = entry.split("=")[-1]
         assert number in title, (title, legend)
+
+
+# ── the callers, not just the helpers ───────────────────────────────────────
+#
+# Everything above tests functions. A mutation that forced the correction off at
+# the *call* — ``_tp_label(drawn, OFF)`` in the tab's own title builder — left
+# every one of them green, which is CLAUDE.md §7.8's second face exactly: the
+# assertion was weaker than the claim because it never reached the caller. These
+# two drive the real title builders.
+
+def test_the_tabs_own_title_carries_the_correction(tab):  # noqa: F811
+    """Through ``_figure_title``, the function the tab actually draws with."""
+    from well_viewer.features.response import controller as rctl
+
+    _one_dose_plate(tab)
+    tab.ctx.state.plot.time_scale = 4.0
+    tab.ctx.state.plot.time_offset = 0.0
+    title = rctl._figure_title(tab.ctx, rctl.response_data(tab.ctx))
+    assert "t=96 h" in title, title
+    assert "filename value × 4" in title, title
+
+
+def test_the_tabs_own_title_is_untouched_with_no_correction(tab):  # noqa: F811
+    """The other half — a builder that always corrected would pass the first."""
+    from well_viewer.features.response import controller as rctl
+
+    _one_dose_plate(tab)
+    title = rctl._figure_title(tab.ctx, rctl.response_data(tab.ctx))
+    assert "t=24 h" in title, title
+    assert "filename value" not in title, title
+
+
+def test_the_batch_export_title_reads_the_same_correction():
+    """The exported figure and the tab must not name different hours.
+
+    Driven through ``_figure_title`` on a panel whose ``_ctx`` is the only thing
+    that method reads for the correction, so this fails for a panel that forgot
+    to read it — the mutation that went unnoticed on the tab side.
+    """
+    from well_viewer.features.batch_export.response_panel import ResponseBatchExportPanel
+
+    panel = ResponseBatchExportPanel.__new__(ResponseBatchExportPanel)
+    panel._ctx = SimpleNamespace(
+        state=SimpleNamespace(plot=SimpleNamespace(time_scale=4.0, time_offset=0.0)))
+    title = ResponseBatchExportPanel._figure_title(
+        panel, SimpleNamespace(name="Drug A"), SimpleNamespace(),
+        channel="gfp", metric_key="mean_intensity",
+        metric_label="Mean Intensity", draws_fraction=False, use_sem=True,
+        variable_name="Dose", timepoints=[6.0, 12.0])
+    assert "t=[24, 48] h" in title, title
+    assert title.count("filename value") == 1, title
 
 
 # ── the guard: no fifth site arrives uncorrected ────────────────────────────

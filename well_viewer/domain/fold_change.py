@@ -1192,9 +1192,26 @@ def fold_change_suffix_for(ctx, scope: str = "") -> str:
     caller that does not say which tab it is labelling gets the single-control
     reading. Every on-tab caller passes one.
     """
+    from well_viewer.domain.time_rescale import format_scaled, rescale_for
+
     plot = ctx.state.plot
     base_tp = parse_baseline_tp(ctx)
-    baseline_label = f"t={base_tp:g}h" if base_tp is not None else "first timepoint"
+    # The baseline hour through the app-wide time correction (Properties →
+    # Time), because this suffix is appended to a figure title that names its
+    # own timepoints corrected. Left raw it put the same moment on one title
+    # twice, once corrected and once not — "fold change vs t=6h" beside
+    # "t=[24, 48] h" for a plate imaged every four hours — which is the
+    # disagreement the correction exists to remove, arriving inside a single
+    # string. Bar and Line append this same suffix and already print corrected
+    # hours on their axes, so they were reading two ways too.
+    #
+    # No marker here: the figures that carry this suffix state the correction
+    # once elsewhere — Bar and Line on their axis label via
+    # ``plot_style.mark_time_rescale``, Response in its own timepoint clause —
+    # and a second copy in the suffix would read as a second correction.
+    baseline_label = (
+        f"t={format_scaled(base_tp, rescale_for(plot))}h"
+        if base_tp is not None else "first timepoint")
     controls = None
     if scope and bool(getattr(plot, "fc_vs_control_on", False)) \
             and str(getattr(plot, "fc_control_mode", "single")) == "per_member":

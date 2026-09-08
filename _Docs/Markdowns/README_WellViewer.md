@@ -2277,13 +2277,29 @@ and what you picked from the timepoint list, so a downstream script reads the
 same numbers whatever these are set to.
 
 **A figure with no time axis names the corrected hour in its title.** The Heat
-Map, the Distribution tab and the Batch Export scatter figures all pick one
-timepoint from a menu rather than drawing an axis of them, so the title is the
-only place the hour appears — which makes it the only place the correction can
-be stated, not a reason to leave it out. Each of those titles carries the whole
-correction beside the number, the way a corrected axis carries it in its axis
-label: `t=24 h, filename value × 4`. Set nothing and they read the plain
-`t=6 h` they always read.
+Map, the Distribution tab, Response Curves and the Batch Export scatter figures
+all name their timepoints rather than drawing an axis of them, so the title is
+the only place the hour appears — which makes it the only place the correction
+can be stated, not a reason to leave it out. Each of those titles carries the
+whole correction beside the number, the way a corrected axis carries it in its
+axis label: `t = 24 h, filename value × 4`. Set nothing and they read the
+plain `t = 6 h` they always read.
+
+**Response Curves names its hours in four places, and all four move together.**
+That tab draws a curve per timepoint, so the hour appears in the title, in every
+legend entry, in the `No fit at …` note under the axes and in the caption naming
+members that had no control — and a title reading `t = [24, 48] h` over a legend
+reading `t=6` would be a worse figure than one corrected nowhere, because the
+two would disagree with each other rather than with another tab. The numbers are
+corrected on all four; the `filename value × 4` marker is printed **once**, on
+the title, since it describes the plate rather than each curve.
+
+The **fold-change** suffix is the fifth place, and it lands inside that same
+title: normalising against a baseline timepoint prints `fold change vs t=24h`,
+and that hour is corrected too. Left raw it named the same moment twice in one
+sentence, once corrected and once not. Bar Plots and Line Graphs append the same
+suffix and are corrected with it — they carry the marker on their time axis, so
+the suffix does not repeat it.
 
 #### Fold-change normalization
 

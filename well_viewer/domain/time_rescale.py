@@ -60,6 +60,7 @@ __all__ = [
     "displayed_interval",
     "factor_for_interval",
     "figure_timepoint_label",
+    "figure_timepoints_label",
     "format_scaled",
     "is_active",
     "observed_interval",
@@ -339,11 +340,20 @@ def describe(rescale) -> str:
     return " ".join(parts)
 
 
+#: The one spelling of the timepoint clause. ``t = 24 h`` — spaces around the
+#: ``=`` — because ``data.metric_labels.timepoint_title`` has always spelled the
+#: Bar and Line titles that way, and two spellings on one plate's figures is a
+#: reader wondering whether they mean different things. The pair below and
+#: ``timepoint_title`` are the only three places a figure's timepoint clause is
+#: built, and ``tests/test_one_spelling_for_the_plot_title_words.py`` holds them
+#: to it.
+
+
 def figure_timepoint_label(value, rescale, *, unit: str = "h") -> str:
     """A timepoint named in a figure *title*, carrying its own marker.
 
-    Returns the whole parenthetical body — ``"t=4 h"`` while the rescale is off,
-    ``"t=4 h, filename value × 4"`` while it is on — so a caller writes
+    Returns the whole parenthetical body — ``"t = 4 h"`` while the rescale is
+    off, ``"t = 4 h, filename value × 4"`` while it is on — so a caller writes
     ``f"… ({figure_timepoint_label(tp, rescale)})"`` and the unit stays beside
     the number instead of ending up outside the bracket.
 
@@ -360,7 +370,52 @@ def figure_timepoint_label(value, rescale, *, unit: str = "h") -> str:
     text = format_scaled(value, rescale)
     if not text:
         return ""
-    body = f"t={text}{' ' + unit if unit else ''}"
+    body = f"t = {text}{' ' + unit if unit else ''}"
+    marker = describe(rescale)
+    return f"{body}, {marker}" if marker else body
+
+
+def figure_timepoints_label(values, rescale, *, unit: str = "h") -> str:
+    """Several timepoints named in a figure *title*, carrying one marker.
+
+    The plural of :func:`figure_timepoint_label`, for a figure that draws a
+    curve or a series **per** timepoint rather than picking one: ``"t=24 h"``
+    for a single value and ``"t=[24, 48] h"`` for several, with the correction
+    appended once — ``"t=[24, 48] h, filename value × 4"``. The bracket for the
+    plural and the bare number for the singular follow
+    :func:`data.metric_labels.timepoint_title`, because a bare list of one is a
+    figure claiming to overlay something it does not.
+
+    One marker, however many numbers: the correction is a property of the plate,
+    not of each timepoint, and repeating it per value would read as several
+    different corrections.
+
+    A value the rescale cannot format — a non-finite timepoint — keeps its own
+    ``%g`` rendering rather than being dropped. Dropping it made the count lie:
+    two curves drawn from ``[nan, 6.0]`` produced ``t=24 h``, naming one, and in
+    the *singular* form this function reserves for a genuine single, while the
+    legend beside it read ``t=nan`` and ``t=24``. A tidy string that misstates
+    what is on the figure is the substitution CLAUDE.md §7 forbids; ``nan`` is
+    ugly and honest, and it agrees with ``renderer._scaled_tp``, which has always
+    fallen back this way.
+
+    An empty list still returns ``""`` — the same answer the caller gets for no
+    timepoints at all, which is what a title clause has to be absent for rather
+    than reading ``t=[] h``.
+    """
+    # ``list(values)`` before any truth test: ``values or ()`` asks a numpy
+    # array whether it is truthy, which raises. This is a ``domain/`` helper and
+    # a caller will hand it an array eventually.
+    items = [] if values is None else list(values)
+    texts = [format_scaled(v, rescale) or f"{v:g}" for v in items]
+    if not texts:
+        return ""
+    if len(texts) == 1:
+        body = f"t = {texts[0]}"
+    else:
+        body = f"t = [{', '.join(texts)}]"
+    if unit:
+        body = f"{body} {unit}"
     marker = describe(rescale)
     return f"{body}, {marker}" if marker else body
 

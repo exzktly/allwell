@@ -572,14 +572,19 @@ class ResponseBatchExportPanel(BatchExportPanel):
         The group's name leads, because that is what distinguishes this figure
         from the others in the folder; on the tab there is only ever one.
         """
-        from well_viewer.data.metric_labels import timepoint_title
+        from well_viewer.domain.time_rescale import (
+            figure_timepoints_label as _tp_label,
+            rescale_for as _rescale_for,
+        )
 
         parts = [grp.name, _measurement_title(
             data, channel=channel, metric_label=metric_label,
             metric_key=metric_key, draws_fraction=draws_fraction,
             use_sem=use_sem)]
-        when = timepoint_title(timepoints,
-                               ", ".join(f"{t:g}" for t in timepoints))
+        # The same clause the tab's title carries, from the same helper — an
+        # exported figure that named a different hour from the tab it came from
+        # would be the disagreement this correction exists to remove.
+        when = _tp_label(timepoints, _rescale_for(self._ctx.state.plot))
         if when:
             parts.append(when)
         if variable_name:

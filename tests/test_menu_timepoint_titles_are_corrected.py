@@ -117,27 +117,27 @@ def title(monkeypatch):
 def test_no_correction_names_the_filename_hour(title):
     """The whole title, so this is a pin rather than a substring that six
     different titles would satisfy."""
-    assert title() == "GFP — Mean above threshold — t=6 h"
+    assert title() == "GFP — Mean above threshold — t = 6 h"
 
 
 def test_an_interval_multiplies_the_hour_on_the_title(title):
     """Six images four hours apart, numbered 1-6 by the microscope."""
-    assert "t=24 h" in title(scale=4.0), title(scale=4.0)
+    assert "t = 24 h" in title(scale=4.0), title(scale=4.0)
 
 
 def test_an_offset_shifts_the_hour_on_the_title(title):
-    assert "t=18 h" in title(offset=12.0), title(offset=12.0)
+    assert "t = 18 h" in title(offset=12.0), title(offset=12.0)
 
 
 def test_the_interval_and_the_offset_compose(title):
     """``filename × interval + offset``, in that order — 6 × 4 + 12 = 36."""
-    assert "t=36 h" in title(scale=4.0, offset=12.0), title(scale=4.0, offset=12.0)
+    assert "t = 36 h" in title(scale=4.0, offset=12.0), title(scale=4.0, offset=12.0)
 
 
 def test_a_corrected_title_says_it_was_corrected(title):
     """The marker is the whole reason the shared helper exists.
 
-    Printing ``t=24 h`` with nothing beside it is worse than printing the raw
+    Printing ``t = 24 h`` with nothing beside it is worse than printing the raw
     6: a corrected number that reads as a measured one cannot be told from a
     plate that really was imaged at 24 hours.
     """
@@ -173,13 +173,13 @@ def _distribution_title(*, scale=1.0, offset=0.0, tp=6.0):
 
 
 def test_the_distribution_title_carries_the_correction():
-    assert "t=24 h" in _distribution_title(scale=4.0)
+    assert "t = 24 h" in _distribution_title(scale=4.0)
     assert "filename value" in _distribution_title(scale=4.0)
 
 
 def test_the_distribution_title_is_the_filename_hour_by_default():
     title = _distribution_title()
-    assert "t=6 h" in title and "filename value" not in title, title
+    assert "t = 6 h" in title and "filename value" not in title, title
 
 
 def test_all_timepoints_is_still_named_that(monkeypatch):

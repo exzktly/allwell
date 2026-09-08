@@ -381,12 +381,24 @@ def figure_timepoints_label(values, rescale, *, unit: str = "h") -> str:
     not of each timepoint, and repeating it per value would read as several
     different corrections.
 
-    Values that do not survive the rescale are dropped rather than printed
-    empty, and a list that empties returns ``""`` — the same answer the caller
-    gets for no timepoints at all, which is what a title clause has to be
-    absent for rather than reading ``t=[] h``.
+    A value the rescale cannot format — a non-finite timepoint — keeps its own
+    ``%g`` rendering rather than being dropped. Dropping it made the count lie:
+    two curves drawn from ``[nan, 6.0]`` produced ``t=24 h``, naming one, and in
+    the *singular* form this function reserves for a genuine single, while the
+    legend beside it read ``t=nan`` and ``t=24``. A tidy string that misstates
+    what is on the figure is the substitution CLAUDE.md §7 forbids; ``nan`` is
+    ugly and honest, and it agrees with ``renderer._scaled_tp``, which has always
+    fallen back this way.
+
+    An empty list still returns ``""`` — the same answer the caller gets for no
+    timepoints at all, which is what a title clause has to be absent for rather
+    than reading ``t=[] h``.
     """
-    texts = [t for t in (format_scaled(v, rescale) for v in (values or ())) if t]
+    # ``list(values)`` before any truth test: ``values or ()`` asks a numpy
+    # array whether it is truthy, which raises. This is a ``domain/`` helper and
+    # a caller will hand it an array eventually.
+    items = [] if values is None else list(values)
+    texts = [format_scaled(v, rescale) or f"{v:g}" for v in items]
     if not texts:
         return ""
     if len(texts) == 1:

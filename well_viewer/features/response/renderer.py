@@ -151,11 +151,15 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
 def _scaled_tp(value, rescale) -> str:
     """One timepoint, corrected and formatted the way the whole app formats one.
 
-    Every place this tab prints an hour goes through here — the legend entry,
-    the no-fit caption, and (via ``time_rescale.figure_timepoints_label``) the
-    title — so the four surfaces of one figure cannot name the same curve two
-    different ways. With no correction in force it is byte-identical to the
-    ``%g`` these sites used to write.
+    The legend entry and the no-fit caption go through here. The omission
+    caption uses ``collect._tp`` and the title
+    ``time_rescale.figure_timepoints_label`` — three call sites of one rule
+    rather than one function, because ``collect.py`` is Qt-free and pure and
+    does not import this module. All three apply the same correction and all
+    three fall back to the raw ``%g`` for a value the rescale cannot format, so
+    the surfaces of one figure cannot name the same curve two different ways.
+    With no correction in force each is byte-identical to the ``%g`` its site
+    used to write.
 
     The *marker* is deliberately not here. It belongs once per figure, on the
     title, rather than on every legend entry beside every number.
@@ -163,6 +167,17 @@ def _scaled_tp(value, rescale) -> str:
     from well_viewer.domain.time_rescale import format_scaled
 
     return format_scaled(value, rescale) or f"{value:g}"
+
+
+#: ``rescale`` is a **required** keyword on the private helpers below rather
+#: than one defaulting to "no correction". ``time_rescale``'s own docstring
+#: warns that such a default lets a call site keep compiling while silently
+#: dropping the correction, printing a figure that is confidently wrong and
+#: marked as though it were right — and that is exactly how the renderer half of
+#: this feature came to be switchable off in one line. ``collect.omission_caption``
+#: keeps its default because it is called by a dozen tests that are about
+#: omissions rather than about the clock, and its default is the honest answer
+#: for a caller with no plot state to read.
 
 
 def _errorbar_colour(container) -> str | None:
@@ -200,7 +215,7 @@ def _draw_fit_line(ax, fit, xs, use_log: bool, colour) -> None:
             zorder=1)
 
 
-def _fit_caption(fits: dict | None, data=None, *, rescale=None) -> str:
+def _fit_caption(fits: dict | None, data=None, *, rescale) -> str:
     """Why each refused fit was refused, for under the axes.
 
     In the caption as well as the legend because the legend has room for
@@ -221,12 +236,19 @@ def _fit_caption(fits: dict | None, data=None, *, rescale=None) -> str:
                     for key, reason in refused)
 
 
-def _curve_name(key, labels: dict, *, rescale=None) -> str:
+def _curve_name(key, labels: dict, *, rescale) -> str:
     """``t=24`` or ``HeLa t=24`` — enough to pick the curve out of the legend.
 
-    The hour is the corrected one, because this sentence names a curve *by* its
-    legend entry: printing a raw hour here would point at an entry that does
-    not exist on the figure.
+    The hour is the corrected one, so that where the legend prints an hour this
+    sentence prints the same one; a raw hour here would name a curve by a
+    number no entry carries.
+
+    It is not a verbatim legend entry, and does not claim to be: ``_curve_label``
+    appends an hour only when more than one timepoint is drawn, so on a
+    single-timepoint figure of several series the legend reads ``HeLa`` while
+    this reads ``HeLa t=24``. That is deliberate — the caption is read away from
+    the key and the extra hour disambiguates rather than misleads — but it means
+    the correspondence is on the *value*, not on the string.
     """
     timepoint, _series_id = key
     series = labels.get(key) or ""
@@ -427,7 +449,7 @@ def _series_styles(ctx, data, *, dash_is_spent: bool) -> dict | None:
     return series_styles(mode, ids, cycle, dash_is_spent=dash_is_spent)
 
 
-def _curve_label(data, curve, *, rescale=None) -> str:
+def _curve_label(data, curve, *, rescale) -> str:
     """The legend entry: the series, the timepoint, or both.
 
     Only what distinguishes this curve from the others on the figure. A single
@@ -521,7 +543,7 @@ class _CurveStyles(NamedTuple):
 
 def _draw_one_curve(ax, data, curve, fits, marks: _CurveStyles, *,
                     use_log: bool, off_scale_x: float | None,
-                    rescale=None) -> bool:
+                    rescale) -> bool:
     """Draw *curve* and its fit. Returns whether it put anything off-scale.
 
     Split out of :func:`draw_response` to keep that function under the

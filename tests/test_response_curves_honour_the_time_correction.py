@@ -70,6 +70,25 @@ def test_an_uncorrected_label_carries_no_marker():
     assert figure_timepoints_label([6.0, 12.0], OFF) == "t=[6, 12] h"
 
 
+def test_a_timepoint_the_rescale_cannot_format_is_still_counted():
+    """A tidy string that misstates the figure is worse than an ugly honest one.
+
+    Dropping the value made the count lie: two curves gave ``t=24 h``, naming
+    one, in the singular form this helper reserves for a genuine single, while
+    the legend beside it read ``t=nan`` and ``t=24``. The fallback matches
+    ``renderer._scaled_tp``, which has always kept the raw rendering.
+    """
+    assert figure_timepoints_label([float("nan"), 6.0], X4).startswith("t=[nan, 24] h")
+
+
+def test_a_numpy_array_of_timepoints_is_accepted():
+    """``values or ()`` asks an array whether it is truthy, which raises. This is
+    a ``domain/`` helper and a caller will hand it an array eventually."""
+    import numpy as np
+
+    assert figure_timepoints_label(np.array([6.0, 12.0]), X4).startswith("t=[24, 48] h")
+
+
 def test_no_timepoints_names_nothing():
     """Rather than ``t=[] h``, which reads as a figure whose numbers went
     missing instead of one with no timepoint to name."""
@@ -315,70 +334,148 @@ def test_the_drawn_caption_carries_the_corrected_hour(tab):  # noqa: F811
 
 # ── the guard: no fifth site arrives uncorrected ────────────────────────────
 
-#: Sites that print an hour somewhere the *correction does not apply* — the
-#: menus and the exported CSVs, which keep the hours the pipeline parsed out of
-#: the filenames. That is the app-wide rule, not an exemption invented here:
-#: nothing another part of All-Well reads is touched by the Time controls.
+#: The files a Response figure's text can come from. Not the feature package
+#: alone: the batch-export panel builds one of the two titles this sweep
+#: converted, and ``domain/fold_change.py`` builds the normalisation suffix that
+#: is appended to both. A guard whose surface is narrower than the sweep it
+#: guards reports a clean tree by not looking (CLAUDE.md §7.5 #3) — this one did
+#: exactly that, and the site in ``fold_change`` below is what it was not seeing.
+_SCANNED = (
+    RESPONSE / "controller.py",
+    RESPONSE / "renderer.py",
+    RESPONSE / "collect.py",
+    RESPONSE.parent / "batch_export" / "response_panel.py",
+    RESPONSE.parent.parent / "domain" / "fold_change.py",
+)
+
+#: Sites entitled to print a filename hour, keyed by the **function** that holds
+#: them rather than by line number: a line number is invalidated by any edit
+#: above it, which makes an unrelated change to another part of the file fail
+#: this one (CLAUDE.md §7.5 #10).
+#:
+#: Two kinds live here and they are not the same kind. The pickers and the CSV
+#: rows are *entitled* to the raw hour — the correction is labels-only, and
+#: nothing another part of All-Well reads is touched by it. The last row is not
+#: entitled to anything: it is a known defect, recorded here so the guard stays
+#: green while the decision it needs is outstanding, and it names the tracker
+#: row rather than pretending to be a reason.
 _KEEPS_FILENAME_HOURS = {
-    "controller.py": {
-        462: "the Timepoint picker's own entries — a menu, not a figure",
-        700: "an exported CSV row",
-        742: "an exported CSV row",
-    },
-    "collect.py": {},
-    "renderer.py": {},
+    ("fold_change.py", "fold_change_suffix_for"):
+        "KNOWN DEFECT, not an entitlement — see PR907_REVIEW_TRACKER.md row D2. "
+        "This builds 't=6h' into the fold-change suffix appended to the Response "
+        "title beside the corrected 't=[24, 48] h', so one title names the same "
+        "timepoints twice, once corrected and once not. The suffix is shared "
+        "verbatim with the Bar and Line titles, so correcting it is a three-tab "
+        "change and the decision is the author's, not this guard's.",
 }
 
-#: Raw hour formatting: an ``f"…{value:g}…"`` next to a ``t=``, or the bare
-#: ``{x:g}`` used to build one.
-_RAW_HOUR = re.compile(r"t=\{[^}]*:g\}")
+#: An hour interpolated after a ``t=``. Deliberately wider than the one shape
+#: the sweep converted (``f"t={x:g}"``): a reviewer found this guard walking
+#: past a formatter that is not a ``:g`` conversion, a bare ``{x}``, a
+#: ``%``-format, and a string concatenation, which is not an f-string node at
+#: all and so is matched textually instead.
+#:
+#: The lookbehind is load-bearing: without it ``style: dict = {…}`` matches, on
+#: the ``t`` of ``dict``, and the roster fills up with exemptions for lines that
+#: never named an hour.
+_RAW_HOUR = re.compile(
+    r"""(?<![A-Za-z0-9_])t\s*=\s*(\{[^}]*\}|%[-#0-9.]*[dfgeGE])""")
+_CONCAT_HOUR = re.compile(r"""["'](?<![A-Za-z0-9_])t\s*=\s*["']\s*\+""")
+
+#: The formatters that apply the correction. An hour routed through one of these
+#: is the *fixed* shape, so it is not a finding and needs no exemption — which
+#: is the difference between a guard that names the rule and one that merely
+#: lists lines.
+_APPROVED = ("_scaled_tp(", "_tp(", "format_scaled(", "figure_timepoint")
 
 
-def _python_files():
-    for path in sorted(RESPONSE.rglob("*.py")):
-        if "__pycache__" not in path.parts:
-            yield path
+def _is_approved(text: str) -> bool:
+    """True when the hour is routed through a formatter that corrects it."""
+    return any(helper in text for helper in _APPROVED)
+
+
+def _enclosing_function(tree) -> dict[int, str]:
+    """Line number → the name of the function whose body holds it."""
+    owner: dict[int, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for line in range(node.lineno, (node.end_lineno or node.lineno) + 1):
+            # Innermost wins: a nested helper owns its own lines.
+            owner[line] = node.name
+    return owner
 
 
 def test_no_response_site_formats_an_hour_outside_the_helpers():
-    """A fifth surface added with ``f"t={t:g}"`` fails here.
+    """A further surface added with a raw hour fails here.
 
-    The four sites this file fixes were found by grepping *after* the first two
-    were already chosen, which is exactly how a half-sweep happens — so the
-    protection is mechanical rather than a promise to remember.
+    The sites this file's fix converted were found by grepping *after* the first
+    two had already been chosen, which is exactly how a half-sweep happens — so
+    the protection is mechanical rather than a promise to remember. It missed a
+    fifth site all the same, by scanning one package when the sweep spanned
+    three; the surface above is that lesson.
     """
     offenders = []
-    for path in _python_files():
+    for path in _SCANNED:
         text = path.read_text()
         tree = ast.parse(text, filename=str(path))
-        allowed = _KEEPS_FILENAME_HOURS.get(path.name, {})
+        owner = _enclosing_function(tree)
+        lines = text.splitlines()
+        hits: list[tuple[int, str]] = []
         for node in ast.walk(tree):
-            if not isinstance(node, ast.JoinedStr):
+            if isinstance(node, ast.JoinedStr):
+                rendered = ast.unparse(node)
+                if _RAW_HOUR.search(rendered) and not _is_approved(rendered):
+                    hits.append((node.lineno, rendered))
+        for lineno, line in enumerate(lines, start=1):
+            if ((_CONCAT_HOUR.search(line) or _RAW_HOUR.search(line))
+                    and not _is_approved(line)):
+                if not any(h[0] == lineno for h in hits):
+                    hits.append((lineno, line.strip()))
+        for lineno, rendered in hits:
+            if (path.name, owner.get(lineno, "")) in _KEEPS_FILENAME_HOURS:
                 continue
-            rendered = ast.unparse(node)
-            if not _RAW_HOUR.search(rendered):
-                continue
-            if node.lineno in allowed:
-                continue
-            offenders.append(f"{path.name}:{node.lineno}: {rendered}")
+            offenders.append(
+                f"{path.name}:{lineno} (in {owner.get(lineno, '<module>')}): {rendered}")
     assert not offenders, (
         "an hour formatted raw on a Response figure — route it through "
-        "renderer._scaled_tp or time_rescale.figure_timepoints_label, or add "
-        "it to _KEEPS_FILENAME_HOURS with the reason:\n  " + "\n  ".join(offenders)
+        "renderer._scaled_tp or time_rescale.figure_timepoints_label, or add its "
+        "function to _KEEPS_FILENAME_HOURS with the reason:\n  "
+        + "\n  ".join(offenders)
     )
 
 
-def test_the_exemption_roster_still_describes_real_sites():
-    """An allowlist entry that stopped matching anything is worse than none:
-    it reads as a considered exemption while guarding nothing."""
+def test_the_exemption_roster_still_describes_real_functions():
+    """An entry that stopped matching anything is worse than none: it reads as a
+    considered exemption while guarding nothing.
+
+    The roster this replaced had three entries and exempted **zero** sites — the
+    guard's pattern required a ``t=`` prefix that none of the three lines had —
+    while its liveness test checked a weaker predicate (``":g}" in line``) and so
+    confirmed all three.  This one asserts what the guard asserts: the named
+    function exists, and it holds a line the guard would otherwise flag.
+    """
     stale = []
-    for name, rows in _KEEPS_FILENAME_HOURS.items():
-        if not rows:
+    for (filename, func), reason in _KEEPS_FILENAME_HOURS.items():
+        path = next((p for p in _SCANNED if p.name == filename), None)
+        if path is None:
+            stale.append(f"{filename}: not in the scanned set")
             continue
-        text = (RESPONSE / name).read_text()
+        text = path.read_text()
+        tree = ast.parse(text, filename=str(path))
+        owner = _enclosing_function(tree)
+        if func not in owner.values():
+            stale.append(f"{filename}::{func} ({reason[:40]}…): no such function")
+            continue
         lines = text.splitlines()
-        for lineno, reason in rows.items():
-            line = lines[lineno - 1] if lineno <= len(lines) else ""
-            if ":g}" not in line:
-                stale.append(f"{name}:{lineno} ({reason}) -> {line.strip()!r}")
-    assert not stale, "exemptions naming a line that no longer formats an hour:\n  " + "\n  ".join(stale)
+        flagged = [
+            lineno for lineno, line in enumerate(lines, start=1)
+            if owner.get(lineno) == func
+            and (_RAW_HOUR.search(line) or _CONCAT_HOUR.search(line))
+            and not _is_approved(line)
+        ]
+        if not flagged:
+            stale.append(
+                f"{filename}::{func} ({reason[:40]}…): formats no raw hour any more")
+    assert not stale, (
+        "exemptions that no longer describe a real site:\n  " + "\n  ".join(stale))

@@ -3843,3 +3843,66 @@ def test_spread_guard_catches_an_unconditional_format(tmp_path, monkeypatch, sha
 def test_spread_guard_clears_the_sanctioned_shapes(tmp_path, monkeypatch, shape):
     good = _write(tmp_path, f"good_spread_{shape.replace(' ', '_')}.py", SPREAD_GOOD[shape])
     assert _run_scan(monkeypatch, *_SPREAD_GUARD, [good]) is None
+
+
+# ── the Response timepoint guard ────────────────────────────────────────────
+#
+# `test_response_curves_honour_the_time_correction.py` holds the rule that no
+# Response figure names an hour outside the correcting helpers. Its first draft
+# recognised exactly one spelling — ``f"t={x:g}"`` — so a reviewer got five
+# other shapes past it, and its own regex matched the ``t`` of ``dict = {``.
+# Both halves are pinned here, because the `prove_guard.sh` proof for that file
+# expires the day it merges and this is what survives.
+
+RESPONSE_HOUR_BAD = {
+    "the converted shape": 'def label(t):\n    return f"t={t:g}"\n',
+    "a formatter that is not :g": 'def label(t):\n    return f"t={format(t, \'g\')}"\n',
+    "no conversion at all": 'def label(t):\n    return f"t={t}"\n',
+    "concatenation": 'def label(t):\n    return "t=" + str(t)\n',
+    "percent format": 'def label(t):\n    return "t=%g" % t\n',
+    "the spaced spelling": 'def label(t):\n    return f"t = {t:g} h"\n',
+}
+
+RESPONSE_HOUR_GOOD = {
+    # Routed through a formatter that applies the correction.
+    "scaled helper": 'def label(t, r):\n    return f"t={_scaled_tp(t, r)}"\n',
+    "collect helper": 'def label(t):\n    return f"t={_tp(t)}"\n',
+    "domain helper": 'def label(t, r):\n    return f"t={format_scaled(t, r)}"\n',
+    # The lookbehind: an annotated dict assignment ends in ``t = {``, on the
+    # ``t`` of ``dict``, and the first draft of the guard flagged it.
+    "an annotated dict": 'def build():\n    style: dict = {"marker": "o"}\n',
+    "a plain dict": 'def build():\n    out: dict = {}\n',
+    # A timepoint that is not being named to the user.
+    "a data key": 'def pick(rows, t):\n    return rows[t]\n',
+}
+
+
+def _response_hour_offenders(source: str) -> list[str]:
+    """Run the guard's own patterns over *source*, as the guard runs them."""
+    import ast as _ast
+
+    import tests.test_response_curves_honour_the_time_correction as mod
+    tree = _ast.parse(source)
+    hits: list[str] = []
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.JoinedStr):
+            rendered = _ast.unparse(node)
+            if mod._RAW_HOUR.search(rendered) and not mod._is_approved(rendered):
+                hits.append(rendered)
+    for line in source.splitlines():
+        if ((mod._CONCAT_HOUR.search(line) or mod._RAW_HOUR.search(line))
+                and not mod._is_approved(line)):
+            hits.append(line.strip())
+    return hits
+
+
+@pytest.mark.parametrize("shape", sorted(RESPONSE_HOUR_BAD))
+def test_response_hour_guard_catches_every_spelling(shape):
+    assert _response_hour_offenders(RESPONSE_HOUR_BAD[shape]), (
+        f"the {shape!r} spelling of a raw hour went uncaught")
+
+
+@pytest.mark.parametrize("shape", sorted(RESPONSE_HOUR_GOOD))
+def test_response_hour_guard_clears_the_sanctioned_shapes(shape):
+    offenders = _response_hour_offenders(RESPONSE_HOUR_GOOD[shape])
+    assert not offenders, f"the {shape!r} shape was wrongly flagged: {offenders}"

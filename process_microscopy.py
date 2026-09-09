@@ -775,16 +775,13 @@ def parse_filename(
 # Image helpers
 # ---------------------------------------------------------------------------
 
-# The one image reader lives beside the writers in ``pipeline.io``; re-exported
-# so ``pm.load_2d_gray`` (the Playground reads a frame through it, to read it
-# exactly as a batch run does) is unchanged.
+# The one image reader lives beside the writers in ``pipeline.io``, re-exported
+# so ``pm.load_2d_gray`` — the Playground's own frame reader — is unchanged.
 from pipeline.io import load_2d_gray  # noqa: F401,E402
 
-# Empty-well (blank) reference sampling and model building moved to
-# ``pipeline.empty_well`` — a Qt-free cohesive module holding the sampler, the
-# two model builders, the per-image lookup and the guard that stops a run whose
-# requested correction could not be built. Re-exported here so ``pm.<name>``
-# call sites, the remote worker and the tests are unchanged.
+# Empty-well (blank) sampling, the two model builders, the per-image lookup and
+# the guards live in the Qt-free ``pipeline.empty_well``. Re-exported here so
+# ``pm.<name>`` call sites, the remote worker and the tests are unchanged.
 from pipeline.empty_well import (  # noqa: F401,E402
     GROUPED_BACKGROUND_KEY,
     GROUPED_FLATFIELD_KEY,
@@ -3847,8 +3844,7 @@ def main() -> None:
     if input_dir.name.lower() == "in":
         organize_loose_tifs_into_well_folders(input_dir, schema=schema, sep=sep)
 
-    # Which blank corrects which well. Read after the loose-TIF organize so the
-    # files the models are built from are on disk under input_dir.
+    # Which blank corrects which well, after the organize so the files exist.
     blank_groups, bg_src = plan_blank_groups(args, input_dir)
 
     # ── Decide mode: zip, folder, or flat ───────────────────────────────────

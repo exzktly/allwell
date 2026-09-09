@@ -257,9 +257,19 @@ def test_a_background_well_the_map_does_not_use_is_refused_in_the_form(tab):
     object the pipeline builds, so it cannot answer differently.
     """
     tab._background_well_edit.setText("H12, G12")
-    error = tab._background_map_coverage_error("H12=A01:D12", "H12, G12")
-    assert error and "G12" in error, error
+    # A map that covers the whole plate, so the *only* thing left to refuse is
+    # the stray blank. Written with a block that leaves nothing uncovered
+    # because the uncovered-well message lists G12 too: asserting "G12 appears"
+    # passed with this fix reverted, which is how the first version of this test
+    # measured nothing at all.
+    error = tab._background_map_coverage_error("H12=A01:H12", "H12, G12")
+    assert error is not None
+    assert "does not use as a blank" in error, error
+    assert "G12" in error.split(",")[0], error
 
     # Named in both, nothing is refused.
     assert tab._background_map_coverage_error(
         "H12=A01:D12; G12=E01:H12", "H12, G12") is None
+    # And a map that covers nothing extra still refuses on coverage, not on this.
+    coverage = tab._background_map_coverage_error("H12=A01:D12; G12=E01:H12", "")
+    assert coverage is None or "does not use as a blank" not in coverage

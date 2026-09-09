@@ -1850,6 +1850,44 @@ on the guard. Two more copies of that regex were still in
 superset — staging a well whole that turns out not to be a blank costs an upload,
 while missing one starves a whole block of its correction.
 
+**The map is written on a plate, not in a text box.** `analyze/bg_map.py` holds
+the editor — a non-modal window off the Quality Control section, built once and
+hidden rather than destroyed. One `WellPlateSelector` in paint mode carries the
+whole partition: a colour per blank, a ring on the block being edited, absent
+wells disabled so a drag cannot claim a well the folder does not have, and a
+live count of the wells no blank claims. That count is
+`BlankGroups.uncovered`'s own answer, so what the editor warns about and what
+the run refuses are one question asked twice rather than two rules that can
+drift. A text field was the cheaper control and the wrong one: the failure the
+map exists to prevent is a well quietly landing in the wrong block, and eight
+rows of `A01,A02,A03…` read as correct whatever they say.
+
+The map lives on the tab and the widgets are drawn from it, never read back —
+the discipline `fold_change_pairing_view` records losing an assignment to
+without. Its row edits go through a deferred repopulate for the reason that
+editor documents too: the combo whose signal started the edit is one of the
+widgets the repopulate deletes.
+
+`Split plate…` takes its blanks **only** from the Background well field, and
+holds every chosen blank out of every block. Neither is fussiness: the first
+version took blanks off the end of the plate when the field named none, so a
+row split assigned H12, H11, H10… — wells inside row H's own block — and row H's
+blank ended up corrected by itself, producing a map this feature's own parser
+refuses. A split with fewer blanks than blocks makes the blocks it can and says
+what is left, rather than inventing a reference out of a sample well.
+
+The editor offers the plate's real wells through
+`input_resolution_service.iter_all_well_tokens`, which is the union
+`count_expected_wells` already computed privately, lifted out so both can use
+it; `iter_well_tokens` alone reads the grouped layouts only and answers empty
+for a plate that is still loose TIFs. It reads the **resolved** input directory
+(`_preflight_input`), because on the common `<dataset>/in` layout the path field
+names the parent, whose own listing holds no wells at all.
+
+`_background_well_validation_error` moved into that module with the map it now
+also validates — `analyze/form.py` was at its line budget, and its own budget
+note asks for an extraction with the next section added.
+
 The map is in `settings_digest.KEYED_ON`, so re-pairing a plate declines to reuse
 the wells already processed under the old pairing — the reuse decision that would
 otherwise hand back numbers built against a different blank and report success.

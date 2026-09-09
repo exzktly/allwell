@@ -420,6 +420,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
             "(per-well zip, per-well folder, or loose TIFs); enabled only when "
             "flat-field or background is empty_well.")
         rbw.layout().addStretch(1)
+        self._build_background_map_row(sec)
 
         def _sync_bg(_=None) -> None:
             bg_method = self._background_cb.currentText()
@@ -439,6 +440,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
             # Tile-ratio / sigma-clip tuning is robust_mesh-only.
             for w in self._mesh_param_rows:
                 w.setVisible(bg_method == "robust_mesh")
+            self._sync_background_map_enabled()
         self._flatfield_cb.currentIndexChanged.connect(_sync_bg)
         self._background_cb.currentIndexChanged.connect(_sync_bg)
         _sync_bg()
@@ -878,45 +880,6 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
                     f"after the run — confirm they exist in:\n{input_dir}")
         return None
 
-    def _background_well_validation_error(self) -> str | None:
-        """When empty_well drives flat-field and/or background, the background
-        well must be specified and must exist in the input. Returns an error
-        message to block the run, or None when the request is valid (or empty_well
-        isn't selected)."""
-        uses = []
-        if self._flatfield_cb.currentText() == "empty_well":
-            uses.append("flat-field correction")
-        if self._background_cb.currentText() == "empty_well":
-            uses.append("background subtraction")
-        if not uses:
-            return None
-        which = " and ".join(uses)
-        # One or several comma-separated wells (e.g. "H12, G12"), pooled.
-        raw = self._background_well_edit.text().strip()
-        seen, wells = set(), []
-        for tok in raw.replace(";", ",").split(","):
-            w = tok.strip()
-            if w and w.lower() not in seen:
-                seen.add(w.lower())
-                wells.append(w)
-        if not wells:
-            return (f"Empty-well {which} requires a Background well.\n\n"
-                    "Enter one empty/background well (e.g. H12) — or several "
-                    "comma-separated (e.g. H12, G12) — so its measured "
-                    "background can be sampled.")
-        input_dir = Path(self._input_edit.text().strip())
-        sep = self._schema_picker.separator()
-        schema = [f.strip().lower() for f in self._build_schema_arg().split(":") if f.strip()]
-        from services.input_resolution_service import well_present_in_input
-        missing = [w for w in wells
-                   if not well_present_in_input(input_dir, w, schema=schema, sep=sep)]
-        if missing:
-            label = ", ".join(f"'{w}'" for w in missing)
-            return (f"Background well {label} was not found in the input folder.\n\n"
-                    f"Empty-well {which} reads its reference images from the named "
-                    f"well(s) — confirm they exist in:\n{input_dir}")
-        return None
-
     def _collect_run_options(self) -> dict:
         """The form's fields as one run-options dict. Every numeric field is
         carried as the **raw text** the user typed: coercing here would put the
@@ -972,6 +935,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
             flatfield=self._flatfield_cb.currentText(),
             background=self._background_cb.currentText(),
             background_well=self._background_well_edit.text().strip(),
+            background_well_map=self._background_map_value(),
             auto_threshold=self._auto_threshold_cb.isChecked(),
             run_check=self._run_check_cb.isChecked(),
             auto_threshold_method=self._auto_threshold_method(),

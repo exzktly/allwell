@@ -39,6 +39,7 @@ from services.pipeline_service import find_pipeline_script
 import theme
 from well_viewer.core.app_shell_view import RAIL_W
 from well_viewer.core.safe import swallowed
+from analyze.bg_map import AnalyzeBackgroundMapMixin
 from analyze.input import AnalyzeInputMixin
 from analyze.preflight import AnalyzePreflightMixin
 from analyze.progress import AnalyzeProgressMixin
@@ -81,7 +82,8 @@ _PREVIEW_TOKENS = {
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
-class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
+class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
+                 AnalyzeLogPaneMixin, AnalyzePreflightMixin,
                  AnalyzeProgressMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
                  AnalyzeTabFormMixin, QWidget):
     """Left: pipeline options form.  Right: live subprocess log."""

@@ -563,20 +563,25 @@ def iter_well_tokens(input_dir: Path) -> list[str]:
     return out
 
 
-def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) -> int:
-    """Best-effort count of distinct wells the run will produce, for the Analyze
-    progress denominator.
+def iter_all_well_tokens(raw: Path, *, filename_schema: str,
+                        filename_sep: str) -> list[str]:
+    """Every distinct well the run will read from *raw*, canonical and sorted.
 
-    Takes the layout from :func:`plan_input_layout`, so the dashboard's
-    "x / N wells" counts the folder the run will actually read. Counts the UNION
-    of already-grouped wells (per-well zips / folders) and distinct well tokens
-    parsed from loose TIFs — so a partially-grouped ``in/`` (some well folders
-    plus leftover loose TIFs) reports the full plate, not just the grouped few.
+    The UNION of already-grouped wells (per-well zips / folders) and the well
+    tokens parsed out of loose TIFs, taking the layout from
+    :func:`plan_input_layout` so it reads the folder the run will actually read.
+    A partially-grouped ``in/`` — some well folders plus leftover loose TIFs —
+    therefore reports the whole plate rather than the grouped few.
 
-    Deliberately best-effort: a layout nothing can be counted in falls back to
-    the loose-TIF count and then to 1, because this is a progress denominator
-    and a zero would leave the dashboard dividing by nothing. When there is
-    genuinely no input, :func:`resolve_input_output` is what says so.
+    :func:`iter_well_tokens` alone is not this: it reads the grouped layouts and
+    nothing else, so a plate that is still all loose TIFs answers empty. That
+    distinction is why this exists as its own function — the Analyze pairing
+    editor offers these wells, and offering none for the commonest
+    not-yet-grouped input would be an empty plate.
+
+    Best-effort by design, like the count built on it: a layout nothing can be
+    read from answers empty rather than raising, and
+    :func:`resolve_input_output` is what says there is no input at all.
     """
     from util.well_token import canonical_well_label
 
@@ -600,9 +605,21 @@ def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) 
         toks |= set(iter_well_tokens(grouped)) | _loose_toks(grouped)
         if grouped != raw:
             toks |= _loose_toks(raw)  # loose TIFs at the selected root
-    if toks:
-        return len(toks)
-    return len(tif_files_in(raw)) or 1
+    return sorted(toks)
+
+
+def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) -> int:
+    """Best-effort count of distinct wells the run will produce, for the Analyze
+    progress denominator.
+
+    The length of :func:`iter_all_well_tokens`, with one fallback of its own: a
+    layout nothing can be counted in falls back to the loose-TIF count and then
+    to 1, because this is a progress denominator and a zero would leave the
+    dashboard dividing by nothing.
+    """
+    toks = iter_all_well_tokens(raw, filename_schema=filename_schema,
+                                filename_sep=filename_sep)
+    return len(toks) or len(tif_files_in(raw)) or 1
 
 
 @dataclass(frozen=True)

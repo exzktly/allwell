@@ -122,7 +122,31 @@ def _load_arrays_from_refs(refs, *, limit: int, tp=None):
     return out
 
 
-def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None) -> np.ndarray | None:
+def _preview_blank_wells(ctx, well: str | None) -> list[str]:
+    """The blank(s) the run would have corrected *well* with.
+
+    One blank when the run paired them, every named blank when it pooled — the
+    same question ``pipeline.empty_well.BlankGroups`` answers for the run
+    itself, asked here through that class so the preview cannot come to
+    disagree with what was actually applied.
+
+    A well the map does not mention answers no blanks at all, and the preview
+    then shows the raw frame. That is the honest reading: such a plate could not
+    have been produced by a run at all, because the run refuses to start.
+    """
+    from pipeline.empty_well import BlankGroups
+
+    mapping = _flatfield_qc(ctx, "background_well_map", "")
+    named = _flatfield_qc(ctx, "background_well", "")
+    groups = BlankGroups(named, mapping, corrections=("empty_well",))
+    if not groups.paired:
+        return _split_background_wells(named)
+    blank = groups.group_of(well) if well else ""
+    return [blank] if blank else []
+
+
+def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None,
+                        well: str | None = None) -> np.ndarray | None:
     """Return the mean-1 flat-field field for the current view, or None (identity).
 
     Recomputes the flat-field METHOD the pipeline used (read from
@@ -137,6 +161,14 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None) -> np.ndarray | N
     *displayed* timepoint (background drifts over time), falling back to the
     all-timepoint pooled estimate when that timepoint is absent. The estimate is
     capped at a few frames and cached so the UI thread isn't blocked on repeats.
+
+    *well* is the well on screen, and it matters when the run paired its blanks
+    (``background_well_map``): the preview must then build the field from that
+    well's **own** blank rather than from all of them pooled, or it shows a
+    correction the run did not apply. The blank is part of the cache key for the
+    same reason — two wells of one plate can now legitimately have different
+    fields, and one entry keyed only by channel would serve the first well's
+    field to the second.
     """
     import pipeline.flatfield as _ffc
 
@@ -150,8 +182,9 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None) -> np.ndarray | N
     chan = str(channel or "").lower()
     from well_viewer.data.image_identity import normalize_tp
     tp_key = normalize_tp(tp) if (mode == "empty_well" and tp is not None) else ""
+    blanks = _preview_blank_wells(ctx, well) if mode == "empty_well" else []
     cache = ctx.state.review_image.flatfield_field_cache
-    key = (chan, mode, tp_key)
+    key = (chan, mode, tp_key, tuple(blanks))
     if key in cache:
         return cache[key]
 
@@ -163,7 +196,7 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None) -> np.ndarray | N
                 ctx.state.preview.fluor, limit=_FLATFIELD_PREVIEW_MAX_SAMPLES)
             field = _ffc.estimate_basic_flatfield(arrs) if arrs else None
         elif mode == "empty_well":
-            wells = _split_background_wells(_flatfield_qc(ctx, "background_well", ""))
+            wells = blanks
             if wells:
                 ctx.notify.set_status("Computing flat-field (empty well) for preview…")
                 refs_by_well = []

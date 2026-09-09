@@ -588,8 +588,17 @@ well on the plate. Nothing about the result looks wrong: the numbers come out
 looking exactly like corrected ones.
 
 When that is your situation, pair each blank with the block it belongs to
-instead. The map is written as one entry per blank, entries separated by `;` or
-a newline:
+instead. **Pair blanks…**, beside the Background well field, opens a plate you
+draw the pairing on: pick a blank in the list, drag across the wells it
+corrects, and each blank's block takes its own colour. A line under the plate
+says how many wells no blank has claimed yet — those are the wells that would
+stop the run, and it says so before you start one. **Split plate…** does the
+common layouts for you (one blank per row, per column, or per quadrant); it
+assigns the blanks you have named in the Background well field and will not turn
+a sample well into a reference, so name your blanks there first.
+
+The map is stored as text, and you can read or write it directly. It is one
+entry per blank, entries separated by `;` or a newline:
 
 ```
 H12=A01:D12; G12=E01:H12

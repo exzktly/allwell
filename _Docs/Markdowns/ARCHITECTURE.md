@@ -11228,6 +11228,15 @@ Without it a fresh remote container has no test stack at all, and every test
 collection dies at `import PySide6` with `libEGL.so.1: cannot open shared object
 file` — Qt needs GL/EGL even under the offscreen QPA platform.
 
+Every workflow that installs those libraries — `ci.yml`, `slow-lane.yml`,
+`coverage.yml`, `coverage-inventory.yml` — lets `apt-get update` report errors
+without failing the step, and gates on the `apt-get install` beneath it instead.
+`update` exits non-zero when *any* configured repository's index fails to fetch,
+including the third-party ones the runner image ships and this project does not
+use, so a stale google-chrome index on `dl.google.com` failed a whole CI run
+before a line of Python was executed. The install is the honest gate: a library
+that genuinely cannot be fetched still fails it, by name.
+
 The hook exits immediately when `CLAUDE_CODE_REMOTE` is not `true`: a developer
 machine has its own environment (`_Docs/requirements.txt`) and the hook must
 never touch it. It also deliberately does **not** install the ML stack —

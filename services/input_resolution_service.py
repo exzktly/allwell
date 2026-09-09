@@ -239,12 +239,15 @@ def has_well_content(folder: Path) -> bool:
     """
     from util.well_token import is_valid_well_name
     try:
-        for p in folder.glob("*.zip"):
-            if _is_well_named(p):
-                return True
-        return any(is_valid_well_name(p.name) for p in subdirs_in(folder))
+        files, subdirs = files_and_subdirs(folder)
     except OSError:
         return False
+    # The archive half is `has_well_zip`'s rule, not a second spelling of it —
+    # the two decide the same thing about the same folder, one branch apart in
+    # `_plan_grouped_root`, and a folder named `A01.zip` must not be an archive
+    # to one and not the other.
+    return _well_zip_among(files) or any(
+        is_valid_well_name(p.name) for p in subdirs)
 
 
 def dir_has_entries(folder: Path) -> bool:
@@ -1370,12 +1373,18 @@ def _grouped_member_index(grouped: Path) -> dict[str, tuple[int, int | None]]:
     index: dict[str, tuple[int, int | None]] = {}
     with swallow(f"listing already-grouped members under {grouped.name}"):
         files, subdirs = files_and_subdirs(grouped)
-        for well_dir in subdirs:
-            for child in files_in(well_dir):
-                if is_group_image(child.name):
-                    with swallow(f"sizing {child.name}"):
-                        index[child.name] = (child.stat().st_size, None)
-        for entry in files:
+        # Folders and archives in one name-sorted sequence, because on the rare
+        # basename that appears in both the *last* writer wins and the order is
+        # therefore part of the answer. Walking all the folders and then all the
+        # archives would quietly hand some of those collisions to the other side.
+        dirs = set(subdirs)
+        for entry in sorted(files + subdirs, key=lambda q: q.name):
+            if entry in dirs:
+                for child in files_in(entry):
+                    if is_group_image(child.name):
+                        with swallow(f"sizing {child.name}"):
+                            index[child.name] = (child.stat().st_size, None)
+                continue
             if entry.suffix.lower() != ".zip":
                 continue
             with swallow(f"reading {entry.name}"), \

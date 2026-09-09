@@ -2042,6 +2042,8 @@ def test_required_files_list_is_what_we_promised():
     "pipeline/cli_args.py",
         "pipeline/cellpose.py",
         "pipeline/completeness.py",
+        # The blank-well sampler + model builders behind empty_well correction.
+        "pipeline/empty_well.py",
         "pipeline/flatfield.py",
         # Per-FOV resume checkpoints, keyed on the output directory and the
         # settings so one plate cannot resume another's intermediates.

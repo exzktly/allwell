@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from util.channel_roles import ChannelTokens, channel_tokens_from_roles, default_channel_roles
+from util.dir_scan import files_in, subdirs_in
 from util.image_exts import is_run_input_member
 from util.fov import parse_fov
 from util.schema import DEFAULT_SEP
@@ -116,8 +117,7 @@ def _spread(names: list[str], take: int) -> list[str]:
 def _tif_stems_in(root: Path, limit: int) -> list[str]:
     if not root.is_dir():
         return []
-    stems = [f.stem for f in sorted(root.iterdir())
-             if f.is_file() and is_run_input_member(f.name)]
+    stems = [f.stem for f in files_in(root) if is_run_input_member(f.name)]
     return _spread(stems, limit)
 
 
@@ -158,18 +158,16 @@ def _well_folder_stems_in(root: Path, limit: int) -> list[str]:
     slot at all.
     """
     try:
-        wells = sorted(
-            p for p in root.iterdir()
-            if p.is_dir() and is_valid_well_name(p.name)
-        ) if root.is_dir() else []
+        wells = [p for p in subdirs_in(root)
+                 if is_valid_well_name(p.name)] if root.is_dir() else []
     except OSError:
         return []
     stems: list[str] = []
     per_well = max(4, (limit // max(1, len(wells))) if wells else limit)
     for well in wells:
         try:
-            names = [f.stem for f in sorted(well.iterdir())
-                     if f.is_file() and is_run_input_member(f.name)]
+            names = [f.stem for f in files_in(well)
+                     if is_run_input_member(f.name)]
         except OSError:
             continue
         stems.extend(_spread(names, min(per_well, limit - len(stems))))

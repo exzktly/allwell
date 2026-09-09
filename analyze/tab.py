@@ -99,6 +99,11 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
     # next job can't race anything after its own emit.
     jobFinished = Signal(bool, str, str)
 
+    #: Set while a caller is about to change the input path *and* the schema
+    #: that reads it, so the readout is computed once, from both. See
+    #: :meth:`_browse_input` — every recomputation walks the selected folder.
+    _suspend_output_refresh = False
+
     def __init__(
         self,
         parent: QWidget | None = None,
@@ -507,10 +512,31 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
             "",
             QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks,
         )
-        if d:
+        if not d:
+            return
+        # Two things about to change, and the readout depends on both: the path
+        # (which `textChanged` reports) and the filename schema the folder scan
+        # infers from it. Left alone, `textChanged` computes the readout from
+        # the new path and the *previous* folder's schema, then
+        # `_autofill_from_input_scan` applies the inferred schema and computes
+        # it again — two walks of the selected folder for one click, the first
+        # of them against a schema that no longer applies. On a plate of a few
+        # thousand loose images on a network volume that is half the cost of
+        # picking a folder.
+        #
+        # So the intermediate readout is held and one is computed at the end,
+        # from the path and the schema together. The `finally` is load-bearing:
+        # a folder whose names do not parse leaves `_autofill_from_input_scan`
+        # early, and the readout still has to be recomputed or the field would
+        # go on describing the folder before it.
+        self._suspend_output_refresh = True
+        try:
             self._input_edit.setText(d)
             self._input_edit.setEnabled(True)
             self._autofill_from_input_scan(d)
+        finally:
+            self._suspend_output_refresh = False
+        self._refresh_output()
 
     def _refresh_output(self, *, immediate: bool = False) -> None:
         """Show where the run will read from and write to, and what it will do.
@@ -521,6 +547,8 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         well content, so a folder holding ``in/Plate1_A1.zip`` displayed
         "using as input" and then failed the run outright.
         """
+        if self._suspend_output_refresh:
+            return
         raw_str = self._input_edit.text().strip()
         if not raw_str:
             self._output_lbl.setText("—"); self._layout_lbl.setText("")

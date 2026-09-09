@@ -188,6 +188,10 @@ allwell/
 │   └── io.py                   ← atomic output writers (images / CSVs / overlay)
 │                                 + the scratch base & staging-dir lifecycle (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
+│   ├── dir_scan.py             ← "what is directly inside this directory?", answered out
+│   │                              of one os.scandir rather than a stat per entry — the
+│   │                              difference between instant and twenty minutes when the
+│   │                              folder is on a Windows network or cloud-synced volume
 │   ├── well_token.py           ← canonical 96-well token parser (single source of truth:
 │   │                              process_microscopy, WellPlateZipper, analyze.tab and
 │   │                              input_resolution_service all parse well names through it)
@@ -5125,6 +5129,65 @@ copied to a non-HFS volume reports "No TIF files or in/ folder found" where it
 previously ran; a folder of PNGs used to count zero and now counts them all, so
 a plate that could not be grouped at all now can. The `> 3` cliff itself
 predates both.
+
+**The decision costs one directory listing, not one metadata call per file.**
+Picking a folder answers three questions of it — is this a packed OME-TIFF,
+what layout is it, and what filename schema do its names follow — and the
+obvious spelling of each, a listing plus `Path.is_file()` per entry, is also one
+`os.stat` per file. On macOS and Linux that is a single cheap syscall answered
+from the kernel's name cache and is invisible. On Windows it is not: CPython
+implements `os.stat` there by opening a handle to the file
+(`CreateFileW` → `GetFileInformationByHandle` → `CloseHandle`), because
+`GetFileAttributesW` does not traverse symlinks the way POSIX `stat` does. On a
+mapped network share, a VPN-ed mount or a cloud-sync root every one of those is
+a round trip on the wire, and a filter driver may inspect it on the way past. A
+plate of 5,800 loose images cost about 17,000 of them, and picking the folder
+sat for twenty minutes at under one percent CPU and a trickle of network
+traffic — the shape of a freeze in which nothing is computing anything.
+
+`util/dir_scan.py` is the answer, and on every platform it is a strict
+improvement rather than a trade: `os.scandir` carries the entry type with the
+listing, so `DirEntry.is_file()` answers from data the enumeration already paid
+for. Everything that classifies the entries of an input folder goes through it —
+`tif_files_in`, `has_well_zip`, `has_well_content`, `iter_well_tokens`, the
+zipper's consolidation passes, and `util.schema_infer`'s sampling of the three
+grouped layouts. The symlink semantics are `pathlib`'s, deliberately: a link to
+a file is a file, and a dangling link is neither, which is the rule `tif_files_in`
+depends on. What it gives up is that the answer describes the directory as it
+was listed rather than as it is now, so a file deleted in between is still
+reported; closing that window means spending the stat the module exists to
+avoid, and every call site already copes with a path that has gone by the time
+it is opened.
+
+Reducing the per-file cost to nothing leaves the number of *listings* as the
+thing worth counting, and there was one per question. `_plan_grouped_root` now
+reads the folder once and answers all three from that listing: the loose-image
+count (`input_images_among`), whether any well archives are present
+(`_well_zip_among`), and the fold plan, which takes the listing as
+`plan_loose_append`'s optional `loose_files`. Stating each rule once is what
+makes that safe — two listings of one directory can disagree about a file
+written between them, and two spellings of one predicate always eventually do.
+`has_well_zip` asks for a well-named *file* as part of the same change: a
+directory called `A01.zip`, which is what an expander names an archive it has
+unpacked in place, used to send the whole folder down the fold-loose path, where
+opening it as an archive fails, the failure reads as "the archive holds
+nothing", and every loose image beside it is reported as new.
+
+The Analyze pane spends that listing once per pick rather than twice.
+`AnalyzeTab._browse_input` changes two things the readout depends on — the path,
+which `textChanged` reports, and the filename schema
+`_autofill_from_input_scan` infers from the folder — so the readout was computed
+first against the new path and the *previous* folder's schema, and then again
+once the inferred schema was applied. `_suspend_output_refresh` holds the
+intermediate one and a single recomputation runs at the end, from the path and
+the schema together. Releasing it in a `finally` is load-bearing: a folder whose
+names do not parse leaves `_autofill_from_input_scan` early, and without the
+release the readout would go on describing the folder picked before it.
+`tests/test_input_scan_costs_no_stat_per_file.py` pins all of this by counting —
+the same folder holding four times as many images must cost the same number of
+metadata calls, and the layout plan must be computed exactly once, with the
+schema the scan inferred. It proves its own counter live first, since a test
+that patched the wrong function would report zero against zero and pass.
 
 The actions are the layouts. A folder **named** `in` is the input directly
 (output `../out`); a folder that **contains** `in/` feeds the pipeline from that

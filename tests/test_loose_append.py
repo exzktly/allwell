@@ -232,3 +232,111 @@ def test_result_zip_is_valid_and_short_well_token_canonicalised(tmp_path):
     assert wells == {"A01"}
     assert zipfile.is_zipfile(tmp_path / "A01.zip")
     assert "exp_w1_a1_2_T01.tif" in zipfile.ZipFile(tmp_path / "A01.zip").namelist()
+
+
+def test_a_supplied_listing_plans_exactly_what_reading_the_folder_would(tmp_path):
+    """``loose_files`` is an optimisation, never a second definition of the rule.
+
+    ``_plan_grouped_root`` counts the loose images to decide whether there is
+    anything to fold, and then hands that same list here rather than making the
+    function list the directory again — one enumeration per readout instead of
+    two, on a volume where an enumeration is a round trip. The parameter is
+    therefore only safe while the two answers are identical, and this is what
+    says they are: a plan built from the caller's listing and a plan built by
+    reading the folder must agree on every well and every file, including the
+    duplicate that neither counts and the unparseable name both skip.
+    """
+    from services.input_resolution_service import plan_loose_append, tif_files_in
+
+    _make_zip(tmp_path / "A01.zip", {"exp_w1_A01_1_T01.tif": b"old"})
+    (tmp_path / "exp_w1_A01_1_T01.tif").write_bytes(b"dupe")   # already a member
+    (tmp_path / "exp_w1_A01_2_T01.tif").write_bytes(b"newfov")
+    (tmp_path / "exp_w1_B02_1_T01.tif").write_bytes(b"newwell")
+    (tmp_path / "notes.txt").write_bytes(b"not an image")
+    (tmp_path / "unparseable.tif").write_bytes(b"no well token")
+
+    read_it = plan_loose_append(
+        tmp_path, filename_schema=SCHEMA, filename_sep=SEP)
+    supplied = plan_loose_append(
+        tmp_path, filename_schema=SCHEMA, filename_sep=SEP,
+        loose_files=tif_files_in(tmp_path))
+
+    assert supplied.by_well == read_it.by_well
+    assert supplied.nonempty == read_it.nonempty
+    # …and the plan is the one the folder actually calls for, so an agreement
+    # between two empty plans cannot pass this.
+    assert {w: [p.name for p in files] for w, files in supplied.by_well.items()} == {
+        "A01": ["exp_w1_A01_2_T01.tif"],
+        "B02": ["exp_w1_B02_1_T01.tif"],
+    }
+    assert supplied.nonempty == frozenset({"A01"})
+
+
+def test_planning_the_fold_reads_the_directory_once_per_readout(tmp_path):
+    """The layout readout enumerates the input folder once, not twice.
+
+    ``plan_input_layout`` asks two questions of the same directory — how many
+    loose images are in it, and which of them would be folded — and used to read
+    it once for each. Counted rather than eyeballed because the duplicate
+    listing is invisible in the answer: both versions produce the identical
+    readout, and only the number of round trips differs.
+    """
+    import os
+
+    from services.input_resolution_service import plan_input_layout
+
+    grouped = tmp_path / "in"
+    grouped.mkdir()
+    _make_zip(grouped / "A01.zip", {"exp_w1_A01_1_T01.tif": b"old"})
+    (grouped / "exp_w1_A01_2_T01.tif").write_bytes(b"newfov")
+
+    real = os.scandir
+    listings: list[str] = []
+
+    def counting(path, *args, **kwargs):
+        listings.append(str(path))
+        return real(path, *args, **kwargs)
+
+    os.scandir = counting
+    try:
+        plan = plan_input_layout(
+            tmp_path, filename_schema=SCHEMA, filename_sep=SEP)
+    finally:
+        os.scandir = real
+
+    assert plan.action == "fold_loose" and plan.loose_count == 1
+    assert listings.count(str(grouped)) == 1, (
+        f"the grouped folder was listed {listings.count(str(grouped))} times "
+        f"for one readout: {listings}")
+
+
+def test_a_directory_named_like_a_well_archive_is_not_one(tmp_path):
+    """``has_well_zip`` asks for a well-named *file*, not a well-named entry.
+
+    A folder called ``A01.zip`` — an archive somebody expanded in place, and
+    the name the expander gives it — used to answer this question True, because
+    the check was a name glob with no file test behind it. Everything
+    downstream then treats the plate as zip-grouped: the readout offers to fold
+    the loose images beside it, and the fold opens ``A01.zip`` as an archive,
+    fails, reads the failure as "the archive holds nothing", and reports every
+    loose image as new. The wrong branch for the whole folder, from one entry.
+    """
+    from services.input_resolution_service import has_well_zip, plan_input_layout
+
+    (tmp_path / "A01.zip").mkdir()
+    (tmp_path / "exp_w1_A01_1_T01.tif").write_bytes(b"loose")
+
+    assert has_well_zip(tmp_path) is False
+
+    # …and the readout says the plate needs grouping, not folding.
+    plan = plan_input_layout(tmp_path, filename_schema=SCHEMA, filename_sep=SEP)
+    assert plan.action != "fold_loose"
+
+
+def test_a_real_well_archive_still_answers_yes(tmp_path):
+    """The companion to the test above: the exclusion is of folders only."""
+    from services.input_resolution_service import has_well_zip
+
+    _make_zip(tmp_path / "A01.zip", {"exp_w1_A01_1_T01.tif": b"old"})
+    assert has_well_zip(tmp_path) is True
+    assert has_well_zip(tmp_path / "nope") is False

@@ -1100,6 +1100,17 @@ to upload it and writes every finished well back to the output folder. The
 reliable setup on a flaky share is to keep both folders on a local disk for the
 run and copy the results across afterwards.
 
+Selecting a folder on such a share is quick whatever its size. Windows answers
+"is this entry a file?" by opening the file, which over a network mount or a
+cloud-synced folder (OneDrive, Dropbox) is a round trip for every image in the
+plate, so a folder of several thousand loose TIFs used to leave the Analyze pane
+unresponsive for many minutes with no CPU load and no message — the classic
+symptom being a window that stops repainting the moment you press *Browse…*.
+All-Well now reads each folder once and takes the answers from that listing, so
+the cost of picking a folder no longer grows with the number of images in it. If
+you do still see a long pause, it is the folder's own listing that is slow, and
+the fix is the same as above: work from a local copy.
+
 ---
 
 ## Review mode — exploring results

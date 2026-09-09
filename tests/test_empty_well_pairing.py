@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import zipfile
 from io import BytesIO
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -220,3 +221,160 @@ def test_re_pairing_a_plate_declines_to_reuse_its_previous_output(tmp_path):
     # option existed, so no plate already on disk is invalidated by adding it.
     assert settings_digest(base) == settings_digest(
         {**base, "background_well_map": None})
+
+
+def test_a_blank_is_corrected_by_its_own_model_not_left_raw(plate):
+    """The blank is a well the run segments and writes a CSV for, like any other.
+
+    Pooling corrected each blank by a reference that contained its own frames,
+    so a paired run leaving the blanks with no model at all is not a smaller
+    correction, it is none: the blank's own background stays in its numbers
+    while its CSV looks exactly like every corrected well's. The plate-wide
+    threshold estimator then reads that well's ``_out.zip`` alongside the
+    corrected ones.
+
+    Asserted on the field's own value, because "the blank has some model" is
+    also true of a blank handed the *other* block's field.
+    """
+    groups = BlankGroups("", "H12=A01; G12=E01", corrections=("empty_well",))
+    grouped = build_grouped_models(
+        plate, groups=groups, builder=build_background_models,
+        tokens=["gfp"], schema=SCHEMA, sep=SEP)
+    for blank, level in (("H12", BRIGHT), ("G12", DIM)):
+        models = models_for_well(grouped, groups, blank)
+        assert models, f"{blank} was handed no model at all"
+        assert float(np.median(models["gfp"]["1"])) == pytest.approx(
+            level, abs=1.0), f"{blank} was corrected by the wrong blank's field"
+
+
+def test_a_correction_that_reads_no_blank_is_built_once_and_installed_flat(plate):
+    """``--flatfield basic`` alongside a map must still correct the whole plate.
+
+    A basic flat-field is estimated from the plate's own images and takes no
+    blank, so pairing has nothing to say about it. Installing it in the grouped
+    shape left every well the map does not name with no flat-field at all — and
+    silently, because the coverage refusal is not in force when neither
+    correction is ``empty_well``. The fixture names one well of four so a
+    grouped install cannot be mistaken for a working one.
+    """
+    calls = []
+
+    def spy(input_dir, *, background_wells, **kwargs):
+        calls.append(list(background_wells))
+        return {"gfp": {"1": np.ones((8, 8), np.float32)}}
+
+    groups = BlankGroups("", "H12=A01", corrections=("basic", "none"))
+    shared: dict = {}
+    prepare_models(shared, what="Flat-field", mode="basic", input_dir=plate,
+                   groups=groups, builder=spy, source=plate,
+                   flat_key="flatfield_models",
+                   grouped_key="_grouped_flatfield_models",
+                   tokens=["gfp"], schema=SCHEMA, sep=SEP)
+    assert len(calls) == 1, (
+        f"the plate-wide model was built once per blank: {calls}")
+    for well in ("A01", "E01", "G12", "H12"):
+        models = shared_kwargs_for_well(shared, well)["flatfield_models"]
+        assert models, f"{well} was left with no flat-field"
+
+
+def test_a_blank_the_map_does_not_use_refuses_rather_than_disagreeing():
+    """``--background_well`` and the map must not answer "is this a blank?" apart.
+
+    ``blank_wells_for_run`` takes the union — remote staging holds such a well
+    out of the batches and uploads it as a reference — while the pairing plan
+    would take only the map's keys and call the same well a sample that some
+    blank must claim. One well, moved as a blank and corrected as a sample.
+    """
+    from util.well_token import blank_wells_for_run
+
+    with pytest.raises(ValueError) as excinfo:
+        BlankGroups("H12, G12", "H12=A01:D12", corrections=("empty_well",))
+    assert "G12" in str(excinfo.value)
+
+    # Named in both, it is a blank to each of them and nothing is refused.
+    groups = BlankGroups("H12, G12", "H12=A01; G12=E01",
+                         corrections=("empty_well",))
+    assert sorted(groups.by_group) == ["G12", "H12"]
+    assert sorted(blank_wells_for_run("H12, G12", "H12=A01; G12=E01")) == [
+        "G12", "H12"]
+
+
+def test_the_pipeline_itself_refuses_an_uncovered_well(plate, monkeypatch):
+    """The refusal is wired into ``main()``, not merely available to it.
+
+    Deleting the call from ``process_microscopy.main`` left every other test in
+    this file green: they all call ``refuse_uncovered_wells`` directly, which is
+    one step past the seam that has to work. This drives the real entry point.
+    """
+    import process_microscopy as pm
+
+    argv = ["process_microscopy.py",
+            "--input_dir", str(plate), "--output_dir", str(plate.parent / "out"),
+            "--background", "empty_well", "--background_well", "H12",
+            "--background_well_map", "H12=A01",
+            "--filename_schema", ":".join(SCHEMA), "--filename_sep", SEP]
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(SystemExit) as excinfo:
+        pm.main()
+    message = str(excinfo.value)
+    assert "E01" in message and "G12" in message, message
+    assert "background_well_map" in message
+
+
+def test_the_map_reaches_the_pipeline_from_the_form():
+    """The flag is emitted into argv, not merely accepted by the parser.
+
+    Dropping ``--background_well_map`` from ``_emit_correction_flags`` left 75
+    tests green: the parser, the digest and the plan are all tested from the
+    value, never from the form that has to hand it over.
+    """
+    from services.pipeline_service import build_pipeline_args
+
+    opts = dict(
+        nuclear_token="NIR", fluor_tokens=["GFP"], csv_prefix="m",
+        filename_schema=":".join(SCHEMA), filename_sep=SEP,
+        segmentation_method="stardist_nuclei", min_nucleus_area_px=50,
+        smfish_tokens=[], shape_features=[], tf_threads="0", workers="0",
+        qc_remove_debris=False, qc_min_area=0.0, qc_max_area=0.0,
+        qc_min_solidity=0.0,
+        flatfield="empty_well", background="empty_well",
+        background_well="H12", background_well_map="H12=A01:H12")
+    pipe, in_dir, out_dir = Path("/pipe.py"), Path("/in"), Path("/out")
+    argv = build_pipeline_args(pipe, in_dir, out_dir, opts)
+    assert "--background_well_map" in argv
+    assert argv[argv.index("--background_well_map") + 1] == "H12=A01:H12"
+
+    # And is absent when no map is set, so the settings digest of every plate
+    # already on disk is unchanged.
+    plain = build_pipeline_args(pipe, in_dir, out_dir,
+                                {**opts, "background_well_map": ""})
+    assert "--background_well_map" not in plain
+
+
+def test_the_refusal_names_a_flag_that_exists(plate):
+    """``what`` is a log label and a flag name, and the two are not the same word.
+
+    ``prepare_models`` passes the Title-Case label it prints, so the guard's
+    message told the user to check ``--Flatfield empty_well`` — a flag argparse
+    has never accepted. The existing test of this guard calls it directly with
+    the old lowercase argument, so it supplies the value the real caller no
+    longer does and cannot see the difference.
+    """
+    from pipeline.cli_args import build_parser
+
+    flags = set()
+    for what, mode, key in (("Flat-field", "empty_well", "flatfield_models"),
+                            ("Background", "empty_well", "background_models")):
+        groups = BlankGroups("H12", "", corrections=("empty_well",))
+        with pytest.raises(SystemExit) as excinfo:
+            prepare_models({}, what=what, mode=mode, input_dir=plate,
+                           groups=groups, builder=lambda *a, **k: {},
+                           source=plate, flat_key=key,
+                           grouped_key=f"_grouped_{key}", tokens=["gfp"],
+                           schema=SCHEMA, sep=SEP)
+        message = str(excinfo.value)
+        flags.add(message.split()[0])
+    assert flags == {"--flatfield", "--background"}, flags
+
+    known = {a for action in build_parser()._actions for a in action.option_strings}
+    assert flags <= known, f"{flags - known} are not flags this pipeline accepts"

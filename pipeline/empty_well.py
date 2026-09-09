@@ -324,7 +324,7 @@ def _require_empty_well_models(what: str, mode: str, models, wells, source) -> N
     if mode != "empty_well" or not wells or models:
         return
     raise SystemExit(
-        f"--{what.replace('-', '')} empty_well was requested with background "
+        f"--{what.lower().replace('-', '')} empty_well was requested with background "
         f"well(s) {', '.join(wells)}, but no usable frames for them were found "
         f"in {source}. Nothing would be corrected, and the output would be "
         f"indistinguishable from a corrected run — so this run stops instead. "
@@ -479,6 +479,36 @@ GROUPED_BACKGROUND_KEY = "_grouped_background_models"
 WELL_GROUP_KEY = "_blank_group_of_well"
 
 
+def _refuse_blanks_the_map_does_not_use(background_well, mapping) -> None:
+    """Stop a run whose ``--background_well`` names a blank the map never uses.
+
+    The two flags would otherwise be two disagreeing answers to "which wells are
+    blanks". :func:`util.well_token.blank_wells_for_run` — the remote staging
+    planner, the batched hold-out and both incremental-scope readers — takes the
+    union, so such a well is held out of the batches and uploaded as a
+    reference; this class would take only the map's keys, so the same well is a
+    sample that some blank must claim. One well, treated as a blank by the
+    machinery that moves it and as a sample by the machinery that corrects it.
+
+    Refused rather than resolved, in the voice the map's own parser uses: every
+    rule that could absorb it — ignore the field, adopt the well as a blank
+    correcting nothing — ends with the run doing something the user did not ask
+    for and cannot see in the output.
+    """
+    stray = [w for w in _split_background_wells(background_well)
+             if (canonical_well_label(w) or str(w).strip()) not in mapping]
+    if not stray:
+        return
+    raise ValueError(
+        f"--background_well names {', '.join(stray)}, which "
+        f"--background_well_map does not use as a blank. A pairing map decides "
+        f"which blank corrects which well on its own, so a blank named only "
+        f"beside it would be staged as a reference and then corrected as a "
+        f"sample. Give it an entry in the map, or drop it from "
+        f"--background_well."
+    )
+
+
 class BlankGroups:
     """Which blank corrects which well, for one run.
 
@@ -502,15 +532,28 @@ class BlankGroups:
         #: every site that acts on the plan.
         self.in_force = "empty_well" in tuple(corrections)
         if self.paired:
+            _refuse_blanks_the_map_does_not_use(background_well, mapping)
             self.by_group: dict[str, list[str]] = {b: [b] for b in mapping}
-            self.well_group: dict[str, str] = {
-                well: blank for blank, wells in mapping.items() for well in wells}
+            #: A blank is corrected by the model built from itself, which is what
+            #: pooling did to it: the pooled reference contained every blank, so
+            #: every blank was corrected by a field that included its own frames.
+            #: Seeding the blanks first and the wells they correct second is safe
+            #: in either order — ``parse_background_well_map`` refuses a well that
+            #: is both — and this order says which of the two is the definition.
+            self.well_group: dict[str, str] = {b: b for b in mapping}
+            self.well_group.update({
+                well: blank for blank, wells in mapping.items() for well in wells})
         else:
             self.by_group = {_POOLED_GROUP: _split_background_wells(background_well)}
             self.well_group = {}
 
     def group_of(self, well_label) -> str:
         """The group key whose model corrects *well_label*.
+
+        Every well a paired run processes has an answer here, blanks included:
+        a blank is a well the pipeline segments and quantifies like any other,
+        so a blank with no group would be written to its own CSV carrying the
+        raw background while looking exactly like a corrected well.
 
         An unmapped well answers :data:`_POOLED_GROUP`, which on a paired run is
         a group that does not exist and therefore an empty model — but no run
@@ -526,19 +569,38 @@ class BlankGroups:
     def uncovered(self, well_labels) -> list[str]:
         """The wells of *well_labels* that no blank claims, canonical and sorted.
 
-        Blanks themselves are not samples and are not expected to be covered.
-        Empty on an unpaired run: pooling covers the plate by construction.
+        A blank is covered by itself, so it never appears here. Empty on an
+        unpaired run: pooling covers the plate by construction.
         """
         if not self.paired:
             return []
-        blanks = {b for b in self.by_group}
         out = set()
         for label in well_labels:
             canon = canonical_well_label(label) or str(label).strip()
-            if canon in blanks or canon in self.well_group:
+            if canon in self.well_group:
                 continue
             out.add(canon)
         return sorted(out)
+
+    def for_mode(self, mode: str) -> "BlankGroups":
+        """This plan as one correction sees it.
+
+        Pairing says which blank a well is corrected *by*, so it shapes a
+        correction only when that correction reads a blank at all. A ``basic``
+        flat-field is estimated from the plate's own images and takes no blank,
+        so on a paired run it is still one field for the whole plate.
+
+        Asking this per correction rather than once per run is not a nicety.
+        ``--flatfield basic`` alongside a map used to build the identical
+        plate-wide field once per blank and then install it in the grouped
+        shape, which left every well the map does not name with no flat-field at
+        all — and the coverage refusal does not fire, because a map alongside
+        ``basic`` is not in force. Two silent no-ops from one question asked in
+        the wrong place.
+        """
+        if mode == "empty_well" or not self.paired:
+            return self
+        return BlankGroups(", ".join(self.blanks()), "", corrections=(mode,))
 
     def blanks(self) -> list[str]:
         """Every well this run treats as a blank, in the order they were named."""
@@ -696,7 +758,12 @@ def prepare_models(shared_kwargs: dict, *, what: str, mode: str,
 
     The log line names the group on a paired run and omits it on a pooled one,
     so an unpaired run's log reads exactly as it did before pairing existed.
+
+    The plan is narrowed to *mode* first, so a correction that does not read a
+    blank is built and installed pooled however the run is paired — see
+    :meth:`BlankGroups.for_mode`.
     """
+    groups = groups.for_mode(mode)
     grouped = build_grouped_models(
         input_dir, groups=groups, builder=builder,
         background_dir=source, **kwargs)

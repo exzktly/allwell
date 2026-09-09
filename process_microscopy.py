@@ -3847,12 +3847,23 @@ def main() -> None:
     if input_dir.name.lower() == "in":
         organize_loose_tifs_into_well_folders(input_dir, schema=schema, sep=sep)
 
-    # Precompute per-channel flat-field models once (basic / empty_well). The
-    # gaussian mode needs no precompute (estimated per image in the worker), and
-    # 'none' is a no-op. Done after the loose-TIF organize so the files are on
-    # disk under input_dir.
+    # Which blank corrects which well. Read after the loose-TIF organize so the
+    # files the models are built from are on disk under input_dir.
     blank_groups, bg_src = plan_blank_groups(args, input_dir)
 
+    # ── Decide mode: zip, folder, or flat ───────────────────────────────────
+    # Ahead of the model precompute below, because both refusals here are
+    # decided from the plate's own well list alone. A run that cannot say what
+    # corrects one of its wells should not first spend a model build per blank.
+    well_zips    = find_well_zips(input_dir)
+    well_folders = find_well_folders(input_dir) if not well_zips else []
+    if well_zips:
+        refuse_images_only_in_ignored_folders(input_dir, well_zips)
+    refuse_uncovered_wells(blank_groups, well_zips, well_folders)
+
+    # Precompute per-channel flat-field models once (basic / empty_well). The
+    # gaussian mode needs no precompute (estimated per image in the worker), and
+    # 'none' is a no-op.
     if args.flatfield in ("basic", "empty_well"):
         prepare_models(
             shared_kwargs, what="Flat-field", mode=args.flatfield,
@@ -3872,13 +3883,6 @@ def main() -> None:
             flat_key="background_models", grouped_key=GROUPED_BACKGROUND_KEY,
             tokens=[args.nuclear_token] + list(fluor_tokens_for_quant),
             schema=schema, sep=sep)
-
-    # ── Decide mode: zip, folder, or flat ───────────────────────────────────
-    well_zips    = find_well_zips(input_dir)
-    well_folders = find_well_folders(input_dir) if not well_zips else []
-    if well_zips:
-        refuse_images_only_in_ignored_folders(input_dir, well_zips)
-    refuse_uncovered_wells(blank_groups, well_zips, well_folders)
 
     # ── Scratch preflight ───────────────────────────────────────────────────
     # Checked here, once both the well list and the channel count are known and

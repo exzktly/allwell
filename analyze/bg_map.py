@@ -57,6 +57,14 @@ from widgets.well_plate_selector import WellPlateSelector
 #: own refusal is what holds the map against the plate that turns up.
 _ALL_WELLS = [f"{row}{col:02d}" for row in "ABCDEFGH" for col in range(1, 13)]
 
+#: The colour swatch that ties a row in the list to its block on the plate.
+#: Sized here rather than at the call site, and small on purpose: it is a key to
+#: the plate above it, not a control, so it should not read as something to
+#: click. Its own constant rather than a `theme.Metrics` token because no other
+#: pane has one — the precedent is `analyze.form_chrome._ROW_LABEL_W`.
+_SWATCH_PX = 12
+_SWATCH_RADIUS_PX = 3
+
 
 class AnalyzeBackgroundMapMixin:
     """The Background-well pairing control, its editor, and their validation."""
@@ -504,9 +512,9 @@ class AnalyzeBackgroundMapMixin:
         line.setContentsMargins(2, 1, 2, 1)
 
         swatch = QLabel(row)
-        swatch.setFixedSize(12, 12)
-        swatch.setStyleSheet(
-            f"background:{self._bg_map_color(index)};border-radius:3px;")
+        swatch.setFixedSize(_SWATCH_PX, _SWATCH_PX)
+        swatch.setStyleSheet(f"background:{self._bg_map_color(index)};"
+                             f"border-radius:{_SWATCH_RADIUS_PX}px;")
         line.addWidget(swatch)
 
         pick = QToolButton(row)

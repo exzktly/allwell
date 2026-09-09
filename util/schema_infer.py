@@ -126,7 +126,13 @@ def _zip_stems_in(root: Path, limit: int) -> list[str]:
     sample spans multiple wells (each per-well zip holds one well) as well as
     every channel within a well."""
     stems: list[str] = []
-    zips = sorted(root.glob("*.zip")) if root.is_dir() else []
+    # A well archive is a file, the same rule `_well_zip_among` applies on the
+    # planner side. Consistency rather than a fix: a *directory* named
+    # `A01.zip` was handed to `zipfile.ZipFile`, raised, and was skipped by the
+    # handler below, so nothing downstream ever saw it. Asked the same way in
+    # both modules, it is simply never a candidate.
+    zips = [p for p in files_in(root)
+            if p.match("*.zip")] if root.is_dir() else []
     per_zip = max(4, (limit // max(1, len(zips))) if zips else limit)
     for z in zips:
         try:

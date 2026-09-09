@@ -25,7 +25,10 @@ def _tree(root: Path) -> None:
     (root / "c_folder").mkdir()
 
 
-def test_files_and_folders_are_split_and_each_is_sorted_by_name(tmp_path):
+def test_files_and_folders_are_split_and_each_is_in_path_order(tmp_path):
+    """Sorted as paths, which is what the replaced ``sorted(folder.glob("*"))``
+    did — ``PurePath`` comparison casefolds on Windows and does not on POSIX, so
+    sorting the bare names would reorder a mixed-case plate on Windows only."""
     _tree(tmp_path)
     files, subdirs = files_and_subdirs(tmp_path)
 
@@ -67,27 +70,61 @@ def test_the_classification_is_the_one_pathlib_gives(tmp_path):
         assert (entry in subdirs) == entry.is_dir()
 
 
-def test_one_enumeration_answers_both_lists(tmp_path):
-    """The point of returning both: two questions, one round trip.
+def test_one_enumeration_and_no_stat_at_all(tmp_path):
+    """The whole reason the module exists, and it needs both halves counted.
 
-    Counted rather than trusted — a helper that called ``os.scandir`` twice
-    would return exactly the same lists, and the cost is the only difference.
+    One ``os.scandir`` is the cheap half to assert and the easy one to satisfy
+    while missing the point: a helper that enumerated once and then called
+    ``Path.is_file()`` on each entry would pass a scandir count, return
+    byte-identical lists, and reintroduce exactly the per-file round trip this
+    replaces. So the stat count is the assertion that matters, and it is zero.
+
+    Both kinds of entry are in the fixture, because the classification is two
+    questions and only the file half is covered end to end by
+    ``test_input_scan_costs_no_stat_per_file``. A regression that stat-ed every
+    entry to answer ``is_dir`` — the well-folder layout — would otherwise be
+    invisible to the whole suite.
+
+    The zero is exact rather than a budget, and it assumes the filesystem under
+    ``tmp_path`` reports an entry type with the listing: ``d_type`` on POSIX,
+    the ``WIN32_FIND_DATA`` attributes on Windows. One that reports neither
+    makes ``DirEntry.is_file`` fall back to a stat and would fail this
+    honestly — the saving really is unavailable there, and that is worth being
+    told rather than absorbed into a tolerance.
     """
     _tree(tmp_path)
-    real = os.scandir
-    calls: list[str] = []
+    for i in range(6):
+        (tmp_path / f"extra{i}.tif").write_bytes(b"II*\0")
+        (tmp_path / f"well{i}").mkdir()
 
-    def counting(path, *args, **kwargs):
-        calls.append(str(path))
-        return real(path, *args, **kwargs)
+    real_scandir, real_stat = os.scandir, os.stat
+    listings: list[str] = []
+    stats: list[str] = []
 
-    os.scandir = counting
+    def counting_scandir(path, *args, **kwargs):
+        listings.append(str(path))
+        return real_scandir(path, *args, **kwargs)
+
+    def counting_stat(path, *args, **kwargs):
+        stats.append(str(path))
+        return real_stat(path, *args, **kwargs)
+
+    os.scandir, os.stat = counting_scandir, counting_stat
     try:
-        files_and_subdirs(tmp_path)
+        files, subdirs = files_and_subdirs(tmp_path)
     finally:
-        os.scandir = real
+        os.scandir, os.stat = real_scandir, real_stat
 
-    assert calls == [str(tmp_path)]
+    assert listings == [str(tmp_path)]
+    assert stats == [], f"{len(stats)} stat call(s) for {len(files) + len(subdirs)} entries"
+    # The counter is live: the same question asked the old way does register.
+    os.stat = counting_stat
+    try:
+        for path in files + subdirs:
+            path.is_file()
+    finally:
+        os.stat = real_stat
+    assert len(stats) >= len(files) + len(subdirs)
 
 
 def test_a_directory_that_cannot_be_listed_raises(tmp_path):

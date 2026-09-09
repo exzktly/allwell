@@ -63,8 +63,12 @@ __all__ = ["files_and_subdirs", "files_in", "subdirs_in"]
 def files_and_subdirs(folder: Path | str) -> tuple[list[Path], list[Path]]:
     """The regular files and the sub-directories directly in *folder*.
 
-    Both lists are sorted by name and hold real :class:`~pathlib.Path` objects
-    built from *folder*, so callers keep the paths they had. One directory
+    Both lists hold real :class:`~pathlib.Path` objects built from *folder*, so
+    callers keep the paths they had, and both are sorted **as paths** rather
+    than by name: ``PurePath`` comparison casefolds on Windows and does not on
+    POSIX, so sorting the names instead would silently reorder a mixed-case
+    plate on Windows only — and the schema scan strides its sample, so a
+    different order there is a different sample. One directory
     enumeration answers both, which is the point wherever a caller wants the
     files *and* the folders — asking twice is two enumerations of a directory
     that has not changed in between.
@@ -74,7 +78,7 @@ def files_and_subdirs(folder: Path | str) -> tuple[list[Path], list[Path]]:
     """
     base = Path(folder)
     with os.scandir(base) as scan:
-        entries = sorted(scan, key=lambda e: e.name)
+        entries = list(scan)
     files: list[Path] = []
     dirs: list[Path] = []
     for entry in entries:
@@ -88,14 +92,16 @@ def files_and_subdirs(folder: Path | str) -> tuple[list[Path], list[Path]]:
             # False here rather than raising, and every call site was written
             # against that; the entry is simply not one of the files.
             continue
+    files.sort()
+    dirs.sort()
     return files, dirs
 
 
 def files_in(folder: Path | str) -> list[Path]:
-    """The regular files directly in *folder*, sorted by name."""
+    """The regular files directly in *folder*, in path order."""
     return files_and_subdirs(folder)[0]
 
 
 def subdirs_in(folder: Path | str) -> list[Path]:
-    """The sub-directories directly in *folder*, sorted by name."""
+    """The sub-directories directly in *folder*, in path order."""
     return files_and_subdirs(folder)[1]

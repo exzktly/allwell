@@ -99,3 +99,43 @@ def test_scan_leaves_form_untouched_when_unparseable(qapp, tmp_path):
     tab._autofill_from_input_scan(str(d))
     assert tab._schema_picker.schema() == before_schema
     assert tab._nuclear_token_edit.text() == before_nuc
+
+
+def test_the_scan_applies_the_schema_it_infers_not_only_the_channels(qapp, tmp_path):
+    """A plate in a layout that is *not* the form's default.
+
+    The three tests above all write ``exp_<channel>_<well>_f0_t0.tif``, which is
+    the schema a fresh form already shows, so asserting the picker holds it
+    afterwards is satisfied by a scan that applies nothing at all — and one did.
+    ``_autofill_from_input_scan`` handed ``_apply_pipeline_info`` the flattened
+    argparse names ``filename_schema`` / ``filename_sep`` while ``_pinfo_flat``
+    reads the sidecar's ``schema`` / ``separator``, so those two keys were
+    dropped on the way in. The channel keys came through because they are
+    already sidecar-shaped, which is what made the gap invisible: the status
+    line named the channels it found, and the schema quietly stayed default.
+
+    So this fixture differs from the default in both the separator and the slot
+    layout, and the first two assertions are what say the fixture is doing its
+    job.
+    """
+    from analyze.tab import AnalyzeTab
+
+    in_dir = tmp_path / "ds" / "in"
+    in_dir.mkdir(parents=True)
+    for well in ("A01", "A02", "B01"):
+        for fov in (1, 2):
+            for channel in ("DAPI", "GFP"):
+                (in_dir / f"{channel}-{well}-f{fov}.tif").write_bytes(b"II*\0")
+
+    tab = AnalyzeTab()
+    assert tab._schema_picker.schema() != "channel:well:fov"
+    assert tab._schema_picker.separator() != "-"
+
+    tab._autofill_from_input_scan(str(tmp_path / "ds"))
+
+    assert tab._schema_picker.separator() == "-"
+    assert tab._schema_picker.schema() == "channel:well:fov"
+    # …and the schema the run would actually be given, not just the widget.
+    assert tab._build_schema_arg() == "channel:well:fov"
+    assert tab._filename_sep() == "-"
+    assert tab._nuclear_token_edit.text() == "DAPI"

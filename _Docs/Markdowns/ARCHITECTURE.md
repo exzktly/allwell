@@ -5111,7 +5111,8 @@ of nothing.
 
 `tif_files_in` is the other half of that, and it asks `is_run_input_member`
 rather than matching a suffix, because a suffix is not a decision about whether
-a file is one of the run's images. Its glob matched `._<name>.tif`, the
+a file is one of the run's images. The glob it was built on matched
+`._<name>.tif`, the
 AppleDouble fork macOS writes beside every file copied to a non-HFS volume — so
 a real plate arrived with exactly twice as many "TIFs" as images — and it read
 `.tif`/`.tiff` only, so a PNG plate looked like a folder holding nothing, and it
@@ -5160,18 +5161,45 @@ avoid, and every call site already copes with a path that has gone by the time
 it is opened.
 
 Reducing the per-file cost to nothing leaves the number of *listings* as the
-thing worth counting, and there was one per question. `_plan_grouped_root` now
-reads the folder once and answers all three from that listing: the loose-image
-count (`input_images_among`), whether any well archives are present
-(`_well_zip_among`), and the fold plan, which takes the listing as
-`plan_loose_append`'s optional `loose_files`. Stating each rule once is what
-makes that safe — two listings of one directory can disagree about a file
-written between them, and two spellings of one predicate always eventually do.
-`has_well_zip` asks for a well-named *file* as part of the same change: a
-directory called `A01.zip`, which is what an expander names an archive it has
-unpacked in place, used to send the whole folder down the fold-loose path, where
-opening it as an archive fails, the failure reads as "the archive holds
-nothing", and every loose image beside it is reported as new.
+thing worth counting, and there was one per question. `_plan_grouped_root` reads
+the folder once and answers four from that listing: the loose-image count
+(`input_images_among`), whether any well archives are present
+(`_well_zip_among`), whether any well *folders* are (`_has_well_content_in`),
+and the fold plan, which takes the listing as `plan_loose_append`'s optional
+`loose_files`. Every layout the pane meets — loose images, zip-grouped,
+folder-grouped — therefore lists the input folder exactly once. Stating each
+rule once is what makes that safe: two listings of one directory can disagree
+about a file written between them, and two spellings of one predicate always
+eventually do.
+
+`dir_has_entries` is the deliberate exception and keeps its own listing. It asks
+whether the folder holds an entry of *any* kind, which includes the ones a
+file/folder split drops because they are neither — a dangling symlink, a socket
+— so answering it from that split would turn a folder holding only such an entry
+from usable-but-unrecognised into empty. It short-circuits on the first entry,
+and it is reached only when the folder has no images, no archives and no well
+folders in it.
+
+**A well archive is a file.** `has_well_zip`, `has_well_content` and
+`_well_in_grouped_root` all say so, through `_well_zip_among`. A directory called
+`A01.zip` — what an expander names an archive it has unpacked in place — used to
+answer yes to all three, and each had its own consequence: the fold-loose path,
+where opening it as an archive fails, the failure reads as "the archive holds
+nothing", and every loose image beside it is reported as new; a `GROUPED` verdict
+on a folder holding nothing the pipeline can read; and, worst, a pass from the
+pre-run guard that exists to refuse a run whose named background well is not in
+the input, so the run started and the correction was never built.
+
+**A folder that cannot be listed is its own answer.** `Path.glob` returns an
+empty list for a directory it may traverse but not read — a share whose ACL
+grants execute and not read, a mount that has gone stale — so such a folder was
+reported as `EMPTY_IN`, *"nothing to process"*: a statement about the plate made
+from a failure to look at it. `os.scandir` raises instead, and `plan_input_layout`
+turns that into an `UNREADABLE` plan naming the folder and the errno. It is not
+in `RUNNABLE_ACTIONS`, and `_layout_error` gives the long form. Letting the
+`OSError` out would have been no better than the empty list: the readout is
+computed from a `textChanged` slot, where an exception leaves the path field
+showing the new folder and every label beside it describing the previous one.
 
 The Analyze pane spends that listing once per pick rather than twice.
 `AnalyzeTab._browse_input` changes two things the readout depends on — the path,
@@ -5186,8 +5214,36 @@ release the readout would go on describing the folder picked before it.
 `tests/test_input_scan_costs_no_stat_per_file.py` pins all of this by counting —
 the same folder holding four times as many images must cost the same number of
 metadata calls, and the layout plan must be computed exactly once, with the
-schema the scan inferred. It proves its own counter live first, since a test
-that patched the wrong function would report zero against zero and pass.
+schema the scan inferred. Its plate is written in a layout that is deliberately
+*not* the form's default, because a fixture in the default layout makes the
+second half of that true of a scan which applied nothing; and it proves its own
+counter live first, since a test that patched the wrong function would report
+zero against zero and pass. `tests/test_dir_scan.py` counts the other end: one
+listing and *zero* stats for a folder of files and sub-folders, which is the
+assertion an implementation that enumerated once and then stat-ed each entry
+would fail.
+
+The scan applies what it infers. `_autofill_from_input_scan` hands
+`_apply_pipeline_info` a **sidecar-shaped** dict — `schema`, `separator`, and
+the channel keys `ChannelTokens.as_pipeline_info` produces — because that is
+what `_pinfo_flat` reads. Spelled with the flattened argparse names
+(`filename_schema`, `filename_sep`) the two schema keys were the only ones in
+the dict that function does not know, so they were dropped on the way in: the
+channel roles landed, the status line announced them, and the form silently kept
+its default schema, which a plate in any other layout then carried into a run
+the user was never prompted to correct.
+
+The same rule reaches the remote runner, because the same plate does.
+`_detect_local_input_mode` runs at the start of every remote run and *before*
+the mode is known, so on a FLAT plate — a folder of loose images — it looks at
+the whole plate; `_unconsumed_loose_tifs` and `_stage_mixed_mode` walk it again
+straight after. All three asked which entries were directories one entry at a
+time and now take that from the listing, so the cost of starting a run stops
+growing with the number of images in the plate.
+`tests/test_remote_input_scan_cost.py` counts it the same way the Analyze one
+does, and pairs the count with a test that every layout is still *detected* —
+a mode detector that answered FLAT unconditionally would satisfy the count
+alone.
 
 The actions are the layouts. A folder **named** `in` is the input directly
 (output `../out`); a folder that **contains** `in/` feeds the pipeline from that

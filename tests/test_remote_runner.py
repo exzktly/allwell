@@ -1992,8 +1992,8 @@ def test_required_files_list_is_what_we_promised():
         # parsing, timepoint parsing, logged-swallow).
         "util/__init__.py",
         "util/aw_safe.py",
-        # One os.scandir in place of a stat per directory entry; reached on the
-        # remote through util.schema_infer.
+        # One os.scandir in place of a stat per directory entry; client-side
+        # only, listed because the manifest mirrors every util/ file.
         "util/dir_scan.py",
         # Rebinds sys.stdout / sys.stderr when a frozen windowed build nulls them;
         # imported by process_microscopy at module load (and by WellPlateZipper).

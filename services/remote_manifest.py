@@ -33,10 +33,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # process_microscopy at module top level, so the remote needs the package.
     "util/__init__.py",
     "util/aw_safe.py",
-    # One `os.scandir` in place of a `stat` per directory entry. Reached on the
-    # remote through `util.schema_infer`, which is itself listed below; the cost
-    # it removes is a Windows one and no remote is Windows, but the import has
-    # to resolve there all the same.
+    # One `os.scandir` in place of a `stat` per directory entry. Client-side
+    # only — its importers are the Analyze input scan and the remote runner's
+    # own staging, both of which run here — but the manifest must list every
+    # ``util/`` file so the completeness guard (test_remote_manifest) passes.
     "util/dir_scan.py",
     # The retry-with-backoff shield behind every pipeline write that lands on
     # the output volume (pipeline.io imports it at module scope).

@@ -37,7 +37,14 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication, QFileDialog  # noqa: E402
 
-SCHEMA = "experiment:channel:well:fov:timepoint"
+#: Deliberately **not** the schema a fresh ``AnalyzeTab`` starts on. A plate
+#: written in the default layout would let the "computed with the schema the
+#: scan inferred" assertion below pass against a ``_browse_input`` that never
+#: applies the scan's answer at all, because the inferred schema and the
+#: untouched default are the same string. ``test_the_fixture_is_not_the_forms_
+#: default`` is what keeps that true if the default ever changes.
+SCHEMA = "channel:well:fov"
+SEP = "-"
 WELLS = [f"{row}{col:02d}" for row in "ABCDEFGH" for col in range(1, 13)]
 
 
@@ -56,9 +63,26 @@ def _plate(root: Path, count: int) -> Path:
             for channel in ("DAPI", "GFP"):
                 if written >= count:
                     return root
-                (in_dir / f"exp_{channel}_{well}_f{fov}_t0.tif").write_bytes(b"II*\0")
+                (in_dir / f"{channel}{SEP}{well}{SEP}f{fov}.tif").write_bytes(b"II*\0")
                 written += 1
     raise AssertionError(f"the name generator cannot reach {count} files")
+
+
+def test_the_fixture_is_not_the_forms_default(qapp):
+    """Everything below is only a measurement if the scan changes something.
+
+    Both the schema and the separator: a plate written in the layout the form
+    already shows makes "the readout was computed with the inferred schema"
+    true of a tab that inferred nothing, and makes the schema assertions in the
+    other tests vacuous. Asserted rather than assumed because the form's
+    default is somebody else's to change.
+    """
+    from analyze.tab import AnalyzeTab
+
+    fresh = AnalyzeTab()
+    assert fresh._schema_picker.schema() != SCHEMA
+    assert fresh._schema_picker.separator() != SEP
+    assert fresh._nuclear_token_edit.text() != "DAPI"
 
 
 class _StatCounter:
@@ -142,6 +166,7 @@ def test_picking_a_folder_does_not_stat_every_file_in_it(qapp, tmp_path, monkeyp
     # not looking at the folder would satisfy the assertion above.
     assert "480" in tab_large._layout_lbl.text()
     assert tab_large._schema_picker.schema() == SCHEMA
+    assert tab_large._schema_picker.separator() == SEP
     assert tab_large._nuclear_token_edit.text() == "DAPI"
 
 
@@ -171,7 +196,7 @@ def test_the_readout_is_computed_once_per_pick_and_with_the_inferred_schema(
     tab = AnalyzeTab()
     _browse(tab, folder, monkeypatch)
 
-    assert calls == [(SCHEMA, "_")], (
+    assert calls == [(SCHEMA, SEP)], (
         "the layout plan should be computed exactly once per pick, from the "
         f"schema the folder scan inferred; got {calls}"
     )
@@ -205,3 +230,40 @@ def test_a_folder_the_scan_cannot_read_still_updates_the_readout(
         f"{tab._layout_lbl.text()!r}"
     )
     assert str(tmp_path / "second" / "out") == tab._output_lbl.text()
+
+
+def test_a_scan_that_raises_still_leaves_the_readout_describing_this_folder(
+        qapp, tmp_path, monkeypatch):
+    """The held refresh is released on the *raise* path too, not only the return.
+
+    ``_autofill_from_input_scan`` guards ``infer_from_dir`` and nothing else:
+    ``_apply_pipeline_info`` drives a dozen widgets unwrapped. If one of them
+    throws, the readout must still be recomputed — otherwise the path field
+    shows the folder just picked while every label beside it describes the one
+    before, which is worse than the wasted walk the hold exists to save.
+
+    Its sibling above cannot see this: a folder whose names do not parse makes
+    ``_autofill_from_input_scan`` *return* early, so a version that cleared the
+    flag and refreshed on the line after the call — no ``try``/``finally`` at
+    all — passes that one. This is the case that separates them.
+    """
+    from analyze.tab import AnalyzeTab
+
+    first = _plate(tmp_path / "first", 24)
+    second = _plate(tmp_path / "second", 8)
+
+    tab = AnalyzeTab()
+    _browse(tab, first, monkeypatch)
+    assert "24" in tab._layout_lbl.text()
+
+    def explode(_info):
+        raise RuntimeError("a widget setter threw")
+
+    monkeypatch.setattr(tab, "_apply_pipeline_info", explode)
+    with pytest.raises(RuntimeError):
+        _browse(tab, second, monkeypatch)
+
+    assert tab._suspend_output_refresh is False
+    assert "8" in tab._layout_lbl.text(), (
+        "the readout still describes the previously picked folder: "
+        f"{tab._layout_lbl.text()!r}")

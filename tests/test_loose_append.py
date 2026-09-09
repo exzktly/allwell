@@ -241,10 +241,17 @@ def test_a_supplied_listing_plans_exactly_what_reading_the_folder_would(tmp_path
     anything to fold, and then hands that same list here rather than making the
     function list the directory again — one enumeration per readout instead of
     two, on a volume where an enumeration is a round trip. The parameter is
-    therefore only safe while the two answers are identical, and this is what
-    says they are: a plan built from the caller's listing and a plan built by
-    reading the folder must agree on every well and every file, including the
-    duplicate that neither counts and the unparseable name both skip.
+    therefore only safe while the two answers are identical.
+
+    Be clear about what this can and cannot say. The equality of the two plans
+    is close to a tautology, since the no-argument path calls the very function
+    the fixture calls to build the argument — an implementation that ignored
+    ``loose_files`` outright would satisfy it. What it does pin is the explicit
+    plan below: the duplicate that neither counts, the unparseable name both
+    skip, and the non-image left alone. That the parameter is *used* is
+    ``test_planning_the_fold_reads_the_directory_once_per_readout``'s job, by
+    counting listings, and it is the test that fails if the parameter is
+    dropped.
     """
     from services.input_resolution_service import plan_loose_append, tif_files_in
 
@@ -310,6 +317,126 @@ def test_planning_the_fold_reads_the_directory_once_per_readout(tmp_path):
         f"for one readout: {listings}")
 
 
+def test_every_layout_lists_the_input_folder_once(tmp_path):
+    """Not only the fold-loose branch — the one a finished plate takes as well.
+
+    A zip-grouped `in/` is what every dataset looks like after one completed
+    run, so it is the state a re-opened plate is in and the one whose cost is
+    paid most often. It reaches `_plan_grouped_root`'s `loose == 0` branch,
+    which asked `has_well_content` and re-read the whole folder to do it.
+    """
+    import os
+
+    from services.input_resolution_service import plan_input_layout
+
+    def listings_of(target: Path, selected: Path) -> int:
+        real_scandir, real_listdir = os.scandir, os.listdir
+        seen: list[str] = []
+
+        def scandir(path, *args, **kwargs):
+            seen.append(str(path))
+            return real_scandir(path, *args, **kwargs)
+
+        def listdir(path, *args, **kwargs):
+            seen.append(str(path))
+            return real_listdir(path, *args, **kwargs)
+
+        os.scandir, os.listdir = scandir, listdir
+        try:
+            plan_input_layout(
+                selected, filename_schema=SCHEMA, filename_sep=SEP)
+        finally:
+            os.scandir, os.listdir = real_scandir, real_listdir
+        return seen.count(str(target))
+
+    zipped = tmp_path / "zipped" / "in"
+    zipped.mkdir(parents=True)
+    for well in ("A01", "A02"):
+        _make_zip(zipped / f"{well}.zip", {f"exp_w1_{well}_1_T01.tif": b"x"})
+    assert listings_of(zipped, tmp_path / "zipped") == 1
+
+    foldered = tmp_path / "foldered" / "in"
+    foldered.mkdir(parents=True)
+    for well in ("A01", "A02"):
+        (foldered / well).mkdir()
+        (foldered / well / f"exp_w1_{well}_1_T01.tif").write_bytes(b"x")
+    assert listings_of(foldered, tmp_path / "foldered") == 1
+
+    loose = tmp_path / "loose" / "in"
+    loose.mkdir(parents=True)
+    (loose / "exp_w1_A01_1_T01.tif").write_bytes(b"x")
+    assert listings_of(loose, tmp_path / "loose") == 1
+
+
+def test_a_folder_that_cannot_be_listed_is_said_so_not_called_empty(tmp_path):
+    """An unreadable folder gets its own verdict, and it is not runnable.
+
+    A directory can be traversable and not listable — a share whose ACL grants
+    execute but not read, a stale mount — and `Path.glob` answered such a folder
+    with an empty list, so the readout said "the in/ folder is empty — nothing
+    to process": a claim about the plate, made from a failure to look at it.
+    Simulated here by making the listing raise, because the permission bits
+    themselves do not stop root.
+    """
+    import errno
+    import os
+
+    from services.input_resolution_service import (
+        RUNNABLE_ACTIONS, plan_input_layout,
+    )
+
+    grouped = tmp_path / "in"
+    grouped.mkdir()
+    (grouped / "exp_w1_A01_1_T01.tif").write_bytes(b"x")
+
+    real_scandir, real_listdir = os.scandir, os.listdir
+
+    def refuse(path, *args, **kwargs):
+        if str(path) == str(grouped):
+            raise PermissionError(errno.EACCES, "Permission denied", str(path))
+        return real_scandir(path, *args, **kwargs)
+
+    def refuse_listdir(path, *args, **kwargs):
+        if str(path) == str(grouped):
+            raise PermissionError(errno.EACCES, "Permission denied", str(path))
+        return real_listdir(path, *args, **kwargs)
+
+    os.scandir, os.listdir = refuse, refuse_listdir
+    try:
+        plan = plan_input_layout(
+            tmp_path, filename_schema=SCHEMA, filename_sep=SEP)
+    finally:
+        os.scandir, os.listdir = real_scandir, real_listdir
+
+    assert plan.action == "unreadable", plan.message
+    assert plan.action not in RUNNABLE_ACTIONS
+    assert "Permission denied" in plan.message
+    assert "empty" not in plan.message.lower()
+
+
+def test_a_directory_named_like_an_archive_does_not_pass_the_well_guard(tmp_path):
+    """The pre-run check that refuses a background well the input does not hold.
+
+    `_background_well_validation_error` asks `well_present_in_input`, which asks
+    `_well_in_grouped_root`. A directory called `A01.zip` answering yes there is
+    a run allowed to start against a background well the pipeline will not find,
+    so the empty-well correction is never built — the guard's entire purpose,
+    defeated by the one entry it is not entitled to call an archive.
+    """
+    from services.input_resolution_service import well_present_in_input
+
+    grouped = tmp_path / "in"
+    grouped.mkdir()
+    (grouped / "A01.zip").mkdir()
+
+    assert well_present_in_input(grouped, "A01") is False
+
+    _make_zip(grouped / "A02.zip", {"exp_w1_A02_1_T01.tif": b"x"})
+    assert well_present_in_input(grouped, "A02") is True
+    (grouped / "A03").mkdir()
+    assert well_present_in_input(grouped, "A03") is True
+
+
 def test_a_directory_named_like_a_well_archive_is_not_one(tmp_path):
     """``has_well_zip`` asks for a well-named *file*, not a well-named entry.
 
@@ -323,14 +450,20 @@ def test_a_directory_named_like_a_well_archive_is_not_one(tmp_path):
     """
     from services.input_resolution_service import has_well_zip, plan_input_layout
 
-    (tmp_path / "A01.zip").mkdir()
-    (tmp_path / "exp_w1_A01_1_T01.tif").write_bytes(b"loose")
+    grouped = tmp_path / "in"
+    grouped.mkdir()
+    (grouped / "A01.zip").mkdir()
+    (grouped / "exp_w1_A01_1_T01.tif").write_bytes(b"loose")
 
-    assert has_well_zip(tmp_path) is False
+    assert has_well_zip(grouped) is False
 
-    # …and the readout says the plate needs grouping, not folding.
+    # …and the readout says the plate needs grouping, not folding. The folder
+    # has to be an `in/` with loose images in it, or `_plan_grouped_root` — the
+    # function this is about — is never reached and the plan comes back
+    # `no_input`, which is what the first version of this test measured.
     plan = plan_input_layout(tmp_path, filename_schema=SCHEMA, filename_sep=SEP)
-    assert plan.action != "fold_loose"
+    assert plan.action == "group_loose", plan.message
+    assert "group 1 loose" in plan.message
 
 
 def test_a_real_well_archive_still_answers_yes(tmp_path):

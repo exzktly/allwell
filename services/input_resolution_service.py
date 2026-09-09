@@ -11,7 +11,7 @@ from collections.abc import Callable
 from services.subprocess_kill import signal_subprocess
 from services.subprocess_text import TEXT_UTF8
 from util.aw_safe import swallow, swallowed
-from util.dir_scan import files_and_subdirs, files_in, subdirs_in
+from util.dir_scan import files_and_subdirs, files_in
 from util.image_exts import is_run_input_member
 from util.retry_io import retry_io
 from util.zip_write import (
@@ -226,6 +226,19 @@ def _zip_timepoints(zip_path: Path, *, schema: str, sep: str) -> set[str]:
     return out
 
 
+def _has_well_content_in(files: list[Path], subdirs: list[Path]) -> bool:
+    """:func:`has_well_content` over a listing already made.
+
+    The archive half is `has_well_zip`'s rule rather than a second spelling of
+    it — the two decide the same thing about the same folder, one branch apart
+    in `_plan_grouped_root`, so a directory named `A01.zip` must not be an
+    archive to one and not to the other.
+    """
+    from util.well_token import is_valid_well_name
+    return _well_zip_among(files) or any(
+        is_valid_well_name(p.name) for p in subdirs)
+
+
 def has_well_content(folder: Path) -> bool:
     """Return True iff *folder* contains *well-named* zip files OR
     well-named subdirectories.
@@ -236,18 +249,17 @@ def has_well_content(folder: Path) -> bool:
     was broken. Judge the basename with the shared canonicaliser to avoid
     that, so this module and the pipeline that then reads the folder agree
     on what counts as a well (ARCHITECTURE §15).
+
+    The archive has to be a *file*: a directory named ``A01.zip`` — what an
+    expander calls an archive it has unpacked in place — is not one, and
+    counting it as one sent the whole folder down a branch where opening it
+    fails. Same rule as :func:`has_well_zip`, and the same reason.
     """
-    from util.well_token import is_valid_well_name
     try:
         files, subdirs = files_and_subdirs(folder)
     except OSError:
         return False
-    # The archive half is `has_well_zip`'s rule, not a second spelling of it —
-    # the two decide the same thing about the same folder, one branch apart in
-    # `_plan_grouped_root`, and a folder named `A01.zip` must not be an archive
-    # to one and not the other.
-    return _well_zip_among(files) or any(
-        is_valid_well_name(p.name) for p in subdirs)
+    return _has_well_content_in(files, subdirs)
 
 
 def dir_has_entries(folder: Path) -> bool:
@@ -288,6 +300,8 @@ ZIP_ROOT = "zip_root"
 UNRECOGNISED = "unrecognised"
 #: An ``in/`` that exists and is empty.
 EMPTY_IN = "empty_in"
+#: The folder is there and is a directory, but listing it failed.
+UNREADABLE = "unreadable"
 #: Nothing usable anywhere.
 NO_INPUT = "no_input"
 
@@ -328,16 +342,51 @@ class InputPlan:
         return self.action in RUNNABLE_ACTIONS
 
 
+def _unreadable_plan(folder: Path, exc: OSError) -> InputPlan:
+    """The plan for a directory that exists and could not be listed.
+
+    A directory can be traversable and not listable — a share whose ACL grants
+    execute and not read, a mount that has gone stale — and the two are told
+    apart only by trying. ``Path.is_dir()`` says yes and the listing then fails.
+
+    This needs its own action because the alternatives are both wrong.
+    ``Path.glob`` answers such a directory with an empty list, so the folder
+    read as `EMPTY_IN`, *"nothing to process"* — a statement about the plate,
+    made from a failure to look at it, and exactly the silent substitution the
+    pipeline is not allowed to make. Letting the ``OSError`` out is no better
+    here: this is reached from a ``textChanged`` slot, where an exception leaves
+    the path field showing the new folder and every label beside it still
+    describing the previous one.
+    """
+    return InputPlan(
+        UNREADABLE, None, None, 0,
+        f"Could not read {folder.name}/ — {exc.strerror or exc}. "
+        f"The folder is there; its contents could not be listed.",
+    )
+
+
 def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool,
                        schema: tuple[str, str] = ("", "_")) -> InputPlan:
     """Classify a folder that is being used as the pipeline's input directly."""
-    # One listing answers everything this decision needs: which loose images are
-    # in the folder, whether any well archives are, and — through
-    # `_plan_loose_append` below — which of those images would be folded into
-    # them. Each of those used to read the directory for itself, so a readout
-    # for a plate of a few thousand loose images enumerated it three times, and
-    # the three listings could disagree about a file written between them.
-    entries = files_in(root)
+    # One listing answers almost everything this decision needs: which loose
+    # images are in the folder, whether any well archives are, whether any
+    # well-named folders are, and — through `_plan_loose_append` below — which
+    # of those images would be folded in. Each of those used to read the
+    # directory for itself, so a readout for a plate of a few thousand loose
+    # images enumerated it three times, and the three listings could disagree
+    # about a file written between them.
+    #
+    # `dir_has_entries` below is the exception and keeps its own listing on
+    # purpose: it asks whether the folder holds an entry of *any* kind, which
+    # includes the ones this listing drops because they are neither a file nor
+    # a directory — a dangling symlink, a socket. Answering it from here would
+    # turn a folder holding only such an entry from usable-but-unrecognised
+    # into empty. It short-circuits on the first entry, and it is reached only
+    # when the folder has no images, no archives and no well folders in it.
+    try:
+        entries, subdirs = files_and_subdirs(root)
+    except OSError as exc:
+        return _unreadable_plan(root, exc)
     loose_files = input_images_among(entries)
     loose = len(loose_files)
     if loose > 0:
@@ -373,7 +422,7 @@ def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool,
             f"✓ Will group {loose} loose TIF(s) into per-well folders "
             f"in {root.name}/",
         )
-    if has_well_content(root):
+    if _has_well_content_in(entries, subdirs):
         return InputPlan(
             GROUPED, root, output_dir, 0,
             "✓ Using selected folder as input" if named_in
@@ -442,7 +491,10 @@ def plan_input_layout(raw: Path, *, filename_schema: str = "",
     else:
         nested = None
 
-    tifs = len(tif_files_in(raw))
+    try:
+        tifs = len(tif_files_in(raw))
+    except OSError as exc:
+        return _unreadable_plan(raw, exc)
     if tifs > 3:
         return InputPlan(
             ZIP_ROOT, in_sub, out_dir, tifs,
@@ -466,6 +518,15 @@ def _layout_error(plan: InputPlan, raw: Path) -> str:
         return plan.message
     if plan.action == NOT_A_DIR:
         return f"Not a directory:\n{raw}"
+    if plan.action == UNREADABLE:
+        return (
+            f"{plan.message}\n\n"
+            "The folder exists, but listing what is in it failed. On a network "
+            "share or a mounted volume this is usually a permissions problem "
+            "or a dropped connection — the run is not started, because what is "
+            "in the folder is unknown rather than known to be nothing.\n\n"
+            f"Folder selected: {raw}"
+        )
     if plan.action == EMPTY_IN:
         return (
             f"{plan.message}\n\n"
@@ -490,17 +551,18 @@ def _well_in_grouped_root(root: Path, target: str) -> bool:
     folder (non-recursive, mirroring the pipeline's grouped-input lookup)."""
     from util.well_token import canonical_well_label
     try:
-        # per-well zip:  <root>/<WELL>.zip
-        for p in root.glob("*.zip"):
-            if canonical_well_label(p.stem) == target:
-                return True
-        # per-well folder:  <root>/<WELL>/
-        for p in subdirs_in(root):
-            if canonical_well_label(p.name) == target:
-                return True
+        files, subdirs = files_and_subdirs(root)
     except OSError:
         return False
-    return False
+    # per-well zip: <root>/<WELL>.zip — a *file*, by `_well_zip_among`'s rule.
+    # This guard is what `_background_well_validation_error` asks before a run
+    # starts, so a directory named `A01.zip` answering yes here is a run allowed
+    # to start against a background well the pipeline will not find.
+    if any(p.match("*.zip") and canonical_well_label(p.stem) == target
+           for p in files):
+        return True
+    # per-well folder:  <root>/<WELL>/
+    return any(canonical_well_label(p.name) == target for p in subdirs)
 
 
 def well_present_in_input(input_dir: Path, well: str, *,
@@ -1373,10 +1435,14 @@ def _grouped_member_index(grouped: Path) -> dict[str, tuple[int, int | None]]:
     index: dict[str, tuple[int, int | None]] = {}
     with swallow(f"listing already-grouped members under {grouped.name}"):
         files, subdirs = files_and_subdirs(grouped)
-        # Folders and archives in one name-sorted sequence, because on the rare
-        # basename that appears in both the *last* writer wins and the order is
-        # therefore part of the answer. Walking all the folders and then all the
-        # archives would quietly hand some of those collisions to the other side.
+        # Folders and archives in one sorted sequence. On the rare basename
+        # that appears in both, the *last* writer wins, so the walk order is
+        # part of the answer — and this is the answer that decides whether a
+        # user's loose original is deleted as already grouped. The old order
+        # was `iterdir`'s, i.e. the filesystem's, so it was arbitrary rather
+        # than files-then-folders; sorting makes it repeatable, and keeping the
+        # two kinds interleaved keeps each collision on the side that a listing
+        # of the folder would put it.
         dirs = set(subdirs)
         for entry in sorted(files + subdirs, key=lambda q: q.name):
             if entry in dirs:

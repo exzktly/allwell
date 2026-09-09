@@ -514,21 +514,18 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         )
         if not d:
             return
-        # Two things about to change, and the readout depends on both: the path
-        # (which `textChanged` reports) and the filename schema the folder scan
-        # infers from it. Left alone, `textChanged` computes the readout from
-        # the new path and the *previous* folder's schema, then
-        # `_autofill_from_input_scan` applies the inferred schema and computes
-        # it again — two walks of the selected folder for one click, the first
-        # of them against a schema that no longer applies. On a plate of a few
-        # thousand loose images on a network volume that is half the cost of
-        # picking a folder.
+        # The readout depends on both things about to change — the path, which
+        # `textChanged` reports, and the schema the folder scan infers from it —
+        # so it is held and computed once at the end, from the two together,
+        # instead of once against the previous folder's schema and once again
+        # after. That is one walk of the selected folder per click rather than
+        # two (ARCHITECTURE, the input-layout section).
         #
-        # So the intermediate readout is held and one is computed at the end,
-        # from the path and the schema together. The `finally` is load-bearing:
-        # a folder whose names do not parse leaves `_autofill_from_input_scan`
-        # early, and the readout still has to be recomputed or the field would
-        # go on describing the folder before it.
+        # Both the release and the recomputation are in the `finally`:
+        # `_autofill_from_input_scan` returns early on names that do not parse
+        # and can raise out of `_apply_pipeline_info`, and either way the
+        # readout must be recomputed or the path field names the new folder
+        # while every label beside it describes the previous one.
         self._suspend_output_refresh = True
         try:
             self._input_edit.setText(d)
@@ -536,7 +533,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
             self._autofill_from_input_scan(d)
         finally:
             self._suspend_output_refresh = False
-        self._refresh_output()
+            self._refresh_output()
 
     def _refresh_output(self, *, immediate: bool = False) -> None:
         """Show where the run will read from and write to, and what it will do.

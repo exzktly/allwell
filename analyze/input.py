@@ -173,7 +173,16 @@ class AnalyzeInputMixin:
             return
         if guess is None:
             return
-        info = {"filename_sep": guess.separator, "filename_schema": guess.schema_str}
+        # Sidecar-shaped keys, because that is what `_apply_pipeline_info` takes
+        # and what `guess.channel_tokens().as_pipeline_info()` below already
+        # produces. Spelled `filename_sep` / `filename_schema` — the flattened,
+        # argparse-side names — these two were the only keys in the dict that
+        # `_pinfo_flat` does not read, so they were dropped on the way in and
+        # the scan applied its channel roles and silently kept the form's
+        # default schema. A plate in any other layout then reached the run with
+        # a schema the user was never prompted to correct, which is the exact
+        # failure `_well_folder_stems_in` was added to prevent.
+        info = {"separator": guess.separator, "schema": guess.schema_str}
         tokens = guess.channel_tokens() if guess.channels else None
         if tokens is not None:
             info.update(tokens.as_pipeline_info())

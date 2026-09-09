@@ -138,9 +138,21 @@ class _IsDirCalls:
     ``p.is_dir()`` anywhere in the staging path.
     """
 
-    #: The files whose classification must not grow with the plate.
-    WATCHED = ("remote_runner.py", "remote_scratch.py",
-               "input_resolution_service.py", "input_layout.py")
+    #: The modules whose classification must not grow with the plate.
+    WATCHED = frozenset((
+        "services.remote_runner", "services.remote_scratch",
+        "services.input_resolution_service", "pipeline.input_layout",
+    ))
+    #: Any frame in one of these packages ends the walk, watched or not. The
+    #: attribution has to be by *module*, never by a path substring: written as
+    #: ``"/allwell/" in co_filename`` this walked straight past this file's own
+    #: fixture whenever the repo was checked out anywhere else — which is exactly
+    #: what a `git worktree` does — and charged the fixture's calls, and
+    #: ``util.zip_write``'s per-member ones, to the production frame beneath them.
+    #: It passed in the main checkout and failed in every worktree, which is the
+    #: harness being wrong rather than the code.
+    ROOTS = ("services", "pipeline", "util", "analyze", "well_viewer",
+             "widgets", "tests")
 
     def __init__(self) -> None:
         self.real = Path.is_dir
@@ -148,19 +160,19 @@ class _IsDirCalls:
         self.where: dict[str, int] = {}
 
     def __enter__(self):
-        watched = self.WATCHED
+        watched, roots = self.WATCHED, self.ROOTS
 
         def counting(inner, *a, **k):
             frame = sys._getframe(1)
             while frame is not None:
-                name = Path(frame.f_code.co_filename).name
-                if name in watched:
-                    key = f"{name}:{frame.f_lineno}"
+                module = frame.f_globals.get("__name__", "")
+                if module in watched:
+                    key = f"{module.rpartition('.')[2]}:{frame.f_lineno}"
                     self.where[key] = self.where.get(key, 0) + 1
                     self.n += 1
                     break
-                if "/allwell/" in frame.f_code.co_filename:
-                    break        # some other All-Well module; not ours to count
+                if module.partition(".")[0] in roots:
+                    break        # another project module; not ours to count
                 frame = frame.f_back
             return self.real(inner, *a, **k)
 

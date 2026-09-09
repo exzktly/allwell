@@ -61,6 +61,9 @@ def test_the_declared_parameters_are_ones_the_dispatch_takes():
     # the `bg_field` the dispatch is handed — but it is a setting a reader needs
     # to reproduce the run, so it is sanctioned by name rather than by signature.
     accepted.add("background_well")
+    # And the pairing map, for the same reason: it is what decided *which*
+    # blank produced that field for this well.
+    accepted.add("background_well_map")
     for method, params in BACKGROUND_METHOD_PARAMS.items():
         unknown = sorted(set(params) - accepted)
         assert not unknown, (
@@ -75,7 +78,7 @@ def test_the_declared_parameters_are_ones_the_dispatch_takes():
     ("fft_bandpass", ("radius", "fft_small")),
     ("fov_median", ()),
     ("none", ()),
-    ("empty_well", ("background_well",)),
+    ("empty_well", ("background_well", "background_well_map")),
 ])
 def test_background_params_used_matches_the_dispatch(method, expected):
     """Pinned against what `subtract_background`'s own docstring describes, so a

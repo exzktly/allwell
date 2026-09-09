@@ -58,6 +58,7 @@ import time
 import zipfile
 from util.json_write import write_json_atomic
 from collections import defaultdict
+from functools import partial
 from pathlib import Path
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -85,6 +86,7 @@ from util.well_token import (  # noqa: F401 — _bg_well_key re-exported for tes
     split_background_wells as _split_background_wells,
     background_well_key as _bg_well_key,
     canonical_well_label as _canonical_well_label,
+    parse_background_well_map,
 )
 from util.schema import (  # noqa: F401  (re-exported for call sites and tests)
     SCHEMA_FIELDS,
@@ -784,6 +786,10 @@ from pipeline.io import load_2d_gray  # noqa: F401,E402
 # requested correction could not be built. Re-exported here so ``pm.<name>``
 # call sites, the remote worker and the tests are unchanged.
 from pipeline.empty_well import (  # noqa: F401,E402
+    GROUPED_BACKGROUND_KEY,
+    GROUPED_FLATFIELD_KEY,
+    WELL_GROUP_KEY,
+    BlankGroups,
     _POOLED_TP,
     _empty_well_field,
     _empty_well_tp_key,
@@ -791,7 +797,14 @@ from pipeline.empty_well import (  # noqa: F401,E402
     _require_empty_well_models,
     build_background_models,
     build_flatfield_models,
+    build_grouped_models,
+    models_for_well,
+    plan_blank_groups,
+    prepare_models,
+    refuse_uncovered_wells,
+    require_grouped_models,
     sample_empty_well_images,
+    shared_kwargs_for_well,
 )
 
 # Background-correction math moved to ``pipeline.background.py`` (a Qt-free
@@ -3247,7 +3260,8 @@ def process_well_zips(
     def _submit(executor, well_label, zip_path):
         return executor.submit(
             process_well_zip_task,
-            well_label, zip_path, output_dir, shared_kwargs_template,
+            well_label, zip_path, output_dir,
+            shared_kwargs_for_well(shared_kwargs_template, well_label),
             nuclear_token, fluor_tokens, csv_prefix, schema, sep,
             _incremental_for_well(incremental, well_label, forced),
             incremental_prior_dir,
@@ -3312,7 +3326,8 @@ def process_well_folders(
     def _submit(executor, well_label, folder_path):
         return executor.submit(
             process_well_folder_task,
-            well_label, folder_path, output_dir, shared_kwargs_template,
+            well_label, folder_path, output_dir,
+            shared_kwargs_for_well(shared_kwargs_template, well_label),
             nuclear_token, fluor_tokens, csv_prefix,
             schema, sep,
             _incremental_for_well(incremental, well_label, forced),
@@ -3652,6 +3667,7 @@ def main() -> None:
                 "flatfield": args.flatfield,
                 "background": args.background,
                 "background_well": args.background_well or "",
+            "background_well_map": args.background_well_map or "",
                 "fft_small_nir": int(args.fft_small_nir or 0),
                 "fft_small_fluor": int(args.fft_small_fluor or 0),
                 "mesh_ratio": float(args.mesh_ratio or 3.0),
@@ -3835,50 +3851,34 @@ def main() -> None:
     # gaussian mode needs no precompute (estimated per image in the worker), and
     # 'none' is a no-op. Done after the loose-TIF organize so the files are on
     # disk under input_dir.
-    # Where the empty-well blank(s) are read from. Normally the run's own input,
-    # but a batched remote run stages one batch at a time and the blank is not in
-    # most batches — it is uploaded once to its own directory and named here.
-    bg_wells = _split_background_wells(args.background_well)
-    bg_src = Path(args.background_dir).expanduser() if args.background_dir else input_dir
+    blank_groups, bg_src = plan_blank_groups(args, input_dir)
 
     if args.flatfield in ("basic", "empty_well"):
-        shared_kwargs["flatfield_models"] = build_flatfield_models(
-            input_dir,
-            tokens=fluor_tokens_for_quant,
-            schema=schema,
-            sep=sep,
-            mode=args.flatfield,
-            background_wells=bg_wells,
-            background_dir=bg_src,
-        )
-        log.info("Flat-field (%s): built field(s) for channel(s): %s",
-                 args.flatfield, sorted(shared_kwargs["flatfield_models"]) or "(none found)")
-        _require_empty_well_models(
-            "flat-field", args.flatfield, shared_kwargs["flatfield_models"],
-            bg_wells, bg_src)
+        prepare_models(
+            shared_kwargs, what="Flat-field", mode=args.flatfield,
+            input_dir=input_dir, groups=blank_groups,
+            builder=partial(build_flatfield_models, mode=args.flatfield),
+            source=bg_src, flat_key="flatfield_models",
+            grouped_key=GROUPED_FLATFIELD_KEY, tokens=fluor_tokens_for_quant,
+            schema=schema, sep=sep)
 
     # Precompute per-channel additive background fields once (--background
     # empty_well). top_hat / sliding_disk estimate per image in the worker.
     if args.background == "empty_well":
-        shared_kwargs["background_models"] = build_background_models(
-            input_dir,
+        prepare_models(
+            shared_kwargs, what="Background", mode=args.background,
+            input_dir=input_dir, groups=blank_groups,
+            builder=build_background_models, source=bg_src,
+            flat_key="background_models", grouped_key=GROUPED_BACKGROUND_KEY,
             tokens=[args.nuclear_token] + list(fluor_tokens_for_quant),
-            schema=schema,
-            sep=sep,
-            background_wells=bg_wells,
-            background_dir=bg_src,
-        )
-        log.info("Background (empty_well): built field(s) for channel(s): %s",
-                 sorted(shared_kwargs["background_models"]) or "(none found)")
-        _require_empty_well_models(
-            "background", args.background, shared_kwargs["background_models"],
-            bg_wells, bg_src)
+            schema=schema, sep=sep)
 
     # ── Decide mode: zip, folder, or flat ───────────────────────────────────
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
     if well_zips:
         refuse_images_only_in_ignored_folders(input_dir, well_zips)
+    refuse_uncovered_wells(blank_groups, well_zips, well_folders)
 
     # ── Scratch preflight ───────────────────────────────────────────────────
     # Checked here, once both the well list and the channel count are known and

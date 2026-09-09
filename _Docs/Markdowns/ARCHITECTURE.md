@@ -1802,6 +1802,62 @@ the four to do, so each warns under the pipeline's own logger naming what did
 not happen. A frame whose median really is zero is not one of these and says
 nothing.
 
+**A blank can be paired with the wells it corrects, and by default is not.**
+Named several blanks, `--background_well H12,G12` pools their frames into one
+reference per (channel, timepoint) — the less noisy estimate, and the right one
+when the blanks differ only by noise. It is the wrong one when they differ
+because of the treatment: a compound that fluoresces puts real signal into its
+own block's blank, and pooling spreads that signal over every well on the plate,
+producing numbers indistinguishable from corrected ones.
+`--background_well_map "H12=A01:D12; G12=E01:H12"` pairs instead, one blank per
+block, written as wells, rectangular blocks, or both. `util.well_token`
+parses it, and refuses rather than resolves anything ambiguous — a well two
+blanks claim, an unreadable token, an empty group — because every rule that
+absorbs those ends with a well corrected against a reference the user did not
+choose.
+
+`pipeline.empty_well` holds all of it: the sampler, both model builders, the
+per-image lookup, and the pairing. `BlankGroups` is the run's plan, and a pooled
+run is that class with one group holding every named blank, so pooling is not a
+branch threaded through the code but the degenerate case of the same one.
+Crucially **the models gain a group dimension and the correction code does
+not**: `main` installs the grouped dicts under private keys, and
+`shared_kwargs_for_well` swaps in one well's own group as that well is submitted
+to the pool, so `process_image_group` and `_correct_image_group` go on receiving
+a flat `{channel: {timepoint: field}}` and go on knowing nothing about wells. An
+unpaired run is handed the identical object it always was. That is also what
+keeps the combined `(raw − B)/(B/mean(B))` correction consistent: its additive
+and multiplicative fields must come from the same blank frames, and slicing both
+dicts with one key at one place cannot disagree the way two lookups inside two
+closures could.
+
+Two consequences the pairing makes load-bearing. `_require_empty_well_models`
+is asked **per group**, because the plate-wide question — was *any* model built —
+is answered yes by a plate where three of four blocks lost their blank, which is
+the silently-uncorrected output that guard exists to refuse. And a well no blank
+claims **stops the run**, before an image is read: pooling the unmapped wells
+corrects them with other treatments' autofluorescence, and leaving them
+uncorrected puts two differently processed populations in one CSV. Both are
+invisible in the output, so neither is a default.
+
+"Which wells are blanks?" is `util.well_token.blank_wells_for_run`, and it is one
+function because five places ask it and they had already drifted: the remote
+runner grew a local whitespace-splitting regex that read `"H12 G12"` as two wells
+where the pipeline's own parser reads it as one, and every batch of that run died
+on the guard. Two more copies of that regex were still in
+`input_resolution_service`'s two incremental-scope readers and are gone;
+`_blank_well_tokens` is the seam, and the union it returns is deliberately a
+superset — staging a well whole that turns out not to be a blank costs an upload,
+while missing one starves a whole block of its correction.
+
+The map is in `settings_digest.KEYED_ON`, so re-pairing a plate declines to reuse
+the wells already processed under the old pairing — the reuse decision that would
+otherwise hand back numbers built against a different blank and report success.
+Its CLI default is `None` rather than `""` for a reason worth keeping: the digest
+skips a `None` and includes a `""`, so an empty-string default would have changed
+the recorded digest of every plate already on disk and forced a plate-wide
+recompute for every user.
+
 `fft_bandpass`'s line says the frame is returned "UNCHANGED", which is true of
 that function and not quite of the pipeline: `subtract_background` hands the
 result to `_floor_after_subtract`, which zeroes non-finite pixels and clips

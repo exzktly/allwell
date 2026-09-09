@@ -12,6 +12,7 @@ from services.subprocess_kill import signal_subprocess
 from services.subprocess_text import TEXT_UTF8
 from util.aw_safe import swallow, swallowed
 from util.image_exts import is_run_input_member
+from util.well_token import blank_wells_for_run, canonical_well_label
 from util.retry_io import retry_io
 from util.zip_write import (
     atomic_zip, replace_folder_with_archive)
@@ -150,6 +151,26 @@ def has_well_zip(folder: Path) -> bool:
 def _schema_field_index(schema: str, field: str) -> int:
     fields = [f.strip().lower() for f in str(schema or "").split(":")]
     return fields.index(field) if field in fields else -1
+
+
+def _blank_well_tokens(opts: dict) -> set[str]:
+    """The canonical wells this run treats as blanks, read the pipeline's way.
+
+    Both scope readers — the preview under the input field and the run that
+    executes it — need this, and they had a copy each: a local
+    whitespace-splitting regex that read ``"H12 G12"`` as two wells where
+    ``util.well_token.split_background_wells`` reads it as one. Two answers to
+    one question about the same plate, and the same divergence had already been
+    found and fixed once in the remote runner, where it killed every batch of a
+    run. ``blank_wells_for_run`` is the single reading, and it also sees a blank
+    named only in the pairing map.
+    """
+    return {
+        canonical_well_label(w)
+        for w in blank_wells_for_run(opts.get("background_well", ""),
+                                     opts.get("background_well_map", ""))
+        if canonical_well_label(w)
+    }
 
 
 def _loose_timepoints_for_wells(
@@ -854,8 +875,6 @@ def plan_incremental_scope(
     against, and pretending otherwise would be the kind of guess this returns a
     named ``"unchanged"`` mode to avoid.
     """
-    from util.well_token import canonical_well_label
-
     schema = str(opts.get("filename_schema") or "")
     sep = str(opts.get("filename_sep") or "_")
     try:
@@ -866,11 +885,7 @@ def plan_incremental_scope(
     if not plan.total:
         return ScopePlan("unchanged", "", "")
 
-    bg_tokens = {
-        canonical_well_label(w)
-        for w in re.split(r"[,\s]+", str(opts.get("background_well", "") or ""))
-        if w
-    }
+    bg_tokens = _blank_well_tokens(opts)
     flatfield = str(opts.get("flatfield", "none") or "none")
     background = str(opts.get("background", "") or "")
     empty_well_in_use = flatfield == "empty_well" or background == "empty_well"
@@ -909,21 +924,13 @@ def select_incremental_scope(
     Qt-free so it stays testable and reusable; the GUI passes a ``log_fn`` that
     forwards to its run-log queue.
     """
-    import re
-
-    from util.well_token import canonical_well_label
-
     def _log(msg: str) -> None:
         if log_fn:
             log_fn(msg)
 
     flatfield = str(opts.get("flatfield", "none") or "none")
     background = str(opts.get("background", "") or "")
-    bg_tokens = {
-        canonical_well_label(w)
-        for w in re.split(r"[,\s]+", str(opts.get("background_well", "") or ""))
-        if w
-    }
+    bg_tokens = _blank_well_tokens(opts)
     empty_well_in_use = flatfield == "empty_well" or background == "empty_well"
 
     # Snapshot the background well's timepoints BEFORE the append consumes the

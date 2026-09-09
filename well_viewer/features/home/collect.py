@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from pipeline import completeness
 from well_viewer.core.lazy import lazy
+from well_viewer.core.safe import swallow
 from well_viewer.domain.dataset_name import dataset_display_name
 
 # Saved Plots is removable, so this is a proxy rather than an import: it resolves
@@ -682,6 +683,21 @@ def _correction_parameter_rows(method: str, qc: dict, execution: dict, *,
                 # Saying "—" here would read as a formatting gap.
                 rows.append({"label": label, "severity": "warn",
                              "value": "none named — the correction did not run"})
+        elif name == "background_well_map":
+            from util.well_token import parse_background_well_map
+            with swallow("reading the empty-well pairing for the receipt"):
+                # A map this reader cannot parse is a map the run was refused
+                # for, so a receipt for a completed run cannot hold one — but a
+                # hand-edited sidecar can, and a receipt is not worth a crash.
+                mapping = parse_background_well_map(
+                    qc.get("background_well_map",
+                           execution.get("background_well_map")))
+                if mapping:
+                    rows.append({
+                        "label": "Paired with",
+                        "value": "; ".join(
+                            f"{blank} → {len(wells)} well(s)"
+                            for blank, wells in mapping.items())})
     return rows
 
 

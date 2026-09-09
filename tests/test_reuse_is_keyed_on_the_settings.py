@@ -89,6 +89,7 @@ OTHER = {
     "flatfield": "per_channel",
     "background_dir": "/data/blank",
     "background_well": "H12",
+    "background_well_map": "H12=A01",
     "no_save_tophat": True,
     "no_auto_threshold": True,
     "pos_control_well": "A01",

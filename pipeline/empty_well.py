@@ -47,6 +47,8 @@ from util.image_exts import is_run_input_member
 from util.timepoint import parse_hours as _tp_parse_hours
 from util.well_token import (
     background_well_key as _bg_well_key,
+    canonical_well_label,
+    parse_background_well_map,
     split_background_wells as _split_background_wells,
 )
 
@@ -445,3 +447,296 @@ def _basic_flatfield_models(input_dir: Path, reader: _StemReader,
         if field is not None:
             models[tok] = {_POOLED_TP: field}
     return models
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pairing a blank with the wells it corrects
+#
+# Everything above builds ONE reference for the whole plate, pooled across every
+# named blank. That is the right model when the blanks differ only by noise, and
+# the wrong one when they differ because of the treatment: a compound that
+# fluoresces, or a different medium in one block, puts real signal into its own
+# blank, and pooling then spreads that signal across every well on the plate.
+# Nothing in the output says so — the numbers look exactly like corrected ones.
+#
+# So a run may instead pair each blank with the wells it corrects. The models
+# gain one dimension, the group, and the per-image lookup does not change at
+# all: each well's worker is handed its own group's models and goes on asking
+# the same `_empty_well_field(models, token, tp_key)` it always did.
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: The single group of a run with no pairing map — every named blank pooled.
+#: Empty string rather than a sentinel object so the grouped dict is plain data
+#: that pickles into a worker and reads in a log without a repr of its own.
+_POOLED_GROUP = ""
+
+#: Private ``shared_kwargs`` keys: the grouped models and the well→group map.
+#: Leading underscore because that is this pipeline's convention for "reaches
+#: the worker pool but not ``process_image_group``" — ``_process_groups_in_worker``
+#: filters them, as it does ``_fov_threads`` and ``_stardist_params``.
+GROUPED_FLATFIELD_KEY = "_grouped_flatfield_models"
+GROUPED_BACKGROUND_KEY = "_grouped_background_models"
+WELL_GROUP_KEY = "_blank_group_of_well"
+
+
+class BlankGroups:
+    """Which blank corrects which well, for one run.
+
+    Two shapes in one object because they are two readings of one decision:
+    *by_group* is what to build a model from, and *well_group* is which model a
+    given well then gets. Deriving either from the other at a call site is how
+    the two would come to disagree.
+
+    A run with no map has exactly one group, :data:`_POOLED_GROUP`, holding every
+    named blank — so the pooled behaviour is not a special case threaded through
+    the code below, it is this class with one entry.
+    """
+
+    def __init__(self, background_well="", background_well_map="", *,
+                 corrections=()) -> None:
+        mapping = parse_background_well_map(background_well_map)
+        self.paired = bool(mapping)
+        #: Whether either correction actually asked for the blank. A map given
+        #: alongside `--flatfield basic` shapes nothing, so it must not refuse
+        #: anything either; deciding that here, once, keeps the question off
+        #: every site that acts on the plan.
+        self.in_force = "empty_well" in tuple(corrections)
+        if self.paired:
+            self.by_group: dict[str, list[str]] = {b: [b] for b in mapping}
+            self.well_group: dict[str, str] = {
+                well: blank for blank, wells in mapping.items() for well in wells}
+        else:
+            self.by_group = {_POOLED_GROUP: _split_background_wells(background_well)}
+            self.well_group = {}
+
+    def group_of(self, well_label) -> str:
+        """The group key whose model corrects *well_label*.
+
+        An unmapped well answers :data:`_POOLED_GROUP`, which on a paired run is
+        a group that does not exist and therefore an empty model — but no run
+        reaches that, because :meth:`uncovered` refuses the run first. The
+        fallback is here so this cannot be the thing that decides; a well with no
+        blank is a refusal, never a quiet no-op.
+        """
+        if not self.paired:
+            return _POOLED_GROUP
+        canon = canonical_well_label(well_label)
+        return self.well_group.get(canon or str(well_label), _POOLED_GROUP)
+
+    def uncovered(self, well_labels) -> list[str]:
+        """The wells of *well_labels* that no blank claims, canonical and sorted.
+
+        Blanks themselves are not samples and are not expected to be covered.
+        Empty on an unpaired run: pooling covers the plate by construction.
+        """
+        if not self.paired:
+            return []
+        blanks = {b for b in self.by_group}
+        out = set()
+        for label in well_labels:
+            canon = canonical_well_label(label) or str(label).strip()
+            if canon in blanks or canon in self.well_group:
+                continue
+            out.add(canon)
+        return sorted(out)
+
+    def blanks(self) -> list[str]:
+        """Every well this run treats as a blank, in the order they were named."""
+        return [w for wells in self.by_group.values() for w in wells]
+
+
+def build_grouped_models(
+    input_dir: Path,
+    *,
+    groups: BlankGroups,
+    builder,
+    **kwargs,
+) -> dict[str, dict[str, dict[str, np.ndarray]]]:
+    """Run *builder* once per group, returning ``{group: {channel: {tp: field}}}``.
+
+    *builder* is :func:`build_background_models` or :func:`build_flatfield_models`
+    — the pooled builders, unchanged and called with one group's blanks each
+    time. That is the whole of the grouping: a group is a run of the existing
+    sampler over a subset of the blanks, so a paired run and a pooled run of the
+    same blank produce the same field by construction rather than by agreement.
+    """
+    return {
+        group: builder(input_dir, background_wells=blanks, **kwargs)
+        for group, blanks in groups.by_group.items()
+    }
+
+
+def models_for_well(grouped, groups: BlankGroups, well_label) -> dict:
+    """The one group's models that correct *well_label*."""
+    return (grouped or {}).get(groups.group_of(well_label), {})
+
+
+def shared_kwargs_for_well(shared_kwargs: dict, well_label: str) -> dict:
+    """*shared_kwargs* with this well's own empty-well models in place.
+
+    The slice happens here, at the point a well is handed to a worker, and this
+    is why nothing below it changes: ``process_image_group`` and
+    ``_correct_image_group`` go on receiving one flat ``{channel: {tp: field}}``
+    per correction and go on knowing nothing about wells or groups.
+
+    It also keeps the pickle small. Every well already receives its own copy of
+    ``shared_kwargs`` — the pool is ``spawn``, so there is no sharing — and
+    shipping every group's fields to every worker would multiply that by the
+    number of groups. The grouped dicts are dropped on the way out.
+
+    A run with no grouped models is returned untouched, same object: the pooled
+    path costs nothing and copies nothing.
+    """
+    grouped_ff = shared_kwargs.get(GROUPED_FLATFIELD_KEY)
+    grouped_bg = shared_kwargs.get(GROUPED_BACKGROUND_KEY)
+    groups = shared_kwargs.get(WELL_GROUP_KEY)
+    if groups is None:
+        return shared_kwargs
+    out = {k: v for k, v in shared_kwargs.items()
+           if k not in (GROUPED_FLATFIELD_KEY, GROUPED_BACKGROUND_KEY,
+                        WELL_GROUP_KEY)}
+    if grouped_ff is not None:
+        out["flatfield_models"] = models_for_well(grouped_ff, groups, well_label)
+    if grouped_bg is not None:
+        out["background_models"] = models_for_well(grouped_bg, groups, well_label)
+    return out
+
+
+def require_grouped_models(what: str, mode: str, grouped, groups: BlankGroups,
+                           source) -> None:
+    """:func:`_require_empty_well_models`, asked once per pairing group.
+
+    The plate-wide guard asks whether *any* model was built. On a paired run that
+    is the wrong question: three of four blocks losing their blank still leaves
+    one model standing, and the guard that exists to stop an uncorrected well
+    reporting success would wave the run through. So each group answers for
+    itself, and the message names the blank that produced nothing.
+    """
+    if mode != "empty_well":
+        return
+    for group, blanks in groups.by_group.items():
+        _require_empty_well_models(
+            what, mode, (grouped or {}).get(group), blanks, source)
+
+
+def refuse_uncovered_wells(groups: BlankGroups, *well_lists) -> None:
+    """Stop a paired run that does not say which blank corrects every well.
+
+    The alternative rules were all considered and all end the same way. Pooling
+    the unmapped wells corrects them with a reference containing other
+    treatments' autofluorescence; leaving them uncorrected puts two differently
+    processed populations in one CSV; and both produce output indistinguishable
+    from the correct thing. A run that cannot say what corrects a well does not
+    start.
+
+    Only when a map is actually in force and an empty-well correction is
+    actually requested — see :attr:`BlankGroups.in_force`.
+
+    Called the moment the plate's own well list is known, which is the first
+    moment a map can be held against it and well before any image is read: a
+    run refused here has cost the user nothing.
+    """
+    if not (groups.paired and groups.in_force):
+        return
+    # Each list is `find_well_zips` / `find_well_folders`' own `(well, path)`
+    # shape, taken rather than pre-flattened so the caller cannot build the
+    # label list a different way than the run's own discovery did.
+    missing = groups.uncovered(
+        well for wells in well_lists for well, _path in wells)
+    if not missing:
+        return
+    raise SystemExit(
+        f"--background_well_map does not say which blank corrects "
+        f"{len(missing)} well(s): {', '.join(missing)}.\n\n"
+        f"Every well the run processes needs a blank, because a well corrected "
+        f"by the wrong block's reference produces numbers that look exactly "
+        f"like correct ones. Add the well(s) to a blank's entry, or drop the "
+        f"map to pool every blank into one plate-wide reference."
+    )
+
+
+def plan_blank_groups(args, input_dir: Path) -> tuple[BlankGroups, Path]:
+    """The run's blank pairing, and the directory its blanks are read from.
+
+    Takes the parsed namespace because the three values it reads are one
+    decision made in one place — ``pipeline.cli_args`` declares all three — and
+    splitting them across a call site is how two of them come to disagree.
+
+    *background_dir* is normally the run's own input. A batched remote run is
+    the exception it exists for: that run stages one batch at a time, so the
+    blank is not in most batches' input at all, and it is uploaded once to a
+    directory of its own and named here. Every batch then builds the same
+    reference from it.
+    """
+    groups = BlankGroups(args.background_well, args.background_well_map,
+                         corrections=(args.flatfield, args.background))
+    source = (Path(args.background_dir).expanduser()
+              if args.background_dir else input_dir)
+    if groups.paired:
+        log.info("Empty-well pairing: %s", describe_pairing(groups))
+    return groups, source
+
+
+def prepare_models(shared_kwargs: dict, *, what: str, mode: str,
+                   input_dir: Path, groups: BlankGroups, builder,
+                   flat_key: str, grouped_key: str, source: Path,
+                   **kwargs) -> None:
+    """Build one correction's models, say what was built, refuse a gap, install.
+
+    The four steps are one sequence and belong together: a model built and not
+    checked is the silent-no-op this module exists to prevent, and a model
+    checked and installed in the wrong shape is a well corrected by another
+    block's blank. Keeping them in one call means a future correction cannot
+    pick up three of the four.
+
+    *source* is both the directory the blanks are read from and the directory
+    the refusal message names, and it is one argument for that reason: passed
+    separately they can differ, and a guard that names a directory the builder
+    did not read sends the user to check the wrong place.
+
+    The log line names the group on a paired run and omits it on a pooled one,
+    so an unpaired run's log reads exactly as it did before pairing existed.
+    """
+    grouped = build_grouped_models(
+        input_dir, groups=groups, builder=builder,
+        background_dir=source, **kwargs)
+    for group, models in grouped.items():
+        log.info("%s (%s)%s: built field(s) for channel(s): %s",
+                 what, mode, f" [{group}]" if group else "",
+                 sorted(models) or "(none found)")
+    require_grouped_models(what, mode, grouped, groups, source)
+    install_grouped_models(shared_kwargs, groups, flat_key, grouped_key, grouped)
+
+
+def describe_pairing(groups: BlankGroups) -> str:
+    """One line naming each blank and how many wells it corrects, or ``""``."""
+    if not groups.paired:
+        return ""
+    counts = {blank: 0 for blank in groups.by_group}
+    for _well, blank in groups.well_group.items():
+        counts[blank] = counts.get(blank, 0) + 1
+    return "; ".join(f"{blank} corrects {n} well(s)" for blank, n in counts.items())
+
+
+def install_grouped_models(shared_kwargs: dict, groups: BlankGroups,
+                           flat_key: str, grouped_key: str, grouped) -> None:
+    """Put one run's models into *shared_kwargs*, in the shape that run needs.
+
+    The two shapes are deliberately not unified. An **unpaired** run installs
+    the flat ``{channel: {tp: field}}`` under its usual key and nothing else —
+    the same object, in the same place, that every run installed before pairing
+    existed, so the pooled path is not merely equivalent to the old one but is
+    the old one. A **paired** run installs the grouped dict and the groups under
+    private keys instead, and :func:`shared_kwargs_for_well` swaps in each
+    well's own group as that well is submitted.
+
+    The flat key is emptied rather than left absent on a paired run, because
+    ``process_image_group`` reads it either way and an absent key would be a
+    second spelling of "no model" beside the empty dict.
+    """
+    if not groups.paired:
+        shared_kwargs[flat_key] = grouped.get(_POOLED_GROUP, {})
+        return
+    shared_kwargs[flat_key] = {}
+    shared_kwargs[grouped_key] = grouped
+    shared_kwargs[WELL_GROUP_KEY] = groups

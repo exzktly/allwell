@@ -37,6 +37,7 @@ import threading
 from pathlib import Path
 from collections.abc import Callable
 
+from util.well_token import blank_wells_for_run
 from services.input_resolution_service import has_well_zip
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
 from services.remote_config import RemoteHost
@@ -1337,7 +1338,8 @@ class PipelineRunner:
                 # filters must not diff it away. Passed whenever either
                 # empty-well mode is on; ignored otherwise.
                 background_wells=(
-                    opts.get("background_well", "")
+                    blank_wells_for_run(opts.get("background_well", ""),
+                                        opts.get("background_well_map", ""))
                     if "empty_well" in (opts.get("background"),
                                         opts.get("flatfield"))
                     else ""),

@@ -104,6 +104,37 @@ def _emit_stardist_threshold_flags(args: list[str], opts: dict) -> None:
             args += [flag, str(v)]
 
 
+def _emit_correction_flags(args: list[str], opts: dict) -> None:
+    """The flat-field / background cluster: the two methods and the blank.
+
+    Extracted from ``build_pipeline_args`` because that function was at the
+    complexity ceiling and this is the coherent piece to take — four decisions
+    about one subject, all reading each other. Same shape as
+    :func:`_emit_auto_threshold_flags` below.
+    """
+    flatfield = str(opts.get("flatfield", "none") or "none")
+    if flatfield and flatfield != "none":
+        args += ["--flatfield", flatfield]
+    # Always pass the selected method explicitly so the run can never silently
+    # fall back to the CLI default — the GUI dropdown is the source of truth.
+    background = str(opts.get("background", "sliding_disk") or "sliding_disk")
+    if background:
+        args += ["--background", background]
+    # The blank feeds both empty_well flat-field and empty_well background, and
+    # so does the map that pairs it with the wells it corrects. Neither shapes
+    # anything unless a correction is actually reading the blank, and neither is
+    # emitted when unset — which is what keeps a run without a map producing the
+    # argv it always did, and therefore keeps its settings digest, and therefore
+    # every already-processed well on that plate, exactly where it was.
+    if "empty_well" not in (flatfield, background):
+        return
+    for flag, key in (("--background_well", "background_well"),
+                      ("--background_well_map", "background_well_map")):
+        value = str(opts.get(key, "") or "").strip()
+        if value:
+            args += [flag, value]
+
+
 def _emit_auto_threshold_flags(args: list[str], opts: dict) -> None:
     """Append the end-of-run threshold flags.
 
@@ -236,19 +267,7 @@ def build_pipeline_args(
     if shape_features:
         args += ["--shape_features"] + list(shape_features)
 
-    # Quality control: flat-field correction + background method + debris removal.
-    flatfield = str(opts.get("flatfield", "none") or "none")
-    bg_well = str(opts.get("background_well", "") or "").strip()
-    if flatfield and flatfield != "none":
-        args += ["--flatfield", flatfield]
-    # Always pass the selected method explicitly so the run can never silently
-    # fall back to the CLI default — the GUI dropdown is the source of truth.
-    background = str(opts.get("background", "sliding_disk") or "sliding_disk")
-    if background:
-        args += ["--background", background]
-    # The background well feeds both empty_well flat-field and empty_well bg.
-    if bg_well and (flatfield == "empty_well" or background == "empty_well"):
-        args += ["--background_well", bg_well]
+    _emit_correction_flags(args, opts)
     # Auto-threshold. The form's checkbox is the positive statement ("calculate
     # thresholds"); the pipeline flag is the negative, so only the off case emits
     # anything. Absent from a legacy opts dict ⇒ on, matching prior behaviour.

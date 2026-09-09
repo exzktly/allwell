@@ -580,6 +580,41 @@ per-well folder, or loose TIFs. The run is blocked if an `empty_well` mode is
 selected but the Background well field is blank or none of the named wells are
 present in the input folder.
 
+**Pairing a blank with the wells it corrects.** Pooling is right when the blanks
+differ only by noise, and wrong when they differ because of the *treatment*. A
+compound that fluoresces, or a different medium in one block of the plate, puts
+real signal into that block's own blank — and pooling then spreads it over every
+well on the plate. Nothing about the result looks wrong: the numbers come out
+looking exactly like corrected ones.
+
+When that is your situation, pair each blank with the block it belongs to
+instead. The map is written as one entry per blank, entries separated by `;` or
+a newline:
+
+```
+H12=A01:D12; G12=E01:H12
+```
+
+`A01:D12` is the rectangle from A01 to D12 — rows A–D, columns 1–12. A blank's
+wells can also be listed individually (`H12=A01,A02,B05`), or mixed. Case and
+zero-padding do not matter: `h12`, `H12` and `H1` are the same well.
+
+With a map in force **every well the run processes must be named by exactly one
+blank**, or the run refuses to start and lists the wells nobody claimed. That is
+deliberate. The alternatives are to pool the leftovers — correcting them with
+other treatments' autofluorescence — or to leave them uncorrected, which puts two
+differently processed populations of wells in one results file. Both produce
+output that cannot be told from the correct thing, so neither is offered.
+
+A map is also refused if it could be read two ways: a well claimed by two blanks,
+a well name it cannot parse, a blank with no wells, or a blank that also appears
+as one of the wells being corrected. Each refusal names the text it choked on.
+
+Leave the map empty and nothing changes — the blanks pool exactly as they always
+have. Re-running a plate with a *different* pairing reprocesses the wells it
+affects rather than reusing the old numbers, so you can change your mind without
+having to force a full re-run.
+
 **Per-timepoint correction.** Background drifts over the course of a timecourse,
 so the field is built **separately for each timepoint**: the empty-well frames at
 a given timepoint correct the sample frames at that same timepoint. Timepoint

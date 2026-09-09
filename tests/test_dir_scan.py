@@ -200,3 +200,90 @@ def test_the_classification_comes_from_the_listing_snapshot(tmp_path):
 
     assert "keep.tif" in names
     assert names in (["keep.tif"], ["keep.tif", "vanishes.tif"])
+
+
+def test_a_read_failure_on_one_entry_is_raised_not_dropped():
+    """An EACCES on one entry must not quietly remove an image from the plate.
+
+    The suppression here exists to match ``Path.is_file()``, which answers
+    ``False`` for ENOENT, ENOTDIR, EBADF and ELOOP — and *re-raises* everything
+    else. A bare ``except OSError`` also swallowed the errnos that mean "I could
+    not look", which turns an unreadable entry into a silently missing field: a
+    run short some images, reporting the shortfall nowhere.
+    """
+    import errno
+
+    from util.dir_scan import _is_not_a_file
+
+    for code in (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP):
+        assert _is_not_a_file(OSError(code, os.strerror(code))), code
+    for code in (errno.EACCES, errno.EIO, errno.ENOMEM):
+        assert not _is_not_a_file(OSError(code, os.strerror(code))), code
+
+
+def test_a_read_failure_on_one_entry_propagates_out_of_the_scan(tmp_path, monkeypatch):
+    """The predicate above, reached through the real function.
+
+    Asserting the predicate alone would pass with the ``except OSError`` still in
+    place, because nothing would call it.
+    """
+    import errno
+
+    from util import dir_scan
+
+    root = tmp_path / "in"
+    root.mkdir()
+    for name in ("a.tif", "b.tif"):
+        (root / name).write_bytes(b"II*\0")
+
+    class _Entry:
+        def __init__(self, name, code):
+            self.name = name
+            self._code = code
+
+        def is_file(self):
+            raise OSError(self._code, os.strerror(self._code), self.name)
+
+        def is_dir(self):
+            return False
+
+    class _Scan:
+        def __init__(self, entries):
+            self._entries = entries
+
+        def __enter__(self):
+            return iter(self._entries)
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(dir_scan.os, "scandir",
+                        lambda _p: _Scan([_Entry("a.tif", errno.EACCES)]))
+    with pytest.raises(PermissionError):
+        dir_scan.files_and_subdirs(root)
+
+    # …while a vanished entry is still simply absent.
+    monkeypatch.setattr(dir_scan.os, "scandir",
+                        lambda _p: _Scan([_Entry("a.tif", errno.ENOENT)]))
+    assert dir_scan.files_and_subdirs(root) == ([], [])
+
+
+def test_path_order_is_not_name_order_on_windows():
+    """Why the sort is over Paths rather than over names.
+
+    ``PurePath`` comparison casefolds on Windows, so sorting the *names* of a
+    mixed-case plate would order it differently there — and the schema scan
+    strides its sample, so it would sample different files on one platform.
+
+    This pins the `pathlib` semantics the choice rests on, which is the half that
+    is decidable here. The half that is **not**: on POSIX, path order and name
+    order are identical for the same strings, so replacing ``files.sort()`` with
+    ``files.sort(key=lambda p: p.name)`` cannot be caught on this platform by any
+    assertion. Said out loud rather than left looking covered.
+    """
+    from pathlib import PurePosixPath, PureWindowsPath
+
+    names = ["B01.tif", "a01.tif", "C01.tif", "b02.tif"]
+    assert [p.name for p in sorted(PureWindowsPath(n) for n in names)] != (
+        sorted(names)), "PureWindowsPath no longer casefolds; the comment is stale"
+    assert [p.name for p in sorted(PurePosixPath(n) for n in names)] == sorted(names)

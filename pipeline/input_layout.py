@@ -33,6 +33,7 @@ import zipfile
 from pathlib import Path
 
 from util.aw_safe import swallow
+from util.dir_scan import files_in, subdirs_in
 from util.image_exts import is_run_input_member
 from util.well_token import canonical_well_label as _canonical_well_label
 
@@ -56,7 +57,14 @@ def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
     found: list[tuple[str, Path]] = []
     skipped: list[Path] = []
 
-    for p in sorted(input_dir.glob("*.zip")):
+    # An archive is a file: a *directory* named ``A01.zip`` matched the glob this
+    # replaced, and was then handed on as a well whose every image group failed
+    # to open. The Analyze planner's ``has_well_zip`` already says such a thing is
+    # not a well archive, and the two have to agree — the planner is what decides
+    # whether a run may start at all. One enumeration, no stat per entry.
+    for p in files_in(input_dir):
+        if p.suffix.lower() != ".zip":
+            continue
         if p.name.startswith("."):
             log.debug("Skipping hidden file: %s", p.name)
             continue
@@ -89,11 +97,14 @@ def find_well_folders(input_dir: Path) -> list[tuple[str, Path]]:
     """
     found: list[tuple[str, Path]] = []
     try:
-        entries = sorted(input_dir.iterdir())
+        # From the listing's entry type. Asked per entry, this cost one stat per
+        # *loose image* on a FLAT plate — the layout it is called for — which on
+        # Windows is a file handle opened and closed over the wire apiece.
+        entries = subdirs_in(input_dir)
     except OSError:
         return found
     for p in entries:
-        if not p.is_dir() or p.name.startswith(".") or p.name.startswith("_"):
+        if p.name.startswith(".") or p.name.startswith("_"):
             continue
         well = _canonical_well_label(p.name)
         if well is not None:

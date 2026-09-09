@@ -25,6 +25,7 @@ import zipfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+from util.dir_scan import files_in
 from util.well_token import is_valid_well_name
 
 __all__ = [
@@ -51,8 +52,18 @@ def _well_zips_in(input_dir: Path):
     few lines away decides with ``is_valid_well_name``. Two rules for "is this a
     well" inside one function is the §15 defect in miniature: staging would take
     ``a1/`` but not ``a1.zip``, and ``A13.zip`` but not ``A13/``.
+
+    **An archive is a file.** A *directory* named ``A01.zip`` — what an expander
+    names an archive it has unpacked in place — matched ``glob("*.zip")``, so
+    this said yes to it while the Analyze planner's ``has_well_zip`` says no.
+    Those two have to agree: this generator is the remote side's whole answer,
+    feeding the mode detector, the staging set, the rollback set and the
+    mixed-mode branch, so disagreeing meant the planner refused a layout the
+    runner then staged as ZIP mode and skipped. ``files_in`` takes the entry type
+    from the listing, so the rule costs the same single enumeration the glob did.
     """
-    return (p for p in input_dir.glob("*.zip") if is_valid_well_name(p.stem))
+    return (p for p in files_in(input_dir)
+            if p.suffix.lower() == ".zip" and is_valid_well_name(p.stem))
 
 
 

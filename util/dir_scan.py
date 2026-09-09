@@ -54,10 +54,33 @@ only.
 
 from __future__ import annotations
 
+import errno
 import os
+import pathlib as _pathlib
 from pathlib import Path
 
 __all__ = ["files_and_subdirs", "files_in", "subdirs_in"]
+
+
+def _is_not_a_file(exc: OSError) -> bool:
+    """Whether ``Path.is_file()`` would answer ``False`` for *exc* rather than raise.
+
+    ``pathlib`` draws this line itself, in ``_ignore_error``: ENOENT, ENOTDIR,
+    EBADF and ELOOP mean "the entry is not of this kind", plus a set of Windows
+    winerror codes for a name the filesystem cannot even evaluate. Everything
+    else — an EACCES or an EIO on the entry's own metadata — it *re-raises*.
+
+    Borrowed rather than restated, because a copy of that list here would drift
+    from the semantics this module promises to reproduce, and the difference is
+    the one it must not get wrong: suppressing a read failure drops an image from
+    the plate and reports the shortfall nowhere, which is a run that silently
+    measured fewer fields than it was handed. The fallback covers a Python whose
+    private name has moved; it is the documented set, so it errs toward raising.
+    """
+    predicate = getattr(_pathlib, "_ignore_error", None)
+    if predicate is not None:
+        return bool(predicate(exc))
+    return exc.errno in (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP)
 
 
 def files_and_subdirs(folder: Path | str) -> tuple[list[Path], list[Path]]:
@@ -87,10 +110,13 @@ def files_and_subdirs(folder: Path | str) -> tuple[list[Path], list[Path]]:
                 files.append(base / entry.name)
             elif entry.is_dir():
                 dirs.append(base / entry.name)
-        except OSError:
-            # Deleted under us, or unreadable metadata. `Path.is_file` answers
-            # False here rather than raising, and every call site was written
-            # against that; the entry is simply not one of the files.
+        except OSError as exc:
+            # Deleted under us, or a name the filesystem cannot evaluate: the
+            # entry is simply not one of the files, which is what `Path.is_file`
+            # answers for these. Any *other* OSError is a failure to read the
+            # entry and is raised — see `_is_not_a_file`.
+            if not _is_not_a_file(exc):
+                raise
             continue
     files.sort()
     dirs.sort()

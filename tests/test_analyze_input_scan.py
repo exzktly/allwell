@@ -139,3 +139,77 @@ def test_the_scan_applies_the_schema_it_infers_not_only_the_channels(qapp, tmp_p
     assert tab._build_schema_arg() == "channel:well:fov"
     assert tab._filename_sep() == "-"
     assert tab._nuclear_token_edit.text() == "DAPI"
+
+
+def test_a_schema_the_scan_is_unsure_of_is_not_applied(qapp, tmp_path):
+    """A single-channel plate must not have Run blocked by the folder scan.
+
+    ``schema_infer`` sets ``confident`` only when it placed both a well slot and
+    a channel slot, and its own docstring says a non-confident guess is advisory
+    — this is the caller that has to honour that. A single-channel plate carries
+    a constant channel token, so no channel slot can be placed and the guess
+    comes back with ``ignore`` where the channel belongs. Writing that into the
+    picker produced a schema the form's own validator rejects, which
+    ``_validate_run_request`` raises as a blocking dialog: picking the folder
+    made the run impossible.
+
+    Asserted on ``_schema_errors()`` — the thing that actually blocks Run — and
+    on the schema being the one the user had, not merely "not the guess".
+    """
+    from analyze.tab import AnalyzeTab
+    from util.schema_infer import infer_from_dir
+
+    tab = AnalyzeTab()
+    plate = tmp_path / "in"
+    plate.mkdir()
+    for well in ("A01", "A02", "B01"):
+        for fov in (1, 2):
+            (plate / f"Plate1_{well}_DAPI_f{fov}.tif").write_bytes(b"II*\0")
+
+    guess = infer_from_dir(str(plate))
+    assert guess is not None and not guess.confident, (
+        "the fixture must be a plate the inference is unsure of, or this test "
+        "measures the confident path instead")
+    assert "ignore" in guess.schema_str
+
+    before = tab._schema_picker.schema()
+    assert tab._schema_errors() == []
+
+    tab._autofill_from_input_scan(str(plate))
+
+    assert tab._schema_picker.schema() == before, (
+        "the scan overwrote the schema with a guess it called non-confident")
+    assert tab._schema_errors() == [], (
+        "picking this folder leaves the form unable to start a run")
+    # And it says so, rather than reporting "schema guessed" either way. Read off
+    # the real dashboard the real handler wrote to, not a stand-in.
+    said = tab._dashboard._status.text()
+    assert "left as you set it" in said, said
+    assert "channel tokens not recognised" in said, said
+
+
+def test_a_confident_schema_is_still_applied(qapp, tmp_path):
+    """The other half: the fix must not turn the scan off.
+
+    A two-channel plate places both slots, so the guess is confident and the
+    schema lands — which is the behaviour the branch added in the first place,
+    and `test_the_scan_applies_the_schema_it_infers_not_only_the_channels` pins
+    in its own layout. Here to hold the two halves against each other in one
+    file, so a fix that simply stopped applying anything cannot pass both.
+    """
+    from analyze.tab import AnalyzeTab
+    from util.schema_infer import infer_from_dir
+
+    tab = AnalyzeTab()
+    plate = tmp_path / "in"
+    plate.mkdir()
+    for well in ("A01", "A02"):
+        for chan in ("DAPI", "GFP"):
+            for fov in (1, 2):
+                (plate / f"Plate1-{well}-{chan}-f{fov}.tif").write_bytes(b"II*\0")
+
+    guess = infer_from_dir(str(plate))
+    assert guess is not None and guess.confident, guess
+    tab._autofill_from_input_scan(str(plate))
+    assert tab._schema_picker.schema() == guess.schema_str
+    assert tab._schema_picker.separator() == guess.separator

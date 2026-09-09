@@ -5237,13 +5237,23 @@ The same rule reaches the remote runner, because the same plate does.
 `_detect_local_input_mode` runs at the start of every remote run and *before*
 the mode is known, so on a FLAT plate — a folder of loose images — it looks at
 the whole plate; `_unconsumed_loose_tifs` and `_stage_mixed_mode` walk it again
-straight after. All three asked which entries were directories one entry at a
-time and now take that from the listing, so the cost of starting a run stops
-growing with the number of images in the plate.
-`tests/test_remote_input_scan_cost.py` counts it the same way the Analyze one
-does, and pairs the count with a test that every layout is still *detected* —
-a mode detector that answered FLAT unconditionally would satisfy the count
-alone.
+straight after, and `stage_local_zips` walks it twice more, once to find the
+well folders it will zip and once for the folders the zipper has left behind.
+Every one of them takes the entry type from the listing, so the cost of starting
+a run stops growing with the number of images in the plate.
+
+The staging pair is the one this branch first missed, and the shape of the miss
+is worth keeping: `folders_after_zipper` was spelled identically to the
+`_stage_mixed_mode` site three lines above it and was left asking `p.is_dir()`
+per entry — which on a copy-mode run, the default, means one stat per loose TIF
+still sitting in the input folder. Measured at 45 stats for 40 images and 180
+for 160, i.e. the linear growth this whole section exists to remove, inside a
+function nothing counted. `tests/test_remote_input_scan_cost.py` now counts
+`stage_local_zips` as well as the detector, because a sweep is only as complete
+as the sites something measures; it counts the same way the Analyze test does,
+and pairs each count with a test that every layout is still *detected* and
+still *staged* — a mode detector that answered FLAT unconditionally would
+satisfy the count alone.
 
 The actions are the layouts. A folder **named** `in` is the input directly
 (output `../out`); a folder that **contains** `in/` feeds the pipeline from that

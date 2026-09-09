@@ -678,14 +678,26 @@ def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) 
         return toks
 
     toks: set[str] = set()
-    grouped = plan_input_layout(raw).input_dir
-    if grouped is not None:
-        toks |= set(iter_well_tokens(grouped)) | _loose_toks(grouped)
-        if grouped != raw:
-            toks |= _loose_toks(raw)  # loose TIFs at the selected root
-    if toks:
-        return len(toks)
-    return len(tif_files_in(raw)) or 1
+    try:
+        grouped = plan_input_layout(raw).input_dir
+        if grouped is not None:
+            toks |= set(iter_well_tokens(grouped)) | _loose_toks(grouped)
+            if grouped != raw:
+                toks |= _loose_toks(raw)  # loose TIFs at the selected root
+        if toks:
+            return len(toks)
+        return len(tif_files_in(raw)) or 1
+    except OSError:
+        # Best-effort means best-effort against a folder that cannot be *listed*
+        # too, which is newly possible: the listing helpers raise where
+        # ``Path.glob`` used to swallow the refusal and hand back an empty list.
+        # This is a progress denominator, and the caller asks for it *before*
+        # ``resolve_input_output`` — so raising from here pre-empted the refusal
+        # that names the folder and the errno, and surfaced instead as a bare
+        # ``[Errno 13]`` through ``pipeline_runner``'s broad handler with nothing
+        # logged by the resolver at all. Meanwhile the readout went on showing
+        # the long UNREADABLE sentence, so one folder had two answers.
+        return 1
 
 
 @dataclass(frozen=True)
@@ -1313,12 +1325,21 @@ def _fold_well_folders_into_existing_zips(
     subdirs: list[Path] = []
     with swallow(f"listing the grouped directory {grouped.name}"):
         files, subdirs = files_and_subdirs(grouped)
+    # By *name*, not by path, at both steps. `files_and_subdirs` sorts the Path
+    # objects, and `PurePath` comparison casefolds on Windows — which is the
+    # right default for the scan that strides a sample, and the wrong one here,
+    # where both of these collapse several entries onto one well token: where
+    # `a1.zip` and `A01.zip` both exist the dict keeps whichever comes last, and
+    # the folder order decides whose images land in the archive last. Its two
+    # sibling sites (`_grouped_member_index` and `iter_well_tokens`) were given
+    # the same key for the same reason, and a third that merely inherited path
+    # order would read as a decision rather than the omission it was.
     zips = {
         canonical_well_label(q.stem): q
-        for q in files
+        for q in sorted(files, key=lambda q: q.name)
         if q.suffix.lower() == ".zip" and canonical_well_label(q.stem)
     }
-    for entry in subdirs:
+    for entry in sorted(subdirs, key=lambda q: q.name):
         tok = canonical_well_label(entry.name)
         target = zips.get(tok) if tok else None
         if target is None:

@@ -550,10 +550,8 @@ def stage_local_zips(
             for p in input_dir.glob(pat)
         ))
     elif mode is LocalInputMode.FOLDER:
-        source_well_folders = tuple(sorted(
-            p for p in input_dir.iterdir()
-            if p.is_dir() and is_valid_well_name(p.name)
-        ))
+        source_well_folders = tuple(
+            p for p in subdirs_in(input_dir) if is_valid_well_name(p.name))
         # v5.x.x resume support: a prior ``--move-source-tifs`` run
         # may have crashed mid-way, leaving SOME TIFs in well
         # subfolders and SOME still loose at the top level. Capture
@@ -649,10 +647,12 @@ def stage_local_zips(
     # FLAT / FOLDER path through ``_stage_input_zips`` was broken
     # because the framework expected zips here but the zipper only
     # produces folders.
-    folders_after_zipper = sorted(
-        p for p in input_dir.iterdir()
-        if p.is_dir() and is_valid_well_name(p.name)
-    )
+    # From the listing's entry type, not a stat per entry. In copy mode — the
+    # default — every loose TIF is still in input_dir when this runs, so
+    # ``p.is_dir()`` here cost one stat per image at the start of every remote
+    # run: the defect the site three lines up was converted for.
+    folders_after_zipper = [
+        p for p in subdirs_in(input_dir) if is_valid_well_name(p.name)]
     # The TIFs a folder gave up are deleted the moment its own zip is
     # published, rather than at the end of the run. ``_zip_well_folder`` goes
     # through ``atomic_zip``, which renames a verified archive into place or

@@ -473,3 +473,54 @@ def test_a_real_well_archive_still_answers_yes(tmp_path):
     _make_zip(tmp_path / "A01.zip", {"exp_w1_A01_1_T01.tif": b"old"})
     assert has_well_zip(tmp_path) is True
     assert has_well_zip(tmp_path / "nope") is False
+
+
+def test_the_run_refuses_an_unreadable_plate_folder_by_name(tmp_path, monkeypatch):
+    """And does not raise a bare errno out of the resolver with nothing logged.
+
+    ``tif_files_in`` now raises where ``Path.glob`` swallowed the refusal, and
+    ``count_expected_wells`` — documented as best-effort, and asked by the Run
+    path *before* ``resolve_input_output`` — had no guard for it. So selecting the
+    share root directly (not the ``parent/in`` shape the test above uses) and
+    pressing Run surfaced ``[Errno 13] Permission denied`` through
+    ``pipeline_runner``'s broad handler, with the resolver logging nothing at
+    all — while the readout went on showing the long UNREADABLE sentence. One
+    folder, two answers.
+    """
+    import pytest
+
+    from services.input_resolution_service import (
+        count_expected_wells, plan_input_layout, resolve_input_output,
+    )
+
+    plate = tmp_path / "share_root"
+    plate.mkdir()
+    (plate / "exp_GFP_A01_f1_t0.tif").write_bytes(b"II*\0")
+
+    import os as _os
+
+    _real_scandir = _os.scandir
+
+    def refusing(path, *a, **k):
+        if Path(path) == plate:
+            raise PermissionError(13, "Permission denied", str(plate))
+        return _real_scandir(path, *a, **k)
+
+    monkeypatch.setattr("util.dir_scan.os.scandir", refusing)
+
+    # The denominator is best-effort and must not raise.
+    assert count_expected_wells(
+        plate, filename_schema="experiment:channel:well:fov:timepoint",
+        filename_sep="_") >= 1
+
+    # The plan says what is wrong, naming the folder.
+    plan = plan_input_layout(plate)
+    assert not plan.runnable
+
+    # And the resolver refuses with that message, as a ValueError the Analyze
+    # input mixin already catches and logs — not as a bare OSError.
+    with pytest.raises(ValueError) as excinfo:
+        resolve_input_output(
+            plate, filename_schema="experiment:channel:well:fov:timepoint",
+            filename_sep="_")
+    assert str(plate) in str(excinfo.value)

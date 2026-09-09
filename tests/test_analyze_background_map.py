@@ -215,3 +215,51 @@ def test_an_unreadable_map_leaves_the_form_pooled_and_says_so(tab):
     tab._set_background_map("H12=A01; G12=A01")     # A01 claimed twice
     assert tab._background_map == {}
     assert "Pooled" in tab._bg_map_summary.text()
+
+
+def test_a_blank_with_no_wells_is_reported_as_pooled_not_as_paired(tab):
+    """The labels describe the run, and a blank with no wells is dropped en route.
+
+    ``format_background_well_map`` omits a blank that claims nothing, so a map
+    of nothing but empty blanks is a non-empty dict on the tab and an empty
+    string to the run. Both readouts used to read the dict: the editor said
+    "Every well is claimed — this pairing will run" and the form's summary said
+    "H12 → 0 well(s)", for a run that pools. Asserting the text rather than "it
+    changed", because a wrong message also differs from the right one.
+    """
+    tab._bg_map_btn.click()
+    tab._background_map = {"H12": []}
+    tab._refresh_background_map_summary()
+    tab._bg_map_refresh_uncovered()
+
+    assert tab._background_map_value() == "", "the run is handed no pairing"
+    summary = tab._bg_map_summary.text()
+    uncovered = tab._bg_map_uncovered.text()
+    assert "Pooled" in summary, summary
+    assert "0 well(s)" not in summary, summary
+    assert "will run" not in uncovered, uncovered
+    assert "pool" in uncovered.lower(), uncovered
+
+    # And once it claims a well, both say a pairing is in force.
+    tab._background_map = {"H12": ["A01"]}
+    tab._refresh_background_map_summary()
+    tab._bg_map_refresh_uncovered()
+    assert "H12 → 1 well(s)" == tab._bg_map_summary.text()
+    assert "Pooled" not in tab._bg_map_uncovered.text()
+
+
+def test_a_background_well_the_map_does_not_use_is_refused_in_the_form(tab):
+    """The run's own refusal, previewed rather than left to `SystemExit`.
+
+    A blank typed into Background well that the map never uses is held out of the
+    batches and uploaded as a reference by ``blank_wells_for_run``, and treated
+    as a sample needing a blank by the pairing plan. The form asks the same
+    object the pipeline builds, so it cannot answer differently.
+    """
+    tab._background_well_edit.setText("H12, G12")
+    error = tab._background_map_coverage_error("H12=A01:D12", "H12, G12")
+    assert error and "G12" in error, error
+
+    # Named in both, nothing is refused.
+    assert tab._background_map_coverage_error(
+        "H12=A01:D12; G12=E01:H12", "H12, G12") is None

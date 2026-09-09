@@ -129,7 +129,7 @@ def _expand_well_range(text: str) -> list[str] | None:
             for c in range(cols[0], cols[1] + 1)]
 
 
-def _covered_wells(text: str, *, blank: str) -> list[str]:
+def _covered_wells(text: str, *, blank: str, blanks=()) -> list[str]:
     """The canonical wells one map entry's right-hand side names.
 
     Accepts a comma-separated list of wells, rectangular blocks, or a mix.
@@ -137,9 +137,19 @@ def _covered_wells(text: str, *, blank: str) -> list[str]:
     token this cannot read is a well the user believes is corrected and which
     would otherwise be silently left out of the map — and an uncovered well is
     the thing the map exists to make impossible.
+
+    A **block** drops any well in *blanks*, because a block is a shorthand for a
+    region and a plate's blanks usually sit inside the region they serve: the
+    natural way to pair the bottom half of a plate is ``G12=E01:H12``, whose
+    rectangle contains both G12 and H12. Nothing is ambiguous there — a blank is
+    the reference for its block and cannot also be a sample of it — and it is
+    what the editor's own splits write, so the written grammar can say what the
+    plate dialog says. A well named **individually** is not dropped: that is a
+    statement about one well, and a blank among them is a typo worth refusing.
     """
     out: list[str] = []
     seen: set[str] = set()
+    held = set(blanks)
     for piece in text.split(","):
         item = piece.strip()
         if not item:
@@ -153,6 +163,8 @@ def _covered_wells(text: str, *, blank: str) -> list[str]:
                     f"block of wells. Write a well (A01), a block (A01:D12), or "
                     f"a comma-separated list of either.")
             wells = [one]
+        else:
+            wells = [w for w in wells if w not in held]
         for well in wells:
             if well not in seen:
                 seen.add(well)
@@ -183,9 +195,15 @@ def parse_background_well_map(value) -> dict[str, list[str]]:
     and **a well two blanks both claim**, which is the one a silent rule would
     resolve by picking one — and picking one means half a plate corrected by a
     reference the user did not choose, which is the defect the map exists to
-    prevent. A blank that also appears as a corrected well is refused for the
-    same reason: it is almost always a typo, and reading it either way changes
-    the numbers.
+    prevent. A blank named *individually* among the wells it corrects is refused
+    for the same reason: it is almost always a typo, and reading it either way
+    changes the numbers.
+
+    A blank inside a **block** is the one case that is resolved rather than
+    refused, and it is resolved because there is nothing to choose between: the
+    block is a shorthand for a region, the blanks of the run are held out of it,
+    and a blank is in any case corrected by the model built from itself. See
+    :func:`_covered_wells`.
     """
     if not value:
         return {}
@@ -205,19 +223,27 @@ def parse_background_well_map(value) -> dict[str, list[str]]:
             left, _, right = text.partition(_MAP_ASSIGN)
             items.append((left, right))
 
-    out: dict[str, list[str]] = {}
-    claimed: dict[str, str] = {}
+    # Every blank is canonicalised before any right-hand side is expanded,
+    # because a block drops the blanks it contains and one entry's block can
+    # contain a later entry's blank.
+    ordered: list[tuple[str, str]] = []
     for raw_blank, raw_wells in items:
         blank = canonical_well_label(raw_blank)
         if blank is None:
             raise ValueError(
                 f"{raw_blank.strip()!r} is not a well, so it cannot be a blank "
                 f"in the background-well map.")
-        if blank in out:
+        if blank in {b for b, _ in ordered}:
             raise ValueError(
                 f"{blank} appears twice in the background-well map. Give each "
                 f"blank one entry listing every well it corrects.")
-        wells = _covered_wells(raw_wells, blank=blank)
+        ordered.append((blank, raw_wells))
+    blanks = {b for b, _ in ordered}
+
+    out: dict[str, list[str]] = {}
+    claimed: dict[str, str] = {}
+    for blank, raw_wells in ordered:
+        wells = _covered_wells(raw_wells, blank=blank, blanks=blanks)
         for well in wells:
             if well in claimed:
                 raise ValueError(

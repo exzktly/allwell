@@ -3667,7 +3667,7 @@ def main() -> None:
                 "flatfield": args.flatfield,
                 "background": args.background,
                 "background_well": args.background_well or "",
-            "background_well_map": args.background_well_map or "",
+                "background_well_map": args.background_well_map or "",
                 "fft_small_nir": int(args.fft_small_nir or 0),
                 "fft_small_fluor": int(args.fft_small_fluor or 0),
                 "mesh_ratio": float(args.mesh_ratio or 3.0),

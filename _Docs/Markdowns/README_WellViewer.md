@@ -606,7 +606,7 @@ H12=A01:D12; G12=E01:H12
 
 `A01:D12` is the rectangle from A01 to D12 — rows A–D, columns 1–12. A blank's
 wells can also be listed individually (`H12=A01,A02,B05`), or mixed. Case and
-zero-padding do not matter: `h12`, `H12` and `H1` are the same well.
+zero-padding do not matter: `h01`, `H1` and `H01` are the same well.
 
 With a map in force **every well the run processes must be named by exactly one
 blank**, or the run refuses to start and lists the wells nobody claimed. That is
@@ -615,14 +615,27 @@ other treatments' autofluorescence — or to leave them uncorrected, which puts 
 differently processed populations of wells in one results file. Both produce
 output that cannot be told from the correct thing, so neither is offered.
 
+A block holds the run's own blank wells out of itself, which is what makes the
+example above work: the bottom-half rectangle `E01:H12` contains both G12 and
+H12, and between the two entries every one of the 96 wells is accounted for
+exactly once. Naming a blank *individually* (`H12=A01,H12`) is still refused —
+that is a statement about one well rather than a region, and it is almost always
+a typo.
+
 A map is also refused if it could be read two ways: a well claimed by two blanks,
-a well name it cannot parse, a blank with no wells, or a blank that also appears
-as one of the wells being corrected. Each refusal names the text it choked on.
+a well name it cannot parse, or a blank with no wells. Each refusal names the
+text it choked on.
 
 Leave the map empty and nothing changes — the blanks pool exactly as they always
-have. Re-running a plate with a *different* pairing reprocesses the wells it
-affects rather than reusing the old numbers, so you can change your mind without
-having to force a full re-run.
+have. Changing the pairing and re-running reprocesses the plate rather than
+handing back the numbers built against the previous blanks, so you can change
+your mind without having to force a full re-run. The pairing is part of the
+settings every well's output is recorded against, and that record is plate-wide:
+editing one blank's block re-runs every well, not only the wells that moved.
+
+The blanks themselves are processed like any other well — segmented, quantified
+and written to their own results file — and each is corrected by the reference
+built from itself, which is what pooling did to them.
 
 **Per-timepoint correction.** Background drifts over the course of a timecourse,
 so the field is built **separately for each timepoint**: the empty-well frames at

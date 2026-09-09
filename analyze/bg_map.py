@@ -128,13 +128,23 @@ class AnalyzeBackgroundMapMixin:
         self._refresh_background_map_summary()
 
     def _refresh_background_map_summary(self) -> None:
-        if not self._background_map:
+        """What the *run* will do, which is not always what the editor holds.
+
+        Asked of :meth:`_background_map_value` rather than of the tab's own dict
+        because a blank with no wells is dropped on the way out — so a map of
+        nothing but empty blanks is a non-empty dict here and an empty string to
+        the run. Reading the dict said "H12 → 0 well(s)", i.e. that a pairing is
+        in force, for a run that pools.
+        """
+        if not self._background_map_value():
             self._bg_map_summary.setText(
-                "Pooled — every blank corrects every well")
+                "Pooled — every blank corrects every well"
+                if not self._background_map else
+                "Pooled — no blank has any wells yet")
             return
         self._bg_map_summary.setText("; ".join(
             f"{blank} → {len(wells)} well(s)"
-            for blank, wells in self._background_map.items()))
+            for blank, wells in self._background_map.items() if wells))
 
     # ── the wells this plate actually has ────────────────────────────────
     def _background_map_plate_wells(self) -> list[str]:
@@ -476,12 +486,15 @@ class AnalyzeBackgroundMapMixin:
         """
         from pipeline.empty_well import BlankGroups
 
-        if not self._background_map:
+        value = self._background_map_value()
+        if not value:
             self._bg_map_uncovered.setText(
-                "Pooled — no pairing in force. Every blank corrects every well.")
+                "Pooled — no pairing in force. Every blank corrects every well."
+                if not self._background_map else
+                "No blank claims any wells yet, so this run would pool. Drag "
+                "across the plate to give a blank its block.")
             return
-        groups = BlankGroups("", self._background_map_value(),
-                             corrections=("empty_well",))
+        groups = BlankGroups("", value, corrections=("empty_well",))
         missing = groups.uncovered(self._background_map_plate_wells())
         if not missing:
             self._bg_map_uncovered.setText(
@@ -592,15 +605,27 @@ class AnalyzeBackgroundMapMixin:
             return (f"Background well {label} was not found in the input folder."
                     f"\n\nEmpty-well {which} reads its reference images from the "
                     f"named well(s) — confirm they exist in:\n{input_dir}")
-        return self._background_map_coverage_error(mapping)
+        return self._background_map_coverage_error(
+            mapping, self._background_well_edit.text().strip())
 
-    def _background_map_coverage_error(self, mapping: str) -> str | None:
-        """The uncovered-well refusal, asked of the form rather than the run."""
+    def _background_map_coverage_error(self, mapping: str,
+                                       named: str = "") -> str | None:
+        """The pairing refusals, asked of the form rather than the run.
+
+        Both of them, from the same object the pipeline builds: a blank named in
+        *named* that the map does not use is refused by the constructor, and a
+        well no blank claims by :meth:`BlankGroups.uncovered`. Asking here is
+        what turns either into a message before a run starts instead of a
+        ``SystemExit`` after one does.
+        """
         if not mapping:
             return None
         from pipeline.empty_well import BlankGroups
 
-        groups = BlankGroups("", mapping, corrections=("empty_well",))
+        try:
+            groups = BlankGroups(named, mapping, corrections=("empty_well",))
+        except ValueError as exc:
+            return str(exc)
         uncovered = groups.uncovered(self._background_map_plate_wells())
         if not uncovered:
             return None

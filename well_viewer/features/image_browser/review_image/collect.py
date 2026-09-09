@@ -131,14 +131,26 @@ def _preview_blank_wells(ctx, well: str | None) -> list[str]:
     disagree with what was actually applied.
 
     A well the map does not mention answers no blanks at all, and the preview
-    then shows the raw frame. That is the honest reading: such a plate could not
-    have been produced by a run at all, because the run refuses to start.
+    then shows the raw frame. That is the honest reading for a plate a run
+    produced, because a run refuses to start with such a well — but a sidecar is
+    a file on disk and can be hand-edited, so a map this parser refuses falls
+    back to the pooled reading rather than raising. This is called from the
+    Review image redraw, which has no handler of its own: the alternative is a
+    traceback out of a Qt slot for a plate that merely has a typo in its
+    ``pipeline_info.json``. The two readers of the same parse in the run receipt
+    and the Analyze form already fall back this way.
     """
     from pipeline.empty_well import BlankGroups
 
     mapping = _flatfield_qc(ctx, "background_well_map", "")
     named = _flatfield_qc(ctx, "background_well", "")
-    groups = BlankGroups(named, mapping, corrections=("empty_well",))
+    try:
+        groups = BlankGroups(named, mapping, corrections=("empty_well",))
+    except ValueError as exc:
+        _logger.warning(
+            "Ignoring an unreadable background-well map in pipeline_info.json, "
+            "showing the pooled field instead: %s", exc)
+        return _split_background_wells(named)
     if not groups.paired:
         return _split_background_wells(named)
     blank = groups.group_of(well) if well else ""
@@ -152,14 +164,16 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None,
     Recomputes the flat-field METHOD the pipeline used (read from
     ``pipeline_info['qc_options']['flatfield']``) so the Segmentation tab can
     show the flat-field stage in isolation, before any background subtraction.
-    Cached per ``(channel, mode, tp)`` in ``ReviewImageState.flatfield_field_cache``.
+    Cached in ``ReviewImageState.flatfield_field_cache``, keyed as described
+    below.
 
     Fidelity: exact for ``none`` / ``gaussian`` / ``empty_well`` (same estimator
     and inputs the pipeline used); ``basic`` is approximated from the *current
-    well's* FOVs (the pipeline samples the whole plate). ``empty_well`` pools all
-    comma-separated background wells and builds the field from the frames at the
-    *displayed* timepoint (background drifts over time), falling back to the
-    all-timepoint pooled estimate when that timepoint is absent. The estimate is
+    well's* FOVs (the pipeline samples the whole plate). ``empty_well`` builds
+    the field from the blank(s) the run would have used for this well — every
+    named blank pooled, or the one blank a pairing map assigns it — taking the
+    frames at the *displayed* timepoint (background drifts over time) and
+    falling back to the all-timepoint estimate when that timepoint is absent. The estimate is
     capped at a few frames and cached so the UI thread isn't blocked on repeats.
 
     *well* is the well on screen, and it matters when the run paired its blanks

@@ -124,3 +124,36 @@ def test_a_non_well_identifier_survives_as_a_blank():
     folder or archive literally called ``blank`` can be the reference. The union
     must not canonicalise that away."""
     assert blank_wells_for_run("blank", "") == ["blank"]
+
+
+def test_a_block_holds_out_the_runs_blanks_and_covers_the_rest():
+    """The documented example has to parse, and it contains both blanks.
+
+    ``H12=A01:D12; G12=E01:H12`` is the natural way to write "top half, bottom
+    half", and the bottom-half rectangle contains G12 and H12. Refusing it made
+    the example printed in the manual and in ARCHITECTURE a map the parser
+    rejects — found by a test fixture, not by reading. A block is a shorthand
+    for a region, so the run's blanks are held out of it; between the two entries
+    every one of the 96 wells is then accounted for exactly once.
+    """
+    mapping = parse_background_well_map("H12=A01:D12; G12=E01:H12")
+    assert sorted(mapping) == ["G12", "H12"]
+    covered = [w for wells in mapping.values() for w in wells]
+    assert len(covered) == len(set(covered)) == 94
+    assert "H12" not in covered and "G12" not in covered
+    assert "H11" in mapping["G12"] and "D12" in mapping["H12"]
+
+    # One entry's block may contain a *later* entry's blank, so the hold-out set
+    # cannot be built as the entries are read: A01 is the second blank and sits
+    # inside the first entry's rectangle.
+    second = parse_background_well_map("D12=A01:D12; A01=E01:H12")
+    assert "A01" not in second["D12"] and "D12" not in second["D12"]
+    assert len(second["D12"]) == 46 and len(second["A01"]) == 48
+
+
+def test_a_blank_named_individually_is_still_refused():
+    """A block is a region; a single well is a statement about that well."""
+    for bad in ("H12=A01,H12", "H12=H12", "H12=A01; G12=H12"):
+        with pytest.raises(ValueError) as excinfo:
+            parse_background_well_map(bad)
+        assert "blank" in str(excinfo.value).lower(), bad

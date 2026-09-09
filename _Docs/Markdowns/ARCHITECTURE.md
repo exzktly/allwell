@@ -1838,7 +1838,42 @@ the silently-uncorrected output that guard exists to refuse. And a well no blank
 claims **stops the run**, before an image is read: pooling the unmapped wells
 corrects them with other treatments' autofluorescence, and leaving them
 uncorrected puts two differently processed populations in one CSV. Both are
-invisible in the output, so neither is a default.
+invisible in the output, so neither is a default. That refusal and the
+ignored-folder one both sit ahead of the model precompute, because each is
+decided from the plate's own well list alone and a run that cannot say what
+corrects one of its wells should not first spend a model build per blank.
+
+Two things the plan has to get right that read as edge cases and are not.
+**A blank is covered by itself.** It is a well the run segments, quantifies and
+writes a results file for like any other, and pooling corrected it by a reference
+that contained its own frames — so a blank resolving to no group leaves its own
+background in its numbers while its CSV looks exactly like a corrected well's,
+and `estimate_thresholds_from_outputs` then fits the plate-wide gate over a
+mixture of corrected and uncorrected archives. **And pairing is asked per
+correction, not per run**, through `BlankGroups.for_mode`: a `basic` flat-field
+is estimated from the plate's own images and takes no blank, so it is one field
+for the whole plate however the run is paired. Grouping it instead built the
+identical field once per blank and then left every well the map does not name
+with no flat-field at all — silently, because the coverage refusal is not in
+force when neither correction reads a blank.
+
+`--background_well` and the map must also not become two answers to "which wells
+are blanks": a blank named beside a map that does not use it is refused, because
+`blank_wells_for_run` below takes the union and would stage it as a reference
+while the plan called it a sample some blank must claim.
+
+One thing the parser resolves rather than refuses, and it is the exception that
+keeps the grammar writable: **a block holds the run's blanks out of itself.**
+`G12=E01:H12` is the natural way to pair the bottom half of a plate and its
+rectangle contains both blanks, so refusing it made the example printed here and
+in the manual a map the parser rejects — caught by a test fixture rather than by
+reading it. There is nothing to choose between: a block is a shorthand for a
+region, the editor's own splits already write blank-free lists, and a blank is
+corrected by the model built from itself in any case. A blank named
+*individually* among the wells it corrects stays refused, because that is a
+statement about one well and not about a region. The blanks are therefore
+canonicalised in a first pass, since one entry's block can contain a later
+entry's blank.
 
 "Which wells are blanks?" is `util.well_token.blank_wells_for_run`, and it is one
 function because five places ask it and they had already drifted: the remote

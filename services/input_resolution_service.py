@@ -13,6 +13,7 @@ from services.subprocess_text import TEXT_UTF8
 from util.aw_safe import swallow, swallowed
 from util.dir_scan import files_and_subdirs, files_in
 from util.image_exts import is_run_input_member
+from util.well_token import blank_wells_for_run, canonical_well_label
 from util.retry_io import retry_io
 from util.zip_write import (
     atomic_zip, replace_folder_with_archive)
@@ -177,6 +178,26 @@ def has_well_zip(folder: Path) -> bool:
 def _schema_field_index(schema: str, field: str) -> int:
     fields = [f.strip().lower() for f in str(schema or "").split(":")]
     return fields.index(field) if field in fields else -1
+
+
+def _blank_well_tokens(opts: dict) -> set[str]:
+    """The canonical wells this run treats as blanks, read the pipeline's way.
+
+    Both scope readers — the preview under the input field and the run that
+    executes it — need this, and they had a copy each: a local
+    whitespace-splitting regex that read ``"H12 G12"`` as two wells where
+    ``util.well_token.split_background_wells`` reads it as one. Two answers to
+    one question about the same plate, and the same divergence had already been
+    found and fixed once in the remote runner, where it killed every batch of a
+    run. ``blank_wells_for_run`` is the single reading, and it also sees a blank
+    named only in the pairing map.
+    """
+    return {
+        canonical_well_label(w)
+        for w in blank_wells_for_run(opts.get("background_well", ""),
+                                     opts.get("background_well_map", ""))
+        if canonical_well_label(w)
+    }
 
 
 def _loose_timepoints_for_wells(
@@ -646,20 +667,25 @@ def iter_well_tokens(input_dir: Path) -> list[str]:
     return out
 
 
-def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) -> int:
-    """Best-effort count of distinct wells the run will produce, for the Analyze
-    progress denominator.
+def iter_all_well_tokens(raw: Path, *, filename_schema: str,
+                        filename_sep: str) -> list[str]:
+    """Every distinct well the run will read from *raw*, canonical and sorted.
 
-    Takes the layout from :func:`plan_input_layout`, so the dashboard's
-    "x / N wells" counts the folder the run will actually read. Counts the UNION
-    of already-grouped wells (per-well zips / folders) and distinct well tokens
-    parsed from loose TIFs — so a partially-grouped ``in/`` (some well folders
-    plus leftover loose TIFs) reports the full plate, not just the grouped few.
+    The UNION of already-grouped wells (per-well zips / folders) and the well
+    tokens parsed out of loose TIFs, taking the layout from
+    :func:`plan_input_layout` so it reads the folder the run will actually read.
+    A partially-grouped ``in/`` — some well folders plus leftover loose TIFs —
+    therefore reports the whole plate rather than the grouped few.
 
-    Deliberately best-effort: a layout nothing can be counted in falls back to
-    the loose-TIF count and then to 1, because this is a progress denominator
-    and a zero would leave the dashboard dividing by nothing. When there is
-    genuinely no input, :func:`resolve_input_output` is what says so.
+    :func:`iter_well_tokens` alone is not this: it reads the grouped layouts and
+    nothing else, so a plate that is still all loose TIFs answers empty. That
+    distinction is why this exists as its own function — the Analyze pairing
+    editor offers these wells, and offering none for the commonest
+    not-yet-grouped input would be an empty plate.
+
+    Best-effort by design, like the count built on it: a layout nothing can be
+    read from answers empty rather than raising, and
+    :func:`resolve_input_output` is what says there is no input at all.
     """
     from util.well_token import canonical_well_label
 
@@ -678,25 +704,37 @@ def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) 
         return toks
 
     toks: set[str] = set()
+    grouped = plan_input_layout(raw).input_dir
+    if grouped is not None:
+        toks |= set(iter_well_tokens(grouped)) | _loose_toks(grouped)
+        if grouped != raw:
+            toks |= _loose_toks(raw)  # loose TIFs at the selected root
+    return sorted(toks)
+
+
+def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) -> int:
+    """Best-effort count of distinct wells the run will produce, for the Analyze
+    progress denominator.
+
+    The length of :func:`iter_all_well_tokens`, with two fallbacks of its own. A
+    layout nothing can be counted in falls back to the loose-TIF count and then
+    to 1, because this is a progress denominator and a zero would leave the
+    dashboard dividing by nothing.
+
+    And a folder that cannot be *listed* falls back to 1 as well, which is newly
+    possible: the listing helpers raise where ``Path.glob`` used to swallow the
+    refusal and hand back an empty list. The caller asks for this *before*
+    ``resolve_input_output``, so raising from here pre-empted the refusal that
+    names the folder and the errno, and surfaced instead as a bare ``[Errno 13]``
+    through ``pipeline_runner``'s broad handler with nothing logged by the
+    resolver at all — while the readout went on showing the long UNREADABLE
+    sentence. One folder, two answers.
+    """
     try:
-        grouped = plan_input_layout(raw).input_dir
-        if grouped is not None:
-            toks |= set(iter_well_tokens(grouped)) | _loose_toks(grouped)
-            if grouped != raw:
-                toks |= _loose_toks(raw)  # loose TIFs at the selected root
-        if toks:
-            return len(toks)
-        return len(tif_files_in(raw)) or 1
+        toks = iter_all_well_tokens(raw, filename_schema=filename_schema,
+                                    filename_sep=filename_sep)
+        return len(toks) or len(tif_files_in(raw)) or 1
     except OSError:
-        # Best-effort means best-effort against a folder that cannot be *listed*
-        # too, which is newly possible: the listing helpers raise where
-        # ``Path.glob`` used to swallow the refusal and hand back an empty list.
-        # This is a progress denominator, and the caller asks for it *before*
-        # ``resolve_input_output`` — so raising from here pre-empted the refusal
-        # that names the folder and the errno, and surfaced instead as a bare
-        # ``[Errno 13]`` through ``pipeline_runner``'s broad handler with nothing
-        # logged by the resolver at all. Meanwhile the readout went on showing
-        # the long UNREADABLE sentence, so one folder had two answers.
         return 1
 
 
@@ -995,8 +1033,6 @@ def plan_incremental_scope(
     against, and pretending otherwise would be the kind of guess this returns a
     named ``"unchanged"`` mode to avoid.
     """
-    from util.well_token import canonical_well_label
-
     schema = str(opts.get("filename_schema") or "")
     sep = str(opts.get("filename_sep") or "_")
     try:
@@ -1007,11 +1043,7 @@ def plan_incremental_scope(
     if not plan.total:
         return ScopePlan("unchanged", "", "")
 
-    bg_tokens = {
-        canonical_well_label(w)
-        for w in re.split(r"[,\s]+", str(opts.get("background_well", "") or ""))
-        if w
-    }
+    bg_tokens = _blank_well_tokens(opts)
     flatfield = str(opts.get("flatfield", "none") or "none")
     background = str(opts.get("background", "") or "")
     empty_well_in_use = flatfield == "empty_well" or background == "empty_well"
@@ -1050,21 +1082,13 @@ def select_incremental_scope(
     Qt-free so it stays testable and reusable; the GUI passes a ``log_fn`` that
     forwards to its run-log queue.
     """
-    import re
-
-    from util.well_token import canonical_well_label
-
     def _log(msg: str) -> None:
         if log_fn:
             log_fn(msg)
 
     flatfield = str(opts.get("flatfield", "none") or "none")
     background = str(opts.get("background", "") or "")
-    bg_tokens = {
-        canonical_well_label(w)
-        for w in re.split(r"[,\s]+", str(opts.get("background_well", "") or ""))
-        if w
-    }
+    bg_tokens = _blank_well_tokens(opts)
     empty_well_in_use = flatfield == "empty_well" or background == "empty_well"
 
     # Snapshot the background well's timepoints BEFORE the append consumes the

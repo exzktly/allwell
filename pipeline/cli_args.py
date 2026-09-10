@@ -208,6 +208,26 @@ def build_parser() -> argparse.ArgumentParser:
                         "directory and named here, which is what lets every "
                         "batch build the same correction from it. Defaults to "
                         "--input_dir.")
+    # `default=None`, not `""`, and that is load-bearing rather than a style
+    # choice. `settings_digest` skips a `None` value and includes a `""` one, so
+    # a `""` default on an option in KEYED_ON would change the recorded digest
+    # of every plate that already exists on every user's disk and force a
+    # plate-wide recompute for all of them. `None` means "this run predates the
+    # option / did not use it", which is what a plate analysed before pairing
+    # existed should say.
+    p.add_argument("--background_well_map", default=None,
+                   help="Pair each blank with the wells it corrects, instead of "
+                        "pooling every --background_well into one plate-wide "
+                        "reference: 'H12=A01:D12; G12=E01:H12'. A blank's wells "
+                        "are a comma-separated list of wells (A01) and "
+                        "rectangular blocks (A01:D12). Use this when the blanks "
+                        "differ because of the treatment — a compound that "
+                        "fluoresces puts real signal into its own blank, and "
+                        "pooling spreads it over the whole plate. With a map in "
+                        "force every well the run processes must be named by "
+                        "exactly one blank, or the run refuses to start. Without "
+                        "one, the blanks pool, which is the less noisy estimate "
+                        "when they really are interchangeable.")
     p.add_argument("--background_well", default="",
                    help="Empty/background well(s) used as the reference for "
                         "--flatfield=empty_well and/or --background=empty_well. One "

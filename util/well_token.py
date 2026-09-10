@@ -92,6 +92,224 @@ def background_well_key(token) -> str:
     return c.lower() if c else str(token or "").strip().lower()
 
 
+#: Separates one blank's entry from the next in a written map. A newline works
+#: too, so a map can be pasted in as lines.
+_MAP_ENTRY_SEP = ";"
+#: Separates the blank from the wells it corrects.
+_MAP_ASSIGN = "="
+#: Separates the two corners of a rectangular block, ``A01:D12``.
+_MAP_RANGE = ":"
+
+
+def _expand_well_range(text: str) -> list[str] | None:
+    """The wells of a rectangular block written ``A01:D12``, or ``None``.
+
+    Rows A–D by columns 1–12, in reading order. Rectangular because a plate's
+    blocks are rectangular: a treatment occupies a set of rows, a set of
+    columns, or a quadrant, and letting the two corners describe anything else
+    would mean guessing which of several readings the user meant.
+
+    Either corner may be given first — ``D12:A01`` is the same block — because
+    a user dragging a selection has no reason to start at the top left.
+    Derives the span from the canonical labels rather than importing the plate's
+    geometry: ``util.plate_grid`` imports *this* module, and
+    ``canonical_well_label`` has already established that the rows are A–H and
+    the columns 1–12.
+    """
+    if _MAP_RANGE not in text:
+        return None
+    first, _, second = text.partition(_MAP_RANGE)
+    lo, hi = canonical_well_label(first), canonical_well_label(second)
+    if lo is None or hi is None:
+        return None
+    rows = sorted((lo[0], hi[0]))
+    cols = sorted((int(lo[1:]), int(hi[1:])))
+    return [f"{chr(r)}{c:02d}"
+            for r in range(ord(rows[0]), ord(rows[1]) + 1)
+            for c in range(cols[0], cols[1] + 1)]
+
+
+def _covered_wells(text: str, *, blank: str, blanks=()) -> list[str]:
+    """The canonical wells one map entry's right-hand side names.
+
+    Accepts a comma-separated list of wells, rectangular blocks, or a mix.
+    Raises ``ValueError`` naming the offending text rather than dropping it: a
+    token this cannot read is a well the user believes is corrected and which
+    would otherwise be silently left out of the map — and an uncovered well is
+    the thing the map exists to make impossible.
+
+    A **block** drops any well in *blanks*, because a block is a shorthand for a
+    region and a plate's blanks usually sit inside the region they serve: the
+    natural way to pair the bottom half of a plate is ``G12=E01:H12``, whose
+    rectangle contains both G12 and H12. Nothing is ambiguous there — a blank is
+    the reference for its block and cannot also be a sample of it — and it is
+    what the editor's own splits write, so the written grammar can say what the
+    plate dialog says. A well named **individually** is not dropped: that is a
+    statement about one well, and a blank among them is a typo worth refusing.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    held = set(blanks)
+    for piece in text.split(","):
+        item = piece.strip()
+        if not item:
+            continue
+        wells = _expand_well_range(item)
+        if wells is None:
+            one = canonical_well_label(item)
+            if one is None:
+                raise ValueError(
+                    f"{blank!r} is mapped to {item!r}, which is not a well or a "
+                    f"block of wells. Write a well (A01), a block (A01:D12), or "
+                    f"a comma-separated list of either.")
+            wells = [one]
+        else:
+            wells = [w for w in wells if w not in held]
+        for well in wells:
+            if well not in seen:
+                seen.add(well)
+                out.append(well)
+    if not out:
+        raise ValueError(
+            f"{blank!r} is mapped to nothing. Give it the wells it corrects, or "
+            f"remove it — a blank that corrects no well is a blank the run has "
+            f"no use for.")
+    return out
+
+
+def parse_background_well_map(value) -> dict[str, list[str]]:
+    """Parse a blank-well → treatment-wells map, or return ``{}`` for none.
+
+    Written ``H12=A01:D12; G12=E01:H12`` — one entry per blank, entries
+    separated by ``;`` or a newline, the wells a blank corrects given as a
+    comma-separated list of wells and rectangular blocks. Well tokens are
+    canonicalised, so ``h12`` and ``H12`` and ``H1 2``'s padded and unpadded
+    spellings all land on the same key. An already-parsed mapping passes through
+    canonicalised, which is what lets a saved run's map round-trip.
+
+    Order is preserved, because it is the order the user wrote and the order the
+    editor will show back.
+
+    Four things are refused rather than absorbed, each naming what it choked on:
+    an entry with no ``=``; a right-hand side this cannot read; an empty group;
+    and **a well two blanks both claim**, which is the one a silent rule would
+    resolve by picking one — and picking one means half a plate corrected by a
+    reference the user did not choose, which is the defect the map exists to
+    prevent. A blank named *individually* among the wells it corrects is refused
+    for the same reason: it is almost always a typo, and reading it either way
+    changes the numbers.
+
+    A blank inside a **block** is the one case that is resolved rather than
+    refused, and it is resolved because there is nothing to choose between: the
+    block is a shorthand for a region, the blanks of the run are held out of it,
+    and a blank is in any case corrected by the model built from itself. See
+    :func:`_covered_wells`.
+    """
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        items = [(str(k), ",".join(str(w) for w in v)) for k, v in value.items()]
+    else:
+        entries = str(value).replace("\n", _MAP_ENTRY_SEP).split(_MAP_ENTRY_SEP)
+        items = []
+        for entry in entries:
+            text = entry.strip()
+            if not text:
+                continue
+            if _MAP_ASSIGN not in text:
+                raise ValueError(
+                    f"{text!r} is not a blank-well assignment. Write "
+                    f"'<blank>=<wells>', for example 'H12=A01:D12'.")
+            left, _, right = text.partition(_MAP_ASSIGN)
+            items.append((left, right))
+
+    # Every blank is canonicalised before any right-hand side is expanded,
+    # because a block drops the blanks it contains and one entry's block can
+    # contain a later entry's blank.
+    ordered: list[tuple[str, str]] = []
+    for raw_blank, raw_wells in items:
+        blank = canonical_well_label(raw_blank)
+        if blank is None:
+            raise ValueError(
+                f"{raw_blank.strip()!r} is not a well, so it cannot be a blank "
+                f"in the background-well map.")
+        if blank in {b for b, _ in ordered}:
+            raise ValueError(
+                f"{blank} appears twice in the background-well map. Give each "
+                f"blank one entry listing every well it corrects.")
+        ordered.append((blank, raw_wells))
+    blanks = {b for b, _ in ordered}
+
+    out: dict[str, list[str]] = {}
+    claimed: dict[str, str] = {}
+    for blank, raw_wells in ordered:
+        wells = _covered_wells(raw_wells, blank=blank, blanks=blanks)
+        for well in wells:
+            if well in claimed:
+                raise ValueError(
+                    f"{well} is mapped to two blanks, {claimed[well]} and "
+                    f"{blank}. A well is corrected by one blank; the run cannot "
+                    f"choose between them.")
+            claimed[well] = blank
+        out[blank] = wells
+
+    overlap = sorted(set(out) & set(claimed))
+    if overlap:
+        raise ValueError(
+            f"{', '.join(overlap)} is named as a blank and also as a well some "
+            f"blank corrects. A blank is the reference, not a sample; check the "
+            f"map for a mistyped well.")
+    return out
+
+
+def format_background_well_map(mapping: dict[str, list[str]]) -> str:
+    """Render a parsed map back to the written form.
+
+    The explicit well list, never a range: what a machine writes has to mean
+    exactly one thing when it is read back, and a rectangle is a claim about the
+    plate's shape that stops being true when the map is edited. Ranges are for
+    the human typing a command line, which :func:`parse_background_well_map`
+    accepts; this is what the form and the sidecar store.
+    """
+    return "; ".join(
+        f"{blank}{_MAP_ASSIGN}{','.join(wells)}"
+        for blank, wells in mapping.items() if wells)
+
+
+def blank_wells_for_run(background_well="", background_well_map="") -> list[str]:
+    """Every well this run treats as a blank, however it was named.
+
+    The union of ``--background_well`` and the keys of ``--background_well_map``,
+    canonical and order-preserving. One function because "which wells are
+    blanks?" is asked in five places that must agree — the model build, the
+    remote staging planner (a blank is uploaded whole and never incrementally
+    diffed), the batched hold-out that keeps the blank out of the slicing, and
+    the two incremental-scope readers — and they have already drifted once:
+    ``remote_runner`` grew a local whitespace-splitting regex that read
+    ``"H12 G12"`` as two wells where :func:`split_background_wells` reads it as
+    one, and every batch of that run died on the guard. Two more copies of that
+    regex are still in ``services.input_resolution_service``; this is what
+    replaces them.
+
+    A superset is the safe direction for every caller: staging a well whole that
+    turns out not to be a blank costs an upload, while missing one starves the
+    whole plate of its correction.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for token in split_background_wells(background_well):
+        key = background_well_key(token)
+        if key not in seen:
+            seen.add(key)
+            out.append(canonical_well_label(token) or str(token).strip())
+    for blank in parse_background_well_map(background_well_map):
+        key = background_well_key(blank)
+        if key not in seen:
+            seen.add(key)
+            out.append(blank)
+    return out
+
+
 def safe_well(label: str) -> str:
     """Sanitise a well label for use as a filename component.
 

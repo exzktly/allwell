@@ -1806,6 +1806,135 @@ the four to do, so each warns under the pipeline's own logger naming what did
 not happen. A frame whose median really is zero is not one of these and says
 nothing.
 
+**A blank can be paired with the wells it corrects, and by default is not.**
+Named several blanks, `--background_well H12,G12` pools their frames into one
+reference per (channel, timepoint) — the less noisy estimate, and the right one
+when the blanks differ only by noise. It is the wrong one when they differ
+because of the treatment: a compound that fluoresces puts real signal into its
+own block's blank, and pooling spreads that signal over every well on the plate,
+producing numbers indistinguishable from corrected ones.
+`--background_well_map "H12=A01:D12; G12=E01:H12"` pairs instead, one blank per
+block, written as wells, rectangular blocks, or both. `util.well_token`
+parses it, and refuses rather than resolves anything ambiguous — a well two
+blanks claim, an unreadable token, an empty group — because every rule that
+absorbs those ends with a well corrected against a reference the user did not
+choose.
+
+`pipeline.empty_well` holds all of it: the sampler, both model builders, the
+per-image lookup, and the pairing. `BlankGroups` is the run's plan, and a pooled
+run is that class with one group holding every named blank, so pooling is not a
+branch threaded through the code but the degenerate case of the same one.
+Crucially **the models gain a group dimension and the correction code does
+not**: `main` installs the grouped dicts under private keys, and
+`shared_kwargs_for_well` swaps in one well's own group as that well is submitted
+to the pool, so `process_image_group` and `_correct_image_group` go on receiving
+a flat `{channel: {timepoint: field}}` and go on knowing nothing about wells. An
+unpaired run is handed the identical object it always was. That is also what
+keeps the combined `(raw − B)/(B/mean(B))` correction consistent: its additive
+and multiplicative fields must come from the same blank frames, and slicing both
+dicts with one key at one place cannot disagree the way two lookups inside two
+closures could.
+
+Two consequences the pairing makes load-bearing. `_require_empty_well_models`
+is asked **per group**, because the plate-wide question — was *any* model built —
+is answered yes by a plate where three of four blocks lost their blank, which is
+the silently-uncorrected output that guard exists to refuse. And a well no blank
+claims **stops the run**, before an image is read: pooling the unmapped wells
+corrects them with other treatments' autofluorescence, and leaving them
+uncorrected puts two differently processed populations in one CSV. Both are
+invisible in the output, so neither is a default. That refusal and the
+ignored-folder one both sit ahead of the model precompute, because each is
+decided from the plate's own well list alone and a run that cannot say what
+corrects one of its wells should not first spend a model build per blank.
+
+Two things the plan has to get right that read as edge cases and are not.
+**A blank is covered by itself.** It is a well the run segments, quantifies and
+writes a results file for like any other, and pooling corrected it by a reference
+that contained its own frames — so a blank resolving to no group leaves its own
+background in its numbers while its CSV looks exactly like a corrected well's,
+and `estimate_thresholds_from_outputs` then fits the plate-wide gate over a
+mixture of corrected and uncorrected archives. **And pairing is asked per
+correction, not per run**, through `BlankGroups.for_mode`: a `basic` flat-field
+is estimated from the plate's own images and takes no blank, so it is one field
+for the whole plate however the run is paired. Grouping it instead built the
+identical field once per blank and then left every well the map does not name
+with no flat-field at all — silently, because the coverage refusal is not in
+force when neither correction reads a blank.
+
+`--background_well` and the map must also not become two answers to "which wells
+are blanks": a blank named beside a map that does not use it is refused, because
+`blank_wells_for_run` below takes the union and would stage it as a reference
+while the plan called it a sample some blank must claim.
+
+One thing the parser resolves rather than refuses, and it is the exception that
+keeps the grammar writable: **a block holds the run's blanks out of itself.**
+`G12=E01:H12` is the natural way to pair the bottom half of a plate and its
+rectangle contains both blanks, so refusing it made the example printed here and
+in the manual a map the parser rejects — caught by a test fixture rather than by
+reading it. There is nothing to choose between: a block is a shorthand for a
+region, the editor's own splits already write blank-free lists, and a blank is
+corrected by the model built from itself in any case. A blank named
+*individually* among the wells it corrects stays refused, because that is a
+statement about one well and not about a region. The blanks are therefore
+canonicalised in a first pass, since one entry's block can contain a later
+entry's blank.
+
+"Which wells are blanks?" is `util.well_token.blank_wells_for_run`, and it is one
+function because five places ask it and they had already drifted: the remote
+runner grew a local whitespace-splitting regex that read `"H12 G12"` as two wells
+where the pipeline's own parser reads it as one, and every batch of that run died
+on the guard. Two more copies of that regex were still in
+`input_resolution_service`'s two incremental-scope readers and are gone;
+`_blank_well_tokens` is the seam, and the union it returns is deliberately a
+superset — staging a well whole that turns out not to be a blank costs an upload,
+while missing one starves a whole block of its correction.
+
+**The map is written on a plate, not in a text box.** `analyze/bg_map.py` holds
+the editor — a non-modal window off the Quality Control section, built once and
+hidden rather than destroyed. One `WellPlateSelector` in paint mode carries the
+whole partition: a colour per blank, a ring on the block being edited, absent
+wells disabled so a drag cannot claim a well the folder does not have, and a
+live count of the wells no blank claims. That count is
+`BlankGroups.uncovered`'s own answer, so what the editor warns about and what
+the run refuses are one question asked twice rather than two rules that can
+drift. A text field was the cheaper control and the wrong one: the failure the
+map exists to prevent is a well quietly landing in the wrong block, and eight
+rows of `A01,A02,A03…` read as correct whatever they say.
+
+The map lives on the tab and the widgets are drawn from it, never read back —
+the discipline `fold_change_pairing_view` records losing an assignment to
+without. Its row edits go through a deferred repopulate for the reason that
+editor documents too: the combo whose signal started the edit is one of the
+widgets the repopulate deletes.
+
+`Split plate…` takes its blanks **only** from the Background well field, and
+holds every chosen blank out of every block. Neither is fussiness: the first
+version took blanks off the end of the plate when the field named none, so a
+row split assigned H12, H11, H10… — wells inside row H's own block — and row H's
+blank ended up corrected by itself, producing a map this feature's own parser
+refuses. A split with fewer blanks than blocks makes the blocks it can and says
+what is left, rather than inventing a reference out of a sample well.
+
+The editor offers the plate's real wells through
+`input_resolution_service.iter_all_well_tokens`, which is the union
+`count_expected_wells` already computed privately, lifted out so both can use
+it; `iter_well_tokens` alone reads the grouped layouts only and answers empty
+for a plate that is still loose TIFs. It reads the **resolved** input directory
+(`_preflight_input`), because on the common `<dataset>/in` layout the path field
+names the parent, whose own listing holds no wells at all.
+
+`_background_well_validation_error` moved into that module with the map it now
+also validates — `analyze/form.py` was at its line budget, and its own budget
+note asks for an extraction with the next section added.
+
+The map is in `settings_digest.KEYED_ON`, so re-pairing a plate declines to reuse
+the wells already processed under the old pairing — the reuse decision that would
+otherwise hand back numbers built against a different blank and report success.
+Its CLI default is `None` rather than `""` for a reason worth keeping: the digest
+skips a `None` and includes a `""`, so an empty-string default would have changed
+the recorded digest of every plate already on disk and forced a plate-wide
+recompute for every user.
+
 `fft_bandpass`'s line says the frame is returned "UNCHANGED", which is true of
 that function and not quite of the pipeline: `subtract_background` hands the
 result to `_floor_after_subtract`, which zeroes non-finite pixels and clips

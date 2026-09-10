@@ -57,6 +57,9 @@ _OPTS = {
     "flatfield": "gaussian",
     "background": "top_hat",
     "background_well": "H12",
+    # The written form the editor produces — an explicit well list, never a
+    # range, so what is stored round-trips to itself.
+    "background_well_map": "H12=A01,A02",
     "auto_threshold": False,
     "run_check": False,
     "auto_threshold_method": "controls",

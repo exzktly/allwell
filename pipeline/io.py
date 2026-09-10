@@ -1,4 +1,4 @@
-"""Atomic output writers for the pipeline (images, CSVs, overlays).
+"""The pipeline's file IO: atomic output writers, and the one image reader.
 
 Extracted from ``process_microscopy.py`` so the "write outputs to disk" helpers
 live in one cohesive, Qt-free module: atomic image/text writes (tmp → fsync →
@@ -9,6 +9,13 @@ check, the boundary overlay, and the scratch-base + staging-directory lifecycle
 commit) that decides *which volume* all of that lands on.
 ``process_microscopy`` re-exports every name so its many ``_safe_imwrite`` /
 ``write_csvs_per_well`` / ``remove_directory`` call sites are unchanged.
+
+``load_2d_gray`` is the one reader here, and it is here rather than in a module
+of its own because it is the counterpart of the writers beside it: every frame
+the pipeline measures comes through it, so a second spelling of "open a TIFF as
+2-D float32" is the kind of drift this file exists to prevent. It is reached as
+``pm.load_2d_gray`` by the Playground, which is what makes an interactive
+preview read a frame exactly as a batch run does.
 
 Depends only on numpy + tifffile/imageio/scikit-image + stdlib — no
 ``process_microscopy`` internals — so there is no import cycle.
@@ -29,7 +36,7 @@ from util.well_token import safe_well
 
 import numpy as np
 import imageio.v3 as iio
-from tifffile import imwrite
+from tifffile import imread, imwrite
 from skimage.segmentation import find_boundaries
 
 from util.retry_io import retry_io
@@ -60,6 +67,14 @@ log = logging.getLogger("process_microscopy")
 # transient per-run working state (it is NOT a cache — deleting it mid-run
 # discards the per-FOV checkpoints a restart resumes from).
 DEFAULT_SCRATCH_SUBDIR = Path(".allwell") / "scratch"
+
+
+def load_2d_gray(path: Path) -> np.ndarray:
+    """Load a TIFF (or other format) as a 2-D float32 array."""
+    img = imread(str(path))
+    while img.ndim > 2:
+        img = img[0]
+    return img.astype(np.float32)
 
 
 def default_scratch_base() -> Path | None:

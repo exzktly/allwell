@@ -61,12 +61,16 @@ BACKGROUND_METHODS = ("none", "top_hat", "sliding_disk", "fov_median", "empty_we
 #: ``background_well`` is not an argument of ``subtract_background`` — it is
 #: what produced the ``bg_field`` handed to it — but it belongs here because it
 #: is the setting a reader has to know to reproduce the run.
+#: ``background_well_map`` is the same kind of setting and matters more: it says
+#: *which* blank produced the field for a given well, so two wells of one plate
+#: can be corrected against different pixels. A receipt naming the blanks and
+#: not the pairing describes a run that could have been either one.
 BACKGROUND_METHOD_PARAMS: dict[str, tuple[str, ...]] = {
     "none": (),
     "top_hat": ("radius",),
     "sliding_disk": ("radius",),
     "fov_median": (),
-    "empty_well": ("background_well",),
+    "empty_well": ("background_well", "background_well_map"),
     "robust_mesh": ("radius", "mesh_ratio", "mesh_sigma"),
     "fft_bandpass": ("radius", "fft_small"),
 }

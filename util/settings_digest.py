@@ -89,6 +89,9 @@ KEYED_ON: dict[str, str] = {
     "flatfield":                   "divides every frame by an illumination field",
     "background_dir":              "the blank the correction is built from",
     "background_well":             "which well inside it that blank is",
+    "background_well_map":         "which blank corrects which well, so a well "
+                                   "re-paired to a different blank is corrected "
+                                   "against different pixels",
     # ── what is written into the output archive ─────────────────────────────
     "no_save_tophat":              "decides whether corrected images are archived",
     # ── the gate the plate is scored against ────────────────────────────────

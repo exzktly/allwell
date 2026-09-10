@@ -81,6 +81,7 @@ class AnalyzePipelineInfoMixin:
             "flatfield": qc.get("flatfield"),
             "background": qc.get("background"),
             "background_well": qc.get("background_well"),
+            "background_well_map": qc.get("background_well_map"),
             "fft_small_nir": qc.get("fft_small_nir"),
             "fft_small_fluor": qc.get("fft_small_fluor"),
             "mesh_ratio": qc.get("mesh_ratio"),
@@ -208,6 +209,13 @@ class AnalyzePipelineInfoMixin:
         combo("_flatfield_cb", d.get("flatfield"))
         combo("_background_cb", d.get("background"))
         s("_background_well_edit", d.get("background_well"))
+        # The map is not a line edit, so it does not go through `s`: it is
+        # parsed and held on the tab, and the summary line is redrawn from it.
+        # An absent key leaves the form alone, the same rule every setter here
+        # follows — a run that predates pairing must not clear a map the user
+        # has just written.
+        if d.get("background_well_map") is not None:
+            self._set_background_map(d.get("background_well_map"))
         # The sidecar records the NEGATIVE (`--no_auto_threshold`), so the
         # checkbox is its inverse; setChecked fires toggled and syncs the rows.
         nat = d.get("no_auto_threshold")

@@ -234,6 +234,56 @@ def test_result_zip_is_valid_and_short_well_token_canonicalised(tmp_path):
     assert "exp_w1_a1_2_T01.tif" in zipfile.ZipFile(tmp_path / "A01.zip").namelist()
 
 
+def test_the_scope_reader_reads_the_blank_list_the_pipeline_way(tmp_path):
+    """One answer to "which wells are blanks", shared with the run itself.
+
+    Both scope readers used to carry a local whitespace-splitting regex that read
+    ``"H12 G12"`` as two wells, where ``util.well_token.split_background_wells``
+    — what the pipeline itself uses — reads it as one. Two answers to one
+    question about one plate. The same divergence was found and fixed once in
+    the remote runner, where it killed every batch of a run, and these two copies
+    survived it.
+
+    Asserted against ``blank_wells_for_run`` rather than against a list written
+    here, so this cannot drift from the pipeline the way the regex did.
+    """
+    from services.input_resolution_service import _blank_well_tokens
+    from util.well_token import blank_wells_for_run, canonical_well_label
+
+    def canonical(background_well="", background_well_map=""):
+        return {canonical_well_label(w)
+                for w in blank_wells_for_run(background_well, background_well_map)
+                if canonical_well_label(w)}
+
+    for opts in (
+        {"background_well": "H12, G12"},
+        {"background_well": "H12;G12"},
+        {"background_well": "H12 G12"},        # one token, not two
+        {"background_well": "h12"},
+        {"background_well_map": "H12=A01; G12=B01"},
+        {"background_well": "F12", "background_well_map": "H12=A01"},
+        {},
+    ):
+        assert _blank_well_tokens(opts) == canonical(
+            opts.get("background_well", ""),
+            opts.get("background_well_map", "")), opts
+
+    # And the specific case the regex got wrong: whitespace does not separate
+    # wells, so this names one well that does not exist rather than two that do.
+    assert _blank_well_tokens({"background_well": "H12 G12"}) == set()
+    assert _blank_well_tokens({"background_well": "H12, G12"}) == {"H12", "G12"}
+
+
+def test_a_blank_named_only_in_the_pairing_map_is_still_a_blank(tmp_path):
+    """The scope readers decide whether new blank frames stale existing wells.
+
+    A blank the map names and ``--background_well`` does not was invisible to
+    that decision, so a re-run that added frames to it would leave every well it
+    corrects holding numbers built from the old reference.
+    """
+    from services.input_resolution_service import _blank_well_tokens
+
+    assert _blank_well_tokens({"background_well_map": "H12=A01,A02"}) == {"H12"}
 def test_a_supplied_listing_plans_exactly_what_reading_the_folder_would(tmp_path):
     """``loose_files`` is an optimisation, never a second definition of the rule.
 

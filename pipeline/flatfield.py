@@ -35,7 +35,9 @@ _FLATFIELD_FLOOR = FLATFIELD_FLOOR
 #: Three of the four take nothing a user chose: ``gaussian`` estimates its field
 #: from the frame in front of it, and ``basic`` estimates one from the plate's
 #: own images. Only ``empty_well`` is told which wells to measure, and that is
-#: the setting somebody has to know to reproduce the run.
+#: the setting somebody has to know to reproduce the run — together with
+#: ``background_well_map``, which says which of those wells measured which
+#: block of the plate.
 #:
 #: The mode roster itself is ``process_microscopy.FLATFIELD_MODES``;
 #: ``tests/test_correction_parameter_roster.py`` holds the two in step.
@@ -43,7 +45,7 @@ FLATFIELD_MODE_PARAMS: dict[str, tuple[str, ...]] = {
     "none": (),
     "gaussian": (),
     "basic": (),
-    "empty_well": ("background_well",),
+    "empty_well": ("background_well", "background_well_map"),
 }
 
 

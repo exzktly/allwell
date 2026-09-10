@@ -84,7 +84,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # services.remote_runner._REQUIRED_REMOTE_FILES, i.e. a change to what every
 # remote machine is sent, and that was explicitly out of scope for this change.
 # That cluster remains the extraction to take when this budget next binds.
-PROCESS_MICROSCOPY_BUDGET = 4336
+#
+# 4336 -> 4048: the empty-well cluster (the blank sampler, both model builders,
+# the per-image field lookup and the guard that stops a run whose requested
+# correction could not be built) moved to `pipeline/empty_well.py`, taking the
+# new-manifest-entry cost the note above declined. Every name is re-exported,
+# so no call site and no test moved with it.
+PROCESS_MICROSCOPY_BUDGET = 4048
 
 # `services/remote_runner.py` is the largest module in the repo — nearly twice
 # `process_microscopy.py` — and until now the only large one with nothing

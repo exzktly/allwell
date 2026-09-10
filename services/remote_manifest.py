@@ -99,6 +99,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # The one definition of "is this well complete", shared by the end-of-run
     # check and the Datasets Validate tool.
     "pipeline/completeness.py",
+    # The blank-well sampler and the two model builders behind
+    # --flatfield/--background empty_well. The remote genuinely runs these:
+    # a batched run reads its blank out of --background_dir on the worker.
+    "pipeline/empty_well.py",
     "pipeline/flatfield.py",
     # Per-FOV resume checkpoints, keyed on the output directory and the run's
     # settings so one plate cannot resume another's intermediates.

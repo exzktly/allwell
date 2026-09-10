@@ -350,7 +350,7 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
             import pipeline.flatfield as _ffc
             field = flatfield_field_for(
                 ctx, str(state.channel.active_image_channel or ""), fluor_arr,
-                tp=tp)
+                tp=tp, well=well)
             fluor_arr = _np.asarray(_ffc.apply_flatfield(fluor_arr, field), dtype=_np.float32)
         center_int = _np.rint(_np.asarray(mask_raw)).astype(_np.int32, copy=False)
         padded = _np.pad(center_int, 1, mode="constant", constant_values=0)

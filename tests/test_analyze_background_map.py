@@ -150,9 +150,9 @@ def test_painting_a_well_assigns_it_to_the_active_blank(tab):
     # …and the form's own summary says so, because that is all a user sees
     # without opening the editor again. The count and whether the run can
     # start, not a per-blank list: eight blanks tripled this row's height.
-    assert "1 blank(s) paired" in tab._bg_map_summary.text()
+    assert "1 blank paired" in tab._bg_map_summary.text()
     assert "the run will refuse" in tab._bg_map_summary.text()
-    assert tab._bg_map_summary.toolTip() == "H12 corrects 2 well(s)"
+    assert tab._bg_map_summary.toolTip() == "H12 corrects 2 wells"
 
 
 def test_dragging_back_over_a_claimed_well_removes_it(tab):
@@ -302,7 +302,7 @@ def test_an_unreadable_map_leaves_the_form_pooled_and_says_so(tab):
     assert tab._background_map == {}
     # A named blank with an unreadable map pools; the summary says which.
     tab._background_well_edit.setText("H12")
-    assert "Pooled — 1 blank(s)" in tab._bg_map_summary.text()
+    assert "Pooled — 1 blank" in tab._bg_map_summary.text()
 
 
 def test_a_blank_with_no_wells_is_reported_as_pooled_not_as_paired(tab):
@@ -333,7 +333,7 @@ def test_a_blank_with_no_wells_is_reported_as_pooled_not_as_paired(tab):
     tab._background_map = {"H12": ["A01"]}
     tab._refresh_background_map_summary()
     tab._bg_map_refresh_uncovered()
-    assert "1 blank(s) paired" in tab._bg_map_summary.text()
+    assert "1 blank paired" in tab._bg_map_summary.text()
     assert "Pooled" not in tab._bg_map_uncovered.text()
 
 
@@ -593,7 +593,7 @@ def test_the_summary_does_not_claim_a_correction_that_is_not_happening(tab):
     assert "No blank well named" in tab._bg_map_summary.text()
 
     tab._background_well_edit.setText("H12")
-    assert "1 blank(s) correct every well" in tab._bg_map_summary.text()
+    assert "1 blank correcting every well" in tab._bg_map_summary.text()
 
 
 def test_the_summary_says_whether_the_run_can_start(tab):
@@ -612,7 +612,7 @@ def test_the_summary_says_whether_the_run_can_start(tab):
                          corrections=("empty_well",))
     missing = groups.uncovered(tab._background_map_plate_wells())
     assert missing, "the fixture must leave something uncovered to measure"
-    assert f"{len(missing)} well(s) unclaimed" in tab._bg_map_summary.text()
+    assert f"{len(missing)} wells unclaimed" in tab._bg_map_summary.text()
     assert "the run will refuse" in tab._bg_map_summary.text()
 
     tab._bg_map_split("even")                    # two blanks, two blocks
@@ -620,24 +620,28 @@ def test_the_summary_says_whether_the_run_can_start(tab):
     assert "refuse" not in tab._bg_map_summary.text()
 
 
-def test_the_summary_stays_one_line_however_many_blanks(tab):
+def test_the_summary_states_the_count_rather_than_listing_the_blanks(tab):
     """Eight blanks made a 141-character list that tripled the row's height.
 
-    Measured on the row, because the defect is what it does to the form around
-    it rather than to its own text: this row sits in Quality Control and pushed
-    everything under it down the pane.
+    The height is pinned on the *button's* row, in the placement test below —
+    the summary has its own line now, and that line is allowed to be as tall as
+    its sentence. What has to stay true here is that the sentence does not grow
+    with the plate: a summary that enumerates has no bounded length.
     """
     tab._background_well_edit.setText("H12")
     tab._bg_map_btn.click()
-    one = tab._bg_map_summary.parentWidget().sizeHint().height()
+    tab._bg_map_split("even")
+    one = tab._bg_map_summary.text()
 
     tab._background_well_edit.setText(", ".join(f"H{i:02d}" for i in range(1, 9)))
     tab._bg_map_split("row")
     assert len(tab._background_map) == 8
-    many = tab._bg_map_summary.parentWidget().sizeHint().height()
+    many = tab._bg_map_summary.text()
 
-    assert many == one, f"the row grew from {one}px to {many}px with the blanks"
-    assert len(tab._bg_map_summary.text()) < 60
+    assert len(many) < 60, many
+    assert abs(len(many) - len(one)) <= 2, (
+        f"the sentence grew with the blanks: {one!r} → {many!r}")
+    assert "H01" not in many, "the summary is enumerating again"
     # The detail is not lost, it moved to where a long list is free.
     assert tab._bg_map_summary.toolTip().count("\n") == 7
 
@@ -651,7 +655,7 @@ def test_the_summary_tracks_the_field_without_the_editor_ever_opening(tab):
     """
     assert tab._bg_map_window is None
     tab._background_well_edit.setText("H12, G12")
-    assert "2 blank(s) correct every well" in tab._bg_map_summary.text()
+    assert "2 blanks correcting every well" in tab._bg_map_summary.text()
     assert tab._bg_map_window is None, "reading the field must not build a window"
 
 
@@ -682,3 +686,30 @@ def test_a_field_edit_does_not_destroy_a_painted_block(tab):
     assert tab._background_map.get("F12") == []
     tab._background_well_edit.setText("H12, G12")
     assert "F12" not in tab._background_map
+
+
+def test_the_summary_reads_under_the_button_not_beside_it(tab):
+    """It is a sentence about the state, not a second control in a control row.
+
+    Sharing one row with the button meant competing with it for width in a form
+    column about 310 pixels wide, which is what let an enumerated list wrap that
+    row from 42 pixels to 112. Measured as geometry rather than as a claim about
+    the layout code.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    tab.show()
+    tab.resize(1100, 900)
+    QApplication.processEvents()
+
+    button = tab._bg_map_btn.mapTo(tab, tab._bg_map_btn.rect().topLeft())
+    summary = tab._bg_map_summary.mapTo(tab, tab._bg_map_summary.rect().topLeft())
+    assert summary.y() > button.y(), "the summary is not below the button"
+    assert summary.x() < button.x(), "the summary is still indented into the row"
+
+    # And the button's own row no longer grows with what the summary says.
+    row = tab._bg_map_btn.parentWidget()
+    before = row.sizeHint().height()
+    tab._background_well_edit.setText(", ".join(f"H{i:02d}" for i in range(1, 9)))
+    tab._bg_map_split("row")
+    assert row.sizeHint().height() == before

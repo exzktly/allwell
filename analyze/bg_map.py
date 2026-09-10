@@ -58,7 +58,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup, QDialog, QHBoxLayout, QLabel, QMenu, QPushButton, QRadioButton,
-    QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
 from theme import WELL_COLORS_TUPLE
@@ -91,6 +91,12 @@ _SWATCH_RADIUS_PX = 3
 #: carries the block and the ring already carries "this is the one being edited".
 _BG_MAP_BLANK_GLYPH = "◎"
 
+#: How far the summary line under the "Pair blanks…" button steps in. Enough to
+#: read as a note about the row above, and nowhere near the button's own left
+#: edge: the form's scroll column is about 310px, so that alignment would spend
+#: a third of the width on white space.
+_BG_MAP_NOTE_INDENT_PX = 12
+
 #: One row of the blank list, for sizing the scroll area that holds them. A
 #: radio button plus a swatch, with the layout's own 1px margins either side.
 _BG_MAP_ROW_PX = 26
@@ -99,6 +105,16 @@ _BG_MAP_ROW_PX = 26
 #: mis-drag and the two or three that followed it before you noticed, shallow
 #: enough that the stack is not a second copy of the session's whole history.
 _BG_MAP_UNDO_DEPTH = 20
+
+
+def _plural(n: int, noun: str) -> str:
+    """``"1 well"`` / ``"2 wells"``, because this line has no room to spare.
+
+    The form's scroll column is about 310px and the longest sentence here is
+    already close to two lines in it; ``"well(s)"`` spends three characters a
+    time saying nothing a reader needed.
+    """
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
 
 class AnalyzeBackgroundMapMixin:
@@ -125,18 +141,6 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_window = None
         self._bg_map_undo = []
         row = self._row(sec, "Blank pairing")
-        self._bg_map_summary = QLabel("No blank well named yet")
-        self._bg_map_summary.setObjectName("Muted")
-        # One line, elided, never wrapped. Enumerating the blanks put 141
-        # characters in this row on an eight-blank split and took it from 42
-        # pixels tall to 112, shoving the rest of Quality Control down the pane.
-        # The per-blank breakdown is still there, in the tooltip, where a long
-        # list costs nothing.
-        self._bg_map_summary.setWordWrap(False)
-        self._bg_map_summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self._bg_map_summary.setSizePolicy(QSizePolicy.Ignored,
-                                           QSizePolicy.Preferred)
-        row.layout().addWidget(self._bg_map_summary, 1)
         self._bg_map_btn = QPushButton("Pair blanks…", row)
         self._bg_map_btn.setProperty("variant", "secondary")
         self._bg_map_btn.setToolTip(
@@ -150,6 +154,28 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_btn.clicked.connect(self._open_background_map_editor)
         row.layout().addWidget(self._bg_map_btn)
         row.layout().addStretch(1)
+
+        # The summary reads *under* the button on a line of its own. Beside it,
+        # it was competing with the button for one row's width — which is what
+        # made an enumerated list wrap that row from 42 pixels to 112 — and it
+        # is a sentence about the state rather than a second control, so a
+        # control row is the wrong place for it.
+        #
+        # Indented a little, and not to the button's own left edge: the Analyze
+        # form sits in a scroll column about 310 pixels wide, so aligning with
+        # the button costs `_ROW_LABEL_W` — a third of the width — and pushed
+        # the longest sentence onto three lines. A small step in reads as "a
+        # note about the row above" and leaves the text room to say it.
+        under = QWidget(sec)
+        under_layout = QHBoxLayout(under)
+        under_layout.setContentsMargins(_BG_MAP_NOTE_INDENT_PX, 0, 0, 2)
+        under_layout.setSpacing(4)
+        self._bg_map_summary = QLabel("No blank well named yet")
+        self._bg_map_summary.setObjectName("Muted")
+        self._bg_map_summary.setWordWrap(True)
+        self._bg_map_summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        under_layout.addWidget(self._bg_map_summary, 1)
+        sec.layout().addWidget(under)
         # Connected here, not on the editor's first open: this label lives in
         # the form and has to track the field whether or not the window has ever
         # been shown. Wired lazily, naming a blank left the summary reading "No
@@ -321,7 +347,7 @@ class AnalyzeBackgroundMapMixin:
         named = self._bg_map_field_blanks()
         paired = {b: w for b, w in self._background_map.items() if w}
         self._bg_map_summary.setToolTip("\n".join(
-            f"{blank} corrects {len(wells)} well(s)"
+            f"{blank} corrects {_plural(len(wells), 'well')}"
             for blank, wells in paired.items()) or "")
 
         if not named:
@@ -329,16 +355,19 @@ class AnalyzeBackgroundMapMixin:
             return
         if not self._background_map_value():
             self._bg_map_summary.setText(
-                f"Pooled — {len(named)} blank(s) correct every well")
+                f"Pooled — {_plural(len(named), 'blank')} "
+                f"correcting every well")
             return
 
         from pipeline.empty_well import BlankGroups
         groups = BlankGroups("", self._background_map_value(),
                              corrections=("empty_well",))
         missing = groups.uncovered(self._background_map_plate_wells())
-        state = ("every well claimed" if not missing
-                 else f"{len(missing)} well(s) unclaimed — the run will refuse")
-        self._bg_map_summary.setText(f"{len(paired)} blank(s) paired · {state}")
+        state = ("every well claimed" if not missing else
+                 f"{_plural(len(missing), 'well')} unclaimed, so the run "
+                 f"will refuse")
+        self._bg_map_summary.setText(
+            f"{_plural(len(paired), 'blank')} paired · {state}")
 
     # ── the wells this plate actually has ────────────────────────────────
     def _background_map_plate_wells(self) -> list[str]:

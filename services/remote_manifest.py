@@ -33,6 +33,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # process_microscopy at module top level, so the remote needs the package.
     "util/__init__.py",
     "util/aw_safe.py",
+    # One `os.scandir` in place of a `stat` per directory entry. Client-side
+    # only — its importers are the Analyze input scan and the remote runner's
+    # own staging, both of which run here — but the manifest must list every
+    # ``util/`` file so the completeness guard (test_remote_manifest) passes.
+    "util/dir_scan.py",
     # The retry-with-backoff shield behind every pipeline write that lands on
     # the output volume (pipeline.io imports it at module scope).
     # Rebinds sys.stdout / sys.stderr when a frozen windowed build nulls them;

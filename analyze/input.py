@@ -173,25 +173,62 @@ class AnalyzeInputMixin:
             return
         if guess is None:
             return
-        info = {"filename_sep": guess.separator, "filename_schema": guess.schema_str}
+        # Sidecar-shaped keys, because that is what `_apply_pipeline_info` takes
+        # and what `guess.channel_tokens().as_pipeline_info()` below already
+        # produces. Spelled `filename_sep` / `filename_schema` — the flattened,
+        # argparse-side names — these two were the only keys in the dict that
+        # `_pinfo_flat` does not read, so they were dropped on the way in and
+        # the scan applied its channel roles and silently kept the form's
+        # default schema. A plate in any other layout then reached the run with
+        # a schema the user was never prompted to correct, which is the exact
+        # failure `_well_folder_stems_in` was added to prevent.
+        #
+        # Applied only when the inference calls itself *confident*, which it does
+        # iff it placed both a well slot and a channel slot — its own module
+        # docstring says a non-confident guess is advisory, and this is the
+        # caller that has to honour that. A single-channel plate carries a
+        # constant channel token, so no channel slot can be placed and the guess
+        # comes back with `ignore` where the channel belongs; writing that into
+        # the picker produces a schema the form's own validator rejects ("channel
+        # must appear exactly once"), which `_validate_run_request` raises as a
+        # blocking dialog. Picking such a folder made Run impossible until the
+        # user noticed that one slot of the picker read `ignore`.
+        info: dict = {}
+        if guess.confident:
+            info = {"separator": guess.separator, "schema": guess.schema_str}
         tokens = guess.channel_tokens() if guess.channels else None
         if tokens is not None:
             info.update(tokens.as_pipeline_info())
-        self._apply_pipeline_info(info)
-        self._report_scan_guess(tokens)
+        if info:
+            self._apply_pipeline_info(info)
+        self._report_scan_guess(
+            tokens, schema=guess.schema_str if guess.confident else "")
 
-    def _report_scan_guess(self, tokens) -> None:
-        """State what the folder scan filled in, on the run dashboard."""
+    def _report_scan_guess(self, tokens, *, schema: str = "") -> None:
+        """State what the folder scan filled in, on the run dashboard.
+
+        *schema* is the schema the scan actually applied, or ``""`` when it
+        applied none. Both halves are named because both overwrite fields whose
+        new values look no different from hand-entered ones — and because a line
+        reading "schema guessed" whether or not a schema was written is how a
+        scan that rewrote the form and a scan that left it alone came to be
+        indistinguishable.
+        """
+        parts = [f"schema {schema}" if schema
+                 else "schema not recognised, left as you set it"]
         if tokens is None:
-            msg = ("Scanned folder: schema guessed, channel tokens not "
-                   "recognised — check the Channel Tokens rows")
+            parts.append("channel tokens not recognised — check the Channel "
+                         "Tokens rows")
         else:
             named = ", ".join(tokens.fluor_tokens) or "none"
-            msg = f"Scanned folder: channels {named}"
+            part = f"channels {named}"
             if tokens.nuclear_token:
-                msg += f"; segmentation channel {tokens.nuclear_token}"
+                part += f"; segmentation channel {tokens.nuclear_token}"
             if tokens.phase_token:
-                msg += f"; phase {tokens.phase_token}"
+                part += f"; phase {tokens.phase_token}"
+            parts.append(part)
+        msg = "Scanned folder: " + "; ".join(parts)
+        if tokens is not None:
             msg += " — check before running"
         try:
             self._dashboard.set_status(msg)

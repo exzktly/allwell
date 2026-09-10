@@ -11,6 +11,7 @@ from collections.abc import Callable
 from services.subprocess_kill import signal_subprocess
 from services.subprocess_text import TEXT_UTF8
 from util.aw_safe import swallow, swallowed
+from util.dir_scan import files_and_subdirs, files_in
 from util.image_exts import is_run_input_member
 from util.retry_io import retry_io
 from util.zip_write import (
@@ -127,10 +128,18 @@ def tif_files_in(folder: Path) -> list[Path]:
     ``is_run_input_member`` is that entitlement question, asked once for the
     whole repo, and it is what makes the four fixes one rule rather than four.
     """
-    return sorted(
-        p for p in folder.glob("*")
-        if p.is_file() and is_run_input_member(p.name)
-    )
+    return input_images_among(files_in(folder))
+
+
+def input_images_among(files: list[Path]) -> list[Path]:
+    """The run-input images in an already-made listing, order preserved.
+
+    :func:`tif_files_in` with the directory read already done, for a caller
+    that has one listing and several questions to ask of it. The rule is stated
+    once, here, so the two cannot drift — which is the whole subject of the
+    docstring above.
+    """
+    return [p for p in files if is_run_input_member(p.name)]
 
 
 def _is_well_named(p: Path) -> bool:
@@ -139,10 +148,28 @@ def _is_well_named(p: Path) -> bool:
     return is_valid_well_name(p.stem)
 
 
+def _well_zip_among(files: list[Path]) -> bool:
+    """True iff *files* holds at least one well-named ``<WELL>.zip``.
+
+    Takes an already-made listing so a caller that has one does not read the
+    directory again to ask this. ``Path.match`` rather than a suffix
+    comparison, because that is the rule ``glob("*.zip")`` applied and it is
+    platform-dependent in a way a hand-written test is not: case-sensitive on
+    POSIX, case-insensitive on Windows.
+    """
+    return any(p.match("*.zip") and _is_well_named(p) for p in files)
+
+
 def has_well_zip(folder: Path) -> bool:
-    """True iff *folder* contains at least one well-named ``<WELL>.zip``."""
+    """True iff *folder* contains at least one well-named ``<WELL>.zip``.
+
+    A *file* named ``<WELL>.zip``: a directory of that name is not an archive,
+    and answering True for one sent the whole folder down the fold-loose path,
+    where opening it as a zip fails and the loose images beside it are then
+    reported as already folded.
+    """
     try:
-        return any(_is_well_named(p) for p in folder.glob("*.zip"))
+        return _well_zip_among(files_in(folder))
     except OSError:
         return False
 
@@ -199,6 +226,19 @@ def _zip_timepoints(zip_path: Path, *, schema: str, sep: str) -> set[str]:
     return out
 
 
+def _has_well_content_in(files: list[Path], subdirs: list[Path]) -> bool:
+    """:func:`has_well_content` over a listing already made.
+
+    The archive half is `has_well_zip`'s rule rather than a second spelling of
+    it — the two decide the same thing about the same folder, one branch apart
+    in `_plan_grouped_root`, so a directory named `A01.zip` must not be an
+    archive to one and not to the other.
+    """
+    from util.well_token import is_valid_well_name
+    return _well_zip_among(files) or any(
+        is_valid_well_name(p.name) for p in subdirs)
+
+
 def has_well_content(folder: Path) -> bool:
     """Return True iff *folder* contains *well-named* zip files OR
     well-named subdirectories.
@@ -209,15 +249,17 @@ def has_well_content(folder: Path) -> bool:
     was broken. Judge the basename with the shared canonicaliser to avoid
     that, so this module and the pipeline that then reads the folder agree
     on what counts as a well (ARCHITECTURE §15).
+
+    The archive has to be a *file*: a directory named ``A01.zip`` — what an
+    expander calls an archive it has unpacked in place — is not one, and
+    counting it as one sent the whole folder down a branch where opening it
+    fails. Same rule as :func:`has_well_zip`, and the same reason.
     """
-    from util.well_token import is_valid_well_name
     try:
-        for p in folder.glob("*.zip"):
-            if _is_well_named(p):
-                return True
-        return any(is_valid_well_name(p.name) for p in folder.iterdir() if p.is_dir())
+        files, subdirs = files_and_subdirs(folder)
     except OSError:
         return False
+    return _has_well_content_in(files, subdirs)
 
 
 def dir_has_entries(folder: Path) -> bool:
@@ -258,6 +300,8 @@ ZIP_ROOT = "zip_root"
 UNRECOGNISED = "unrecognised"
 #: An ``in/`` that exists and is empty.
 EMPTY_IN = "empty_in"
+#: The folder is there and is a directory, but listing it failed.
+UNREADABLE = "unreadable"
 #: Nothing usable anywhere.
 NO_INPUT = "no_input"
 
@@ -298,12 +342,55 @@ class InputPlan:
         return self.action in RUNNABLE_ACTIONS
 
 
+def _unreadable_plan(folder: Path, exc: OSError) -> InputPlan:
+    """The plan for a directory that exists and could not be listed.
+
+    A directory can be traversable and not listable — a share whose ACL grants
+    execute and not read, a mount that has gone stale — and the two are told
+    apart only by trying. ``Path.is_dir()`` says yes and the listing then fails.
+
+    This needs its own action because the alternatives are both wrong.
+    ``Path.glob`` answers such a directory with an empty list, so the folder
+    read as `EMPTY_IN`, *"nothing to process"* — a statement about the plate,
+    made from a failure to look at it, and exactly the silent substitution the
+    pipeline is not allowed to make. Letting the ``OSError`` out is no better
+    here: this is reached from a ``textChanged`` slot, where an exception leaves
+    the path field showing the new folder and every label beside it still
+    describing the previous one.
+    """
+    return InputPlan(
+        UNREADABLE, None, None, 0,
+        f"Could not read {folder.name}/ — {exc.strerror or exc}. "
+        f"The folder is there; its contents could not be listed.",
+    )
+
+
 def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool,
                        schema: tuple[str, str] = ("", "_")) -> InputPlan:
     """Classify a folder that is being used as the pipeline's input directly."""
-    loose = len(tif_files_in(root))
+    # One listing answers almost everything this decision needs: which loose
+    # images are in the folder, whether any well archives are, whether any
+    # well-named folders are, and — through `_plan_loose_append` below — which
+    # of those images would be folded in. Each of those used to read the
+    # directory for itself, so a readout for a plate of a few thousand loose
+    # images enumerated it three times, and the three listings could disagree
+    # about a file written between them.
+    #
+    # `dir_has_entries` below is the exception and keeps its own listing on
+    # purpose: it asks whether the folder holds an entry of *any* kind, which
+    # includes the ones this listing drops because they are neither a file nor
+    # a directory — a dangling symlink, a socket. Answering it from here would
+    # turn a folder holding only such an entry from usable-but-unrecognised
+    # into empty. It short-circuits on the first entry, and it is reached only
+    # when the folder has no images, no archives and no well folders in it.
+    try:
+        entries, subdirs = files_and_subdirs(root)
+    except OSError as exc:
+        return _unreadable_plan(root, exc)
+    loose_files = input_images_among(entries)
+    loose = len(loose_files)
     if loose > 0:
-        if has_well_zip(root):
+        if _well_zip_among(entries):
             # The number the *run* will fold, not the number of files with a
             # TIF suffix, when the caller supplied the schema that decides it.
             # ``plan_loose_append`` is the function ``append_loose_images_to_zips``
@@ -311,9 +398,9 @@ def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool,
             fold_schema, fold_sep = schema
             folded = loose
             if fold_schema:
-                folded = plan_loose_append(
+                folded = _plan_loose_append(
                     root, filename_schema=fold_schema,
-                    filename_sep=fold_sep).total
+                    filename_sep=fold_sep, loose_files=loose_files).total
             if folded == 0:
                 # Files are lying there and none of them is new. Saying "will
                 # fold 0" invites the user to wonder what went wrong; saying
@@ -335,7 +422,7 @@ def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool,
             f"✓ Will group {loose} loose TIF(s) into per-well folders "
             f"in {root.name}/",
         )
-    if has_well_content(root):
+    if _has_well_content_in(entries, subdirs):
         return InputPlan(
             GROUPED, root, output_dir, 0,
             "✓ Using selected folder as input" if named_in
@@ -404,7 +491,10 @@ def plan_input_layout(raw: Path, *, filename_schema: str = "",
     else:
         nested = None
 
-    tifs = len(tif_files_in(raw))
+    try:
+        tifs = len(tif_files_in(raw))
+    except OSError as exc:
+        return _unreadable_plan(raw, exc)
     if tifs > 3:
         return InputPlan(
             ZIP_ROOT, in_sub, out_dir, tifs,
@@ -428,6 +518,15 @@ def _layout_error(plan: InputPlan, raw: Path) -> str:
         return plan.message
     if plan.action == NOT_A_DIR:
         return f"Not a directory:\n{raw}"
+    if plan.action == UNREADABLE:
+        return (
+            f"{plan.message}\n\n"
+            "The folder exists, but listing what is in it failed. On a network "
+            "share or a mounted volume this is usually a permissions problem "
+            "or a dropped connection — the run is not started, because what is "
+            "in the folder is unknown rather than known to be nothing.\n\n"
+            f"Folder selected: {raw}"
+        )
     if plan.action == EMPTY_IN:
         return (
             f"{plan.message}\n\n"
@@ -452,17 +551,18 @@ def _well_in_grouped_root(root: Path, target: str) -> bool:
     folder (non-recursive, mirroring the pipeline's grouped-input lookup)."""
     from util.well_token import canonical_well_label
     try:
-        # per-well zip:  <root>/<WELL>.zip
-        for p in root.glob("*.zip"):
-            if canonical_well_label(p.stem) == target:
-                return True
-        # per-well folder:  <root>/<WELL>/
-        for p in root.iterdir():
-            if p.is_dir() and canonical_well_label(p.name) == target:
-                return True
+        files, subdirs = files_and_subdirs(root)
     except OSError:
         return False
-    return False
+    # per-well zip: <root>/<WELL>.zip — a *file*, by `_well_zip_among`'s rule.
+    # This guard is what `_background_well_validation_error` asks before a run
+    # starts, so a directory named `A01.zip` answering yes here is a run allowed
+    # to start against a background well the pipeline will not find.
+    if any(p.match("*.zip") and canonical_well_label(p.stem) == target
+           for p in files):
+        return True
+    # per-well folder:  <root>/<WELL>/
+    return any(canonical_well_label(p.name) == target for p in subdirs)
 
 
 def well_present_in_input(input_dir: Path, well: str, *,
@@ -527,15 +627,19 @@ def iter_well_tokens(input_dir: Path) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
     try:
-        entries = sorted(input_dir.iterdir(), key=lambda p: p.name)
+        files, subdirs = files_and_subdirs(input_dir)
     except OSError:
         return out
-    for p in entries:
-        tok = None
-        if p.is_file() and p.suffix.lower() == ".zip":
-            tok = canonical_well_label(p.stem)
-        elif p.is_dir():
-            tok = canonical_well_label(p.name)
+    # Archives and folders interleave in one name-sorted sequence, because that
+    # is the order the tokens come back in: a plate holding `A01.zip` beside
+    # `A02/` must not report A02 after every zip in the folder.
+    candidates = sorted(
+        [(p.name, canonical_well_label(p.stem))
+         for p in files if p.suffix.lower() == ".zip"]
+        + [(p.name, canonical_well_label(p.name)) for p in subdirs],
+        key=lambda pair: pair[0],
+    )
+    for _name, tok in candidates:
         if tok and tok not in seen:
             seen.add(tok)
             out.append(tok)
@@ -574,14 +678,26 @@ def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) 
         return toks
 
     toks: set[str] = set()
-    grouped = plan_input_layout(raw).input_dir
-    if grouped is not None:
-        toks |= set(iter_well_tokens(grouped)) | _loose_toks(grouped)
-        if grouped != raw:
-            toks |= _loose_toks(raw)  # loose TIFs at the selected root
-    if toks:
-        return len(toks)
-    return len(tif_files_in(raw)) or 1
+    try:
+        grouped = plan_input_layout(raw).input_dir
+        if grouped is not None:
+            toks |= set(iter_well_tokens(grouped)) | _loose_toks(grouped)
+            if grouped != raw:
+                toks |= _loose_toks(raw)  # loose TIFs at the selected root
+        if toks:
+            return len(toks)
+        return len(tif_files_in(raw)) or 1
+    except OSError:
+        # Best-effort means best-effort against a folder that cannot be *listed*
+        # too, which is newly possible: the listing helpers raise where
+        # ``Path.glob`` used to swallow the refusal and hand back an empty list.
+        # This is a progress denominator, and the caller asks for it *before*
+        # ``resolve_input_output`` — so raising from here pre-empted the refusal
+        # that names the folder and the errno, and surfaced instead as a bare
+        # ``[Errno 13]`` through ``pipeline_runner``'s broad handler with nothing
+        # logged by the resolver at all. Meanwhile the readout went on showing
+        # the long UNREADABLE sentence, so one folder had two answers.
+        return 1
 
 
 @dataclass(frozen=True)
@@ -618,6 +734,7 @@ def plan_loose_append(
     filename_schema: str,
     filename_sep: str,
     log_fn: Callable[[str], None] | None = None,
+    loose_files: list[Path] | None = None,
 ) -> LooseAppendPlan:
     """Decide which loose images would be folded in, writing nothing.
 
@@ -631,33 +748,57 @@ def plan_loose_append(
     the leftovers of an interrupted append — so it is neither counted nor
     deleted, and a run whose every loose file is a duplicate has nothing new to
     process however many files are lying there.
+
+    *loose_files* is :func:`tif_files_in`'s answer for *grouped_dir*, for a
+    caller that already has it. The layout readout does — it counts the loose
+    images to decide whether there is anything to fold at all — and every
+    function this used to reach read that same directory again for itself, so
+    one readout of a plate holding a few thousand loose images enumerated it
+    three times over. Passing it is an optimisation and never required for
+    correctness: omitted, this reads the directory itself.
     """
+    # Gate: only a zip-grouped layout qualifies. Folder-only / loose-only
+    # layouts are the normal zipper's job. Asked here rather than in
+    # `_plan_loose_append` so a caller that has already established it — the
+    # layout readout has, which is why it reached the fold branch at all — does
+    # not read the directory a second time to be told what it knows.
+    if not has_well_zip(grouped_dir):
+        return LooseAppendPlan()
+    return _plan_loose_append(
+        grouped_dir, filename_schema=filename_schema,
+        filename_sep=filename_sep, log_fn=log_fn, loose_files=loose_files)
+
+
+def _plan_loose_append(
+    grouped_dir: Path,
+    *,
+    filename_schema: str,
+    filename_sep: str,
+    log_fn: Callable[[str], None] | None = None,
+    loose_files: list[Path] | None = None,
+) -> LooseAppendPlan:
+    """:func:`plan_loose_append` with the well-archive gate already answered."""
     from util.well_token import canonical_well_label
 
     empty = LooseAppendPlan()
-    # Gate: only a zip-grouped layout qualifies. Folder-only / loose-only
-    # layouts are the normal zipper's job.
-    if not has_well_zip(grouped_dir):
-        return empty
-
     fields = [str(f).strip().lower() for f in str(filename_schema or "").split(":")]
     if "well" not in fields:
         return empty
     well_idx = fields.index("well")
 
-    # Loose top-level image files (not zips, not dirs), grouped by well.
+    # Loose top-level image files (not zips, not dirs), grouped by well. The
+    # rule for which of them count is `tif_files_in`'s, asked once for the whole
+    # repo: this branch decides what `plan_input_layout` tells the user it is
+    # about to do, and the copy of the rule that used to live here took
+    # `.tif`/`.tiff` alone, so a PNG plate was described as holding no loose
+    # images at all.
     by_well: dict[str, list[Path]] = {}
-    try:
-        entries = sorted(grouped_dir.iterdir(), key=lambda p: p.name)
-    except OSError:
-        return empty
-    for p in entries:
-        # The same rule the zipper and the pre-flight use. This branch decides
-        # what `plan_input_layout` tells the user it is about to do, and taking
-        # `.tif`/`.tiff` alone meant a PNG plate was described as holding no
-        # loose images at all.
-        if not p.is_file() or not is_run_input_member(p.name):
-            continue
+    if loose_files is None:
+        try:
+            loose_files = tif_files_in(grouped_dir)
+        except OSError:
+            return empty
+    for p in loose_files:
         parts = p.stem.split(filename_sep)
         token = canonical_well_label(parts[well_idx]) if well_idx < len(parts) else None
         if token is None:
@@ -1074,22 +1215,21 @@ def _consolidate_mixed_to_zips(
     from util.well_token import canonical_well_label
 
     try:
-        entries = list(folder.iterdir())
+        files, subdirs = files_and_subdirs(folder)
     except OSError:
         return False
     zip_wells = {
         canonical_well_label(p.stem)
-        for p in entries
-        if p.is_file() and p.suffix.lower() == ".zip" and canonical_well_label(p.stem)
+        for p in files
+        if p.suffix.lower() == ".zip" and canonical_well_label(p.stem)
     }
     if not zip_wells:
         return False  # pure folders / pure loose — folder mode handles it
     leftover: dict[str, Path] = {}
-    for p in entries:
-        if p.is_dir():
-            tok = canonical_well_label(p.name)
-            if tok and tok not in zip_wells:
-                leftover[tok] = p
+    for p in subdirs:
+        tok = canonical_well_label(p.name)
+        if tok and tok not in zip_wells:
+            leftover[tok] = p
     if not leftover:
         return False
 
@@ -1105,10 +1245,7 @@ def _consolidate_mixed_to_zips(
         # Input images, by the one definition — this packs the *user's* well
         # folder into the archive the pipeline segments from, so a narrower
         # rule here silently drops a PNG plate's images out of the run.
-        tifs = sorted(
-            p for p in well_dir.iterdir()
-            if p.is_file() and is_run_input_member(p.name)
-        )
+        tifs = tif_files_in(well_dir)
         if not tifs:
             # Nothing to pack. Writing the archive anyway would publish a
             # member-less <WELL>.zip — which macOS refuses to expand and the
@@ -1184,18 +1321,25 @@ def _fold_well_folders_into_existing_zips(
     from util.well_token import canonical_well_label
 
     folded = 0
-    entries: list[Path] = []
+    files: list[Path] = []
+    subdirs: list[Path] = []
     with swallow(f"listing the grouped directory {grouped.name}"):
-        entries = sorted(grouped.iterdir(), key=lambda q: q.name)
+        files, subdirs = files_and_subdirs(grouped)
+    # By *name*, not by path, at both steps. `files_and_subdirs` sorts the Path
+    # objects, and `PurePath` comparison casefolds on Windows — which is the
+    # right default for the scan that strides a sample, and the wrong one here,
+    # where both of these collapse several entries onto one well token: where
+    # `a1.zip` and `A01.zip` both exist the dict keeps whichever comes last, and
+    # the folder order decides whose images land in the archive last. Its two
+    # sibling sites (`_grouped_member_index` and `iter_well_tokens`) were given
+    # the same key for the same reason, and a third that merely inherited path
+    # order would read as a decision rather than the omission it was.
     zips = {
         canonical_well_label(q.stem): q
-        for q in entries
-        if q.is_file() and q.suffix.lower() == ".zip"
-        and canonical_well_label(q.stem)
+        for q in sorted(files, key=lambda q: q.name)
+        if q.suffix.lower() == ".zip" and canonical_well_label(q.stem)
     }
-    for entry in entries:
-        if not entry.is_dir():
-            continue
+    for entry in sorted(subdirs, key=lambda q: q.name):
         tok = canonical_well_label(entry.name)
         target = zips.get(tok) if tok else None
         if target is None:
@@ -1214,10 +1358,7 @@ def _fold_one_well(entry: Path, target: Path, *,
                    log_fn: Callable[[str], None] | None,
                    is_image: Callable[[str], bool]) -> int:
     """Fold one ``<WELL>/`` folder into the ``<WELL>.zip`` beside it."""
-    images = [
-        q for q in sorted(entry.iterdir())
-        if q.is_file() and is_image(q.name)
-    ]
+    images = [q for q in files_in(entry) if is_image(q.name)]
     by_name = {q.name: q for q in images}
 
     with zipfile.ZipFile(target) as src:
@@ -1314,20 +1455,32 @@ def _grouped_member_index(grouped: Path) -> dict[str, tuple[int, int | None]]:
 
     index: dict[str, tuple[int, int | None]] = {}
     with swallow(f"listing already-grouped members under {grouped.name}"):
-        for entry in grouped.iterdir():
-            if entry.is_dir():
-                for child in entry.iterdir():
-                    if child.is_file() and is_group_image(child.name):
+        files, subdirs = files_and_subdirs(grouped)
+        # Folders and archives in one sorted sequence. On the rare basename
+        # that appears in both, the *last* writer wins, so the walk order is
+        # part of the answer — and this is the answer that decides whether a
+        # user's loose original is deleted as already grouped. The old order
+        # was `iterdir`'s, i.e. the filesystem's, so it was arbitrary rather
+        # than files-then-folders; sorting makes it repeatable, and keeping the
+        # two kinds interleaved keeps each collision on the side that a listing
+        # of the folder would put it.
+        dirs = set(subdirs)
+        for entry in sorted(files + subdirs, key=lambda q: q.name):
+            if entry in dirs:
+                for child in files_in(entry):
+                    if is_group_image(child.name):
                         with swallow(f"sizing {child.name}"):
                             index[child.name] = (child.stat().st_size, None)
-            elif entry.suffix.lower() == ".zip":
-                with swallow(f"reading {entry.name}"), \
-                        zipfile.ZipFile(entry) as zf:
-                    for info in zf.infolist():
-                        base = info.filename.rsplit("/", 1)[-1]
-                        if base and not base.startswith(".") \
-                                and is_group_image(base):
-                            index[base] = (info.file_size, info.CRC)
+                continue
+            if entry.suffix.lower() != ".zip":
+                continue
+            with swallow(f"reading {entry.name}"), \
+                    zipfile.ZipFile(entry) as zf:
+                for info in zf.infolist():
+                    base = info.filename.rsplit("/", 1)[-1]
+                    if base and not base.startswith(".") \
+                            and is_group_image(base):
+                        index[base] = (info.file_size, info.CRC)
     return index
 
 
@@ -1497,10 +1650,8 @@ def detect_ome_input(raw: Path) -> Path | None:
         return raw
     if raw.is_dir():
         try:
-            hits = [
-                p for p in sorted(raw.glob("*"))
-                if p.is_file() and p.name.lower().endswith(_OME_SUFFIXES)
-            ]
+            hits = [p for p in files_in(raw)
+                    if p.name.lower().endswith(_OME_SUFFIXES)]
         except OSError:
             return None
         if len(hits) == 1:

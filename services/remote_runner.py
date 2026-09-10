@@ -67,6 +67,7 @@ from services.remote_config import (
 # zipfile/pathlib only, so it never drags numpy/tifffile into the remote client.
 from util.channel_roles import LABELFREE_METHODS, quantified_channel_tokens
 from util.fov import sort_key as fov_sort_key
+from util.dir_scan import files_in, subdirs_in
 from util.image_exts import GROUP_IMAGE_EXTS
 from util.timepoint import sort_key as tp_sort_key
 from pipeline.run_report import (
@@ -549,10 +550,8 @@ def stage_local_zips(
             for p in input_dir.glob(pat)
         ))
     elif mode is LocalInputMode.FOLDER:
-        source_well_folders = tuple(sorted(
-            p for p in input_dir.iterdir()
-            if p.is_dir() and is_valid_well_name(p.name)
-        ))
+        source_well_folders = tuple(
+            p for p in subdirs_in(input_dir) if is_valid_well_name(p.name))
         # v5.x.x resume support: a prior ``--move-source-tifs`` run
         # may have crashed mid-way, leaving SOME TIFs in well
         # subfolders and SOME still loose at the top level. Capture
@@ -588,13 +587,14 @@ def stage_local_zips(
     # confusing logs as the user watches the zipper "do work" against
     # files that are already in their folders).
     def _basenames_inside_well_folders() -> set[str]:
+        # `subdirs_in`, not a stat per entry: in FLAT mode this sees the plate's
+        # loose images, and on Windows each stat opens a file handle.
         names: set[str] = set()
-        for p in input_dir.iterdir():
-            if not (p.is_dir() and is_valid_well_name(p.name)):
+        for p in subdirs_in(input_dir):
+            if not is_valid_well_name(p.name):
                 continue
-            for child in p.iterdir():
-                if child.is_file() and child.suffix.lower() in (".tif", ".tiff"):
-                    names.add(child.name)
+            names.update(c.name for c in files_in(p)
+                         if c.suffix.lower() in (".tif", ".tiff"))
         return names
 
     folder_basenames = _basenames_inside_well_folders()
@@ -647,10 +647,12 @@ def stage_local_zips(
     # FLAT / FOLDER path through ``_stage_input_zips`` was broken
     # because the framework expected zips here but the zipper only
     # produces folders.
-    folders_after_zipper = sorted(
-        p for p in input_dir.iterdir()
-        if p.is_dir() and is_valid_well_name(p.name)
-    )
+    # From the listing's entry type, not a stat per entry. In copy mode — the
+    # default — every loose TIF is still in input_dir when this runs, so
+    # ``p.is_dir()`` here cost one stat per image at the start of every remote
+    # run: the defect the site three lines up was converted for.
+    folders_after_zipper = [
+        p for p in subdirs_in(input_dir) if is_valid_well_name(p.name)]
     # The TIFs a folder gave up are deleted the moment its own zip is
     # published, rather than at the end of the run. ``_zip_well_folder`` goes
     # through ``atomic_zip``, which renames a verified archive into place or
@@ -779,10 +781,11 @@ def _detect_local_input_mode(input_dir: Path) -> LocalInputMode:
             zip_wells.add(label)
 
     folder_wells: set[str] = set()
-    # A raised OSError from iterdir() (e.g. the drive was yanked) propagates
-    # naturally to the caller — no wrapping handler needed.
-    for p in input_dir.iterdir():
-        if not (p.is_dir() and is_valid_well_name(p.name)):
+    # A raised OSError from the listing (e.g. the drive was yanked) propagates
+    # naturally to the caller. `subdirs_in` runs before the mode is known, so on
+    # a FLAT plate it sees every image — hence no stat per entry.
+    for p in subdirs_in(input_dir):
+        if not is_valid_well_name(p.name):
             continue
         label = _canonical_well_from_path(p.name)
         if label is None:
@@ -1073,8 +1076,8 @@ def _stage_mixed_mode(
             existing_wells[label] = p
 
     folder_wells: dict[str, Path] = {}
-    for p in input_dir.iterdir():
-        if not (p.is_dir() and is_valid_well_name(p.name)):
+    for p in subdirs_in(input_dir):
+        if not is_valid_well_name(p.name):
             continue
         label = _canonical_well_from_path(p.name)
         if label is None or label in existing_wells:

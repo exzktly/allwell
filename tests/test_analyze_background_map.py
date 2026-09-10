@@ -148,8 +148,11 @@ def test_painting_a_well_assigns_it_to_the_active_blank(tab):
     assert tab._background_map == {"H12": ["A01", "A02"]}
     assert tab._background_map_value() == "H12=A01,A02"
     # …and the form's own summary says so, because that is all a user sees
-    # without opening the editor again.
-    assert "H12 → 2 well(s)" in tab._bg_map_summary.text()
+    # without opening the editor again. The count and whether the run can
+    # start, not a per-blank list: eight blanks tripled this row's height.
+    assert "1 blank(s) paired" in tab._bg_map_summary.text()
+    assert "the run will refuse" in tab._bg_map_summary.text()
+    assert tab._bg_map_summary.toolTip() == "H12 corrects 2 well(s)"
 
 
 def test_dragging_back_over_a_claimed_well_removes_it(tab):
@@ -297,7 +300,9 @@ def test_an_unreadable_map_leaves_the_form_pooled_and_says_so(tab):
     silently kept half of it would be worse than one that kept none."""
     tab._set_background_map("H12=A01; G12=A01")     # A01 claimed twice
     assert tab._background_map == {}
-    assert "Pooled" in tab._bg_map_summary.text()
+    # A named blank with an unreadable map pools; the summary says which.
+    tab._background_well_edit.setText("H12")
+    assert "Pooled — 1 blank(s)" in tab._bg_map_summary.text()
 
 
 def test_a_blank_with_no_wells_is_reported_as_pooled_not_as_paired(tab):
@@ -316,6 +321,7 @@ def test_a_blank_with_no_wells_is_reported_as_pooled_not_as_paired(tab):
     tab._bg_map_refresh_uncovered()
 
     assert tab._background_map_value() == "", "the run is handed no pairing"
+    tab._background_well_edit.setText("H12")
     summary = tab._bg_map_summary.text()
     uncovered = tab._bg_map_uncovered.text()
     assert "Pooled" in summary, summary
@@ -327,7 +333,7 @@ def test_a_blank_with_no_wells_is_reported_as_pooled_not_as_paired(tab):
     tab._background_map = {"H12": ["A01"]}
     tab._refresh_background_map_summary()
     tab._bg_map_refresh_uncovered()
-    assert "H12 → 1 well(s)" == tab._bg_map_summary.text()
+    assert "1 blank(s) paired" in tab._bg_map_summary.text()
     assert "Pooled" not in tab._bg_map_uncovered.text()
 
 
@@ -573,3 +579,106 @@ def test_the_blank_list_is_tall_enough_to_read(tab):
     tab._bg_map_btn.click()
     scroll = tab._bg_map_window.findChild(QScrollArea)
     assert scroll.minimumHeight() >= 4 * 24
+
+
+# ── the one-line summary beside the button ───────────────────────────────
+
+def test_the_summary_does_not_claim_a_correction_that_is_not_happening(tab):
+    """With no blank named, nothing is corrected — so it must not say otherwise.
+
+    It read "Pooled — every blank corrects every well" on a form where no
+    background well existed, which describes a correction that is not running.
+    """
+    assert "corrects every well" not in tab._bg_map_summary.text()
+    assert "No blank well named" in tab._bg_map_summary.text()
+
+    tab._background_well_edit.setText("H12")
+    assert "1 blank(s) correct every well" in tab._bg_map_summary.text()
+
+
+def test_the_summary_says_whether_the_run_can_start(tab):
+    """The uncovered count is the run's refusal, and it lived only in the dialog.
+
+    Asserted against ``BlankGroups`` rather than a number written here, so the
+    row, the editor and the pipeline cannot drift into three answers.
+    """
+    from pipeline.empty_well import BlankGroups
+
+    tab._background_well_edit.setText("H12, G12")
+    tab._bg_map_btn.click()
+
+    tab._bg_map_split("row")                     # two blanks, eight blocks
+    groups = BlankGroups("", tab._background_map_value(),
+                         corrections=("empty_well",))
+    missing = groups.uncovered(tab._background_map_plate_wells())
+    assert missing, "the fixture must leave something uncovered to measure"
+    assert f"{len(missing)} well(s) unclaimed" in tab._bg_map_summary.text()
+    assert "the run will refuse" in tab._bg_map_summary.text()
+
+    tab._bg_map_split("even")                    # two blanks, two blocks
+    assert "every well claimed" in tab._bg_map_summary.text()
+    assert "refuse" not in tab._bg_map_summary.text()
+
+
+def test_the_summary_stays_one_line_however_many_blanks(tab):
+    """Eight blanks made a 141-character list that tripled the row's height.
+
+    Measured on the row, because the defect is what it does to the form around
+    it rather than to its own text: this row sits in Quality Control and pushed
+    everything under it down the pane.
+    """
+    tab._background_well_edit.setText("H12")
+    tab._bg_map_btn.click()
+    one = tab._bg_map_summary.parentWidget().sizeHint().height()
+
+    tab._background_well_edit.setText(", ".join(f"H{i:02d}" for i in range(1, 9)))
+    tab._bg_map_split("row")
+    assert len(tab._background_map) == 8
+    many = tab._bg_map_summary.parentWidget().sizeHint().height()
+
+    assert many == one, f"the row grew from {one}px to {many}px with the blanks"
+    assert len(tab._bg_map_summary.text()) < 60
+    # The detail is not lost, it moved to where a long list is free.
+    assert tab._bg_map_summary.toolTip().count("\n") == 7
+
+
+def test_the_summary_tracks_the_field_without_the_editor_ever_opening(tab):
+    """This label is in the form, not in the dialog.
+
+    Wired on the editor's first open, naming a blank left the summary reading
+    "No blank well named yet" until something else happened to refresh it —
+    and most users never open the editor at all.
+    """
+    assert tab._bg_map_window is None
+    tab._background_well_edit.setText("H12, G12")
+    assert "2 blank(s) correct every well" in tab._bg_map_summary.text()
+    assert tab._bg_map_window is None, "reading the field must not build a window"
+
+
+def test_a_field_edit_does_not_destroy_a_painted_block(tab):
+    """The run unions both flags, so a blank with a block is a blank either way.
+
+    Restoring a sidecar that carries a pairing for H12 and G12 while naming only
+    H12 in ``background_well`` used to drop G12 and everything it corrected —
+    the field made authoritative over a statement it had not made.
+    """
+    tab._set_background_map("H12=A01,A02; G12=B01")
+    assert set(tab._background_map) == {"H12", "G12"}
+
+    tab._background_well_edit.setText("H12")          # G12 dropped from the field
+    assert tab._background_map.get("G12") == ["B01"], "a painted block was destroyed"
+    # The field is left exactly as typed — a box that types your deletion back
+    # is worse than the disagreement — and nothing is lost by that, because the
+    # run reads *both* flags and unions them. Asserted through the pipeline's
+    # own answer rather than a claim made here.
+    assert tab._background_well_edit.text() == "H12"
+    from util.well_token import blank_wells_for_run
+    assert sorted(blank_wells_for_run(
+        tab._background_well_edit.text(),
+        tab._background_map_value())) == ["G12", "H12"]
+
+    # A blank with no block is the field's to remove, because that is all it was.
+    tab._background_well_edit.setText("H12, G12, F12")
+    assert tab._background_map.get("F12") == []
+    tab._background_well_edit.setText("H12, G12")
+    assert "F12" not in tab._background_map

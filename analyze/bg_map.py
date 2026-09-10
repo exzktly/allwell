@@ -54,11 +54,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup, QDialog, QHBoxLayout, QLabel, QMenu, QPushButton, QRadioButton,
-    QScrollArea, QToolButton, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from theme import WELL_COLORS_TUPLE
@@ -125,9 +125,17 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_window = None
         self._bg_map_undo = []
         row = self._row(sec, "Blank pairing")
-        self._bg_map_summary = QLabel("Pooled — every blank corrects every well")
+        self._bg_map_summary = QLabel("No blank well named yet")
         self._bg_map_summary.setObjectName("Muted")
-        self._bg_map_summary.setWordWrap(True)
+        # One line, elided, never wrapped. Enumerating the blanks put 141
+        # characters in this row on an eight-blank split and took it from 42
+        # pixels tall to 112, shoving the rest of Quality Control down the pane.
+        # The per-blank breakdown is still there, in the tooltip, where a long
+        # list costs nothing.
+        self._bg_map_summary.setWordWrap(False)
+        self._bg_map_summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._bg_map_summary.setSizePolicy(QSizePolicy.Ignored,
+                                           QSizePolicy.Preferred)
         row.layout().addWidget(self._bg_map_summary, 1)
         self._bg_map_btn = QPushButton("Pair blanks…", row)
         self._bg_map_btn.setProperty("variant", "secondary")
@@ -142,6 +150,13 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_btn.clicked.connect(self._open_background_map_editor)
         row.layout().addWidget(self._bg_map_btn)
         row.layout().addStretch(1)
+        # Connected here, not on the editor's first open: this label lives in
+        # the form and has to track the field whether or not the window has ever
+        # been shown. Wired lazily, naming a blank left the summary reading "No
+        # blank well named yet" until something else happened to refresh it.
+        self._background_well_edit.textChanged.connect(
+            lambda _text: self._bg_map_on_field_changed())
+        self._refresh_background_map_summary()
 
     def _sync_background_map_enabled(self) -> None:
         """Enabled on the same condition as the Background well field itself."""
@@ -223,16 +238,20 @@ class AnalyzeBackgroundMapMixin:
         is open, so "pick a blank in the list" is true the moment the window
         appears — the state a first-time user actually lands in.
         """
-        named: list[str] = []
-        for candidate in split_background_wells(
-                self._background_well_edit.text()):
-            well = canonical_well_label(candidate)
-            if well and well not in named:
-                named.append(well)
-        if named == list(self._background_map) and all(
-                w in named for w in self._background_map):
+        named = self._bg_map_field_blanks()
+        # A blank that already corrects wells stays, even if the field stops
+        # naming it. The run agrees — ``blank_wells_for_run`` unions the two
+        # flags, so such a well is a blank to the pipeline either way — and the
+        # alternative silently destroys a block: restoring a sidecar that
+        # carries a pairing for H12 and G12 but names only H12 in
+        # ``background_well`` dropped G12 and everything it corrected. Only the
+        # empty rows are the field's to take away, because an empty row is
+        # nothing but the field's own name for a blank.
+        keep = named + [b for b, wells in self._background_map.items()
+                        if wells and b not in named]
+        if keep == list(self._background_map):
             return
-        self._background_map = {w: self._background_map.get(w, []) for w in named}
+        self._background_map = {w: self._background_map.get(w, []) for w in keep}
         # A well can only be corrected by a blank that still exists, and a blank
         # is never one of its own samples.
         for blank, wells in self._background_map.items():
@@ -240,9 +259,12 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_active = min(self._bg_map_active, max(len(named) - 1, 0))
 
     def _bg_map_on_field_changed(self) -> None:
-        """Re-project the field onto the list, but only while the window is up."""
-        if getattr(self, "_bg_map_window", None) is None:
-            return
+        """Re-project the field onto the blanks, and say so in both places.
+
+        The list is only rebuilt when the window is up — ``_refresh_background_map_editor``
+        returns early otherwise — but the *summary* is in the form and is
+        refreshed either way.
+        """
         self._bg_map_sync_blanks_from_field()
         self._refresh_background_map_editor()
         self._refresh_background_map_summary()
@@ -273,23 +295,50 @@ class AnalyzeBackgroundMapMixin:
                          "Undone — back to where this editor opened.")
 
     def _refresh_background_map_summary(self) -> None:
-        """What the *run* will do, which is not always what the editor holds.
+        """One line saying what the *run* will do, and whether it can start.
 
         Asked of :meth:`_background_map_value` rather than of the tab's own dict
         because a blank with no wells is dropped on the way out — so a map of
         nothing but empty blanks is a non-empty dict here and an empty string to
         the run. Reading the dict said "H12 → 0 well(s)", i.e. that a pairing is
         in force, for a run that pools.
+
+        Three things this line has to get right, and did not:
+
+        * **It said "every blank corrects every well" when there was no blank.**
+          Nothing was being corrected at all, so the sentence described a
+          correction that was not happening — the same shape of untruth the
+          editor's own labels carried.
+        * **It enumerated.** Eight blanks made a 141-character list that wrapped
+          this row from 42 pixels to 112 and pushed the rest of Quality Control
+          down the pane. The count is the summary; the list is the tooltip.
+        * **It never said whether the pairing would run.** The uncovered count
+          is the run's refusal, and it lived only inside the editor — so the one
+          thing you would want from a summary, whether you can press Run, meant
+          opening the dialog. It comes from ``BlankGroups.uncovered``, the same
+          answer the editor and the pipeline give.
         """
+        named = self._bg_map_field_blanks()
+        paired = {b: w for b, w in self._background_map.items() if w}
+        self._bg_map_summary.setToolTip("\n".join(
+            f"{blank} corrects {len(wells)} well(s)"
+            for blank, wells in paired.items()) or "")
+
+        if not named:
+            self._bg_map_summary.setText("No blank well named yet")
+            return
         if not self._background_map_value():
             self._bg_map_summary.setText(
-                "Pooled — every blank corrects every well"
-                if not self._background_map else
-                "Pooled — no blank has any wells yet")
+                f"Pooled — {len(named)} blank(s) correct every well")
             return
-        self._bg_map_summary.setText("; ".join(
-            f"{blank} → {len(wells)} well(s)"
-            for blank, wells in self._background_map.items() if wells))
+
+        from pipeline.empty_well import BlankGroups
+        groups = BlankGroups("", self._background_map_value(),
+                             corrections=("empty_well",))
+        missing = groups.uncovered(self._background_map_plate_wells())
+        state = ("every well claimed" if not missing
+                 else f"{len(missing)} well(s) unclaimed — the run will refuse")
+        self._bg_map_summary.setText(f"{len(paired)} blank(s) paired · {state}")
 
     # ── the wells this plate actually has ────────────────────────────────
     def _background_map_plate_wells(self) -> list[str]:
@@ -322,13 +371,6 @@ class AnalyzeBackgroundMapMixin:
         """
         if self._bg_map_window is None:
             self._bg_map_window = self._build_background_map_window()
-            # While the window exists, the field it projects keeps it current.
-            # Connected here rather than where the field is built because the
-            # field belongs to the form and this is the only thing that watches
-            # it; connecting once, on first open, also means a form that never
-            # opens the editor pays nothing.
-            self._background_well_edit.textChanged.connect(
-                lambda _text: self._bg_map_on_field_changed())
         self._bg_map_sync_blanks_from_field()
         self._bg_map_say()
         self._refresh_background_map_editor()

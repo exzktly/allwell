@@ -1922,6 +1922,24 @@ well the user believes is a blank; nothing that parsed before parses differently
 since a token containing `:` was not a well and a run naming one refused to
 start.
 
+**The plate names blanks too.** A two-way mode above it — *Choose blank wells* /
+*Assign wells to a blank* — because one plate now does two jobs and a click is
+ambiguous without one. Choosing writes straight back into the Background well
+field, so the plate is another way of typing there rather than a second record —
+a second record in this editor is precisely what the rewrite above removed. A
+drag latches its direction from the well it starts on, the way the block gesture
+does, so sweeping back across your own picks does not undo them. The field is
+rewritten as an explicit list, which turns a typed range into its wells the
+moment one is clicked — the same reason the map itself is always written out in
+full.
+
+**A blank is drawn darker than the block it serves**, and marked. It used to
+share its block's fill exactly, so a glyph at 62% of the well was the only thing
+separating the reference from the wells it corrects, on a plate whose whole job
+is to show that partition. Two channels carry it now and neither is asked to
+alone. `darker` and never `lighter`: Qt's lighten drops saturation once value
+saturates and walks a state colour to white.
+
 That is a rewrite of the first version, and the reason is worth keeping. The
 editor then held a second answer to the same question: an `+ Add blank` button
 that named blanks for the editor while the field named them for the run. The

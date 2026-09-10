@@ -439,12 +439,20 @@ def test_the_plate_is_actually_told_what_to_draw(tab):
     pick(tab, 1)
     drag(tab, "B01", "B02")
 
+    from analyze.bg_map import _darker
+
     first, second = tab._bg_map_color(0), tab._bg_map_color(1)
     assert first != second
-    # The blank is drawn in its own block's colour…
-    assert spy.block_of(first) == ["A01", "A02", "H12"]
-    assert spy.block_of(second) == ["B01", "B02", "G12"]
-    # …and marked, so the reference is not mistaken for one of its samples.
+    # The wells a blank corrects take the block's colour…
+    assert spy.block_of(first) == ["A01", "A02"]
+    assert spy.block_of(second) == ["B01", "B02"]
+    # …and the blank itself the same hue, darker, so the reference does not read
+    # as one more of them. Asserted as the value, not as "they differ": a blank
+    # painted any other colour also differs.
+    assert spy.colors["H12"] == _darker(first)
+    assert spy.colors["G12"] == _darker(second)
+    assert spy.colors["H12"] != first
+    # …and marked, so the two tones are not asked to carry it alone.
     assert set(spy.markers) == {"H12", "G12"}
     assert all(g for g in spy.markers.values())
     # The ring says which blank is being edited, which is a different question.
@@ -713,6 +721,109 @@ def test_the_summary_reads_under_the_button_not_beside_it(tab):
     tab._background_well_edit.setText(", ".join(f"H{i:02d}" for i in range(1, 9)))
     tab._bg_map_split("row")
     assert row.sizeHint().height() == before
+
+
+# ── choosing blanks on the plate ─────────────────────────────────────────
+
+def test_clicking_a_well_makes_it_a_blank_and_the_field_follows(tab):
+    """The plate can name blanks now, and the field is still the one record.
+
+    Written back into the Background well field rather than held in the editor,
+    because a second list kept in here is exactly what made this dialog unusable
+    the first time. Driven through the plate's own paint signals.
+    """
+    tab._bg_map_btn.click()
+    tab._bg_map_mode_blanks.setChecked(True)
+    tab._bg_map_mode_changed()
+
+    drag(tab, "H12")
+    assert tab._background_well_edit.text() == "H12"
+    assert [r.text().split()[0] for r in rows(tab)] == ["H12"]
+
+    # A drag names several, and the direction is latched by the well it started
+    # on — so a sweep back across your own picks does not undo itself.
+    drag(tab, "G12", "F12")
+    assert tab._background_well_edit.text() == "H12, G12, F12"
+
+    # Clicking a blank again stops it being one.
+    drag(tab, "G12")
+    assert tab._background_well_edit.text() == "H12, F12"
+    assert [r.text().split()[0] for r in rows(tab)] == ["H12", "F12"]
+
+
+def test_the_two_modes_do_different_things_with_the_same_gesture(tab):
+    """One plate, two jobs, so the plate has to say which it is doing."""
+    tab._background_well_edit.setText("H12")
+    tab._bg_map_btn.click()
+
+    # Blocks mode (the default): a drag gives wells to the picked blank.
+    assert tab._bg_map_mode_blocks.isChecked()
+    drag(tab, "A01", "A02")
+    assert tab._background_map["H12"] == ["A01", "A02"]
+    assert tab._background_well_edit.text() == "H12", "blocks mode named a blank"
+
+    # Blanks mode: the same gesture names blanks and leaves the blocks alone.
+    tab._bg_map_mode_blanks.setChecked(True)
+    tab._bg_map_mode_changed()
+    drag(tab, "G12")
+    assert tab._background_well_edit.text() == "H12, G12"
+    assert tab._background_map["H12"] == ["A01", "A02"], "blanks mode moved a block"
+
+
+def test_a_blank_is_drawn_darker_than_the_block_it_serves(tab):
+    """Two channels, neither asked to carry it alone.
+
+    The blank shared its block's fill, so a small glyph was the only thing
+    separating the reference from the wells it corrects — on a plate whose whole
+    job is to show that partition.
+    """
+    from analyze.bg_map import _darker
+
+    tab._background_well_edit.setText("H12")
+    tab._bg_map_btn.click()
+    spy = PlateSpy(tab._bg_map_plate)
+    drag(tab, "A01")
+
+    shade = tab._bg_map_color(0)
+    assert spy.colors["A01"] == shade
+    assert spy.colors["H12"] == _darker(shade) != shade
+    assert spy.markers.get("H12")
+
+
+def test_the_plate_does_not_shrink_when_a_line_under_it_wraps(tab):
+    """The reported defect, in the window it was reported against.
+
+    A status line *below* the plate wrapping to a second line took the plate
+    from 210px to 168px on a window whose own size never changed. The synthetic
+    column in ``test_a_plate_keeps_its_size`` pins the aspect forwarding across
+    every role, and cannot reproduce this: there the stretchy sibling gives up
+    its height first, while here the blank list is already at its own minimum,
+    so the plate is the only thing left to take from. That difference is why
+    this test exists in addition to those.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    tab._background_well_edit.setText("H12, G12")
+    tab._bg_map_btn.click()
+    win, plate = tab._bg_map_window, tab._bg_map_plate
+    win.show()
+    win.resize(win.sizeHint())
+    QApplication.processEvents()
+    before = (plate.width(), plate.height())
+    assert before[1] > 100, before
+
+    tab._bg_map_split("row")            # writes the longest status, which wraps
+    QApplication.processEvents()
+    assert len(tab._bg_map_status.text()) > 60, "the fixture must produce a wrap"
+    assert (plate.width(), plate.height()) == before, "a wrapping line moved it"
+
+    tab._bg_map_say("")
+    QApplication.processEvents()
+    assert (plate.width(), plate.height()) == before, "clearing it moved it back"
+
+    tab._background_well_edit.setText(", ".join(f"H{i:02d}" for i in range(1, 9)))
+    QApplication.processEvents()
+    assert (plate.width(), plate.height()) == before, "the growing list moved it"
 
 
 def test_a_range_in_the_field_fills_the_editor_s_blank_list(tab):

@@ -37,6 +37,24 @@ editor plate sitting among other controls on a page takes them; a canvas plate
 takes the larger :data:`PLATE_CANVAS_WIDTH` / :data:`PLATE_CANVAS_HEIGHT`
 instead.
 
+**A plate does not resize because something beside it did**, and that is the
+selector's own doing rather than this module's: ``WellPlateSelector`` forwards
+its grid's aspect lock (``hasHeightForWidth`` / ``heightForWidth``) and holds its
+``minimumHeight`` at that aspect for its current width. Both halves are needed.
+The policy flag is set *here* — ``setHeightForWidth(True)``, below — on a widget
+that did not implement it: the lock lived on ``_PlateGrid``, one layout down,
+where no host's layout ever asked, so ``QWidget``'s default answered -1 and the
+flag did nothing at all. And forwarding alone is not enough, because a box layout
+treats ``heightForWidth`` as a hint rather than a floor. Measured: in the
+blank-pairing editor a status line *below* the plate wrapping to a second line
+took the plate from 210px to 168px on a window whose own size never changed, and
+Home's Variables canvas moved the same way when a button appeared beside it. The
+floor is clamped to ``maximumHeight`` so a capped plate cannot ask for more than
+its role allows. ``tests/test_a_plate_keeps_its_size.py`` pins the forwarding
+across every role; the editor's own test pins the case a synthetic column cannot
+reproduce, where the stretchy sibling is already at its minimum and the plate is
+the only thing left to take from.
+
 Why a maximum *width* as well as a maximum height: ``WellPlateSelector`` paints
 its panel background and border across its entire allocated widget box, while
 the grid inside it sizes cells to ``min(available_width / 12,

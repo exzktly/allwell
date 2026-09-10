@@ -55,7 +55,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup, QDialog, QHBoxLayout, QLabel, QMenu, QPushButton, QRadioButton,
     QScrollArea, QToolButton, QVBoxLayout, QWidget,
@@ -86,6 +86,12 @@ _ALL_WELLS = [f"{row}{col:02d}" for row in "ABCDEFGH" for col in range(1, 13)]
 _SWATCH_PX = 12
 _SWATCH_RADIUS_PX = 3
 
+#: How much darker a blank is drawn than the block it serves. Qt's `darker`
+#: takes a percentage — 100 is unchanged — and 145 is the step that separates the
+#: two tones at every colour in `WELL_COLORS_TUPLE` while keeping the hue
+#: obviously shared, which is the point: the blank belongs to that block.
+_BG_MAP_BLANK_DARKEN = 145
+
 #: Drawn on a blank well so the reference is not mistaken for one of the wells
 #: it corrects. A glyph rather than another colour because the fill already
 #: carries the block and the ring already carries "this is the one being edited".
@@ -105,6 +111,13 @@ _BG_MAP_ROW_PX = 26
 #: mis-drag and the two or three that followed it before you noticed, shallow
 #: enough that the stack is not a second copy of the session's whole history.
 _BG_MAP_UNDO_DEPTH = 20
+
+
+def _darker(hex_color: str | None) -> str | None:
+    """*hex_color* a step darker, for the blank inside its own block."""
+    if not hex_color:
+        return hex_color
+    return QColor(hex_color).darker(_BG_MAP_BLANK_DARKEN).name()
 
 
 def _plural(n: int, noun: str) -> str:
@@ -417,6 +430,29 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_hint.setWordWrap(True)
         outer.addWidget(self._bg_map_hint)
 
+        # Two things can be done on one plate, so the plate has to say which it
+        # is doing. Without a mode a click is ambiguous — is this well becoming a
+        # blank, or being given to one? — and the editor previously answered that
+        # by offering only the second, which left naming a blank possible in the
+        # text field alone.
+        modes = QHBoxLayout()
+        self._bg_map_mode_blanks = QRadioButton("Choose blank wells", win)
+        self._bg_map_mode_blanks.setToolTip(
+            "Click a well to make it a blank, or click a blank to stop it being "
+            "one. The Background well field follows.")
+        self._bg_map_mode_blocks = QRadioButton("Assign wells to a blank", win)
+        self._bg_map_mode_blocks.setToolTip(
+            "Pick a blank below, then drag across the wells it corrects.")
+        self._bg_map_mode_blocks.setChecked(True)
+        group = QButtonGroup(win)
+        group.setExclusive(True)
+        for button in (self._bg_map_mode_blanks, self._bg_map_mode_blocks):
+            group.addButton(button)
+            button.clicked.connect(self._bg_map_mode_changed)
+            modes.addWidget(button)
+        modes.addStretch(1)
+        outer.addLayout(modes)
+
         self._bg_map_plate = WellPlateSelector()
         apply_plate_geometry(self._bg_map_plate, role="editor")
         self._bg_map_plate.setSelectionModel("paint")
@@ -544,15 +580,24 @@ class AnalyzeBackgroundMapMixin:
         than each well toggling under the cursor — dragging back over your own
         block should undo it, not stipple it.
         """
+        if self._bg_map_choosing_blanks():
+            # A press decides the gesture's direction here too: a drag that
+            # starts on a plain well makes wells blanks throughout, and one that
+            # starts on a blank unmakes them. Toggling per well under the cursor
+            # would make a drag across your own block undo itself.
+            self._bg_map_adding = well not in self._bg_map_field_blanks()
+            self._bg_map_push_undo()
+            self._bg_map_paint_blank(well)
+            return
         blanks = self._bg_map_blanks()
         if not blanks:
             # Never silently. A drag that does nothing and says nothing is what
             # the first version of this did on every cold open, and it is
             # indistinguishable from a dialog that is simply broken.
             self._bg_map_say(
-                "No blanks to paint onto. Name your blank well(s) in the "
-                "Background well field beside this button — those are the "
-                "wells that will appear in the list below.")
+                "No blanks yet. Switch to <b>Choose blank wells</b> above and "
+                "click the empty well(s), or type them into the Background "
+                "well field beside the button that opened this.")
             return
         self._bg_map_push_undo()
         blank = blanks[min(self._bg_map_active, len(blanks) - 1)]
@@ -560,6 +605,9 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_paint(well)
 
     def _bg_map_paint(self, well: str) -> None:
+        if self._bg_map_choosing_blanks():
+            self._bg_map_paint_blank(well)
+            return
         blanks = self._bg_map_blanks()
         if not blanks:
             return
@@ -604,6 +652,44 @@ class AnalyzeBackgroundMapMixin:
                 + f" and gave them to {active_blank}. Undo puts them back.")
         self._refresh_background_map_editor()
         self._refresh_background_map_summary()
+
+    # ── choosing which wells are blanks, on the plate ────────────────────
+    def _bg_map_choosing_blanks(self) -> bool:
+        return bool(getattr(self, "_bg_map_mode_blanks", None)
+                    and self._bg_map_mode_blanks.isChecked())
+
+    def _bg_map_mode_changed(self, _checked: bool = False) -> None:
+        self._bg_map_say()
+        self._refresh_background_map_editor()
+
+    def _bg_map_paint_blank(self, well: str) -> None:
+        """Make *well* a blank, or stop it being one, by editing the field.
+
+        Written back into the Background well field rather than held here,
+        because that field is the one place a well is declared a blank — for the
+        run as much as for this window. A second list kept in the editor is
+        exactly what made the first version of this dialog unusable, and clicking
+        a plate is not a good enough reason to reintroduce one.
+
+        A consequence worth stating: the field is rewritten as an explicit list,
+        so a range typed as ``H01:H12`` becomes twelve labels the moment a well
+        is clicked. What is stored then means one thing, which is the same reason
+        the pairing map is always written out in full.
+        """
+        named = self._bg_map_field_blanks()
+        wanted = canonical_well_label(well)
+        if wanted is None:
+            return
+        if self._bg_map_adding and wanted not in named:
+            named.append(wanted)
+        elif not self._bg_map_adding and wanted in named:
+            named.remove(wanted)
+        else:
+            return
+        # Straight to the field: its `textChanged` re-projects the blank list,
+        # repaints the plate and updates both readouts, so there is one path
+        # into all of it whether the wells were typed or clicked.
+        self._background_well_edit.setText(", ".join(named))
 
     # ── the list of blanks ───────────────────────────────────────────────
     def _bg_map_clear_blank(self, blank: str) -> None:
@@ -780,6 +866,16 @@ class AnalyzeBackgroundMapMixin:
             colors[blank] = shade
             for well in self._background_map[blank]:
                 colors[well] = shade
+        for blank in blanks:
+            # The blank keeps its block's hue — that is what says which block it
+            # serves — and is drawn darker, so the reference does not read as one
+            # more of the wells it corrects. The glyph below carries the same
+            # statement for anyone who cannot separate the two tones; neither is
+            # asked to do the job alone. `darker` and never `lighter`: Qt's
+            # lighten drops saturation once value saturates and walks a state
+            # colour to white, which is how an uploaded well once rendered as a
+            # white disc (§ the well painter's own note).
+            colors[blank] = _darker(colors[blank])
         plate.setEnabledWells(sorted(available))
         plate.setWellColors(colors)
         # A blank and the wells it corrects shared one fill, so nothing on the
@@ -819,12 +915,18 @@ class AnalyzeBackgroundMapMixin:
         hint = getattr(self, "_bg_map_hint", None)
         if hint is None:
             return
+        if self._bg_map_choosing_blanks():
+            hint.setText(
+                "Click the empty well(s) on the plate, or drag across several. "
+                "Click one again to stop it being a blank. The <b>Background "
+                "well</b> field follows what you pick.")
+            return
         if not self._background_map:
             hint.setText(
-                "No blanks yet. Type the empty well(s) into <b>Background "
-                "well</b>, beside the button that opened this — they appear "
-                "here as you type, and you drag on the plate to give each one "
-                "the wells it corrects.")
+                "No blanks yet. Switch to <b>Choose blank wells</b> above and "
+                "click them on the plate, or type them into <b>Background "
+                "well</b> beside the button that opened this — either way they "
+                "appear in the list below.")
             return
         hint.setText(
             "Pick a blank below, then drag across the plate to give it the "

@@ -1542,6 +1542,69 @@ class WellPlateSelector(QWidget):
     wellPaintDragged = Signal(str)
     paintDragFinished = Signal()
 
+    #: Chrome around the grid — the layout's own margins, its spacing, and the
+    #: action row when one is shown. Measured rather than assumed so the aspect
+    #: lock below tracks the real button metrics at the current font and DPI.
+    def _chrome_height(self) -> int:
+        layout = self.layout()
+        if layout is None:
+            return 0
+        margins = layout.contentsMargins()
+        total = margins.top() + margins.bottom()
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            widget = item.widget()
+            if widget is self._grid:
+                continue
+            if widget is not None and widget.isHidden():
+                continue
+            hint = item.sizeHint().height()
+            if hint:
+                total += layout.spacing() + hint
+        return total
+
+    def hasHeightForWidth(self) -> bool:
+        """Forward the grid's aspect lock, which this wrapper is what carries.
+
+        ``plate_geometry`` sets ``QSizePolicy.setHeightForWidth(True)`` on *this*
+        widget, and this widget did not implement it — so ``QWidget``'s default
+        answered -1 and the flag did nothing at all. The aspect lock existed on
+        ``_PlateGrid``, one layout down, where no host's layout ever asked. The
+        visible cost: a plate crushed by whatever else shared its column, most
+        recently in the blank-pairing editor, where a status line **below** it
+        wrapping to a second line took the plate from 210px to 168px on a window
+        whose own size never changed.
+        """
+        return True
+
+    def heightForWidth(self, w: int) -> int:
+        margins = self.layout().contentsMargins() if self.layout() else None
+        inset = (margins.left() + margins.right()) if margins else 0
+        return self._grid.heightForWidth(max(1, w - inset)) + self._chrome_height()
+
+    def resizeEvent(self, ev) -> None:
+        """Hold the floor at the aspect-locked height for the current width.
+
+        A box layout treats ``heightForWidth`` as a hint rather than a floor, so
+        forwarding it is necessary but not sufficient: the layout will still take
+        the plate's height to give to a sibling that grew. A plate is the surface
+        the user works on, and a sentence growing underneath it is not a reason
+        to make it smaller.
+
+        Clamped to ``maximumHeight`` so a capped plate cannot ask for more than
+        its role allows, which would leave Qt reconciling a minimum above a
+        maximum.
+        """
+        super().resizeEvent(ev)
+        floor = self.heightForWidth(self.width())
+        ceiling = self.maximumHeight()
+        if ceiling:
+            floor = min(floor, ceiling)
+        # Only when it moves: setMinimumHeight relayouts, and a relayout that
+        # resizes us re-enters here.
+        if floor != self.minimumHeight():
+            self.setMinimumHeight(floor)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("WellPlateSelector")

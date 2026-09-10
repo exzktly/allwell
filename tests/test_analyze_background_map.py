@@ -824,3 +824,41 @@ def test_the_plate_does_not_shrink_when_a_line_under_it_wraps(tab):
     tab._background_well_edit.setText(", ".join(f"H{i:02d}" for i in range(1, 9)))
     QApplication.processEvents()
     assert (plate.width(), plate.height()) == before, "the growing list moved it"
+
+
+def test_a_range_in_the_field_fills_the_editor_s_blank_list(tab):
+    """The list is a projection of the field, so a rectangle projects too.
+
+    Driven through the real controls: type the block where the manual says to,
+    open the editor, and the rows are there to pick from.
+    """
+    tab._background_well_edit.setText("H01:H04")
+    tab._bg_map_btn.click()
+
+    assert [r.text().split()[0] for r in rows(tab)] == ["H01", "H02", "H03", "H04"]
+    pick(tab, 2)
+    drag(tab, "A01", "A02")
+    assert tab._background_map["H03"] == ["A01", "A02"]
+
+    # The summary counts the blanks that have a block, which is one of the four
+    # the range named — and says the plate is not covered, which it is not.
+    assert "1 blank paired" in tab._bg_map_summary.text()
+    assert "wells unclaimed" in tab._bg_map_summary.text()
+
+    # Give the other three their wells and the range is fully in play.
+    for index, row_letter in ((0, "B"), (1, "C"), (3, "D")):
+        pick(tab, index)
+        drag(tab, f"{row_letter}01")
+    assert "4 blanks paired" in tab._bg_map_summary.text()
+
+
+def test_a_range_and_the_wells_it_names_are_one_answer(tab):
+    """What the editor lists and what the run stages must be the same set."""
+    from util.well_token import blank_wells_for_run
+
+    tab._background_well_edit.setText("H01:H03, A01")
+    tab._bg_map_btn.click()
+    listed = [r.text().split()[0] for r in rows(tab)]
+
+    assert listed == ["H01", "H02", "H03", "A01"]
+    assert blank_wells_for_run(tab._background_well_edit.text(), "") == listed

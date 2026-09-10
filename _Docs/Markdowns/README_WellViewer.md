@@ -572,13 +572,22 @@ empty well itself to ~0.
 #### Background well
 
 Any `empty_well` choice (flat-field and/or background) reads its reference images
-from the well(s) named here. Enter **one** well (e.g. `H12`) or **several
-comma-separated** (e.g. `H12, G12`) — multiple blank wells are **pooled** (their
-frames combined before the per-pixel median) for a cleaner, less noisy estimate.
-Each well is located in whichever input layout holds it — a per-well ZIP, a
-per-well folder, or loose TIFs. The run is blocked if an `empty_well` mode is
-selected but the Background well field is blank or none of the named wells are
-present in the input folder.
+from the well(s) named here. Enter **one** well (e.g. `H12`), **several
+comma-separated** (e.g. `H12, G12`), or a **rectangular block** written with a
+colon — `H01:H12` is the whole of row H, `A01:D12` the top half of the plate,
+`A01:H01` the first column. Blocks and single wells mix freely (`H01:H12, A01`),
+either corner may come first (`D12:A01` is the same block as `A01:D12`), and case
+and zero-padding do not matter (`h1:h12` is row H). It is the same `:` the
+pairing map uses, so a rectangle means one thing wherever you write a set of
+wells.
+
+Multiple blank wells are **pooled** (their frames combined before the per-pixel
+median) for a cleaner, less noisy estimate. Each well is located in whichever
+input layout holds it — a per-well ZIP, a per-well folder, or loose TIFs. The run
+is blocked if an `empty_well` mode is selected but the Background well field is
+blank or none of the named wells are present in the input folder; a block whose
+corners cannot be read is left as you typed it and refused by name, rather than
+quietly dropping the wells you meant.
 
 **Pairing a blank with the wells it corrects.** Pooling is right when the blanks
 differ only by noise, and wrong when they differ because of the *treatment*. A
@@ -596,9 +605,10 @@ either way round. Type the wells into the **Background well** field, or open
 **Pair blanks…** beside it and switch the plate to **Choose blank wells**, where
 clicking a well makes it a blank and clicking it again stops it being one. The
 field and the plate are the same record: whichever you use, the other follows,
-and clicking rewrites the field as an explicit list of well names. With the
-editor open, editing the field adds and removes blanks from the list as you
-type.
+and clicking rewrites the field as an explicit list of well names — so a block
+typed as `H01:H12` becomes its twelve wells the moment you click one of them.
+With the editor open, editing the field adds and removes blanks from the list as
+you type.
 
 The editor's other mode, **Assign wells to a blank**, is where the pairing
 itself is drawn: the wells you named appear in a list, you pick one, and you

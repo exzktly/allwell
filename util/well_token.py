@@ -69,16 +69,35 @@ def split_background_wells(value) -> list[str]:
     disagreeing in both directions. A well name cannot contain either
     character, so taking both here is a superset of what each did and lets the
     copy go.
+
+    **A rectangle is a well list.** ``H01:H12`` is the whole of row H, ``A01:D12``
+    the top half, and either can sit among ordinary wells (``H01:H12, A01``).
+    The corners expand to canonical labels in reading order, by
+    :func:`_expand_well_range` — the same reading the pairing map's right-hand
+    side has always used, so ``:`` means one thing wherever a set of wells is
+    written. Expanded here, in the one function every reader of the field goes
+    through, so a range means the same thing to the model build, the remote
+    staging planner, the batched hold-out, both incremental-scope readers, the
+    pairing editor's list, the Review preview and the run receipt. Nothing that
+    parsed before parses differently: a token containing ``:`` was not a well,
+    so a run naming one refused to start.
     """
     items = (value if isinstance(value, (list, tuple))
              else str(value or "").replace(";", ",").split(","))
     out: list[str] = []
     seen: set = set()
     for it in items:
-        w = str(it or "").strip()
-        if w and w.lower() not in seen:
-            seen.add(w.lower())
-            out.append(w)
+        text = str(it or "").strip()
+        if not text:
+            continue
+        # An unreadable range falls through as the token it is, so the caller
+        # refuses it by name — the same way it refuses any other well it cannot
+        # find. Swallowing it here would drop a well the user believes is a
+        # blank, which is the one outcome this field must not produce.
+        for w in _expand_well_range(text) or [text]:
+            if w.lower() not in seen:
+                seen.add(w.lower())
+                out.append(w)
     return out
 
 

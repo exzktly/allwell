@@ -588,7 +588,16 @@ well on the plate. Nothing about the result looks wrong: the numbers come out
 looking exactly like corrected ones.
 
 When that is your situation, pair each blank with the block it belongs to
-instead. **Name your blank wells in the Background well field first** — that
+instead. You can name your blanks either way: type them into the **Background
+well** field, or open the editor and switch it to **Choose blank wells**, where
+clicking a well makes it a blank and clicking it again stops it being one. The
+field and the plate are the same record — whichever you use, the other follows —
+though clicking rewrites the field as an explicit list, so a range typed as
+`H01:H12` becomes twelve well names. On the plate a blank is drawn in its block's
+colour but darker, and marked, so you can tell the reference from the wells it
+corrects.
+
+**Name your blank wells in the Background well field first** — that
 field is what decides which wells are blanks, for the pairing and for the run
 alike. **Pair blanks…** beside it then opens a plate you draw the pairing on:
 the wells you named appear in the list, you pick one, and you drag across the

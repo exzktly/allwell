@@ -588,23 +588,23 @@ well on the plate. Nothing about the result looks wrong: the numbers come out
 looking exactly like corrected ones.
 
 When that is your situation, pair each blank with the block it belongs to
-instead. You can name your blanks either way: type them into the **Background
-well** field, or open the editor and switch it to **Choose blank wells**, where
-clicking a well makes it a blank and clicking it again stops it being one. The
-field and the plate are the same record — whichever you use, the other follows —
-though clicking rewrites the field as an explicit list, so a range typed as
-`H01:H12` becomes twelve well names. On the plate a blank is drawn in its block's
-colour but darker, and marked, so you can tell the reference from the wells it
-corrects.
+instead.
 
-**Name your blank wells in the Background well field first** — that
-field is what decides which wells are blanks, for the pairing and for the run
-alike. **Pair blanks…** beside it then opens a plate you draw the pairing on:
-the wells you named appear in the list, you pick one, and you drag across the
-wells it corrects. Each blank's block takes its own colour, and the blank itself
-is marked so you can tell the reference from the wells it is correcting. Add or
-remove a blank by editing the Background well field — the list follows as you
-type, with the editor open.
+**Name your blank wells before you draw the pairing** — which wells are blanks
+is one record, and it decides the pairing and the run alike. You can set it
+either way round. Type the wells into the **Background well** field, or open
+**Pair blanks…** beside it and switch the plate to **Choose blank wells**, where
+clicking a well makes it a blank and clicking it again stops it being one. The
+field and the plate are the same record: whichever you use, the other follows,
+and clicking rewrites the field as an explicit list of well names. With the
+editor open, editing the field adds and removes blanks from the list as you
+type.
+
+The editor's other mode, **Assign wells to a blank**, is where the pairing
+itself is drawn: the wells you named appear in a list, you pick one, and you
+drag across the wells it corrects. Each blank's block takes its own colour, and
+the blank is drawn in that colour but darker, and marked, so you can tell the
+reference from the wells it is correcting.
 
 A line under the plate says how many wells no blank has claimed yet: those are
 the wells that would stop the run, and it says so before you start one. Below it

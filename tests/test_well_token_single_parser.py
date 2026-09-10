@@ -144,3 +144,68 @@ def test_no_module_keeps_its_own_whole_token_well_regex():
         "Use `canonical_well_label` / `is_valid_well_name` so this module and "
         "the pipeline agree on what a well is:\n  " + "\n  ".join(offenders)
     )
+
+
+# ── ranges in the Background well field ──────────────────────────────────
+
+def test_a_colon_names_a_rectangle_of_blanks():
+    """``H01:H12`` is the whole of row H, and mixes with ordinary wells.
+
+    Asserted on the wells, not on the count: a rule that expanded the corners
+    into *something* twelve long would satisfy a count.
+    """
+    from util.well_token import split_background_wells
+
+    assert split_background_wells("H01:H12") == [f"H{c:02d}" for c in range(1, 13)]
+    assert split_background_wells("A01:B03") == ["A01", "A02", "A03",
+                                                 "B01", "B02", "B03"]
+    # Either corner first, and case and zero-padding immaterial — the same
+    # readings the pairing map's right-hand side has always had.
+    assert split_background_wells("D12:A01") == split_background_wells("A01:D12")
+    assert split_background_wells("h1:h3") == ["H01", "H02", "H03"]
+
+    # Mixed with singles, in the order written, de-duped across both.
+    assert split_background_wells("H01:H03, A01") == ["H01", "H02", "H03", "A01"]
+    assert split_background_wells("H01:H03, H02") == ["H01", "H02", "H03"]
+
+
+def test_an_unreadable_block_is_refused_by_name_not_dropped():
+    """Dropping it would remove a well the user believes is a blank.
+
+    The field's whole job is to say which wells are references; a token it
+    cannot read has to reach the caller that refuses by name, the same way any
+    other well it cannot find does.
+    """
+    from util.well_token import split_background_wells
+
+    assert split_background_wells("A01:ZZ") == ["A01:ZZ"]
+    assert split_background_wells("nonsense") == ["nonsense"]
+    # Whitespace still does not separate wells, so this is one unreadable token
+    # rather than two good ones — the divergence that killed every batch of a run.
+    assert split_background_wells("H12 G12") == ["H12 G12"]
+
+
+def test_every_reader_of_the_field_sees_the_same_wells(tmp_path):
+    """A range must not mean twelve wells here and one token there.
+
+    The blank set is asked by the model build, the remote staging planner, the
+    batched hold-out, both incremental-scope readers, the pairing editor and the
+    run receipt. They agree by going through one function; this drives the ones
+    reachable without a GUI or a remote host and holds them against it.
+    """
+    from pipeline.empty_well import BlankGroups
+    from services.input_resolution_service import _blank_well_tokens
+    from util.well_token import blank_wells_for_run, split_background_wells
+
+    field = "H01:H03"
+    expected = ["H01", "H02", "H03"]
+    assert split_background_wells(field) == expected
+
+    # The pipeline's own plan, pooled: one group holding all three.
+    groups = BlankGroups(field, "", corrections=("empty_well",))
+    assert groups.blanks() == expected
+
+    # The union both flags feed, which is what staging and the hold-out read.
+    assert blank_wells_for_run(field, "") == expected
+    # And the incremental-scope reader, which had its own regex once.
+    assert _blank_well_tokens({"background_well": field}) == set(expected)

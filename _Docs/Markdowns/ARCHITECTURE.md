@@ -1908,6 +1908,20 @@ list is a projection of it, seeded when the window opens and re-synced on the
 field's `textChanged` while it is up, and a restored map unions its own blanks
 back into the field so the two cannot disagree in that direction either.
 
+**A rectangle is a well list, in the field as well as in the map.** `H01:H12`
+names the whole of row H and mixes with ordinary wells, expanded by the same
+`_expand_well_range` the map's right-hand side has always used, so `:` means one
+thing wherever a set of wells is written. It is expanded inside
+`split_background_wells` — the one function every reader of that field goes
+through — so the model build, the remote staging planner, the batched hold-out,
+both incremental-scope readers, the editor's list, the Review preview and the run
+receipt all see the same twelve wells rather than a token one of them might
+parse differently. A block whose corners cannot be read falls through as the
+token it is and is refused by name, because dropping it would silently remove a
+well the user believes is a blank; nothing that parsed before parses differently,
+since a token containing `:` was not a well and a run naming one refused to
+start.
+
 That is a rewrite of the first version, and the reason is worth keeping. The
 editor then held a second answer to the same question: an `+ Add blank` button
 that named blanks for the editor while the field named them for the run. The

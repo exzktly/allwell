@@ -407,13 +407,15 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
 
         rbw = self._row(sec, "Background well")
         self._background_well_edit = self._entry(rbw, "", width=160)
-        self._background_well_edit.setPlaceholderText("H12 or H12, G12")
+        self._background_well_edit.setPlaceholderText("H12, G12 or H01:H12")
         self._background_well_edit.setToolTip(
             "Well label(s) of empty/background well(s) used as the reference for "
-            "any empty_well mode above. Enter one (e.g. H12) or several "
-            "comma-separated (e.g. H12, G12) — multiple wells are pooled for a "
-            "cleaner estimate, unless Pair blanks… assigns each one its own "
-            "block of wells. Their smoothed per-pixel median supplies the "
+            "any empty_well mode above. Enter one (e.g. H12), several "
+            "comma-separated (e.g. H12, G12), or a rectangular block written "
+            "with a colon (H01:H12 is the whole of row H, A01:D12 the top half) "
+            "— and you can mix them (H01:H12, A01). Multiple wells are pooled "
+            "for a cleaner estimate, unless Pair blanks… assigns each one its "
+            "own block of wells. Their smoothed per-pixel median supplies the "
             "illumination field (flat-field) and/or the measured additive "
             "background, computed PER TIMEPOINT (background drifts over time); a "
             "timepoint the blank wells lack falls back to the all-timepoint "

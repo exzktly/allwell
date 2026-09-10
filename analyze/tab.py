@@ -101,6 +101,11 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
     # next job can't race anything after its own emit.
     jobFinished = Signal(bool, str, str)
 
+    #: Set while a caller is about to change the input path *and* the schema
+    #: that reads it, so the readout is computed once, from both. See
+    #: :meth:`_browse_input` — every recomputation walks the selected folder.
+    _suspend_output_refresh = False
+
     def __init__(
         self,
         parent: QWidget | None = None,
@@ -509,10 +514,28 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
             "",
             QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks,
         )
-        if d:
+        if not d:
+            return
+        # The readout depends on both things about to change — the path, which
+        # `textChanged` reports, and the schema the folder scan infers from it —
+        # so it is held and computed once at the end, from the two together,
+        # instead of once against the previous folder's schema and once again
+        # after. That is one walk of the selected folder per click rather than
+        # two (ARCHITECTURE, the input-layout section).
+        #
+        # Both the release and the recomputation are in the `finally`:
+        # `_autofill_from_input_scan` returns early on names that do not parse
+        # and can raise out of `_apply_pipeline_info`, and either way the
+        # readout must be recomputed or the path field names the new folder
+        # while every label beside it describes the previous one.
+        self._suspend_output_refresh = True
+        try:
             self._input_edit.setText(d)
             self._input_edit.setEnabled(True)
             self._autofill_from_input_scan(d)
+        finally:
+            self._suspend_output_refresh = False
+            self._refresh_output()
 
     def _refresh_output(self, *, immediate: bool = False) -> None:
         """Show where the run will read from and write to, and what it will do.
@@ -523,6 +546,8 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         well content, so a folder holding ``in/Plate1_A1.zip`` displayed
         "using as input" and then failed the run outright.
         """
+        if self._suspend_output_refresh:
+            return
         raw_str = self._input_edit.text().strip()
         if not raw_str:
             self._output_lbl.setText("—"); self._layout_lbl.setText("")

@@ -108,7 +108,15 @@ jobs:
       # PySide6 needs system GL/EGL libraries even under the offscreen QPA.
       - name: Install Qt system libraries
         run: |
-          sudo apt-get update
+          # `apt-get update` exits non-zero when *any* configured repository's
+          # index fails to fetch, including the third-party ones the runner
+          # image ships and this project does not use. A stale google-chrome
+          # index ("Hash Sum mismatch" on dl.google.com) has failed this step
+          # outright, before a line of Python ran. That is not a reason to stop:
+          # the install below is the real gate, and a package that genuinely
+          # cannot be fetched still fails it, loudly and by name.
+          sudo apt-get update || echo "::warning::apt-get update reported errors \
+            — if the install below cannot locate a package, the fetch above is why"
           sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3
       - name: Install Python dependencies
         run: |

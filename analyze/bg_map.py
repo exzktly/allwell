@@ -19,15 +19,35 @@ and its own budget note asks for an extraction with the next section. It takes
 ``_background_well_validation_error`` with it, which belongs beside the map it
 now also validates.
 
-Two habits borrowed from the editors this is modelled on, both load-bearing:
+**The Background well field says which wells are blanks; this editor only says
+which wells each of them corrects.** One question, one control. The first
+version of this asked the question twice — the field named the blanks for the
+run, and an ``+ Add blank`` button in here named them for the editor — and the
+two did not agree in either direction. A blank typed in the field was invisible
+here, so the list was empty on open and the manual's own first instruction
+("pick a blank in the list") could not be carried out; every drag was a silent
+no-op with no colour, no message and no changed label. Meanwhile the button, when
+the field named nothing, took a well off the *end of the plate* and made it the
+reference: a sample well held out of the results and used to correct the other
+ninety-five, with this editor reporting "Every well is claimed — this pairing
+will run" and the form raising nothing.
+
+So the list is a projection of the field, seeded when the editor opens and
+re-synced whenever the field changes while it is open. Nothing in here can
+invent a blank, and there is nothing in here to rename one with.
+
+Three habits borrowed from the editors this is modelled on, all load-bearing:
 
 * **The map lives on the tab and the widgets are a projection of it**, never the
   other way round. Reading membership back out of the widgets is how
   ``fold_change_pairing_view`` describes losing an assignment to a repopulate.
 * **A row edit that rebuilds the rows destroys the widget mid-signal.** The
-  combo whose ``currentIndexChanged`` started the edit is deleted by the
-  repopulate that edit triggers. Guarded with a re-entrancy flag and a
-  zero-delay timer, the same way that editor does it.
+  control whose signal started the edit is one of the widgets the repopulate
+  deletes. Guarded with a re-entrancy flag and a zero-delay timer.
+* **Every gesture that changes the map is undoable.** A drag takes a well from
+  whoever held it, which is the right data rule and an invisible interaction —
+  one sweep across a neighbour's block moved four wells and the only trace was a
+  count going to zero in a list 70 pixels tall.
 """
 
 from __future__ import annotations
@@ -35,9 +55,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea,
-    QToolButton, QVBoxLayout, QWidget,
+    QButtonGroup, QDialog, QHBoxLayout, QLabel, QMenu, QPushButton, QRadioButton,
+    QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
 from theme import WELL_COLORS_TUPLE
@@ -65,6 +86,20 @@ _ALL_WELLS = [f"{row}{col:02d}" for row in "ABCDEFGH" for col in range(1, 13)]
 _SWATCH_PX = 12
 _SWATCH_RADIUS_PX = 3
 
+#: Drawn on a blank well so the reference is not mistaken for one of the wells
+#: it corrects. A glyph rather than another colour because the fill already
+#: carries the block and the ring already carries "this is the one being edited".
+_BG_MAP_BLANK_GLYPH = "◎"
+
+#: One row of the blank list, for sizing the scroll area that holds them. A
+#: radio button plus a swatch, with the layout's own 1px margins either side.
+_BG_MAP_ROW_PX = 26
+
+#: How many gestures Undo can step back through. Deep enough to recover from a
+#: mis-drag and the two or three that followed it before you noticed, shallow
+#: enough that the stack is not a second copy of the session's whole history.
+_BG_MAP_UNDO_DEPTH = 20
+
 
 class AnalyzeBackgroundMapMixin:
     """The Background-well pairing control, its editor, and their validation."""
@@ -74,12 +109,21 @@ class AnalyzeBackgroundMapMixin:
     _background_map: dict[str, list[str]]
     #: Guards the repopulate-inside-a-signal re-entrancy described above.
     _bg_map_in_change = False
+    #: Snapshots of :attr:`_background_map`, most recent last. Pushed before a
+    #: gesture rather than after, so Undo returns to the state the user could
+    #: see when they started it.
+    _bg_map_undo: list[dict[str, list[str]]]
+    #: How many rows of the blank list the window opens tall enough to show.
+    #: Four because a row split of a 96-well plate makes eight, and a list that
+    #: shows two and a half of them is one the user cannot read.
+    _BG_MAP_VISIBLE_ROWS = 4
 
     # ── the row in the Quality Control section ───────────────────────────
     def _build_background_map_row(self, sec: QWidget) -> None:
         self._background_map = {}
         self._bg_map_active = 0
         self._bg_map_window = None
+        self._bg_map_undo = []
         row = self._row(sec, "Blank pairing")
         self._bg_map_summary = QLabel("Pooled — every blank corrects every well")
         self._bg_map_summary.setObjectName("Muted")
@@ -125,7 +169,108 @@ class AnalyzeBackgroundMapMixin:
             # the run would refuse too. Dropping it leaves the form pooled and
             # says so, which is the honest reading of "this cannot be applied".
             self._background_map = {}
+        self._bg_map_active = 0
+        self._bg_map_undo = []
+        # A restored map may name blanks the Background well field does not, and
+        # the field is what this editor projects — so without this the next
+        # keystroke in the field would quietly drop those blanks and their
+        # blocks. Unioned into the field instead, which is also what the run
+        # does with the two flags (``util.well_token.blank_wells_for_run``), so
+        # the form now says out loud what the pipeline was going to conclude.
+        self._bg_map_adopt_blanks_into_field()
         self._refresh_background_map_summary()
+        # And the editor, if it is open. Refreshing only the summary left the
+        # window showing the *previous* map: rows naming blanks the new map does
+        # not have, a stale coverage line, stale colours — and a drag then
+        # painted into whichever blank happened to be first in the new map.
+        self._refresh_background_map_editor()
+
+    def _bg_map_adopt_blanks_into_field(self) -> None:
+        """Add this map's blanks to the Background well field, keeping its order."""
+        edit = getattr(self, "_background_well_edit", None)
+        if edit is None or not self._background_map:
+            return
+        named = self._bg_map_field_blanks()
+        missing = [b for b in self._background_map if b not in named]
+        if not missing:
+            return
+        edit.setText(", ".join(named + missing))
+
+    def _bg_map_say(self, message: str = "") -> None:
+        """Put a transient note on the second line, or clear it.
+
+        Separate from the coverage line so a message can be cleared without
+        taking the unclaimed-well count with it, and so a refusal cannot outlive
+        its cause: the split's "name a blank first" used to sit there until the
+        window was closed and reopened, long after the field had been filled in.
+        """
+        label = getattr(self, "_bg_map_status", None)
+        if label is not None:
+            label.setText(message)
+
+    # ── the blanks come from the Background well field ───────────────────
+    def _bg_map_sync_blanks_from_field(self) -> None:
+        """Make the blank list say exactly what the Background well field says.
+
+        The field is the one place a well is declared a blank — it is what the
+        run reads, through ``util.well_token.blank_wells_for_run`` — so the
+        editor projects it rather than keeping a second list beside it. A well
+        newly named there arrives here with no wells yet; a well no longer named
+        there stops being a blank, and the wells it held become unclaimed, which
+        the coverage line then says out loud.
+
+        Called when the editor opens and on every keystroke in the field while it
+        is open, so "pick a blank in the list" is true the moment the window
+        appears — the state a first-time user actually lands in.
+        """
+        named: list[str] = []
+        for candidate in split_background_wells(
+                self._background_well_edit.text()):
+            well = canonical_well_label(candidate)
+            if well and well not in named:
+                named.append(well)
+        if named == list(self._background_map) and all(
+                w in named for w in self._background_map):
+            return
+        self._background_map = {w: self._background_map.get(w, []) for w in named}
+        # A well can only be corrected by a blank that still exists, and a blank
+        # is never one of its own samples.
+        for blank, wells in self._background_map.items():
+            self._background_map[blank] = [w for w in wells if w != blank]
+        self._bg_map_active = min(self._bg_map_active, max(len(named) - 1, 0))
+
+    def _bg_map_on_field_changed(self) -> None:
+        """Re-project the field onto the list, but only while the window is up."""
+        if getattr(self, "_bg_map_window", None) is None:
+            return
+        self._bg_map_sync_blanks_from_field()
+        self._refresh_background_map_editor()
+        self._refresh_background_map_summary()
+
+    # ── undo ─────────────────────────────────────────────────────────────
+    def _bg_map_push_undo(self) -> None:
+        """Snapshot the map before changing it.
+
+        Deep enough to be independent — the well lists are mutated in place by
+        the paint handlers, so a shallow copy would alias the very lists it is
+        meant to preserve.
+        """
+        self._bg_map_undo.append(
+            {blank: list(wells) for blank, wells in self._background_map.items()})
+        del self._bg_map_undo[:-_BG_MAP_UNDO_DEPTH]
+
+    def _bg_map_undo_last(self) -> None:
+        """Step back one gesture, or say there is nothing to step back to."""
+        if not self._bg_map_undo:
+            self._bg_map_say("Nothing to undo.")
+            return
+        self._background_map = self._bg_map_undo.pop()
+        self._bg_map_active = min(
+            self._bg_map_active, max(len(self._background_map) - 1, 0))
+        self._refresh_background_map_editor()
+        self._refresh_background_map_summary()
+        self._bg_map_say("Undone." if self._bg_map_undo else
+                         "Undone — back to where this editor opened.")
 
     def _refresh_background_map_summary(self) -> None:
         """What the *run* will do, which is not always what the editor holds.
@@ -177,7 +322,17 @@ class AnalyzeBackgroundMapMixin:
         """
         if self._bg_map_window is None:
             self._bg_map_window = self._build_background_map_window()
+            # While the window exists, the field it projects keeps it current.
+            # Connected here rather than where the field is built because the
+            # field belongs to the form and this is the only thing that watches
+            # it; connecting once, on first open, also means a form that never
+            # opens the editor pays nothing.
+            self._background_well_edit.textChanged.connect(
+                lambda _text: self._bg_map_on_field_changed())
+        self._bg_map_sync_blanks_from_field()
+        self._bg_map_say()
         self._refresh_background_map_editor()
+        self._refresh_background_map_summary()
         self._bg_map_window.show()
         self._bg_map_window.raise_()
 
@@ -187,12 +342,9 @@ class AnalyzeBackgroundMapMixin:
         win.setModal(False)
         outer = QVBoxLayout(win)
 
-        hint = QLabel(
-            "Pick a blank below, then drag across the plate to give it the "
-            "wells it corrects. Every well must be claimed by exactly one "
-            "blank, or the run will refuse to start.")
-        hint.setWordWrap(True)
-        outer.addWidget(hint)
+        self._bg_map_hint = QLabel("")
+        self._bg_map_hint.setWordWrap(True)
+        outer.addWidget(self._bg_map_hint)
 
         self._bg_map_plate = WellPlateSelector()
         apply_plate_geometry(self._bg_map_plate, role="editor")
@@ -207,9 +359,20 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_plate.paintDragFinished.connect(self._bg_map_release)
         outer.addWidget(self._bg_map_plate, 0, PLATE_ALIGNMENT)
 
+        # Two labels, not one. The coverage line has to state the number of
+        # unclaimed wells at all times — it is the run's refusal shown early —
+        # and a split that cannot fill the plate used to overwrite it with its
+        # own message, destroying the count at the moment it was largest. So
+        # anything transient goes to a second line that can be cleared without
+        # taking the count with it.
         self._bg_map_uncovered = QLabel("")
         self._bg_map_uncovered.setWordWrap(True)
         outer.addWidget(self._bg_map_uncovered)
+
+        self._bg_map_status = QLabel("")
+        self._bg_map_status.setObjectName("Muted")
+        self._bg_map_status.setWordWrap(True)
+        outer.addWidget(self._bg_map_status)
 
         scroll = QScrollArea(win)
         scroll.setWidgetResizable(True)
@@ -218,30 +381,39 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_rows_layout.setContentsMargins(0, 0, 0, 0)
         self._bg_map_rows_layout.addStretch(1)
         scroll.setWidget(self._bg_map_rows_host)
+        # Tall enough for four rows. The list is what the manual tells you to
+        # pick from, and it was getting 70px of a 404px window — two and a half
+        # of the eight rows a row split produces, the third sliced in half.
+        scroll.setMinimumHeight(_BG_MAP_ROW_PX * self._BG_MAP_VISIBLE_ROWS)
         outer.addWidget(scroll, 1)
 
         footer = QHBoxLayout()
-        add = QPushButton("+ Add blank", win)
-        add.setProperty("variant", "secondary")
-        add.clicked.connect(self._bg_map_add_blank)
-        footer.addWidget(add)
+        # No "add a blank" control: a blank is declared in the Background well
+        # field and nowhere else. The button that used to be here invented one
+        # off the end of the plate when the field named none, which turns a
+        # sample well into the reference for the rest of the plate.
+        self._bg_map_undo_btn = QPushButton("Undo", win)
+        self._bg_map_undo_btn.setProperty("variant", "secondary")
+        self._bg_map_undo_btn.setToolTip(
+            "Step back one drag, split or clear (Ctrl+Z).")
+        self._bg_map_undo_btn.clicked.connect(self._bg_map_undo_last)
+        footer.addWidget(self._bg_map_undo_btn)
+        undo_key = QShortcut(QKeySequence.StandardKey.Undo, win)
+        undo_key.activated.connect(self._bg_map_undo_last)
 
         split = QToolButton(win)
         split.setText("Split plate…")
         split.setPopupMode(QToolButton.InstantPopup)
         split.setStyleSheet(
             "QToolButton::menu-indicator { image: none; width: 0px; }")
-        menu = QMenu(split)
-        # The blanks are assigned to blocks in the order they were added, which
-        # is the order they read in the list — so a user can see which blank got
-        # which block rather than having to infer it.
-        menu.addAction("One blank per row (A, B, C…)",
-                       lambda: self._bg_map_split("row"))
-        menu.addAction("One blank per column (01, 02…)",
-                       lambda: self._bg_map_split("col"))
-        menu.addAction("One blank per quadrant",
-                       lambda: self._bg_map_split("quadrant"))
-        split.setMenu(menu)
+        # Each entry states the blocks it makes against the blanks you have, so
+        # a split that cannot fill the plate is visible before it is chosen
+        # rather than as seventy unclaimed wells after it. Rebuilt on open,
+        # because both numbers change.
+        self._bg_map_split_menu = QMenu(split)
+        self._bg_map_split_menu.aboutToShow.connect(self._bg_map_rebuild_split_menu)
+        self._bg_map_rebuild_split_menu()
+        split.setMenu(self._bg_map_split_menu)
         footer.addWidget(split)
 
         clear = QPushButton("Clear pairing", win)
@@ -256,6 +428,28 @@ class AnalyzeBackgroundMapMixin:
         footer.addWidget(close)
         outer.addLayout(footer)
         return win
+
+    def _bg_map_rebuild_split_menu(self) -> None:
+        """Label each split with the blocks it needs and the blanks available."""
+        menu = getattr(self, "_bg_map_split_menu", None)
+        if menu is None:
+            return
+        menu.clear()
+        have = len(self._bg_map_field_blanks())
+        for how, label in (("row", "One blank per row (A, B, C…)"),
+                           ("col", "One blank per column (01, 02…)"),
+                           ("quadrant", "One blank per quadrant"),
+                           ("even", "Even split, one block per blank")):
+            need = len(self._bg_map_blocks(how))
+            fits = have >= need
+            text = (f"{label} — {need} block(s), you have {have} blank(s)"
+                    if not fits else f"{label} — {need} block(s)")
+            action = menu.addAction(
+                text, lambda h=how: self._bg_map_split(h))
+            # Left enabled rather than greyed out: an under-supplied split is a
+            # usable starting point that the user then paints on top of, and a
+            # disabled item cannot say why it is disabled.
+            action.setEnabled(have > 0)
 
     @staticmethod
     def _bg_map_color(index: int) -> str:
@@ -281,7 +475,15 @@ class AnalyzeBackgroundMapMixin:
         """
         blanks = self._bg_map_blanks()
         if not blanks:
+            # Never silently. A drag that does nothing and says nothing is what
+            # the first version of this did on every cold open, and it is
+            # indistinguishable from a dialog that is simply broken.
+            self._bg_map_say(
+                "No blanks to paint onto. Name your blank well(s) in the "
+                "Background well field beside this button — those are the "
+                "wells that will appear in the list below.")
             return
+        self._bg_map_push_undo()
         blank = blanks[min(self._bg_map_active, len(blanks) - 1)]
         self._bg_map_adding = well not in self._background_map.get(blank, [])
         self._bg_map_paint(well)
@@ -308,55 +510,43 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_repaint_plate()
 
     def _bg_map_release(self) -> None:
+        """Finish the gesture, and name anything it took from another blank.
+
+        The steal is the right data rule — one well, one blank — and an
+        invisible interaction: one sweep back across a neighbour's block moved
+        four wells, and the only trace was a count going to zero in a list too
+        short to show the row it happened on.
+        """
+        before = self._bg_map_undo[-1] if self._bg_map_undo else {}
+        active = self._bg_map_blanks()
+        active_blank = (active[min(self._bg_map_active, len(active) - 1)]
+                        if active else "")
+        robbed = {
+            blank: len(set(wells) - set(self._background_map.get(blank, [])))
+            for blank, wells in before.items()
+            if blank != active_blank and blank in self._background_map
+        }
+        taken = {b: n for b, n in robbed.items() if n}
+        if taken:
+            self._bg_map_say("Took " + ", ".join(
+                f"{n} well(s) from {b}" for b, n in taken.items())
+                + f" and gave them to {active_blank}. Undo puts them back.")
         self._refresh_background_map_editor()
         self._refresh_background_map_summary()
 
     # ── the list of blanks ───────────────────────────────────────────────
-    def _bg_map_add_blank(self) -> None:
-        """Add a blank, defaulting to a well the map does not already use.
+    def _bg_map_clear_blank(self, blank: str) -> None:
+        """Take every well away from *blank*, leaving it a blank with no block.
 
-        Seeded from the Background well field when it names one that is free,
-        because that is the well the user has already told the form about.
+        Not "remove this blank": the Background well field decides that, and a
+        row that could delete a blank the field still names would be the second
+        answer to that question this editor used to carry.
         """
-        taken = set(self._background_map)
-        for candidate in split_background_wells(
-                self._background_well_edit.text()):
-            well = canonical_well_label(candidate)
-            if well and well not in taken:
-                self._background_map[well] = []
-                break
-        else:
-            for well in reversed(self._background_map_plate_wells()):
-                if well not in taken:
-                    self._background_map[well] = []
-                    break
-            else:
-                return
-        self._bg_map_active = len(self._background_map) - 1
-        self._refresh_background_map_editor()
-        self._refresh_background_map_summary()
-
-    def _bg_map_remove_blank(self, blank: str) -> None:
-        self._background_map.pop(blank, None)
-        self._bg_map_active = 0
-        self._bg_map_defer_refresh()
-
-    def _bg_map_rename_blank(self, old: str, new_text: str) -> None:
-        """Move a blank's whole entry to a different well, keeping its order.
-
-        Rebuilt rather than mutated in place so the list order — which is the
-        colour order the user is looking at — does not jump when a blank is
-        renamed.
-        """
-        new = canonical_well_label(new_text)
-        if new is None or new == old or new in self._background_map:
-            self._bg_map_defer_refresh()
+        if blank not in self._background_map:
             return
-        self._background_map = {
-            (new if blank == old else blank):
-                [w for w in wells if w != new]
-            for blank, wells in self._background_map.items()
-        }
+        self._bg_map_push_undo()
+        self._background_map[blank] = []
+        self._bg_map_say(f"{blank} now corrects nothing.")
         self._bg_map_defer_refresh()
 
     def _bg_map_defer_refresh(self) -> None:
@@ -379,66 +569,125 @@ class AnalyzeBackgroundMapMixin:
         QTimer.singleShot(0, _done)
 
     def _bg_map_clear(self) -> None:
-        self._background_map = {}
+        """Drop every block, leaving the field's blanks pooled.
+
+        Undoable rather than confirmed: a dialog asking "are you sure" before
+        an action that can be taken back is a click spent on nothing, and this
+        editor has no destructive action that cannot be.
+        """
+        self._bg_map_push_undo()
+        self._bg_map_sync_blanks_from_field()
+        for blank in self._background_map:
+            self._background_map[blank] = []
         self._bg_map_active = 0
+        self._bg_map_say("Pairing cleared — every blank pools again. Undo "
+                         "brings the blocks back.")
         self._refresh_background_map_editor()
         self._refresh_background_map_summary()
 
-    def _bg_map_split(self, how: str) -> None:
-        """Replace the map with one blank per row / column / quadrant.
+    def _bg_map_blocks(self, how: str) -> list[list[str]]:
+        """The plate cut into blocks the named way, absent wells excluded.
 
-        The blocks come from the plate's own wells, so a plate that is only half
-        populated gets half-blocks rather than blocks of absent wells. Blanks
-        are taken from the Background well field first and then from the
-        unclaimed wells, and a split that cannot find enough blanks makes as many
-        blocks as it has blanks for rather than silently dropping the rest.
+        Taken from the plate's own wells, so a half-populated plate gets
+        half-blocks rather than blocks of wells the folder does not have.
+        ``"even"`` divides the plate into exactly as many contiguous blocks as
+        there are blanks, which is the split the common case actually wants: two
+        blanks and "one blank per row" means eight blocks, six of them with no
+        blank and seventy wells left unclaimed.
         """
         wells = self._background_map_plate_wells()
         if how == "row":
             keys = sorted({w[0] for w in wells})
-            blocks = [[w for w in wells if w[0] == k] for k in keys]
-        elif how == "col":
+            return [[w for w in wells if w[0] == k] for k in keys]
+        if how == "col":
             keys = sorted({w[1:] for w in wells})
-            blocks = [[w for w in wells if w[1:] == k] for k in keys]
-        else:
-            def quadrant(w: str) -> tuple[bool, bool]:
-                return (w[0] >= "E", int(w[1:]) > 6)
-            keys = sorted({quadrant(w) for w in wells})
-            blocks = [[w for w in wells if quadrant(w) == k] for k in keys]
+            return [[w for w in wells if w[1:] == k] for k in keys]
+        if how == "even":
+            n = max(len(self._bg_map_field_blanks()), 1)
+            columns = sorted({w[1:] for w in wells})
+            size = max(1, -(-len(columns) // n))       # ceil, so n blocks cover
+            return [[w for w in wells if w[1:] in columns[i:i + size]]
+                    for i in range(0, len(columns), size)]
 
+        def quadrant(w: str) -> tuple[bool, bool]:
+            return (w[0] >= "E", int(w[1:]) > 6)
+        keys = sorted({quadrant(w) for w in wells})
+        return [[w for w in wells if quadrant(w) == k] for k in keys]
+
+    def _bg_map_field_blanks(self) -> list[str]:
+        """The canonical blanks the Background well field names, in its order."""
+        seen: list[str] = []
+        for candidate in split_background_wells(
+                self._background_well_edit.text()):
+            well = canonical_well_label(candidate)
+            if well and well not in seen:
+                seen.append(well)
+        return seen
+
+    def _bg_map_split(self, how: str) -> None:
+        """Replace the map with one blank per row / column / quadrant.
+
+        Each blank takes the block it **sits in** where it sits in one, and the
+        blocks nobody sits in are handed out in order to the blanks left over.
+        Assigning strictly by list position instead put the blank in row H in
+        charge of row A, which is the opposite of what a user picking "one blank
+        per row" is asking for and is invisible until the numbers are wrong.
+        """
+        blocks = self._bg_map_blocks(how)
         # Blanks come only from the Background well field, never from the
         # plate's remaining wells. Inventing one turns a sample well into a
         # reference — silently, and against the whole point of pairing — and
         # the first draft of this did exactly that: it took H12, H11, H10… off
         # the end of the plate, so row H's blank sat inside row H's own block
         # and was corrected by itself.
-        blanks = [w for w in (canonical_well_label(c) for c
-                              in split_background_wells(
-                                  self._background_well_edit.text())) if w]
+        blanks = self._bg_map_field_blanks()
         if not blanks:
-            self._bg_map_uncovered.setText(
+            self._bg_map_say(
                 "Name the blank well(s) in Background well first — a split "
                 "assigns the blanks you have, and will not turn a sample well "
                 "into a reference.")
             return
 
-        # Every chosen blank is held out of *every* block, not just its own.
-        chosen = blanks[:len(blocks)]
-        held_out = set(chosen)
+        self._bg_map_push_undo()
+        held_out = set(blanks)
+        # A blank that lives inside a block gets that block; the rest are dealt
+        # out in order to whatever is left.
+        home = {}
+        spare_blocks = []
+        for block in blocks:
+            inside = [b for b in blanks if b in block and b not in home.values()]
+            if inside:
+                home[id(block)] = inside[0]
+            else:
+                spare_blocks.append(block)
+        leftover = [b for b in blanks if b not in home.values()]
+        for block in spare_blocks:
+            if not leftover:
+                break
+            home[id(block)] = leftover.pop(0)
+
         mapping: dict[str, list[str]] = {}
-        for blank, block in zip(chosen, blocks):
-            claimed = sorted(w for w in block if w not in held_out)
-            if claimed:
-                mapping[blank] = claimed
-        self._background_map = mapping
+        for blank in blanks:                      # keep the field's own order
+            for block in blocks:
+                if home.get(id(block)) != blank:
+                    continue
+                claimed = sorted(w for w in block if w not in held_out)
+                if claimed:
+                    mapping.setdefault(blank, []).extend(claimed)
+        self._background_map = {b: sorted(mapping.get(b, [])) for b in blanks}
         self._bg_map_active = 0
         self._refresh_background_map_editor()
         self._refresh_background_map_summary()
         if len(blanks) < len(blocks):
-            self._bg_map_uncovered.setText(
-                f"{len(blanks)} blank(s) for {len(blocks)} block(s) — the rest "
-                f"of the plate is unclaimed. Name more blanks in Background "
-                f"well, or paint the remaining wells onto a blank above.")
+            self._bg_map_say(
+                f"{len(blanks)} blank(s) for {len(blocks)} block(s), so "
+                f"{len(blocks) - len(blanks)} block(s) went to nobody. Name "
+                f"more blanks in Background well, choose the even split, or "
+                f"paint the rest onto a blank below.")
+        else:
+            self._bg_map_say(
+                f"Split into {len(blocks)} block(s). Undo puts back what was "
+                f"here before.")
 
     # ── drawing the map back onto the widgets ────────────────────────────
     def _bg_map_repaint_plate(self) -> None:
@@ -462,6 +711,13 @@ class AnalyzeBackgroundMapMixin:
                 colors[well] = shade
         plate.setEnabledWells(sorted(available))
         plate.setWellColors(colors)
+        # A blank and the wells it corrects shared one fill, so nothing on the
+        # plate said which of them was the reference — on a plate whose whole
+        # job is to show that partition. The glyph is the one channel free:
+        # the fill is the block, the ring is the block being edited.
+        plate.clearWellMarkers()
+        for blank in blanks:
+            plate.setWellMarker(blank, _BG_MAP_BLANK_GLYPH)
         # Which blank you are editing is a different question from which blank a
         # well belongs to, so it gets the ring rather than overloading the fill.
         active = blanks[self._bg_map_active] if blanks else None
@@ -476,6 +732,33 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_repaint_plate()
         self._bg_map_rebuild_rows()
         self._bg_map_refresh_uncovered()
+        self._bg_map_refresh_hint()
+        undo = getattr(self, "_bg_map_undo_btn", None)
+        if undo is not None:
+            undo.setEnabled(bool(self._bg_map_undo))
+
+    def _bg_map_refresh_hint(self) -> None:
+        """Say what to do *next*, which is not the same in both states.
+
+        A fixed line reading "pick a blank below" is a lie on a plate with no
+        blanks, and that is the state a first-time user opens this in: it told
+        them to do something the window offered no way to do, which is the whole
+        of the report this editor was rewritten for.
+        """
+        hint = getattr(self, "_bg_map_hint", None)
+        if hint is None:
+            return
+        if not self._background_map:
+            hint.setText(
+                "No blanks yet. Type the empty well(s) into <b>Background "
+                "well</b>, beside the button that opened this — they appear "
+                "here as you type, and you drag on the plate to give each one "
+                "the wells it corrects.")
+            return
+        hint.setText(
+            "Pick a blank below, then drag across the plate to give it the "
+            "wells it corrects. Every well must be claimed by exactly one "
+            "blank, or the run will refuse to start.")
 
     def _bg_map_refresh_uncovered(self) -> None:
         """Say how many wells nobody claims — the run's own refusal, in advance.
@@ -494,6 +777,7 @@ class AnalyzeBackgroundMapMixin:
                 "No blank claims any wells yet, so this run would pool. Drag "
                 "across the plate to give a blank its block.")
             return
+
         groups = BlankGroups("", value, corrections=("empty_well",))
         missing = groups.uncovered(self._background_map_plate_wells())
         if not missing:
@@ -506,20 +790,42 @@ class AnalyzeBackgroundMapMixin:
             f"refuse to start: {shown}")
 
     def _bg_map_rebuild_rows(self) -> None:
-        """One row per blank: its colour, its well, its count, and a remove."""
+        """One row per blank: its colour, its well, its count, and a clear."""
         layout = self._bg_map_rows_layout
         while layout.count() > 1:                 # keep the trailing stretch
             item = layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                # Unparented *before* the deferred delete. `deleteLater` alone
+                # leaves the row a child of the host until the event loop turns,
+                # and this rebuilds on every paint tick — so the host carries a
+                # crowd of pending-delete rows for the whole of a drag, and
+                # anything reading the list through `findChildren` (a test, or
+                # the button group) sees the dead ones alongside the live.
+                widget.setParent(None)
                 widget.deleteLater()
 
-        wells = self._background_map_plate_wells()
+        # A group, so picking one row un-picks the last without this having to
+        # track it, and so arrow keys move between blanks.
+        self._bg_map_row_group = QButtonGroup(self._bg_map_rows_host)
+        self._bg_map_row_group.setExclusive(True)
         for index, blank in enumerate(self._bg_map_blanks()):
-            layout.insertWidget(index, self._bg_map_build_row(index, blank, wells))
+            layout.insertWidget(index, self._bg_map_build_row(index, blank))
 
-    def _bg_map_build_row(self, index: int, blank: str,
-                          wells: list[str]) -> QWidget:
+    def _bg_map_build_row(self, index: int, blank: str) -> QWidget:
+        """The row is the picker.
+
+        It used to hold three things that could be clicked — an 18-pixel ``●``
+        that was the picker and said so only in a tooltip, a combo of all 96
+        wells that *looked* like the picker and was actually a rename, and a
+        ``✕``. Picking a well from the combo replaced the user's blank with a
+        sample well, and the run then refused with a message about the input
+        folder, which is not where the problem was. There is nothing to rename
+        with now — the Background well field owns which wells are blanks — and
+        the one thing left to click is a radio spanning the row, which is what
+        "pick a blank in the list" has meant everywhere else since dialogs
+        existed.
+        """
         row = QWidget(self._bg_map_rows_host)
         line = QHBoxLayout(row)
         line.setContentsMargins(2, 1, 2, 1)
@@ -530,33 +836,28 @@ class AnalyzeBackgroundMapMixin:
                              f"border-radius:{_SWATCH_RADIUS_PX}px;")
         line.addWidget(swatch)
 
-        pick = QToolButton(row)
-        pick.setText("●" if index == self._bg_map_active else "○")
-        pick.setToolTip("Paint onto this blank's block")
+        count = len(self._background_map[blank])
+        pick = QRadioButton(f"{blank}   {count} well(s)", row)
+        pick.setChecked(index == self._bg_map_active)
+        pick.setToolTip(f"Drag on the plate to give {blank} the wells it "
+                        f"corrects.")
         pick.clicked.connect(lambda _=False, i=index: self._bg_map_set_active(i))
-        line.addWidget(pick)
+        self._bg_map_row_group.addButton(pick, index)
+        line.addWidget(pick, 1)
 
-        combo = QComboBox(row)
-        combo.addItems(wells if blank in wells else [blank] + wells)
-        combo.setCurrentText(blank)
-        combo.currentTextChanged.connect(
-            lambda text, old=blank: self._bg_map_rename_blank(old, text))
-        line.addWidget(combo)
-
-        count = QLabel(f"{len(self._background_map[blank])} well(s)", row)
-        count.setObjectName("Muted")
-        line.addWidget(count)
-        line.addStretch(1)
-
-        remove = QToolButton(row)
-        remove.setText("✕")
-        remove.setToolTip("Remove this blank from the pairing")
-        remove.clicked.connect(lambda _=False, b=blank: self._bg_map_remove_blank(b))
-        line.addWidget(remove)
+        clear = QToolButton(row)
+        clear.setText("✕")
+        clear.setToolTip(f"Take every well away from {blank}. {blank} stays a "
+                         f"blank — remove it from the Background well field to "
+                         f"stop it being one.")
+        clear.clicked.connect(
+            lambda _=False, b=blank: self._bg_map_clear_blank(b))
+        line.addWidget(clear)
         return row
 
     def _bg_map_set_active(self, index: int) -> None:
         self._bg_map_active = index
+        self._bg_map_say()
         self._refresh_background_map_editor()
 
     # ── validation, moved here with the field it now shares ──────────────

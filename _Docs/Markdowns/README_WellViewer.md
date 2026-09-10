@@ -588,14 +588,30 @@ well on the plate. Nothing about the result looks wrong: the numbers come out
 looking exactly like corrected ones.
 
 When that is your situation, pair each blank with the block it belongs to
-instead. **Pair blanks…**, beside the Background well field, opens a plate you
-draw the pairing on: pick a blank in the list, drag across the wells it
-corrects, and each blank's block takes its own colour. A line under the plate
-says how many wells no blank has claimed yet — those are the wells that would
-stop the run, and it says so before you start one. **Split plate…** does the
-common layouts for you (one blank per row, per column, or per quadrant); it
-assigns the blanks you have named in the Background well field and will not turn
-a sample well into a reference, so name your blanks there first.
+instead. **Name your blank wells in the Background well field first** — that
+field is what decides which wells are blanks, for the pairing and for the run
+alike. **Pair blanks…** beside it then opens a plate you draw the pairing on:
+the wells you named appear in the list, you pick one, and you drag across the
+wells it corrects. Each blank's block takes its own colour, and the blank itself
+is marked so you can tell the reference from the wells it is correcting. Add or
+remove a blank by editing the Background well field — the list follows as you
+type, with the editor open.
+
+A line under the plate says how many wells no blank has claimed yet: those are
+the wells that would stop the run, and it says so before you start one. Below it
+a second line reports what your last action did. **Undo** (or Ctrl+Z) steps back
+through drags, splits and clears, which matters because dragging over a well
+another blank owns takes it — that is what keeps one well to one blank, and the
+status line names what moved.
+
+**Split plate…** does the common layouts for you. Each entry says how many
+blocks it makes and how many blanks you have, because a split with fewer blanks
+than blocks leaves the rest of the plate unclaimed: with two blanks, "one blank
+per row" makes eight blocks and covers a quarter of the plate, while **even
+split** makes exactly one block per blank and covers all of it. A blank that
+sits inside one of the blocks gets that block, so a blank in row H corrects row
+H. Splits assign only the blanks you have named, and will not turn a sample well
+into a reference.
 
 The map is stored as text, and you can read or write it directly. It is one
 entry per blank, entries separated by `;` or a newline:

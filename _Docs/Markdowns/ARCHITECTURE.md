@@ -1901,11 +1901,57 @@ drift. A text field was the cheaper control and the wrong one: the failure the
 map exists to prevent is a well quietly landing in the wrong block, and eight
 rows of `A01,A02,A03…` read as correct whatever they say.
 
+**The Background well field says which wells are blanks; the editor says only
+which wells each of them corrects.** One question, one control, and the field is
+the one — it is what the run reads, through `blank_wells_for_run`. The editor's
+list is a projection of it, seeded when the window opens and re-synced on the
+field's `textChanged` while it is up, and a restored map unions its own blanks
+back into the field so the two cannot disagree in that direction either.
+
+That is a rewrite of the first version, and the reason is worth keeping. The
+editor then held a second answer to the same question: an `+ Add blank` button
+that named blanks for the editor while the field named them for the run. The
+two did not agree in either direction. A blank typed in the field was invisible
+in here — the field was read only inside two button handlers, never on open and
+never on change — so the list was empty on every cold open, the manual's own
+first instruction ("pick a blank in the list") could not be carried out, and
+every drag was a silent no-op with no colour, no message and no changed label.
+And when the field named nothing, that button took a well off the *end of the
+plate* and made it the reference: a sample well held out of the results and used
+to correct the other ninety-five, with the editor reporting "Every well is
+claimed — this pairing will run" and the form's pre-run gate raising nothing.
+There is no add control now, and nothing in the window can invent a blank.
+
+The row **is** the picker — a radio spanning it, in an exclusive group. It
+previously held three clickable things: an 18-pixel `●` that was the picker and
+said so only in a tooltip, a combo of all 96 wells that looked like the picker
+and was actually a rename, and a `✕`. Picking a well from that combo replaced
+the user's blank with a sample well and the run then refused with a message
+about the input folder, which is not where the problem was. Nothing renames a
+blank now; the `✕` clears a blank's block and leaves it a blank, because the
+field decides that.
+
+**Every gesture is undoable**, and the transient line names what one took. A
+drag takes a well from whoever held it — the right data rule, one well to one
+blank, and an invisible interaction: one sweep back across a neighbour's block
+moved four wells and the only trace was a count going to zero in a list 70
+pixels tall. `Clear pairing` and `Split plate…` push the same stack, which is
+why neither asks for confirmation: a dialog guarding an action that can be taken
+back spends a click on nothing.
+
+**Two labels, not one.** The coverage line states the number of unclaimed wells
+at all times — it is the run's refusal shown early — and anything transient goes
+to a second line beneath it. They were one label, so a split that could not fill
+the plate overwrote the count with its own message at the moment the count was
+largest, and its "name a blank first" refusal outlived the field being filled in.
+
 The map lives on the tab and the widgets are drawn from it, never read back —
 the discipline `fold_change_pairing_view` records losing an assignment to
-without. Its row edits go through a deferred repopulate for the reason that
-editor documents too: the combo whose signal started the edit is one of the
-widgets the repopulate deletes.
+without. Row edits go through a deferred repopulate for the reason that editor
+documents too: the control whose signal started the edit is one of the widgets
+the repopulate deletes. A rebuilt row is **unparented before** its deferred
+delete, because the rebuild runs on every paint tick and `deleteLater` alone
+leaves the dead rows children of the host until the event loop turns.
 
 `Split plate…` takes its blanks **only** from the Background well field, and
 holds every chosen blank out of every block. Neither is fussiness: the first
@@ -1914,6 +1960,16 @@ row split assigned H12, H11, H10… — wells inside row H's own block — and r
 blank ended up corrected by itself, producing a map this feature's own parser
 refuses. A split with fewer blanks than blocks makes the blocks it can and says
 what is left, rather than inventing a reference out of a sample well.
+
+**A blank takes the block it sits in**, and only the blocks nobody sits in are
+dealt out in order to the blanks left over. Assigning strictly by list position
+put the blank in row H in charge of row A — the opposite of what someone
+choosing "one blank per row" is asking for, and invisible until the numbers are
+wrong. Each menu entry also states the blocks it makes against the blanks
+available, because a split that cannot fill the plate should be visible before
+it is chosen rather than as seventy unclaimed wells after it; **even split**
+exists for the same reason, cutting the plate into exactly as many blocks as
+there are blanks, which is what the common two-blank case actually wants.
 
 The editor offers the plate's real wells through
 `input_resolution_service.iter_all_well_tokens`, which is the union

@@ -23,7 +23,6 @@ quietly reopening the hole.
 from __future__ import annotations
 
 import importlib
-import ast
 from pathlib import Path
 
 import shutil
@@ -4311,7 +4310,12 @@ def _run_placement_scan(monkeypatch, root: Path, module_name: str, test_name: st
     return _run_rooted_scan(
         monkeypatch, module_name, test_name, root,
         extra={"python_sources": lambda **kw: files,
-               "parse_source": lambda p: ast.parse(p.read_text(encoding="utf-8")),
+               # `parse_source` rather than a direct `ast.parse` of the file: each
+               # synthetic tree lives in its own `tmp_path`, so nothing is shared
+               # between cases and the cache costs nothing — and
+               # `test_the_fast_lane_stays_fast` forbids a guard reading and
+               # parsing a file itself, without knowing these are one-offs.
+               "parse_source": parse_source,
                **(extra or {})})
 
 

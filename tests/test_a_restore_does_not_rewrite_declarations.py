@@ -32,7 +32,8 @@ from types import SimpleNamespace
 import pytest
 
 from review.domain import sample_variables as sv
-from review.domain.selections_model import group_drift, make_selection
+from domain.selections_format import make_selection
+from review.domain.selections_model import group_drift
 
 pytestmark = pytest.mark.qt
 

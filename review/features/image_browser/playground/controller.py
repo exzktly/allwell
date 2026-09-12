@@ -95,7 +95,7 @@ def playground_first_selected_well(ctx):
     """Lowest-plate-rank well in the current sidebar selection (``None`` if the
     selection is empty). The Playground is single-well, so on entry from a
     multi-well tab this picks a stable, well-ordered representative."""
-    from review.domain.selections_model import well_rank
+    from domain.selections_format import well_rank
     wells = [w for w in ctx.state.selection.selected_wells
              if w in ctx.state.dataset.well_paths]
     return min(wells, key=well_rank) if wells else None

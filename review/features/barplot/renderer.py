@@ -14,7 +14,11 @@ from review.features.barplot.collect import _bar_debug, bar_err_settings, collec
 
 from review.domain.plot_members import plot_replicate_sets
 
-from review.domain.selections_model import (color_for_replicate_set, color_for_well, well_display_label)
+from review.domain.selections_model import (
+    color_for_replicate_set,
+    color_for_well,
+    well_display_label,
+)
 from review.domain.bar_colors import apply_bar_color_mode, mono_bar_color
 from review.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from review.core.empty_state_copy import NO_DATASET_MESSAGE

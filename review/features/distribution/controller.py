@@ -409,7 +409,8 @@ def _display_label_for(ctx, name: str) -> str:
     """
     from review.domain.plot_members import plot_replicate_sets
     from review.domain.selections_model import (
-        replicate_display_label, well_display_label,
+        replicate_display_label,
+        well_display_label,
     )
     try:
         if name in (ctx.state.dataset.well_paths or {}):

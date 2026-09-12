@@ -61,8 +61,6 @@ COLOUR_ALLOWLIST = {
     "widgets/lut_selector.py": "colormap stop triples — the literals are the colormap",
     "review/features/image_browser/image_table/builder_view.py":
         "cmap swatch colours, keyed by the matplotlib colormap they preview",
-    "review/domain/selections_model.py":
-        "the rank-assigned selection palette (theme.WELL_COLORS_TUPLE's fallback twin)",
     "widgets/color_picker_popover.py": "__main__ demo block",
     "widgets/color_swatch_row.py": "__main__ demo block",
     "widgets/gradient_strip.py": "__main__ demo block",

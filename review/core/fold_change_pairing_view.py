@@ -144,9 +144,7 @@ def member_color(ctx, scope: str, member: str) -> str:
     bar on the plate. The row is meant to be findable in the figure.
     """
     from review.domain.plot_members import plot_replicate_sets
-    from review.domain.selections_model import (
-        color_for_replicate_set, color_for_well,
-    )
+    from review.domain.selections_model import color_for_replicate_set, color_for_well
 
     if _members._keys_are_replicate_sets(ctx, scope):
         for rset in plot_replicate_sets(ctx):

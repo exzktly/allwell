@@ -29,8 +29,10 @@ from review.domain.stats_compute import group_replicate_stats, _reduce_reps
 from review.domain.metric_registry import column_gating_exempt
 from review.domain.plot_members import plot_replicate_sets
 from review.domain.selections_model import (
-    color_for_replicate_set, color_for_well,
-    replicate_display_label, well_display_label,
+    color_for_replicate_set,
+    color_for_well,
+    replicate_display_label,
+    well_display_label,
 )
 from review.domain.plot_order import apply_order
 from review.domain.viewer_state import parse_rc

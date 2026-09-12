@@ -15,8 +15,11 @@ from review.data.metric_labels import spread_label
 from review.domain.plot_members import plot_replicate_sets
 
 from review.domain.selections_model import (
-    LABEL_FROM_CUSTOM, color_for_replicate_set, color_for_well,
-    replicate_display_label, well_display_label,
+    LABEL_FROM_CUSTOM,
+    color_for_replicate_set,
+    color_for_well,
+    replicate_display_label,
+    well_display_label,
     well_display_label_and_source,
 )
 from review.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column

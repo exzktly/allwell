@@ -20,7 +20,7 @@ from review.core.selection_controller import set_selected_wells
 import logging
 
 from core.safe import swallowed
-from review.domain.plot_groups import make_plot_group
+from domain.plot_groups import make_plot_group
 from review.domain.viewer_state import parse_rc
 from ui import theme
 

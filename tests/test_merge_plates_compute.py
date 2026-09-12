@@ -171,7 +171,7 @@ def test_sample_definitions_survive_a_merge_of_two_current_plates(tmp_path):
     dataset 1's block with an empty legacy shape — every selection, plot group,
     note and current selection from both plates gone, reported as success.
     """
-    from review.domain.selections_model import make_selection, to_block
+    from domain.selections_format import make_selection, to_block
 
     def v2_block(pairs, notes, groups):
         used_names, used_ids, used_colors = set(), set(), set()

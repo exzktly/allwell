@@ -181,7 +181,7 @@ def rep_quick_pairs(ctx) -> None:
         )
         if resp != QMessageBox.Yes:
             return
-    from review.domain.selections_model import make_selection
+    from domain.selections_format import make_selection
     used_names: set = set()
     used_ids: set = set()
     # A group is one condition; its wells are implicitly its replicate set, so

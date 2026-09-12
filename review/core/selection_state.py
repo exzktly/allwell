@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from review.domain.sample_variables import VariableSet
-from review.domain.selections_model import validate_repair
+from domain.selections_format import validate_repair
 
 
 @dataclass

@@ -932,7 +932,7 @@ class BatchExportPanel(QWidget):
         control: ``active_replicate_sets`` skips hidden entries, so nothing
         extra is drawn, and ``resolve_control`` does not, so the control
         resolves."""
-        from review.domain.selections_model import make_selection
+        from domain.selections_format import make_selection
         sel = self._ctx.state.selection
         saved = (sel.selections, sel.current_selection_id, sel.selected_wells)
         try:
@@ -983,7 +983,7 @@ class BatchExportPanel(QWidget):
         on every mode — see that method.
         """
         from review.domain.control_ref import KIND_SET
-        from review.domain.selections_model import make_selection
+        from domain.selections_format import make_selection
 
         wanted: list[str] = []
         for ref in self._fold_change_control_refs():

@@ -161,7 +161,11 @@ stats_refresh_map = _lazy("review.features.stats.controller", "stats_refresh_map
 from review.core.ui_helpers import refresh_plot_empty_states
 update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app, refresh_bar_layout_btn_state, update_bar_tp_selection_display = _lazy_names("review.features.barplot.controller", "update_bar_tp_menu", "bar_event_xdata", "on_bar_drag_motion", "toggle_swarm", "toggle_violin", "bar_well_display_label", "rep_sets_active", "collect_bar_items_for_app", "refresh_bar_layout_btn_state", "update_bar_tp_selection_display")
 from review.core.channel_state_controller import get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, set_thresh_frac_on, refresh_thresh_frac_quick_edit, ratio_label_for, active_channel_label, set_ratio_metrics, on_plot_channel_selected, on_metric_selected_global
-from review.domain.selections_model import color_for_replicate_set, replicate_display_label, well_display_label
+from review.domain.selections_model import (
+    color_for_replicate_set,
+    replicate_display_label,
+    well_display_label,
+)
 from review.core.load_controller import load_path_shim
 from review.core.plot_orchestrator import redraw_app
 from review.features.preview.controller import refresh_preview_picker_shim

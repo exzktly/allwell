@@ -33,9 +33,10 @@ import pytest
 
 from review.domain import sample_variables as sv
 from review.domain.batch_models import ReplicateSet
+from domain.selections_format import from_block, make_selection, to_block
 from review.domain.selections_model import (
-    active_replicate_sets, from_block, make_selection, replicate_display_label,
-    to_block,
+    active_replicate_sets,
+    replicate_display_label,
 )
 from review.features.home.groups.controller import (
     make_replicate_pairs, name_sets_from_variables, rep_quick_pairs,

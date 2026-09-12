@@ -850,7 +850,7 @@ def sel_export_one(ctx, sid) -> None:
     if not path:
         return
     try:
-        from review.domain.selections_model import to_block
+        from domain.selections_format import to_block
         block = to_block([s], current_id=s.get("id"))
         write_json_atomic(path, block)
         ctx.notify.toast(f"Exported '{s.get('name')}' to {path}.", kind="success")
@@ -1128,7 +1128,7 @@ def sel_add(ctx, name=None, wells=None, replicates=None, source="user",
     ``replicate_display_label`` would otherwise read as an auto-generated name
     and redraw on every axis as ``A01,A02``.
     """
-    from review.domain.selections_model import make_selection
+    from domain.selections_format import make_selection
     sel_state = ctx.state.selection
     used_names = {s.get("name") for s in sel_state.selections}
     used_ids = {s.get("id") for s in sel_state.selections}
@@ -1161,7 +1161,7 @@ def sel_set_hidden(ctx, sid, hidden, *, light=False) -> None:
 
 
 def sel_set_composition(ctx, sid, wells=None, replicates=None) -> None:
-    from review.domain.selections_model import _clean_wells
+    from domain.selections_format import _clean_wells
     s = sel_by_id(ctx, sid)
     if s is None:
         return
@@ -1265,7 +1265,7 @@ def rep_clear_all(ctx) -> None:
 
 
 def sel_rename(ctx, sid, name) -> None:
-    from review.domain.selections_model import _unique_name as _uq
+    from domain.selections_format import _unique_name as _uq
     s = sel_by_id(ctx, sid)
     if s is None:
         return

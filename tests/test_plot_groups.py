@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from review.domain.plot_groups import make_plot_group, validate_repair_plot_groups
-from review.domain.selections_model import from_block, to_block
+from domain.plot_groups import make_plot_group, validate_repair_plot_groups
+from domain.selections_format import from_block, to_block
 
 
 def test_plot_group_normalizes_wells_and_names():

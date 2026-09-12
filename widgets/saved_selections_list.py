@@ -1,7 +1,7 @@
 """SavedSelectionsList — an editable, reorderable list of saved well selections.
 
 Built against the ``Selection`` model implemented in
-``review.selections_model``: the widget holds a working ``list[dict]``
+``domain.selections_format``: the widget holds a working ``list[dict]``
 (each dict = one ``Selection``: ``id``,
 ``name``, ``color``, ``hidden``, ``wells``, ``replicates``, optional ``labels``/
 ``source``) and emits granular signals plus a coarse ``selectionsChanged(list)``

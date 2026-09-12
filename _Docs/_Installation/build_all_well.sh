@@ -6,7 +6,7 @@
 # SETUP (one time):
 #   mamba create -n allwell python=3.10.14 -c conda-forge -y
 #   mamba activate allwell
-#   pip install -r _Docs/requirements.txt
+#   pip install -r requirements.txt
 #   xcode-select --install
 #
 # BUILD (run from the repository root):
@@ -177,7 +177,7 @@ REQUIRED=(
     "_Docs/_Installation/hooks/hook-csbdeep.py"
     "_Docs/_Installation/hooks/hook-pkg_resources.py"
     "_Docs/_Installation/hooks/rthook-pkg_resources.py"
-    "_Docs/requirements.txt"
+    "requirements.txt"
 )
 MISSING=0
 for f in "${REQUIRED[@]}"; do
@@ -197,7 +197,7 @@ if [ "$MISSING" -gt 0 ]; then
     echo "Ensure you:"
     echo "  1. Have the entry points at the repository root: allwell.py, all_well_launcher.py, process_microscopy.py"
     echo "  2. Have _Docs/_Installation/hooks/ subdirectory with PyInstaller hooks"
-    echo "  3. Have _Docs/requirements.txt with pip dependencies"
+    echo "  3. Have requirements.txt with pip dependencies"
     exit 1
 fi
 echo ""

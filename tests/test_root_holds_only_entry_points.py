@@ -113,9 +113,12 @@ ROOT_DIRS = {
         "time (`scripts/profile_build.py`)",
     "_Docs":
         "everything that is not source — the live docs, the installer and its "
-        "spec, the requirements lists, the design mockups, the visual audit. "
-        "`_Docs/requirements-remote.txt` is uploaded to a remote worker by that "
-        "exact string, so this name is load-bearing",
+        "spec, the design mockups, the visual audit. The dependency manifests "
+        "are no longer among them: `requirements.txt` and "
+        "`requirements-remote.txt` are repository metadata in the same sense "
+        "as `version.py` — read by pip, by the remote bootstrap and by the "
+        "PyInstaller spec, none of them from Python — so they sit at the root "
+        "beside it",
 }
 
 #: Directories that are not content: version control, tooling caches, build

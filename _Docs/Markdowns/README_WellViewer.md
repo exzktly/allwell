@@ -155,7 +155,7 @@ Install the pip-managed packages. **Always pass `--no-build-isolation`** so
 pip honours the mamba-managed pins above:
 
 ```sh
-pip install --no-build-isolation -r _Docs/requirements.txt
+pip install --no-build-isolation -r requirements.txt
 ```
 
 On Apple Silicon, confirm TensorFlow sees the Metal GPU:
@@ -243,7 +243,7 @@ Install the pip-managed packages. Use the full path to the requirements
 file from repo root:
 
 ```powershell
-pip install --no-build-isolation -r _Docs\requirements.txt
+pip install --no-build-isolation -r requirements.txt
 ```
 
 Verify TensorFlow is CPU-only as expected:
@@ -5441,5 +5441,5 @@ quick-reference notes.
   also a usable CLI (`python process_microscopy.py --help`).
 - [`_Docs/_Installation/`](../_Docs/_Installation/) — the PyInstaller spec
   + build script for producing the macOS bundle.
-- [`_Docs/requirements.txt`](../_Docs/requirements.txt) — the pinned
+- [`requirements.txt`](../requirements.txt) — the pinned
   pip-managed dependencies, with environment-setup comments.

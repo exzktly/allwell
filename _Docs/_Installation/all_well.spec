@@ -9,7 +9,7 @@
 #   dist/AllWell-<version>[-<profile>].app   — double-clickable macOS app bundle
 #   (e.g. dist/AllWell-8.8.8.app, or dist/AllWell-8.8.8-thin.app for a subset)
 #
-# Requires: pyinstaller >= 6.0, all packages in _Docs/requirements.txt
+# Requires: pyinstaller >= 6.0, all packages in requirements.txt
 # installed in the active Python environment.
 
 import sys
@@ -34,7 +34,7 @@ sys.setrecursionlimit(max(sys.getrecursionlimit(), 5000))
 def pkg_dir(name: str) -> Path:
     spec = importlib.util.find_spec(name)
     if spec is None:
-        raise RuntimeError(f"Package {name!r} not found — install _Docs/requirements.txt first")
+        raise RuntimeError(f"Package {name!r} not found — install requirements.txt first")
     return Path(spec.origin).parent
 
 
@@ -166,19 +166,19 @@ sibling_scripts = [
     (str(_parent / "version.py"),               "."),
     # Remote (SLURM/SSH) execution uploads the files in
     # services.remote_runner._REQUIRED_REMOTE_FILES to the worker; that list
-    # includes _Docs/requirements-remote.txt (the headless pip install). The
+    # includes requirements-remote.txt (the headless pip install). The
     # frozen app resolves those paths under _MEIPASS, so the file must ship at
-    # _MEIPASS/_Docs/requirements-remote.txt or remote runs abort with
+    # _MEIPASS/requirements-remote.txt or remote runs abort with
     # "missing local file". (The GUI-superset requirements.txt is NOT bundled —
     # only the remote install manifest is needed at runtime.)
-    (str(_parent / "_Docs" / "requirements-remote.txt"), "_Docs"),
+    (str(_parent / "requirements-remote.txt"), "."),
     # The Analyze → Remotes dialog provisions a remote host by spawning this
     # bootstrap module as a subprocess (re-exec'd via the ``--run-bootstrap``
     # launcher sentinel — sys.executable is the .app binary, not python). It's
     # loaded by file path at _MEIPASS/scripts/_bootstrap_lib.py and its
     # ``REPO_ROOT = __file__.parent.parent`` resolves to _MEIPASS, where the
     # files it syncs to the remote (process_microscopy.py, pipeline/, util/,
-    # _Docs/requirements-remote.txt) are already bundled. Keep the ``scripts/``
+    # requirements-remote.txt) are already bundled. Keep the ``scripts/``
     # dest so that .parent.parent lands on the bundle root, not above it.
     (str(_parent / "scripts" / "_bootstrap_lib.py"), "scripts"),
 ]

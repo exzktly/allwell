@@ -165,7 +165,7 @@ def test_the_staging_dirs_are_made_either_way(remote):
     assert r.returncode == 0, r.stderr
     assert (home / ".allwell-staging" / "datasets").is_dir()
     assert (home / ".allwell-staging" / "runs").is_dir()
-    assert (home / "allwell" / "_Docs").is_dir()
+    assert (home / "allwell").is_dir()
 
 
 # ── --force ─────────────────────────────────────────────────────────────────

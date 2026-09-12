@@ -333,7 +333,7 @@ the Segmentation tab's "Flat-field" validation view recomputes them on demand.
 See §6.2 for the contract.
 
 **Feature-stack dependencies (segmentation / QC / shape / tracking).** This work
-adds a pinned ML stack to `_Docs/requirements-remote.txt` — Torch 2.0.1
+adds a pinned ML stack to `requirements-remote.txt` — Torch 2.0.1
 (cellpose + trackastra) and btrack — deliberately held to the **Torch 2.0.1
 line** because TensorFlow 2.13 caps `typing-extensions<4.6` while newer Torch
 needs `>=4.8`; the whole stack (incl. lightning/kornia) is pinned to coexist.
@@ -343,7 +343,7 @@ gains `.get`-defaulted keys (`shape_features` / `qc_options` / `phase_token` /
 `schema_version`) so pre-feature sidecars load unchanged.
 
 **Multivariate (Review-side) dependencies.** The Multivariate tab's UMAP / t-SNE
-projections add `scikit-learn==1.3.2` + `umap-learn==0.5.5` to `_Docs/requirements.txt`
+projections add `scikit-learn==1.3.2` + `umap-learn==0.5.5` to `requirements.txt`
 (GUI-only — **not** `requirements-remote.txt`; the headless pipeline never runs Review
 analysis). Pinned to coexist with the binding caps above (they hold `numpy` at 1.24.3
 and `typing-extensions` at 4.5.0 — verified by a full `pip install` resolution). PCA
@@ -11444,7 +11444,7 @@ can reproduce:
 
 | | CI | A dev machine |
 |---|---|---|
-| Deps | `tests/requirements-dev.txt`, pinned to the app's stack (numpy 1.24, pandas 2.2, PySide6 6.7.3) | `_Docs/requirements.txt` — same pins, plus the ML stack |
+| Deps | `tests/requirements-dev.txt`, pinned to the app's stack (numpy 1.24, pandas 2.2, PySide6 6.7.3) | `requirements.txt` — same pins, plus the ML stack |
 | ML stack | absent — `importorskip("stardist")` / `("tensorflow")` tests **skip** | present, so those tests actually run |
 | OS / Python | ubuntu-latest, 3.11, case-sensitive FS | typically macOS arm64, 3.10.14, case-**in**sensitive FS |
 | Timeout | `--timeout=90` per test | same, via `scripts/test.sh` |
@@ -11527,7 +11527,7 @@ before a line of Python was executed. The install is the honest gate: a library
 that genuinely cannot be fetched still fails it, by name.
 
 The hook exits immediately when `CLAUDE_CODE_REMOTE` is not `true`: a developer
-machine has its own environment (`_Docs/requirements.txt`) and the hook must
+machine has its own environment (`requirements.txt`) and the hook must
 never touch it. It also deliberately does **not** install the ML stack —
 TensorFlow + StarDist and Torch + Cellpose are several GB and only the `slow`
 segmentation tests need them, which is the same line `tests/requirements-dev.txt`
@@ -12134,7 +12134,7 @@ mamba deactivate
 mamba env remove -n allwell -y
 mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib-base pillow imageio h5py vs2015_runtime -c conda-forge -y
 mamba activate allwell
-pip install --no-build-isolation -r _Docs\requirements.txt
+pip install --no-build-isolation -r requirements.txt
 ```
 
 Do NOT include `pyside6` or `matplotlib` in the mamba step — both pull
@@ -12162,7 +12162,7 @@ The active env doesn't have the deps installed. Activate the env first and
 re-run pip:
 ```powershell
 mamba activate allwell
-pip install --no-build-isolation -r _Docs\requirements.txt
+pip install --no-build-isolation -r requirements.txt
 ```
 
 ### GPU / models / build output

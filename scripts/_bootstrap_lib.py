@@ -689,7 +689,7 @@ def env_setup_script() -> str:
 mkdir -p "$HOME/.allwell-staging/datasets" "$HOME/.allwell-staging/runs"
 
 # Placeholder repo dir so rsync has somewhere to land.
-mkdir -p "$HOME/allwell/_Docs"
+mkdir -p "$HOME/allwell"
 
 # Whether the env exists is conda's own question — a prefix is an environment
 # iff it holds conda-meta/history. The old check ("is the name in conda env
@@ -741,7 +741,7 @@ def ensure_env_and_staging(
     The env's heavyweight pip dependencies (TensorFlow, StarDist, etc.)
     are installed by :func:`install_pip_deps` after the required files
     have been rsynced to the remote — that way pip can read
-    ``_Docs/requirements.txt`` from disk.
+    ``requirements.txt`` from disk.
     """
     say("Ensuring conda env + staging dirs on remote…")
     _ssh_run(
@@ -780,7 +780,7 @@ def sync_required_files(alias: str, *, ssh_key_path: str = "") -> None:
 def install_pip_deps(
     alias: str, probe: HostProbe, *, ssh_key_path: str = "",
 ) -> None:
-    """Pip-install ``_Docs/requirements.txt`` in the conda env.
+    """Pip-install ``requirements.txt`` in the conda env.
 
     Skipped when the probe found a usable tensorflow already — that's
     the most expensive part of bootstrap and re-doing it on every
@@ -824,7 +824,7 @@ RUNNING="$STAGING/.pip_running"
 DONE="$STAGING/.pip_done"
 FAILED="$STAGING/.pip_failed"
 
-REQ_FILE="$HOME/allwell/_Docs/requirements-remote.txt"
+REQ_FILE="$HOME/allwell/requirements-remote.txt"
 if [ -f "$REQ_FILE" ]; then
     # If a previous bootstrap left pip running in the background, just
     # tail its log — don't start a second pip in parallel.
@@ -856,8 +856,8 @@ if [ -f "$REQ_FILE" ]; then
     exit 1
 else
     echo "ERROR: $REQ_FILE not found on remote." >&2
-    echo "(v5.2.1 split the GUI superset off into _Docs/requirements.txt;" >&2
-    echo " the headless deps live in _Docs/requirements-remote.txt — make" >&2
+    echo "(v5.2.1 split the GUI superset off into requirements.txt;" >&2
+    echo " the headless deps live in requirements-remote.txt — make" >&2
     echo " sure your local working copy has that file and re-run bootstrap.)" >&2
     exit 1
 fi

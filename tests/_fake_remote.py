@@ -180,7 +180,7 @@ class FakeRemote:
               *directory* containing a file of that name;
             * **-R** (relative) reproduces the source path under the
               destination, which is the entire reason ``sync_required_files``
-              uses it — without it ``_Docs/requirements-remote.txt`` lands as
+              uses it — without it ``requirements-remote.txt`` lands as
               ``requirements-remote.txt`` and a correct sync reads as broken;
             * a **glob** source expands, because ``_retry_missing_wells``
               passes one and a literal ``*`` matches nothing and transfers

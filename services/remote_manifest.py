@@ -138,7 +138,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/suspend.py",
     "pipeline/threshold_optimize.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
-    # — the remote doesn't run the GUI). See _Docs/requirements.txt for
+    # — the remote doesn't run the GUI). See requirements.txt for
     # the GUI superset.
-    "_Docs/requirements-remote.txt",
+    "requirements-remote.txt",
 )

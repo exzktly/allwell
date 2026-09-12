@@ -113,7 +113,7 @@
 # v5.2.1: split off so the bootstrap can install just the pipeline deps
 # on the remote without dragging PySide6/pyobjc/pyinstaller through
 # (some of which lack wheels on Linux aarch64 / newer Pythons). See
-# _Docs/requirements-remote.txt for the full list.
+# requirements-remote.txt for the full list.
 #
 # This install targets StarDist + Cellpose *inference* only.
 -r requirements-remote.txt

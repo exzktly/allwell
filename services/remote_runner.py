@@ -3391,7 +3391,7 @@ def _run_rsync_streaming(
     # an rsync error line, or one of the well-known directory or
     # incremental-listing markers. Captures both the well-zip names
     # (e.g. "A01.zip") and the required-files names (e.g.
-    # "process_microscopy.py", "_Docs/requirements-remote.txt").
+    # "process_microscopy.py", "requirements-remote.txt").
     file_count = 0
     # Rate-limit the progress-bar surfacing — rsync can emit many
     # progress updates per second, and the GUI doesn't need
@@ -5798,8 +5798,8 @@ class RemoteRunner:
         never accidentally runs against stale remote code.
 
         Files synced: see :data:`_REQUIRED_REMOTE_FILES`. The relative
-        layout is preserved on the remote (so ``_Docs/requirements.txt``
-        lands at ``{remote_project_dir}/_Docs/requirements.txt``).
+        layout is preserved on the remote (so ``requirements.txt``
+        lands at ``{remote_project_dir}/requirements.txt``).
         """
         log = log_fn or (lambda _m: None)
         root = repo_root()
@@ -5834,13 +5834,13 @@ class RemoteRunner:
         # the relative path. Older rsync (macOS bundles 2.6.9) doesn't
         # honor that pivot reliably and mirrors the WHOLE local path
         # on the remote, so the user saw:
-        #   ~/allwell/Users/me/allwell/_Docs/requirements-remote.txt
+        #   ~/allwell/Users/me/allwell/requirements-remote.txt
         # instead of the expected:
-        #   ~/allwell/_Docs/requirements-remote.txt
+        #   ~/allwell/requirements-remote.txt
         #
         # Using cwd + bare relative sources works on every rsync
         # version we've seen. rsync's -R then preserves just the
-        # relative path from cwd (`_Docs/requirements-remote.txt`)
+        # relative path from cwd (`requirements-remote.txt`)
         # rather than the absolute prefix.
         sources = list(_REQUIRED_REMOTE_FILES)
         dest = f"{self.host.ssh_alias}:{self.host.remote_project_dir}/"

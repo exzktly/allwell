@@ -377,11 +377,10 @@ def test_the_transfer_model_honours_the_argv_shapes_the_runner_builds(
 
     # 1. `-aR`, as `sync_required_files` uses: the source path is
     #    reproduced under the destination.
-    (tmp_path / "_Docs").mkdir()
-    (tmp_path / "_Docs" / "requirements-remote.txt").write_text("numpy\n")
-    rsync(["rsync", "-aR", "_Docs/requirements-remote.txt",
+    (tmp_path / "requirements-remote.txt").write_text("numpy\n")
+    rsync(["rsync", "-aR", "requirements-remote.txt",
            "test-host:~/allwell/"], cwd=str(tmp_path))
-    assert remote.exists("~/allwell/_Docs/requirements-remote.txt"), (
+    assert remote.exists("~/allwell/requirements-remote.txt"), (
         f"-R did not reproduce the source path; host holds {remote.tree()}")
 
     # 2. A *file* destination, as `_rsync_optional` and the sidecar pull

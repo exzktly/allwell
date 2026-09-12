@@ -367,7 +367,7 @@ Any string  preserved as-is and sorted lexicographically
 ### 2. Folders
 
 The input folder is resolved by
-[`services/input_resolution_service.py`](../services/input_resolution_service.py).
+[`services/input_resolution_service.py`](../../services/input_resolution_service.py).
 **Either the dataset folder or the `in/` inside it works** — the two are read the
 same way, so you never have to pick the inner one:
 
@@ -5437,9 +5437,9 @@ quick-reference notes.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the developer-oriented
   architectural overview: what each module does, how the pieces fit
   together, where to add features, and how to debug.
-- [`process_microscopy.py`](../process_microscopy.py) — the pipeline. It's
+- [`process_microscopy.py`](../../process_microscopy.py) — the pipeline. It's
   also a usable CLI (`python process_microscopy.py --help`).
-- [`_Docs/_Installation/`](../_Docs/_Installation/) — the PyInstaller spec
+- [`_Docs/_Installation/`](../_Installation/) — the PyInstaller spec
   + build script for producing the macOS bundle.
-- [`requirements.txt`](../requirements.txt) — the pinned
+- [`requirements.txt`](../../requirements.txt) — the pinned
   pip-managed dependencies, with environment-setup comments.

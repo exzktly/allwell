@@ -23,6 +23,7 @@ quietly reopening the hole.
 from __future__ import annotations
 
 import importlib
+import ast
 from pathlib import Path
 
 import shutil
@@ -4292,3 +4293,162 @@ def test_dispatch_call_guard_clears_a_correct_branch(tmp_path, monkeypatch):
     called = _dispatch_calls(monkeypatch, tmp_path, DISPATCH_IMPORT_GOOD["real_submodule"])
     assert any("well_plate_zipper" in n for n in called.get("--run-zipper", [])), (
         f"a correct dispatch was not recognised: {called}")
+
+
+# ── the structural-placement guards ─────────────────────────────────────────
+#
+# The five guards this branch added were each proved by mutating HEAD, which is
+# the right proof at the time and the wrong one afterwards: once the fix merges
+# the rule holds on the base for ever, so that proof can never be re-run. These
+# are the durable half — a synthetic tree carrying the violation, and the same
+# tree without it.
+
+
+def _run_placement_scan(monkeypatch, root: Path, module_name: str, test_name: str,
+                        extra: dict | None = None):
+    """Aim a `python_sources`-driven guard at a synthetic tree."""
+    files = sorted(p for p in root.rglob("*.py") if "__pycache__" not in p.parts)
+    return _run_rooted_scan(
+        monkeypatch, module_name, test_name, root,
+        extra={"python_sources": lambda **kw: files,
+               "parse_source": lambda p: ast.parse(p.read_text(encoding="utf-8")),
+               **(extra or {})})
+
+
+#: Every shape that reaches into another pane's module. The plain import is the
+#: one the guard was written for; the rest are the forms that hid from the
+#: *textual* sweeps on this branch — a parenthesised multi-line import is what
+#: slipped past the separator lift, and a function-local one is what the
+#: `analyze/seg_params.py` NamedPageStack import actually was.
+CROSS_PANE_VIOLATIONS = {
+    "module_scope": "from review.core.thing import Thing\n",
+    "parenthesised": "from review.core.thing import (\n    Thing,\n)\n",
+    "function_local": "def build():\n    from review.core.thing import Thing\n    return Thing\n",
+    "plain_import": "import review.core.thing\n",
+    "aliased": "from review.core.thing import Thing as _T\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(CROSS_PANE_VIOLATIONS))
+def test_placement_guard_catches_a_cross_pane_import(tmp_path, monkeypatch, shape):
+    """`datasets/` reaching into `review/` must fire, in every import shape."""
+    (tmp_path / "review" / "core").mkdir(parents=True)
+    (tmp_path / "review" / "core" / "thing.py").write_text("Thing = 1\n", encoding="utf-8")
+    (tmp_path / "datasets").mkdir()
+    (tmp_path / "datasets" / "tool.py").write_text(
+        CROSS_PANE_VIOLATIONS[shape], encoding="utf-8")
+
+    exc = _run_placement_scan(
+        monkeypatch, tmp_path, "tests.test_a_module_lives_at_its_widest_use",
+        "test_no_module_inside_a_pane_is_imported_from_outside_it",
+        extra={"ALLOWED": {}, "PANE_ENTRY_POINTS": {}})
+    assert exc is not None, f"the {shape} shape was not caught"
+    assert "review/core/thing.py" in str(exc), str(exc)
+
+
+def test_placement_guard_clears_a_pane_importing_itself(tmp_path, monkeypatch):
+    """A module reaching its own pane's sibling is not a crossing."""
+    (tmp_path / "review" / "core").mkdir(parents=True)
+    (tmp_path / "review" / "core" / "thing.py").write_text("Thing = 1\n", encoding="utf-8")
+    (tmp_path / "review" / "user.py").write_text(
+        "from review.core.thing import Thing\n", encoding="utf-8")
+
+    exc = _run_placement_scan(
+        monkeypatch, tmp_path, "tests.test_a_module_lives_at_its_widest_use",
+        "test_no_module_inside_a_pane_is_imported_from_outside_it",
+        extra={"ALLOWED": {}, "PANE_ENTRY_POINTS": {}})
+    assert exc is None, f"a pane importing itself was wrongly reported: {exc}"
+
+
+#: `from X import name` where X does not define `name`. The parenthesised form
+#: is the one that shipped broken on this branch and survived `ruff`, the whole
+#: guard family and every targeted file — the fast lane found it at collection.
+UNRESOLVED_IMPORT_VIOLATIONS = {
+    "module_scope": "from pkg.mod import gone\n",
+    "parenthesised": "from pkg.mod import (\n    here,\n    gone,\n)\n",
+    "aliased": "from pkg.mod import gone as _g\n",
+    "function_local": "def f():\n    from pkg.mod import gone\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(UNRESOLVED_IMPORT_VIOLATIONS))
+def test_import_resolution_guard_catches_a_departed_symbol(tmp_path, monkeypatch, shape):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "mod.py").write_text("here = 1\n", encoding="utf-8")
+    (tmp_path / "user.py").write_text(
+        UNRESOLVED_IMPORT_VIOLATIONS[shape], encoding="utf-8")
+
+    exc = _run_placement_scan(
+        monkeypatch, tmp_path, "tests.test_first_party_imports_resolve",
+        "test_every_first_party_import_names_something_that_exists",
+        extra={"_FIRST_PARTY": {"pkg", "user"}})
+    assert exc is not None, f"the {shape} shape was not caught"
+    assert "`gone`" in str(exc) and "pkg.mod" in str(exc), str(exc)
+
+
+def test_import_resolution_guard_clears_a_module_that_serves_names_dynamically(
+        tmp_path, monkeypatch):
+    """A module-scope `__getattr__` can serve any name, so it must not accuse.
+
+    This is the fail-closed half, and it is the half that decides whether the
+    guard is usable: `review/__init__.py` serves `ReviewApp` through exactly
+    this mechanism.
+    """
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "mod.py").write_text(
+        "def __getattr__(name):\n    return 1\n", encoding="utf-8")
+    (tmp_path / "user.py").write_text("from pkg.mod import anything\n", encoding="utf-8")
+
+    exc = _run_placement_scan(
+        monkeypatch, tmp_path, "tests.test_first_party_imports_resolve",
+        "test_every_first_party_import_names_something_that_exists",
+        extra={"_FIRST_PARTY": {"pkg", "user"}})
+    assert exc is None, f"a dynamic module was wrongly accused: {exc}"
+
+
+#: A path assembled from several literals where only the basename followed the
+#: file. The `.txt` case is the one the first version of the guard could not
+#: see at all, because it only inspected chains ending in `.py`.
+SPLIT_PATH_VIOLATIONS = {
+    "python_module": ('from pathlib import Path\n'
+                      'p = Path("/x") / "scripts" / "mover.py"\n'),
+    "data_file": ('from pathlib import Path\n'
+                  'p = Path("/x") / "_Docs" / "manifest.txt"\n'),
+    "three_segments": ('from pathlib import Path\n'
+                       'p = Path("/x") / "a" / "b" / "mover.py"\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(SPLIT_PATH_VIOLATIONS))
+def test_split_literal_guard_catches_a_stale_directory(tmp_path, monkeypatch, shape):
+    (tmp_path / "services").mkdir()
+    (tmp_path / "services" / "mover.py").write_text("", encoding="utf-8")
+    (tmp_path / "manifest.txt").write_text("", encoding="utf-8")
+    (tmp_path / "user.py").write_text(SPLIT_PATH_VIOLATIONS[shape], encoding="utf-8")
+
+    exc = _run_placement_scan(
+        monkeypatch, tmp_path, "tests.test_split_literal_paths_resolve",
+        "test_a_path_written_as_several_literals_still_exists",
+        extra={"_EXTRA_SOURCES": ()})
+    assert exc is not None, f"the {shape} shape was not caught"
+    assert "user.py" in str(exc), str(exc)
+
+
+def test_split_literal_guard_clears_a_path_that_is_not_a_repository_file(
+        tmp_path, monkeypatch):
+    """A basename that names nothing here is not a claim about this repository.
+
+    The premise keeps the guard quiet on remote paths and temp directories; a
+    basename it cannot find is one it knows nothing about.
+    """
+    (tmp_path / "user.py").write_text(
+        'from pathlib import Path\np = Path("~") / "allwell" / "not_here.txt"\n',
+        encoding="utf-8")
+
+    exc = _run_placement_scan(
+        monkeypatch, tmp_path, "tests.test_split_literal_paths_resolve",
+        "test_a_path_written_as_several_literals_still_exists",
+        extra={"_EXTRA_SOURCES": ()})
+    assert exc is None, f"a non-repository path was wrongly accused: {exc}"

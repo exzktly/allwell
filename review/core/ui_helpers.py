@@ -1481,7 +1481,7 @@ def notes_schedule_save(ctx, *, widget_key: str = "_home_notes_edit") -> None:
 
 
 def norm_timepoint(ctx, value: object) -> str:
-    """The ctx-shaped leaf over :func:`data.image_identity.normalize_tp`.
+    """The ctx-shaped leaf over :func:`domain.image_identity.normalize_tp`.
 
     A ctx signature so features can reach the canonical timepoint key through
     the context rather than importing the data layer directly; the rule itself

@@ -12,7 +12,7 @@ here, the same way ``test_datasets_log_panel`` does it: a hardcoded list makes a
 sweep say "all six tools" while meaning "the six I knew about", and a seventh
 tool is covered from the moment it is registered.
 
-``_common`` is the sanctioned direction. So is a tool importing from itself.
+``datasets/core`` is the sanctioned direction. So is a tool importing from itself.
 Everything else is the coupling this test exists to prevent.
 """
 
@@ -62,7 +62,11 @@ def test_no_tool_imports_another_tool():
                     if len(parts) < 2 or parts[0] != "datasets":
                         continue
                     other = parts[1]
-                    if other in ("_common", tool):
+                    # `datasets/core` is shared by design; a tool importing
+                    # itself is not a crossing. Neither is ever a tool kind, so
+                    # this cannot mask a real one — it reads as a list of tool
+                    # names and is not.
+                    if other in ("core", tool):
                         continue
                     if other in tools:
                         offenders.append(

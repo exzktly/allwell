@@ -673,7 +673,7 @@ it finished — not to claim work is owed, which nothing below does.
     than three things the loader happens to remember. The move also freed Cell Gating
     from its lazy hop into Image Browser and took the loader's feature import with it:
     `CORE_FEATURE_IMPORT_BUDGET` 31 → **30**.
-  - `review/data/image_identity.py` gained `cell_key_tuples_for_dataframe`, the one
+  - `domain/image_identity.py` gained `cell_key_tuples_for_dataframe`, the one
     implementation of the `(fov, tp, nid)` row key both the projector and Review Image's
     own lookups use; `collect.review_row_keys_series` is now the tab-side name for it.
   - `runtime_app._load_well_csv` is deleted — a pass-through with one caller, which was

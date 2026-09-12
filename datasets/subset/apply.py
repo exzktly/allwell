@@ -306,7 +306,7 @@ def execute_plan(
                             )
                         )
                     # cell_overrides.json stores fov/tp already normalized (via
-                    # CellKey.as_tuple, review/data/image_identity.py), so
+                    # CellKey.as_tuple, domain/image_identity.py), so
                     # this set must be normalized the same way or a parseable
                     # timepoint label like "24h" never matches its normalized
                     # "24" and _copy_filtered_overrides drops the override.

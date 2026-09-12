@@ -172,15 +172,16 @@ sibling_scripts = [
     # "missing local file". (The GUI-superset requirements.txt is NOT bundled —
     # only the remote install manifest is needed at runtime.)
     (str(_parent / "requirements-remote.txt"), "."),
-    # The Analyze → Remotes dialog provisions a remote host by spawning this
-    # bootstrap module as a subprocess (re-exec'd via the ``--run-bootstrap``
-    # launcher sentinel — sys.executable is the .app binary, not python). It's
-    # loaded by file path at _MEIPASS/services/remote_bootstrap.py and its
-    # ``REPO_ROOT = __file__.parent.parent`` resolves to _MEIPASS, where the
-    # files it syncs to the remote (process_microscopy.py, pipeline/, util/,
-    # requirements-remote.txt) are already bundled. Keep the ``scripts/``
-    # dest so that .parent.parent lands on the bundle root, not above it.
-    (str(_parent / "services" / "remote_bootstrap.py"), "services"),
+    # The remote bootstrap needs no entry here any more. It lives in
+    # ``services/``, which the package loop below bundles whole, so it already
+    # lands at _MEIPASS/services/remote_bootstrap.py — where
+    # ``all_well_launcher.py``'s ``--run-bootstrap`` dispatch loads it by path
+    # and its ``REPO_ROOT = __file__.parent.parent`` resolves to the bundle
+    # root, beside the files it syncs to the remote (process_microscopy.py,
+    # pipeline/, util/, requirements-remote.txt). The entry existed only
+    # because the module used to sit in ``scripts/``, which is not a bundled
+    # package; listing it again would ship the same file twice and give the
+    # destination a second place to drift from.
 ]
 
 # Bundle every first-party package so module imports resolve at runtime inside

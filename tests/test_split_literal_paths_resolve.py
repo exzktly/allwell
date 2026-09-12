@@ -30,6 +30,13 @@ from collections import defaultdict
 
 from tests._repo_scan import REPO_ROOT, parse_source, python_sources
 
+#: Python that is not named `.py`, and is therefore outside `python_sources()`.
+#: The spec is the reason this guard exists — it bundles `(source, destination)`
+#: as two literals — so leaving it unscanned would have made the guard blind to
+#: its own motivating incident. `tests/test_scan_surface_is_complete.py` guards
+#: `PACKAGE_ROOTS`; this is one file, named here because it has no package.
+_EXTRA_SOURCES = (REPO_ROOT / "_Docs" / "_Installation" / "all_well.spec",)
+
 
 def _segments(node: ast.AST) -> list[str] | None:
     """The trailing string literals of a `a / "b" / "c.py"` chain, outermost last.
@@ -47,13 +54,38 @@ def _segments(node: ast.AST) -> list[str] | None:
     return out or None
 
 
+#: Directories whose contents are not repository content.
+_IGNORED_DIRS = {".git", "__pycache__", "build", "dist", ".venv", "venv",
+                 "node_modules", ".ruff_cache", ".pytest_cache"}
+
+#: Test fixtures are excluded from the basename index, and the reason is the
+#: guard's whole premise. That premise is "this basename names a file in the
+#: repository, so the path was meant to point at one" — and a fixture is a
+#: *copy of a runtime artifact*, not a place anything lives. `pipeline_info.json`
+#: exists under `tests/fixtures/`, so without this the guard accuses
+#: `datasets/subset/view.py` of misnaming the `<dataset>/out/pipeline_info.json`
+#: a user's own dataset holds, which is not a repository path at all. Indexing
+#: fixtures would make the guard loudest exactly where it knows least.
+_IGNORED_PREFIXES = ("tests/fixtures/",)
+
+
 def _repo_files_by_name() -> dict[str, list[str]]:
-    """Every tracked Python file in the repository, keyed by basename."""
+    """Every file in the repository, keyed by basename.
+
+    Not just `.py`: the incident that motivated this guard was a `.txt`
+    manifest bundled to a stale destination, and restricting the scan to
+    Python would have excluded it. A basename that names no repository file is
+    ignored either way, so widening costs nothing but catches the manifests,
+    the shell scripts and the spec.
+    """
     out: dict[str, list[str]] = defaultdict(list)
-    for p in REPO_ROOT.rglob("*.py"):
-        if "__pycache__" in p.parts or ".git" in p.parts:
+    for p in REPO_ROOT.rglob("*"):
+        if not p.is_file() or any(d in p.parts for d in _IGNORED_DIRS):
             continue
-        out[p.name].append(str(p.relative_to(REPO_ROOT)))
+        rel = str(p.relative_to(REPO_ROOT))
+        if rel.startswith(_IGNORED_PREFIXES):
+            continue
+        out[p.name].append(rel)
     return out
 
 
@@ -61,13 +93,13 @@ def test_a_path_written_as_several_literals_still_exists():
     by_name = _repo_files_by_name()
     offenders: list[str] = []
 
-    for path in python_sources():
+    for path in (*python_sources(), *_EXTRA_SOURCES):
         rel = str(path.relative_to(REPO_ROOT))
         for node in ast.walk(parse_source(path)):
             if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
                 continue
             segs = _segments(node)
-            if not segs or len(segs) < 2 or not segs[-1].endswith(".py"):
+            if not segs or len(segs) < 2:
                 continue
             homes = by_name.get(segs[-1])
             if not homes:

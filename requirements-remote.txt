@@ -2,7 +2,7 @@
 # ------------------------
 # Pipeline-only Python dependencies for the AllWell *remote* execution
 # host (a Linux machine the user SSHes into). The bootstrap script
-# (scripts/_bootstrap_lib.py) pip-installs this file inside the
+# (services/remote_bootstrap.py) pip-installs this file inside the
 # ``allwell`` conda env on the remote.
 #
 # Why a separate file from requirements.txt? The GUI side ships PySide6,

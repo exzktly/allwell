@@ -1,7 +1,7 @@
 """``swallow`` and ``swallowed`` are used the way each is built to be used.
 
 Two helpers with near-identical names and opposite call shapes
-(``review/core/safe.py``, ``util/aw_safe.py``): ``swallow(note)`` is a
+(``core/safe.py``, ``util/aw_safe.py``): ``swallow(note)`` is a
 context manager, ``swallowed(note)`` is a call for inside an ``except`` block.
 Swap them and Python does not complain until the line runs —
 ``with swallowed():`` raises ``AttributeError: __enter__``, and it raises

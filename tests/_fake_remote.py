@@ -180,8 +180,11 @@ class FakeRemote:
               *directory* containing a file of that name;
             * **-R** (relative) reproduces the source path under the
               destination, which is the entire reason ``sync_required_files``
-              uses it — without it ``requirements-remote.txt`` lands as
-              ``requirements-remote.txt`` and a correct sync reads as broken;
+              uses it — without it ``pipeline/io.py`` lands as ``io.py`` at the
+              destination root and a correct sync reads as broken. The example
+              has to be a manifest entry that is *in* a subdirectory: a
+              root-level one like ``requirements-remote.txt`` reproduces to
+              itself, so it cannot show the difference this flag makes;
             * a **glob** source expands, because ``_retry_missing_wells``
               passes one and a literal ``*`` matches nothing and transfers
               silently;

@@ -48,12 +48,55 @@ def test_launcher_dispatches_the_sentinel():
     assert "remote_bootstrap" in src
 
 
-def test_spec_bundles_the_bootstrap_module():
-    """The frozen build must ship ``services/remote_bootstrap.py`` under a
-    ``services/`` dest so its ``REPO_ROOT = __file__.parent.parent`` resolves to
-    _MEIPASS (where the files it syncs to the remote are bundled)."""
-    spec = (REPO_ROOT / "_Docs" / "_Installation" / "all_well.spec").read_text()
-    assert '"services" / "remote_bootstrap.py"' in spec
+def test_spec_bundles_the_bootstrap_module_at_the_path_the_launcher_loads():
+    """The frozen build must ship the module at ``_MEIPASS/services/remote_bootstrap.py``.
+
+    That exact path is hard-coded twice — ``all_well_launcher.py`` loads it by
+    file path under the ``--run-bootstrap`` sentinel, and the module's own
+    ``REPO_ROOT = __file__.parent.parent`` has to resolve to the bundle root,
+    beside the files it syncs to the remote. A destination one level off makes
+    ``REPO_ROOT`` the directory *above* the bundle and the sync finds nothing.
+
+    Asserted as the requirement rather than as a substring. The previous version
+    checked that the text ``"services" / "remote_bootstrap.py"`` appeared in the
+    spec, which is true of a source path bundled to *any* destination — the
+    destination being the half that fails silently — and became false the moment
+    the explicit entry was removed in favour of the package loop, even though the
+    file still ships at exactly the right place. Two routes satisfy this, and
+    both are legitimate: an explicit data tuple whose destination is
+    ``services``, or ``services`` bundled whole by the package loop.
+    """
+    import ast
+
+    spec_text = (REPO_ROOT / "_Docs" / "_Installation" / "all_well.spec").read_text()
+    tree = ast.parse(spec_text)
+
+    # Route 1: the package loop bundles `services` whole.
+    bundled_whole = False
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.For) and getattr(node.target, "id", "") == "_pkg"
+                and isinstance(node.iter, ast.Tuple)):
+            bundled_whole = "services" in {
+                e.value for e in node.iter.elts if isinstance(e, ast.Constant)}
+
+    # Route 2: an explicit (source, dest) tuple landing it in `services`.
+    explicit = False
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Tuple) and len(node.elts) == 2):
+            continue
+        src, dest = node.elts
+        if not (isinstance(dest, ast.Constant) and dest.value == "services"):
+            continue
+        if "remote_bootstrap.py" in ast.dump(src):
+            explicit = True
+
+    assert bundled_whole or explicit, (
+        "all_well.spec ships services/remote_bootstrap.py at neither the "
+        "package-loop path nor an explicit `services` destination. "
+        "`all_well_launcher.py` loads it from _MEIPASS/services/ and the "
+        "module's REPO_ROOT = __file__.parent.parent must land on the bundle "
+        "root; any other destination breaks the remote sync from a frozen "
+        "build, which no test exercises.")
 
 
 # ── the frozen windowed build's nulled standard streams ─────────────────────

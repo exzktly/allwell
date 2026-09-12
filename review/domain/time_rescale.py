@@ -33,7 +33,7 @@ it were right. One value cannot be half-passed, and
 ``tests/test_time_rescale_is_swept.py`` holds the other half of that rule: no
 module outside this one and its three owners reads the two numbers apart.
 
-Formatting goes through ``data.image_identity.normalize_tp``, the canonical
+Formatting goes through ``domain.image_identity.normalize_tp``, the canonical
 timepoint key form, so a rescaled label reads the same way every other timepoint
 in the app does.
 

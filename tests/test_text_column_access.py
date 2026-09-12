@@ -23,7 +23,7 @@ So the rule is not "add the fill values to the categories" — the next fill val
 someone writes would not be in the list either, and a category list wider than
 the observed values makes ``groupby`` fabricate a group per unused category.
 The rule is that these columns are normalised in one place,
-``review/domain/text_columns.py``, whose helpers widen a categorical to
+``domain/text_columns.py``, whose helpers widen a categorical to
 ``object`` before touching it.
 
 Decidable from the syntax tree: the column name is a literal at every call site

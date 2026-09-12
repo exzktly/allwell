@@ -12,7 +12,7 @@
 # distinguish a *logged* broad catch from a *silently swallowed* one. The
 # silent-swallow anti-pattern is instead caught by a targeted guardrail
 # test (tests/test_no_silent_except.py), added alongside the `swallow`
-# helper in review/core/safe.py.
+# helper in core/safe.py.
 
 # ── pytest ───────────────────────────────────────────────────────────────────
 # Lives here rather than in tests/pytest.ini so BOTH invocations load the same

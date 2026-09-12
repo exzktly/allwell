@@ -208,6 +208,7 @@ def _apply_unified_state(ctx, block, *, set_notes: bool = True) -> tuple[bool, d
     failure: logs, leaves the existing state alone, disables v2 writes for the
     session, and returns ``(False, {})``.
     """
+    from domain import selections_format as _fmt
     from review.domain import selections_model as _sel
     sel_state = ctx.state.selection
     tok_to_label = ctx.state.dataset.tok_to_label
@@ -238,7 +239,7 @@ def _apply_unified_state(ctx, block, *, set_notes: bool = True) -> tuple[bool, d
     try:
         # Don't honour line order here — line_order.json loads *after* this; its
         # loader re-applies the reorder.
-        selections, current_id, well_labels, notes, plot_groups = _sel.from_block(
+        selections, current_id, well_labels, notes, plot_groups = _fmt.from_block(
             block, tok_to_label=tok_to_label)
     except Exception:  # pragma: no cover - defensive: never crash on bad data
         _logger.exception("Couldn't upgrade saved sample definitions — using "

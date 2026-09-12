@@ -4412,6 +4412,64 @@ def test_import_resolution_guard_clears_a_module_that_serves_names_dynamically(
     assert exc is None, f"a dynamic module was wrongly accused: {exc}"
 
 
+#: The module-object spelling of the same fact: the import resolves (the module
+#: is still there) and only the attribute read off it is gone. Four call sites
+#: in four files shipped this way when `selections_model` was split, past `ruff`,
+#: past the guard family, and past the name-by-name half of the import guard.
+MODULE_ATTR_VIOLATIONS = {
+    "module_scope": "from pkg import mod\nmod.gone()\n",
+    "aliased": "from pkg import mod as _m\n_m.gone()\n",
+    "function_local": "def f():\n    from pkg import mod as _m\n    return _m.gone()\n",
+    "private_name": "from pkg import mod as _m\n_m._gone()\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(MODULE_ATTR_VIOLATIONS))
+def test_module_attribute_guard_catches_a_departed_symbol(tmp_path, monkeypatch, shape):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "mod.py").write_text("def here():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "user.py").write_text(
+        MODULE_ATTR_VIOLATIONS[shape], encoding="utf-8")
+
+    exc = _run_placement_scan(
+        monkeypatch, tmp_path, "tests.test_first_party_imports_resolve",
+        "test_every_module_attribute_resolves",
+        extra={"_FIRST_PARTY": {"pkg", "user"}})
+    assert exc is not None, f"the {shape} shape was not caught"
+    assert "pkg.mod" in str(exc), str(exc)
+
+
+def test_module_attribute_guard_clears_a_name_that_means_two_modules(
+        tmp_path, monkeypatch):
+    """The fail-closed half, and the one that decides whether the guard is usable.
+
+    `review/features/stats/controller.py` binds `_st` to `scipy.stats` in one
+    function and to `review.domain.stats_tests` in another. The scan has no
+    notion of scope, so a name bound more than once has to be skipped — reading
+    the second module's definitions against the first module's call sites
+    accused four scipy functions of not existing, which is how this case was
+    found.
+    """
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "mod.py").write_text("def here():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "user.py").write_text(
+        "def a():\n"
+        "    import math as _m\n"
+        "    return _m.sqrt(4)\n"
+        "def b():\n"
+        "    from pkg import mod as _m\n"
+        "    return _m.here()\n",
+        encoding="utf-8")
+
+    exc = _run_placement_scan(
+        monkeypatch, tmp_path, "tests.test_first_party_imports_resolve",
+        "test_every_module_attribute_resolves",
+        extra={"_FIRST_PARTY": {"pkg", "user"}})
+    assert exc is None, f"a twice-bound alias was wrongly accused: {exc}"
+
+
 #: A path assembled from several literals where only the basename followed the
 #: file. The `.txt` case is the one the first version of the guard could not
 #: see at all, because it only inspected chains ending in `.py`.

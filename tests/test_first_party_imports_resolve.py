@@ -13,6 +13,15 @@ broken one is invisible until something actually imports the module — which, f
 a GUI built lazily, can be no test at all. Deciding it from the syntax tree costs
 a couple of seconds and needs nothing imported.
 
+The same fact has a second spelling, and it is the one that got away. A module
+imported as an *object* — `from review.domain import selections_model as _sel`,
+then `_sel.from_block(...)` — binds a name the first test resolves perfectly
+well, because the module does still exist; what moved is the attribute read off
+it. Splitting that module left four such call sites reaching for functions it no
+longer defined, in four files, and every one of them passed `ruff`, the guard
+family, and the first test in this file. `test_every_module_attribute_resolves`
+is the half that reads the attribute.
+
 **Every limitation here fails closed**, i.e. skips rather than accuses:
 
 * a module that defines `__getattr__` at module scope can serve any name (the
@@ -104,3 +113,101 @@ def test_every_first_party_import_names_something_that_exists():
         "not resolve imports across modules, so nothing else reports it until "
         "the module is imported at runtime — which, for a tab that builds "
         "lazily, may be no test at all.")
+
+
+def _module_object_aliases(tree: ast.Module) -> dict[str, str]:
+    """``alias -> dotted module`` for every ``from pkg import submodule`` here.
+
+    **A name this file binds more than once, by any means, is dropped.** The
+    scan walks the whole tree with no notion of scope, so a name meaning two
+    things in two functions means nothing it can check: `features/stats/controller.py`
+    binds `_st` to `scipy.stats` inside one function and to
+    `review.domain.stats_tests` inside another, and reading the second module's
+    bindings against the first one's call sites accused four scipy functions of
+    not existing. Counting every binding form — an `import`, a `from`-import, an
+    assignment, a parameter, a `def`, a `class`, a comprehension or `with` or
+    `except` target — is what makes "bound once" mean it.
+    """
+    counts: dict[str, int] = {}
+
+    def bind(name: str) -> None:
+        counts[name] = counts.get(name, 0) + 1
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for a in node.names:
+                if a.name != "*":
+                    bind(a.asname or a.name.split(".")[0])
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bind(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bind(node.name)
+        elif isinstance(node, ast.arg):
+            bind(node.arg)
+        elif isinstance(node, ast.Global):
+            for name in node.names:
+                bind(name)
+
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.level or not node.module:
+            continue
+        if node.module.split(".")[0] not in _FIRST_PARTY:
+            continue
+        for a in node.names:
+            dotted = f"{node.module}.{a.name}"
+            if _module_path(dotted) is None:
+                continue                      # a plain symbol, the other test's job
+            name = a.asname or a.name
+            if counts.get(name, 0) == 1:
+                aliases[name] = dotted
+    return aliases
+
+
+def test_every_module_attribute_resolves():
+    """``_sel.from_block`` where ``_sel`` is a module this repository defines.
+
+    The private names are checked like any other: ``_sel.block_is_v2`` is as
+    broken as ``_sel.from_block`` when the module stops defining it, and an
+    underscore is a convention about who *should* call it rather than a claim
+    that nobody does.
+    """
+    offenders: list[str] = []
+    cache: dict[str, set[str] | None] = {}
+
+    for path in python_sources():
+        tree = parse_source(path)
+        aliases = _module_object_aliases(tree)
+        if not aliases:
+            continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Attribute)
+                    and isinstance(node.value, ast.Name)
+                    and isinstance(node.ctx, ast.Load)):
+                continue
+            dotted = aliases.get(node.value.id)
+            if dotted is None:
+                continue
+            if dotted not in cache:
+                target = _module_path(dotted)
+                cache[dotted] = (
+                    _bindings(parse_source(target)) if target is not None else None)
+            bound = cache[dotted]
+            if bound is None:
+                continue                      # dynamic or star-importing: fail closed
+            if _module_path(f"{dotted}.{node.attr}") is not None:
+                continue                      # a submodule, not an attribute
+            if node.attr in bound or node.attr.startswith("__"):
+                continue
+            offenders.append(
+                f"{path.relative_to(REPO_ROOT)}:{node.lineno} reads "
+                f"`{node.value.id}.{node.attr}`, but `{dotted}` does not define "
+                f"`{node.attr}`")
+
+    assert not offenders, (
+        "these attribute reads name something their module does not define — an "
+        "AttributeError waiting for whatever first runs the line:\n  "
+        + "\n  ".join(sorted(set(offenders))) + "\n\n"
+        "A symbol moved and the call site did not follow. This is the form a "
+        "name-by-name sweep walks past: the *import* still resolves, because "
+        "the module is still there, and only the attribute is gone.")

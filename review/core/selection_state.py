@@ -8,9 +8,9 @@ against removals, and the per-tick commit-coalescing flag.
 Composes ``domain/selections_format.py``: that module owns the v2 schema,
 validation / repair, v1→v2 migration, and colour assignment — ``SelectionState``
 reuses its functions rather than reimplementing them. It is the *shared* half of
-the saved-selections model, because the same block is written by the pipeline,
-read by Review and merged by Datasets; Review's own half, what a selection means
-on a figure, is ``review/domain/selections_model.py`` and nothing here needs it.
+the saved-selections model, because Review writes that block and Datasets
+rewrites it on a plate merge; Review's own half, what a selection means on a
+figure, is ``review/domain/selections_model.py`` and nothing here needs it.
 
 Qt-free: imports only stdlib and ``selections_format``.
 """

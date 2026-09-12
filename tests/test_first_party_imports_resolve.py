@@ -17,9 +17,10 @@ The same fact has a second spelling, and it is the one that got away. A module
 imported as an *object* — `from review.domain import selections_model as _sel`,
 then `_sel.from_block(...)` — binds a name the first test resolves perfectly
 well, because the module does still exist; what moved is the attribute read off
-it. Splitting that module left four such call sites reaching for functions it no
-longer defined, in four files, and every one of them passed `ruff`, the guard
-family, and the first test in this file. `test_every_module_attribute_resolves`
+it. Splitting that module left six such attribute reads reaching for functions
+it no longer defined, across four files, and every one of them passed `ruff`,
+the guard family, and the first test in this file. (Six reads, four files — the
+count this guard produces, not the four the first draft of this sentence said.) `test_every_module_attribute_resolves`
 is the half that reads the attribute.
 
 **Every limitation here fails closed**, i.e. skips rather than accuses:
@@ -118,26 +119,56 @@ def test_every_first_party_import_names_something_that_exists():
 def _module_object_aliases(tree: ast.Module) -> dict[str, str]:
     """``alias -> dotted module`` for every ``from pkg import submodule`` here.
 
-    **A name this file binds more than once, by any means, is dropped.** The
-    scan walks the whole tree with no notion of scope, so a name meaning two
-    things in two functions means nothing it can check: `features/stats/controller.py`
-    binds `_st` to `scipy.stats` inside one function and to
-    `review.domain.stats_tests` inside another, and reading the second module's
-    bindings against the first one's call sites accused four scipy functions of
-    not existing. Counting every binding form — an `import`, a `from`-import, an
-    assignment, a parameter, a `def`, a `class`, a comprehension or `with` or
-    `except` target — is what makes "bound once" mean it.
-    """
-    counts: dict[str, int] = {}
+    **A name is dropped when its bindings disagree**, not merely when there are
+    several of them. The scan walks the whole tree with no notion of scope, so a
+    name meaning two things in two functions means nothing it can check:
+    `features/stats/controller.py` binds `_st` to `scipy.stats` inside one
+    function and to `review.domain.stats_tests` inside another, and reading the
+    second module's definitions against the first one's call sites accused four
+    scipy functions of not existing.
 
-    def bind(name: str) -> None:
-        counts[name] = counts.get(name, 0) + 1
+    Dropping every *multi*-bound alias was the first version of that rule and it
+    was far too blunt: per-function lazy importing is this repository's dominant
+    idiom, so the same module is routinely imported under the same alias in six
+    or nine different functions of one file — `services/remote_runner.py` binds
+    `run_journal` six times and reads eight attributes off it. Measured, the
+    blunt rule left 8 aliases and 39 attribute reads unchecked, every one of them
+    perfectly consistent, and it would have walked past the very defect this
+    guard was written for had `_sel` been imported in two functions rather than
+    one.
+
+    So the bindings are gathered per name: a name bound only by `from pkg import
+    mod` / `import pkg.mod` statements that all name **one** module is that
+    module; a name bound any other way, or to two different modules, is dropped.
+    Every binding form counts as a disagreeing one — an assignment, a parameter,
+    a `def`, a `class`, a `global`, a `with` or `except` or comprehension target
+    — because none of them says which module the name holds.
+    """
+    #: name -> the set of modules it is bound to; ``None`` in the set means a
+    #: binding that says nothing about which module (an assignment, a parameter).
+    bound: dict[str, set] = {}
+
+    def bind(name: str, dotted=None) -> None:
+        bound.setdefault(name, set()).add(dotted)
 
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
+        if isinstance(node, ast.Import):
+            # ``import pkg.mod`` binds ``pkg``; ``import pkg.mod as m`` binds ``m``
+            # to ``pkg.mod`` — the spelling the first version of this scan could
+            # not see at all, worth 26 unchecked reads across 8 first-party sites.
             for a in node.names:
-                if a.name != "*":
-                    bind(a.asname or a.name.split(".")[0])
+                if a.asname:
+                    bind(a.asname, a.name if _module_path(a.name) else None)
+                else:
+                    bind(a.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for a in node.names:
+                if a.name == "*":
+                    continue
+                name = a.asname or a.name
+                dotted = (f"{node.module}.{a.name}"
+                          if node.module and not node.level else None)
+                bind(name, dotted if dotted and _module_path(dotted) else None)
         elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             bind(node.id)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -148,20 +179,12 @@ def _module_object_aliases(tree: ast.Module) -> dict[str, str]:
             for name in node.names:
                 bind(name)
 
-    aliases: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom) or node.level or not node.module:
-            continue
-        if node.module.split(".")[0] not in _FIRST_PARTY:
-            continue
-        for a in node.names:
-            dotted = f"{node.module}.{a.name}"
-            if _module_path(dotted) is None:
-                continue                      # a plain symbol, the other test's job
-            name = a.asname or a.name
-            if counts.get(name, 0) == 1:
-                aliases[name] = dotted
-    return aliases
+    return {
+        name: next(iter(mods))
+        for name, mods in bound.items()
+        if len(mods) == 1 and next(iter(mods)) is not None
+        and next(iter(mods)).split(".")[0] in _FIRST_PARTY
+    }
 
 
 def test_every_module_attribute_resolves():

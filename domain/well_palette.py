@@ -24,7 +24,9 @@ Three consumers reference it:
   ``widgets/plot_card.plot_palette()`` feeds into matplotlib's
   ``axes.prop_cycle`` (screen and publication modes alike).
 * ``review.domain.plate_layout.WELL_COLORS`` — a plain ``list()`` copy, read by
-  every plot renderer that needs a per-well colour by rank.
+  every plot renderer that needs a per-well colour by rank. Named here as a
+  reader, which is the direction that is allowed: nothing in this package
+  imports it, and this module imports nothing at all.
 * :func:`domain.selections_format.well_colors` — the palette ``rank_color``
   bakes from.
 

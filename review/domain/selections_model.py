@@ -3,8 +3,10 @@
 The other half is :mod:`domain.selections_format`, which owns the on-disk
 ``sample_definitions`` block: reading it, writing it, repairing it, migrating a
 legacy v1 one, and baking the ``color`` field from well rank. That half is
-shared, because the pipeline writes the block, Review reads it and Datasets
-merges two of them, so all three have to agree about the format.
+shared, because Review writes that block and Datasets rewrites it on a plate
+merge, so two panes have to agree about the format. (The pipeline only carries
+an existing block across untouched — ``pipeline.sidecar`` lists it among the
+blocks that have no author on the pipeline side.)
 
 This module is what only Review needs, and no other pane touches:
 

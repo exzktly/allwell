@@ -15,7 +15,8 @@ A ``Selection`` is a plain ``dict`` (JSON-friendly):
     }
 
 ``name_is_verbatim`` marks a name that stands on its own — one composed from the
-sample variables the group's wells hold — so ``replicate_display_label`` leaves
+sample variables the group's wells hold — so
+:func:`review.domain.selections_model.replicate_display_label` leaves
 it alone instead of reading a `Dose` group called ``10`` as an auto-generated
 name and redrawing it as its well tokens. Absent on every selection that has not
 claimed it, which is most of them.
@@ -26,13 +27,23 @@ bar-plot order. ``well_labels`` (a ``dict[token, str]``) stays a separate siblin
 Why this is shared rather than Review's
 =======================================
 
-The block is written by the pipeline, read by Review, and merged by Datasets:
+**Two panes write this block, and they have to agree about it.** Review writes
+it whenever someone edits a selection, and Datasets rewrites it on a plate merge:
 ``datasets.merge_plates.merge_plates_compute.merge_sample_definitions`` runs both
 plates' blocks through :func:`from_block` and writes the result back through
 :func:`to_block`, because they are the only things in the codebase that know how
 to read a saved block — a v2 one is validated and a legacy v1 one is migrated on
 the way in. Two panes that disagreed about the format would disagree about the
 same file.
+
+The pipeline is **not** the third party. It has no author for this block at all:
+:mod:`pipeline.sidecar` lists ``sample_definitions`` in ``USER_SIDE_BLOCKS``,
+the blocks that describe what the user decided afterwards in Review, and
+``process_microscopy.write_pipeline_info`` only carries an existing one across
+verbatim so that a re-run does not destroy it. Nothing under ``pipeline/`` or
+``services/`` imports this module, and the remote manifest ships no ``domain/``
+file. A sentence saying otherwise stood here until a reviewer checked it against
+``pipeline/sidecar.py``'s own docstring, which says the opposite.
 
 What is *not* here is what a selection means once it reaches a figure: its
 colour on a plate, the label it draws under a bar, which of its members the
@@ -56,7 +67,17 @@ from collections.abc import Callable, Iterable, Sequence
 from util.well_token import canonical_well_label
 from domain.well_palette import WELL_COLORS_TUPLE
 
-_logger = logging.getLogger("domain.selections_format")
+# Parented under ``review`` on purpose, though this module is not Review's.
+# The one warning below — a v1 group whose rep-set went missing during the
+# migration — is the only notice a user gets that a saved group lost a
+# member, and the surface they are watching while a dataset loads is
+# Review's footer drawer, whose handler is attached to the ``review``
+# logger with ``propagate = False`` (``review/core/status_view.py``).
+# Named after the pane that shows it rather than the package it lives in,
+# the same way ``core/safe.py`` logs under ``review.swallowed`` and
+# ``widgets/fig_clipboard.py`` under ``review``. A logger name is a string
+# rather than an import, so it costs this module none of its independence.
+_logger = logging.getLogger("review.domain.selections_format")
 
 SCHEMA_VERSION = 2
 
@@ -147,18 +168,24 @@ def rank_color(wells: Sequence[str], fallback_idx: int = 0,
     Falls back to the positional palette entry when ``wells`` has no parseable
     token (e.g. an empty, not-yet-populated selection).
 
-    The plate has 96 wells and the palette has ``len(theme.WELL_COLORS_TUPLE)``
+    The plate has 96 wells and the palette has
+    ``len(domain.well_palette.WELL_COLORS_TUPLE)``
     entries, so two selections whose lowest-rank wells differ by exactly that
     many map to the same palette index. When ``used_colors`` is supplied, the index is
     incremented (mod len(palette)) until a free slot is found — preserving
     the "same lowest-rank well → same colour" intent in the common case
     while keeping distinct selections distinguishable.
     """
-    # No empty-palette guard: a truthy ``palette`` lists at least one colour and
-    # a falsy one falls through to the 96 of :func:`well_colors`, so ``pal`` can
-    # no longer be empty. It could when this read a ten-colour fallback through
-    # a ``try``/``except`` that a missing GUI could take.
     pal = list(palette) if palette else well_colors()
+    if not pal:
+        # Reachable, though no caller in the application reaches it. An
+        # *exhausted iterator* is truthy and lists to nothing, so
+        # ``rank_color(wells, 0, iter([]))`` takes the first branch and lands
+        # here with an empty palette; without this, the ``% len(pal)`` below
+        # raises ZeroDivisionError. A previous version of this deleted the
+        # branch under a comment asserting it could not be reached, which was
+        # true only of a sequence.
+        pal = well_colors()
     ranks = [well_rank(w) for w in wells]
     ranks = [r for r in ranks if r < (1 << 30)]
     if not ranks:
@@ -241,8 +268,11 @@ def make_selection(*, name: Any, wells: Any, replicates: Any = None,
     true. Deleting the explicit parameter on the strength of the old sentence
     would silently drop the flag on every reload; the check is one line, and it
     is in ``tests/test_group_names_from_variables.py``.
-    :func:`active_replicate_sets` hands it to the ``ReplicateSet``,
-    which is where :func:`replicate_display_label` reads it: without it a `Dose`
+    :func:`review.domain.selections_model.active_replicate_sets` hands it to the
+    ``ReplicateSet``, which is where
+    :func:`~review.domain.selections_model.replicate_display_label` reads it —
+    both in Review's half, which is the only place a stored flag is *read*;
+    carrying it across save and load is this module's job. Without it a `Dose`
     group named ``10`` matches the auto-generated-name pattern and is redrawn on
     every axis as the tokens of the wells that received that dose.
     """

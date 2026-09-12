@@ -86,20 +86,32 @@ def test_a_selection_keeps_its_colour_through_a_block_round_trip():
         "to avoid")
 
 
-def _public_defs(rel: str) -> set[str]:
+def _module_level_names(rel: str) -> set[str]:
+    """Every name the module binds at module scope — constants included.
+
+    Constants are the half that matters most here and the half the first
+    version of this missed: it collected only `def`/`class`, so adding a
+    contradictory ``SCHEMA_VERSION = 3`` to Review's side left all five tests
+    green. That constant is the on-disk version marker, so two spellings of it
+    is the one duplication that could write a block nothing can read back.
+    """
     tree = parse_source(REPO_ROOT / rel)
-    return {
-        node.name
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    }
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+    return names
 
 
 def test_neither_half_redefines_a_name_the_other_half_owns():
     """Review's half imports ``well_rank`` and ``_clean_wells`` from the format
     half rather than keeping a copy. A name defined on both sides means the two
     modules have started to drift apart while every test still passes."""
-    shared = _public_defs("domain/selections_format.py") & _public_defs(
+    shared = _module_level_names("domain/selections_format.py") & _module_level_names(
         "review/domain/selections_model.py")
     assert not shared, (
         "these names are defined in both domain/selections_format.py and "

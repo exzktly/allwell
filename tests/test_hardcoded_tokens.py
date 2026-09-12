@@ -58,6 +58,11 @@ EMBEDDED_HEX_ALLOWLIST = {
 # path -> why. A palette's stops are data; a `__main__` block is a developer
 # harness that never ships in a window.
 COLOUR_ALLOWLIST = {
+    "domain/well_palette.py":
+        "the 96 well-rank colours themselves — the literals are the palette. "
+        "Deliberately here rather than in _TOKEN_HOMES, which also exempts the "
+        "embedded-hex and pixel-size scans this file has no claim on (§7.5 #10: "
+        "allowlist the site, not the file)",
     "widgets/lut_selector.py": "colormap stop triples — the literals are the colormap",
     "review/features/image_browser/image_table/builder_view.py":
         "cmap swatch colours, keyed by the matplotlib colormap they preview",
@@ -126,14 +131,7 @@ EXPRESSION_ALLOWLIST = {
 #: Matched on the repository-relative path, not the basename: `theme.py` as a
 #: basename exempts any file of that name anywhere in the tree, which is a
 #: standing invitation to add a second one and inherit the exemption for free.
-_TOKEN_HOMES = {
-    "ui/theme.py",
-    # The 96 well-rank colours themselves. They left ``ui/theme.py`` for
-    # ``domain/`` because they are baked into the ``color`` field on disk and
-    # both panes must agree on them; the exemption follows the tuple rather
-    # than staying with the module it used to live in.
-    "domain/well_palette.py",
-}
+_TOKEN_HOMES = {"ui/theme.py"}
 
 
 def _bare_ints(node: ast.AST) -> list[int]:

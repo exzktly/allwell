@@ -4421,6 +4421,16 @@ MODULE_ATTR_VIOLATIONS = {
     "aliased": "from pkg import mod as _m\n_m.gone()\n",
     "function_local": "def f():\n    from pkg import mod as _m\n    return _m.gone()\n",
     "private_name": "from pkg import mod as _m\n_m._gone()\n",
+    # `import pkg.mod as alias` — the spelling the guard's first version did not
+    # scan at all, worth 26 unchecked reads across 8 first-party sites.
+    "import_as": "import pkg.mod as _m\n_m.gone()\n",
+    # The same module imported under the same alias in several functions is this
+    # repository's dominant lazy-import idiom (`services/remote_runner.py` binds
+    # `run_journal` six times). The guard's first version dropped every
+    # multi-bound alias and so walked past exactly this.
+    "consistent_multi_binding": (
+        "def a():\n    from pkg import mod as _m\n    return _m.here()\n"
+        "def b():\n    from pkg import mod as _m\n    return _m.gone()\n"),
 }
 
 

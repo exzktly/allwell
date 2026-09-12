@@ -262,7 +262,19 @@ allwell/
 │                                  per-well archives (pipeline, services, remote),
 │                                  and replace_folder_with_archive(): the one way
 │                                  to consume the folder an archive was built from
-├── review/                 ← Review pane (the bulk of the app)
+├── review/                      ← Review pane (the bulk of the app)
+├── core/                        ← cross-cutting application infrastructure every pane shares and
+│   │                              no pane owns. Distinguished from its neighbours by what it is
+│   │                              rather than by being shared: ui/ is shared *UI*, widgets/ knows
+│   │                              nothing about All-Well, util/ is Qt-free and rsynced wholesale
+│   │                              to a remote worker. Nothing here may import a pane
+│   ├── safe.py                 ← swallow() / swallowed(): the logged suppression every module
+│   │                              reaches for (util/aw_safe.py is its pipeline-side twin, which
+│   │                              exists because util/ may not import Qt)
+│   ├── app_settings.py         ← the one QSettings wrapper
+│   ├── profile.py              ← reads ALLWELL_PROFILE and resolves profiles/<name>.toml
+│   ├── debug_flags.py          ← the per-tab debug toggles, all shipping off
+│   └── worker_bridge.py        ← GuiLogRelay: a worker thread's log lines onto the GUI thread
 ├── ui/                          ← app-level UI every pane shares and none owns. The distinction
 │   │                              from widgets/ is ownership, not subject: a widget knows nothing
 │   │                              about All-Well, a module here knows the app but belongs to no
@@ -271,11 +283,13 @@ allwell/
 │   │                              theme registry, and qss() — the one place a raw colour literal
 │   │                              may be written (tests/test_hardcoded_tokens.py names it)
 │   └── help_topics.py          ← Qt-free: which manual heading documents which page (help drawer)
-├── widgets/                     ← reusable Qt widgets (no app coupling)
+├── widgets/                     ← reusable Qt widgets (no app coupling) — including
+│                                  separator.py, the two divider builders every pane uses
 ├── startup/                     ← what runs before the application exists (§4)
 │   ├── boot_diag.py            ← the per-launch boot log + faulthandler, so a native crash or a
 │   │                              hang names the step that never returned
-│   └── mpl_bootstrap.py        ← restrict matplotlib to the bundled fonts (called first in main)
+│   ├── mpl_bootstrap.py        ← restrict matplotlib to the bundled fonts (called first in main)
+│   └── app_fonts.py            ← register the bundled Inter / JetBrains Mono faces with Qt
 ├── services/                    ← Analyze-side service modules
 ├── assets/                      ← runtime resources: fonts/ (Inter, JetBrains Mono) + icons/ (SVG)
 ├── profiles/                    ← build profiles — the feature subsets ALLWELL_PROFILE selects
@@ -12020,6 +12034,8 @@ The map (each rule links to the test that holds it):
 | The PyInstaller spec's own **imports** resolve, not just the rosters it bundles. PyInstaller executes the spec as Python, and it imports first-party code at module scope — `scripts.profile_build`, `services.remote_runner`, `ui.theme` to validate a baked `ALLWELL_THEME`. A stale one is not a missing file in the bundle, it is a build that will not start, and the `ALLWELL_THEME` import sits inside a conditional so only a themed build reaches it: the default build stays green while the themed one is broken. Nothing in the suite executes the spec, so the first symptom is otherwise a release that cannot be built | `tests/test_spec_ships_every_first_party_module.py::test_the_spec_imports_only_modules_that_exist` |
 | Every `--run-*` branch of `all_well_launcher._dispatch` imports a module that exists **and** calls that module's own `main()`. Both halves are needed: importing the zipper and then calling the pipeline's `main()` satisfies the import check while a frozen grouping run silently performs a pipeline run instead. Checked against the syntax tree, because `all_well_launcher` is the one module no test may import | `tests/test_zipper_frozen_dispatch.py` |
 | `services.input_resolution_service.ZIPPER_SCRIPT` resolves to the `pipeline.well_plate_zipper` module itself. The grouping pre-pass is reached by **path** rather than by import, so nothing in Python notices when the path stops describing the tree: `find_zipper_script()` answers `None` and `run_zipper` raises only at the moment a user starts a run on a folder of loose TIFs. Identity rather than existence, because a constant pointing at `pipeline/__init__.py` would satisfy an `.exists()` check while spawning a subprocess that does nothing. The other rosters naming this file (`services.remote_manifest`, the build script's `REQUIRED` array, the spec's package walk) each read their own list against the tree and none of them reads this constant | `tests/test_zipper_script_path_resolves.py` |
+| `core/` never imports a pane. The dependency runs one way — a pane reaches into this package, never the reverse — and a module here that needs `review/`, `analyze/` or `datasets/` is a pane's module that happens to sit in `core/`, which re-creates the tangle the package exists to remove (`analyze` importing `core` importing `review`) | `test_architecture_contracts.py::test_core_does_not_import_a_pane` |
+| `core.profile._repo_root` and `startup.app_fonts.fonts_dir` resolve the repository root by counting parents from their own `__file__`, so each count is that module's address rather than a constant. A wrong count raises nothing: no profile resolves and every build falls back silently to the full application, or no bundled face registers and the application draws in a system font. Both are held against the repository root rather than re-derived from the module's own location, because a test that computes the answer the same way the module does accepts whatever the module says | `tests/test_profile_repo_root.py`, `tests/test_app_fonts_dir.py` |
 | Controllers reach the app via the `app` arg, not by importing `ReviewApp` (§9) | `test_architecture_contracts.py::test_nothing_imports_reviewapp_at_runtime` |
 | EventBus is a capped catalogue of exactly 5 signals (§9) | `test_architecture_contracts.py::test_event_bus_signal_catalogue_is_capped` |
 | Feature-module naming scheme (§3) | `test_architecture_contracts.py::test_feature_module_naming` |

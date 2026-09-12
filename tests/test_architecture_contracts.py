@@ -112,6 +112,36 @@ def test_services_do_not_import_review():
     )
 
 
+def test_core_does_not_import_a_pane():
+    """`core/` is infrastructure the panes reach into, never the reverse.
+
+    The package exists because the Review pane held five modules that all three
+    panes used. The one thing that keeps it from becoming a fourth pane is the
+    direction of the arrow: a module that has to reach back down into
+    `review/`, `analyze/` or `datasets/` is not shared infrastructure, it is a
+    pane's module that happens to sit here, and its presence would re-create
+    exactly the tangle the lift removed — `analyze` importing `core` importing
+    `review`.
+
+    Its docstring already claims this. A claim is worth what its guard is worth,
+    which is why this exists rather than the sentence alone.
+    """
+    panes = {"review", "analyze", "datasets"}
+    offenders = []
+    for path in _walk_py(REPO_ROOT / "core"):
+        for node, top in _all_imports(_parse(path)):
+            if top in panes:
+                offenders.append(
+                    f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports {top}")
+    assert not offenders, (
+        "core/ must not import a pane — the dependency runs one way, from a "
+        "pane into this package:\n  " + "\n  ".join(offenders) + "\n\n"
+        "A module here that needs a pane has been misfiled by that fact. Move "
+        "it back into the pane that owns it, or push the part the panes share "
+        "down into core/ and leave the rest behind."
+    )
+
+
 # ── widgets/ have no All-Well app coupling ────────────────────────────────────
 
 def test_widgets_do_not_import_the_app():

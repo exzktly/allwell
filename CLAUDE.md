@@ -237,18 +237,25 @@ services/               Analyze-side services (pipeline/remote runners, config) 
 analyze/                Analyze pane — AnalyzeTab (tab.py) + the mixins it is
                         assembled from (form, input, preflight, progress,
                         suspend, run_spec, …) + the Remotes dialogs
-review/            Review pane — the bulk of the app
-  core/                 cross-cutting infra (state, event bus, controllers, shell views)
+review/                 Review pane — the bulk of the app
+  core/                 Review's own cross-cutting infra (state, event bus, controllers,
+                        shell views). Not to be confused with the root `core/` below:
+                        this one is the pane's, that one is the application's
   data/                 IO + decode (data_loading, image_identity, zipfile_cache, …)
   domain/               Qt-free models + pure math (stats_compute, fold_change, …)
   features/<name>/      one package per tab — controller/renderer/collect/state/tab_view
   persistence/          JSON read/write, one module per on-disk block
-widgets/                reusable Qt widgets, zero app coupling
+core/                   cross-cutting APP infrastructure every pane shares and no pane
+                        owns — safe.py (swallow/swallowed), app_settings.py, profile.py
+                        (ALLWELL_PROFILE), debug_flags.py, worker_bridge.py. Nothing here
+                        may import a pane; the arrow runs one way and a test says so
+widgets/                reusable Qt widgets, zero app coupling — incl. separator.py
 ui/                     app-level UI every pane shares and none owns —
                         theme.py (design tokens + QSS, never hardcode colours),
                         help_topics.py (page → manual heading)
 startup/                what runs before the app exists — boot_diag.py (boot log
-                        + faulthandler), mpl_bootstrap.py (bundled fonts only)
+                        + faulthandler), mpl_bootstrap.py (bundled fonts only),
+                        app_fonts.py (register the bundled Qt faces)
 assets/                 runtime resources — fonts/, icons/
 profiles/*.toml         build profiles (feature subsets)
 tests/                  ~490 test files, incl. the guardrails

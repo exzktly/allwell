@@ -71,7 +71,10 @@ ROOT_MODULES = {
     "all_well_launcher.py":
         "entry point — the module PyInstaller boots in the frozen bundle "
         "(`_Docs/_Installation/all_well.spec` names it as the Analysis script), "
-        "and the `--run-pipeline` / `--run-bootstrap` subprocess dispatcher",
+        "and the `--run-pipeline` / `--run-zipper` / `--run-bootstrap` "
+        "subprocess dispatcher. That dispatch is how a helper which is *not* a "
+        "root module still gets run inside a frozen bundle, where "
+        "`sys.executable` is the .app binary rather than an interpreter",
     "version.py":
         "repository metadata — the one version literal, parsed by path from "
         "outside Python by `scripts/preflight.sh` and the PyInstaller spec, so "

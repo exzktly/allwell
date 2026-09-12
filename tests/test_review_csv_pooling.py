@@ -52,7 +52,7 @@ def _cap() -> int:
     The fallback lets this file measure real behaviour against a branch that
     still keeps the number as a local inside the function.
     """
-    from well_viewer.features.image_browser.review_image import controller as RC
+    from review.features.image_browser.review_image import controller as RC
     return int(getattr(RC, "MAX_TABLE_ROWS", 5000))
 
 
@@ -88,7 +88,7 @@ def test_refreshing_review_csv_does_not_pool_the_whole_plate(
     app._set_selected_wells(set(app._app_state.dataset.well_paths), commit=False)
 
     counter = _RecordCounter(monkeypatch)
-    from well_viewer.features.image_browser.review_image.controller import (
+    from review.features.image_browser.review_image.controller import (
         refresh_review_csv,
     )
     refresh_review_csv(app._ctx)
@@ -107,7 +107,7 @@ def test_the_table_still_fills_and_is_capped(wide_app):
     assert app._notebook.setCurrentByName("Review CSV")
     app._set_selected_wells(set(app._app_state.dataset.well_paths), commit=False)
 
-    from well_viewer.features.image_browser.review_image.controller import (
+    from review.features.image_browser.review_image.controller import (
         refresh_review_csv,
     )
     refresh_review_csv(app._ctx)
@@ -126,7 +126,7 @@ def test_the_combo_values_cover_every_fov_and_timepoint(wide_app):
     assert app._notebook.setCurrentByName("Review CSV")
     app._set_selected_wells(set(app._app_state.dataset.well_paths), commit=False)
 
-    from well_viewer.features.image_browser.review_image.controller import (
+    from review.features.image_browser.review_image.controller import (
         refresh_review_csv,
     )
     refresh_review_csv(app._ctx)
@@ -147,7 +147,7 @@ def test_a_selected_fov_and_timepoint_narrow_the_table(wide_app):
     assert app._notebook.setCurrentByName("Review CSV")
     app._set_selected_wells(set(app._app_state.dataset.well_paths), commit=False)
 
-    from well_viewer.features.image_browser.review_image.controller import (
+    from review.features.image_browser.review_image.controller import (
         refresh_review_csv, refresh_review_csv_rows,
     )
     refresh_review_csv(app._ctx)

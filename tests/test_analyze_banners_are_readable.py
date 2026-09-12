@@ -12,7 +12,7 @@ own background rule entirely unless ``WA_StyledBackground`` is set. So the
 strips had no boundary against the form beneath them: an offer to resume
 yesterday's run read as the first paragraph of the Analyze form.
 
-**The text had no room.** The Analyze sidebar is ``app_shell_view.RAIL_W`` and
+**The text had no room.** The Analyze sidebar is ``app_shell_view.theme.Metrics.rail_w`` and
 fixed at it, with 319 px of scrolling viewport inside that. Measured in a real
 ``AnalyzeTab`` at the app's default window size, ``Resume`` and ``Discard``
 beside the label left the resume offer **139 px** and the pre-run report
@@ -32,8 +32,7 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ui import theme
 from services import run_journal as J
-from well_viewer.core.app_shell_view import RAIL_W
-
+from ui import theme
 #: The share of the strip the offer's own words must get. Deliberately well
 #: below what the stacked layout achieves (295/319 ≈ 0.92 in the real sidebar)
 #: and well above what the row layout gave it (139/319 ≈ 0.44), so the number is
@@ -70,8 +69,8 @@ def strips(qtbot):
     lay.setSpacing(0)
     tab._build_banner_strips(host)
     lay.addStretch(1)
-    host.setFixedWidth(RAIL_W)
-    host.resize(RAIL_W, 600)
+    host.setFixedWidth(theme.Metrics.rail_w)
+    host.resize(theme.Metrics.rail_w, 600)
     host.show()
     qtbot.waitExposed(host)
     return tab, host

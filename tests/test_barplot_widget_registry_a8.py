@@ -16,7 +16,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.features.barplot.tab_view import build_bar_plots_tab
+from review.features.barplot.tab_view import build_bar_plots_tab
 from tests.widget_registry_helpers import assert_handles_registered
 
 _HANDLES = (

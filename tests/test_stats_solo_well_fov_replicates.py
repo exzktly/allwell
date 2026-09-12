@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from well_viewer.domain import stats_compute as sc
+from review.domain import stats_compute as sc
 
 N_FOV = 6
 N_CELL = 300
@@ -105,7 +105,7 @@ def test_collect_group_values_returns_n_fov_values_for_a_solo_well(
     empty above-threshold population is NaN — so a statistic that silently
     loses FOVs here shows up as "fewer than 2 FOV samples" downstream.
     """
-    from well_viewer.features.stats.controller import collect_group_values
+    from review.features.stats.controller import collect_group_values
 
     ctx = ctx_with({"A01": _well_frame(0, loc=6.0)})
     vals = collect_group_values(
@@ -126,7 +126,7 @@ def test_pairwise_runs_for_two_solo_well_groups_in_fov_mode(ctx_with, statistic)
     ``StatsState.pairwise`` empty and the bar plot bracket-less.
     """
     pytest.importorskip("scipy")
-    from well_viewer.features.stats.controller import compute_pairwise
+    from review.features.stats.controller import compute_pairwise
 
     ctx = ctx_with({
         "A01": _well_frame(0, loc=6.0),
@@ -148,7 +148,7 @@ def test_pairwise_declines_two_solo_wells_with_fov_mode_off(ctx_with):
     """Control: with FOV mode off the same two groups are n=1 and must decline,
     so a passing test above cannot be an artefact of the harness."""
     pytest.importorskip("scipy")
-    from well_viewer.features.stats.controller import compute_pairwise
+    from review.features.stats.controller import compute_pairwise
 
     ctx = ctx_with({
         "A01": _well_frame(0, loc=6.0),

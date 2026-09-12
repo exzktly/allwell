@@ -15,14 +15,14 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.features.barplot.renderer import resolve_bar_timepoints
+from review.features.barplot.renderer import resolve_bar_timepoints
 
 pytestmark = pytest.mark.qt
 
 
 def test_pending_bar_timepoints_survive_tab_activation(loaded_app):
     app = loaded_app
-    from well_viewer.core.tab_controller import on_tab_change
+    from review.core.tab_controller import on_tab_change
 
     # All timepoints present in the dataset, formatted as the popup keys are.
     all_tps = sorted(app._app_state.dataset.all_timepoints_cache) or [0.0]

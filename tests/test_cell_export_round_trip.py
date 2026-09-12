@@ -55,7 +55,7 @@ def read_export(path):
 def run_export(ctx, qtbot, monkeypatch, tmp_path, scope_fn, name="cells.csv"):
     from PySide6.QtWidgets import QFileDialog
 
-    from well_viewer.features.export.service import export_cell_data_from
+    from review.features.export.service import export_cell_data_from
 
     out = tmp_path / name
     monkeypatch.setattr(QFileDialog, "getSaveFileName",
@@ -87,8 +87,8 @@ def test_the_fixture_cutoff_actually_excludes_cells(
         two_wells, qtbot, monkeypatch, tmp_path):
     """Guards the guard: if the floor stopped biting, every marker assertion in
     this file would pass against code that ignored the marker entirely."""
-    from well_viewer.features.distribution.cell_scope_compute import cell_scope
-    from well_viewer.features.distribution.controller import redraw_distribution
+    from review.features.distribution.cell_scope_compute import cell_scope
+    from review.features.distribution.controller import redraw_distribution
 
     ctx = two_wells._ctx
     redraw_distribution(ctx)
@@ -175,8 +175,8 @@ def errorbar_spreads(ax):
 def test_distribution_cells_reproduce_the_drawn_population(
         two_wells, qtbot, monkeypatch, tmp_path):
     """The tab titles itself with the cell count it drew; the file must hold it."""
-    from well_viewer.features.distribution.cell_scope_compute import cell_scope
-    from well_viewer.features.distribution.controller import redraw_distribution
+    from review.features.distribution.cell_scope_compute import cell_scope
+    from review.features.distribution.controller import redraw_distribution
 
     ctx = two_wells._ctx
     redraw_distribution(ctx)
@@ -196,8 +196,8 @@ def test_distribution_cells_reproduce_the_drawn_population(
 @pytest.mark.slow
 def test_distribution_values_match_the_drawn_values_exactly(
         two_wells, qtbot, monkeypatch, tmp_path):
-    from well_viewer.features.distribution.cell_scope_compute import cell_scope
-    from well_viewer.features.distribution.controller import redraw_distribution
+    from review.features.distribution.cell_scope_compute import cell_scope
+    from review.features.distribution.controller import redraw_distribution
 
     ctx = two_wells._ctx
     redraw_distribution(ctx)
@@ -208,7 +208,7 @@ def test_distribution_values_match_the_drawn_values_exactly(
 
     # The reference side, transcribed rather than imported: the tab's filter is
     # the timepoint and the per-channel floor, and the floor is the fixture's.
-    from well_viewer.data.data_loading import get_rows
+    from review.data.data_loading import get_rows
     drawn = []
     for well in sorted(ctx.state.selection.selected_wells):
         rows = get_rows(ctx, well)
@@ -231,8 +231,8 @@ def test_bar_heights_recompute_from_the_exported_cells(
     renderer stashes for exactly this: bar x positions carry cluster gaps, so a
     patch's index is not its item's index.
     """
-    from well_viewer.features.barplot.cell_scope_compute import cell_scope
-    from well_viewer.features.barplot.renderer import redraw_bars
+    from review.features.barplot.cell_scope_compute import cell_scope
+    from review.features.barplot.renderer import redraw_bars
 
     ctx = two_wells._ctx
     redraw_bars(ctx)
@@ -282,8 +282,8 @@ def test_line_points_recompute_from_the_exported_cells(
     already filtered to the timepoints that produced a mean, so the recompute is
     matched to the x values the artist carries rather than to the scope's.
     """
-    from well_viewer.core.plot_orchestrator import redraw_app
-    from well_viewer.features.lineplot.cell_scope_compute import cell_scope
+    from review.core.plot_orchestrator import redraw_app
+    from review.features.lineplot.cell_scope_compute import cell_scope
 
     ctx = two_wells._ctx
     # The app's own fan-out, rather than the renderer's keyword-heavy signature
@@ -332,8 +332,8 @@ def test_heatmap_count_cells_recompute_from_the_exported_cells(
     carries ``group`` (the grid cell) and ``well_label`` rather than trying to
     be the row set behind a drawn number.
     """
-    from well_viewer.features.heatmap.cell_scope_compute import cell_scope
-    from well_viewer.features.heatmap.controller import (
+    from review.features.heatmap.cell_scope_compute import cell_scope
+    from review.features.heatmap.controller import (
         METRIC_COUNT, active_layout, make_plate_layout, redraw_heatmap,
     )
 
@@ -378,7 +378,7 @@ def test_heatmap_count_cells_recompute_from_the_exported_cells(
 @pytest.mark.slow
 def test_heatmap_refuses_before_the_grid_is_drawn(loaded_app):
     """A scope that cannot be built says so rather than writing an empty file."""
-    from well_viewer.features.heatmap.cell_scope_compute import cell_scope
+    from review.features.heatmap.cell_scope_compute import cell_scope
 
     ctx = loaded_app._ctx
     ctx.runtime.heatmap.cell_well_index = None
@@ -396,8 +396,8 @@ def test_scatter_exports_the_ungated_cloud_with_membership_marked(
     a file filtered down to the gate could not reproduce the number on the
     figure. Membership is a column instead.
     """
-    from well_viewer.features.scatter.cell_scope_compute import cell_scope
-    from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
+    from review.features.scatter.cell_scope_compute import cell_scope
+    from review.features.scatter.controller import redraw_scatter_orchestrate
 
     ctx = two_wells._ctx
     redraw_scatter_orchestrate(ctx)
@@ -421,7 +421,7 @@ def test_scatter_exports_the_ungated_cloud_with_membership_marked(
 
 @pytest.mark.slow
 def test_multivariate_matrix_rows_are_marked(two_wells, qtbot, monkeypatch, tmp_path):
-    from well_viewer.features.multivariate.cell_scope_compute import cell_scope
+    from review.features.multivariate.cell_scope_compute import cell_scope
 
     ctx = two_wells._ctx
     state = ctx.state.feature_slice("multivariate")
@@ -452,8 +452,8 @@ def test_spatial_requires_the_centroid_columns(two_wells, qtbot, monkeypatch,
     the live case rather than a hypothetical: the scope demands them, so the
     export writes a header and no rows instead of rows the figure never drew.
     """
-    from well_viewer.features.spatial.cell_scope_compute import cell_scope
-    from well_viewer.features.spatial.collect import (
+    from review.features.spatial.cell_scope_compute import cell_scope
+    from review.features.spatial.collect import (
         CENTROID_COL_COL, CENTROID_ROW_COL,
     )
 
@@ -486,8 +486,8 @@ def test_an_export_aborts_when_the_data_moves_under_it(
     guards. Bumping ``rows_version`` mid-run must cancel rather than finish."""
     from PySide6.QtWidgets import QFileDialog
 
-    from well_viewer.features.distribution.cell_scope_compute import cell_scope
-    from well_viewer.features.export.service import export_cell_data_from
+    from review.features.distribution.cell_scope_compute import cell_scope
+    from review.features.export.service import export_cell_data_from
 
     ctx = two_wells._ctx
     out = tmp_path / "aborted.csv"
@@ -496,7 +496,7 @@ def test_an_export_aborts_when_the_data_moves_under_it(
 
     original = ctx.state.dataset.rows_version
 
-    from well_viewer.features.export import cell_scope_compute as csc
+    from review.features.export import cell_scope_compute as csc
     real_build = csc.build_chunk
     calls = {"n": 0}
 
@@ -521,8 +521,8 @@ def test_cancelling_leaves_neither_a_file_nor_a_temp(
         two_wells, qtbot, monkeypatch, tmp_path):
     from PySide6.QtWidgets import QFileDialog
 
-    from well_viewer.features.distribution.cell_scope_compute import cell_scope
-    from well_viewer.features.export.service import (
+    from review.features.distribution.cell_scope_compute import cell_scope
+    from review.features.export.service import (
         cancel_cell_export, export_cell_data_from,
     )
 
@@ -544,8 +544,8 @@ def test_an_export_with_no_wells_refuses_rather_than_writing_the_plate(
     write nothing — the mismatch its summary export has today."""
     from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-    from well_viewer.features.distribution.cell_scope_compute import cell_scope
-    from well_viewer.features.export.service import export_cell_data_from
+    from review.features.distribution.cell_scope_compute import cell_scope
+    from review.features.export.service import export_cell_data_from
 
     ctx = loaded_app._ctx
     ctx.state.selection.selected_wells = set()
@@ -575,8 +575,8 @@ def test_a_replicate_sets_bar_recomputes_as_a_mean_of_per_well_means(
     wrong for every grouped plot in the app, and the scopes' own
     "group by well_label to reproduce it" note would be a promise nothing kept.
     """
-    from well_viewer.features.barplot.cell_scope_compute import cell_scope
-    from well_viewer.features.barplot.renderer import redraw_bars
+    from review.features.barplot.cell_scope_compute import cell_scope
+    from review.features.barplot.renderer import redraw_bars
 
     ctx = two_wells._ctx
     ctx.state.selection.selections = [
@@ -625,10 +625,10 @@ def test_the_aggregate_scatter_exports_its_own_axes_not_the_cells_tabs(
     channel at the wrong timepoints under a scope block naming a third thing —
     right schema, right-looking counts, no error.
     """
-    from well_viewer.features.scatter.cell_scope_compute import (
+    from review.features.scatter.cell_scope_compute import (
         agg_cell_scope, cell_scope,
     )
-    from well_viewer.features.scatter.controller import (
+    from review.features.scatter.controller import (
         redraw_scatter_agg_orchestrate,
     )
 
@@ -676,7 +676,7 @@ def test_spatial_exports_every_panel_the_tab_drew(
     controller sets them, because building the lazy Spatial canvas is not what
     this is about — the scope's reading of them is.
     """
-    from well_viewer.features.spatial.cell_scope_compute import cell_scope
+    from review.features.spatial.cell_scope_compute import cell_scope
 
     ctx = loaded_app._ctx
     panels = ["A01", "A02", "B01", "B02"]
@@ -704,7 +704,7 @@ def test_spatial_resolves_an_unset_timepoint_the_way_the_collector_does(
     """``timepoint = None`` means "the first available" to the collector, not
     "every timepoint" — reading it as the latter exports a file several times
     wider than the figure while claiming to hold all of it."""
-    from well_viewer.features.spatial.cell_scope_compute import cell_scope
+    from review.features.spatial.cell_scope_compute import cell_scope
 
     ctx = loaded_app._ctx
     ctx.state.selection.selected_wells = {"A01"}
@@ -731,9 +731,9 @@ def test_a_failed_writer_stops_the_slicing_chain(
     100 Hz loop for the life of the process, pinning every well's frame."""
     from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-    from well_viewer.features.distribution.cell_scope_compute import cell_scope
-    from well_viewer.features.export import worker as worker_mod
-    from well_viewer.features.export.service import export_cell_data_from
+    from review.features.distribution.cell_scope_compute import cell_scope
+    from review.features.export import worker as worker_mod
+    from review.features.export.service import export_cell_data_from
 
     ctx = two_wells._ctx
     out = tmp_path / "doomed.csv"

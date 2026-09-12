@@ -10,8 +10,8 @@ source.
 
 from __future__ import annotations
 
-import well_viewer.domain.metric_registry as reg
-from well_viewer.domain.metric_registry import (
+import review.domain.metric_registry as reg
+from review.domain.metric_registry import (
     MetricDef,
     column_gating_exempt,
     intensity_keys,
@@ -23,7 +23,7 @@ from well_viewer.domain.metric_registry import (
 def test_metric_labels_tables_are_derived_from_the_registry():
     """``data/metric_labels`` must compute its public tables from ``METRICS`` —
     not maintain a parallel hand-written copy."""
-    from well_viewer.data import metric_labels as ml
+    from review.data import metric_labels as ml
 
     assert ml.METRIC_ORDER == [m.label for m in reg.METRICS]
     assert ml.METRIC_LABEL_TO_KEY == {m.label: m.key for m in reg.METRICS}
@@ -70,8 +70,8 @@ def test_adding_a_metric_flows_everywhere(monkeypatch):
     # labels appear there too. Re-derive metric_labels' table from the patched
     # registry (mirrors what a real source edit produces at import time) and
     # drive populate_metric_combo with a minimal fake combo.
-    from well_viewer.data import metric_labels as ml
-    from well_viewer.core.channel_state_controller import populate_metric_combo
+    from review.data import metric_labels as ml
+    from review.core.channel_state_controller import populate_metric_combo
 
     monkeypatch.setattr(ml, "METRIC_ORDER", metric_labels_in_order())
 
@@ -132,7 +132,7 @@ def test_only_metrics_with_their_own_cutoff_can_be_thresholded():
     mean-scale cutoff is the same units error that feeding a spot tally a
     brightness was.
     """
-    from well_viewer.domain.metric_registry import metric_has_own_cutoff
+    from review.domain.metric_registry import metric_has_own_cutoff
 
     assert metric_has_own_cutoff("mean_intensity") is True   # ThreshFracOn
     assert metric_has_own_cutoff("smfish_count") is True     # ThreshCountOn
@@ -151,7 +151,7 @@ def test_a_new_count_metric_gets_a_cutoff_without_a_second_edit(monkeypatch):
     other test in this file and quietly exclude the next count metric someone
     adds.
     """
-    from well_viewer.domain.metric_registry import metric_has_own_cutoff
+    from review.domain.metric_registry import metric_has_own_cutoff
 
     fake_count = MetricDef("foci_count", "Foci Count", "count", True)
     fake_intensity = MetricDef("median_intensity", "Median Intensity",

@@ -532,7 +532,7 @@ def stage_path_cycles(layout: OmeLayout) -> tuple[int, int]:
 # Written into the destination while a conversion is running and removed when it
 # finishes. Its presence is what separates "this tool's interrupted run, resume
 # it" from "somebody else's dataset, refuse it" — the same device every other
-# Datasets tool uses (``_common.dataset_paths.make_dataset_api``).
+# Datasets tool uses (``core.dataset_paths.make_dataset_api``).
 IN_PROGRESS_MARKER = ".aw_ome_in_progress"
 
 # The settings that decide which stage position becomes which well. Two runs
@@ -652,7 +652,7 @@ def destination_problem(dest: Path | str, src: Path | str = "",
     produces, so a destination that already holds wells keeps whichever of them
     this run does not write — a folder holding two different plates, with
     nothing in it saying so. Every other Datasets tool validates its destination
-    field this way (``_common.dataset_fields.is_free_destination``); the wording
+    field this way (``core.dataset_fields.is_free_destination``); the wording
     differs here only because this tool writes ``in/`` and nothing else.
 
     Given *src* and *params*, a folder carrying this tool's own in-progress

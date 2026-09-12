@@ -23,9 +23,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.core.widget_registry import WidgetRegistry
-from well_viewer.features.heatmap.state import HeatmapState
-from well_viewer.persistence import heatmap_layouts as hl
+from review.core.widget_registry import WidgetRegistry
+from review.features.heatmap.state import HeatmapState
+from review.persistence import heatmap_layouts as hl
 
 
 ON_DISK = {
@@ -119,7 +119,7 @@ def test_a_reset_still_empties_the_section():
     must not turn that into a save of the old settings.
     """
     app, hm = _session(tab_built=False, saved=ON_DISK)
-    from well_viewer.persistence.reset_scopes import restore_slice_defaults
+    from review.persistence.reset_scopes import restore_slice_defaults
 
     restore_slice_defaults(hm, "heatmap")
     assert hl._collect_settings(app) == {}

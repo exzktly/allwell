@@ -23,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 _SENTENCE = re.compile(r"top of the left rail")
 
 _ALLOWED = {
-    Path("well_viewer/core/empty_state_copy.py"),   # the one home
+    Path("review/core/empty_state_copy.py"),   # the one home
     Path("tests/test_no_dataset_copy.py"),          # this file
 }
 
@@ -41,14 +41,14 @@ def test_the_no_dataset_sentence_is_written_in_exactly_one_module():
                 offenders.append(f"{rel}:{lineno}: {line.strip()}")
     assert not offenders, (
         "the no-dataset sentence is spelled out here instead of imported from "
-        "well_viewer.core.empty_state_copy:\n  " + "\n  ".join(offenders))
+        "review.core.empty_state_copy:\n  " + "\n  ".join(offenders))
 
 
 def test_the_hint_names_the_control_as_a_button_and_carries_no_ellipsis():
     """The reported defect: a sentence opening with the bare control name,
     whose trailing ellipsis then read as prose trailing off. The dots are gone
     from the control, and "button" carries what they were there to convey."""
-    from well_viewer.core.empty_state_copy import NO_DATASET_HINT
+    from review.core.empty_state_copy import NO_DATASET_HINT
     assert "…" not in NO_DATASET_HINT, (
         "the hint carries an ellipsis again; the Open control does not have one")
     assert not NO_DATASET_HINT.startswith("Open"), (
@@ -68,7 +68,7 @@ def qapp():
 
 def test_an_action_button_replaces_the_hint_rather_than_joining_it(qapp):
     from widgets.empty_state import EmptyState
-    from well_viewer.core.empty_state_copy import NO_DATASET_HINT, NO_DATASET_TITLE
+    from review.core.empty_state_copy import NO_DATASET_HINT, NO_DATASET_TITLE
 
     es = EmptyState(NO_DATASET_TITLE, hint=NO_DATASET_HINT)
     assert not es._hint.isHidden(), "hint should be on before any action is set"

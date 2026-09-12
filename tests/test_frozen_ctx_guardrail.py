@@ -36,7 +36,7 @@ import ast
 from pathlib import Path
 from tests._repo_scan import parse_source
 
-_PKG = Path(__file__).resolve().parent.parent / "well_viewer"
+_PKG = Path(__file__).resolve().parent.parent / "review"
 _TESTS = Path(__file__).resolve().parent
 _DYNATTR = {"getattr", "setattr", "hasattr"}
 
@@ -50,7 +50,7 @@ def _call_site_files():
 
     The suite has to be in scope. ``tests/test_qc_reopen_apply.py`` called
     ``save_to_data_dir(app)`` from the day that function moved to ``ctx``, and
-    because ``ctx.window`` on a real ``WellViewerApp`` resolves to Qt's own
+    because ``ctx.window`` on a real ``ReviewApp`` resolves to Qt's own
     ``QWidget.window`` method rather than raising, the failure surfaced as an
     ``AttributeError`` two frames later instead of at the boundary. The test
     uses the ``loaded_app`` fixture, so it is marked ``slow`` and never ran in
@@ -112,7 +112,7 @@ def _collect_free_func_first_params():
     return ctx_first, non_ctx_first
 
 
-# The fixtures that yield a real ``WellViewerApp``. A test that receives one of
+# The fixtures that yield a real ``ReviewApp``. A test that receives one of
 # these has an ``app`` for which ``app.window`` is Qt's ``QWidget.window`` method,
 # so handing it to a ctx function fails. A test that does *not* receive one built
 # its own ``SimpleNamespace`` mock, and those deliberately set ``app.window = app``
@@ -132,14 +132,14 @@ def _uses_real_app_fixture(fn_node: ast.AST) -> bool:
 
 # Package roots whose modules hold the free functions this check is about. A name
 # bound to one of them is a module handle, not an object.
-_MODULE_ROOTS = ("well_viewer", "util", "widgets", "services")
+_MODULE_ROOTS = ("review", "util", "widgets", "services")
 
 
 def _module_aliases(tree: ast.AST) -> set:
     """Names bound to a first-party *module* in this file.
 
-    ``import well_viewer.core.selection_controller as sc`` and ``from
-    well_viewer.core import selection_controller as sc`` both make ``sc`` a
+    ``import review.core.selection_controller as sc`` and ``from
+    review.core import selection_controller as sc`` both make ``sc`` a
     module handle, so ``sc.foo(app)`` resolves to the free function ``foo`` as
     unambiguously as a bare ``foo(app)`` does. Collecting the aliases per file is
     what lets the call scan below cover the qualified form without mistaking a

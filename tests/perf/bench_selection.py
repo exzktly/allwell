@@ -85,12 +85,12 @@ def build_ctx(plate: Path):
     rather than being silently defaulted, which is the behaviour we want from a
     measurement harness.
     """
-    from well_viewer.core.app_runtime import AppRuntime
-    from well_viewer.core.app_state import AppState
-    from well_viewer.core.event_bus import EventBus
-    from well_viewer.core.widget_registry import WidgetRegistry
-    from well_viewer.features.registry import attach_feature_state
-    from well_viewer.viewer_context import ViewerContext
+    from review.core.app_runtime import AppRuntime
+    from review.core.app_state import AppState
+    from review.core.event_bus import EventBus
+    from review.core.widget_registry import WidgetRegistry
+    from review.features.registry import attach_feature_state
+    from review.viewer_context import ViewerContext
 
     st = AppState()
     attach_feature_state(st)
@@ -114,7 +114,7 @@ def warm_rows(ctx) -> float:
     Every timing after this is cache-warm on purpose: the click being measured
     happens on a dataset the user already has open.
     """
-    from well_viewer.data.data_loading import get_rows
+    from review.data.data_loading import get_rows
     t0 = time.perf_counter()
     for label in ctx.state.dataset.well_paths:
         get_rows(ctx, label)
@@ -190,7 +190,7 @@ def solo_selection(ctx, wells) -> None:
 
 def grouped_selection(ctx, n_groups: int, per_group: int) -> None:
     """Define *n_groups* replicate sets of *per_group* wells each."""
-    from well_viewer.domain.selections_model import validate_repair
+    from review.domain.selections_model import validate_repair
     sel = ctx.state.selection
     groups = []
     for g in range(n_groups):
@@ -211,7 +211,7 @@ def app_threshold(ctx) -> float:
     aggregation for two different cutoffs in one collect where the app asks for
     one. The app's own redraw resolves the cutoff with this exact expression.
     """
-    from well_viewer.core.channel_state_controller import on_cutoff_for_column
+    from review.core.channel_state_controller import on_cutoff_for_column
     return on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col,
         channel=ctx.state.channel.active_channel)
@@ -231,9 +231,9 @@ def stub_bar_runtime(ctx) -> None:
 
 def run_collects(ctx, repeats: int) -> dict:
     """Time the four collect paths, counting aggregate_well through each."""
-    from well_viewer.domain import stats_compute
-    from well_viewer.features.barplot.collect import collect_bar_items_for_app
-    from well_viewer.features.lineplot.controller import collect_line_series
+    from review.domain import stats_compute
+    from review.features.barplot.collect import collect_bar_items_for_app
+    from review.features.lineplot.controller import collect_line_series
 
     out: dict = {}
     tp0 = TIMEPOINTS[0][1]
@@ -314,7 +314,7 @@ def run_collects(ctx, repeats: int) -> dict:
         lambda: [collect_bar_items_for_app(ctx, t) for _, t in TIMEPOINTS],
     )
 
-    from well_viewer.data.data_loading import iter_plot_groups
+    from review.data.data_loading import iter_plot_groups
     grouped_selection(ctx, 12, 8)
     ctx.state.plot.bar_pool_replicates = True
     ms, _ = timed(lambda: list(iter_plot_groups(ctx)), repeats)
@@ -342,14 +342,14 @@ def run_draw(ctx, repeats: int) -> dict:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from well_viewer.features.lineplot.controller import (
+    from review.features.lineplot.controller import (
         SCREEN_CDF_POINTS,
         SCREEN_LEGEND_ENTRIES,
         LineAxes,
         collect_line_series,
         render_line_series,
     )
-    from well_viewer.data.data_loading import _all_fluor_values_filtered
+    from review.data.data_loading import _all_fluor_values_filtered
 
     solo_selection(ctx, WELLS)
     series, _ = collect_line_series(

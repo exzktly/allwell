@@ -16,7 +16,7 @@ exactly the kind that breaks a callable defined three modules away.
 
 from __future__ import annotations
 
-from well_viewer.core.worker_bridge import run_off_thread
+from core.worker_bridge import run_off_thread
 
 
 def test_fn_is_called_with_no_arguments_when_nothing_is_reported(qtbot):

@@ -30,7 +30,7 @@ import types
 
 import pytest
 
-from well_viewer.features.heatmap import sidebar_view as SV
+from review.features.heatmap import sidebar_view as SV
 
 _LOADED = ["A01", "A02", "B01", "B02", "C01", "C02", "D05"]
 

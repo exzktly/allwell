@@ -28,11 +28,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-from well_viewer.domain.time_rescale import TimeRescale, figure_timepoints_label
+from review.domain.time_rescale import TimeRescale, figure_timepoints_label
 from tests.test_response_figure_title import _one_dose_plate
 from tests.test_response_tab import tab  # noqa: F401 — the fixture is the point
 
-RESPONSE = Path(__file__).resolve().parent.parent / "well_viewer" / "features" / "response"
+RESPONSE = Path(__file__).resolve().parent.parent / "review" / "features" / "response"
 
 OFF = TimeRescale(factor=1.0, offset=0.0)
 #: Six images four hours apart, numbered 1-6 by the microscope.
@@ -108,7 +108,7 @@ def test_the_off_state_reads_exactly_as_the_bar_and_line_titles_do():
     The conversion also has to be invisible until a correction is set — every
     site swapped in this branch wrote ``f"{t:g}"`` — so the values go wide.
     """
-    from well_viewer.data.metric_labels import timepoint_title
+    from review.data.metric_labels import timepoint_title
 
     for value in (0.0, 1.0, 1.5, 6.0, 24.0, 100.0, 0.25, 1e-7, 1e20):
         assert (figure_timepoints_label([value], OFF)
@@ -123,8 +123,8 @@ def test_the_singular_helper_reads_the_same_way():
     the Distribution tab and the batch-export scatter. Two near-identically
     named helpers disagreeing about their one output format is CLAUDE.md §7.6
     #4's hazard by construction, so they are held together here."""
-    from well_viewer.data.metric_labels import timepoint_title
-    from well_viewer.domain.time_rescale import figure_timepoint_label
+    from review.data.metric_labels import timepoint_title
+    from review.domain.time_rescale import figure_timepoint_label
 
     for value in (0.0, 6.0, 24.0, 1.5):
         assert (figure_timepoint_label(value, OFF)
@@ -145,7 +145,7 @@ def _curves_data(timepoints, *, series_label=""):
 
 
 def test_the_legend_entry_names_the_corrected_hour():
-    from well_viewer.features.response import renderer as R
+    from review.features.response import renderer as R
 
     data = _curves_data([6.0, 12.0])
     labels = [R._curve_label(data, c, rescale=X4) for c in data.curves]
@@ -155,7 +155,7 @@ def test_the_legend_entry_names_the_corrected_hour():
 def test_the_legend_entry_carries_no_marker_of_its_own():
     """The correction is named on the title. A legend of four curves would
     otherwise carry four copies of the same sentence."""
-    from well_viewer.features.response import renderer as R
+    from review.features.response import renderer as R
 
     data = _curves_data([6.0, 12.0])
     for c in data.curves:
@@ -165,7 +165,7 @@ def test_the_legend_entry_carries_no_marker_of_its_own():
 def test_the_no_fit_caption_names_the_hour_the_legend_shows():
     """This sentence identifies a curve *by* its legend entry, so a raw hour
     here points at an entry the figure does not carry."""
-    from well_viewer.features.response import renderer as R
+    from review.features.response import renderer as R
 
     data = _curves_data([6.0])
     fits = {(6.0, ""): SimpleNamespace(ok=False, reason="too few points")}
@@ -174,14 +174,14 @@ def test_the_no_fit_caption_names_the_hour_the_legend_shows():
 
 
 def test_the_omission_caption_names_the_corrected_hour():
-    from well_viewer.features.response.collect import ResponseData, omission_caption
+    from review.features.response.collect import ResponseData, omission_caption
 
     data = ResponseData(variable_name="Dose", control_gaps=[("A01", 6.0)])
     assert "A01 t=24" in omission_caption(data, rescale=X4)
 
 
 def test_the_omission_caption_is_unchanged_with_no_correction():
-    from well_viewer.features.response.collect import ResponseData, omission_caption
+    from review.features.response.collect import ResponseData, omission_caption
 
     data = ResponseData(variable_name="Dose", control_gaps=[("A01", 6.0)])
     assert omission_caption(data, rescale=OFF) == omission_caption(data)
@@ -195,7 +195,7 @@ def test_the_title_and_the_legend_agree_on_one_figure():
     original: the two disagree *within one figure*, where a reader cannot even
     appeal to another tab to work out which is meant.
     """
-    from well_viewer.features.response import renderer as R
+    from review.features.response import renderer as R
 
     data = _curves_data([6.0, 12.0])
     title = figure_timepoints_label([6.0, 12.0], X4)
@@ -215,7 +215,7 @@ def test_the_title_and_the_legend_agree_on_one_figure():
 
 def test_the_tabs_own_title_carries_the_correction(tab):  # noqa: F811
     """Through ``_figure_title``, the function the tab actually draws with."""
-    from well_viewer.features.response import controller as rctl
+    from review.features.response import controller as rctl
 
     _one_dose_plate(tab)
     tab.ctx.state.plot.time_scale = 4.0
@@ -227,7 +227,7 @@ def test_the_tabs_own_title_carries_the_correction(tab):  # noqa: F811
 
 def test_the_tabs_own_title_is_untouched_with_no_correction(tab):  # noqa: F811
     """The other half — a builder that always corrected would pass the first."""
-    from well_viewer.features.response import controller as rctl
+    from review.features.response import controller as rctl
 
     _one_dose_plate(tab)
     title = rctl._figure_title(tab.ctx, rctl.response_data(tab.ctx))
@@ -242,7 +242,7 @@ def test_the_batch_export_title_reads_the_same_correction():
     that method reads for the correction, so this fails for a panel that forgot
     to read it — the mutation that went unnoticed on the tab side.
     """
-    from well_viewer.features.batch_export.response_panel import ResponseBatchExportPanel
+    from review.features.batch_export.response_panel import ResponseBatchExportPanel
 
     panel = ResponseBatchExportPanel.__new__(ResponseBatchExportPanel)
     panel._ctx = SimpleNamespace(
@@ -279,7 +279,7 @@ def _drawn(tab, *, scale=1.0, offset=0.0, timepoints=(6.0, 12.0)):  # noqa: F811
     Every timepoint is ticked on, because a curve per timepoint is the shape
     this whole file is about and the picker opens with one.
     """
-    from well_viewer.features.response import controller as rctl
+    from review.features.response import controller as rctl
 
     _one_dose_plate(tab, timepoints=timepoints)
     slice_ = tab.ctx.state.feature_slice("response")
@@ -316,7 +316,7 @@ def test_the_drawn_title_and_the_drawn_legend_name_the_same_hours(tab):  # noqa:
     and the legend separately and gave each the correction by hand, so the one
     thing it could never catch was a renderer that failed to apply it.
     """
-    from well_viewer.features.response import controller as rctl
+    from review.features.response import controller as rctl
 
     ax = _drawn(tab, scale=4.0)
     # The ``tab`` fixture stubs ``apply_ax_style``, which is what puts a title on
@@ -335,8 +335,8 @@ def test_the_drawn_caption_carries_the_corrected_hour(tab):  # noqa: F811
     Reached through the renderer rather than by calling ``omission_caption``
     directly, for the same reason as the legend above.
     """
-    from well_viewer.features.response import collect as rc
-    from well_viewer.features.response import controller as rctl
+    from review.features.response import collect as rc
+    from review.features.response import controller as rctl
 
     _one_dose_plate(tab, timepoints=(6.0,))
     tab.ctx.state.plot.time_scale = 4.0
@@ -346,7 +346,7 @@ def test_the_drawn_caption_carries_the_corrected_hour(tab):  # noqa: F811
         data.control_gaps = [("A01", 6.0)]
         return real(data, **kwargs)
 
-    import well_viewer.features.response.renderer as R
+    import review.features.response.renderer as R
     saved = R.omission_caption
     R.omission_caption = _with_a_gap
     try:
@@ -373,7 +373,7 @@ def test_the_fold_change_baseline_hour_agrees_with_the_timepoint_clause(tab):  #
     the disagreement between two clauses and only the assembled string holds
     both.
     """
-    from well_viewer.features.response import controller as rctl
+    from review.features.response import controller as rctl
 
     _one_dose_plate(tab, timepoints=(6.0, 12.0))
     slice_ = tab.ctx.state.feature_slice("response")
@@ -390,7 +390,7 @@ def test_the_fold_change_baseline_hour_agrees_with_the_timepoint_clause(tab):  #
 
 def test_the_fold_change_baseline_hour_is_raw_with_no_correction(tab):  # noqa: F811
     """The other half — a suffix that always corrected would pass the first."""
-    from well_viewer.features.response import controller as rctl
+    from review.features.response import controller as rctl
 
     _one_dose_plate(tab, timepoints=(6.0, 12.0))
     slice_ = tab.ctx.state.feature_slice("response")
@@ -410,7 +410,7 @@ def test_the_fold_change_suffix_carries_no_marker_of_its_own(tab):  # noqa: F811
     instead; a copy inside the suffix would read as a second correction on
     every one of them.
     """
-    from well_viewer.features.response import controller as rctl
+    from review.features.response import controller as rctl
 
     _one_dose_plate(tab, timepoints=(6.0,))
     slice_ = tab.ctx.state.feature_slice("response")

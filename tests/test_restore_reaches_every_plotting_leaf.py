@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.features.registry import build_feature_registry
-from well_viewer.persistence import view_state
+from review.features.registry import build_feature_registry
+from review.persistence import view_state
 
 
 class _Notebook:

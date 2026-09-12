@@ -28,7 +28,7 @@ def _spy_cell_browser_hook(app, monkeypatch):
 
 
 def test_group_edit_recollects_cell_browser_in_split(loaded_app, monkeypatch):
-    from well_viewer.core import selection_controller as sc
+    from review.core import selection_controller as sc
 
     app = loaded_app
     # Pretend the Cell Browser is the live, on-screen split pane. We drive the
@@ -43,7 +43,7 @@ def test_group_edit_recollects_cell_browser_in_split(loaded_app, monkeypatch):
 
 
 def test_group_edit_skips_cell_browser_when_not_visible(loaded_app, monkeypatch):
-    from well_viewer.core import selection_controller as sc
+    from review.core import selection_controller as sc
 
     app = loaded_app
     app._split_active = True

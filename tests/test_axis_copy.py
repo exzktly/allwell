@@ -2,7 +2,7 @@
 
 Covers the two load-bearing facts behind the PlotCard hover-copy overlay:
 1. ``copy_figure_to_clipboard`` relocated to ``widgets.fig_clipboard`` is still
-   re-exported from ``well_viewer.features.export.style`` (the existing call
+   re-exported from ``review.features.export.style`` (the existing call
    sites import it from there), and is the *same* object.
 2. ``axis_tight_bbox_inches`` crops to a single subplot — its bbox is strictly
    smaller than the whole figure's tight bbox, with positive extent.
@@ -18,7 +18,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 def test_copy_figure_reexport_is_same_object():
     import widgets.fig_clipboard as fc
-    from well_viewer.features.export.style import copy_figure_to_clipboard
+    from review.features.export.style import copy_figure_to_clipboard
 
     assert copy_figure_to_clipboard is fc.copy_figure_to_clipboard
 

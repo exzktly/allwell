@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core.selection_controller import select_none
+from review.core.selection_controller import select_none
 
 
 def _mk_app(tab, *, selections, selected):

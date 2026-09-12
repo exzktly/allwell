@@ -32,9 +32,9 @@ import pytest
 
 from tests._repo_scan import parsed_sources
 
-_PANEL_MODULE = "well_viewer/features/export/style.py"
+_PANEL_MODULE = "review/features/export/style.py"
 _PANEL_FUNCTION = "open_export_style_panel"
-_SIDEBAR_MODULE = "well_viewer/features/export/sidebar_view.py"
+_SIDEBAR_MODULE = "review/features/export/sidebar_view.py"
 _DISPATCH_FUNCTION = "_redraw_bound_figure"
 _FEATURE_ROSTER = "_FIGURE_OWNING_FEATURES"
 
@@ -134,7 +134,7 @@ def test_each_named_feature_really_owns_a_redraw(feature):
     registry at runtime. A name that no descriptor carries, or a descriptor
     with no redraw, makes ``features.redraw`` return ``False`` — the sidebar
     then reports the failure it should never have had to."""
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
 
     registry = build_feature_registry()
     descriptor = registry.get(feature)

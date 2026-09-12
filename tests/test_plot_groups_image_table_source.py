@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core import sidebar_view as SV
-from well_viewer.features.image_browser.image_table.controller import (
+from review.core import sidebar_view as SV
+from review.features.image_browser.image_table.controller import (
     image_table_active_wells,
 )
 

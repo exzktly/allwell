@@ -22,15 +22,15 @@ import pytest
 
 matplotlib.use("Agg")
 
-from well_viewer.features.saved_plots import _deck  # noqa: E402
-from well_viewer.features.saved_plots._deck import (  # noqa: E402
+from review.features.saved_plots import _deck  # noqa: E402
+from review.features.saved_plots._deck import (  # noqa: E402
     MAX_SHAPES_PER_SLIDE, build_saved_plots_deck,
 )
-from well_viewer.features.saved_plots._drawingml import (  # noqa: E402
+from review.features.saved_plots._drawingml import (  # noqa: E402
     EMU_PER_POINT, Placement, ShapeIds, drawing_group_xml,
 )
-from well_viewer.features.saved_plots._pptx import PptxBuilder  # noqa: E402
-from well_viewer.features.saved_plots._svg_shapes import (  # noqa: E402
+from review.features.saved_plots._pptx import PptxBuilder  # noqa: E402
+from review.features.saved_plots._svg_shapes import (  # noqa: E402
     ImageShape, PathShape, SvgParseError, TextShape, clip_subpaths,
     parse_path_data, parse_svg, subpath_bounds,
 )
@@ -456,10 +456,10 @@ def _stub_ctx(tmp_path):
     ``AppState()`` constructs standalone and costs nothing, so there is no reason
     to approximate it.
     """
-    from well_viewer.core.app_runtime import AppRuntime
-    from well_viewer.core.app_state import AppState
-    from well_viewer.core.widget_registry import WidgetRegistry
-    from well_viewer.features.registry import (
+    from review.core.app_runtime import AppRuntime
+    from review.core.app_state import AppState
+    from review.core.widget_registry import WidgetRegistry
+    from review.features.registry import (
         attach_feature_state, build_feature_registry,
     )
 
@@ -494,8 +494,8 @@ def test_saving_a_card_then_exporting_gives_editable_shapes(qapp, tmp_path,
     was written under. Both are sequence facts, and both have exactly one
     symptom when wrong — every figure silently exports as a picture.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import get_store
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import get_store
     from widgets.plot_card import PlotCard
 
     ctx = _stub_ctx(tmp_path)
@@ -534,8 +534,8 @@ def test_a_record_saved_without_vector_never_claims_to_have_one(tmp_path,
     picture rather than looking for a file nobody wrote — and reports it as the
     normal outcome it is, not as a missing file.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import get_store
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import get_store
 
     ctx = _stub_ctx(tmp_path)
     monkeypatch.setattr(C, "capture_params", lambda ctx_, tab: ({}, {}))
@@ -550,7 +550,7 @@ def test_a_record_saved_without_vector_never_claims_to_have_one(tmp_path,
 
 def test_deleting_a_plot_takes_its_vector_capture_with_it(tmp_path):
     """Otherwise the dataset folder accumulates SVGs nothing can name."""
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -574,7 +574,7 @@ def test_a_vector_write_that_fails_still_saves_the_plot(tmp_path, monkeypatch):
     for it, fail to read it, and report "the capture could not be read" — a
     different problem with a different fix.
     """
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -607,8 +607,8 @@ def test_the_export_menu_reaches_both_exporters(qapp, monkeypatch):
     """
     from PySide6.QtWidgets import QWidget
 
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots import tab_view
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots import tab_view
 
     called = []
     monkeypatch.setattr(C, "export_report_pdf", lambda ctx: called.append("pdf"))
@@ -643,7 +643,7 @@ def test_the_export_control_is_built_the_way_every_other_menu_in_the_app_is(qapp
     """
     from PySide6.QtWidgets import QToolButton, QWidget
 
-    from well_viewer.features.saved_plots import tab_view
+    from review.features.saved_plots import tab_view
 
     band = QWidget()          # held: its child's C++ object dies with it
     button = tab_view._build_export_button(object(), band)
@@ -1013,8 +1013,8 @@ def test_a_png_only_plot_is_redrawn_so_the_deck_can_make_it_editable(
     the live figure, and keeps the result on the record — the redraw is a one-off
     repair, not a cost paid on every export.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
     from widgets.plot_card import PlotCard
 
     ctx = _stub_ctx(tmp_path)
@@ -1060,8 +1060,8 @@ def test_a_png_only_plot_is_redrawn_so_the_deck_can_make_it_editable(
 def test_a_plot_that_already_has_vector_is_never_redrawn(qapp, tmp_path):
     """The capture taken when the user saved is the better record of what they
     saw, so it is never replaced by a later redraw."""
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1080,8 +1080,8 @@ def test_a_plot_that_already_has_vector_is_never_redrawn(qapp, tmp_path):
 def test_a_tab_with_no_figure_is_left_as_a_picture(qapp, tmp_path):
     """The Image Table composes its snapshot from microscopy frames rather than
     drawing a chart, so it has never had vector and cannot acquire it here."""
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1125,7 +1125,7 @@ def _card_that_draws_what_it_is_told(ctx, *, adopted=None):
     five tests here reported the repair as having produced nothing at all: a
     double shaped to yesterday's call is §7.8's first face, in the fixture.
     """
-    from well_viewer.features.saved_plots import controller as C
+    from review.features.saved_plots import controller as C
     from widgets.plot_card import PlotCard
 
     card = PlotCard(figsize=(4, 3))
@@ -1148,8 +1148,8 @@ def test_the_replay_asks_for_the_records_own_groups(qapp, tmp_path, monkeypatch)
     it — and it is the one caller that may take them, because ``_LiveState``
     puts the user's back in a ``finally``. Without the flag every regenerated
     slide is quietly a picture of today's groups under yesterday's title."""
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1176,8 +1176,8 @@ def test_each_record_is_captured_from_its_own_redrawn_figure(qapp, tmp_path,
     figure on a slide under the wrong plot's title and parameters, which is the
     failure this repository cares most about — wrong output that looks right.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1213,8 +1213,8 @@ def test_the_gating_pass_finishes_before_the_figure_is_captured(qapp, tmp_path,
     finish on this thread, between the replay and the capture, or the number on
     the slide is wrong with a confident caption.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1249,8 +1249,8 @@ def test_the_export_puts_the_user_s_own_work_back(qapp, tmp_path, monkeypatch):
     and with the clobbered gating reaching `pipeline_info.json` on the user's
     next gate edit. An export is not a navigation and must not cost them work.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1293,8 +1293,8 @@ def test_a_repair_that_cannot_be_undone_never_starts(qapp, tmp_path,
     that got its state replaced. Declining is the only safe answer, and it is
     said out loud rather than left as a deck that is quietly less editable.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1410,8 +1410,8 @@ def test_a_single_panel_record_is_not_regenerated_as_the_whole_figure(
     and beside the panel's parameters — a different figure, not a worse one. A
     picture of the right plot beats shapes of the wrong one.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1435,7 +1435,7 @@ def test_a_single_panel_record_is_not_regenerated_as_the_whole_figure(
 
 def test_a_panel_record_round_trips_through_persistence(tmp_path):
     """The flag has to survive the JSON, or the next export substitutes again."""
-    from well_viewer.features.saved_plots.state import SavedPlot
+    from review.features.saved_plots.state import SavedPlot
 
     rec = SavedPlot(id="p", created_at="", tab="Bar Plots", title="t",
                     png_filename="p.png", params={}, panel_only=True)
@@ -1461,8 +1461,8 @@ def test_a_capture_that_could_not_be_written_still_makes_this_deck_editable(
     A failed write — a full disk, a read-only folder — used to throw away both,
     so the export fell back to a picture for a figure it had already rendered.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1491,7 +1491,7 @@ def test_a_capture_that_could_not_be_written_still_makes_this_deck_editable(
 # ── a record that does not say what it saved ─────────────────────────────────
 
 def _multi_panel_card(ctx, panels: int = 3):
-    from well_viewer.features.saved_plots import controller as C
+    from review.features.saved_plots import controller as C
     from widgets.plot_card import PlotCard
 
     card = PlotCard(figsize=(5, 8))
@@ -1527,8 +1527,8 @@ def test_an_old_panel_record_is_not_redrawn_as_the_whole_figure(qapp, tmp_path):
     panel's parameters. The record's own stored image says otherwise: one panel
     of a three-panel card is about three times as wide for its height.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
     from widgets.fig_clipboard import axis_tight_bbox_inches
 
     ctx = _stub_ctx(tmp_path)
@@ -1555,8 +1555,8 @@ def test_an_unknown_record_on_a_single_panel_figure_is_redrawn(qapp, tmp_path):
     so the record's unknown scope cannot change what lands on the slide and the
     repair is safe whatever it meant.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
     from widgets.plot_card import PlotCard
 
     ctx = _stub_ctx(tmp_path)
@@ -1586,8 +1586,8 @@ def test_an_unknown_record_on_a_multi_panel_figure_is_left_alone(qapp, tmp_path)
     plot card takes its size from the widget, so opening the Properties sidebar
     alone moves the live figure's aspect by more than 40%.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1606,8 +1606,8 @@ def test_an_unknown_record_on_a_multi_panel_figure_is_left_alone(qapp, tmp_path)
 def test_a_record_that_states_its_scope_is_believed(qapp, tmp_path):
     """A record that says what it saved is taken at its word — the panel count
     is only consulted when the record does not say."""
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1624,8 +1624,8 @@ def test_a_record_that_states_its_scope_is_believed(qapp, tmp_path):
 @pytest.mark.qt
 def test_an_unreadable_figure_leaves_the_plot_as_a_picture(qapp, tmp_path):
     """A card whose panels cannot be counted is not redrawn from."""
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1664,8 +1664,8 @@ def test_the_export_reports_progress_across_both_of_its_phases(qapp, tmp_path,
     Asserted across **both** phases: a bar that covered only the deck build
     would sit at zero through the slow half.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot
 
     ctx = _bar_ctx(tmp_path)
     store = C.get_store(ctx)
@@ -1716,8 +1716,8 @@ def test_a_skipped_plot_still_advances_the_bar(qapp, tmp_path, monkeypatch):
     gallery of plots that are all being skipped — which is the common case for
     an older gallery of multi-panel figures, and looks exactly like a hang.
     """
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = _bar_ctx(tmp_path)
     store = SavedPlotsStore()
@@ -1742,8 +1742,8 @@ def test_a_skipped_plot_still_advances_the_bar(qapp, tmp_path, monkeypatch):
 def test_the_bar_is_hidden_even_when_the_export_fails(qapp, tmp_path,
                                                       monkeypatch):
     """A bar left running after an export died is its own false statement."""
-    from well_viewer.features.saved_plots import controller as C
-    from well_viewer.features.saved_plots.state import SavedPlot
+    from review.features.saved_plots import controller as C
+    from review.features.saved_plots.state import SavedPlot
 
     ctx = _bar_ctx(tmp_path)
     store = C.get_store(ctx)

@@ -1053,7 +1053,7 @@ class PipelineRunner:
             os.environ.pop("ALLWELL_SCRATCH_DIR", None)
         try:
             # No compatibility fallback. The only production caller,
-            # `analyze.input._resolve_run_dirs_for_runner`, takes `proc_hook`,
+            # `analyze.domain.input._resolve_run_dirs_for_runner`, takes `proc_hook`,
             # and the `except TypeError` that used to sit here could therefore
             # not be entered by a caller with the wrong signature — only by a
             # `TypeError` raised from *inside* the resolver, which it then

@@ -13,9 +13,9 @@ import json
 from datasets.subset.apply import execute_plan
 from datasets.subset.subset_compute import SubsetFilter, build_subset_plan
 from tests.fixtures.dataset_builder import build_dataset
-from well_viewer.data.data_loading import load_well_csv
-from well_viewer.domain.viewer_state import read_pipeline_info
-from well_viewer.persistence.cell_overrides import load_overrides
+from review.data.data_loading import load_well_csv
+from review.domain.viewer_state import read_pipeline_info
+from review.persistence.cell_overrides import load_overrides
 
 
 def test_subset_end_to_end_then_reopen_in_review(tmp_path):

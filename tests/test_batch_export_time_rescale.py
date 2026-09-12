@@ -25,7 +25,7 @@ from types import SimpleNamespace
 import pytest
 from tests._repo_scan import parse_source
 
-BATCH = Path(__file__).resolve().parent.parent / "well_viewer" / "features" / "batch_export"
+BATCH = Path(__file__).resolve().parent.parent / "review" / "features" / "batch_export"
 
 #: Anything that puts the rescale marker on a figure.
 MARKERS = ("mark_time_rescale", "figure_timepoint_label", "axis_label",
@@ -74,7 +74,7 @@ def _panel(factor):
 
 
 def _tp_label(factor, tp_h):
-    from well_viewer.features.batch_export.scatter_panel import ScatterBatchExportPanel
+    from review.features.batch_export.scatter_panel import ScatterBatchExportPanel
     return ScatterBatchExportPanel._tp_figure_label(_panel(factor), tp_h)
 
 

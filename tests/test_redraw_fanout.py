@@ -2,7 +2,7 @@
 
 Counts actual invocations of each fold-change scope's redraw callable
 (``redraw_app`` for the line scope, ``redraw_bars`` for the bar scope) on
-a *real* ``WellViewerApp``. A single user action must produce **exactly
+a *real* ``ReviewApp``. A single user action must produce **exactly
 one** redraw of the visible scope — never zero, never two.
 
 This guards Phase 3 of the ``runtime_app.py`` teardown. When the ``EventBus``
@@ -22,9 +22,9 @@ from dataclasses import replace
 
 import pytest
 
-from well_viewer.core.channel_state_controller import set_active_channel
-from well_viewer.core.fold_change_controls_view import set_fold_change_state
-from well_viewer.domain.fold_change_scopes import (
+from review.core.channel_state_controller import set_active_channel
+from review.core.fold_change_controls_view import set_fold_change_state
+from review.domain.fold_change_scopes import (
     get_scope, register_fold_change_scope,
 )
 
@@ -71,7 +71,7 @@ class _RedrawCounter:
         # The tab-switch activation path (``on_tab_change`` /
         # ``_activate_default_plot``) imports ``redraw_app`` function-locally, so
         # it resolves the module attribute — patch that too.
-        import well_viewer.core.plot_orchestrator as _po
+        import review.core.plot_orchestrator as _po
         self._po = _po
         self._original_redraw_app = _po.redraw_app
         _po.redraw_app = self._wrap("line", _po.redraw_app)

@@ -33,10 +33,10 @@ from types import SimpleNamespace
 import pytest
 
 from ui import theme
-from well_viewer.core.cell_gating_state import CellGatingState
-from well_viewer.core.export_prefs_state import ExportPrefsState
-from well_viewer.core.plot_state import PlotState
-from well_viewer.features.scatter.state import ScatterState
+from review.core.cell_gating_state import CellGatingState
+from review.core.export_prefs_state import ExportPrefsState
+from review.core.plot_state import PlotState
+from review.features.scatter.state import ScatterState
 
 pytestmark = pytest.mark.qt
 
@@ -44,7 +44,7 @@ _SECTION = "Colours"
 
 
 def _mk_ctx(app):
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     return SimpleNamespace(
         app=app,
         state=app._app_state,
@@ -102,7 +102,7 @@ def _build_sidebar(qtbot, monkeypatch, *, is_bar: bool = False,
     is the value the real one returns and the value the handler branches on."""
     from matplotlib.figure import Figure
 
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
 
     fig = Figure(figsize=(4, 3))
     fig.add_subplot(1, 1, 1)
@@ -161,7 +161,7 @@ def test_the_bar_figure_offers_both_modes(qtbot, monkeypatch):
 
 
 def test_picking_grey_reaches_the_state_the_renderers_read(qtbot, monkeypatch):
-    from well_viewer.domain.bar_colors import mono_bar_color
+    from review.domain.bar_colors import mono_bar_color
 
     app, sb, redraws = _build_sidebar(qtbot, monkeypatch, is_bar=True)
     _colour_segment(sb).setCurrentByData("grey")
@@ -175,7 +175,7 @@ def test_picking_plate_again_restores_the_original_colours(qtbot, monkeypatch):
     """The mode has to be reversible from the same control. A handler that only
     ever writes "grey" (a segment wired to a constant rather than to its own
     data) passes the test above and strands the user in grey."""
-    from well_viewer.domain.bar_colors import mono_bar_color
+    from review.domain.bar_colors import mono_bar_color
 
     app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_bar=True)
     seg = _colour_segment(sb)
@@ -192,7 +192,7 @@ def test_the_section_opens_on_whatever_mode_is_already_set(qtbot, monkeypatch):
     already thinks it is there."""
     from matplotlib.figure import Figure
 
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
 
     fig = Figure(figsize=(4, 3))
     fig.add_subplot(1, 1, 1)
@@ -230,7 +230,7 @@ def test_picking_grey_on_the_line_figure_writes_the_line_field(qtbot, monkeypatc
     the two tabs' segments the panel was built for, so a handler still writing
     ``bar_color_mode`` would grey the Bar tab from the Line tab's control and
     leave the traces coloured."""
-    from well_viewer.domain.line_colors import line_color_mode
+    from review.domain.line_colors import line_color_mode
 
     app, sb, redraws = _build_sidebar(qtbot, monkeypatch, is_line=True)
     _colour_segment(sb).setCurrentByData("grey")
@@ -278,12 +278,12 @@ def test_the_real_redraw_reports_whether_it_ran(qtbot, monkeypatch):
     """The stub above returns a bool because the real one does. Pinned here so
     the two cannot drift — a stub that is more honest than the code it stands
     in for tests nothing."""
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
 
     fig_app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_bar=True)
     monkeypatch.undo()
     calls: list[str] = []
-    monkeypatch.setattr("well_viewer.features.export.sidebar_view.redraw_bars",
+    monkeypatch.setattr("review.features.export.sidebar_view.redraw_bars",
                         lambda _ctx: calls.append("bars"))
     assert ExportStyleSidebar._redraw_bound_figure(sb) is True
     assert calls == ["bars"]
@@ -308,7 +308,7 @@ def test_a_stale_segment_is_re_seeded_when_the_panel_is_reopened(qtbot, monkeypa
     re-seed the segment still reads Grey over plate-coloured bars, and the click
     that should fix it is swallowed as a no-op.
     """
-    from well_viewer.persistence import view_state as vs
+    from review.persistence import view_state as vs
 
     app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_bar=True)
     seg = _colour_segment(sb)
@@ -404,7 +404,7 @@ def test_the_response_figure_offers_series_and_grey(qtbot, monkeypatch):
 
 def test_picking_grey_on_the_response_figure_writes_its_own_field(
         qtbot, monkeypatch):
-    from well_viewer.domain.response_colors import response_color_mode
+    from review.domain.response_colors import response_color_mode
 
     app, sb, redraws = _build_sidebar(qtbot, monkeypatch, is_response=True)
     _colour_segment(sb).setCurrentByData("grey")
@@ -485,7 +485,7 @@ def test_the_real_redraw_reaches_the_response_figure(qtbot, monkeypatch):
     **not** what ran — the half a bare "did something redraw?" assertion would
     miss, since the fall-through redraws too.
     """
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
 
     _app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_response=True)
     monkeypatch.undo()

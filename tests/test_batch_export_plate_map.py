@@ -22,7 +22,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 
 def _panel(app):
-    from well_viewer.features.batch_export import BarBatchExportPanel
+    from review.features.batch_export import BarBatchExportPanel
     return BarBatchExportPanel(app._ctx, None, use_sidebar_groups=False)
 
 
@@ -46,7 +46,7 @@ def test_the_plate_map_is_a_well_plate_selector(loaded_app):
 def test_a_press_adds_and_a_press_on_an_owned_well_removes(loaded_app):
     """The gesture's direction is latched by the well it started on, so one
     drag adds or removes throughout rather than toggling under the cursor."""
-    from well_viewer.features.batch_export._common import BarGroup
+    from review.features.batch_export._common import BarGroup
 
     panel = _panel(loaded_app)
     well = next(iter(loaded_app._app_state.dataset.well_paths))
@@ -65,7 +65,7 @@ def test_a_press_adds_and_a_press_on_an_owned_well_removes(loaded_app):
 def test_a_well_outside_the_dataset_is_ignored(loaded_app):
     """The plate shows all 96 positions; only the ones the dataset actually
     has may join a group."""
-    from well_viewer.features.batch_export._common import BarGroup
+    from review.features.batch_export._common import BarGroup
 
     panel = _panel(loaded_app)
     panel._groups.append(BarGroup("G1"))
@@ -82,7 +82,7 @@ def test_group_colours_and_the_active_ring_reach_the_plate(loaded_app):
     already answering the first."""
     from PySide6.QtGui import QColor
     from widgets.well_plate_selector import _parse_well_id
-    from well_viewer.features.batch_export._common import BarGroup
+    from review.features.batch_export._common import BarGroup
 
     panel = _panel(loaded_app)
     wells = list(loaded_app._app_state.dataset.well_paths)[:2]
@@ -138,7 +138,7 @@ def test_the_ring_follows_a_well_out_of_the_active_group_mid_drag(loaded_app):
     colour. Left to the end-of-gesture refresh, a well dragged out of the
     active group sits ringed but uncoloured for the rest of the drag."""
     from widgets.well_plate_selector import _parse_well_id
-    from well_viewer.features.batch_export._common import BarGroup
+    from review.features.batch_export._common import BarGroup
 
     panel = _panel(loaded_app)
     well = next(iter(loaded_app._app_state.dataset.well_paths))
@@ -158,7 +158,7 @@ def test_a_real_drag_gesture_reaches_the_group(loaded_app):
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtGui import QMouseEvent
     from widgets.well_plate_selector import _parse_well_id
-    from well_viewer.features.batch_export._common import BarGroup
+    from review.features.batch_export._common import BarGroup
 
     panel = _panel(loaded_app)
     panel._map_plate.resize(480, 320)
@@ -203,7 +203,7 @@ def test_dragging_one_well_of_a_replicate_set_adds_the_whole_set(loaded_app):
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtGui import QMouseEvent
     from widgets.well_plate_selector import _parse_well_id
-    from well_viewer.features.batch_export._common import BarGroup
+    from review.features.batch_export._common import BarGroup
 
     have = list(loaded_app._app_state.dataset.well_paths)
     if len(have) < 3:
@@ -248,7 +248,7 @@ def test_dragging_a_replicate_set_back_off_removes_the_whole_set(loaded_app):
     """Remove is the mirror: the polarity latched on the press applies to the
     member, so one touch takes the sample out rather than orphaning the rest
     of its wells in the group."""
-    from well_viewer.features.batch_export._common import BarGroup
+    from review.features.batch_export._common import BarGroup
 
     have = list(loaded_app._app_state.dataset.well_paths)
     if len(have) < 2:
@@ -274,7 +274,7 @@ def test_dragging_a_replicate_set_back_off_removes_the_whole_set(loaded_app):
 def test_a_replicate_set_spanning_the_drag_is_added_once(loaded_app):
     """Dragging across several wells of the same sample must not append the
     sample twice — the group would then export it doubled."""
-    from well_viewer.features.batch_export._common import BarGroup
+    from review.features.batch_export._common import BarGroup
 
     have = list(loaded_app._app_state.dataset.well_paths)
     if len(have) < 2:
@@ -297,7 +297,7 @@ def test_the_whole_replicate_set_takes_the_group_colour_after_the_gesture(loaded
     the mid-drag repaint only knows the well under the cursor, so the
     end-of-gesture `_refresh_map` is what makes the rest catch up."""
     from widgets.well_plate_selector import _parse_well_id
-    from well_viewer.features.batch_export._common import BarGroup
+    from review.features.batch_export._common import BarGroup
 
     have = list(loaded_app._app_state.dataset.well_paths)
     if len(have) < 2:

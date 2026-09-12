@@ -3,7 +3,7 @@
 ``_GUILogHandler`` writes records into a ``QTextEdit``. The handler outlives that
 widget — nothing detaches it on teardown — so in a process that builds more than
 one window (every full-app test file does) the dead handlers stay subscribed to
-the ``well_viewer`` logger.
+the ``review`` logger.
 
 Logging a failure from inside a log handler is what made that fatal rather than
 merely wasteful: the record propagates back to the logger the handler is attached
@@ -22,7 +22,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QTextEdit
 
-from well_viewer.core import status_view as SV
+from review.core import status_view as SV
 
 
 class _DeadWidget:
@@ -45,8 +45,8 @@ class _CountingHandler(logging.Handler):
 
 @pytest.fixture
 def wv_logger():
-    """The real ``well_viewer`` logger, restored afterwards."""
-    logger = logging.getLogger("well_viewer")
+    """The real ``review`` logger, restored afterwards."""
+    logger = logging.getLogger("review")
     before = list(logger.handlers)
     level, propagate = logger.level, logger.propagate
     try:

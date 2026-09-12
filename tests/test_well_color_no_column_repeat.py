@@ -12,8 +12,8 @@ no numpy), so it runs in the headless test scaffold.
 """
 from __future__ import annotations
 
-from well_viewer.domain.plate_layout import PLATE_COLS, PLATE_ROWS, WELL_COLORS
-from well_viewer.domain.selections_model import color_for_well
+from review.domain.plate_layout import PLATE_COLS, PLATE_ROWS, WELL_COLORS
+from review.domain.selections_model import color_for_well
 
 
 def test_palette_has_one_colour_per_plate_position():

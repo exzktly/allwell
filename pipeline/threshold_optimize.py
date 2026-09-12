@@ -6,7 +6,7 @@ largest relative fraction-on gap, ``|fa-fb| / max(|fa|, |fb|)``.
 
 Shared by ``process_microscopy``'s end-of-run pass and the Cell Gating tab's
 "Optimize ThreshFracOn" button, so the two cannot give different answers on the
-same data. The pipeline may not import ``well_viewer`` (ARCHITECTURE §6.2), so
+same data. The pipeline may not import ``review`` (ARCHITECTURE §6.2), so
 the core lives here and the viewer's fold-change layer stays behind in
 ``gating_compute`` — moving it would drag ``domain.fold_change`` into the
 pipeline's import graph.
@@ -160,7 +160,7 @@ def relative_gap(fa: np.ndarray, fb: np.ndarray, *,
     this module can decide.
 
     Counts are optional because the fold-change layer in
-    ``well_viewer.features.home.cell_gating.gating_compute`` scans *adjusted*
+    ``review.features.home.cell_gating.gating_compute`` scans *adjusted*
     fractions, which are no longer ``k / n`` — they can exceed 1 and go
     negative — so there is no ``k`` to add one to. Pass counts only for genuine
     fraction-on curves.

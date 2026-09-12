@@ -20,9 +20,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import pytest  # noqa: E402
 
-from well_viewer.domain.time_rescale import axis_label  # noqa: E402
+from review.domain.time_rescale import axis_label  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent / "well_viewer"
+ROOT = Path(__file__).resolve().parent.parent / "review"
 
 #: The base text of every time axis in the app. A new one belongs in this list
 #: *and* wrapped in ``axis_label`` — the guard below fails either way round.
@@ -46,7 +46,7 @@ def test_the_off_state_is_byte_identical(base):
 # ── the Bar plot's marker, which is an x-label it otherwise has none of ────
 
 def test_bar_panels_gain_a_marker_label_only_while_rescaled():
-    from well_viewer.core.plot_style import mark_time_rescale
+    from review.core.plot_style import mark_time_rescale
 
     fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
     try:
@@ -63,7 +63,7 @@ def test_bar_panels_gain_a_marker_label_only_while_rescaled():
 
 
 def test_bar_marker_lands_on_the_n_panel_when_there_is_one():
-    from well_viewer.core.plot_style import mark_time_rescale
+    from review.core.plot_style import mark_time_rescale
 
     fig, (ax_mean, ax_frac, ax_n) = plt.subplots(3, 1)
     try:
@@ -75,7 +75,7 @@ def test_bar_marker_lands_on_the_n_panel_when_there_is_one():
 
 
 def test_bar_marker_tolerates_a_missing_n_panel():
-    from well_viewer.core.plot_style import mark_time_rescale
+    from review.core.plot_style import mark_time_rescale
 
     fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
     try:
@@ -167,7 +167,7 @@ def test_a_shifted_axis_is_marked_as_loudly_as_a_scaled_one():
     Statistics tab and every exported CSV say, exactly as a factor does. An
     axis that carried the marker only for the multiplier would present a
     shifted axis as real hours."""
-    from well_viewer.domain.time_rescale import TimeRescale
+    from review.domain.time_rescale import TimeRescale
 
     rs = TimeRescale(factor=1, offset=2)
     for base in TIME_AXIS_LABELS:
@@ -177,8 +177,8 @@ def test_a_shifted_axis_is_marked_as_loudly_as_a_scaled_one():
 
 
 def test_the_marker_names_both_terms_on_a_categorical_stack():
-    from well_viewer.core.plot_style import mark_time_rescale
-    from well_viewer.domain.time_rescale import TimeRescale
+    from review.core.plot_style import mark_time_rescale
+    from review.domain.time_rescale import TimeRescale
 
     fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
     try:
@@ -191,8 +191,8 @@ def test_the_marker_names_both_terms_on_a_categorical_stack():
 
 
 def test_an_offset_only_stack_is_still_marked():
-    from well_viewer.core.plot_style import mark_time_rescale
-    from well_viewer.domain.time_rescale import TimeRescale
+    from review.core.plot_style import mark_time_rescale
+    from review.domain.time_rescale import TimeRescale
 
     fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
     try:
@@ -203,7 +203,7 @@ def test_an_offset_only_stack_is_still_marked():
 
 
 def test_the_off_state_is_byte_identical_with_both_halves_at_rest():
-    from well_viewer.domain.time_rescale import OFF
+    from review.domain.time_rescale import OFF
 
     for base in TIME_AXIS_LABELS:
         assert axis_label(base, OFF) == base

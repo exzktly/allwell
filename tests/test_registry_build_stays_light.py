@@ -35,16 +35,16 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 #: data layer is the tell for curation, and the two controllers for QC / crop.
 _MUST_NOT_LOAD = (
     "pandas",
-    "well_viewer.data.curation",
-    "well_viewer.data.data_loading",
-    "well_viewer.features.qc.controller",
-    "well_viewer.features.crop.controller",
+    "review.data.curation",
+    "review.data.data_loading",
+    "review.features.qc.controller",
+    "review.features.crop.controller",
 )
 
 _PROBE = textwrap.dedent(
     """
     import sys
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
 
     registry = build_feature_registry()
     assert registry.all(), "the probe built an empty registry"
@@ -86,7 +86,7 @@ def test_the_probe_would_notice_an_eager_import():
     proc = subprocess.run(
         [sys.executable, "-c",
          "import sys, pandas\n"
-         "from well_viewer.features.registry import build_feature_registry\n"
+         "from review.features.registry import build_feature_registry\n"
          "build_feature_registry()\n"
          f"print(','.join(m for m in {_MUST_NOT_LOAD!r} if m in sys.modules))"],
         cwd=REPO_ROOT, capture_output=True, text=True, timeout=300,

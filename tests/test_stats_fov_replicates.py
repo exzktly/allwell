@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.domain.batch_models import BarGroup
-from well_viewer.domain.stats_compute import (
+from review.domain.batch_models import BarGroup
+from review.domain.stats_compute import (
     replicate_unit, group_replicate_stats, compute_rep_stats,
     compute_rep_per_fov_stats,
 )
-from well_viewer.features.stats.controller import collect_group_values, compute_pairwise
+from review.features.stats.controller import collect_group_values, compute_pairwise
 
 pytestmark = pytest.mark.qt
 
@@ -83,8 +83,8 @@ def test_single_well_fov_off_yields_one_value_untestable(loaded_app_multifov):
 def test_saved_plot_captures_and_reruns_fov_mode(loaded_app_multifov):
     """A saved plot records the FOV-replicate mode and re-runs the test under it,
     so restored brackets match regardless of the live toggle."""
-    from well_viewer.features.saved_plots.collect import _capture_stats_config
-    from well_viewer.features.saved_plots.controller import _restore_stats
+    from review.features.saved_plots.collect import _capture_stats_config
+    from review.features.saved_plots.controller import _restore_stats
     app = loaded_app_multifov
     groups = [_grp("a", ["A01"]), _grp("b", ["B01"])]  # single-well groups
     app._app_state.stats.groups = groups
@@ -108,7 +108,7 @@ def test_saved_plot_captures_and_reruns_fov_mode(loaded_app_multifov):
 def test_unity_plot_spread_reduces_same_replicates_as_stats(loaded_app_multifov):
     """The bar/line rep-stats reduce the SAME per-replicate values the stats test
     uses — so plot spread and test n describe the same replicate unit."""
-    from well_viewer.domain.batch_models import ReplicateSet
+    from review.domain.batch_models import ReplicateSet
     import numpy as np
     app = loaded_app_multifov
 

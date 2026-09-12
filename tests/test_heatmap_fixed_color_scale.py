@@ -34,8 +34,8 @@ import types
 
 import pytest
 
-from well_viewer.features.heatmap import controller as HM
-from well_viewer.features.heatmap.models import HeatmapLayout
+from review.features.heatmap import controller as HM
+from review.features.heatmap.models import HeatmapLayout
 
 _TP = 0.0
 _VAL = "gfp_mean_intensity"
@@ -323,7 +323,7 @@ def test_a_blank_limit_is_none_and_every_finite_number_is_a_limit(value, expecte
 
 def _type_limits(ctx, vmin_text: str, vmax_text: str) -> None:
     """Put *vmin_text* / *vmax_text* in the edits and run the tab's handler."""
-    from well_viewer.features.heatmap import tab_view
+    from review.features.heatmap import tab_view
 
     ctx.widgets.get_or_none("_heatmap_vmin_edit").setText(vmin_text)
     ctx.widgets.get_or_none("_heatmap_vmax_edit").setText(vmax_text)

@@ -46,8 +46,8 @@ def test_canonicaliser_is_the_definition(raw, expected):
 def _membership_helpers():
     """The two "canonicalise for a membership test" helpers, which must agree
     with the canonicaliser and with each other."""
-    from well_viewer.features.batch_export.base_panel import _norm_well_token
-    from well_viewer.domain import bar_groups
+    from review.features.batch_export.base_panel import _norm_well_token
+    from review.domain import bar_groups
 
     # bar_groups' copy is nested inside bar_groups_from_data; reach it through
     # the public entry point rather than restating it here.

@@ -33,14 +33,14 @@ import types
 
 import pytest
 
-from well_viewer.domain.sample_variables import (
+from review.domain.sample_variables import (
     Variable,
     VariableSet,
     VariableValue,
     labels_for_axis_lines,
 )
-from well_viewer.features.heatmap import controller as HM
-from well_viewer.features.heatmap.models import HeatmapLayout
+from review.features.heatmap import controller as HM
+from review.features.heatmap.models import HeatmapLayout
 
 _TP = 0.0
 _VAL = "gfp_mean_intensity"

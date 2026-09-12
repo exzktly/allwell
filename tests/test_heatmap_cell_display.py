@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import types
 
-from well_viewer.features.heatmap.models import HeatmapLayout
-from well_viewer.features.heatmap.sidebar_view import (
+from review.features.heatmap.models import HeatmapLayout
+from review.features.heatmap.sidebar_view import (
     _CELL_TOKEN_ROLE, _cell_display, _cell_token, _on_drop_event,
 )
 
@@ -73,7 +73,7 @@ def _drop_ctx(layout):
 
 
 def test_moving_a_replicate_set_cell_carries_every_member(monkeypatch):
-    from well_viewer.features.heatmap import sidebar_view as SV
+    from review.features.heatmap import sidebar_view as SV
 
     layout = HeatmapLayout(name="Sidebar", rows=2, cols=2)
     layout.assign(0, 0, ["A01", "B01", "C01"])
@@ -89,7 +89,7 @@ def test_moving_a_replicate_set_cell_carries_every_member(monkeypatch):
 
 
 def test_a_well_dragged_from_the_plate_lands_alone(monkeypatch):
-    from well_viewer.features.heatmap import sidebar_view as SV
+    from review.features.heatmap import sidebar_view as SV
 
     layout = HeatmapLayout(name="Sidebar", rows=2, cols=2)
     monkeypatch.setattr(SV, "_ensure_sidebar_layout", lambda _c: layout)

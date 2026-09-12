@@ -13,7 +13,7 @@ A well is carried by four values, and all four must move together — the same
 lock-step discipline ARCHITECTURE §6b documents for Concatenate's timepoints,
 with a wider surface because three of these are filenames rather than file
 contents: the ``well`` field inside each zip member's filename (via
-``datasets._common.member_names.rewrite_member_field``), the ``well`` column
+``datasets.core.member_names.rewrite_member_field``), the ``well`` column
 in every CSV row, the three container names
 (``in/<WELL>.zip``/``out/<WELL>_out.zip``/``out/<csv_prefix>_<WELL>.csv``),
 and the ``well`` keys inside ``cell_overrides.json`` and
@@ -32,8 +32,8 @@ from pathlib import Path
 
 from util.timepoint import parse_hours, sort_key as tp_sort_key
 from util.well_token import canonical_well_label
-from well_viewer.data.image_identity import PipelineSchema, load_schema
-from datasets._common.dataset_paths import (
+from domain.image_identity import PipelineSchema, load_schema
+from datasets.core.dataset_paths import (
     make_dataset_api,
     DatasetPaths,
     dataset_wells,
@@ -45,7 +45,7 @@ from datasets._common.dataset_paths import (
     out_csvs,
     out_zips,
 )
-from datasets._common.dataset_paths import check_compatible, known_channel_tokens
+from datasets.core.dataset_paths import check_compatible, known_channel_tokens
 
 IN_PROGRESS_MARKER = ".aw_merge_in_progress"
 
@@ -55,7 +55,7 @@ class MergePlatesError(Exception):
 
 
 # The five dataset entry points, bound to this tool's error class and its
-# own in-progress marker. See ``_common.dataset_paths.make_dataset_api``
+# own in-progress marker. See ``core.dataset_paths.make_dataset_api``
 # for why they are generated rather than written out: three tools carried
 # the same five wrappers, differing only in these two choices.
 _api = make_dataset_api(MergePlatesError, IN_PROGRESS_MARKER)
@@ -170,7 +170,7 @@ def merge_sample_definitions(info1: dict, info2: dict, *, well_map: dict[str, st
     The output is built with :func:`selections_model.to_block`, so the merged
     plate carries the same shape the app writes for any other plate.
     """
-    from well_viewer.domain.selections_model import from_block, to_block
+    from review.domain.selections_model import from_block, to_block
 
     sd1 = info1.get("sample_definitions") or {}
     sd2 = info2.get("sample_definitions") or {}

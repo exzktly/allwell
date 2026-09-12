@@ -26,8 +26,8 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 
-from well_viewer.core.dnd import WELL_MIME
-from well_viewer.features.heatmap.controller import _event_modifiers
+from review.core.dnd import WELL_MIME
+from review.features.heatmap.controller import _event_modifiers
 from widgets.well_plate_selector import WellPlateSelector
 
 

@@ -18,9 +18,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core import channel_state_controller
-from well_viewer.core.channel_state import ChannelState
-from well_viewer.core.widget_registry import WidgetRegistry
+from review.core import channel_state_controller
+from review.core.channel_state import ChannelState
+from review.core.widget_registry import WidgetRegistry
 
 
 def _ctx(channel_state: ChannelState, well_paths: dict | None = None):

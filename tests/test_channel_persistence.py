@@ -16,15 +16,15 @@ from pathlib import Path
 
 import pytest
 
-from well_viewer.core.channel_state_controller import set_active_channel
-from well_viewer.persistence import view_state
-from well_viewer.runtime_app import WellViewerApp
+from review.core.channel_state_controller import set_active_channel
+from review.persistence import view_state
+from review.runtime_app import ReviewApp
 
 pytestmark = pytest.mark.qt
 
 
 def _reopen(mini_dataset, qtbot):
-    app = WellViewerApp()
+    app = ReviewApp()
     qtbot.addWidget(app)
     app._load_path(mini_dataset)
     return app

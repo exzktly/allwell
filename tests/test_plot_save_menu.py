@@ -20,7 +20,7 @@ import pytest
 from tests._repo_scan import parse_source
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-FEATURES = REPO_ROOT / "well_viewer" / "features"
+FEATURES = REPO_ROOT / "review" / "features"
 
 #: The tab builders that draw a plot and therefore owe a Save menu.
 PLOT_TAB_VIEWS = (
@@ -123,7 +123,7 @@ def test_the_builder_requires_the_cells_callback():
     """
     import inspect
 
-    from well_viewer.core.ui_helpers import build_plot_save_menu
+    from review.core.ui_helpers import build_plot_save_menu
 
     parameter = inspect.signature(build_plot_save_menu).parameters["cells_cb"]
     assert parameter.default is inspect.Parameter.empty
@@ -132,7 +132,7 @@ def test_the_builder_requires_the_cells_callback():
 
 def test_the_menu_reads_as_one_vocabulary():
     """One verb, and no leftover "Export" inside a menu the button calls Save."""
-    from well_viewer.core import ui_helpers
+    from review.core import ui_helpers
 
     tree = parse_source(pathlib.Path(ui_helpers.__file__))
     builder = next(n for n in ast.walk(tree)

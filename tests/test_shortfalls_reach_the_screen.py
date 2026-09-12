@@ -35,7 +35,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.data.zip_members import ScanResult
+from review.data.zip_members import ScanResult
 
 
 # ── a status label that records what it was told ─────────────────────────────
@@ -111,7 +111,7 @@ _MASK = np.array([[1, 1], [2, 2]], dtype=np.int32)
 
 
 def test_a_complete_scan_leaves_the_review_image_status_alone():
-    from well_viewer.features.image_browser.review_image import renderer as R
+    from review.features.image_browser.review_image import renderer as R
 
     ctx, status = _render_ctx(fluor=ScanResult({("1", "0"): "ref"}))
     R.draw_review_image(ctx, _ARR, _MASK, {})
@@ -119,7 +119,7 @@ def test_a_complete_scan_leaves_the_review_image_status_alone():
 
 
 def test_a_truncated_scan_says_so_on_the_review_image_status_line():
-    from well_viewer.features.image_browser.review_image import renderer as R
+    from review.features.image_browser.review_image import renderer as R
 
     truncated = ScanResult({("1", "0"): "ref"})
     truncated.mark_partial("scanning A01.zip failed: Bad CRC-32")
@@ -133,7 +133,7 @@ def test_a_truncated_scan_says_so_on_the_review_image_status_line():
 
 def test_the_mask_scan_being_truncated_is_reported_too():
     """Any of the four inventories being short makes the frame suspect."""
-    from well_viewer.features.image_browser.review_image import renderer as R
+    from review.features.image_browser.review_image import renderer as R
 
     ctx, status = _render_ctx(fluor=ScanResult({("1", "0"): "ref"}))
     ctx.state.preview.mask.mark_partial("scanning A01_out.zip failed: truncated")
@@ -183,12 +183,12 @@ def test_a_well_whose_scan_read_nothing_says_so_instead_of_the_previous_well(
     described the previous one — and "this well has no images" and "the scan
     failed before it read one" arrived as the same silence.
     """
-    from well_viewer.features.image_browser.review_image import renderer as R
+    from review.features.image_browser.review_image import renderer as R
 
     empty_but_failed = ScanResult()
     empty_but_failed.mark_partial("B02.zip could not be opened")
     monkeypatch.setattr(
-        "well_viewer.data.image_discovery.find_well_images_and_masks",
+        "review.data.image_discovery.find_well_images_and_masks",
         lambda *a, **k: (empty_but_failed, ScanResult(), ScanResult(), ScanResult()),
     )
 
@@ -213,7 +213,7 @@ def test_a_well_whose_scan_read_nothing_says_so_instead_of_the_previous_well(
     # The renderer reaches discovery through ``ctx.state.images``; the facade
     # resolves ``find_well_images_and_masks`` when it is called, so the
     # monkeypatched raiser above is still what runs.
-    from well_viewer.data.image_repository import ImageRepository
+    from review.data.image_repository import ImageRepository
     ctx.state.images = ImageRepository(ctx)
     R._update_preview_impl(ctx, "B02")
 
@@ -228,8 +228,8 @@ def _loader_ctx(data_dir):
 
 def test_load_well_channel_reports_a_truncated_inventory_to_its_caller(monkeypatch):
     """The data layer's outbound call: the caller's pass-scoped set."""
-    import well_viewer.data.image_discovery as ID
-    from well_viewer.data.frame_load import load_well_channel
+    import review.data.image_discovery as ID
+    from review.data.frame_load import load_well_channel
 
     truncated = ScanResult({("1", "0"): "ref"})
     truncated.mark_partial("scanning A01.zip failed: Bad CRC-32")
@@ -248,8 +248,8 @@ def test_load_well_channel_reports_a_truncated_inventory_to_its_caller(monkeypat
 def test_a_cache_hit_still_reports_the_truncation(monkeypatch):
     """The flag rides on the cached inventory, and every cell drawn from it is
     equally short — so a second pass must not read as clean."""
-    import well_viewer.data.image_discovery as ID
-    from well_viewer.data.frame_load import load_well_channel
+    import review.data.image_discovery as ID
+    from review.data.frame_load import load_well_channel
 
     truncated = ScanResult({("1", "0"): "ref"})
     truncated.mark_partial("scanning A01.zip failed: Bad CRC-32")
@@ -265,8 +265,8 @@ def test_a_cache_hit_still_reports_the_truncation(monkeypatch):
 
 
 def test_a_complete_inventory_records_nothing(monkeypatch):
-    import well_viewer.data.image_discovery as ID
-    from well_viewer.data.frame_load import load_well_channel
+    import review.data.image_discovery as ID
+    from review.data.frame_load import load_well_channel
 
     monkeypatch.setattr(
         ID, "find_well_images_and_masks",
@@ -279,7 +279,7 @@ def test_a_complete_inventory_records_nothing(monkeypatch):
 
 
 def test_the_image_table_reader_names_the_wells_and_the_reason():
-    from well_viewer.features.image_browser.image_table.image_compose import (
+    from review.features.image_browser.image_table.image_compose import (
         partial_scan_report,
     )
 
@@ -304,7 +304,7 @@ def _white_pixels(ctx) -> int:
 
 def test_a_measured_threshold_with_no_passing_cell_still_draws_black():
     """The case the all-black silhouette is the RIGHT answer for."""
-    from well_viewer.features.image_browser.review_image import renderer as R
+    from review.features.image_browser.review_image import renderer as R
 
     ctx, status = _render_ctx(binary=True)
     R.draw_review_image(ctx, _ARR, _MASK, {}, above_by_nid={1: False, 2: False})
@@ -313,7 +313,7 @@ def test_a_measured_threshold_with_no_passing_cell_still_draws_black():
 
 
 def test_an_unmeasured_threshold_does_not_draw_as_nothing_passing():
-    from well_viewer.features.image_browser.review_image import renderer as R
+    from review.features.image_browser.review_image import renderer as R
 
     measured, _ = _render_ctx(binary=True)
     R.draw_review_image(measured, _ARR, _MASK, {},
@@ -331,7 +331,7 @@ def test_an_unmeasured_threshold_does_not_draw_as_nothing_passing():
 
 
 def test_a_passing_cell_is_still_drawn_white():
-    from well_viewer.features.image_browser.review_image import renderer as R
+    from review.features.image_browser.review_image import renderer as R
 
     ctx, _status = _render_ctx(binary=True)
     R.draw_review_image(ctx, _ARR, _MASK, {}, above_by_nid={1: True, 2: False})
@@ -383,8 +383,8 @@ def _frames():
 
 
 def test_a_qc_reprojection_failure_names_the_well_on_screen(monkeypatch, caplog):
-    from well_viewer.features.qc import controller as QC
-    from well_viewer.features.qc.params import QCParams
+    from review.features.qc import controller as QC
+    from review.features.qc.params import QCParams
 
     real = QC.compute_qc_pass
 
@@ -396,7 +396,7 @@ def test_a_qc_reprojection_failure_names_the_well_on_screen(monkeypatch, caplog)
     monkeypatch.setattr(QC, "compute_qc_pass", flaky)
     ctx, notify = _verdict_ctx(_frames())
     ctx.state.qc.params = QCParams(enabled=True, min_area=5.0)
-    with caplog.at_level(logging.ERROR, logger="well_viewer"):
+    with caplog.at_level(logging.ERROR, logger="review"):
         QC.recompute_qc_all(ctx)
 
     # The frame's own signal (the column is gone) is right and invisible: every
@@ -407,8 +407,8 @@ def test_a_qc_reprojection_failure_names_the_well_on_screen(monkeypatch, caplog)
 
 
 def test_a_clean_qc_reprojection_says_nothing(monkeypatch):
-    from well_viewer.features.qc import controller as QC
-    from well_viewer.features.qc.params import QCParams
+    from review.features.qc import controller as QC
+    from review.features.qc.params import QCParams
 
     ctx, notify = _verdict_ctx({"A01": _frames()["A01"]})
     ctx.state.qc.params = QCParams(enabled=True, min_area=5.0)
@@ -424,7 +424,7 @@ def test_a_crop_reprojection_failure_survives_the_status_written_after_it(
     the same defect one layer along, so the warning has to be part of the line
     that ends up on screen.
     """
-    from well_viewer.features.crop import controller as CR
+    from review.features.crop import controller as CR
 
     def boom(_df, _region, _scope, well):
         if well == "A02":
@@ -433,7 +433,7 @@ def test_a_crop_reprojection_failure_survives_the_status_written_after_it(
 
     monkeypatch.setattr(CR, "compute_crop_pass", boom)
     ctx, notify = _verdict_ctx(_frames())
-    with caplog.at_level(logging.ERROR, logger="well_viewer"):
+    with caplog.at_level(logging.ERROR, logger="review"):
         CR.set_crop_region(ctx, (0, 0, 4, 4))
 
     assert any(kind == "error" and "A02" in m for kind, m in notify.toasts)
@@ -444,7 +444,7 @@ def test_a_crop_reprojection_failure_survives_the_status_written_after_it(
 
 
 def test_a_clean_crop_says_only_its_own_outcome(monkeypatch):
-    from well_viewer.features.crop import controller as CR
+    from review.features.crop import controller as CR
 
     monkeypatch.setattr(CR, "compute_crop_pass",
                         lambda _df, _r, _s, _w: pd.Series([1, 1]))

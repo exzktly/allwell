@@ -66,7 +66,7 @@ def _spy_plot_redraws(app, monkeypatch):
     the feature names routed through the registry, and a counter for
     ``app._redraw`` (line / distribution / heat map share it).
     """
-    from well_viewer.domain import fold_change_scopes as fcs
+    from review.domain import fold_change_scopes as fcs
 
     scopes: list[str] = []
     monkeypatch.setattr(fcs, "_call_redraw",
@@ -84,13 +84,13 @@ def _spy_plot_redraws(app, monkeypatch):
 
 def _dirty(app) -> set[str]:
     """The scopes left deferred — what an ``on_activate`` flush will redraw."""
-    from well_viewer.domain import fold_change_scopes as fcs
+    from review.domain import fold_change_scopes as fcs
     return set(fcs._dirty_set(app))
 
 
 def test_group_edit_skips_all_plot_redraws_when_none_visible(loaded_app, monkeypatch):
     """Home open → no plot on screen → nothing repaints, everything defers."""
-    from well_viewer.core import selection_controller as sc
+    from review.core import selection_controller as sc
 
     app = loaded_app
     _show(app, monkeypatch, "Home")
@@ -110,7 +110,7 @@ def test_group_edit_skips_all_plot_redraws_when_none_visible(loaded_app, monkeyp
 
 def test_group_edit_redraws_only_the_visible_plot(loaded_app, monkeypatch):
     """Bar Plots on screen (e.g. a split pane alongside Home) → it redraws live."""
-    from well_viewer.core import selection_controller as sc
+    from review.core import selection_controller as sc
 
     app = loaded_app
     _show(app, monkeypatch, "Bar Plots")
@@ -131,7 +131,7 @@ def test_group_edit_redraws_a_visible_scatter_through_the_registry(loaded_app, m
     `rebuild_all` has to ask for it explicitly. A test that only drove the
     coalescer would not notice that call disappearing.
     """
-    from well_viewer.core import selection_controller as sc
+    from review.core import selection_controller as sc
 
     app = loaded_app
     _show(app, monkeypatch, "Scatter Plot")
@@ -151,7 +151,7 @@ def test_group_edit_redraws_a_visible_line_graph(loaded_app, monkeypatch):
     `redraw_scopes_or_defer` is told to skip it rather than paint them twice —
     which means a test watching only the coalescer sees nothing here either.
     """
-    from well_viewer.core import selection_controller as sc
+    from review.core import selection_controller as sc
 
     app = loaded_app
     _show(app, monkeypatch, "Line Graphs")

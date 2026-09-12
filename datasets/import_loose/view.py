@@ -34,13 +34,13 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
-from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
 from widgets.schema_picker import SchemaPicker
-from datasets._common.dataset_fields import is_free_destination
-from datasets._common.dataset_paths import (
+from datasets.core.dataset_fields import is_free_destination
+from datasets.core.dataset_paths import (
     destination_has_unrecognized_content,
     destination_is_complete_dataset,
 )
@@ -62,7 +62,7 @@ def _is_destination(root: Path) -> str:
     ``apply.py::_check_new_destination`` enforces authoritatively before any
     write happens.
 
-    The shared rule (`_common.dataset_fields.is_free_destination`), the same one
+    The shared rule (`core.dataset_fields.is_free_destination`), the same one
     Concatenate, Subset and Merge Plates use. Its wording is shared on purpose:
     a user moving between two Datasets tools should not be told the same thing
     two different ways. Checking only `in`/`out` here, as this page used to, let

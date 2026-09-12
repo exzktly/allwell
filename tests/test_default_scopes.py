@@ -15,8 +15,8 @@ from types import SimpleNamespace
 
 
 def test_distribution_and_heatmap_are_registered_scopes():
-    from well_viewer.core.scope_registry import register_default_scopes
-    from well_viewer.domain.fold_change_scopes import get_scope
+    from review.core.scope_registry import register_default_scopes
+    from review.domain.fold_change_scopes import get_scope
 
     register_default_scopes()
 
@@ -33,13 +33,13 @@ def test_default_scope_redraw_threads_app_to_ctx(monkeypatch):
     """The coalescer calls ``scope.redraw(app)`` with the app; the default
     scopes must forward ``app._ctx`` to the ctx-native ``redraw_app`` (not the
     raw app, which has no ``.window`` and would be swallowed)."""
-    import well_viewer.core.plot_orchestrator as po
+    import review.core.plot_orchestrator as po
 
     seen = []
     monkeypatch.setattr(po, "redraw_app", lambda ctx: seen.append(ctx))
 
-    from well_viewer.core.scope_registry import register_default_scopes
-    from well_viewer.domain.fold_change_scopes import get_scope
+    from review.core.scope_registry import register_default_scopes
+    from review.domain.fold_change_scopes import get_scope
 
     register_default_scopes()
 
@@ -66,9 +66,9 @@ def test_a_feature_scope_registers_only_when_a_registry_is_offered():
     import pytest
 
     pytest.importorskip("PySide6")
-    from well_viewer.core.scope_registry import register_default_scopes
-    from well_viewer.domain import fold_change_scopes
-    from well_viewer.features.registry import build_feature_registry
+    from review.core.scope_registry import register_default_scopes
+    from review.domain import fold_change_scopes
+    from review.features.registry import build_feature_registry
 
     fold_change_scopes._REGISTERED_SCOPES.clear()
     register_default_scopes()

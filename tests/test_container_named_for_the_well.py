@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from datasets._common.containers import container_dest  # noqa: E402
+from datasets.core.containers import container_dest  # noqa: E402
 
 
 def _zip(path: Path, names=("img_t1.tif",)) -> Path:

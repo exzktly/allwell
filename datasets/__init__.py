@@ -16,5 +16,5 @@ different plates along the well axis into one dataset.
 The heavy planning/rewriting logic lives in Qt-free modules so it is unit-
 testable without building the app; the Qt views are thin builders on top.
 Helpers shared across features (dataset-folder resolution, well-container IO,
-schema-safe filename rewriting) live in :mod:`datasets._common`.
+schema-safe filename rewriting) live in :mod:`datasets.core`.
 """

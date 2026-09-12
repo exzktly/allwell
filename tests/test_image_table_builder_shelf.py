@@ -13,16 +13,16 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import builder_view as B
-from well_viewer.features.image_browser.image_table import image_compose as IC
-from well_viewer.features.image_browser.image_table.state import (
+from review.features.image_browser.image_table import builder_view as B
+from review.features.image_browser.image_table import image_compose as IC
+from review.features.image_browser.image_table.state import (
     ChannelSpec, spec_to_state_fields,
 )
 
 
 def _fake_ctx(*, wells, channels, timepoints=None, fovs=None):
-    from well_viewer.core.app_runtime import AppRuntime
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from review.core.app_runtime import AppRuntime
+    from review.features.image_browser.image_table.state import ImageTableState
     info = {"available_timepoints": timepoints or [], "available_fovs": fovs or [],
             "nuclear_token": ""}
     app = SimpleNamespace()
@@ -211,7 +211,7 @@ def test_recognised_fluorophores_get_standard_colours():
     assert B._standard_cmap("NIR") == "Magenta"
     assert B._standard_cmap("NUC+SEG") is None      # unrecognised → nearest-tint
     # Cyan / Magenta are real, selectable LUTs that ramp black→colour.
-    from well_viewer.features.image_browser.image_table.image_compose import LUT_COLOR_NAMES
+    from review.features.image_browser.image_table.image_compose import LUT_COLOR_NAMES
     assert "Cyan" in LUT_COLOR_NAMES and "Magenta" in LUT_COLOR_NAMES
     from widgets.lut_cmaps import lut_cmap
     assert tuple(round(x) for x in lut_cmap("Magenta")(1.0)[:3]) == (1, 0, 1)

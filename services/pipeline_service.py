@@ -67,7 +67,7 @@ def _emit_execution_flags(args: list[str], opts: dict) -> None:
         # earlier StarDist run would otherwise change a Cellpose plate's reuse
         # key and force it to recompute for a setting that cannot affect it.
         # The Analyze form gates the same field the same way
-        # (``analyze.fields._METHOD_GATED_INT_FIELDS``); the two are held
+        # (``analyze.domain.fields._METHOD_GATED_INT_FIELDS``); the two are held
         # together by ``tests/test_tile_size_belongs_to_one_routine.py``, which
         # is the shape used for the StarDist threshold rule for the same reason
         # — ``services`` must not import the form's module.

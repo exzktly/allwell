@@ -12,14 +12,14 @@ from __future__ import annotations
 
 import json
 
-from well_viewer.domain.gating_state import (
+from review.domain.gating_state import (
     DEFAULT_THRESH_COUNT_ON,
     build_gating_block,
     read_gating_params,
     save_gating_to_pipeline_info,
 )
-from well_viewer.persistence.cell_gating import _write_gating_block_to_slice
-from well_viewer.core.cell_gating_state import CellGatingState
+from review.persistence.cell_gating import _write_gating_block_to_slice
+from review.core.cell_gating_state import CellGatingState
 
 
 def _sidecar(tmp_path, block=None):
@@ -83,7 +83,7 @@ def test_the_auto_threshold_rebuild_preserves_count_cutoffs(tmp_path, monkeypatc
     this one. The Otsu sweep itself is stubbed: what is under test is the
     rebuild, not the thresholds it computes.
     """
-    from well_viewer.data import auto_threshold as at
+    from review.data import auto_threshold as at
 
     _sidecar(tmp_path, {"thresh_frac_on": {"gfp": 60.0},
                         "thresh_count_on": {"w3cy5": 4.0}})

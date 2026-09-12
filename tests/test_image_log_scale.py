@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from well_viewer.core.ui_helpers import apply_log_scale, lut_colormap_to_rgb
+from review.core.ui_helpers import apply_log_scale, lut_colormap_to_rgb
 
 
 def test_apply_log_scale_floors_nonpositive_and_log10s():

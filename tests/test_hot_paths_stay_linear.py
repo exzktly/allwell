@@ -35,7 +35,7 @@ import pytest
 
 
 def _dbscan_set_calls(n_points: int) -> int:
-    from well_viewer.domain import spatial_compute as sc
+    from review.domain import spatial_compute as sc
 
     # One dense blob, so the whole input is a single cluster and the frontier
     # grows to n — which is the shape the quadratic rebuild was quadratic in.
@@ -197,7 +197,7 @@ def _plate_frame(n_rows: int):
 
 
 def test_a_complete_numeric_timepoint_column_never_reaches_the_string_parser(monkeypatch):
-    from well_viewer.data import data_loading as dl
+    from review.data import data_loading as dl
 
     called = {"n": 0}
     real = dl._ordinal_timepoints_df

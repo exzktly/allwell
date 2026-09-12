@@ -40,10 +40,10 @@ _ROOT_EXCUSED = {
 
 #: Packages the loop is right not to cover, with the reason.
 _PKG_EXCUSED = {
-    # Dev tooling, except `_bootstrap_lib.py`, which the spec ships by name
+    # Dev tooling, except `remote_bootstrap.py`, which the spec ships by name
     # into `scripts/` so its `REPO_ROOT = __file__.parent.parent` lands on the
     # bundle root. Shipping the rest would bundle the test harness.
-    "scripts": "dev tooling; _bootstrap_lib.py is shipped by name instead",
+    "scripts": "dev tooling — shell wrappers and build/test scripts, none of it imported by the application",
 }
 
 
@@ -58,7 +58,7 @@ def _path_parts(node: ast.AST) -> list[str] | None:
     """The string segments of a `_parent / "a" / "b.py"` expression.
 
     Reconstructed whole rather than by basename: entries are not all
-    top-level. `scripts/_bootstrap_lib.py` is two segments, and reading only
+    top-level. `services/remote_bootstrap.py` is two segments, and reading only
     the last one turns it into a root module that does not exist.
     """
     if isinstance(node, ast.Name):

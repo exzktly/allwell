@@ -107,7 +107,7 @@ def test_the_scan_finds_the_builders_it_measures():
 
 
 def test_every_leaf_with_its_own_channel_is_in_the_roster():
-    from well_viewer.core.ui_helpers import OWN_CHANNEL_LEAVES
+    from review.core.ui_helpers import OWN_CHANNEL_LEAVES
 
     missing = {title: keys for title, keys in _leaf_channel_scopes().items()
                if keys and title not in OWN_CHANNEL_LEAVES}
@@ -121,7 +121,7 @@ def test_every_leaf_with_its_own_channel_is_in_the_roster():
 
 def test_the_shared_leaves_are_not_in_the_roster():
     """The roster hides live controls, so a leaf that needs them stays out."""
-    from well_viewer.core.ui_helpers import OWN_CHANNEL_LEAVES
+    from review.core.ui_helpers import OWN_CHANNEL_LEAVES
 
     for title in ("Bar Plots", "Line Graphs", "Distribution", "Heat Map"):
         assert title not in OWN_CHANNEL_LEAVES

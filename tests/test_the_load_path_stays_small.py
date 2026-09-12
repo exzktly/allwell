@@ -81,7 +81,7 @@ def _peak_mb(fn):
 
 
 def test_the_read_does_not_allocate_a_string_per_cell(plate_csv):
-    from well_viewer.data.data_loading import load_well_csv
+    from review.data.data_loading import load_well_csv
 
     size_mb = plate_csv.stat().st_size / 1e6
     peak_mb, frame = _peak_mb(lambda: load_well_csv(plate_csv))
@@ -101,7 +101,7 @@ def test_the_text_columns_come_back_as_categories(plate_csv):
     A ratio ceiling cannot see this — the conversion happens after the read, so
     peak allocation barely moves — which is why it is asserted directly.
     """
-    from well_viewer.data.data_loading import load_well_csv
+    from review.data.data_loading import load_well_csv
 
     frame = load_well_csv(plate_csv)
     plain = [c for c in _TEXT_COLS
@@ -124,7 +124,7 @@ def test_a_text_column_that_does_not_repeat_is_left_alone():
     smallest frame that can show it.
     """
     pd = pytest.importorskip("pandas")
-    from well_viewer.data.data_loading import (
+    from review.data.data_loading import (
         _CATEGORY_MAX_UNIQUE_SHARE,
         _categorize_text_columns,
     )

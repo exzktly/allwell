@@ -48,7 +48,7 @@ def _build_every_plot_tab(app):
 def _flip_the_way_the_shell_does(ctx, mode):
     """``allwell.py::_on_present_toggled``'s loop, verbatim."""
     from PySide6.QtWidgets import QApplication
-    from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
+    from review.core.plot_card_actions import PLOT_CARD_ATTRS
     for attr in PLOT_CARD_ATTRS:
         card = ctx.widgets.get_or_none(attr)
         if card is not None and hasattr(card, "setPlotTheme"):
@@ -80,7 +80,7 @@ def test_the_toggle_reaches_the_response_card(loaded_app):
 def test_the_toggle_reaches_every_plot_card(loaded_app):
     """Not only Response. The roster has now been short three times — Spatial,
     Multivariate, and this — so the assertion is over all of them."""
-    from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
+    from review.core.plot_card_actions import PLOT_CARD_ATTRS
 
     app = loaded_app
     ctx = app._ctx
@@ -158,7 +158,7 @@ def _ink(artist):
 
 
 def _a_curve_with_an_omission():
-    from well_viewer.features.response import collect as rc
+    from review.features.response import collect as rc
 
     points = (rc.ResponsePoint("m0", 1.0, 5.0, 0.5, 3, "1"),
               rc.ResponsePoint("m1", 10.0, 9.0, 0.5, 3, "10"))
@@ -168,7 +168,7 @@ def _a_curve_with_an_omission():
 
 
 def _nothing_to_draw():
-    from well_viewer.features.response import collect as rc
+    from review.features.response import collect as rc
 
     return rc.ResponseData(variable_name="Dose", curves=[],
                            omitted=[("B2", rc.NO_VALUE)])
@@ -184,7 +184,7 @@ def test_the_caption_under_the_axes_is_drawn_in_the_theme_ink(qapp, mode):
     (§7.8 #1). Neither theme's muted ink is black, so the pre-fix bare
     ``ax.text`` fails this in both directions.
     """
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
     from widgets.plot_card import plot_tokens
 
     _card, ax = _themed_axes(mode)
@@ -202,7 +202,7 @@ def test_the_caption_under_the_axes_is_drawn_in_the_theme_ink(qapp, mode):
 def test_the_empty_state_sentences_are_drawn_in_the_theme_ink(qapp, mode):
     """The reason and its caption — the one drawing whose whole job is to be
     read, and the one a user meets before they have picked a variable."""
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
     from widgets.plot_card import plot_tokens
 
     _card, ax = _themed_axes(mode)

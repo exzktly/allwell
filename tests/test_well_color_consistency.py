@@ -15,7 +15,7 @@ pytestmark = pytest.mark.qt
 
 
 def test_multivariate_picker_pushes_rank_colors(loaded_app):
-    from well_viewer.domain.selections_model import color_for_well
+    from review.domain.selections_model import color_for_well
 
     app = loaded_app
     wells = list(app._app_state.dataset.well_paths.keys())[:3]
@@ -44,7 +44,7 @@ def test_multivariate_picker_pushes_rank_colors(loaded_app):
 
 def test_point_colors_by_well_uses_well_colors_when_groups_active():
     import numpy as np
-    from well_viewer.features.multivariate.renderer import _point_colors
+    from review.features.multivariate.renderer import _point_colors
 
     # rep-set mode: group_colors is keyed by GROUP name; well_colors by well.
     data = {

@@ -34,13 +34,13 @@ def _close_figures():
     yield
     plt.close("all")
 
-from well_viewer.core.plot_annotations import (  # noqa: E402
+from review.core.plot_annotations import (  # noqa: E402
     LABEL_HEADROOM,
     format_value_label,
     value_label_settings,
 )
-from well_viewer.core.plot_state import PlotState  # noqa: E402
-from well_viewer.features.barplot.controller import BarItem, render_bar_items  # noqa: E402
+from review.core.plot_state import PlotState  # noqa: E402
+from review.features.barplot.controller import BarItem, render_bar_items  # noqa: E402
 
 
 # ── defaults ─────────────────────────────────────────────────────────────────
@@ -300,8 +300,8 @@ def test_a_label_turns_inward_under_a_pinned_y_limit(monkeypatch):
     after the draw, and these labels carry ``annotation_clip=False`` — so an
     outside label ends up over the panel title rather than clipped. The same
     ceiling the significance brackets already stack under."""
-    import well_viewer.core.plot_style as ps
-    from well_viewer.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
+    import review.core.plot_style as ps
+    from review.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
 
     prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
     prefs["axis_buckets"] = {"1": {"y_lim_max": "1250"}}
@@ -320,7 +320,7 @@ def test_a_label_turns_inward_under_a_pinned_y_limit(monkeypatch):
 
 def _line_series():
     import numpy as np
-    from well_viewer.features.lineplot.controller import LinePoint, LineSeries
+    from review.features.lineplot.controller import LinePoint, LineSeries
 
     pts = [
         LinePoint(t=0.0, mean=100.0, spread=8.0, frac=0.2, n_above=30.0,
@@ -334,7 +334,7 @@ def _line_series():
 
 
 def _render_line(value_labels, fmt="", *, fc_active=False, series=None):
-    from well_viewer.features.lineplot.controller import LineAxes, render_line_series
+    from review.features.lineplot.controller import LineAxes, render_line_series
 
     fig, (axm, axf, axn, axc) = plt.subplots(4, 1, figsize=(6.0, 12.0))
     render_line_series(
@@ -377,7 +377,7 @@ def test_the_line_fraction_panel_gets_room_under_fold_change():
     the topmost label was drawn over the title while the Bar tab's Fraction
     panel, drawing the same field, had room."""
     import numpy as np
-    from well_viewer.features.lineplot.controller import LinePoint, LineSeries
+    from review.features.lineplot.controller import LinePoint, LineSeries
 
     pts = [LinePoint(t=0.0, mean=1.0, spread=0.1, frac=1.2, n_above=10.0,
                      n_total=100, frac_spread=0.1, n_above_spread=1.0),
@@ -457,7 +457,7 @@ def test_a_line_label_keeps_its_trace_s_colour():
 
 @pytest.mark.qt
 def test_the_overlay_round_trips_through_view_state(loaded_app):
-    from well_viewer.persistence import view_state as vs
+    from review.persistence import view_state as vs
 
     app = loaded_app
     app._app_state.plot.show_value_labels = True
@@ -487,7 +487,7 @@ def test_a_new_dataset_keeps_the_overlay():
 def test_the_anchor_clears_a_negative_bar_downwards():
     # A subtractive fold change puts bars below the axis. The label must go
     # below them, not through them.
-    from well_viewer.core.plot_annotations import annotate_value
+    from review.core.plot_annotations import annotate_value
 
     fig, ax = plt.subplots()
     annotate_value(ax, 0, -5.0, 1.0, anchor=-6.0)

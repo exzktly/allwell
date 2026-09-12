@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from well_viewer.domain.plot_groups import make_plot_group, validate_repair_plot_groups
-from well_viewer.domain.selections_model import from_block, to_block
+from review.domain.plot_groups import make_plot_group, validate_repair_plot_groups
+from review.domain.selections_model import from_block, to_block
 
 
 def test_plot_group_normalizes_wells_and_names():
@@ -54,7 +54,7 @@ def test_add_current_prefers_the_triggering_drawers_name_field(qapp, monkeypatch
     """
     from types import SimpleNamespace
     from PySide6.QtWidgets import QLineEdit
-    from well_viewer.core import sidebar_view as SV
+    from review.core import sidebar_view as SV
 
     # The "registry" (main sidebar) name field vs. the drawer that was clicked.
     registry_edit = QLineEdit(); registry_edit.setText("MAIN")
@@ -83,8 +83,8 @@ def test_add_current_prefers_the_triggering_drawers_name_field(qapp, monkeypatch
 def _persistence_fake_app(tmp_path, plot_groups):
     from types import SimpleNamespace
 
-    from well_viewer.core.dataset_state import DatasetState
-    from well_viewer.core.selection_state import SelectionState
+    from review.core.dataset_state import DatasetState
+    from review.core.selection_state import SelectionState
 
     app = SimpleNamespace(
         _app_state=SimpleNamespace(
@@ -104,7 +104,7 @@ def test_load_keeps_pipeline_info_groups_when_the_doc_has_no_section(tmp_path):
     """A dataset can carry Plot Groups in pipeline_info.json and no
     persistence.json section (folder copied without the sidecar). The
     sample-definitions hydrator runs first; this loader must not wipe it."""
-    from well_viewer.persistence import plot_groups as persist
+    from review.persistence import plot_groups as persist
 
     app = _persistence_fake_app(
         tmp_path,
@@ -122,9 +122,9 @@ def test_load_keeps_pipeline_info_groups_when_the_doc_has_no_section(tmp_path):
 def test_plot_groups_persistence_round_trip(tmp_path):
     from types import SimpleNamespace
 
-    from well_viewer.core.dataset_state import DatasetState
-    from well_viewer.core.selection_state import SelectionState
-    from well_viewer.persistence import plot_groups as persist
+    from review.core.dataset_state import DatasetState
+    from review.core.selection_state import SelectionState
+    from review.persistence import plot_groups as persist
 
     app = SimpleNamespace(
         _app_state=SimpleNamespace(

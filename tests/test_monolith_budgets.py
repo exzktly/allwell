@@ -194,7 +194,7 @@ ANALYZE_TAB_BUDGET = 855
 # and the form chrome (_section / _row / _entry / _info_icon / reveal_section →
 # analyze.form_chrome.AnalyzeFormChromeMixin) and the entry-boundary field
 # validation (the field tables and _numeric_option_errors →
-# analyze/fields.py) all did.
+# analyze/domain/fields.py) all did.
 # 1170 -> 1107: the per-method segmentation parameter pages (the NamedPageStack
 # and its StarDist / watershed / Cellpose / label-free / classical pages) moved
 # to analyze.seg_params.AnalyzeSegParamsMixin, which is also where the
@@ -235,7 +235,7 @@ def test_remote_runner_line_budget():
 
 
 def test_image_table_controller_line_budget():
-    n = _line_count("well_viewer/features/image_browser/image_table/controller.py")
+    n = _line_count("review/features/image_browser/image_table/controller.py")
     assert n <= IMAGE_TABLE_CONTROLLER_BUDGET, (
         f"image_table/controller.py is {n} lines, over the "
         f"{IMAGE_TABLE_CONTROLLER_BUDGET} budget. Split a cohesive cluster "
@@ -245,7 +245,7 @@ def test_image_table_controller_line_budget():
 
 
 def test_scatter_controller_line_budget():
-    n = _line_count("well_viewer/features/scatter/controller.py")
+    n = _line_count("review/features/scatter/controller.py")
     assert n <= SCATTER_CONTROLLER_BUDGET, (
         f"scatter/controller.py is {n} lines, over the {SCATTER_CONTROLLER_BUDGET} "
         "budget. Keep pure data collection in scatter/collect.py; the ratchet "
@@ -254,7 +254,7 @@ def test_scatter_controller_line_budget():
 
 
 def test_barplot_controller_line_budget():
-    n = _line_count("well_viewer/features/barplot/controller.py")
+    n = _line_count("review/features/barplot/controller.py")
     assert n <= BARPLOT_CONTROLLER_BUDGET, (
         f"barplot/controller.py is {n} lines, over the {BARPLOT_CONTROLLER_BUDGET} "
         "budget. Keep pure data collection in barplot/collect.py and rendering in "
@@ -263,7 +263,7 @@ def test_barplot_controller_line_budget():
 
 
 def test_review_image_controller_line_budget():
-    n = _line_count("well_viewer/features/image_browser/review_image/controller.py")
+    n = _line_count("review/features/image_browser/review_image/controller.py")
     assert n <= REVIEW_IMAGE_CONTROLLER_BUDGET, (
         f"review_image/controller.py is {n} lines, over the "
         f"{REVIEW_IMAGE_CONTROLLER_BUDGET} budget. Extract a cohesive cluster "

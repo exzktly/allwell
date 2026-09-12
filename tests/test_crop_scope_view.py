@@ -5,7 +5,7 @@ un-armed default, so what is tested here is the difference: an untouched field
 means *every* frame, the popover says so, and one edit narrows one field without
 pinning the other two to whatever happened to be on screen.
 
-Built against a stub ctx — Qt widgets, no ``WellViewerApp`` — so the seeding, the
+Built against a stub ctx — Qt widgets, no ``ReviewApp`` — so the seeding, the
 arming and the button readout are exercised rather than reasoned about. The
 armed scope decides which cells count toward every downstream number, so what
 the button says has to match what the state holds.
@@ -23,9 +23,9 @@ pd = pytest.importorskip("pandas")
 from PySide6.QtWidgets import QPushButton, QWidget
 
 from widgets.checkable_dropdown import CheckableDropdown
-from well_viewer.features.crop.controller import CROP_SCOPE
-from well_viewer.features.image_browser.review_image.state import ReviewImageState
-from well_viewer.features.preview.crop_scope_view import (
+from review.features.crop.controller import CROP_SCOPE
+from review.features.image_browser.review_image.state import ReviewImageState
+from review.features.preview.crop_scope_view import (
     build_crop_scope_control, describe_crop_scope,
 )
 
@@ -204,7 +204,7 @@ def test_each_tick_writes_state_but_only_one_recompute_runs(built, monkeypatch):
     re-derivation re-projects every cached well, redraws the plot and re-renders
     the canvas. Ticking eleven wells one at a time ran eleven of those on the UI
     thread. The state and the button still move on every tick."""
-    from well_viewer.features.preview import frame_scope_view
+    from review.features.preview import frame_scope_view
 
     ctx, btn, _parent = built
     calls: list[int] = []
@@ -223,7 +223,7 @@ def test_each_tick_writes_state_but_only_one_recompute_runs(built, monkeypatch):
 
 def test_closing_the_popover_with_nothing_pending_recomputes_nothing(built,
                                                                      monkeypatch):
-    from well_viewer.features.preview import frame_scope_view
+    from review.features.preview import frame_scope_view
 
     _ctx_, btn, _parent = built
     calls: list[int] = []

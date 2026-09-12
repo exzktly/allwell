@@ -22,9 +22,9 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from well_viewer.core.channel_state import ChannelState
-from well_viewer.core.dataset_state import DatasetState
-from well_viewer.domain.metric_registry import channel_supports_smfish
+from review.core.channel_state import ChannelState
+from review.core.dataset_state import DatasetState
+from review.domain.metric_registry import channel_supports_smfish
 
 
 # ── the shared predicate ────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ def _ctx_with_smfish(*channels: str):
 def test_smfish_item_enables_for_an_upper_case_channel_label():
     """The scatter / stats regression: those combos hold "CY5", the state holds
     "cy5". Comparing them raw left the item disabled on every channel."""
-    from well_viewer.core.channel_state_controller import populate_metric_combo
+    from review.core.channel_state_controller import populate_metric_combo
 
     cb = _FakeCombo()
     populate_metric_combo(
@@ -125,7 +125,7 @@ def test_smfish_item_enables_for_an_upper_case_channel_label():
 
 def test_smfish_item_enables_for_the_normalised_token():
     """The global Property combo passes the token itself — still works."""
-    from well_viewer.core.channel_state_controller import populate_metric_combo
+    from review.core.channel_state_controller import populate_metric_combo
 
     cb = _FakeCombo()
     populate_metric_combo(
@@ -136,7 +136,7 @@ def test_smfish_item_enables_for_the_normalised_token():
 
 
 def test_smfish_item_stays_disabled_for_a_non_smfish_channel():
-    from well_viewer.core.channel_state_controller import populate_metric_combo
+    from review.core.channel_state_controller import populate_metric_combo
 
     cb = _FakeCombo()
     populate_metric_combo(
@@ -153,7 +153,7 @@ def test_smfish_channels_are_published_before_the_combos_repopulate(monkeypatch)
     reads ``smfish_channels`` to decide whether smFISH Count is selectable. The
     set therefore has to be current *before* that call — publishing it after
     left the item greyed out against columns that already existed on disk."""
-    import well_viewer.core.channel_state_controller as csc
+    import review.core.channel_state_controller as csc
 
     seen: list[set[str]] = []
     monkeypatch.setattr(
@@ -181,7 +181,7 @@ def test_smfish_channels_are_published_before_the_combos_repopulate(monkeypatch)
 def test_recalculate_threshold_clears_smfish_channels_when_none_are_detected(monkeypatch):
     """The set is re-derived from the loaded CSVs each pass, so a dataset with
     no count columns must not inherit the previous dataset's channels."""
-    import well_viewer.core.channel_state_controller as csc
+    import review.core.channel_state_controller as csc
 
     monkeypatch.setattr(csc, "update_channel_selector", lambda _ctx: None)
     monkeypatch.setattr(csc, "detect_smfish_channels", lambda _df: [])
@@ -201,7 +201,7 @@ def test_recalculate_threshold_clears_smfish_channels_when_none_are_detected(mon
 def test_recalculate_threshold_drops_a_stale_smfish_metric(monkeypatch):
     """Invariant kept from the reorder: a channel with no smFISH data must not
     be left holding the ``smfish_count`` metric."""
-    import well_viewer.core.channel_state_controller as csc
+    import review.core.channel_state_controller as csc
 
     monkeypatch.setattr(csc, "update_channel_selector", lambda _ctx: None)
     monkeypatch.setattr(csc, "detect_smfish_channels", lambda _df: [])
@@ -223,7 +223,7 @@ def test_recalculate_threshold_drops_a_stale_smfish_metric(monkeypatch):
 def test_detectors_tolerate_an_unloaded_dataset():
     """Guards the assumption the ordering tests above lean on: with no wells
     loaded the sample frame is empty and detection is a no-op, not a crash."""
-    from well_viewer.data.data_loading import (
+    from review.data.data_loading import (
         detect_fluor_channels, detect_smfish_channels,
     )
 

@@ -18,7 +18,7 @@ import ast
 
 import pytest
 
-from well_viewer.domain.dataset_name import dataset_display_name
+from review.domain.dataset_name import dataset_display_name
 
 from tests._repo_scan import parse_source, python_sources, rel
 
@@ -78,7 +78,7 @@ def test_the_export_cover_names_the_dataset_root(split_dataset):
     """Reported: both exports opened with the folder name "out"."""
     from types import SimpleNamespace
 
-    from well_viewer.features.saved_plots.controller import _dataset_name
+    from review.features.saved_plots.controller import _dataset_name
 
     ctx = SimpleNamespace(state=SimpleNamespace(
         dataset=SimpleNamespace(data_dir=split_dataset)))
@@ -89,7 +89,7 @@ def test_the_home_masthead_names_the_dataset_root(split_dataset):
     """Same defect, unreported: Home titled every pipeline dataset "out"."""
     from types import SimpleNamespace
 
-    from well_viewer.features.home.collect import identity
+    from review.features.home.collect import identity
 
     ctx = SimpleNamespace(state=SimpleNamespace(
         dataset=SimpleNamespace(data_dir=split_dataset)))
@@ -100,7 +100,7 @@ def test_the_home_masthead_names_the_dataset_root(split_dataset):
 
 #: The one module allowed to take ``.name`` off a dataset directory — it is
 #: where the rule lives.
-_RULE_MODULE = "well_viewer/domain/dataset_name.py"
+_RULE_MODULE = "review/domain/dataset_name.py"
 
 #: Names that hold the directory Review loaded. ``.name`` on one of them is the
 #: literal "out" for a pipeline dataset, which is the bug.
@@ -155,7 +155,7 @@ def test_nothing_re_derives_the_dataset_name():
             offenders.append(f"{where}:{line}: {expression}")
     assert not offenders, (
         "the dataset's display name comes from "
-        "`well_viewer.domain.dataset_name.dataset_display_name`, not from the "
+        "`review.domain.dataset_name.dataset_display_name`, not from the "
         "loaded directory's own name — Review loads `<dataset_root>/out`, so "
         "that name is the literal \"out\" on every pipeline dataset:\n  "
         + "\n  ".join(offenders))

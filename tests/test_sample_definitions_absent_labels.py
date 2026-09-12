@@ -20,9 +20,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.core.widget_registry import WidgetRegistry
-from well_viewer.domain.sample_definitions import build_sample_definitions_v2
-from well_viewer.persistence import sample_definitions
+from review.core.widget_registry import WidgetRegistry
+from review.domain.sample_definitions import build_sample_definitions_v2
+from review.persistence import sample_definitions
 
 
 FULL_PLATE_LABELS = {
@@ -65,7 +65,7 @@ def plate(tmp_path, monkeypatch):
 
     # The stats-cache invalidation reaches the plot toggles and the review-image
     # slice; neither is part of the label round-trip.
-    import well_viewer.core.selection_controller as selection_controller
+    import review.core.selection_controller as selection_controller
     monkeypatch.setattr(
         selection_controller, "invalidate_stats_cache", lambda c: None
     )

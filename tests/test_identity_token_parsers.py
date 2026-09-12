@@ -32,14 +32,14 @@ from util import fov as fov_mod
 from util import timepoint as tp_mod
 from util.channel_roles import channel_tokens_from_roles, default_channel_roles
 from util.schema_infer import infer_schema
-from well_viewer.data.frame_load import match_image_ref
-from well_viewer.data.image_identity import (
+from review.data.frame_load import match_image_ref
+from domain.image_identity import (
     PipelineSchema,
     Role,
     classify_filename_role,
     parse_image_filename,
 )
-from well_viewer.data.image_resolver import (
+from review.data.image_resolver import (
     classify_filename_kind,
     normalize_numeric_token,
 )
@@ -268,12 +268,12 @@ def test_no_absolute_timepoint_tolerance_in_features():
     timepoint-ish variable counts.
     """
     offenders = []
-    for path in sorted((REPO_ROOT / "well_viewer" / "features").rglob("*.py")):
+    for path in sorted((REPO_ROOT / "review" / "features").rglob("*.py")):
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
             if "1e-6" in line and _TP_NAME_RE.search(line):
                 rel = path.relative_to(REPO_ROOT)
                 offenders.append(f"{rel}:{lineno}: {line.strip()}")
     assert not offenders, (
-        "timepoint comparisons must go through well_viewer.domain.tp_match:\n"
+        "timepoint comparisons must go through domain.tp_match:\n"
         + "\n".join(offenders)
     )

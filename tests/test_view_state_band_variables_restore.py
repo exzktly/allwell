@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.persistence import view_state
+from review.persistence import view_state
 
 pytestmark = pytest.mark.qt
 

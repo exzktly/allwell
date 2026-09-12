@@ -8,18 +8,20 @@
 # Prereqs:
 #   - The `allwell` conda env is activated (mamba activate allwell).
 #   - Dependencies installed:
-#       pip install --no-build-isolation -r _Docs\requirements.txt
+#       pip install --no-build-isolation -r requirements.txt
 #
 # Usage (from the repo root):
 #   .\scripts\build_executable.ps1            # incremental build
 #   .\scripts\build_executable.ps1 -Clean     # wipe build\ and dist\ first
 #
-# The default build is slim: StarDist + Cellpose inference only. Multi-frame
-# tracking + its training stack is opt-in — install the extras and set the flag
-# (the spec reads it via os.environ, same as the macOS/Linux build):
-#   pip install --no-build-isolation -r _Docs\requirements-tracking.txt
-#   $env:ALLWELL_WITH_TRACKING = '1'
-#   .\scripts\build_executable.ps1 -Clean
+# The build is slim: StarDist + Cellpose inference only. There is no
+# tracking/training extra to opt into — the manifest this block used to name
+# (`requirements-tracking.txt`) has never existed in this repository, and
+# `all_well.spec` reads only ALLWELL_PROFILE and ALLWELL_THEME from the
+# environment, never ALLWELL_WITH_TRACKING. The flag and the line it printed
+# are gone rather than repointed: a build that announces "bundling
+# tracking/training stack" and bundles nothing is the one thing this codebase
+# treats as worse than failing outright.
 #
 # The other two build-time switches the spec reads from the environment work
 # the same way here as on macOS/Linux:
@@ -75,14 +77,11 @@ if ($pythonCmd -eq 'py') { $pyArgs += '-3' }
 
 & $pythonCmd @pyArgs -c "import PyInstaller" 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "PyInstaller is not importable in the active Python env.`nRun: pip install --no-build-isolation -r _Docs\requirements.txt"
+    Write-Error "PyInstaller is not importable in the active Python env.`nRun: pip install --no-build-isolation -r requirements.txt"
     exit 1
 }
 
 Write-Host "Running PyInstaller against $specFile ..."
-if ($env:ALLWELL_WITH_TRACKING -and $env:ALLWELL_WITH_TRACKING -ne '0') {
-    Write-Host '  (ALLWELL_WITH_TRACKING set - bundling tracking/training stack)'
-}
 if ($env:ALLWELL_PROFILE -and $env:ALLWELL_PROFILE -ne 'full') {
     Write-Host "  (ALLWELL_PROFILE=$env:ALLWELL_PROFILE - building a feature subset)"
 }

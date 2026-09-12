@@ -24,15 +24,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from well_viewer.data.data_loading import (
+from review.data.data_loading import (
     aggregate_with_threshold_df,
     load_well_csv,
 )
-from well_viewer.data.image_identity import cell_keys_for_dataframe
-from well_viewer.domain.fov_integrity import check_fov_labels
-from well_viewer.domain.stats_compute import _norm_fov
-from well_viewer.domain.text_columns import as_text, fov_text, text_column
-from well_viewer.features.home.cell_gating.gating_compute import (
+from domain.image_identity import cell_keys_for_dataframe
+from review.domain.fov_integrity import check_fov_labels
+from review.domain.stats_compute import _norm_fov
+from domain.text_columns import as_text, fov_text, text_column
+from review.features.home.cell_gating.gating_compute import (
     _cell_gating_first_frame_rows,
 )
 
@@ -115,7 +115,7 @@ def test_cell_keys_are_built(plate):
 
 
 def test_dataset_state_rebuilds_its_menus(plate):
-    from well_viewer.core.dataset_state import DatasetState
+    from review.core.dataset_state import DatasetState
 
     state = DatasetState()
     state.cache["A1"] = plate

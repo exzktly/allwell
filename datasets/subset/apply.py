@@ -21,9 +21,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from util.aw_safe import swallow
-from well_viewer.data.image_identity import normalize_fov, normalize_tp
-from datasets._common.concurrency import pick_workers
-from datasets._common.containers import (
+from domain.image_identity import normalize_fov, normalize_tp
+from datasets.core.concurrency import pick_workers
+from datasets.core.containers import (
     FILENAME_COLUMN,
     OVERRIDES_FILENAME,
     OVERRIDES_SCHEMA_VERSION,
@@ -193,11 +193,11 @@ def execute_plan(
     well, so a dashboard can render that well as a filling dial rather than a
     binary copying/done state. The two passes a well takes (the raw input, then
     the QC archive) are fused into one sweep from 0 to *total* by
-    :class:`~datasets._common.containers.WellFraction` — without that, each
+    :class:`~datasets.core.containers.WellFraction` — without that, each
     pass would fill the same dial from empty on its own.
 
     Wells are copied in parallel — *workers* threads (0 = auto, see
-    :func:`datasets._common.concurrency.pick_workers`), each owning one
+    :func:`datasets.core.concurrency.pick_workers`), each owning one
     well's own destination files with nothing shared between wells. ``log``/
     ``progress`` calls before a well's work starts are serialised behind a
     lock; aggregating each well's result back into ``well_row_counts``/etc.
@@ -306,7 +306,7 @@ def execute_plan(
                             )
                         )
                     # cell_overrides.json stores fov/tp already normalized (via
-                    # CellKey.as_tuple, well_viewer/data/image_identity.py), so
+                    # CellKey.as_tuple, domain/image_identity.py), so
                     # this set must be normalized the same way or a parseable
                     # timepoint label like "24h" never matches its normalized
                     # "24" and _copy_filtered_overrides drops the override.

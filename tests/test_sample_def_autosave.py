@@ -10,8 +10,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.persistence import sample_definitions as sd
-from well_viewer.persistence.registry import build_persistence_registry
+from review.persistence import sample_definitions as sd
+from review.persistence.registry import build_persistence_registry
 
 
 def test_sample_definitions_registered_for_autosave():
@@ -64,8 +64,8 @@ def test_label_edit_schedules_autosave(loaded_app, monkeypatch):
     app._app_state.selection.selected_wells = set(
         list(app._app_state.dataset.well_paths.keys())[:1]
     )
-    from well_viewer.core import ui_helpers
-    from well_viewer.core.selection_controller import labels_apply_affix
+    from review.core import ui_helpers
+    from review.core.selection_controller import labels_apply_affix
 
     # labels_apply_affix prompts for the affix text through ask_name_dialog,
     # which is a modal QInputDialog. Under the offscreen QPA there is nobody to
@@ -92,9 +92,9 @@ def test_cell_gating_edit_persists_without_save_button(loaded_app, mini_dataset)
     not strand gating state. Guards the autosave coverage the Save removal
     relies on.
     """
-    from well_viewer.domain.gating_state import read_gating_params
-    from well_viewer.features.home.cell_gating.controller import cell_gating_on_threshold_frac_on_change
-    from well_viewer.features.home.cell_gating.tab_view import build_cell_gating_subtab
+    from review.domain.gating_state import read_gating_params
+    from review.features.home.cell_gating.controller import cell_gating_on_threshold_frac_on_change
+    from review.features.home.cell_gating.tab_view import build_cell_gating_subtab
 
     app = loaded_app
     if not hasattr(app, "_cell_gating_thresh_frac_edits"):

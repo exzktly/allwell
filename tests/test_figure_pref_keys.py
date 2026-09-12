@@ -63,7 +63,7 @@ def registered_figures() -> dict[str, str]:
 
 
 def test_every_registered_figure_has_a_stable_pref_key():
-    from well_viewer.core.plot_style import _FIG_PREF_KEY_MAP
+    from review.core.plot_style import _FIG_PREF_KEY_MAP
 
     mapped = {attr for attr, _key in _FIG_PREF_KEY_MAP}
     missing = sorted(
@@ -80,7 +80,7 @@ def test_every_registered_figure_has_a_stable_pref_key():
 
 def test_the_key_map_has_no_stale_entries():
     """An entry naming a figure nothing registers is not describing the app."""
-    from well_viewer.core.plot_style import _FIG_PREF_KEY_MAP
+    from review.core.plot_style import _FIG_PREF_KEY_MAP
 
     registered = set(registered_figures())
     stale = sorted(attr for attr, _key in _FIG_PREF_KEY_MAP if attr not in registered)
@@ -92,7 +92,7 @@ def test_the_key_map_has_no_stale_entries():
 
 def test_the_keys_are_distinct():
     """Two figures sharing a key would silently share one set of prefs."""
-    from well_viewer.core.plot_style import _FIG_PREF_KEY_MAP
+    from review.core.plot_style import _FIG_PREF_KEY_MAP
 
     keys = [key for _attr, key in _FIG_PREF_KEY_MAP]
     assert len(keys) == len(set(keys)), f"duplicate pref key(s) in {keys}"

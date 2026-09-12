@@ -23,7 +23,7 @@ import types
 
 import pytest
 
-from well_viewer.features.smfish import tab_view
+from review.features.smfish import tab_view
 
 
 class _Sig:
@@ -62,7 +62,7 @@ def harness(monkeypatch, tmp_path):
     monkeypatch.setattr(tab_view, "_smfish_refresh_app_cache", lambda *a, **k: None)
     monkeypatch.setattr(tab_view.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(tab_view.QMessageBox, "information", staticmethod(lambda *a, **k: None))
-    import well_viewer.persistence.smfish as persist
+    import review.persistence.smfish as persist
     monkeypatch.setattr(persist, "save_threshold", _fake_save_threshold)
 
     smfish = types.SimpleNamespace(
@@ -104,7 +104,7 @@ def test_a_dataset_swap_mid_run_blocks_the_stamp(harness, caplog):
     tab_view._smfish_apply_to_all(ctx)
     # The user opens another plate while the worker is still going.
     ctx.state.dataset.data_dir = plate_b
-    with caplog.at_level("WARNING", logger="well_viewer"):
+    with caplog.at_level("WARNING", logger="review"):
         captured["after_csv_cb"](0)
     assert saved == [], "the abandoned run stamped its threshold into the new plate"
     # And it must not be silent — a skipped persist the user cannot see is the

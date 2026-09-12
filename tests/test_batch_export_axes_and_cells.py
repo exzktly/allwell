@@ -36,19 +36,19 @@ import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 from matplotlib.figure import Figure  # noqa: E402
 
-from well_viewer.features.batch_export._panels import (  # noqa: E402
+from review.features.batch_export._panels import (  # noqa: E402
     AxesSpec, Panel, PanelAxis, figure_height, panel_axes, pin_scales,
 )
-from well_viewer.features.batch_export.bar_panel import (  # noqa: E402
+from review.features.batch_export.bar_panel import (  # noqa: E402
     BarBatchExportPanel,
 )
-from well_viewer.features.batch_export.base_panel import (  # noqa: E402
+from review.features.batch_export.base_panel import (  # noqa: E402
     BatchExportPanel, _parse_limit, _scale_choice, _summarise_notes,
 )
-from well_viewer.features.batch_export.response_panel import (  # noqa: E402
+from review.features.batch_export.response_panel import (  # noqa: E402
     ResponseBatchExportPanel,
 )
-from well_viewer.features.batch_export.scatter_panel import (  # noqa: E402
+from review.features.batch_export.scatter_panel import (  # noqa: E402
     ScatterBatchExportPanel,
 )
 
@@ -260,7 +260,7 @@ def test_the_style_pass_really_honours_what_is_pinned_and_handed():
     The two mechanisms are only worth using if that function reads them, and
     reading its source is not the same as running it.
     """
-    from well_viewer.core.plot_style import apply_export_style_prefs
+    from review.core.plot_style import apply_export_style_prefs
 
     fig = Figure()
     ax = fig.add_subplot(1, 1, 1)
@@ -349,7 +349,7 @@ def test_every_mode_names_the_cell_scope_of_its_own_source_tab():
     for cls, (tab, feature) in expected.items():
         assert cls._SOURCE_TAB == tab
         assert cls._CELL_SCOPE == (
-            f"well_viewer.features.{feature}.cell_scope_compute")
+            f"review.features.{feature}.cell_scope_compute")
         # And the module really exposes the callable, so a typo in the path is
         # a failure here rather than at the end of somebody's export.
         assert callable(import_module(cls._CELL_SCOPE).cell_scope)
@@ -404,7 +404,7 @@ def test_every_mode_says_which_panels_its_x_row_governs():
 # ── the rows behind a figure ────────────────────────────────────────────────
 
 def _scope(wells, *, plot="line", val_col="gfp_mean_intensity"):
-    from well_viewer.features.export.cell_scope_compute import CellScope
+    from review.features.export.cell_scope_compute import CellScope
 
     return CellScope(plot=plot, val_col=val_col, ratios={}, threshold=0.0,
                      fluor_gates={}, wells=tuple(wells))
@@ -453,11 +453,11 @@ def test_the_per_cell_file_names_the_wells_its_scope_asked_for(tmp_path,
     the wrong implementation that passes a "did it run" test is one that
     exports the plot on screen under this group's name.
     """
-    import well_viewer.features.batch_export._cell_rows as cr
+    import review.features.batch_export._cell_rows as cr
 
     frames = {"A01": _frame(3, "A01"), "A02": _frame(2, "A02")}
     monkeypatch.setattr(cr, "get_rows", lambda ctx, w: frames[w], raising=False)
-    monkeypatch.setattr("well_viewer.data.data_loading.get_rows",
+    monkeypatch.setattr("review.data.data_loading.get_rows",
                         lambda ctx, w: frames[w])
     monkeypatch.setattr(cr, "figure_names_map", lambda ctx: {})
     monkeypatch.setattr(cr, "_scope_block",
@@ -479,7 +479,7 @@ def test_the_per_cell_file_names_the_wells_its_scope_asked_for(tmp_path,
 
 
 def test_a_scope_naming_no_loaded_well_writes_nothing_and_says_so(tmp_path):
-    from well_viewer.features.batch_export import _cell_rows as cr
+    from review.features.batch_export import _cell_rows as cr
 
     out = tmp_path / "batch_G_cells.csv"
     assert cr.write_cell_rows(_cell_ctx({}), _scope([("G", "Z99")]), out) == -1
@@ -502,7 +502,7 @@ def test_the_scope_overrides_carry_this_run_s_column_and_timepoints():
     # Nothing overridden is an empty dict, so the tab's own answer stands.
     assert panel._cell_scope_kwargs(val_col=None, timepoints=None) == {}
 
-    from well_viewer.features.barplot.cell_scope_compute import cell_scope
+    from review.features.barplot.cell_scope_compute import cell_scope
 
     scope = cell_scope(_scope_ctx(), val_col="mcherry_total_intensity",
                        timepoints=(24.0, 48.0))
@@ -521,7 +521,7 @@ def test_the_scatter_modes_build_two_different_scopes():
     assert cells._CELL_SCOPE_FN == "cell_scope"
     assert agg._CELL_SCOPE_FN == "agg_cell_scope"
 
-    from well_viewer.features.scatter import cell_scope_compute as m
+    from review.features.scatter import cell_scope_compute as m
 
     assert callable(m.cell_scope) and callable(m.agg_cell_scope)
 
@@ -635,7 +635,7 @@ class _RowsStub:
     _app_val_col_scope = BatchExportPanel._app_val_col_scope
     _control_selections = BatchExportPanel._control_selections
     _fold_change_control_refs = BatchExportPanel._fold_change_control_refs
-    _CELL_SCOPE = "well_viewer.features.lineplot.cell_scope_compute"
+    _CELL_SCOPE = "review.features.lineplot.cell_scope_compute"
     _CELL_SCOPE_FN = "cell_scope"
 
     def __init__(self, wanted=True):
@@ -656,7 +656,7 @@ class _RowsStub:
 
 
 def _group(name="Drug A"):
-    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+    from review.domain.batch_models import BarGroup, ReplicateSet
 
     return BarGroup(name, [ReplicateSet("rep 1", ["B02", "B03"])])
 
@@ -669,7 +669,7 @@ def test_a_run_that_asked_for_rows_writes_them_under_the_group_s_stem(
     it — the review's second mutation — so this one goes through the method the
     job actually invokes and checks what reached the writer.
     """
-    import well_viewer.features.batch_export.base_panel as bp
+    import review.features.batch_export.base_panel as bp
 
     seen = {}
 
@@ -680,7 +680,7 @@ def test_a_run_that_asked_for_rows_writes_them_under_the_group_s_stem(
         return "SCOPE"
 
     monkeypatch.setattr(
-        "well_viewer.features.lineplot.cell_scope_compute.cell_scope",
+        "review.features.lineplot.cell_scope_compute.cell_scope",
         _fake_scope)
 
     def _fake_write(ctx, scope, path):
@@ -706,7 +706,7 @@ def test_a_run_that_asked_for_rows_writes_them_under_the_group_s_stem(
 
 
 def test_a_run_that_did_not_ask_for_rows_writes_none(tmp_path, monkeypatch):
-    import well_viewer.features.batch_export.base_panel as bp
+    import review.features.batch_export.base_panel as bp
 
     monkeypatch.setattr(bp, "write_cell_rows",
                         lambda *a, **k: pytest.fail("should not be called"))
@@ -717,10 +717,10 @@ def test_a_run_that_did_not_ask_for_rows_writes_none(tmp_path, monkeypatch):
 
 def test_a_group_with_no_loaded_wells_is_reported_not_silently_skipped(
         tmp_path, monkeypatch):
-    import well_viewer.features.batch_export.base_panel as bp
+    import review.features.batch_export.base_panel as bp
 
     monkeypatch.setattr(
-        "well_viewer.features.lineplot.cell_scope_compute.cell_scope",
+        "review.features.lineplot.cell_scope_compute.cell_scope",
         lambda ctx, **k: "SCOPE")
     monkeypatch.setattr(bp, "write_cell_rows", lambda ctx, scope, path: -1)
 
@@ -733,7 +733,7 @@ def test_a_group_with_no_loaded_wells_is_reported_not_silently_skipped(
 def test_a_scope_the_tab_declines_to_build_is_reported(tmp_path, monkeypatch):
     """Some tabs return ``None`` before a first draw. Said, not written blank."""
     monkeypatch.setattr(
-        "well_viewer.features.lineplot.cell_scope_compute.cell_scope",
+        "review.features.lineplot.cell_scope_compute.cell_scope",
         lambda ctx, **k: None)
     panel = _RowsStub()
     panel._write_cell_rows_for(_group(), tmp_path, "batch_Drug_A")
@@ -749,10 +749,10 @@ def test_the_three_refusals_are_told_apart(tmp_path, monkeypatch):
     selection that is already correct — and printed over a gating recompute it
     hides the one case where waiting is the whole answer.
     """
-    import well_viewer.features.batch_export.base_panel as bp
+    import review.features.batch_export.base_panel as bp
 
     monkeypatch.setattr(
-        "well_viewer.features.lineplot.cell_scope_compute.cell_scope",
+        "review.features.lineplot.cell_scope_compute.cell_scope",
         lambda ctx, **k: "SCOPE")
     said = {}
     for code, expect in ((-1, "no loaded wells"),
@@ -777,7 +777,7 @@ def test_the_writer_refuses_while_cell_gating_is_recomputing(monkeypatch,
     worker's callbacks land — so a run started mid-recompute would give its
     early groups one gating state and its later ones another.
     """
-    import well_viewer.features.batch_export._cell_rows as cr
+    import review.features.batch_export._cell_rows as cr
 
     monkeypatch.setattr(cr, "_gating_busy", lambda ctx: True)
     out = tmp_path / "x.csv"
@@ -791,13 +791,13 @@ def test_the_writer_refuses_while_cell_gating_is_recomputing(monkeypatch,
 
 def test_unreadable_rows_are_not_reported_as_a_missing_selection(monkeypatch,
                                                                  tmp_path):
-    import well_viewer.features.batch_export._cell_rows as cr
+    import review.features.batch_export._cell_rows as cr
 
     monkeypatch.setattr(cr, "_gating_busy", lambda ctx: False)
 
     def _boom(ctx, well):
         raise OSError("cache is bad")
 
-    monkeypatch.setattr("well_viewer.data.data_loading.get_rows", _boom)
+    monkeypatch.setattr("review.data.data_loading.get_rows", _boom)
     ctx = _cell_ctx({"A01": None})
     assert cr.write_cell_rows(ctx, _scope([("G", "A01")]), tmp_path / "x.csv") == -2

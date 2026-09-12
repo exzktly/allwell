@@ -9,7 +9,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from well_viewer.features.barplot.controller import BarItem, render_bar_items
+from review.features.barplot.controller import BarItem, render_bar_items
 
 
 def _item(key, mean, spread, frac, frac_spread, n_above, n_spread):

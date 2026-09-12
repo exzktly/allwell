@@ -33,12 +33,12 @@ import matplotlib.pyplot as plt
 
 from PySide6.QtWidgets import QApplication
 
-from well_viewer.domain import fold_change as _fc
-from well_viewer.domain import fold_change_pairing as _pairing
-from well_viewer.domain.batch_models import BarGroup, ReplicateSet
-from well_viewer.domain.control_ref import KIND_LEGACY, ControlRef
-from well_viewer.domain.fold_change_state import FoldChangeState
-from well_viewer.features.barplot.collect import (
+from review.domain import fold_change as _fc
+from review.domain import fold_change_pairing as _pairing
+from review.domain.batch_models import BarGroup, ReplicateSet
+from review.domain.control_ref import KIND_LEGACY, ControlRef
+from review.domain.fold_change_state import FoldChangeState
+from review.features.barplot.collect import (
     collect_bar_items,
     collect_bar_items_for_group,
 )
@@ -133,7 +133,7 @@ def test_the_batch_bar_agrees_with_the_tab(op_ctrl, op_t0, order, vs_t0):
 # draw; nothing rescued this one.
 
 def test_the_unscaled_events_panel_is_not_labelled_a_fold_change(qapp):
-    from well_viewer.features.barplot.renderer import draw_per_well_n_bars
+    from review.features.barplot.renderer import draw_per_well_n_bars
     app = _two_set_app()
     fig, ax = plt.subplots()
     try:
@@ -164,7 +164,7 @@ def test_the_line_status_line_names_the_members_that_failed_to_pair():
     ctx.state.plot.fc_control_mode = "per_member"
     ctx.state.plot.fc_control_map = {"DRUG": _SET("CTRL"),
                                      "OTHER": _SET("DELETED")}
-    from well_viewer.features.lineplot.controller import (
+    from review.features.lineplot.controller import (
         collect_line_series, line_status_text,
     )
     series, _ = collect_line_series(ctx, threshold=1.0, use_sem=False)
@@ -187,7 +187,7 @@ def test_the_line_status_line_names_the_members_that_failed_to_pair():
 def test_the_line_status_line_falls_back_to_the_well_count():
     """The clean case still reads as before — a shortfall sentence on every
     redraw would be its own kind of wrong."""
-    from well_viewer.features.lineplot.controller import (
+    from review.features.lineplot.controller import (
         collect_line_series, line_status_text,
     )
     app = _two_set_app()
@@ -228,7 +228,7 @@ def test_a_control_with_no_fraction_blanks_only_the_fraction():
 
 
 def _fc_cache_for(ctx):
-    from well_viewer.domain.fold_change_series_cache import ControlSeriesCache
+    from review.domain.fold_change_series_cache import ControlSeriesCache
     return ControlSeriesCache(
         ctx, threshold=1.0, val_col=ctx.state.channel.active_val_col,
         use_sem=False, per_fov_spread=False, fluor_gates=None)
@@ -282,7 +282,7 @@ def test_a_single_well_bar_reports_no_replicate_total():
 
 def test_a_single_well_row_leaves_the_replicate_columns_empty():
     """Through the collector, not by hand-picking ``bar_metric_row``'s args."""
-    from well_viewer.features.export.service import (
+    from review.features.export.service import (
         _replicate_unit_for, bar_metric_row,
     )
     ctx = _solo_app()._ctx
@@ -302,7 +302,7 @@ def test_a_single_well_row_leaves_the_replicate_columns_empty():
 
 
 def test_a_single_well_row_keeps_the_per_fov_float_form():
-    from well_viewer.features.export.service import (
+    from review.features.export.service import (
         _replicate_unit_for, bar_metric_row,
     )
     app = _solo_app()
@@ -324,7 +324,7 @@ def test_a_single_well_row_keeps_the_per_fov_float_form():
 # ── the line CSV's Events columns ────────────────────────────────────────────
 
 def test_the_line_csv_carries_all_three_events_columns():
-    from well_viewer.features.export.service import (
+    from review.features.export.service import (
         line_metric_fieldnames, line_metric_row,
     )
     cols = line_metric_fieldnames("gfp", "mean_intensity", "SD")
@@ -363,7 +363,7 @@ def test_a_single_control_that_named_nothing_says_so():
 # title reading "vs control", and ``null`` written to disk on the next save.
 
 def test_renaming_a_group_keeps_an_unresolvable_control():
-    from well_viewer.core.selection_controller import _upgrade_fc_controls
+    from review.core.selection_controller import _upgrade_fc_controls
     app = _two_set_app()
     ctx = app._ctx
     ctx.state.plot.fc_vs_control_on = True
@@ -378,7 +378,7 @@ def test_renaming_a_group_keeps_an_unresolvable_control():
 
 def test_renaming_onto_an_existing_key_keeps_the_renamed_entry():
     """The live pairing wins the collision, not the dormant one it lands on."""
-    from well_viewer.core.plot_state import PlotState
+    from review.core.plot_state import PlotState
     plot = PlotState()
     plot.fc_control_map = {"A": _SET("CTRL_A"), "B": _SET("CTRL_B")}
     assert plot.rename_member("A", "B") is True
@@ -400,7 +400,7 @@ def test_an_inherited_assignment_is_not_reported_unused():
 
 
 def test_the_table_and_the_footer_share_one_resolved_mapping():
-    from well_viewer.core import fold_change_pairing_view as view
+    from review.core import fold_change_pairing_view as view
     app = _two_set_app()
     ctx = app._ctx
     ctx.state.plot.bar_pool_replicates = False
@@ -444,7 +444,7 @@ def test_tick_labels_do_not_collapse_a_well_and_a_set_of_one_name():
 # ── the saved-plot summary counts controls, not entries ──────────────────────
 
 def test_the_saved_plot_summary_counts_distinct_controls():
-    from well_viewer.features.saved_plots.collect import _fc_control_phrase
+    from review.features.saved_plots.collect import _fc_control_phrase
     fc = {
         "control_mode": "per_member",
         "control_map": {

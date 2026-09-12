@@ -42,7 +42,7 @@ def load_catalog(path) -> list:
 def admits(entry: dict, features, subtabs) -> bool:
     """Whether a *profile* (``features`` set + ``subtabs`` map) admits a catalog
     *entry*. ``features is None`` = the full app (admit everything). Mirrors
-    ``well_viewer.core.profile.Profile.includes`` so the binary, the stripped
+    ``core.profile.Profile.includes`` so the binary, the stripped
     tree, and the runtime subset always agree."""
     if features is None:
         return True
@@ -72,7 +72,7 @@ def path_is_excluded(repo_rel: str, exclude_repo_dirs) -> bool:
     """Whether a repo-relative path is dropped by a profile's exclusion list.
 
     A path is excluded if it *is* an excluded entry or lives under one (so an
-    excluded feature dir like ``well_viewer/features/stats`` drops every file
+    excluded feature dir like ``review/features/stats`` drops every file
     beneath it). This is the single match rule shared by ``all_well.spec``'s
     per-file bundler (``_pkg_datas``) and the guard tests, so the binary and the
     tests can never disagree about what a profile ships."""
@@ -164,7 +164,7 @@ README_SUBTAB_TITLES = {
 #:
 #: Restated here rather than read from the registry because this module is
 #: stdlib-only — ``all_well.spec`` imports it at build time and importing
-#: ``well_viewer`` would drag in Qt. ``test_profile_build`` holds this against
+#: ``review`` would drag in Qt. ``test_profile_build`` holds this against
 #: the registry, which is where the drift check belongs.
 README_ALWAYS_SUBTABS = {
     "Image Browser": {"Segmentation"},

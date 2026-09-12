@@ -27,7 +27,7 @@ class ImportLooseWorker(QThread):
     wellStage = Signal(str, str)  # (well, "writing"|"done")
     # (well, done, total) — sub-progress *within* one well, so its plate cell
     # can render as a filling dial instead of a flat "writing" until the whole
-    # well lands. See datasets._common.containers.WellFraction.
+    # well lands. See datasets.core.containers.WellFraction.
     wellFraction = Signal(str, int, int)
     succeeded = Signal(str, str)  # (destination root — "" for in-place, summary)
     failed = Signal(str)

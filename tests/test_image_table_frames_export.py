@@ -22,7 +22,7 @@ wrong implementation that would otherwise pass it:
   ``.pptx`` back, not by trusting the builder's own counters.
 
 Fast lane: the export builder runs on the same plain-data fake ctx
-``test_image_table_facet_export`` uses, so no ``WellViewerApp`` is built.
+``test_image_table_facet_export`` uses, so no ``ReviewApp`` is built.
 """
 from __future__ import annotations
 
@@ -37,10 +37,10 @@ pytest.importorskip("matplotlib")
 np = pytest.importorskip("numpy")
 pytest.importorskip("PIL")
 
-from well_viewer.domain import image_frames as IF
-from well_viewer.features.image_browser.image_table import export as E
-from well_viewer.features.image_browser.image_table import image_compose as IC
-from well_viewer.features.image_browser.image_table._frames import FrameCollector
+from review.domain import image_frames as IF
+from review.features.image_browser.image_table import export as E
+from review.features.image_browser.image_table import image_compose as IC
+from review.features.image_browser.image_table._frames import FrameCollector
 
 _NS = {
     "p": "http://schemas.openxmlformats.org/presentationml/2006/main",
@@ -69,7 +69,7 @@ def _source_rgb(seed: int):
 
 
 def _export_ctx(cells, *, bar_um=0.0, pixel_um=0.0, label_mode="identity"):
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from review.features.image_browser.image_table.state import ImageTableState
 
     st = ImageTableState()
     st.row_dims, st.col_dims = ["well"], ["field"]
@@ -107,7 +107,7 @@ def _install_sources(monkeypatch, sources):
         return seen.setdefault((well, fov), sources[len(seen) % len(sources)])
 
     monkeypatch.setattr(E, "_load_array", _load)
-    from well_viewer.features.image_browser.image_table import controller as ITC
+    from review.features.image_browser.image_table import controller as ITC
     monkeypatch.setattr(ITC, "_prefetch_cell_arrays", lambda *a, **k: None)
     monkeypatch.setattr(
         E, "cell_display_rgb",
@@ -302,7 +302,7 @@ def _drawn_image_boxes(fig):
     """
     from matplotlib.backends.backend_agg import FigureCanvasAgg
 
-    from well_viewer.features.image_browser.image_table import renderer as R
+    from review.features.image_browser.image_table import renderer as R
 
     # An explicit Agg canvas, because ``apply_aspect`` — the thing that shrinks
     # an ``aspect="equal"`` axes to its image's ratio — only runs during a real
@@ -338,7 +338,7 @@ def _off(shape):
 def test_the_deck_places_one_group_per_field_holding_picture_and_text(
         monkeypatch, tmp_path):
     """Read back out of the written file, not off the builder's own counters."""
-    from well_viewer.features.saved_plots._deck import build_image_grid_deck
+    from review.features.saved_plots._deck import build_image_grid_deck
 
     cells = _cells()
     ctx = _export_ctx(cells, bar_um=40.0, pixel_um=0.5)
@@ -383,7 +383,7 @@ def test_a_deck_of_frames_is_a_valid_package_a_reader_can_walk(
     """Structurally valid to something other than this module's own writer."""
     pptx = pytest.importorskip("pptx")
 
-    from well_viewer.features.saved_plots._deck import build_image_grid_deck
+    from review.features.saved_plots._deck import build_image_grid_deck
 
     cells = _cells()
     ctx = _export_ctx(cells, bar_um=40.0, pixel_um=0.5)
@@ -442,7 +442,7 @@ def test_the_gallery_deck_places_a_stored_grid_as_frames_not_a_picture(
     per field and no single full-width raster — so that is what is asserted,
     together with the counters that have to agree with it.
     """
-    from well_viewer.features.saved_plots._deck import build_saved_plots_deck
+    from review.features.saved_plots._deck import build_saved_plots_deck
 
     plan = tmp_path / "g1.frames.zip"
     plan.write_bytes(_grid_bytes(monkeypatch))
@@ -468,7 +468,7 @@ def test_the_gallery_deck_places_a_stored_grid_as_frames_not_a_picture(
 def test_a_grid_whose_plan_is_unreadable_falls_back_to_the_picture(
         monkeypatch, tmp_path):
     """Losing the plan must lose the frames, not the slide."""
-    from well_viewer.features.saved_plots._deck import build_saved_plots_deck
+    from review.features.saved_plots._deck import build_saved_plots_deck
 
     plan = tmp_path / "g1.frames.zip"
     plan.write_bytes(b"this is not a zip")
@@ -491,7 +491,7 @@ def test_a_record_with_a_frame_plan_is_not_queued_for_a_redraw():
     it would still be counted into the progress bar and still walk the record
     onto its tab first.
     """
-    from well_viewer.features.saved_plots.controller import _wants_redraw
+    from review.features.saved_plots.controller import _wants_redraw
 
     assert _wants_redraw(_record(frames_filename="")) is True
     assert _wants_redraw(_record()) is False
@@ -499,7 +499,7 @@ def test_a_record_with_a_frame_plan_is_not_queued_for_a_redraw():
 
 def test_deleting_a_grid_takes_its_frame_plan_with_it(tmp_path):
     """Otherwise the dataset folder keeps plans nothing can name."""
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = SimpleNamespace(state=SimpleNamespace(
         dataset=SimpleNamespace(data_dir=tmp_path)))
@@ -523,7 +523,7 @@ def test_a_plan_that_cannot_be_written_clears_the_name_it_would_have_had(
     It would then place nothing rather than falling back to the picture, so the
     grid would vanish off its own slide.
     """
-    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from review.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
     ctx = SimpleNamespace(state=SimpleNamespace(
         dataset=SimpleNamespace(data_dir=tmp_path)))
@@ -600,7 +600,7 @@ def test_a_grid_whose_fields_all_failed_to_encode_falls_back_to_the_snapshot(
     a grid of labelled blanks — and reports that grid as editable — is degraded
     output dressed as good output.
     """
-    from well_viewer.features.saved_plots._deck import build_saved_plots_deck
+    from review.features.saved_plots._deck import build_saved_plots_deck
 
     cells = _cells()
     ctx = _export_ctx(cells)
@@ -635,7 +635,7 @@ def _unclamped_label_width(label, frame) -> float:
     Reproduces ``_frames._label_mark``'s own estimate from the mark that came
     out, so the test can say whether this fixture actually exercises the clamp.
     """
-    from well_viewer.features.image_browser.image_table import _frames as FR
+    from review.features.image_browser.image_table import _frames as FR
 
     size_in = label.size_pt / 72.0
     return FR._ADVANCE_FRACTION * size_in * len(label.text)
@@ -678,7 +678,7 @@ def test_every_malformed_plan_is_a_framed_grid_error(overrides, why):
 
 def test_a_malformed_plan_costs_that_plot_its_frames_and_nothing_else(
         tmp_path):
-    from well_viewer.features.saved_plots._deck import build_saved_plots_deck
+    from review.features.saved_plots._deck import build_saved_plots_deck
 
     plan = tmp_path / "g1.frames.zip"
     plan.write_bytes(_plan_with(
@@ -727,7 +727,7 @@ def test_a_field_that_could_not_be_read_is_placed_and_says_so(monkeypatch):
     cells = _cells()
     ctx = _export_ctx(cells, label_mode="none")
     monkeypatch.setattr(E, "_load_array", lambda *a, **k: None)
-    from well_viewer.features.image_browser.image_table import controller as ITC
+    from review.features.image_browser.image_table import controller as ITC
     monkeypatch.setattr(ITC, "_prefetch_cell_arrays", lambda *a, **k: None)
     collector = FrameCollector()
     fig, _kw = E._build_export_figure(ctx, cell_max_px=POOLED_PX,
@@ -843,7 +843,7 @@ def test_the_menu_action_writes_nothing_when_no_field_could_be_read(
     ctx.notify.set_status = said.append
 
     monkeypatch.setattr(E, "_load_array", lambda *a, **k: None)
-    from well_viewer.features.image_browser.image_table import controller as ITC
+    from review.features.image_browser.image_table import controller as ITC
     monkeypatch.setattr(ITC, "_prefetch_cell_arrays", lambda *a, **k: None)
 
     def _refuse(*_a, **_k):

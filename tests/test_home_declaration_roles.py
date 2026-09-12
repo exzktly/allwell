@@ -24,7 +24,7 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtWidgets import QLabel, QWidget
 
-from well_viewer.features.home import collect as hc
+from review.features.home import collect as hc
 
 
 class _Registry:
@@ -47,8 +47,8 @@ def _wells(rows="AB", cols=(1, 2, 3, 4)):
 
 
 def _ctx(wells=None, selections=(), labels=None):
-    from well_viewer.core.selection_state import SelectionState
-    from well_viewer.features.home.state import HomeState
+    from review.core.selection_state import SelectionState
+    from review.features.home.state import HomeState
 
     selection = SelectionState()
     selection.selections = [dict(s) for s in selections]
@@ -84,7 +84,7 @@ def _texts(root: QWidget) -> list[str]:
 
 def _build_sample_map(qtbot, ctx=None):
     """The merged tab, through its real builder."""
-    from well_viewer.features.home.sample_map.tab_view import build_sample_map_subtab
+    from review.features.home.sample_map.tab_view import build_sample_map_subtab
 
     ctx = ctx if ctx is not None else _ctx()
     frame = QWidget()
@@ -94,7 +94,7 @@ def _build_sample_map(qtbot, ctx=None):
 
 
 def _strip_texts(ctx) -> list[str]:
-    from well_viewer.features.home.sample_map.controller import STRIP_KEY
+    from review.features.home.sample_map.controller import STRIP_KEY
 
     host = ctx.widgets.get_or_none(STRIP_KEY)
     return _texts(host) if host is not None else []
@@ -108,7 +108,7 @@ def test_every_layer_states_its_role_and_its_sibling(layer, qtbot):
     invisible, and the whole point of moving the strip onto the tab is that one
     statement is on screen at a time.
     """
-    from well_viewer.features.home.sample_map.controller import set_layer
+    from review.features.home.sample_map.controller import set_layer
 
     role = hc.role_for_tab(layer)
     assert role is not None, f"{layer} declares no role in DECLARATION_ROLES"
@@ -125,7 +125,7 @@ def test_every_layer_states_its_role_and_its_sibling(layer, qtbot):
 def test_only_the_current_layer_s_role_is_on_screen(qtbot):
     """Three strips stacked and hidden would be three answers, two of them
     waiting for a bug to show them. There is one, rebuilt per layer."""
-    from well_viewer.features.home.sample_map.controller import set_layer
+    from review.features.home.sample_map.controller import set_layer
 
     ctx, _frame = _build_sample_map(qtbot)
     set_layer(ctx, "Variables")
@@ -139,7 +139,7 @@ def test_only_the_current_layer_s_role_is_on_screen(qtbot):
 def test_the_roster_and_the_layers_name_the_same_things():
     """A role for a layer nobody builds is copy nobody reads, and the reverse is
     a layer with no statement of what it is for."""
-    from well_viewer.features.home.sample_map.controller import (
+    from review.features.home.sample_map.controller import (
         LAYER_BUILDERS, LAYER_PLATES, LAYERS,
     )
 
@@ -168,7 +168,7 @@ def test_every_role_says_whether_it_pools():
 # ── Overview reports all four, with what each does ──────────────────────────
 
 def test_your_work_reports_variables_with_their_count():
-    from well_viewer.domain.sample_variables import VariableSet, new_variable
+    from review.domain.sample_variables import VariableSet, new_variable
 
     ctx = _ctx()
     vset = VariableSet()
@@ -211,7 +211,7 @@ def test_the_work_row_paints_its_effect_beside_the_count(qtbot):
     different facts, and the second is the one a user can see. This calls the
     real row builder, which is what Overview calls for every line of the block.
     """
-    from well_viewer.features.home.controller import _row_widget
+    from review.features.home.controller import _row_widget
 
     parent = QWidget()
     qtbot.addWidget(parent)
@@ -235,7 +235,7 @@ def _group(name, wells, **extra):
 def test_the_clause_names_the_exact_substitution():
     """The value, not the shape of it. "A sentence was produced" is satisfied
     by a sentence naming the wrong group."""
-    from well_viewer.domain.selections_model import relabelled_groups_clause
+    from review.domain.selections_model import relabelled_groups_clause
 
     ctx = _ctx(selections=[_group("1", ["A01", "A02"])],
                labels={"A01": "shCtrl", "A02": "shA"})
@@ -249,7 +249,7 @@ def test_the_clause_names_the_exact_substitution():
 def test_a_group_the_user_named_is_not_reported():
     """The clause exists to explain a substitution. A group named ``Control``
     keeps its name on the axis, so saying anything about it is noise."""
-    from well_viewer.domain.selections_model import relabelled_groups_clause
+    from review.domain.selections_model import relabelled_groups_clause
 
     ctx = _ctx(selections=[_group("Control", ["A01", "A02"])],
                labels={"A01": "shCtrl"})
@@ -258,7 +258,7 @@ def test_a_group_the_user_named_is_not_reported():
 
 def test_a_hidden_group_is_not_reported():
     """Nothing draws it, so nothing relabels it."""
-    from well_viewer.domain.selections_model import relabelled_groups_clause
+    from review.domain.selections_model import relabelled_groups_clause
 
     ctx = _ctx(selections=[_group("1", ["A01", "A02"], hidden=True)],
                labels={"A01": "shCtrl"})
@@ -269,8 +269,8 @@ def test_a_variable_grouping_silences_the_relabel_note():
     """A group a variable grouping has displaced is not drawn, so nothing
     relabels it — and the note appeared on the same tab as, and flatly
     contradicted, the line saying those groups were not pooling."""
-    from well_viewer.domain import sample_variables as sv
-    from well_viewer.domain.selections_model import relabelled_groups_clause
+    from review.domain import sample_variables as sv
+    from review.domain.selections_model import relabelled_groups_clause
 
     ctx = _ctx(selections=[_group("1", ["A01", "A02"])],
                labels={"A01": "shCtrl", "A02": "shA"})
@@ -290,7 +290,7 @@ def test_a_variable_grouping_silences_the_relabel_note():
 
 
 def test_the_clause_counts_the_ones_it_does_not_name():
-    from well_viewer.domain.selections_model import relabelled_groups_clause
+    from review.domain.selections_model import relabelled_groups_clause
 
     # Five groups over wells the dataset actually holds — a group whose only
     # well is not loaded is not drawn, so a fixture reaching past A04 would be
@@ -308,7 +308,7 @@ def test_the_groups_tab_shows_the_clause_on_its_own_label(qtbot):
     """At the widget. A test that read the clause function would pass against a
     tab that had stopped painting it — which is the defect this whole note is
     about, one layer up."""
-    from well_viewer.features.home.groups.selections_view import rep_panel_refresh
+    from review.features.home.groups.selections_view import rep_panel_refresh
 
     ctx = _ctx(selections=[_group("1", ["A01", "A02"])],
                labels={"A01": "shCtrl", "A02": "shA"})
@@ -321,7 +321,7 @@ def test_the_groups_tab_shows_the_clause_on_its_own_label(qtbot):
 
 
 def test_the_note_stays_off_when_nothing_is_relabelled(qtbot):
-    from well_viewer.features.home.groups.selections_view import rep_panel_refresh
+    from review.features.home.groups.selections_view import rep_panel_refresh
 
     ctx = _ctx(selections=[_group("Control", ["A01", "A02"])])
     _c, frame = _build_sample_map(qtbot, ctx=ctx)

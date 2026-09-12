@@ -161,7 +161,7 @@ def _home_subtab_names() -> list[str]:
     descriptors are the roster the notebook enumerates, so a sub-tab added there
     without a help topic has to fail here.
     """
-    src = (REPO_ROOT / "well_viewer" / "features" / "registry.py").read_text(
+    src = (REPO_ROOT / "review" / "features" / "registry.py").read_text(
         encoding="utf-8")
     names: list[str] = []
     for node in ast.walk(ast.parse(src)):

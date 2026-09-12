@@ -18,7 +18,7 @@ import pathlib
 
 import pytest
 
-from well_viewer.core import recent_datasets as rd
+from review.core import recent_datasets as rd
 
 
 class _Settings:
@@ -189,7 +189,7 @@ def test_load_on_a_settings_object_that_has_never_been_written():
 def _load_ctx(monkeypatch, *, wells, data_dir, settings=None):
     """A ctx, with the settings handle patched **where the app reads it**.
 
-    ``well_viewer.core.app_settings.app_settings`` is the one door onto this
+    ``core.app_settings.app_settings`` is the one door onto this
     user's settings, and both the recorder and Home go through it. Patching
     anything else is what let this feature ship dead: the first version of
     these tests stubbed ``ctx.window._qsettings``, which the shipped app does
@@ -203,7 +203,7 @@ def _load_ctx(monkeypatch, *, wells, data_dir, settings=None):
     """
     from types import SimpleNamespace
 
-    from well_viewer.core import app_settings as app_settings_module
+    from core import app_settings as app_settings_module
 
     settings = settings if settings is not None else _Settings()
     monkeypatch.setattr(app_settings_module, "app_settings", lambda: settings)
@@ -216,7 +216,7 @@ def _load_ctx(monkeypatch, *, wells, data_dir, settings=None):
 
 
 def test_a_load_that_found_wells_is_remembered(tmp_path, monkeypatch):
-    from well_viewer.core.load_controller import _remember_if_it_loaded
+    from review.core.load_controller import _remember_if_it_loaded
 
     # Both halves, because that is the structure ``load_path`` requires before
     # it descends into ``out`` and the structure ``dataset_display_name`` looks
@@ -247,7 +247,7 @@ def test_a_folder_that_yielded_no_wells_is_not_remembered(tmp_path, monkeypatch)
     Offering it back on the next launch would make this list a record of the
     user's mistakes rather than of their work.
     """
-    from well_viewer.core.load_controller import _remember_if_it_loaded
+    from review.core.load_controller import _remember_if_it_loaded
 
     ctx, settings = _load_ctx(monkeypatch, wells={}, data_dir=tmp_path / "empty")
     _remember_if_it_loaded(ctx, tmp_path / "empty")
@@ -269,8 +269,8 @@ def test_a_settings_backend_that_will_not_write_does_not_cost_the_load(
     """
     from types import SimpleNamespace
 
-    from well_viewer.core import app_settings as app_settings_module
-    from well_viewer.core.load_controller import _remember_if_it_loaded
+    from core import app_settings as app_settings_module
+    from review.core.load_controller import _remember_if_it_loaded
 
     class _Broken:
         def value(self, key, default=None):

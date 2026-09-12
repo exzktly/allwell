@@ -1,11 +1,11 @@
 """Guardrail: the remote-bootstrap subprocess must use the frozen dispatch.
 
 In a frozen (PyInstaller) bundle ``sys.executable`` is the .app binary, not a
-Python interpreter, so ``[sys.executable, "scripts/_bootstrap_lib.py", ...]``
+Python interpreter, so ``[sys.executable, "services/remote_bootstrap.py", ...]``
 would just relaunch the GUI and the remote provisioning would never run — the
 user reported "bootstrap_lib was not found" launching the built app.
 ``build_bootstrap_cmd`` must instead emit the ``--run-bootstrap`` sentinel
-(which all_well_launcher routes into ``scripts/_bootstrap_lib.main()``),
+(which all_well_launcher routes into ``services/remote_bootstrap.main()``),
 mirroring the pipeline's ``--run-pipeline`` and zipper's ``--run-zipper`` paths.
 
 This is a frozen-only failure mode that a normal (unfrozen) CI run of the app
@@ -19,7 +19,7 @@ from pathlib import Path
 from services.input_resolution_service import build_bootstrap_cmd
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-_BOOT = Path("/bundle/scripts/_bootstrap_lib.py")
+_BOOT = Path("/bundle/services/remote_bootstrap.py")
 
 
 def test_source_mode_invokes_the_script_path(monkeypatch):
@@ -37,7 +37,7 @@ def test_frozen_mode_uses_run_bootstrap_sentinel(monkeypatch):
     # GUI in a real bundle).
     assert cmd == [sys.executable, "--run-bootstrap", "myhost"]
     assert str(_BOOT) not in cmd
-    assert not any(str(a).endswith("_bootstrap_lib.py") for a in cmd)
+    assert not any(str(a).endswith("remote_bootstrap.py") for a in cmd)
 
 
 def test_launcher_dispatches_the_sentinel():
@@ -45,15 +45,58 @@ def test_launcher_dispatches_the_sentinel():
     module — otherwise the sentinel falls through to the GUI."""
     src = (REPO_ROOT / "all_well_launcher.py").read_text()
     assert '"--run-bootstrap"' in src
-    assert "_bootstrap_lib" in src
+    assert "remote_bootstrap" in src
 
 
-def test_spec_bundles_the_bootstrap_module():
-    """The frozen build must ship ``scripts/_bootstrap_lib.py`` under a
-    ``scripts/`` dest so its ``REPO_ROOT = __file__.parent.parent`` resolves to
-    _MEIPASS (where the files it syncs to the remote are bundled)."""
-    spec = (REPO_ROOT / "_Docs" / "_Installation" / "all_well.spec").read_text()
-    assert '"scripts" / "_bootstrap_lib.py"' in spec
+def test_spec_bundles_the_bootstrap_module_at_the_path_the_launcher_loads():
+    """The frozen build must ship the module at ``_MEIPASS/services/remote_bootstrap.py``.
+
+    That exact path is hard-coded twice — ``all_well_launcher.py`` loads it by
+    file path under the ``--run-bootstrap`` sentinel, and the module's own
+    ``REPO_ROOT = __file__.parent.parent`` has to resolve to the bundle root,
+    beside the files it syncs to the remote. A destination one level off makes
+    ``REPO_ROOT`` the directory *above* the bundle and the sync finds nothing.
+
+    Asserted as the requirement rather than as a substring. The previous version
+    checked that the text ``"services" / "remote_bootstrap.py"`` appeared in the
+    spec, which is true of a source path bundled to *any* destination — the
+    destination being the half that fails silently — and became false the moment
+    the explicit entry was removed in favour of the package loop, even though the
+    file still ships at exactly the right place. Two routes satisfy this, and
+    both are legitimate: an explicit data tuple whose destination is
+    ``services``, or ``services`` bundled whole by the package loop.
+    """
+    import ast
+
+    spec_text = (REPO_ROOT / "_Docs" / "_Installation" / "all_well.spec").read_text()
+    tree = ast.parse(spec_text)
+
+    # Route 1: the package loop bundles `services` whole.
+    bundled_whole = False
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.For) and getattr(node.target, "id", "") == "_pkg"
+                and isinstance(node.iter, ast.Tuple)):
+            bundled_whole = "services" in {
+                e.value for e in node.iter.elts if isinstance(e, ast.Constant)}
+
+    # Route 2: an explicit (source, dest) tuple landing it in `services`.
+    explicit = False
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Tuple) and len(node.elts) == 2):
+            continue
+        src, dest = node.elts
+        if not (isinstance(dest, ast.Constant) and dest.value == "services"):
+            continue
+        if "remote_bootstrap.py" in ast.dump(src):
+            explicit = True
+
+    assert bundled_whole or explicit, (
+        "all_well.spec ships services/remote_bootstrap.py at neither the "
+        "package-loop path nor an explicit `services` destination. "
+        "`all_well_launcher.py` loads it from _MEIPASS/services/ and the "
+        "module's REPO_ROOT = __file__.parent.parent must land on the bundle "
+        "root; any other destination breaks the remote sync from a frozen "
+        "build, which no test exercises.")
 
 
 # ── the frozen windowed build's nulled standard streams ─────────────────────
@@ -69,10 +112,10 @@ def test_spec_bundles_the_bootstrap_module():
 
 
 def _bootstrap_module():
-    """Load ``scripts/_bootstrap_lib.py`` the way the launcher does."""
+    """Load ``services/remote_bootstrap.py`` the way the launcher does."""
     import importlib.util
 
-    path = REPO_ROOT / "scripts" / "_bootstrap_lib.py"
+    path = REPO_ROOT / "services" / "remote_bootstrap.py"
     spec = importlib.util.spec_from_file_location("_bootstrap_lib_probe", path)
     module = importlib.util.module_from_spec(spec)
     sys.modules["_bootstrap_lib_probe"] = module
@@ -115,7 +158,7 @@ def test_the_launcher_repairs_the_streams_before_loading_the_module():
     branch = src.split('"--run-bootstrap"', 1)[1]
     assert "ensure_std_streams" in branch.split("def ", 1)[0], (
         "all_well_launcher's --run-bootstrap branch must call "
-        "util.frozen_io.ensure_std_streams before loading _bootstrap_lib"
+        "util.frozen_io.ensure_std_streams before loading remote_bootstrap"
     )
 
 
@@ -126,7 +169,7 @@ def test_the_tee_wraps_the_repaired_streams_not_the_dunder_pair():
     None and every later write raises."""
     import ast
 
-    src = (REPO_ROOT / "scripts" / "_bootstrap_lib.py").read_text(encoding="utf-8")
+    src = (REPO_ROOT / "services" / "remote_bootstrap.py").read_text(encoding="utf-8")
     primaries = [
         ast.unparse(node.args[0])
         for node in ast.walk(ast.parse(src))

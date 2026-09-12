@@ -31,7 +31,7 @@ from tests._repo_scan import parse_source
 
 
 def test_the_shell_imports_the_roster_rather_than_restating_it():
-    from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
+    from review.core.plot_card_actions import PLOT_CARD_ATTRS
 
     offenders = []
     # Not just `allwell.py`: `core/centre_view.py` carried two more copies of
@@ -68,7 +68,7 @@ def test_the_shell_imports_the_roster_rather_than_restating_it():
 def test_every_roster_entry_has_a_save_as_filename():
     """``PLOT_CARD_ATTRS`` is derived from ``_CARDS`` rather than maintained
     beside it, so the two cannot fall out of step."""
-    from well_viewer.core.plot_card_actions import _CARDS, PLOT_CARD_ATTRS
+    from review.core.plot_card_actions import _CARDS, PLOT_CARD_ATTRS
 
     assert PLOT_CARD_ATTRS == tuple(attr for attr, _ in _CARDS)
     assert all(default.endswith(".png") for _, default in _CARDS)
@@ -90,7 +90,7 @@ def test_the_roster_holds_every_plot_card_the_app_builds():
     """
     import re
 
-    from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
+    from review.core.plot_card_actions import PLOT_CARD_ATTRS
 
     registered = {}
     for path in python_sources():
@@ -128,7 +128,7 @@ def test_the_roster_lists_no_card_nothing_registers():
     """
     import re
 
-    from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
+    from review.core.plot_card_actions import PLOT_CARD_ATTRS
 
     registered = set()
     for path in python_sources():

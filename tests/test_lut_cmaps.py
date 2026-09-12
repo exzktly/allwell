@@ -47,7 +47,7 @@ def test_non_mono_names_fall_back_to_builtin():
 @pytest.mark.qt
 def test_lut_colormap_to_rgb_reds_is_black_to_red():
     import numpy as np
-    from well_viewer.core.ui_helpers import lut_colormap_to_rgb
+    from review.core.ui_helpers import lut_colormap_to_rgb
 
     ramp = np.tile(np.linspace(0.0, 1.0, 16, dtype=np.float32)[:, None], (1, 4))
     rgb = lut_colormap_to_rgb(ramp, 0.0, 1.0, cmap_name="Reds")

@@ -47,10 +47,10 @@ from tests._repo_scan import parse_source
 # test may build a throwaway frame to measure the behaviour above.
 
 # The names ``theme.qss`` styles. ``Separator`` is what
-# ``ui_helpers.build_hline_separator`` / ``build_vline_separator`` apply, and is
+# ``widgets.separator.build_hline_separator`` / ``build_vline_separator`` apply, and is
 # how a divider should be built; ``HRule`` / ``VRule`` are the equivalent
 # hand-rolled spellings, needed by the frames that choose an orientation at run
-# time and by ``datasets/_common/log_panel.hrule``.
+# time and by ``datasets/core/log_panel.hrule``.
 SANCTIONED_NAMES = frozenset({"Separator", "HRule", "VRule"})
 SANCTIONED_PROPS = frozenset({"hline", "vline"})
 
@@ -149,7 +149,7 @@ def test_no_unnamed_divider_frames():
         "Divider frame(s) with no sanctioned object name (ARCHITECTURE §8). "
         "Each paints Qt's default etched border — a near-white #e6e9ef line on "
         "this app's surfaces — instead of a border_subtle hairline. Build it "
-        "with `ui_helpers.build_hline_separator` / `build_vline_separator`, or "
+        "with `widgets.separator.build_hline_separator` / `build_vline_separator`, or "
         "give it one of "
         f"{sorted(SANCTIONED_NAMES)}:\n  " + "\n  ".join(offenders)
     )

@@ -20,12 +20,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pytest
 
-from well_viewer.features.export.style import (
+from review.features.export.style import (
     _macos_pasteboard_write,
     _render_figure,
     copy_figure_to_clipboard,
 )
-from well_viewer.features.export.sidebar_view import (
+from review.features.export.sidebar_view import (
     _EXPORT_FILTER_ORDER,
     _EXPORT_FILTERS,
     ExportStyleSidebar,

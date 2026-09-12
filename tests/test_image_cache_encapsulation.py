@@ -27,7 +27,7 @@ from pathlib import Path
 
 from tests._repo_scan import parse_source, python_sources, rel
 
-ROOT = Path(__file__).resolve().parent.parent / "well_viewer"
+ROOT = Path(__file__).resolve().parent.parent / "review"
 
 #: The cache objects and the class behind one of them.
 _PRIVATE_CACHES = frozenset({"GLOBAL_CACHE", "_DECODE_CACHE", "_DecodedArrayCache"})
@@ -77,14 +77,14 @@ def test_no_module_reaches_into_an_image_cache():
 def test_the_scan_reads_the_shapes_it_claims_to():
     """The predicate the guard uses, on synthetic sources."""
     assert _cache_names_in(ast.parse(
-        "from well_viewer.data.zipfile_cache import GLOBAL_CACHE\n")) == {"GLOBAL_CACHE"}
+        "from review.data.zipfile_cache import GLOBAL_CACHE\n")) == {"GLOBAL_CACHE"}
     # Aliased on import — the text ``GLOBAL_CACHE`` still appears, and the
     # binding it creates does not, which is why the import is read too.
     assert _cache_names_in(ast.parse(
-        "from well_viewer.data.zipfile_cache import GLOBAL_CACHE as c\n")) == {"GLOBAL_CACHE"}
+        "from review.data.zipfile_cache import GLOBAL_CACHE as c\n")) == {"GLOBAL_CACHE"}
     # Reached as an attribute of the module rather than imported.
     assert _cache_names_in(ast.parse(
-        "import well_viewer.data.zipfile_cache as z\nz.GLOBAL_CACHE.invalidate()\n")
+        "import review.data.zipfile_cache as z\nz.GLOBAL_CACHE.invalidate()\n")
     ) == {"GLOBAL_CACHE"}
     assert _cache_names_in(ast.parse(
-        "from well_viewer.data.image_discovery import open_imgref_as_array\n")) == set()
+        "from review.data.image_discovery import open_imgref_as_array\n")) == set()

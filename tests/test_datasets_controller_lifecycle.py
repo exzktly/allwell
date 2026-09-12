@@ -3,7 +3,7 @@
 `stop`, `is_busy` and `shutdown` were six copies of the same eight lines,
 differing only in which method asks the worker to stop and which label a
 swallowed teardown error is logged under. They live on
-`datasets._common.tool_controller.DatasetToolController` now, with those two
+`datasets.core.tool_controller.DatasetToolController` now, with those two
 differences as a hook and a class attribute.
 
 The hook is the load-bearing part, and this file is where its reason is
@@ -39,7 +39,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from datasets._common.tool_controller import (  # noqa: E402
+from datasets.core.tool_controller import (  # noqa: E402
     DatasetToolController, DestinationToolController,
 )
 
@@ -212,7 +212,7 @@ def test_a_worker_that_outlives_the_deadline_is_named_in_the_log(caplog):
     worker = _StubbornWorker()
     ctrl = _controller_with(worker)
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         ctrl.shutdown()
 
     assert worker.stop_requested, "the worker was never asked to stop"
@@ -229,7 +229,7 @@ def test_a_worker_that_stops_in_time_says_nothing(caplog):
 
     ctrl = _controller_with(_CompliantWorker())
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         ctrl.shutdown()
 
     assert [r.getMessage() for r in caplog.records] == []

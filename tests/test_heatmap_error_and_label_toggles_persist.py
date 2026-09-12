@@ -23,9 +23,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.core.widget_registry import WidgetRegistry
-from well_viewer.features.heatmap.state import HeatmapState
-from well_viewer.persistence import heatmap_layouts as hl
+from review.core.widget_registry import WidgetRegistry
+from review.features.heatmap.state import HeatmapState
+from review.persistence import heatmap_layouts as hl
 
 
 class _Check:
@@ -162,7 +162,7 @@ def test_a_reset_moves_the_checkboxes_with_the_slice():
     app._heatmap_log_scale_cb.setChecked(True)
     app._heatmap_repset_avg_cb.setChecked(True)
 
-    from well_viewer.domain.state_defaults import restore_defaults
+    from review.domain.state_defaults import restore_defaults
     restore_defaults(hm)
     hl.sync_widgets_to_slice(ctx)
 
@@ -181,7 +181,7 @@ def test_the_reset_path_calls_that_sync():
     import ast
     import inspect
 
-    from well_viewer.persistence import reset_scopes
+    from review.persistence import reset_scopes
 
     src = inspect.getsource(reset_scopes.reset_view)
     names = {n.func.attr if isinstance(n.func, ast.Attribute) else

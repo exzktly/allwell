@@ -35,7 +35,7 @@ def _first_image_label(grid):
 
 
 def test_non_square_cells_hug_the_pixmap_no_letterbox(image_table_app, monkeypatch):
-    from well_viewer.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import controller as C
 
     ctx = image_table_app._ctx
     monkeypatch.setattr(C, "_load_array", _wide_loader)
@@ -53,7 +53,7 @@ def test_non_square_cells_hug_the_pixmap_no_letterbox(image_table_app, monkeypat
 
 
 def test_cell_gap_drives_inter_row_spacing(image_table_app, monkeypatch):
-    from well_viewer.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import controller as C
 
     ctx = image_table_app._ctx
     monkeypatch.setattr(C, "_load_array", _wide_loader)

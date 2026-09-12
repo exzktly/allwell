@@ -15,7 +15,7 @@ would then act on the plate that was not on screen.
 And every offer named the *output folder*, which is the literal word ``out`` for
 essentially every dataset, so it identified nothing.
 
-Builds a real ``AnalyzeTab`` but no ``WellViewerApp``, so this stays in the fast
+Builds a real ``AnalyzeTab`` but no ``ReviewApp``, so this stays in the fast
 lane. Presses the buttons rather than calling the callbacks — asserting a
 control is offered is not asserting it works.
 """

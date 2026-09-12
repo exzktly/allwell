@@ -1,6 +1,6 @@
 """Full-app smoke test for the Multivariate tab.
 
-Boots the real ``WellViewerApp`` with a shape-feature dataset, opens the
+Boots the real ``ReviewApp`` with a shape-feature dataset, opens the
 Multivariate tab (lazy build + activation), selects a feature set, and drives
 every one of the four analysis modes end-to-end — asserting each produces a
 result with no error. This exercises the Qt tab builder, the collect→compute→
@@ -15,8 +15,8 @@ import pytest
 @pytest.mark.slow
 def test_multivariate_tab_runs_all_modes(loaded_app_shape):
     app = loaded_app_shape
-    from well_viewer.features.multivariate import controller as mvctl
-    from well_viewer.features.multivariate.collect import available_feature_columns
+    from review.features.multivariate import controller as mvctl
+    from review.features.multivariate.collect import available_feature_columns
 
     # Select every loaded well so the matrix has plenty of cells.
     app._set_selected_wells(set(app._app_state.dataset.well_paths))
@@ -57,8 +57,8 @@ def test_multivariate_dimred_pca_exposes_loadings(loaded_app_shape):
     """PCA dim-red must attach loadings (feature weights per PC) to the result so
     the renderer can draw the loadings panel and the export can write them."""
     app = loaded_app_shape
-    from well_viewer.features.multivariate import controller as mvctl
-    from well_viewer.features.multivariate.collect import available_feature_columns
+    from review.features.multivariate import controller as mvctl
+    from review.features.multivariate.collect import available_feature_columns
 
     app._set_selected_wells(set(app._app_state.dataset.well_paths))
     assert app._notebook.setCurrentByName("Multivariate")
@@ -82,8 +82,8 @@ def test_multivariate_clustering_exposes_feature_profile(loaded_app_shape):
     """Clustering must attach a per-cluster feature profile (the interpretable
     'what is each cluster' table) so the renderer + export can surface it."""
     app = loaded_app_shape
-    from well_viewer.features.multivariate import controller as mvctl
-    from well_viewer.features.multivariate.collect import available_feature_columns
+    from review.features.multivariate import controller as mvctl
+    from review.features.multivariate.collect import available_feature_columns
 
     app._set_selected_wells(set(app._app_state.dataset.well_paths))
     assert app._notebook.setCurrentByName("Multivariate")
@@ -143,7 +143,7 @@ def test_multivariate_k_spinbox_has_room_for_value(loaded_app_shape):
 @pytest.mark.slow
 def test_multivariate_empty_selection_shows_message(loaded_app_shape):
     app = loaded_app_shape
-    from well_viewer.features.multivariate import controller as mvctl
+    from review.features.multivariate import controller as mvctl
 
     app._set_selected_wells(set())
     assert app._notebook.setCurrentByName("Multivariate")

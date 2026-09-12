@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.domain import sample_variables as sv
-from well_viewer.domain.batch_models import BarGroup
-from well_viewer.features.stats import controller as sc
+from review.domain import sample_variables as sv
+from review.domain.batch_models import BarGroup
+from review.features.stats import controller as sc
 
 pytestmark = pytest.mark.slow
 
@@ -393,7 +393,7 @@ def test_the_control_picker_follows_groups_defined_after_the_test_was_chosen(
     assert control.count() == 0
 
     _two_groups(app)
-    from well_viewer.features.stats.controller import stats_refresh_group_list
+    from review.features.stats.controller import stats_refresh_group_list
     stats_refresh_group_list(ctx)
 
     assert [control.itemText(i) for i in range(control.count())] == ["Ctrl", "Drug"]
@@ -410,7 +410,7 @@ def test_a_variable_declared_after_arriving_reaches_the_factor_pickers(loaded_ap
 
     _declare(app, "Dose", "number", [("d0", "0"), ("d1", "10")],
              {"A01": "d0", "A02": "d1"})
-    from well_viewer.features.stats.controller import refresh_stats_test_inputs
+    from review.features.stats.controller import refresh_stats_test_inputs
     refresh_stats_test_inputs(ctx)
 
     assert [var_a.itemText(i) for i in range(var_a.count())] == ["Dose"]

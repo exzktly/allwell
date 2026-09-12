@@ -24,12 +24,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from well_viewer.core.app_state import AppState
-from well_viewer.core.app_runtime import AppRuntime
-from well_viewer.core.event_bus import EventBus
-from well_viewer.core.widget_registry import WidgetRegistry
-from well_viewer.domain.stats_compute import aggregate_well_cached
-from well_viewer.viewer_context import ViewerContext
+from review.core.app_state import AppState
+from review.core.app_runtime import AppRuntime
+from review.core.event_bus import EventBus
+from review.core.widget_registry import WidgetRegistry
+from review.domain.stats_compute import aggregate_well_cached
+from review.viewer_context import ViewerContext
 
 VAL_COL = "gfp_mean_intensity"
 WELL = "A01"
@@ -53,7 +53,7 @@ def _rows(n: int = 12, bump: float = 0.0) -> pd.DataFrame:
 @pytest.fixture
 def ctx(tmp_path):
     """A headless context holding one cached well — no Qt, no window."""
-    from well_viewer.features.registry import attach_feature_state
+    from review.features.registry import attach_feature_state
 
     state = AppState()
     attach_feature_state(state)
@@ -81,7 +81,7 @@ def _agg(ctx, **over):
 # ── The memo works at all ────────────────────────────────────────────────────
 
 def test_a_repeated_call_is_served_from_the_memo(ctx):
-    from well_viewer.domain import stats_compute as sc
+    from review.domain import stats_compute as sc
 
     calls = {"n": 0}
     orig = sc.aggregate_well
@@ -191,7 +191,7 @@ def test_a_ratio_edited_in_place_declines(ctx):
     the active one cannot get a key describing a different ratio than the one
     it computed with.
     """
-    from well_viewer.domain.ratio_models import RatioMetric
+    from review.domain.ratio_models import RatioMetric
 
     ratio = RatioMetric(
         name="R", numerator_channel="gfp", numerator_metric="mean_intensity",
@@ -223,7 +223,7 @@ def test_every_documented_key_component_has_a_test():
     """
     import inspect
 
-    from well_viewer.domain import stats_compute as sc
+    from review.domain import stats_compute as sc
 
     src = inspect.getsource(sc.aggregate_well_cached)
     key_src = src.split("key = (", 1)[1].split("    )", 1)[0]
@@ -249,8 +249,8 @@ def test_every_documented_key_component_has_a_test():
 # ── The CDF memo, keyed the same way ─────────────────────────────────────────
 
 def _cdf(ctx, **over):
-    from well_viewer.data.data_loading import _all_fluor_values_filtered
-    from well_viewer.domain.stats_compute import cdf_values_cached
+    from review.data.data_loading import _all_fluor_values_filtered
+    from review.domain.stats_compute import cdf_values_cached
 
     kw = dict(val_col=VAL_COL, fluor_gates={},
               compute=_all_fluor_values_filtered)
@@ -378,7 +378,7 @@ def test_a_different_well_declines(ctx):
     other_rows[VAL_COL] = other_rows[VAL_COL] + 500.0
     ctx.state.dataset.well_paths["B02"] = ctx.state.dataset.data_dir / "B02.csv"
     ctx.state.dataset.cache["B02"] = other_rows
-    from well_viewer.domain.stats_compute import aggregate_well_cached
+    from review.domain.stats_compute import aggregate_well_cached
 
     a = _agg(ctx)
     b = aggregate_well_cached(

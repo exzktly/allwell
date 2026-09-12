@@ -21,7 +21,7 @@ import csv
 import json
 import math
 import threading
-from datasets._common.containers import container_dest, publish_container
+from datasets.core.containers import container_dest, publish_container
 from util.json_write import write_json_atomic
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -30,9 +30,9 @@ from pathlib import Path
 
 from util.timepoint import parse_hours
 from util.aw_safe import swallow
-from well_viewer.domain.tp_match import tp_close
-from datasets._common.concurrency import pick_workers
-from datasets._common.containers import (
+from domain.tp_match import tp_close
+from datasets.core.concurrency import pick_workers
+from datasets.core.containers import (
     FILENAME_COLUMN as _FILENAME_COLUMN,
     OVERRIDES_FILENAME as _OVERRIDES_FILENAME,
     OVERRIDES_SCHEMA_VERSION as _OVERRIDES_SCHEMA_VERSION,
@@ -44,7 +44,7 @@ from datasets._common.containers import (
     restamp_overrides,
     unstamped_note,
 )
-from datasets._common.member_names import is_os_junk_member
+from datasets.core.member_names import is_os_junk_member
 from datasets.concatenate.concatenate_compute import (
     IN_PROGRESS_MARKER,
     ConcatError,
@@ -95,7 +95,7 @@ def _detached_fraction(well: str) -> WellFraction:
 
 # ── container IO ─────────────────────────────────────────────────────────────
 # read_members / write_zip / copy_container_members live in
-# datasets._common.containers — see the import block above.
+# datasets.core.containers — see the import block above.
 class _MemberRename:
     """The per-member rename :func:`copy_container_members` applies to a well.
 
@@ -389,7 +389,7 @@ def merge_measurements(
 
 
 # ── restart cleanup ───────────────────────────────────────────────────────────
-# clear_destination now lives in datasets._common.containers — see the import
+# clear_destination now lives in datasets.core.containers — see the import
 # block above.
 
 
@@ -556,14 +556,14 @@ def execute_plan(
     total)`` repeatedly *within* one well, so that display can render the well
     as a filling dial rather than a binary merging/merged state; the six
     passes a well takes are fused into one 0-to-*total* sweep by
-    :class:`~datasets._common.containers.WellFraction` (see
+    :class:`~datasets.core.containers.WellFraction` (see
     :func:`merge_input`). It is called from the worker threads without the
     callback lock: every call names its own well, so interleaving is
     harmless, and locking once per member would serialise the parallel merge
     it is reporting on.
 
     Wells are merged in parallel — *workers* threads (0 = auto, see
-    :func:`datasets._common.concurrency.pick_workers`), each owning one
+    :func:`datasets.core.concurrency.pick_workers`), each owning one
     well's own destination files (``in/<WELL>.zip``, ``out/<WELL>_out.zip``,
     its measurements CSV) with nothing shared between wells. ``log``/
     ``progress`` calls that happen before a well's work starts are

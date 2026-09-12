@@ -13,12 +13,12 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QObject
 
-from well_viewer.core.safe import swallowed
-from datasets._common.dataset_paths import shorten_headline
+from core.safe import swallowed
+from datasets.core.dataset_paths import shorten_headline
 from datasets.concatenate.concatenate_compute import destination_has_marker
 from datasets.concatenate.view import ConcatenatePage
 from datasets.concatenate.worker import ConcatenateWorker
-from datasets._common.tool_controller import DestinationToolController
+from datasets.core.tool_controller import DestinationToolController
 
 
 class ConcatenateController(DestinationToolController):

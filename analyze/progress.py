@@ -27,7 +27,7 @@ import time as _time
 from PySide6.QtCore import QTimer
 
 from services import run_journal
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 
 
 def _fmt_secs(secs: float) -> str:

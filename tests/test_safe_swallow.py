@@ -1,25 +1,25 @@
-"""Tests for well_viewer.core.safe — the observable exception-suppression helpers.
+"""Tests for core.safe — the observable exception-suppression helpers.
 
 Records are captured with a handler attached *directly* to the
-``well_viewer.swallowed`` logger rather than via ``caplog``. caplog listens at
+``review.swallowed`` logger rather than via ``caplog``. caplog listens at
 the root logger and therefore depends on propagation, which the GUI disables at
-runtime (``status_view`` sets ``well_viewer`` ``propagate = False`` so log lines
+runtime (``status_view`` sets ``review`` ``propagate = False`` so log lines
 don't double-print). A direct handler captures the records regardless, which is
-also what the real app relies on: ``well_viewer.swallowed`` propagates to the
-``well_viewer`` logger, where the GUI handler lives.
+also what the real app relies on: ``review.swallowed`` propagates to the
+``review`` logger, where the GUI handler lives.
 """
 
 import logging
 
 import pytest
 
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 
 
 class _Capture:
     """Context manager that captures records emitted to a named logger."""
 
-    def __init__(self, name="well_viewer.swallowed", level=logging.DEBUG):
+    def __init__(self, name="review.swallowed", level=logging.DEBUG):
         self._name = name
         self._level = level
         self.records: list[logging.LogRecord] = []

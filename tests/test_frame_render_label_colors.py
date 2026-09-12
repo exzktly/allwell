@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from well_viewer.core.frame_render import build_frame_rgb, label_color_lut
+from review.core.frame_render import build_frame_rgb, label_color_lut
 
 
 def _two_touching_cells():

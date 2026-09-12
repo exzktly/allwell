@@ -16,7 +16,7 @@ zipper's copy carried a comment saying it "mirrors process_microscopy" — this
 module makes that structural rather than aspirational.
 
 Stdlib-only, so the pipeline can import it without breaching the "no
-``well_viewer`` / ``widgets`` / Qt imports" contract from ARCHITECTURE §6.2 —
+``review`` / ``widgets`` / Qt imports" contract from ARCHITECTURE §6.2 —
 the same reason ``util.well_token`` lives here. Listed in
 ``services.remote_runner._REQUIRED_REMOTE_FILES`` so a remote run receives it.
 """

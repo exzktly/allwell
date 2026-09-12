@@ -28,14 +28,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 #: `_Docs/`, `assets/`, `profiles/` hold no Python.
 #:
 #: `scripts/` used to be excluded as "dev tooling, not shipped". That was not
-#: true of all of it: `scripts/_bootstrap_lib.py` is 1,225 lines, is listed in
+#: true of all of it: it held the 1,225-line remote bootstrap (now `services/remote_bootstrap.py`), is listed in
 #: `_Docs/_Installation/build_all_well.sh`, ships inside the bundle, and runs
 #: at runtime — `all_well_launcher._dispatch` loads it by file path when the
 #: Remotes dialog provisions a host. Every guard built on this module was
 #: therefore blind to it. The rest of `scripts/` is genuinely dev tooling and
 #: costs nothing to scan alongside it.
 PACKAGE_ROOTS = (
-    "well_viewer",
+    "review",
     "widgets",
     "datasets",
     "analyze",
@@ -44,6 +44,8 @@ PACKAGE_ROOTS = (
     "util",
     "ui",
     "startup",
+    "core",
+    "domain",
     "scripts",
 )
 

@@ -1,4 +1,4 @@
-"""Analyze's form must actually fit inside RAIL_W (well_viewer/core/app_shell_view.py).
+"""Analyze's form must actually fit inside theme.Metrics.rail_w (review/core/app_shell_view.py).
 
 Regression: unifying Review/Datasets/Analyze's left-panel width let Analyze's
 widest content (its per-channel rows, several label+field rows, and two wide
@@ -22,7 +22,7 @@ This drives every collapsible section open (real ``QTest.mouseClick``, not a
 direct call, so it exercises the exact code path a user's click does) and
 requires several fluorescent-channel rows (the worst case for the Channel
 Tokens section), then asserts the form's real, laid-out minimum width — not
-its un-realized ``QSize(0, 0)`` before a layout pass — fits inside RAIL_W.
+its un-realized ``QSize(0, 0)`` before a layout pass — fits inside theme.Metrics.rail_w.
 """
 
 from __future__ import annotations
@@ -55,13 +55,12 @@ def _expand_every_collapsible_section(tab) -> None:
 
 def test_analyze_form_fits_rail_w_with_every_section_expanded(qapp):
     from analyze.tab import AnalyzeTab
-    from well_viewer.core.app_shell_view import RAIL_W
-
-    # Locks the specific target (438 shrunk 25%), not just "whatever RAIL_W
-    # currently is" — a bare `width <= RAIL_W` check would pass trivially
+    from ui import theme
+    # Locks the specific target (438 shrunk 25%), not just "whatever theme.Metrics.rail_w
+    # currently is" — a bare `width <= theme.Metrics.rail_w` check would pass trivially
     # against the pre-fix 438px width too, since that value was originally
     # sized to fit the pre-fix (wider) rows.
-    assert RAIL_W == 329
+    assert theme.Metrics.rail_w == 329
 
     tab = AnalyzeTab()
     tab._fluor_add_row("RFP")
@@ -77,16 +76,16 @@ def test_analyze_form_fits_rail_w_with_every_section_expanded(qapp):
 
     form = tab._left_sidebar.widget()
     width = form.minimumSizeHint().width()
-    assert width <= RAIL_W, (
+    assert width <= theme.Metrics.rail_w, (
         f"Analyze form's minimum width ({width}) exceeds the shared sidebar "
-        f"width RAIL_W ({RAIL_W}) once every collapsible section is expanded "
+        f"width theme.Metrics.rail_w ({theme.Metrics.rail_w}) once every collapsible section is expanded "
         "— some row doesn't fit."
     )
 
 
 def test_segmentation_and_auto_threshold_method_combos_fit_and_elide(qapp):
     """The two widest fixed-width combos in the form must be narrower than
-    RAIL_W's row budget, and still carry their full text on the tooltip since
+    theme.Metrics.rail_w's row budget, and still carry their full text on the tooltip since
     Qt elides the closed box's label rather than showing it in full."""
     from analyze.tab import AnalyzeTab
 
@@ -103,7 +102,7 @@ def test_segmentation_and_auto_threshold_method_combos_fit_and_elide(qapp):
 
 
 def test_run_controls_fit_the_rail_with_the_queue_button_shown(qapp):
-    """The run row has to fit RAIL_W *with* "+ Queue" on it.
+    """The run row has to fit theme.Metrics.rail_w *with* "+ Queue" on it.
 
     Regression: the button is hidden until the Datasets pane injects a queue
     sink, so every existing check measured the row without it and passed. With
@@ -113,8 +112,7 @@ def test_run_controls_fit_the_rail_with_the_queue_button_shown(qapp):
     its children for show/hide so the row re-wraps when the button appears.
     """
     from analyze.tab import AnalyzeTab
-    from well_viewer.core.app_shell_view import RAIL_W
-
+    from ui import theme
     tab = AnalyzeTab()
     tab.resize(1640, 980)
     tab.show()
@@ -124,11 +122,11 @@ def test_run_controls_fit_the_rail_with_the_queue_button_shown(qapp):
         assert tab._queue_btn.isVisibleTo(tab), "the sink should reveal the button"
 
         row = tab._run_btn.parentWidget()
-        assert row.minimumSizeHint().width() <= RAIL_W, (
-            f"run row needs {row.minimumSizeHint().width()}px, rail is {RAIL_W}px"
+        assert row.minimumSizeHint().width() <= theme.Metrics.rail_w, (
+            f"run row needs {row.minimumSizeHint().width()}px, rail is {theme.Metrics.rail_w}px"
         )
         # And it fits by wrapping, not by squashing: at the rail's width the
         # row is taller than a single button.
-        assert row.heightForWidth(RAIL_W) > tab._run_btn.sizeHint().height()
+        assert row.heightForWidth(theme.Metrics.rail_w) > tab._run_btn.sizeHint().height()
     finally:
         tab.close()

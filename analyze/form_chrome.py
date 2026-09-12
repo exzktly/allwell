@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-from well_viewer.core.ui_helpers import build_hline_separator
+from widgets.separator import build_hline_separator
 
 
 class AnalyzeFormChromeMixin:
@@ -197,11 +197,11 @@ class AnalyzeFormChromeMixin:
         return info_icon(parent, info)
 
     #: Row label column width, narrow enough to leave room for a field at
-    #: RAIL_W; word-wrap below lets an overflowing label wrap instead of clip.
+    #: rail_w; word-wrap below lets an overflowing label wrap instead of clip.
     _ROW_LABEL_W = 108
     # Control widths for the Analyze form, alongside the label column above.
     # The whole set is one decision: ARCHITECTURE's rail-head section explains
-    # that the form was narrowed to fit ``RAIL_W`` by shrinking this label
+    # that the form was narrowed to fit ``theme.Metrics.rail_w`` by shrinking this label
     # column and capping the two widest combos, so a later change to that fit
     # has to be able to see all of them at once.
     _ADD_BTN_W = 130

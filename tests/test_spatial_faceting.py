@@ -1,6 +1,6 @@
 """Spatial tab multi-well faceting.
 
-Boots the real ``WellViewerApp`` with a shape-feature dataset (which carries
+Boots the real ``ReviewApp`` with a shape-feature dataset (which carries
 the ``shape_centroid_*`` columns the Spatial tab needs), selects several wells,
 and asserts the per-frame levels (Cell / Colony / Intra-colony) compute one
 payload per selected well and draw one panel per well — rather than collapsing
@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from tests.fixtures.mini_dataset import WELLS
-from well_viewer.features.spatial import state as sp_state
+from review.features.spatial import state as sp_state
 
 
 def _open_spatial(app):
@@ -25,7 +25,7 @@ def _open_spatial(app):
 @pytest.mark.slow
 def test_spatial_map_facets_every_selected_well(loaded_app_shape):
     app = loaded_app_shape
-    from well_viewer.features.spatial import controller as spc
+    from review.features.spatial import controller as spc
 
     st = _open_spatial(app)
     st.level = sp_state.LEVEL_CELL
@@ -48,7 +48,7 @@ def test_distribution_viz_facets_per_well(loaded_app_shape):
     """NND histogram (a distribution viz) also draws one panel per selected
     well, matching the scatter/distribution tab faceting."""
     app = loaded_app_shape
-    from well_viewer.features.spatial import controller as spc
+    from review.features.spatial import controller as spc
 
     st = _open_spatial(app)
     st.level = sp_state.LEVEL_CELL
@@ -63,7 +63,7 @@ def test_distribution_viz_facets_per_well(loaded_app_shape):
 @pytest.mark.slow
 def test_single_well_still_single_panel(loaded_app_shape):
     app = loaded_app_shape
-    from well_viewer.features.spatial import controller as spc
+    from review.features.spatial import controller as spc
 
     _open_spatial(app)
     app._set_selected_wells({WELLS[0]})
@@ -83,7 +83,7 @@ def test_summary_level_unaffected(loaded_app_shape):
     """Summary level stays a single collapsed matrix (not faceted) and leaves
     ``frames`` empty."""
     app = loaded_app_shape
-    from well_viewer.features.spatial import controller as spc
+    from review.features.spatial import controller as spc
 
     st = _open_spatial(app)
     st.level = sp_state.LEVEL_SUMMARY
@@ -105,7 +105,7 @@ def test_colony_vs_intra_map_recolours_even_with_metric(loaded_app_shape):
     colorbar label differs between the levels.
     """
     app = loaded_app_shape
-    from well_viewer.features.spatial import controller as spc
+    from review.features.spatial import controller as spc
 
     _open_spatial(app)
     app._set_selected_wells({WELLS[0]})

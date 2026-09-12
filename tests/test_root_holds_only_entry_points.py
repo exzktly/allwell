@@ -92,15 +92,17 @@ ROOT_MODULES = {
 #: something outside Python reads them at a fixed path.
 ROOT_DIRS = {
     "analyze": "package — the Analyze pane",
+    "core": "package — cross-cutting app infrastructure no pane owns",
+    "domain": "package — Qt-free models and pure logic more than one pane needs",
     "datasets": "package — the Datasets pane and its tools",
     "pipeline": "package — the Qt-free analysis pipeline",
     "services": "package — the Analyze-side service layer",
     "startup": "package — what runs before the application exists",
     "ui": "package — app-level UI every pane shares",
     "util": "package — Qt-free general helpers",
-    "well_viewer": "package — the Review pane",
+    "review": "package — the Review pane",
     "widgets": "package — reusable Qt widgets",
-    "scripts": "dev tooling + `_bootstrap_lib.py`, which ships in the bundle",
+    "scripts": "dev tooling — the build, test and preflight scripts a person runs, plus the two thin wrappers that exec `services/remote_bootstrap.py`",
     "tests": "the pytest suite",
     "assets":
         "runtime resources read by path — `ui.theme._icon_path` and "
@@ -111,9 +113,12 @@ ROOT_DIRS = {
         "time (`scripts/profile_build.py`)",
     "_Docs":
         "everything that is not source — the live docs, the installer and its "
-        "spec, the requirements lists, the design mockups, the visual audit. "
-        "`_Docs/requirements-remote.txt` is uploaded to a remote worker by that "
-        "exact string, so this name is load-bearing",
+        "spec, the design mockups, the visual audit. The dependency manifests "
+        "are no longer among them: `requirements.txt` and "
+        "`requirements-remote.txt` are repository metadata in the same sense "
+        "as `version.py` — read by pip, by the remote bootstrap and by the "
+        "PyInstaller spec, none of them from Python — so they sit at the root "
+        "beside it",
 }
 
 #: Directories that are not content: version control, tooling caches, build

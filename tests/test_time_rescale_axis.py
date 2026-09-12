@@ -13,7 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import pytest  # noqa: E402
 
-from well_viewer.core.plot_style import (  # noqa: E402
+from review.core.plot_style import (  # noqa: E402
     apply_export_style_prefs,
     apply_time_rescale,
 )
@@ -55,7 +55,7 @@ def test_a_factor_of_one_leaves_the_default_formatter(ax):
 
 
 def test_the_factor_is_stamped_for_the_restyle_pass(ax):
-    from well_viewer.domain.time_rescale import TimeRescale
+    from review.domain.time_rescale import TimeRescale
     apply_time_rescale(ax, 4)
     assert ax._aw_time_rescale == TimeRescale(factor=4)
     apply_time_rescale(ax, 1)
@@ -105,7 +105,7 @@ def test_a_fractional_factor_prints_fractional_hours(ax):
 # ── the offset, on a real axis ──────────────────────────────────────────────
 
 def test_ticks_print_the_shifted_value(ax):
-    from well_viewer.domain.time_rescale import TimeRescale
+    from review.domain.time_rescale import TimeRescale
     ax.set_xticks([0, 1, 2, 3])
     apply_time_rescale(ax, TimeRescale(factor=4, offset=-2))
     assert _tick_texts(ax) == ["-2", "2", "6", "10"]
@@ -114,14 +114,14 @@ def test_ticks_print_the_shifted_value(ax):
 def test_an_offset_alone_still_installs_the_formatter(ax):
     """A shifted axis is as far from the timepoint menus as a scaled one, and
     an offset with the factor left at one is the ordinary way to ask for it."""
-    from well_viewer.domain.time_rescale import TimeRescale
+    from review.domain.time_rescale import TimeRescale
     ax.set_xticks([0, 1, 2, 3])
     apply_time_rescale(ax, TimeRescale(factor=1, offset=2))
     assert _tick_texts(ax) == ["2", "3", "4", "5"]
 
 
 def test_the_offset_leaves_the_plotted_data_alone(ax):
-    from well_viewer.domain.time_rescale import TimeRescale
+    from review.domain.time_rescale import TimeRescale
     apply_time_rescale(ax, TimeRescale(factor=4, offset=-2))
     ax.figure.canvas.draw()
     assert list(ax.lines[0].get_xdata()) == [0, 1, 2, 3]
@@ -133,14 +133,14 @@ def test_the_whole_correction_is_stamped_for_the_restyle_pass(ax):
     the offset here and nowhere else — a figure that is right until the export
     style pass runs over it, which is the worst place for the two to disagree.
     """
-    from well_viewer.domain.time_rescale import TimeRescale
+    from review.domain.time_rescale import TimeRescale
     rs = TimeRescale(factor=4, offset=-2)
     apply_time_rescale(ax, rs)
     assert ax._aw_time_rescale == rs
 
 
 def test_the_offset_survives_the_export_style_pass(ax):
-    from well_viewer.domain.time_rescale import TimeRescale
+    from review.domain.time_rescale import TimeRescale
     ax.set_xticks([0, 1, 2, 3])
     apply_time_rescale(ax, TimeRescale(factor=4, offset=-2))
     apply_export_style_prefs(ax.figure, {})

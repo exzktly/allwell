@@ -34,12 +34,12 @@ import matplotlib.pyplot as plt  # noqa: E402
 import pytest  # noqa: E402
 from matplotlib.legend import Legend  # noqa: E402
 
-from well_viewer.core.plot_style import (  # noqa: E402
+from review.core.plot_style import (  # noqa: E402
     DEFAULT_EXPORT_STYLE_PREFS,
     apply_export_style_prefs,
     legends_on,
 )
-from well_viewer.features.scatter._annotations import (  # noqa: E402
+from review.features.scatter._annotations import (  # noqa: E402
     draw_scatter_agg_legends,
 )
 
@@ -164,11 +164,11 @@ def test_hiding_the_legend_hides_every_key(fig):
 def _stub_app():
     """The smallest app the Properties sidebar will build against — the same
     shape ``tests/test_properties_colour_control.py`` uses."""
-    from well_viewer.core.app_runtime import AppRuntime
-    from well_viewer.core.cell_gating_state import CellGatingState
-    from well_viewer.core.export_prefs_state import ExportPrefsState
-    from well_viewer.core.plot_state import PlotState
-    from well_viewer.features.scatter.state import ScatterState
+    from review.core.app_runtime import AppRuntime
+    from review.core.cell_gating_state import CellGatingState
+    from review.core.export_prefs_state import ExportPrefsState
+    from review.core.plot_state import PlotState
+    from review.features.scatter.state import ScatterState
 
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
@@ -223,7 +223,7 @@ def test_typing_a_size_into_the_panel_resizes_the_aggregate_keys(qtbot, monkeypa
     Properties control usually breaks."""
     from matplotlib.figure import Figure
 
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
 
     figure = Figure(figsize=(4, 3))
     ax = _agg_axes(figure)

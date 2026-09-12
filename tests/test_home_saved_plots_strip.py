@@ -15,11 +15,11 @@ import types
 import pytest
 
 from ui import theme
-from well_viewer.features.home import collect as hc
+from review.features.home import collect as hc
 
 
 def _ctx(tmp_path, *, has_feature=True):
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
 
     dataset = types.SimpleNamespace(data_dir=tmp_path, persistence_doc=None)
     state = types.SimpleNamespace(dataset=dataset)
@@ -52,7 +52,7 @@ def _png() -> bytes:
 
 def _save(ctx, n: int) -> None:
     """Put *n* saved plots in the store, oldest first, each with a real file."""
-    from well_viewer.features.saved_plots.state import SavedPlot, get_store
+    from review.features.saved_plots.state import SavedPlot, get_store
 
     store = get_store(ctx)
     store.ensure_loaded(ctx)
@@ -124,8 +124,8 @@ def test_clicking_a_tile_opens_that_plot_and_not_merely_the_gallery(
     """
     from PySide6.QtWidgets import QWidget
 
-    from well_viewer.features.home import controller as HC
-    from well_viewer.features.home import tab_view
+    from review.features.home import controller as HC
+    from review.features.home import tab_view
 
     opened = []
     monkeypatch.setattr(HC, "_focus_saved_plot",
@@ -147,7 +147,7 @@ def test_a_tile_whose_image_is_gone_says_so_rather_than_drawing_nothing(
         qapp, tmp_path):
     from PySide6.QtWidgets import QWidget
 
-    from well_viewer.features.home import tab_view
+    from review.features.home import tab_view
 
     entry = {"id": "p0", "title": "Plot 0", "tab": "Bar Plots",
              "created_at": "", "image": tmp_path / "never-written.png"}
@@ -166,7 +166,7 @@ def test_a_jump_that_could_not_land_is_reported(qapp, tmp_path, monkeypatch):
     still looking at whatever page they were on. Saying so is the difference
     between a stale thumbnail and a broken feature.
     """
-    from well_viewer.features.home import controller as HC
+    from review.features.home import controller as HC
 
     said = []
     ctx = _ctx(tmp_path)
@@ -181,7 +181,7 @@ def test_a_jump_that_could_not_land_is_reported(qapp, tmp_path, monkeypatch):
 def test_a_build_without_the_feature_never_reaches_the_gallery(tmp_path,
                                                                monkeypatch):
     """The guard is the registry lookup, not a try/except around the import."""
-    from well_viewer.features.home import controller as HC
+    from review.features.home import controller as HC
 
     reached = []
     monkeypatch.setattr(HC, "_focus_saved_plot",
@@ -224,7 +224,7 @@ def test_the_caption_sits_under_the_picture_and_not_beside_it(qapp, tmp_path):
     """
     from PySide6.QtWidgets import QWidget
 
-    from well_viewer.features.home import tab_view
+    from review.features.home import tab_view
 
     ctx = _ctx(tmp_path)
     _save(ctx, 1)
@@ -250,7 +250,7 @@ def test_a_long_title_is_elided_rather_than_running_off_the_tile(qapp, tmp_path)
     and the whole of it stays reachable in the tooltip."""
     from PySide6.QtWidgets import QWidget
 
-    from well_viewer.features.home import tab_view
+    from review.features.home import tab_view
 
     long_title = "Fraction ON over time, all conditions, 48 h, replicate 2"
     entry = {"id": "p0", "title": long_title, "tab": "Line Graphs",
@@ -271,7 +271,7 @@ def test_a_click_anywhere_on_the_tile_reaches_the_button(qapp, tmp_path):
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QWidget
 
-    from well_viewer.features.home import tab_view
+    from review.features.home import tab_view
 
     ctx = _ctx(tmp_path)
     _save(ctx, 1)
@@ -297,7 +297,7 @@ def test_a_thumbnail_is_decoded_at_thumbnail_size(qapp, tmp_path, monkeypatch):
     from PySide6.QtGui import QImageReader
     from PySide6.QtWidgets import QWidget
 
-    from well_viewer.features.home import tab_view
+    from review.features.home import tab_view
 
     asked = []
     real_set = QImageReader.setScaledSize
@@ -347,7 +347,7 @@ def test_a_thumbnail_is_decoded_once_and_then_cached(qapp, tmp_path,
     """
     from PySide6.QtGui import QImageReader
 
-    from well_viewer.features.home import tab_view
+    from review.features.home import tab_view
 
     reads = []
     real_read = QImageReader.read
@@ -370,7 +370,7 @@ def test_a_re_saved_plot_is_decoded_again(qapp, tmp_path, monkeypatch):
     same name shows the new figure rather than the cached old one."""
     from PySide6.QtGui import QImageReader
 
-    from well_viewer.features.home import tab_view
+    from review.features.home import tab_view
 
     reads = []
     real_read = QImageReader.read

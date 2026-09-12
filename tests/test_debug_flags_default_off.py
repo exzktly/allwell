@@ -17,7 +17,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from well_viewer.core import debug_flags  # noqa: E402
+from core import debug_flags  # noqa: E402
 from tests._repo_scan import parse_source
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -41,7 +41,7 @@ def _module_bools(path: pathlib.Path) -> dict[str, bool]:
 
 
 def test_every_flag_ships_off():
-    declared = _module_bools(_ROOT / "well_viewer" / "core" / "debug_flags.py")
+    declared = _module_bools(_ROOT / "core" / "debug_flags.py")
     on = sorted(name for name, value in declared.items() if value)
     assert not on, (
         f"debug flag(s) shipping ON: {on}. ARCHITECTURE 10.2 says the toggles "
@@ -51,7 +51,7 @@ def test_every_flag_ships_off():
 
 
 def test_the_roster_names_every_flag():
-    declared = set(_module_bools(_ROOT / "well_viewer" / "core" / "debug_flags.py"))
+    declared = set(_module_bools(_ROOT / "core" / "debug_flags.py"))
     assert set(debug_flags.FLAG_NAMES) == declared, (
         "FLAG_NAMES and the module's own booleans have diverged: "
         f"{sorted(set(debug_flags.FLAG_NAMES) ^ declared)}"

@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
-from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
 from util.timepoint import sort_key as tp_sort_key
 from widgets._support import set_variant
 from widgets.flow_layout import FlowLayout
@@ -44,8 +44,8 @@ from datasets.subset.subset_compute import (
     destination_has_unrecognized_content,
     destination_is_complete_dataset,
 )
-from datasets._common.dataset_fields import is_dataset, is_free_destination
-from datasets._common.dataset_fields import promote_open_button
+from datasets.core.dataset_fields import is_dataset, is_free_destination
+from datasets.core.dataset_fields import promote_open_button
 
 
 

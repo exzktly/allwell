@@ -43,7 +43,7 @@ def _no_tab_dispatch(monkeypatch):
     module attribute is the binding the calls resolve) keeps these tests on
     the reparenting they exist to check.
     """
-    from well_viewer.core import split_view as _sv
+    from review.core import split_view as _sv
     monkeypatch.setattr(_sv, "on_tab_change", lambda *a, **k: None)
 
 
@@ -59,7 +59,7 @@ pytest.importorskip("PySide6")
 @pytest.fixture(autouse=True)
 def _reset_split_providers():
     """Isolate the module-global provider hooks across tests."""
-    from well_viewer.core import tab_controller as tc
+    from review.core import tab_controller as tc
     saved = (tc.split_focus_provider, tc.split_visible_provider,
              tc.split_nav_intercept)
     tc.split_focus_provider = tc.split_visible_provider = tc.split_nav_intercept = None
@@ -73,7 +73,7 @@ def _reset_split_providers():
 def _new_stack(names):
     from PySide6.QtWidgets import QApplication, QLabel
 
-    from well_viewer.core.centre_view import NamedPageStack
+    from widgets.page_stack import NamedPageStack
 
     QApplication.instance() or QApplication([])
     st = NamedPageStack()
@@ -124,7 +124,7 @@ def test_detach_unknown_page_returns_none():
 def _split_app(*, install=True):
     from PySide6.QtWidgets import QHBoxLayout, QWidget
 
-    from well_viewer.core import split_view as sv
+    from review.core import split_view as sv
 
     st, widgets = _new_stack(["Plotting", "Statistics", "Saved Plots"])
 
@@ -140,8 +140,8 @@ def _split_app(*, install=True):
     # providers now take ctx (A8): the centre notebook via ctx.window, the split
     # flags via ctx.runtime.split. Give the double a matching ctx.
     from types import SimpleNamespace
-    from well_viewer.core.app_runtime import AppRuntime
-    from well_viewer.core.widget_registry import WidgetRegistry
+    from review.core.app_runtime import AppRuntime
+    from review.core.widget_registry import WidgetRegistry
     app._ctx = SimpleNamespace(app=app, window=app, runtime=AppRuntime(app),
                                widgets=WidgetRegistry(app))
     if install:
@@ -152,7 +152,7 @@ def _split_app(*, install=True):
 def test_not_installed_is_single_tab():
     """Removability: with no install, the resolvers collapse to single-tab and
     no toggle button exists — the feature is fully absent."""
-    from well_viewer.core import tab_controller as tc
+    from review.core import tab_controller as tc
 
     app, _, _ = _split_app(install=False)
     assert tc.split_visible_provider is None
@@ -163,7 +163,7 @@ def test_not_installed_is_single_tab():
 
 
 def test_install_registers_hooks_and_widgets():
-    from well_viewer.core import tab_controller as tc
+    from review.core import tab_controller as tc
 
     app, _, _ = _split_app()
     assert tc.split_visible_provider is not None
@@ -176,7 +176,7 @@ def test_install_registers_hooks_and_widgets():
 def test_toggle_hidden_outside_review_mode():
     """Regression guard: the split-view toggle lives in the top bar shared by
     all three modes (Review/Analyze/Datasets mount into the same
-    WellViewerApp central-pane stack, see allwell.py), but splitting two
+    ReviewApp central-pane stack, see allwell.py), but splitting two
     Review tabs makes no sense from Analyze or Datasets — the toggle used to
     just sit there regardless of mode, with nothing for it to act on.
     It must start visible on Review (the default mode), hide when the mode
@@ -184,9 +184,9 @@ def test_toggle_hidden_outside_review_mode():
     from PySide6.QtCore import QObject, Signal
     from PySide6.QtWidgets import QApplication, QHBoxLayout, QWidget
 
-    from well_viewer.core import split_view as sv
-    from well_viewer.core.app_runtime import AppRuntime
-    from well_viewer.core.widget_registry import WidgetRegistry
+    from review.core import split_view as sv
+    from review.core.app_runtime import AppRuntime
+    from review.core.widget_registry import WidgetRegistry
 
     QApplication.instance() or QApplication([])
 
@@ -202,7 +202,7 @@ def test_toggle_hidden_outside_review_mode():
             return self._mode
 
     app = _ModedApp()
-    from well_viewer.core.centre_view import NamedPageStack
+    from widgets.page_stack import NamedPageStack
     app._notebook = NamedPageStack()
     top = QWidget()
     QHBoxLayout(top)
@@ -238,7 +238,7 @@ def test_focus_watcher_reads_split_state_without_crashing():
     never exercised and a stale ``self._ctx`` reference (left by the ctx-migration)
     slipped through, crashing every real focus change while Split View was
     installed (``'_SplitFocusWatcher' object has no attribute '_ctx'``)."""
-    from well_viewer.core.split_view import _SplitFocusWatcher
+    from review.core.split_view import _SplitFocusWatcher
 
     app, _, _ = _split_app(install=False)
     watcher = _SplitFocusWatcher(app)
@@ -255,13 +255,13 @@ def test_section_nav_hands_ctx_not_app_to_intercept():
     registered *indirectly* (``tab_controller.split_nav_intercept`` module global),
     so the frozen-ctx guard can't resolve the call site and verify the argument.
     Passing the app instead of ``self._ctx`` crashed on every rail tab change
-    (``'WellViewerApp' object has no attribute 'runtime'``). This locks the
+    (``'ReviewApp' object has no attribute 'runtime'``). This locks the
     contract without needing a full app.
     """
     from types import SimpleNamespace
 
-    from well_viewer.core import tab_controller as tc
-    from well_viewer.runtime_app import WellViewerApp
+    from review.core import tab_controller as tc
+    from review.runtime_app import ReviewApp
 
     seen = {}
 
@@ -279,7 +279,7 @@ def test_section_nav_hands_ctx_not_app_to_intercept():
             _notebook=SimpleNamespace(setCurrentByName=lambda _k: None),
         )
         # Call the unbound method against the stub — exercises the real caller body.
-        WellViewerApp._on_section_nav_changed(stub, "Line Graphs")
+        ReviewApp._on_section_nav_changed(stub, "Line Graphs")
         assert seen["arg"] is sentinel_ctx, (
             "the nav-intercept hook must receive ctx (ctx.runtime.split), not the app"
         )
@@ -288,8 +288,8 @@ def test_section_nav_hands_ctx_not_app_to_intercept():
 
 
 def test_enter_split_reparents_and_reports_both_panes():
-    from well_viewer.core import split_view as sv
-    from well_viewer.core import tab_controller as tc
+    from review.core import split_view as sv
+    from review.core import tab_controller as tc
 
     app, st, _ = _split_app()
     sv.enter_split(app._ctx, "Plotting", "Saved Plots")
@@ -303,7 +303,7 @@ def test_enter_split_reparents_and_reports_both_panes():
 
 
 def test_exit_split_restores_notebook_order():
-    from well_viewer.core import split_view as sv
+    from review.core import split_view as sv
 
     app, st, _ = _split_app()
     sv.enter_split(app._ctx, "Plotting", "Saved Plots")
@@ -316,7 +316,7 @@ def test_exit_split_restores_notebook_order():
 
 
 def test_enter_split_same_tab_is_noop():
-    from well_viewer.core import split_view as sv
+    from review.core import split_view as sv
 
     app, st, _ = _split_app()
     sv.enter_split(app._ctx, "Plotting", "Plotting")
@@ -325,8 +325,8 @@ def test_enter_split_same_tab_is_noop():
 
 
 def test_focus_split_switches_focused_pane():
-    from well_viewer.core import split_view as sv
-    from well_viewer.core import tab_controller as tc
+    from review.core import split_view as sv
+    from review.core import tab_controller as tc
 
     app, _, _ = _split_app()
     sv.enter_split(app._ctx, "Plotting", "Saved Plots")
@@ -336,7 +336,7 @@ def test_focus_split_switches_focused_pane():
     assert tc.current_centre_tab(app._ctx) == "Saved Plots"
 
 
-# ── Full-app integration (real WellViewerApp via the loaded_app fixture) ──────
+# ── Full-app integration (real ReviewApp via the loaded_app fixture) ──────
 _PLOT_LEAVES = {"Line Graphs", "Bar Plots", "Scatter Plot", "Distribution",
                 "Heat Map"}
 
@@ -345,8 +345,8 @@ def test_real_app_enter_exit_split(loaded_app):
     """On a real app (install ran in build_ui): splitting Plotting | Statistics
     force-builds Statistics, detaches both top-level pages (Plotting's nested
     notebook moves whole), reports both leaves visible; exiting restores order."""
-    from well_viewer.core import split_view as sv
-    from well_viewer.core import tab_controller as tc
+    from review.core import split_view as sv
+    from review.core import tab_controller as tc
 
     app = loaded_app
     assert tc.split_visible_provider is not None  # install_split_view ran
@@ -371,7 +371,7 @@ def test_dataset_reload_exits_split(loaded_app, mini_dataset):
     """Loading a dataset while split is active must leave split first — the load
     restores view-state + redraws against the single-notebook layout, which the
     detached panes break (reported crash: Image Table | plot, then open dataset)."""
-    from well_viewer.core import split_view as sv
+    from review.core import split_view as sv
 
     app = loaded_app
     app._notebook.setCurrentByName("Plotting")

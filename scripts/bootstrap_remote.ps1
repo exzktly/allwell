@@ -1,7 +1,7 @@
 # bootstrap_remote.ps1 — one-time setup for an AllWell remote-execution host
 # (native Windows PowerShell version).
 #
-# Thin wrapper around scripts\_bootstrap_lib.py — the real logic lives
+# Thin wrapper around services\remote_bootstrap.py — the real logic lives
 # there so the Linux/macOS/Git Bash path (bootstrap_remote.sh) and this
 # one share a single source of truth.
 #
@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 # Force UTF-8 on Python's stdout/stderr so the bootstrap's progress
 # messages (which contain ``→``, ``…``, etc.) don't crash with
 # ``UnicodeEncodeError: 'charmap' codec can't encode character`` on a
-# console whose codepage is cp1252. ``_bootstrap_lib.py`` ALSO calls
+# console whose codepage is cp1252. ``remote_bootstrap.py`` ALSO calls
 # ``sys.stdout.reconfigure(encoding='utf-8')`` at startup, but the
 # very earliest argparse/usage output can fire before that runs, and
 # some older Python builds don't honour reconfigure for already-piped
@@ -32,7 +32,7 @@ $prevConsoleEncoding = [Console]::OutputEncoding
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$libPath = Join-Path $here '_bootstrap_lib.py'
+$libPath = Join-Path (Split-Path -Parent $here) 'services\remote_bootstrap.py'
 
 # Find a Python interpreter. Try the standard launcher first, fall back
 # to plain 'python' on PATH. We don't try to be clever — if neither is

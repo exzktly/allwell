@@ -35,8 +35,8 @@ from unittest.mock import patch
 
 import pytest
 
-from well_viewer.persistence import _io as _atomic_io
-from well_viewer.persistence._io import atomic_write_json, atomic_write_text
+from review.persistence import _io as _atomic_io
+from review.persistence._io import atomic_write_json, atomic_write_text
 
 
 def test_atomic_write_text_succeeds_on_happy_path(tmp_path):

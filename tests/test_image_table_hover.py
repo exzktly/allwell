@@ -20,7 +20,7 @@ from PySide6.QtCore import QEvent, QPoint, QPointF
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication, QLabel, QToolTip
 
-from well_viewer.features.image_browser.image_table import controller as C
+from review.features.image_browser.image_table import controller as C
 
 _app = QApplication.instance() or QApplication([])
 

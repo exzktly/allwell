@@ -1,7 +1,7 @@
 """End-to-end evaluation of every CSV export and batch export path.
 
 This module is a *vigorous, behavioural* audit of All-Well's export surface.
-It drives a real, fully-loaded ``WellViewerApp`` on the offscreen Qt platform
+It drives a real, fully-loaded ``ReviewApp`` on the offscreen Qt platform
 (no mocking of the aggregation / collection layers) and asserts the actual
 bytes written to disk for:
 
@@ -63,7 +63,7 @@ pytestmark = pytest.mark.slow
 
 # ── module-scoped fully-loaded app ───────────────────────────────────────────
 #
-# Constructing ``WellViewerApp`` under the offscreen QPA platform is expensive
+# Constructing ``ReviewApp`` under the offscreen QPA platform is expensive
 # (~1 min), so build it ONCE for the module and reset the cheap per-test state
 # (selection / replicate sets) between tests.
 
@@ -80,9 +80,9 @@ def eval_app(tmp_path_factory):
     QMessageBox.question = staticmethod(lambda *a, **k: 0)
 
     data_dir = build_mini_dataset(tmp_path_factory.mktemp("mini") / "ds")
-    from well_viewer.runtime_app import WellViewerApp
+    from review.runtime_app import ReviewApp
 
-    va = WellViewerApp()
+    va = ReviewApp()
     va._load_path(data_dir)
     yield va
     va.deleteLater()
@@ -109,7 +109,7 @@ def _run_ontab_export(ctx, fn, tmp_path, name="out") -> list[dict] | None:
     Returns the parsed rows, or ``None`` when the exporter warned/aborted
     (no file written).
     """
-    from well_viewer.features.export import service as svc
+    from review.features.export import service as svc
 
     out = Path(tmp_path) / f"{name}.csv"
     with mock.patch.object(svc, "ask_save_csv", return_value=str(out)):
@@ -136,7 +136,7 @@ def _define_replicate_sets(ctx, sets):
 def _make_mixed_group(name="Cond1"):
     """A batch group mixing a replicate set (A01+A02) with a single well (B01)
     — the exact 'replicates and single wells' construct the task calls for."""
-    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+    from review.domain.batch_models import BarGroup, ReplicateSet
 
     return BarGroup(
         name,
@@ -152,7 +152,7 @@ def _make_mixed_group(name="Cond1"):
 def test_ontab_line_single_wells(ctx, tmp_path):
     """Single-well selection → one block of rows per well, no replicate_set
     column, exact per-well means across all three timepoints."""
-    from well_viewer.features.export.service import export_plot_data
+    from review.features.export.service import export_plot_data
 
     _select_single_wells(ctx, ["A01", "B01"])
     rows = _run_ontab_export(ctx, export_plot_data, tmp_path, "line_wells")
@@ -199,7 +199,7 @@ def test_ontab_line_replicate_set_fallback(ctx, tmp_path):
     it is over, because a per-well point is not an aggregation of anything —
     both columns were empty on every plate.
     """
-    from well_viewer.features.export.service import export_plot_data
+    from review.features.export.service import export_plot_data
 
     _define_replicate_sets(ctx, [("CTRL", ["A01", "A02"])])
     rows = _run_ontab_export(ctx, export_plot_data, tmp_path, "line_rep")
@@ -228,10 +228,10 @@ def test_batch_line_solo_well_uses_sample_label(ctx):
     (``well_display_label``), not the bare well token. Regression for the
     well-number-in-legend bug: a labelled well shows its sample name, an
     unlabelled one falls back to the token."""
-    from well_viewer.features.batch_export._line_series_runner import (
+    from review.features.batch_export._line_series_runner import (
         collect_line_series_for_group,
     )
-    from well_viewer.domain.batch_models import BarGroup
+    from review.domain.batch_models import BarGroup
 
     val_col = f"{ctx.state.channel.active_channel}_{ctx.state.channel.active_metric}"
     prev_labels = dict(ctx.state.dataset.well_labels)
@@ -258,10 +258,10 @@ def test_batch_bar_group_uses_sample_labels(ctx):
     straight through to ``BarItem.display``, so a custom Home → Well Labels
     label never reached the batch-exported bar figure even though the
     on-tab collector (``collect_bar_items``) already resolved it."""
-    from well_viewer.features.barplot.controller import (
+    from review.features.barplot.controller import (
         FC_STATE_OFF, collect_bar_items_for_group,
     )
-    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+    from review.domain.batch_models import BarGroup, ReplicateSet
 
     val_col = f"{ctx.state.channel.active_channel}_{ctx.state.channel.active_metric}"
     prev_labels = dict(ctx.state.dataset.well_labels)
@@ -289,7 +289,7 @@ def test_batch_bar_group_uses_sample_labels(ctx):
 def test_ontab_bar_well_mode(ctx, tmp_path):
     """Single wells, no rep-sets → ``well`` id column, per-well mean at the
     active timepoint (t0)."""
-    from well_viewer.features.export.service import export_bar_plot_data
+    from review.features.export.service import export_bar_plot_data
 
     _select_single_wells(ctx, ["A01", "B01"])
     rows = _run_ontab_export(ctx, export_bar_plot_data, tmp_path, "bar_wells")
@@ -305,7 +305,7 @@ def test_ontab_bar_well_mode(ctx, tmp_path):
 def test_ontab_bar_group_mode(ctx, tmp_path):
     """Active replicate sets → ``name`` id column keyed by rep-set name, with
     the mean-of-per-well-means aggregate (CTRL = mean(103.5, 113.5) = 108.5)."""
-    from well_viewer.features.export.service import export_bar_plot_data
+    from review.features.export.service import export_bar_plot_data
 
     _define_replicate_sets(ctx, [("CTRL", ["A01", "A02"]), ("TREAT", ["B01", "B02"])])
     rows = _run_ontab_export(ctx, export_bar_plot_data, tmp_path, "bar_groups")
@@ -326,7 +326,7 @@ def test_ontab_bar_group_mode(ctx, tmp_path):
 
 def test_ontab_scatter_cells(ctx, tmp_path):
     """Per-cell scatter export → one row per cell of each selected well."""
-    from well_viewer.features.export.service import export_scatter_data
+    from review.features.export.service import export_scatter_data
 
     _select_single_wells(ctx, ["A01", "B01"])
     rows = _run_ontab_export(ctx, export_scatter_data, tmp_path, "scatter")
@@ -340,7 +340,7 @@ def test_ontab_scatter_cells(ctx, tmp_path):
 def test_ontab_heatmap(ctx, tmp_path):
     """Heatmap export → one row per plate cell (8x12 = 96), value column named
     for the active channel/metric."""
-    from well_viewer.features.export.service import export_heatmap_data
+    from review.features.export.service import export_heatmap_data
 
     # The heatmap must be drawn before it can be exported; the loaded app drew
     # it during load. Export the current grid.
@@ -352,7 +352,7 @@ def test_ontab_heatmap(ctx, tmp_path):
 
 def test_ontab_distribution(ctx, tmp_path):
     """Per-cell distribution export → one row per cell across selected wells."""
-    from well_viewer.features.export.service import export_distribution_data
+    from review.features.export.service import export_distribution_data
 
     _select_single_wells(ctx, ["A01", "B01"])
     rows = _run_ontab_export(ctx, export_distribution_data, tmp_path, "dist")
@@ -366,7 +366,7 @@ def test_ontab_distribution(ctx, tmp_path):
 # =============================================================================
 
 def _run_line_batch(ctx, groups, out_dir):
-    from well_viewer.features.batch_export import BatchExportPanel
+    from review.features.batch_export import BatchExportPanel
 
     panel = BatchExportPanel(ctx, None, use_sidebar_groups=False)
     panel._groups = list(groups)
@@ -423,7 +423,7 @@ def test_batch_line_regression_figure_render(ctx, tmp_path):
     (``all_fluor_values``) — every line batch export failed and committed
     NOTHING. Guard that a plain line batch now produces its CSV + figure."""
     out_dir = tmp_path / "batch_line_reg"
-    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+    from review.domain.batch_models import BarGroup, ReplicateSet
 
     grp = BarGroup("G", members=[ReplicateSet("R", ["A01", "A02"])], solo_wells=[])
     panel = _run_line_batch(ctx, [grp], out_dir)
@@ -439,7 +439,7 @@ def test_batch_line_figure_has_four_panels_incl_n_above(ctx):
     stacked panels (mean / fraction / N(above) / CDF) but the batch line figure
     dropped the N(above) panel. The batch figure now reuses the tab's renderer,
     so it must have four axes with the N(above) panel third."""
-    from well_viewer.features.batch_export import BatchExportPanel
+    from review.features.batch_export import BatchExportPanel
 
     panel = BatchExportPanel(ctx, None, use_sidebar_groups=False)
     grp = _make_mixed_group("Cond1")
@@ -456,7 +456,7 @@ def test_batch_line_solo_well_error_matches_within_well(ctx, tmp_path):
     per-well statistic), NOT a replicate spread of 0 — i.e. a solo is never
     silently treated as a one-well replicate set."""
     out_dir = tmp_path / "batch_line_solo"
-    from well_viewer.domain.batch_models import BarGroup
+    from review.domain.batch_models import BarGroup
 
     _run_line_batch(ctx, [BarGroup("G", members=[], solo_wells=["B01"])], out_dir)
     rows = _parse_csv((out_dir / "batch_G.csv").read_text())
@@ -475,7 +475,7 @@ def test_batch_line_solo_well_error_matches_within_well(ctx, tmp_path):
 # =============================================================================
 
 def _run_bar_batch(ctx, groups, out_dir, *, pool_replicates=True, tps=("0",)):
-    from well_viewer.features.batch_export import BarBatchExportPanel
+    from review.features.batch_export import BarBatchExportPanel
 
     panel = BarBatchExportPanel(ctx, None, use_sidebar_groups=False)
     panel._groups = list(groups)
@@ -538,8 +538,8 @@ def test_cross_path_solo_well_bytes_match(ctx, tmp_path):
     """A single well's bar metric columns are byte-identical whether written by
     the on-tab exporter or the batch exporter — they share the same
     ``bar_metric_row`` builder, and this proves it end to end."""
-    from well_viewer.features.export.service import export_bar_plot_data
-    from well_viewer.domain.batch_models import BarGroup
+    from review.features.export.service import export_bar_plot_data
+    from review.domain.batch_models import BarGroup
 
     # on-tab, well mode, A01 at t0
     _select_single_wells(ctx, ["A01"])
@@ -575,8 +575,8 @@ def test_cross_path_line_solo_well_bytes_match(ctx, tmp_path):
     own collector, so a solo well's metric columns must agree cell for cell.
     The on-tab exporter used to re-aggregate the well itself, and the two
     disagreed on every column the plain 9-tuple cannot carry."""
-    from well_viewer.features.export.service import export_plot_data
-    from well_viewer.domain.batch_models import BarGroup
+    from review.features.export.service import export_plot_data
+    from review.domain.batch_models import BarGroup
 
     _select_single_wells(ctx, ["A01"])
     ontab = _run_ontab_export(ctx, export_plot_data, tmp_path, "xl_ontab")
@@ -604,7 +604,7 @@ def test_cross_path_line_solo_well_bytes_match(ctx, tmp_path):
 # =============================================================================
 
 def _run_scatter_cells_batch(ctx, groups, out_dir, *, tps=("0.0",)):
-    from well_viewer.features.batch_export import ScatterBatchExportPanel
+    from review.features.batch_export import ScatterBatchExportPanel
 
     panel = ScatterBatchExportPanel(ctx, None, scatter_mode="cells",
                                     use_sidebar_groups=False)
@@ -657,8 +657,8 @@ def test_a_mid_run_axis_change_does_not_split_one_scatter_batch(ctx, tmp_path,
     The assertion is on the column handed to the collector, which is what the
     figure and the CSV are actually built from.
     """
-    from well_viewer.features.batch_export import ScatterBatchExportPanel
-    from well_viewer.features.scatter import controller as scatter_controller
+    from review.features.batch_export import ScatterBatchExportPanel
+    from review.features.scatter import controller as scatter_controller
 
     panel = ScatterBatchExportPanel(ctx, None, scatter_mode="cells",
                                     use_sidebar_groups=False)
@@ -689,7 +689,7 @@ def test_a_mid_run_axis_change_does_not_split_one_scatter_batch(ctx, tmp_path,
 
 
 def _run_scatter_agg_batch(ctx, groups, out_dir, *, tps=("0.0",)):
-    from well_viewer.features.batch_export import ScatterBatchExportPanel
+    from review.features.batch_export import ScatterBatchExportPanel
 
     panel = ScatterBatchExportPanel(ctx, None, scatter_mode="aggregate",
                                     use_sidebar_groups=False)
@@ -752,9 +752,9 @@ def test_batch_scatter_cells_honors_display_options(ctx, tmp_path, monkeypatch):
     """The scatter-cells batch figure reuses the tab's render_scatter_points and
     honours the new panel options: density shading, per-axis log, and the
     Overlay-vs-Separate-axes layout (one panel per group when separated)."""
-    from well_viewer.features.batch_export import ScatterBatchExportPanel
-    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
-    from well_viewer.features.scatter.controller import collect_scatter_data
+    from review.features.batch_export import ScatterBatchExportPanel
+    from review.domain.batch_models import BarGroup, ReplicateSet
+    from review.features.scatter.controller import collect_scatter_data
 
     panel = ScatterBatchExportPanel(ctx, None, scatter_mode="cells",
                                     use_sidebar_groups=False)
@@ -797,8 +797,8 @@ def test_batch_scatter_cells_honors_display_options(ctx, tmp_path, monkeypatch):
 
 def test_batch_scatter_agg_honors_log_scale(ctx, tmp_path, monkeypatch):
     """The aggregate scatter batch applies the X/Y log toggles to the figure."""
-    from well_viewer.features.batch_export import ScatterBatchExportPanel
-    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+    from review.features.batch_export import ScatterBatchExportPanel
+    from review.domain.batch_models import BarGroup, ReplicateSet
 
     panel = ScatterBatchExportPanel(ctx, None, scatter_mode="aggregate",
                                     use_sidebar_groups=False)
@@ -838,7 +838,7 @@ def test_batch_failure_preserves_prior_export(ctx, tmp_path, monkeypatch):
     assert prior
 
     # Now force the figure render to blow up and re-run.
-    from well_viewer.features.batch_export import base_panel
+    from review.features.batch_export import base_panel
     monkeypatch.setattr(
         base_panel.BatchExportPanel, "_render_group_figure",
         lambda self, *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
@@ -881,7 +881,7 @@ def _deck_only(panel, out):
 
 
 def _committed_names(out):
-    from well_viewer.features.batch_export.service import MANIFEST_NAME
+    from review.features.batch_export.service import MANIFEST_NAME
 
     return sorted(p.name for p in out.iterdir()
                   if p.name != MANIFEST_NAME)
@@ -895,7 +895,7 @@ def test_a_line_batch_with_image_files_off_writes_only_the_deck(ctx, tmp_path):
     ``_out_path``, got ``None``, and wrote through some other path would
     satisfy every fast-lane test and fail this one.
     """
-    from well_viewer.features.batch_export import BatchExportPanel
+    from review.features.batch_export import BatchExportPanel
 
     out = tmp_path / "nofiles"
     panel = BatchExportPanel(ctx, None, use_sidebar_groups=False)
@@ -910,7 +910,7 @@ def test_a_line_batch_with_image_files_off_writes_only_the_deck(ctx, tmp_path):
 def test_a_line_batch_with_no_destination_but_the_gallery_writes_nothing(
         ctx, tmp_path):
     """And the folder is not even created. Complementary to the deck case."""
-    from well_viewer.features.batch_export import BatchExportPanel
+    from review.features.batch_export import BatchExportPanel
 
     out = tmp_path / "gallery_only"
     panel = BatchExportPanel(ctx, None, use_sidebar_groups=False)
@@ -930,7 +930,7 @@ def test_the_same_batch_with_image_files_on_writes_them(ctx, tmp_path):
     group that resolved to no wells, a mode that returned early — would give
     an empty directory and read as the feature working.
     """
-    from well_viewer.features.batch_export import BatchExportPanel
+    from review.features.batch_export import BatchExportPanel
 
     out = tmp_path / "withfiles"
     panel = BatchExportPanel(ctx, None, use_sidebar_groups=False)
@@ -951,7 +951,7 @@ def test_a_bar_batch_with_image_files_off_writes_only_the_deck(ctx, tmp_path):
     most likely to be missed by a sweep — so it gets its own end-to-end case
     rather than being assumed to follow the line mode.
     """
-    from well_viewer.features.batch_export import BarBatchExportPanel
+    from review.features.batch_export import BarBatchExportPanel
 
     out = tmp_path / "bar_nofiles"
     panel = BarBatchExportPanel(ctx, None, use_sidebar_groups=False)
@@ -974,7 +974,7 @@ def test_a_bar_batch_with_image_files_off_writes_only_the_deck(ctx, tmp_path):
 
 def test_a_scatter_batch_with_image_files_off_writes_only_the_deck(ctx,
                                                                    tmp_path):
-    from well_viewer.features.batch_export import ScatterBatchExportPanel
+    from review.features.batch_export import ScatterBatchExportPanel
 
     out = tmp_path / "scatter_nofiles"
     panel = ScatterBatchExportPanel(ctx, None, scatter_mode="cells",

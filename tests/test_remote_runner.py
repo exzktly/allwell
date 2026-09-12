@@ -1981,8 +1981,8 @@ def test_verify_reports_empty_csv(host, tmp_path):
 def test_required_files_list_is_what_we_promised():
     """The contract from the design discussion: only these files.
 
-    v5.2.1 swapped ``_Docs/requirements.txt`` for
-    ``_Docs/requirements-remote.txt`` so the remote install no longer
+    v5.2.1 swapped ``requirements.txt`` for
+    ``requirements-remote.txt`` so the remote install no longer
     drags in PySide6 / pyobjc / pyinstaller. If this assertion fails
     the contract drifted and both halves of the split need a look.
     """
@@ -2073,7 +2073,7 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/stardist.py",
         "pipeline/suspend.py",
         "pipeline/threshold_optimize.py",
-        "_Docs/requirements-remote.txt",
+        "requirements-remote.txt",
     )
 
 
@@ -2110,7 +2110,7 @@ def test_remote_requirements_file_omits_gui_deps():
     re-introduce the same wheel-availability failures on aarch64 / new
     Pythons that the v5.2.1 split was meant to fix."""
     from services.remote_runner import repo_root
-    text = (repo_root() / "_Docs" / "requirements-remote.txt").read_text(
+    text = (repo_root() / "requirements-remote.txt").read_text(
         encoding="utf-8",
     )
     # Strip comment lines so a doc-only mention doesn't break the check.
@@ -2182,14 +2182,25 @@ def test_sync_required_files_mkdir_for_subdirs(host, monkeypatch):
 
     runner.sync_required_files()
 
-    # First ssh call should be a `mkdir -p` covering the project dir
-    # plus the _Docs subdir.
+    # First ssh call should be a `mkdir -p` covering the project dir plus
+    # every subdirectory the manifest names. The subdirectories are read out
+    # of the manifest rather than written here: this test used to name
+    # `_Docs` — the one manifest entry that has since moved to the repository
+    # root — so it asserted against a path nobody syncs any more, and it would
+    # have gone on passing right up until that entry was the only one left.
+    from services.remote_runner import _REQUIRED_REMOTE_FILES
+
+    subdirs = {f.split("/")[0] for f in _REQUIRED_REMOTE_FILES if "/" in f}
+    assert subdirs, "the manifest has no subdirectory entries left to check"
     assert captured, "expected at least one ssh mkdir call"
     mk = captured[0]
     assert mk[0] == "mkdir"
     assert "-p" in mk
     assert any(host.remote_project_dir in arg for arg in mk)
-    assert any("_Docs" in arg for arg in mk)
+    for sub in sorted(subdirs):
+        assert any(sub in arg for arg in mk), (
+            f"manifest subdirectory {sub!r} is not pre-created; rsync with "
+            f"individual file sources will not make it. mkdir argv: {mk}")
 
 
 def test_sync_required_files_raises_when_local_file_missing(host, monkeypatch, tmp_path):
@@ -2228,13 +2239,13 @@ def test_sync_required_files_surfaces_rsync_failure(host, monkeypatch):
 
 def test_sync_required_files_uses_bare_relative_sources_with_cwd(host, monkeypatch):
     """v5.2.12: rsync sources are bare relative paths
-    (``process_microscopy.py``, ``_Docs/requirements-remote.txt``)
+    (``process_microscopy.py``, ``requirements-remote.txt``)
     and the subprocess.run cwd is the repo root. Pre-v5.2.12 we used
     absolute paths with the ``/./`` pivot, which older rsync versions
     (macOS bundled 2.6.9) mis-handled — they preserved the FULL local
     path on the remote, creating directories like
-    ``~/allwell/Users/me/allwell/_Docs/requirements-remote.txt`` instead
-    of ``~/allwell/_Docs/requirements-remote.txt``.
+    ``~/allwell/Users/me/allwell/requirements-remote.txt`` instead
+    of ``~/allwell/requirements-remote.txt``.
 
     Bare-relative + cwd works on every rsync version we've seen.
     """
@@ -2929,7 +2940,7 @@ def test_looks_like_rsync_filename_accepts_zip_paths():
     from services.remote_runner import _looks_like_rsync_filename
     assert _looks_like_rsync_filename("A01.zip") is True
     assert _looks_like_rsync_filename("process_microscopy.py") is True
-    assert _looks_like_rsync_filename("_Docs/requirements-remote.txt") is True
+    assert _looks_like_rsync_filename("requirements-remote.txt") is True
 
 
 def test_looks_like_rsync_filename_rejects_progress_and_status_lines():

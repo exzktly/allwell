@@ -29,8 +29,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from well_viewer.data.cache_projectors import project_verdict_column
-from well_viewer.data.zip_members import ScanResult, merge_partial
+from review.data.cache_projectors import project_verdict_column
+from review.data.zip_members import ScanResult, merge_partial
 
 
 # ── item 23: a failed re-projection must not leave the old verdict ───────────
@@ -59,7 +59,7 @@ def test_a_failed_reprojection_drops_the_stale_verdict(caplog):
     def boom(_d, _lbl):
         raise KeyError("GFP_mean_intensity")
 
-    with caplog.at_level(logging.ERROR, logger="well_viewer"):
+    with caplog.at_level(logging.ERROR, logger="review"):
         failed = project_verdict_column(ctx, "A01", column="QC_Pass",
                                         verdict=boom, layer="qc")
     # Keeping [1, 1, 0] would filter every plot by the PREVIOUS thresholds while
@@ -101,7 +101,7 @@ def well_zip(tmp_path):
 
 
 def test_a_complete_scan_is_not_flagged(well_zip):
-    from well_viewer.data.image_discovery import scan_zip_members
+    from review.data.image_discovery import scan_zip_members
 
     fluor, *_rest = scan_zip_members(well_zip, "gfp")
     assert isinstance(fluor, ScanResult)
@@ -110,7 +110,7 @@ def test_a_complete_scan_is_not_flagged(well_zip):
 
 
 def test_a_truncated_zip_scan_says_it_is_truncated(well_zip, monkeypatch):
-    import well_viewer.data.image_discovery as ID
+    import review.data.image_discovery as ID
 
     real = ID.classify_member
     seen = {"n": 0}
@@ -130,7 +130,7 @@ def test_a_truncated_zip_scan_says_it_is_truncated(well_zip, monkeypatch):
 
 
 def test_the_flag_survives_the_merge_and_the_sort():
-    from well_viewer.data.image_discovery import _merge_scan
+    from review.data.image_discovery import _merge_scan
 
     truncated = ScanResult({("1", "0"): "ref"})
     truncated.mark_partial("scanning A01.zip failed: Bad CRC-32")
@@ -170,14 +170,14 @@ def _names(refs):
 
 
 def test_a_parseable_label_still_finds_its_own_well(loose_files):
-    from well_viewer.data.image_discovery import find_well_images_and_masks
+    from review.data.image_discovery import find_well_images_and_masks
 
     fluor, *_rest = find_well_images_and_masks(loose_files, "plate_A01", "GFP")
     assert _names(fluor) == ["A01_GFP_f1_t0.tif"]
 
 
 def test_an_unparseable_label_does_not_admit_another_wells_image(loose_files):
-    from well_viewer.data.image_discovery import find_well_images_and_masks
+    from review.data.image_discovery import find_well_images_and_masks
 
     # The three files collide on (fov, tp) and the merge is first-hit-wins, so
     # the unfiltered scan did not show a MIX — it showed A01's image, one frame,
@@ -189,7 +189,7 @@ def test_an_unparseable_label_does_not_admit_another_wells_image(loose_files):
 def test_files_naming_no_well_are_still_admitted_under_an_unparseable_label(tmp_path):
     from PIL import Image
 
-    from well_viewer.data.image_discovery import find_well_images_and_masks
+    from review.data.image_discovery import find_well_images_and_masks
 
     # A single-well directory whose filenames carry no well field: nothing here
     # contradicts the label, so this is the case the fallback exists for and it
@@ -234,7 +234,7 @@ def _rows(records):
 
 
 def test_rows_that_cover_the_field_still_return_a_measured_map():
-    from well_viewer.features.image_browser.review_image.collect import (
+    from review.features.image_browser.review_image.collect import (
         review_build_threshold_map,
     )
 
@@ -246,7 +246,7 @@ def test_rows_that_cover_the_field_still_return_a_measured_map():
 
 
 def test_a_field_with_no_rows_is_unmeasured_not_empty():
-    from well_viewer.features.image_browser.review_image.collect import (
+    from review.features.image_browser.review_image.collect import (
         review_build_threshold_map,
     )
 
@@ -257,7 +257,7 @@ def test_a_field_with_no_rows_is_unmeasured_not_empty():
 
 
 def test_a_well_with_no_rows_at_all_is_unmeasured():
-    from well_viewer.features.image_browser.review_image.collect import (
+    from review.features.image_browser.review_image.collect import (
         review_build_threshold_map,
     )
 

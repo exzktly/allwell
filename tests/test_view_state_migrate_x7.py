@@ -7,7 +7,7 @@ reached (unknown step, or a doc written by a newer app).
 """
 from __future__ import annotations
 
-from well_viewer.persistence import view_state as vs
+from review.persistence import view_state as vs
 
 
 def test_current_version_passes_through():

@@ -1,6 +1,6 @@
 """Tests for the shared Datasets container copier.
 
-``datasets._common.containers.copy_container_members`` is the one path every
+``datasets.core.containers.copy_container_members`` is the one path every
 Datasets tool moves image bytes through, and it moves them without decoding
 them (see that module's docstring for the three tiers). These tests hold it to
 the two things that buys and the one thing it must never cost:
@@ -27,8 +27,8 @@ from pathlib import Path
 
 import pytest
 
-from datasets._common.containers import copy_container_members
-from datasets._common.zip_passthrough import (
+from datasets.core.containers import copy_container_members
+from datasets.core.zip_passthrough import (
     _UNICODE_PATH_EXTRA_ID,
     _ZIP64_EXTRA_ID,
     RawCopyUnsupported,
@@ -330,7 +330,7 @@ def test_a_member_the_passthrough_declines_still_lands(tmp_path, monkeypatch):
     dest = tmp_path / "dest.zip"
 
     monkeypatch.setattr(
-        "datasets._common.containers.member_is_raw_copyable", lambda _info: False,
+        "datasets.core.containers.member_is_raw_copyable", lambda _info: False,
     )
     copy_container_members(
         dest, [src], lambda _c, n: None if n == _NAMES[-1] else n,
@@ -503,7 +503,7 @@ def test_a_member_failing_mid_archive_publishes_nothing(tmp_path, monkeypatch):
             raise RawCopyUnsupported("simulated mid-archive failure")
         return real(*args, **kwargs)
 
-    monkeypatch.setattr("datasets._common.containers.copy_member_raw", _fail_on_third)
+    monkeypatch.setattr("datasets.core.containers.copy_member_raw", _fail_on_third)
     with pytest.raises(RawCopyUnsupported):
         copy_container_members(
             dest, [src], lambda _c, n: None if n == _NAMES[-1] else n,

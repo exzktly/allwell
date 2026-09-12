@@ -9,7 +9,7 @@ progress and cancellation through. All the heavy pixel work lives in
 It also owns the *quantising* of per-well progress. The exploder reports one
 tick per plane written; a well of a few thousand planes would be a few thousand
 queued Qt signals and plate repaints, so each well's ticks are folded into a
-single monotonic 0 → 100 sweep by ``_common.containers.WellFraction`` — the same
+single monotonic 0 → 100 sweep by ``core.containers.WellFraction`` — the same
 class every other Datasets tool uses for the same job, so a dial rises the same
 way whichever tool is filling it.
 """
@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from datasets._common.containers import WellFraction
+from datasets.core.containers import WellFraction
 from datasets.ome_import.ome_import_compute import (
     ConversionParams,
     OmeImportError,

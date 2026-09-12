@@ -590,7 +590,7 @@ def _format_block(host: RemoteHost) -> str:
     """Render a ``RemoteHost`` as a TOML ``[remote.<name>]`` block.
 
     Single source of truth for what a remote looks like on disk; called
-    by both :func:`write_remote` and ``scripts/_bootstrap_lib.py``.
+    by both :func:`write_remote` and ``services/remote_bootstrap.py``.
     """
     extras = ", ".join(_toml_string(x) for x in host.extra_args)
     # ssh_key_path is only emitted when set, to keep the common-case

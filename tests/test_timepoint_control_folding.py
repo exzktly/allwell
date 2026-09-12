@@ -28,24 +28,24 @@ import pytest
 # ── multiselect_button_text: Qt-free, pure ───────────────────────────────────
 
 def test_multiselect_button_text_all_selected():
-    from well_viewer.core.ui_helpers import multiselect_button_text
+    from review.core.ui_helpers import multiselect_button_text
     assert multiselect_button_text("Timepoints", {"1": True, "2": True}) == \
         "Timepoints: All 2 selected"
 
 
 def test_multiselect_button_text_partial():
-    from well_viewer.core.ui_helpers import multiselect_button_text
+    from review.core.ui_helpers import multiselect_button_text
     assert multiselect_button_text("Timepoints", {"1": True, "2": False, "3": True}) == \
         "Timepoints: 2/3 selected"
 
 
 def test_multiselect_button_text_empty():
-    from well_viewer.core.ui_helpers import multiselect_button_text
+    from review.core.ui_helpers import multiselect_button_text
     assert multiselect_button_text("Timepoints", {}) == "Timepoints: 0 selected"
 
 
 def test_multiselect_button_text_none_selected():
-    from well_viewer.core.ui_helpers import multiselect_button_text
+    from review.core.ui_helpers import multiselect_button_text
     assert multiselect_button_text("Timepoints", {"1": False, "2": False}) == \
         "Timepoints: 0/2 selected"
 
@@ -68,14 +68,14 @@ def test_combo_based_timepoint_controls_use_labeled_combo(viewer_app, qtbot):
 
     app = viewer_app
     checks = [
-        ("well_viewer.features.stats.tab_view", "build_stats_tab", "_stats_tp_cb"),
-        ("well_viewer.features.spatial.tab_view", "build_spatial_tab", "_sp_tp_cb"),
-        ("well_viewer.features.multivariate.tab_view", "build_multivariate_tab", "_mv_tp_cb"),
-        ("well_viewer.features.distribution.tab_view", "build_distribution_tab", "_distribution_tp_cb"),
-        ("well_viewer.features.smfish.tab_view", "build_smfish_tab", "_smfish_tp_cb"),
-        ("well_viewer.features.review_csv.tab_view", "build_review_csv_tab", "_review_tp_cb"),
-        ("well_viewer.features.preview.panel_view", "build_review_image_panel", "_review_image_tp_menu"),
-        ("well_viewer.features.heatmap.tab_view", "build_heatmap_tab", "_heatmap_tp_cb"),
+        ("review.features.stats.tab_view", "build_stats_tab", "_stats_tp_cb"),
+        ("review.features.spatial.tab_view", "build_spatial_tab", "_sp_tp_cb"),
+        ("review.features.multivariate.tab_view", "build_multivariate_tab", "_mv_tp_cb"),
+        ("review.features.distribution.tab_view", "build_distribution_tab", "_distribution_tp_cb"),
+        ("review.features.smfish.tab_view", "build_smfish_tab", "_smfish_tp_cb"),
+        ("review.features.review_csv.tab_view", "build_review_csv_tab", "_review_tp_cb"),
+        ("review.features.preview.panel_view", "build_review_image_panel", "_review_image_tp_menu"),
+        ("review.features.heatmap.tab_view", "build_heatmap_tab", "_heatmap_tp_cb"),
     ]
     import importlib
     for module_name, fn_name, attr in checks:
@@ -106,9 +106,9 @@ def test_combo_based_timepoint_controls_use_labeled_combo(viewer_app, qtbot):
 
 
 def test_multiselect_timepoint_buttons_have_no_sibling_label(viewer_app, qtbot):
-    from well_viewer.features.barplot.tab_view import build_bar_plots_tab
-    from well_viewer.features.scatter.cells_tab_view import build_scatter_cells_tab
-    from well_viewer.features.scatter.agg_tab_view import build_scatter_agg_tab
+    from review.features.barplot.tab_view import build_bar_plots_tab
+    from review.features.scatter.cells_tab_view import build_scatter_cells_tab
+    from review.features.scatter.agg_tab_view import build_scatter_agg_tab
 
     app = viewer_app
     for builder, btn_attr, label_attr in (

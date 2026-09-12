@@ -18,10 +18,10 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
-from well_viewer.features.crop.region import (
+from review.features.crop.region import (
     centroids_inside, compute_crop_pass, has_centroid_columns,
 )
-from well_viewer.features.image_browser.review_image.collect import (
+from review.features.image_browser.review_image.collect import (
     collect_region_delete_targets,
 )
 
@@ -98,7 +98,7 @@ def _ctx(frames):
 def _patch_get_rows(monkeypatch):
     """``collect_region_delete_targets`` fetches rows through the data service;
     serve them from the stub ctx's cache instead of the filesystem."""
-    import well_viewer.features.image_browser.review_image.collect as collect
+    import review.features.image_browser.review_image.collect as collect
 
     monkeypatch.setattr(
         collect, "get_rows", lambda ctx, well: ctx.state.dataset.cache.get(well),
@@ -187,7 +187,7 @@ def test_unreadable_well_is_reported():
     def _boom(ctx, well):
         raise OSError("unreadable")
 
-    import well_viewer.features.image_browser.review_image.collect as collect
+    import review.features.image_browser.review_image.collect as collect
     ctx = _ctx({"A01": None})
     orig = collect.get_rows
     collect.get_rows = _boom
@@ -253,10 +253,10 @@ def test_armed_well_missing_from_the_dataset_is_reported():
 # ── scope resolution ─────────────────────────────────────────────────────────
 
 def test_resolve_delete_scope_defaults_to_the_displayed_frame():
-    from well_viewer.features.image_browser.review_image.callbacks import (
+    from review.features.image_browser.review_image.callbacks import (
         delete_scope_is_armed, resolve_delete_scope,
     )
-    from well_viewer.features.image_browser.review_image.state import (
+    from review.features.image_browser.review_image.state import (
         ReviewImageState,
     )
 
@@ -278,8 +278,8 @@ def test_zero_timepoint_survives_normalisation():
     """``normalize_tp(0.0)`` used to return "" because 0.0 is falsy, so a
     numeric ``t=0`` baseline — the first column of most time courses — read as
     "no timepoint" and dropped out of every scope and every override key."""
-    from well_viewer.data.image_identity import normalize_tp
-    from well_viewer.core.ui_helpers import norm_timepoint
+    from domain.image_identity import normalize_tp
+    from review.core.ui_helpers import norm_timepoint
 
     assert normalize_tp(0.0) == "0"
     assert normalize_tp(0) == "0"
@@ -300,8 +300,8 @@ def apply_ctx(monkeypatch):
     counts stay readable.
     """
     np = pytest.importorskip("numpy")
-    import well_viewer.features.image_browser.review_image.callbacks as cbs
-    from well_viewer.features.image_browser.review_image.state import (
+    import review.features.image_browser.review_image.callbacks as cbs
+    from review.features.image_browser.review_image.state import (
         ReviewImageState,
     )
 
@@ -309,7 +309,7 @@ def apply_ctx(monkeypatch):
                  "apply_curation_to_cache"):
         monkeypatch.setattr(cbs, name, lambda *a, **k: None)
     monkeypatch.setattr(
-        "well_viewer.core.selection_controller.invalidate_stats_cache",
+        "review.core.selection_controller.invalidate_stats_cache",
         lambda ctx: None,
     )
 
@@ -346,7 +346,7 @@ def apply_ctx(monkeypatch):
 
 def _box(ctx):
     """Drag the top-left 0–100 px box, in mask pixels (x0, y0, x1, y1)."""
-    from well_viewer.features.image_browser.review_image.callbacks import (
+    from review.features.image_browser.review_image.callbacks import (
         apply_box_delete,
     )
     apply_box_delete(ctx, 0, 0, 100, 100)
@@ -418,7 +418,7 @@ def test_reported_count_is_what_was_written_not_what_was_matched(apply_ctx):
 
 
 def test_zero_area_box_and_missing_mask_are_not_silent(apply_ctx):
-    from well_viewer.features.image_browser.review_image.callbacks import (
+    from review.features.image_browser.review_image.callbacks import (
         apply_box_delete,
     )
     apply_box_delete(apply_ctx, 50, 50, 50, 50)

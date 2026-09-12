@@ -32,7 +32,7 @@ def _returns_before(fn, marker: str) -> bool:
 
 
 def test_the_bar_keys_refuse_the_stale_fallback():
-    from well_viewer.features.barplot.controller import ordered_bar_keys
+    from review.features.barplot.controller import ordered_bar_keys
 
     src = textwrap.dedent(inspect.getsource(ordered_bar_keys))
     tree = ast.parse(src)
@@ -43,7 +43,7 @@ def test_the_bar_keys_refuse_the_stale_fallback():
 
 
 def test_the_line_collector_refuses_it_too():
-    from well_viewer.features.lineplot import controller as line_ctrl
+    from review.features.lineplot import controller as line_ctrl
 
     fn = getattr(line_ctrl, "collect_line_series", None) or line_ctrl.build_line_series
     src = textwrap.dedent(inspect.getsource(fn))
@@ -59,7 +59,7 @@ def test_the_line_collector_refuses_it_too():
 
 
 def test_the_group_marker_roster_is_wider_than_a_plate_of_groups():
-    from well_viewer.features.scatter.collect import GROUP_MARKERS
+    from review.features.scatter.collect import GROUP_MARKERS
 
     assert len(GROUP_MARKERS) == len(set(GROUP_MARKERS)), "a shape is listed twice"
     assert len(GROUP_MARKERS) >= 20, (
@@ -71,7 +71,7 @@ def test_every_group_marker_is_a_real_matplotlib_marker():
     matplotlib = pytest.importorskip("matplotlib")
     from matplotlib.markers import MarkerStyle
 
-    from well_viewer.features.scatter.collect import GROUP_MARKERS
+    from review.features.scatter.collect import GROUP_MARKERS
 
     assert matplotlib is not None
     unknown = [m for m in GROUP_MARKERS if m not in MarkerStyle.markers]
@@ -82,7 +82,7 @@ def test_a_wrapped_marker_roster_is_announced(caplog):
     """Silence is the defect: the legend just lists the same swatch twice."""
     import logging
 
-    from well_viewer.features.scatter import collect
+    from review.features.scatter import collect
 
     src = textwrap.dedent(inspect.getsource(collect.collect_scatter_agg_data))
     assert "_logger.warning" in src, (

@@ -13,7 +13,7 @@ import pytest
 pd = pytest.importorskip("pandas")
 np = pytest.importorskip("numpy")
 
-from well_viewer.data.data_loading import aggregate_with_threshold_df
+from review.data.data_loading import aggregate_with_threshold_df
 
 
 def _df(included, qc=None, crop=None):

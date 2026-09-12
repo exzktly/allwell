@@ -33,7 +33,7 @@ from tests._repo_scan import parse_source
 _CALL_NAMES = {"render_bar_items", "_render_bar_items", "_bar_render_items"}
 
 #: The renderer's own module — the ``def`` lives there, not a call.
-_DEFINITION = "well_viewer/features/barplot/controller.py"
+_DEFINITION = "review/features/barplot/controller.py"
 
 
 def rel(path) -> str:
@@ -115,8 +115,8 @@ def test_the_guard_can_see_both_known_call_sites():
     is §7.5 #3 — the guard measuring nothing and reporting success. So the two
     call sites this rule exists for are named, and must be found."""
     expected = {
-        "well_viewer/features/barplot/renderer.py",
-        "well_viewer/features/batch_export/bar_panel.py",
+        "review/features/barplot/renderer.py",
+        "review/features/batch_export/bar_panel.py",
     }
     found: set[str] = set()
     for path in python_sources():
@@ -149,7 +149,7 @@ def test_the_guard_can_see_both_known_call_sites():
 #: and §7.6 #3 is the answer to that: ask what else the syntax tree can decide.
 _PER_CELL_RENDERERS = ("draw_violin", "draw_beeswarm", "draw_per_well_n_bars")
 
-_RENDERER_MODULE = "well_viewer/features/barplot/renderer.py"
+_RENDERER_MODULE = "review/features/barplot/renderer.py"
 
 
 def _is_apply_call(value: ast.AST) -> bool:

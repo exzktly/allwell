@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from well_viewer.features.export import cell_scope_compute as csc
+from review.features.export import cell_scope_compute as csc
 
 
 def _scope(**kwargs) -> csc.CellScope:

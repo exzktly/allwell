@@ -2,12 +2,12 @@
 
 One equation-style input row — dataset 1 (the base / earlier timepoints) +
 dataset 2 (the one appended after) = a fresh destination, built by the shared
-:mod:`datasets._common.equation_row` that Merge Plates draws from too — over an
+:mod:`datasets.core.equation_row` that Merge Plates draws from too — over an
 Analyze-style status view: a live per-well :class:`~datasets.concatenate.dashboard.ConcatDashboard`
 with the raw text log demoted to a collapsible "Show raw log" checkbox (the
 same furniture as ``analyze/log_pane.py``'s ``_build_log``/``_on_toggle_raw_log``,
 though Analyze starts its log open and this page starts it closed — see
-:mod:`datasets._common.log_panel` for why).
+:mod:`datasets.core.log_panel` for why).
 
 Pure view: it owns widgets and emits intent (``runRequested``,
 ``openInReviewRequested``); the worker wiring lives in
@@ -32,16 +32,16 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from widgets._support import set_variant
-from datasets._common.dataset_paths import preview_wells
-from datasets._common.equation_row import build_equation_row
-from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.dataset_paths import preview_wells
+from datasets.core.equation_row import build_equation_row
+from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
 from datasets.concatenate.concatenate_compute import (
     destination_has_unrecognized_content,
     destination_is_complete_dataset,
 )
 from datasets.concatenate.dashboard import ConcatDashboard
-from datasets._common.dataset_fields import is_dataset, is_free_destination
-from datasets._common.dataset_fields import promote_open_button
+from datasets.core.dataset_fields import is_dataset, is_free_destination
+from datasets.core.dataset_fields import promote_open_button
 
 
 

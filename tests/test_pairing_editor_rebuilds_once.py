@@ -29,8 +29,8 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QComboBox, QTableWidget
 
-from well_viewer.core import fold_change_pairing_view as V
-from well_viewer.domain.fold_change_pairing import ControlOutcome
+from review.core import fold_change_pairing_view as V
+from review.domain.fold_change_pairing import ControlOutcome
 
 pytestmark = pytest.mark.qt
 
@@ -84,7 +84,7 @@ def editor(qtbot, monkeypatch):
         ),
     )
 
-    import well_viewer.core.fold_change_controls_view as CV
+    import review.core.fold_change_controls_view as CV
 
     def _set_state(_ctx, *, control_map=None, initiating_scope=None, **_kw):
         writes.append(dict(control_map or {}))

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.data.metric_labels import (
+from review.data.metric_labels import (
     events_per_fov_title,
     events_total_title,
     fraction_title,

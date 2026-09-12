@@ -24,7 +24,7 @@ import math
 import numpy as np
 import pytest
 
-from well_viewer.domain import stats_tests as st
+from review.domain import stats_tests as st
 
 
 # ── H1: effect size and interval ────────────────────────────────────────────

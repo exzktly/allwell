@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.domain import sample_variables as sv
-from well_viewer.domain import variable_series as vseries
+from review.domain import sample_variables as sv
+from review.domain import variable_series as vseries
 
 
 def _dose():

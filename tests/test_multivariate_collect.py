@@ -13,8 +13,8 @@ import types
 import numpy as np
 import pandas as pd
 
-from well_viewer.features.multivariate import collect as mv_collect
-from well_viewer.domain import multivariate_compute as mvc
+from review.features.multivariate import collect as mv_collect
+from review.domain import multivariate_compute as mvc
 
 
 def _well_df(seed, n=60):
@@ -55,7 +55,7 @@ def _fake_app(frames):
         _rank_color_well=lambda label: "#4C78A8",
         _parse_rc=lambda label: (label[0], label[1:]),
     )
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app._ctx = types.SimpleNamespace(app=app, state=app_state, runtime=AppRuntime(app))
     return app
 

@@ -29,8 +29,8 @@ pytest.importorskip("pyarrow")
 
 from pandas.testing import assert_frame_equal  # noqa: E402
 
-from well_viewer.data import parquet_cache as pc  # noqa: E402
-from well_viewer.data.data_loading import load_well_csv, read_well_frame  # noqa: E402
+from review.data import parquet_cache as pc  # noqa: E402
+from review.data.data_loading import load_well_csv, read_well_frame  # noqa: E402
 
 _TEXT = ["experiment", "channel", "well", "fov", "timepoint", "filename"]
 _NUM = ["timepoint_hours", "area_px", "gfp_mean_intensity", "shape_perimeter"]
@@ -96,7 +96,7 @@ def test_the_second_read_does_not_parse_the_csv_again(plate, monkeypatch):
 
     So this counts parses, not frames. Two reads of one well must parse once.
     """
-    import well_viewer.data.data_loading as dl
+    import review.data.data_loading as dl
 
     parses = {"n": 0}
     real = dl.load_well_csv
@@ -152,7 +152,7 @@ def test_a_changed_parser_invalidates_every_cache():
     import hashlib
     import inspect
 
-    from well_viewer.data import data_loading as dl
+    from review.data import data_loading as dl
 
     material = "".join([
         inspect.getsource(dl.load_well_csv),
@@ -180,7 +180,7 @@ def test_the_fingerprint_is_taken_before_the_parse(plate, monkeypatch):
     rows: the cache then looks fresh and is wrong on every read afterwards,
     which is §7's cardinal case reached with no bug in the parse at all.
     """
-    import well_viewer.data.data_loading as dl
+    import review.data.data_loading as dl
 
     real = dl.load_well_csv
 
@@ -282,8 +282,8 @@ def test_the_cache_is_written_before_any_verdict_is_projected(plate, monkeypatch
     one line down, past the loop — which is a mistake in ``load_and_project``,
     and only a test that runs that loop can see it.
     """
-    import well_viewer.data.cache_projectors as cp
-    import well_viewer.data.data_loading as dl
+    import review.data.cache_projectors as cp
+    import review.data.data_loading as dl
 
     seen = {}
     real = pc.write_cache
@@ -360,7 +360,7 @@ def test_read_well_frame_is_the_only_door_onto_a_wells_rows():
     """
     from tests._repo_scan import parse_source, python_sources
 
-    exempt = {"well_viewer/data/data_loading.py", "well_viewer/data/parquet_cache.py"}
+    exempt = {"review/data/data_loading.py", "review/data/parquet_cache.py"}
     trees = [(path, parse_source(path)) for path in python_sources()
              if not str(path).replace("\\", "/").endswith(tuple(exempt))]
     offenders = load_well_csv_call_sites(trees)

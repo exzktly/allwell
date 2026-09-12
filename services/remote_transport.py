@@ -210,7 +210,7 @@ _RSYNC_FILENAME_RE = re.compile(
     # Positive match: a single token (NO whitespace anywhere) that
     # either contains a path separator (e.g. ``subdir/foo.tif``) or
     # ends with a 1–8 character extension (e.g. ``A01.zip``,
-    # ``process_microscopy.py``, ``_Docs/requirements-remote.txt``).
+    # ``process_microscopy.py``, ``requirements-remote.txt``).
     r"^\S+(?:[/\\]\S+|\.[A-Za-z0-9]{1,8})$"
 )
 

@@ -22,7 +22,7 @@ literals: both mean "no constraint" rather than a measurement, and naming them
 makes a call site harder to read, not easier.
 
 `datasets/` is out of scope for now — its six tool pages are mid-consolidation
-into `datasets/_common/`, and naming constants inside modules that are about to
+into `datasets/core/`, and naming constants inside modules that are about to
 move would land the same numbers twice.
 """
 
@@ -59,15 +59,15 @@ EMBEDDED_HEX_ALLOWLIST = {
 # harness that never ships in a window.
 COLOUR_ALLOWLIST = {
     "widgets/lut_selector.py": "colormap stop triples — the literals are the colormap",
-    "well_viewer/features/image_browser/image_table/builder_view.py":
+    "review/features/image_browser/image_table/builder_view.py":
         "cmap swatch colours, keyed by the matplotlib colormap they preview",
-    "well_viewer/domain/selections_model.py":
+    "review/domain/selections_model.py":
         "the rank-assigned selection palette (theme.WELL_COLORS_TUPLE's fallback twin)",
     "widgets/color_picker_popover.py": "__main__ demo block",
     "widgets/color_swatch_row.py": "__main__ demo block",
     "widgets/gradient_strip.py": "__main__ demo block",
     "widgets/saved_selections_list.py":
-        "widgets/ may not import well_viewer; the two fallbacks restate theme's",
+        "widgets/ may not import review; the two fallbacks restate theme's",
     "allwell.py": "the app-icon painter's own art palette (see _ICON_* below it)",
 }
 
@@ -268,8 +268,12 @@ def test_no_inline_pixel_sizes():
         "Pixel size(s) written at the call site. Give the number a name: a "
         "`theme.Metrics` token when the role is shared across panes, a "
         "module-level constant when it belongs to one module's controls "
-        "(the precedent is `analyze.form_chrome._ROW_LABEL_W`, "
-        "`core/app_shell_view.RAIL_W`):\n  " + "\n  ".join(sorted(offenders))
+        "(the precedent is `analyze.form_chrome._ROW_LABEL_W`). A number more "
+        "than one pane sets is a shared role by definition and belongs in "
+        "`theme.Metrics`: the navigation-rail width was named right here as "
+        "the precedent for a module-local constant while it sat inside the "
+        "Review pane and Analyze and Datasets imported it across a package "
+        "boundary to stay aligned:\n  " + "\n  ".join(sorted(offenders))
     )
 
 

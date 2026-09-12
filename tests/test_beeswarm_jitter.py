@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from well_viewer.data.data_loading import _beeswarm_jitter
+from review.data.data_loading import _beeswarm_jitter
 
 
 def test_widely_spaced_points_sit_on_midline():

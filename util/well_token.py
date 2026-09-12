@@ -11,7 +11,7 @@ normalisation logic:
 They agreed by coincidence; this module is the canonical home so a
 future change can't drift the parsers apart again. It depends only on
 the stdlib, so the pipeline (`process_microscopy.py`) can import it
-without violating the "no well_viewer/widgets imports" contract from
+without violating the "no review/widgets imports" contract from
 ARCHITECTURE §6.2.
 """
 

@@ -12,7 +12,7 @@ They now all delegate to :mod:`util.timepoint`, and these tests are what keeps
 that true. The names survive because call sites are written against them:
 
 * ``util.timepoint.parse_hours`` — the implementation.
-* ``well_viewer.data.image_identity.parse_timepoint_hours`` — the viewer's name,
+* ``domain.image_identity.parse_timepoint_hours`` — the viewer's name,
   consumed by ``normalize_tp`` (canonical keys) and ``tp_hours``.
 * ``pipeline.auto_threshold.parse_tp_hours`` — the pipeline's name.
 * ``process_microscopy._parse_timepoint_hours`` — a ``nan``-returning adapter;
@@ -38,7 +38,7 @@ def _parsers():
     is an adapter with a different sentinel and gets its own tests."""
     from pipeline.auto_threshold import parse_tp_hours
     from util.timepoint import parse_hours
-    from well_viewer.data.image_identity import parse_timepoint_hours
+    from domain.image_identity import parse_timepoint_hours
 
     return {
         "util.timepoint": parse_hours,
@@ -178,8 +178,8 @@ class TestSortKey:
         from util.timepoint import sort_key
         import pipeline.auto_threshold as at
         import services.remote_runner as rr
-        from well_viewer.features.image_browser.image_table import grid_layout
-        from well_viewer.features.image_browser.review_image import collect
+        from review.features.image_browser.image_table import grid_layout
+        from review.features.image_browser.review_image import collect
 
         assert at.tp_sort_key is sort_key
         assert grid_layout._tp_sort_key is sort_key
@@ -202,7 +202,7 @@ class TestCanonicalKeyForm:
         nothing, so a lookup keyed on a float 0.0 silently found no images and no
         rows. Emptiness is a property of the string, not of the number.
         """
-        from well_viewer.data.image_identity import normalize_tp
+        from domain.image_identity import normalize_tp
         assert normalize_tp(0.0) == "0"
         assert normalize_tp(0) == "0"
         assert normalize_tp("0") == "0"
@@ -221,7 +221,7 @@ class TestCanonicalKeyForm:
         reporting the baseline as unreadable.
         """
         from util.timepoint import parse_hours
-        from well_viewer.data.image_identity import tp_hours
+        from domain.image_identity import tp_hours
         for zero in (0, 0.0, "0", "0h", "T00"):
             assert parse_hours(zero) == 0.0, zero
         assert tp_hours(0) == 0.0
@@ -235,14 +235,14 @@ class TestCanonicalKeyForm:
         assert parse_hours(True) is None
 
     def test_genuinely_absent_values_still_normalise_to_empty(self):
-        from well_viewer.data.image_identity import normalize_tp
+        from domain.image_identity import normalize_tp
         assert normalize_tp(None) == ""
         assert normalize_tp("") == ""
         assert normalize_tp("   ") == ""
 
     def test_numeric_and_text_spellings_agree_for_every_timepoint(self):
         """The property the zero case violated: one timepoint, one key."""
-        from well_viewer.data.image_identity import normalize_tp
+        from domain.image_identity import normalize_tp
         for hours in (0.0, 0.5, 1.0, 4.0, 23.5, 48.0):
             assert normalize_tp(hours) == normalize_tp(str(hours))
 
@@ -250,8 +250,8 @@ class TestCanonicalKeyForm:
         """``core.ui_helpers.norm_timepoint`` is the ctx-shaped wrapper. It
         carried its own copy of the rule, which is how it kept the zero bug
         after ``normalize_tp`` was fixed."""
-        from well_viewer.core.ui_helpers import norm_timepoint
-        from well_viewer.data.image_identity import normalize_tp
+        from review.core.ui_helpers import norm_timepoint
+        from domain.image_identity import normalize_tp
         for value in (0.0, 0, "0", "T01", "1h30m", "treated_arm_2", "", None):
             assert norm_timepoint(None, value) == normalize_tp(value)
 
@@ -266,7 +266,7 @@ class TestCanonicalKeyForm:
         """
         import ast
         import inspect
-        from well_viewer.core import ui_helpers
+        from review.core import ui_helpers
 
         src = inspect.getsource(ui_helpers.norm_timepoint)
         fn = ast.parse(textwrap.dedent(src)).body[0]

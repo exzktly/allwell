@@ -33,7 +33,7 @@ import pytest
 from tests._repo_scan import parsed_sources
 
 #: Where the roster lives, and the function that holds it.
-_PANEL_MODULE = "well_viewer/features/export/style.py"
+_PANEL_MODULE = "review/features/export/style.py"
 _PANEL_FUNCTION = "open_export_style_panel"
 #: The helper a tab calls to build the button.
 _BUTTON_HELPER = "make_properties_button"
@@ -166,7 +166,7 @@ def test_opening_the_response_panel_gets_past_the_roster_lookup():
     Asserting the sentence rather than "no error", because a broken key also
     produces a status line and "something was said" passes both ways.
     """
-    from well_viewer.features.export.style import open_export_style_panel
+    from review.features.export.style import open_export_style_panel
 
     said = []
     win = type("Win", (), {"_set_status": lambda self, text: said.append(text)})()

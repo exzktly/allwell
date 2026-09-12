@@ -37,11 +37,11 @@ import io
 from unittest import mock
 
 
-from well_viewer.features.export import service as svc
-from well_viewer.features.export.service import (
+from review.features.export import service as svc
+from review.features.export.service import (
     export_plot_data, line_metric_fieldnames, line_metric_row,
 )
-from well_viewer.features.lineplot.controller import collect_line_series
+from review.features.lineplot.controller import collect_line_series
 
 from tests.conftest import MockApp, make_agg
 
@@ -302,7 +302,7 @@ def test_the_event_count_keeps_its_integer_form_through_as_aggpoint():
     ``int`` at index 4, a shape the exporter never sees, so neither could
     notice (CLAUDE.md §7.8 face two).
     """
-    from well_viewer.features.lineplot.controller import LinePoint
+    from review.features.lineplot.controller import LinePoint
 
     nan = float("nan")
     point = LinePoint(t=0.0, mean=100.0, spread=1.0, frac=0.4, n_above=3,
@@ -365,7 +365,7 @@ def test_a_blanked_fold_change_point_writes_no_spread_on_the_tab_export(tmp_path
     happen. Fold change is switched on through the app's own state, and only
     the second collector pass (the fold-change one) is replaced, so the row is
     assembled by the real exporter."""
-    from well_viewer.features.lineplot.controller import LinePoint, LineSeries
+    from review.features.lineplot.controller import LinePoint, LineSeries
 
     app = MockApp(
         per_well_pts={
@@ -405,7 +405,7 @@ def test_a_control_the_plot_hides_is_not_in_the_file(tmp_path):
     The file then carried rows for a curve nobody could see, with blank
     fold-change cells that read exactly like a normalization that failed.
     """
-    from well_viewer.features.lineplot.controller import LinePoint, LineSeries
+    from review.features.lineplot.controller import LinePoint, LineSeries
 
     app = MockApp(
         per_well_pts={
@@ -504,7 +504,7 @@ def test_the_two_tabs_write_the_same_column_names():
     read the other, and a column existed whose only distinction from its
     neighbour was a different rule for blanking.
     """
-    from well_viewer.features.export.service import bar_metric_fieldnames
+    from review.features.export.service import bar_metric_fieldnames
 
     line = line_metric_fieldnames("gfp", "mean_intensity", "SEM")
     bar = bar_metric_fieldnames("gfp", "mean_intensity", "SEM")
@@ -531,7 +531,7 @@ def test_the_two_tabs_write_the_same_column_names():
 
 def test_the_band_travels_in_the_column_name():
     """SD and SEM are different intervals, so they are different columns."""
-    from well_viewer.features.export.service import bar_metric_fieldnames
+    from review.features.export.service import bar_metric_fieldnames
 
     sd = line_metric_fieldnames("gfp", "mean_intensity", "SD")
     assert "sd_gfp_mean_intensity" in sd

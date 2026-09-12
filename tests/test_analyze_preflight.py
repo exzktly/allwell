@@ -6,7 +6,7 @@ clicked it. So the load path here is exercised by pressing the button and
 reading the form afterwards, never by calling the callback directly. Reaching
 past the widget is exactly the seam that would hide a broken connection.
 
-Builds a real ``AnalyzeTab`` but **not** a ``WellViewerApp``, so these stay in
+Builds a real ``AnalyzeTab`` but **not** a ``ReviewApp``, so these stay in
 the fast lane (ARCHITECTURE §10.4). Do not reach for the ``viewer_app``
 fixture here.
 """

@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import types
 
-from well_viewer.core.selection_state import SelectionState
-from well_viewer.core.load_controller import _reset_sample_definitions_state
+from review.core.selection_state import SelectionState
+from review.core.load_controller import _reset_sample_definitions_state
 
 
 class _FakeNotesEdit:
@@ -63,7 +63,7 @@ def test_reset_sample_definitions_no_notes_widget_is_safe():
 
 
 def test_preview_and_review_image_clear_caches():
-    from well_viewer.features.image_browser.review_image.state import (
+    from review.features.image_browser.review_image.state import (
         PreviewState,
         ReviewImageState,
     )
@@ -94,7 +94,7 @@ def test_preview_and_review_image_clear_caches():
 def _poison_dataset_state(app) -> None:
     """Set every leaky field to a non-default value, as if the just-loaded
     dataset had defined them."""
-    from well_viewer.domain.ratio_models import RatioMetric
+    from review.domain.ratio_models import RatioMetric
 
     st = app._app_state
     st.dataset.well_labels["A01"] = "CTRL"
@@ -142,7 +142,7 @@ def test_well_labels_hydrate_then_do_not_leak(viewer_app, tmp_path):
     """The genuine early-return path: A has a saved sample_definitions block with
     a label; B has none. A's label hydrates, then must be gone after loading B."""
     from tests.fixtures.mini_dataset import build_mini_dataset
-    from well_viewer.domain.sample_definitions import (
+    from review.domain.sample_definitions import (
         build_sample_definitions_v2,
         save_to_pipeline_info,
     )

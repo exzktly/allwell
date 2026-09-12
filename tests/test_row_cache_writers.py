@@ -62,12 +62,12 @@ _INCLUSION_COLUMNS = frozenset({
 #: must say how the row-cache version comes to be bumped, because that is the
 #: single thing standing between a mutation here and a stale plotted number.
 _KNOWN_WRITERS: dict[str, str] = {
-    "well_viewer/data/data_loading.py::Included": (
+    "review/data/data_loading.py::Included": (
         "load_well_csv seeds Included=1 on a frame it has just built, before "
         "that frame is placed in the cache. Nothing can hold a memo keyed on a "
         "frame that does not yet exist, so no bump is needed."
     ),
-    "well_viewer/data/cache_projectors.py::__dynamic__": (
+    "review/data/cache_projectors.py::__dynamic__": (
         "project_verdict_column writes whichever column its caller names "
         "(QC_Pass, Crop_Pass) onto cached frames. It does NOT bump. Three "
         "routes reach it. The QC and crop controllers' recompute entry points "
@@ -82,27 +82,27 @@ _KNOWN_WRITERS: dict[str, str] = {
         "only two; if the load sequence ever grows an aggregation before this "
         "point, the bump has to move into project_verdict_column."
     ),
-    "well_viewer/features/home/cell_gating/gating_compute.py::Included": (
+    "review/features/home/cell_gating/gating_compute.py::Included": (
         "apply_fluor_gating rewrites the inclusion columns for a well from the "
         "current gate thresholds. Its callers invalidate the stats cache; the "
         "version bump rides on the same edit."
     ),
-    "well_viewer/features/home/cell_gating/gating_compute.py::Gate_Pass": (
+    "review/features/home/cell_gating/gating_compute.py::Gate_Pass": (
         "Same call as Included above — one function writes both columns."
     ),
-    "well_viewer/features/home/cell_gating/gating_compute.py::Gate_On": (
+    "review/features/home/cell_gating/gating_compute.py::Gate_On": (
         "Same call again. Written when the scatter-gate thresholding layer is "
         "active; the aggregation reads it as the on-population, so it changes "
         "plotted fractions and must bump."
     ),
-    "well_viewer/features/smfish/tab_view.py::__replaces_frame__": (
+    "review/features/smfish/tab_view.py::__replaces_frame__": (
         "The smFISH worker writes its per-cell tallies back into the well CSV "
         "and then REPLACES the cached frame by re-reading it. A replacement "
         "invalidates a memo exactly as hard as a column write, and is a "
         "different syntactic shape, so a scan looking only for column writes "
         "walks past it."
     ),
-    "well_viewer/data/data_loading.py::__replaces_frame__": (
+    "review/data/data_loading.py::__replaces_frame__": (
         "load_and_project seeds the cache well by well — the single path a "
         "frame enters the row cache by, for the lazy read and the dataset "
         "loader's bulk pass alike. Bumping on a fresh insert would be wrong — "
@@ -113,7 +113,7 @@ _KNOWN_WRITERS: dict[str, str] = {
         "name the scan could not attribute to the row cache; writing it as "
         "``dataset.cache[label]`` in one place is what put it in view here."
     ),
-    "well_viewer/data/curation.py::Included": (
+    "review/data/curation.py::Included": (
         "apply_curation_to_cache projects manual per-cell curation onto the "
         "cached frame via df.loc. This is the site a grep for 'df[' missed. "
         "Reached from review_image/controller.py, review_image/callbacks.py, "
@@ -283,7 +283,7 @@ def test_the_scan_finds_the_site_a_grep_missed():
     scan has regressed to what a grep could already do.
     """
     discovered = _discovered_writers()
-    key = "well_viewer/data/curation.py"
+    key = "review/data/curation.py"
     assert key in discovered, "the df.loc writer is no longer being found"
     assert "Included" in discovered[key]
 

@@ -25,8 +25,8 @@ from types import SimpleNamespace  # noqa: E402
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from well_viewer.core.widget_registry import WidgetRegistry  # noqa: E402
-from well_viewer.features.home.groups import panel_view  # noqa: E402
+from review.core.widget_registry import WidgetRegistry  # noqa: E402
+from review.features.home.groups import panel_view  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -49,7 +49,7 @@ def panel(qapp):
     dataset = SimpleNamespace(
         well_paths={"A01": 1, "A02": 2}, well_labels={}, tok_to_label={},
     )
-    from well_viewer.features.home.state import HomeState
+    from review.features.home.state import HomeState
     home = HomeState(sample_map_layer="Replicates")
     registry = WidgetRegistry(SimpleNamespace())
     ctx = SimpleNamespace(

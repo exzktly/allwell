@@ -24,9 +24,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.core import tab_controller
-from well_viewer.features.registry import build_feature_registry
-from well_viewer.persistence import view_state
+from review.core import tab_controller
+from review.features.registry import build_feature_registry
+from review.persistence import view_state
 
 #: Tabs that own a block and are deliberately **not** repainted, with why.
 _NOT_REPAINTED = {

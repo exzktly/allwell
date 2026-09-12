@@ -14,10 +14,10 @@ import math
 
 import pytest
 
-from well_viewer.features.barplot.controller import (
+from review.features.barplot.controller import (
     BarItem, FC_STATE_OFF, collect_bar_items, collect_bar_items_for_group,
 )
-from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+from review.domain.batch_models import BarGroup, ReplicateSet
 from tests.conftest import make_agg
 
 
@@ -651,7 +651,7 @@ def test_per_axis_ops_legacy_fc_op_still_fans_out(mock_app):
 def test_bar_idx_at_x_uses_real_cluster_positions():
     """With cluster gaps the bars sit at non-integer x; the hit-test must pick
     the nearest *real* position, not int(round(x))."""
-    from well_viewer.features.barplot.controller import bar_idx_at_x
+    from review.features.barplot.controller import bar_idx_at_x
     xs = [0.0, 1.0, 3.0, 4.0]  # two clusters of 2 with a one-unit gap
     # x=2.6 is nearest the 3rd bar (pos 3.0 -> index 2).
     assert bar_idx_at_x(2.6, 4, xs) == 2

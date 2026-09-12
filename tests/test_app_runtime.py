@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core.app_runtime import AppRuntime, _FeatureRuntime
+from review.core.app_runtime import AppRuntime, _FeatureRuntime
 
 
 def test_write_through_stores_and_reads_back():
@@ -58,7 +58,7 @@ def test_shared_store_bridges_widget_and_runtime_names():
     # A widget registered under its underscored name is reachable through the
     # runtime namespace when both share one store, exactly as when both stamped
     # a single ``app.__dict__``.
-    from well_viewer.core.widget_registry import WidgetRegistry
+    from review.core.widget_registry import WidgetRegistry
 
     store: dict = {}
     reg = WidgetRegistry(app=None, store=store)
@@ -84,7 +84,7 @@ def test_persistence_never_imports_app_runtime():
     import pkgutil
     from pathlib import Path
 
-    import well_viewer.persistence as pkg
+    import review.persistence as pkg
 
     root = Path(pkg.__file__).parent
     offenders = []

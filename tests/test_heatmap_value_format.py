@@ -23,10 +23,10 @@ import numpy as np
 from matplotlib.colors import LogNorm
 from matplotlib.figure import Figure
 
-from well_viewer.core.plot_style import (
+from review.core.plot_style import (
     DEFAULT_EXPORT_STYLE_PREFS, apply_export_style_prefs,
 )
-from well_viewer.features.heatmap.controller import (
+from review.features.heatmap.controller import (
     METRIC_COUNT, METRIC_FRACTION, _format_cell_value,
 )
 

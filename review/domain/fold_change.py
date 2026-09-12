@@ -1,0 +1,2070 @@
+"""Fold-change normalization helpers for the Bar and Line plot tabs.
+
+Two independent modes are supported and may be combined:
+
+1. ``vs control`` — every bar / curve is divided by the control well's
+   (or replicate-set's) mean at the same timepoint.
+2. ``vs t0``     — every bar / curve is divided by its own value at the
+   earliest available timepoint (each member's own baseline).
+
+The helpers operate on aggregation-point ("AggPoint") tuples produced by
+``aggregate_with_threshold_df`` / ``_aggregate_well`` / ``_aggregate_group``:
+
+    (t, mean, spread, frac, n_above, n_total,
+     frac_spread?, n_above_pf_mean?, n_above_pf_spread?)
+
+``mean``/``spread`` are rescaled by the bar's mean panel, and ``frac``/
+``frac_spread`` are independently rescaled by the bar's OnFraction panel
+(its FC denominator is the control's / baseline's frac, not its mean — they
+are independent quantities and shouldn't share a denominator). Counts and
+per-FOV spreads of counts are left untouched. The transform returns new
+tuples with the same arity.
+
+Stacking order: when both axes are active, ``vs t0`` is applied to the
+post-control values. The final value is::
+
+    Y(t) = (X(t) / C(t)) / (X(0) / C(0))
+
+i.e. the ΔΔCt-style ratio-of-ratios, not ``(X(t) / X(0)) / (C(t) / C(0))``.
+The two forms are NOT equivalent in general; the docstring of
+``normalize_pts`` carries the math.
+
+Error propagation: each fold-change denominator (control mean, t0
+baseline) is divided through with its OWN spread, and the resulting
+relative error combines in quadrature:
+
+    (σ_Y / Y)² = (σ_X / X)² + (σ_C / C)² + (σ_B / B)²    (B = t0)
+
+The relevant helpers (``scale_bar_value``, ``normalize_pts``) accept
+denominator spreads via ``control_spread`` / ``t0_spread`` /
+``control_stats``. When a denominator spread isn't supplied it
+defaults to 0 (the "treat as exact" behaviour) — that's still the
+backwards-compatible mode and matches the unit tests' simpler form.
+``member_stats_series`` / ``control_stats_at_for_bar`` return both
+mean and spread so the plot tab and line tab pick up the full
+propagation automatically.
+
+Statistical consistency: ``member_mean_series`` and
+``control_mean_at_for_bar`` resolve the control's mean using the SAME
+statistic the displayed bar / curve uses — mean-of-per-well-means for
+rep-set members (via ``_compute_rep_stats`` / ``_compute_rep_per_fov_stats``),
+single-well aggregation for well members. Mixing statistics across
+numerator and denominator gave biased ratios in the original
+implementation; that's fixed here.
+"""
+
+from __future__ import annotations
+
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from review.domain.batch_models import ReplicateSet
+
+import logging
+import math
+from typing import NamedTuple
+from collections.abc import Callable
+from review.domain.stats_compute import compute_rep_stats
+from review.domain.numeric import is_number
+from review.domain.stats_compute import compute_rep_per_fov_stats
+from review.domain.stats_compute import compute_rep_n_above_stats
+from review.domain.stats_compute import aggregate_well
+from review.domain.stats_compute import aggregate_group
+from review.domain.fold_change_state import (  # noqa: F401 - re-exported
+    FC_STATE_OFF,
+    FoldChangeState,
+    coerce_fc_state,
+)
+
+
+CONTROL_NONE = ""
+
+# Relative-tolerance match for floating-point timepoint comparisons.
+# Combo widgets format their items with ``:.4g`` (≈4 significant figures),
+# so a fractional timepoint like 2/3 ≈ 0.6667 can be ~3e-5 off the original
+# float when parsed back from text. An absolute 1e-6 tolerance misses
+# those cases, so we use a relative one — passes for both whole-number
+# and fractional timepoints, fails only on truly mismatched values.
+_TP_REL_TOL = 1e-3
+
+
+def _as_finite(value) -> float | None:
+    """*value* as a Python float when it is a finite real number, else ``None``.
+
+    Written as a duck-typed conversion rather than ``isinstance(value, (int,
+    float))`` on purpose. ``numpy.float32`` is not an instance of ``float``, so
+    the isinstance spelling silently answered "not a number" for it — and this
+    is the most numerically sensitive module in the app, where that produced a
+    NaN mean and a vanished error bar rather than an exception. ``bool`` is
+    excluded because ``True`` is not a measurement.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if math.isfinite(out) else None
+
+
+def _rel_err_sq(value: float, spread: float) -> float:
+    """``(spread / value)²``, falling back to 0 for non-finite or zero values."""
+    v = _as_finite(value)
+    sp = _as_finite(spread)
+    if v is None or v == 0 or sp is None:
+        return 0.0
+    return (sp / v) ** 2
+
+
+def _propagate_spread(
+    new_mean: float, mean: float, spread: float,
+    denom_rel_err_sq: float,
+) -> float:
+    """Combined spread for Y = X / D under independent-error quadrature.
+
+    ``denom_rel_err_sq`` is the sum of ``(σ_Di / Di)²`` over every
+    denominator. When it's 0 the formula collapses to ``spread / factor``
+    (the "treat denominator as exact" behaviour). Returns a non-negative
+    value, or NaN when the input spread was itself undefined — the same
+    convention ``scale_bar_value`` documents on the bar path. An undefined
+    spread scaled to 0.0 draws an error bar that looks measured.
+    """
+    if not math.isfinite(new_mean):
+        return 0.0
+    if _as_finite(spread) is None:
+        return float("nan")
+    rel_sq = _rel_err_sq(mean, spread) + denom_rel_err_sq
+    if rel_sq <= 0:
+        return 0.0
+    return abs(new_mean) * math.sqrt(rel_sq)
+
+
+def _subtract_pt(
+    pt: tuple, shift: float, *,
+    shift_spread: float = 0.0,
+) -> tuple:
+    """Return a copy of *pt* with ``shift`` subtracted from the mean.
+
+    Absolute variances add in quadrature: ``σ_Y² = σ_X² + σ_shift²``.
+    Companion to :func:`_scale_pt` for the additive (``op="subtract"``)
+    fold-change branch.
+    """
+    m = pt[1]
+    s = pt[2]
+    if not is_number(m):
+        new = list(pt); new[1] = float("nan"); new[2] = 0.0
+        return tuple(new)
+    if not math.isfinite(shift):
+        new = list(pt); new[1] = float("nan"); new[2] = 0.0
+        return tuple(new)
+    s_val = s if is_number(s) else 0.0
+    shift_var = float(shift_spread) ** 2 if math.isfinite(shift_spread) else 0.0
+    new_spread = math.sqrt(s_val * s_val + shift_var)
+    new = list(pt)
+    new[1] = float(m) - float(shift)
+    new[2] = float(new_spread)
+    return tuple(new)
+
+
+def _scale_pt(
+    pt: tuple, factor: float, *,
+    factor_rel_err_sq: float = 0.0,
+) -> tuple:
+    """Return a copy of *pt* with mean & spread scaled by ``1/factor``.
+
+    *factor_rel_err_sq* — pre-computed ``(σ_D / D)²`` for the divisor,
+    folded into the result's spread via quadrature. Default 0 preserves
+    the legacy "denominator treated as exact" behaviour.
+    """
+    if factor == 0 or not math.isfinite(factor):
+        scaled_mean = float("nan")
+        scaled_spread = 0.0
+    else:
+        m_val = _as_finite(pt[1])
+        if m_val is not None:
+            scaled_mean = m_val / factor
+        else:
+            scaled_mean = float("nan")
+        # An undefined spread stays undefined. Folding it to 0.0 here made a
+        # normalised point claim a measured zero spread, while the bar path's
+        # ``scale_bar_value`` — whose docstring states the rule — preserved the
+        # NaN. One figure, two conventions for "we could not compute this".
+        s_raw = _as_finite(pt[2])
+        s_val = s_raw if s_raw is not None else float("nan")
+        scaled_spread = _propagate_spread(
+            scaled_mean,
+            m_val if m_val is not None else float("nan"),
+            s_val, factor_rel_err_sq,
+        )
+    new = list(pt)
+    new[1] = scaled_mean
+    new[2] = scaled_spread
+    return tuple(new)
+
+
+def _grow(new: list, idx_a: int, idx_b: int | None) -> None:
+    """Pad *new* with 0.0 so indices ``idx_a`` and ``idx_b`` are addressable."""
+    need = idx_a if idx_b is None else max(idx_a, idx_b)
+    while len(new) <= need:
+        new.append(0.0)
+
+
+def _spread_slot(pt: tuple, spread_idx: int | None) -> int | None:
+    """*spread_idx* if *pt* actually carries that field, else ``None``.
+
+    An AggPoint is a tuple of varying length: a replicate-set point is an
+    11-tuple carrying the cross-well events spread at index 9, and a plain
+    per-well point from ``aggregate_well`` is a 9-tuple that has no such field
+    because a single well has no replicates to vary across. Naming index 9
+    unconditionally makes ``_grow`` *invent* the slot and then fill it with a
+    propagated error — so a single well, normalised against a control, came
+    back with an events error band it has no replicates to have measured, and
+    the panel drew a filled ribbon around it. The rule is that normalization
+    may rescale a field that exists; it may not create one."""
+    if spread_idx is None or spread_idx < len(pt):
+        return spread_idx
+    return None
+
+
+def _scale_field(
+    pt: tuple, val_idx: int, spread_idx: int | None, factor: float, *,
+    factor_rel_err_sq: float = 0.0,
+) -> tuple:
+    """Generic ``_scale_pt`` over an arbitrary ``(val_idx, spread_idx)`` field.
+
+    Used to fold-change the fraction field ([3]/[6]) and the N-events field
+    ([4] non-FOV, no spread; [7]/[8] per-FOV) the same way the mean field
+    ([1]/[2]) is scaled. ``spread_idx=None`` marks a count-like field with no
+    spread — the value is scaled and no spread is written.
+    """
+    spread_idx = _spread_slot(pt, spread_idx)
+    new = list(pt)
+    _grow(new, val_idx, spread_idx)
+    if factor == 0 or not math.isfinite(factor):
+        new[val_idx] = float("nan")
+        if spread_idx is not None:
+            new[spread_idx] = 0.0
+        return tuple(new)
+    v = _as_finite(pt[val_idx] if val_idx < len(pt) else None)
+    scaled_val = v / factor if v is not None else float("nan")
+    new[val_idx] = scaled_val
+    if spread_idx is not None:
+        # An undefined spread stays undefined, exactly as ``_scale_pt`` does
+        # for the mean field. Folding it to 0.0 here put two conventions for
+        # "we could not compute this" in panels of the same figure.
+        s_raw = _as_finite(pt[spread_idx] if spread_idx < len(pt) else None)
+        new[spread_idx] = _propagate_spread(
+            scaled_val,
+            v if v is not None else float("nan"),
+            s_raw if s_raw is not None else float("nan"),
+            factor_rel_err_sq,
+        )
+    return tuple(new)
+
+
+def _subtract_field(
+    pt: tuple, val_idx: int, spread_idx: int | None, shift: float, *,
+    shift_spread: float = 0.0,
+) -> tuple:
+    """Generic ``_subtract_pt`` over an arbitrary ``(val_idx, spread_idx)`` field."""
+    spread_idx = _spread_slot(pt, spread_idx)
+    new = list(pt)
+    _grow(new, val_idx, spread_idx)
+    v = _as_finite(pt[val_idx] if val_idx < len(pt) else None)
+    if v is None or not math.isfinite(shift):
+        new[val_idx] = float("nan")
+        if spread_idx is not None:
+            new[spread_idx] = 0.0
+        return tuple(new)
+    new[val_idx] = float(v) - float(shift)
+    if spread_idx is not None:
+        s_raw = _as_finite(pt[spread_idx] if spread_idx < len(pt) else None)
+        if s_raw is None:
+            # Undefined in, undefined out — the rule ``_scale_pt`` follows.
+            new[spread_idx] = float("nan")
+        else:
+            shift_var = float(shift_spread) ** 2 if math.isfinite(shift_spread) else 0.0
+            new[spread_idx] = math.sqrt(s_raw * s_raw + shift_var)
+    return tuple(new)
+
+
+def _resolve_stat(
+    t: float, stats: dict[float, tuple[float, float]],
+    default: tuple[float, float],
+) -> tuple[float, float]:
+    """Resolve the ``(value, spread)`` for *t* in *stats* under relative tol."""
+    if t in stats:
+        return stats[t]
+    for ct, vs in stats.items():
+        if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t)):
+            return vs
+    return default
+
+
+def _series_at(
+    series: dict[float, tuple[float, float]], target_t: float,
+) -> tuple[float, float] | None:
+    """The ``(value, spread)`` a member's series carries at *target_t*.
+
+    Matches an exact key first, then any key within the relative timepoint
+    tolerance. Returns ``None`` when the series is empty or carries no sample
+    near *target_t* — the "control can't be resolved" case the bar-plot
+    ``control_*_at_for_bar`` wrappers report upward.
+    """
+    if not series:
+        return None
+    if target_t in series:
+        return series[target_t]
+    for ct, val in series.items():
+        if abs(ct - target_t) < _TP_REL_TOL * max(1.0, abs(ct), abs(target_t)):
+            return val
+    return None
+
+
+def _series_baseline(
+    series: dict[float, tuple[float, float]], baseline_tp: float | None,
+) -> tuple[float, float, float] | None:
+    """``(tp, value, spread)`` for a member's baseline timepoint.
+
+    Prefers the sample at *baseline_tp* (under the relative tolerance) so a bar
+    plot can look the control up at the SAME tp the member used — needed for
+    correct post-control baseline stacking when ops are mixed. Falls through to
+    the earliest timepoint when no baseline is given, when it is non-finite, or
+    when the series has no sample near it. Returns ``None`` only for an empty
+    series.
+    """
+    if not series:
+        return None
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for t, vs in series.items():
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                return (float(t), vs[0], vs[1])
+    earliest = min(series)
+    vs = series[earliest]
+    return (float(earliest), vs[0], vs[1])
+
+
+_logger = logging.getLogger(__name__)
+
+
+def _baseline_usable(value, *, op: str) -> bool:
+    """Whether *value* can serve as a vs-t0 baseline under operation *op*.
+
+    The two operations do not have the same requirement, and treating them as
+    if they did is what made a fold-change figure normalise its three panels
+    against two different timepoints.
+
+    Dividing by zero is undefined, so a ratio baseline must be non-zero. But
+    *subtracting* zero is perfectly well defined, and zero at t0 is the
+    expected reading for the fields this matters to — a fraction-on or an event
+    count at the start of an induction experiment is normally 0. Requiring
+    non-zero for both meant the requested baseline was skipped and a **later
+    timepoint** silently substituted, under an axis still labelled "vs t0".
+    """
+    v = _as_finite(value)
+    if v is None:
+        return False
+    return True if op == "subtract" else v != 0.0
+
+
+def _field_baseline(
+    pts, val_idx: int, baseline_tp: float | None, *, op: str = "ratio",
+) -> tuple[float | None, float]:
+    """``(baseline_val, baseline_spread_unused)`` for a field's vs-t0 step.
+
+    Mirrors the mean baseline logic: prefer the point at *baseline_tp*, else the
+    earliest finite non-zero value. The spread returned is always the field's
+    own spread at that point is *not* needed here — the count/fraction t0
+    propagation reuses the field's own spread via ``_scale_field`` — so this
+    returns only the divisor; the caller passes ``shift_spread=0`` / a 0 rel-err
+    for the baseline (matching the mean path, which folds only the control and
+    the member's own per-point spread, not a separate baseline spread term).
+    """
+    candidates = pts
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for pt in pts:
+            if abs(float(pt[0]) - tgt) <= _TP_REL_TOL * max(1.0, abs(float(pt[0])), abs(tgt)):
+                v = pt[val_idx] if len(pt) > val_idx else None
+                if _baseline_usable(v, op=op):
+                    return float(v), 0.0
+                _logger.warning(
+                    "Fold change: the requested baseline timepoint %g has no "
+                    "usable value for field %d (%r) — falling back to the "
+                    "earliest timepoint that does, so this field is normalised "
+                    "against a different timepoint than the label says.",
+                    tgt, val_idx, v,
+                )
+                break
+    for pt in sorted(candidates, key=lambda p: p[0]):
+        v = pt[val_idx] if len(pt) > val_idx else None
+        if _baseline_usable(v, op=op):
+            return float(v), 0.0
+    return None, 0.0
+
+
+def _normalize_field(
+    pts, *, val_idx: int, spread_idx: int | None,
+    control_stats: dict[float, tuple[float, float]] | None,
+    use_t0: bool, baseline_tp: float | None,
+    op_ctrl: str, op_t0: str,
+) -> list:
+    """Apply vs-control + vs-t0 normalization to ONE AggPoint field.
+
+    Generic counterpart to the mean steps in :func:`normalize_pts`, used for the
+    fraction and N-events fields so all three line-plot panels fold-change
+    consistently. The mean field is left untouched (it has its own steps). A
+    point with no matching control sample has only *this* field set to NaN — the
+    mean step already recorded the miss in ``miss_sink``.
+    """
+    # Step A: control normalization.
+    if control_stats:
+        means_only = {t: vs[0] for t, vs in control_stats.items()}
+        stage: list = []
+        for pt in pts:
+            t = float(pt[0])
+            cm = _match_control_mean(t, means_only)
+            if cm is None:
+                # Same two rules as the scaling siblings below: address the
+                # spread field only if the point carries it (normalization
+                # rescales fields, it does not create them), and write NaN
+                # rather than 0.0 for a value nobody could compute.
+                slot = _spread_slot(pt, spread_idx)
+                new = list(pt)
+                _grow(new, val_idx, slot)
+                new[val_idx] = float("nan")
+                if slot is not None:
+                    new[slot] = float("nan")
+                stage.append(tuple(new))
+                continue
+            cval, cspread = _resolve_stat(t, control_stats, (cm, 0.0))
+            if op_ctrl == "subtract":
+                stage.append(_subtract_field(pt, val_idx, spread_idx, cval,
+                                             shift_spread=cspread or 0.0))
+            else:
+                stage.append(_scale_field(pt, val_idx, spread_idx, cval,
+                                          factor_rel_err_sq=_rel_err_sq(cval, cspread)))
+        pts = stage
+
+    # Step B: vs-t0 baseline (uses each member's own post-control values).
+    if use_t0:
+        base, base_spread = _field_baseline(pts, val_idx, baseline_tp, op=op_t0)
+        if base is not None:
+            if op_t0 == "subtract":
+                pts = [_subtract_field(pt, val_idx, spread_idx, base,
+                                       shift_spread=base_spread) for pt in pts]
+            else:
+                pts = [_scale_field(pt, val_idx, spread_idx, base,
+                                    factor_rel_err_sq=_rel_err_sq(base, base_spread))
+                       for pt in pts]
+    return pts
+
+
+def pts_to_mean_by_t(pts) -> dict[float, float]:
+    """Build a ``{t: mean}`` dict from an AggPoint list, skipping NaN means."""
+    out: dict[float, float] = {}
+    for pt in pts or ():
+        t = float(pt[0])
+        m = pt[1]
+        if is_number(m):
+            out[t] = float(m)
+    return out
+
+
+def _match_control_mean(t: float, control_means: dict[float, float]) -> float | None:
+    """Resolve the control mean at timepoint *t* under relative tolerance.
+
+    Uses a relative-tolerance match (``abs(a - b) < 1e-3 * max(1, |a|, |b|)``)
+    instead of the previous absolute 1e-6 — the bar tp combo formats
+    its items with ``:.4g`` so fractional timepoints lose precision
+    when parsed back, which the old tolerance rejected.
+    """
+    if not control_means:
+        return None
+    if t in control_means:
+        return control_means[t]
+    for ct, cm in control_means.items():
+        if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t)):
+            return cm
+    return None
+
+
+def normalize_pts(
+    pts,
+    *,
+    control_means: dict[float, float] | None = None,
+    control_stats: dict[float, tuple[float, float]] | None = None,
+    control_frac_stats: dict[float, tuple[float, float]] | None = None,
+    control_n_stats: dict[float, tuple[float, float]] | None = None,
+    normalize_frac_n: bool = False,
+    n_per_fov: bool = False,
+    use_t0: bool = False,
+    baseline_tp: float | None = None,
+    op: str = "ratio",
+    op_ctrl: str | None = None,
+    op_t0: str | None = None,
+    miss_sink: set[float] | None = None,
+) -> list:
+    """Apply optional vs-control and/or vs-t0 normalization to AggPoint list.
+
+    *control_means* — ``{t: mean}`` for the control. Each point's mean is
+    divided by the control's mean at the matching timepoint. Points
+    with no matching control sample produce NaN means.
+
+    *control_stats* — richer ``{t: (mean, spread)}`` variant. When
+    supplied, takes precedence over *control_means* and the resulting
+    spread folds the control's relative error in quadrature. Pass this
+    for proper error propagation; pass *control_means* alone for the
+    legacy "treat denominator as exact" behaviour.
+
+    *control_frac_stats* — ``{t: (frac, frac_spread)}`` for the control.
+    Normalizes the fraction field (value [3], spread [6]) with the same
+    vs-control / vs-t0 logic as the mean, so the Line Graphs' OnFraction
+    panel rescales under fold change instead of staying at raw values.
+
+    *control_n_stats* — ``{t: (n, 0.0)}`` for the control's N-events value.
+    Normalizes the N-events field with the same logic. ``n_per_fov`` selects
+    which AggPoint field the N panel actually plots: the per-FOV-mean count
+    ([7]/[8]) when FOV-spread is on, else the total count ([4], no spread).
+    The control denominator in *control_n_stats* must be computed for the
+    matching representation (see :func:`member_n_series`).
+
+    The vs-t0 baseline applies to the mean, fraction, and N fields alike, so
+    every panel responds to "vs t0" consistently. When only ``use_t0`` is set
+    (no control selected) the fraction / N fields still normalize against their
+    own t0 even though *control_frac_stats* / *control_n_stats* are empty.
+
+    *use_t0* — when True, finds the member's earliest finite mean and
+    divides every point by it after the control step. The earliest
+    point itself becomes 1.0 ± propagated spread by construction.
+    The baseline's OWN spread (taken from the same AggPoint) is folded
+    into the propagation.
+
+    *miss_sink* — optional set the caller passes in to collect the
+    timepoints where the control had no sample (so the renderer can
+    surface a single end-of-redraw status warning rather than silently
+    drop bars / points).
+
+    Stacking: with both axes active the result is
+    ``(X(t) / C(t)) / (X(0) / C(0))`` (ΔΔCt-style), because the t0
+    step uses the post-control values.
+    """
+    if not pts:
+        return []
+
+    # Per-axis ops fall through to the legacy ``op`` when unspecified, so
+    # callers that still pass a single ``op`` keep their old contract.
+    effective_op_ctrl = op_ctrl if op_ctrl is not None else op
+    effective_op_t0 = op_t0 if op_t0 is not None else op
+
+    # Use control_stats when provided; fall back to control_means (with
+    # zero spread per tp) for the legacy callers / tests.
+    effective_stats: dict[float, tuple[float, float]] | None = None
+    if control_stats:
+        effective_stats = control_stats
+    elif control_means:
+        effective_stats = {t: (m, 0.0) for t, m in control_means.items()}
+
+    # Step 1: control normalization.
+    if effective_stats:
+        stage1: list = []
+        means_only = {t: ms[0] for t, ms in effective_stats.items()}
+        for pt in pts:
+            t = float(pt[0])
+            cm = _match_control_mean(t, means_only)
+            if cm is None:
+                # No control sample at this t — drop mean to NaN and
+                # record the miss so the caller can surface it.
+                if miss_sink is not None:
+                    miss_sink.add(t)
+                new = list(pt)
+                new[1] = float("nan")
+                new[2] = 0.0
+                stage1.append(tuple(new))
+            else:
+                # Pick the (mean, spread) that _match_control_mean
+                # resolved — relative tolerance on the tp key.
+                ctrl_mean, ctrl_spread = effective_stats.get(
+                    t, (cm, 0.0)
+                ) if t in effective_stats else next(
+                    ((m, s) for ct, (m, s) in effective_stats.items()
+                     if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t))),
+                    (cm, 0.0),
+                )
+                if effective_op_ctrl == "subtract":
+                    stage1.append(_subtract_pt(pt, ctrl_mean,
+                                               shift_spread=ctrl_spread or 0.0))
+                else:
+                    rel_err_sq = _rel_err_sq(ctrl_mean, ctrl_spread)
+                    stage1.append(_scale_pt(pt, ctrl_mean,
+                                             factor_rel_err_sq=rel_err_sq))
+    else:
+        stage1 = list(pts)
+
+    # Step 2: baseline normalization (uses post-control values). The
+    # baseline's own spread folds into every downstream point's spread via
+    # the same quadrature formula.
+    #
+    # ``baseline_tp`` (when finite) names the exact timepoint to use as the
+    # divisor — its mean / spread are pulled from the point at that tp
+    # (with a relative tolerance to absorb float-printing drift). When
+    # ``baseline_tp`` is ``None`` we fall back to the earliest finite
+    # non-zero mean — the original "vs t0" semantics — so saved state
+    # that only carries ``use_t0=True`` keeps working.
+    if use_t0:
+        baseline = None
+        baseline_spread = 0.0
+        if baseline_tp is not None and math.isfinite(baseline_tp):
+            tgt = float(baseline_tp)
+            for pt in stage1:
+                t = float(pt[0])
+                if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                    m = pt[1]
+                    if _baseline_usable(m, op=effective_op_t0):
+                        baseline = float(m)
+                        s = pt[2] if len(pt) > 2 else 0.0
+                        baseline_spread = (
+                            float(s) if is_number(s)
+                            else 0.0
+                        )
+                    else:
+                        _logger.warning(
+                            "Fold change: the requested baseline timepoint %g "
+                            "has no usable mean (%r) — falling back to the "
+                            "earliest timepoint that does.", tgt, m,
+                        )
+                    break
+        if baseline is None:
+            # Either no ``baseline_tp`` was supplied or the requested
+            # timepoint had no finite non-zero mean — fall through to
+            # earliest-finite behaviour so the user still gets a useful
+            # normalisation rather than a silent no-op.
+            for pt in sorted(stage1, key=lambda p: p[0]):
+                m = pt[1]
+                if _baseline_usable(m, op=effective_op_t0):
+                    baseline = float(m)
+                    s = pt[2] if len(pt) > 2 else 0.0
+                    baseline_spread = (
+                        float(s) if is_number(s)
+                        else 0.0
+                    )
+                    break
+        if baseline is None:
+            stage2 = stage1
+        elif effective_op_t0 == "subtract":
+            stage2 = [_subtract_pt(pt, baseline, shift_spread=baseline_spread)
+                      for pt in stage1]
+        else:
+            baseline_rel_err_sq = _rel_err_sq(baseline, baseline_spread)
+            stage2 = [_scale_pt(pt, baseline,
+                                factor_rel_err_sq=baseline_rel_err_sq)
+                      for pt in stage1]
+    else:
+        stage2 = stage1
+
+    # The fraction / N-events fields are normalized only for the Line Graphs
+    # panels that plot them (``normalize_frac_n``). Bar / batch / CSV callers
+    # leave the flag off so their AggPoint count semantics are unchanged.
+    if normalize_frac_n:
+        # Steps 3+4: fraction field ([3]/[6]) — same vs-control + vs-t0 logic.
+        stage2 = _normalize_field(
+            stage2, val_idx=3, spread_idx=6,
+            control_stats=control_frac_stats, use_t0=use_t0,
+            baseline_tp=baseline_tp,
+            op_ctrl=effective_op_ctrl, op_t0=effective_op_t0,
+        )
+        # Steps 5+6: N-events field — [7]/[8] per-FOV-mean (the panel's
+        # FOV-spread series) or [4]/[9] the per-well count and its cross-well
+        # replicate spread otherwise. Index 9 used to be left unnormalised
+        # while the value at index 4 was scaled, so a normalised Events panel
+        # carried a raw-units error band around a scaled point. It was
+        # invisible only because the Line tab was passing a literal 0.0 for
+        # that spread at the draw site.
+        if n_per_fov:
+            n_val_idx, n_spread_idx = 7, 8
+        else:
+            n_val_idx, n_spread_idx = 4, 9
+        stage2 = _normalize_field(
+            stage2, val_idx=n_val_idx, spread_idx=n_spread_idx,
+            control_stats=control_n_stats, use_t0=use_t0,
+            baseline_tp=baseline_tp,
+            op_ctrl=effective_op_ctrl, op_t0=effective_op_t0,
+        )
+
+    return stage2
+
+
+# ── State accessors / ctx integration ───────────────────────────────────────
+
+def fold_change_state(ctx) -> FoldChangeState:
+    """Return the active fold-change request.
+
+    Used by both the on-screen plot tabs and the per-tab CSV exporter so the
+    plot and the export stay in sync. Read it by name — see
+    :mod:`review.domain.fold_change_state` for why it is not a tuple.
+    """
+    plot = ctx.state.plot
+    return FoldChangeState(
+        vs_control_on=bool(plot.fc_vs_control_on),
+        control=plot.fc_control,
+        vs_t0_on=bool(plot.fc_vs_t0_on),
+        control_mode=str(plot.fc_control_mode or "single"),
+        # Sorted so two reads of unchanged state produce equal — and equally
+        # hashing — objects, whatever order the mapping happens to iterate in.
+        control_map=tuple(sorted((plot.fc_control_map or {}).items())),
+        control_render=str(plot.fc_control_render or "self"),
+    )
+
+
+def _pt_frac(pt) -> tuple[float | None, float]:
+    """Extract ``(frac, frac_spread)`` from an AggPoint, with NaN guarding."""
+    if len(pt) < 4:
+        return None, 0.0
+    f = pt[3]
+    if not is_number(f):
+        return None, 0.0
+    fs = pt[6] if len(pt) >= 7 else 0.0
+    fs = float(fs) if is_number(fs) else 0.0
+    return float(f), fs
+
+
+def baseline_from_points(
+    pts, baseline_tp: float | None = None, *, op: str = "ratio",
+) -> tuple[float | None, float]:
+    """Pull the ``(mean, spread)`` baseline out of an AggPoint sequence.
+
+    ``baseline_tp`` (when finite) picks the point at that timepoint;
+    otherwise the earliest finite non-zero mean wins (the original "vs
+    t0" semantics). Returns ``(None, 0.0)`` when no point qualifies, so
+    callers can treat that as "no baseline available" without divide-by-
+    zero or NaN propagation surprises.
+    """
+    if not pts:
+        return None, 0.0
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for pt in pts:
+            t = float(pt[0])
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                m = pt[1]
+                if _baseline_usable(m, op=op):
+                    s = pt[2] if len(pt) > 2 else 0.0
+                    return (
+                        float(m),
+                        float(s) if is_number(s) else 0.0,
+                    )
+                # Matched tp but its mean isn't finite/non-zero — fall
+                # through to earliest so the bar still normalises.
+                break
+        # Requested baseline tp wasn't found (or had bad data); fall
+        # through to earliest-finite — matches normalize_pts so the
+        # bar plot doesn't silently no-op when the user picks a tp
+        # the per-well series doesn't sample.
+    for pt in sorted(pts, key=lambda p: p[0]):
+        m = pt[1]
+        if _baseline_usable(m, op=op):
+            s = pt[2] if len(pt) > 2 else 0.0
+            return (
+                float(m),
+                float(s) if is_number(s) else 0.0,
+            )
+    return None, 0.0
+
+
+def baseline_from_points_resolved(
+    pts, baseline_tp: float | None = None, *, op: str = "ratio",
+) -> tuple[float | None, float | None, float]:
+    """Like :func:`baseline_from_points` but also returns the resolved tp.
+
+    Returns ``(tp, mean, spread)``. ``tp`` is ``None`` when no baseline
+    qualifies. Used by the bar's per-well path so the caller can look up
+    the control's value at the SAME tp the per-well baseline used."""
+    if not pts:
+        return None, None, 0.0
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for pt in pts:
+            t = float(pt[0])
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                m = pt[1]
+                if _baseline_usable(m, op=op):
+                    s = pt[2] if len(pt) > 2 else 0.0
+                    return (
+                        t,
+                        float(m),
+                        float(s) if is_number(s) else 0.0,
+                    )
+                break
+    for pt in sorted(pts, key=lambda p: p[0]):
+        m = pt[1]
+        if _baseline_usable(m, op=op):
+            s = pt[2] if len(pt) > 2 else 0.0
+            return (
+                float(pt[0]),
+                float(m),
+                float(s) if is_number(s) else 0.0,
+            )
+    return None, None, 0.0
+
+
+def baseline_frac_from_points_resolved(
+    pts, baseline_tp: float | None = None, *, op: str = "ratio",
+) -> tuple[float | None, float | None, float]:
+    """Frac counterpart of :func:`baseline_from_points_resolved` —
+    returns ``(tp, frac, frac_spread)`` with ``tp=None`` for the no-match case."""
+    if not pts:
+        return None, None, 0.0
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for pt in pts:
+            t = float(pt[0])
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                f, fs = _pt_frac(pt)
+                if _baseline_usable(f, op=op):
+                    return t, f, fs
+                break
+    for pt in sorted(pts, key=lambda p: p[0]):
+        f, fs = _pt_frac(pt)
+        if _baseline_usable(f, op=op):
+            return float(pt[0]), f, fs
+    return None, None, 0.0
+
+
+def baseline_frac_from_points(
+    pts, baseline_tp: float | None = None, *, op: str = "ratio",
+) -> tuple[float | None, float]:
+    """Pull the ``(frac, frac_spread)`` baseline out of an AggPoint sequence.
+
+    Fraction-on counterpart of :func:`baseline_from_points`. Same fall-through
+    semantics: matched ``baseline_tp`` wins; otherwise the earliest finite tp
+    is used. Returns ``(None, 0.0)`` when nothing qualifies — that signals
+    "no baseline available" so the fraction bar passes through raw rather than
+    div-by-zeroing.
+    """
+    if not pts:
+        return None, 0.0
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for pt in pts:
+            t = float(pt[0])
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                f, fs = _pt_frac(pt)
+                if _baseline_usable(f, op=op):
+                    return f, fs
+                break
+    for pt in sorted(pts, key=lambda p: p[0]):
+        f, fs = _pt_frac(pt)
+        if _baseline_usable(f, op=op):
+            return f, fs
+    return None, 0.0
+
+
+def _pt_n_above(pt, per_fov_spread: bool = False) -> tuple[float, float]:
+    """Extract ``(n_above, n_above_spread)`` from an AggPoint.
+
+    Index 4 is **not** always an integer count. A point built by a collector for
+    a replicate set carries the per-well *mean* there, which is fractional, and
+    its cross-well spread at index 9. Rounding the one down and returning zero
+    for the other was harmless only while nothing but ``aggregate_well`` points
+    — 9-tuples holding a true count and no index 9 — reached this function. The
+    length check is what preserves that case: a well point has no index 9, so it
+    still reports no spread, without a flag saying which kind of point it is.
+    """
+    if per_fov_spread:
+        n = float(pt[7]) if len(pt) >= 8 else 0.0
+        ns = float(pt[8]) if len(pt) >= 9 else 0.0
+        return n, ns
+    n = float(pt[4]) if len(pt) >= 5 else 0.0
+    ns = float(pt[9]) if len(pt) >= 10 and pt[9] is not None else 0.0
+    return n, (ns if math.isfinite(ns) else 0.0)
+
+
+def baseline_n_from_points_resolved(
+    pts, *, per_fov_spread: bool = False, baseline_tp: float | None = None,
+    op: str = "ratio",
+) -> tuple[float | None, float | None, float]:
+    """``(tp, n_above, n_above_spread)`` for the member's baseline tp.
+
+    N-events counterpart of :func:`baseline_from_points_resolved`.
+    """
+    if not pts:
+        return None, None, 0.0
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for pt in pts:
+            t = float(pt[0])
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                n, ns = _pt_n_above(pt, per_fov_spread)
+                if _baseline_usable(n, op=op):
+                    return t, n, ns
+                break
+    for pt in sorted(pts, key=lambda p: p[0]):
+        n, ns = _pt_n_above(pt, per_fov_spread)
+        if _baseline_usable(n, op=op):
+            return float(pt[0]), n, ns
+    return None, None, 0.0
+
+
+# ── the member-series skeleton ───────────────────────────────────────────────
+# Six public ``member_*_series`` functions ask the same question of a member —
+# "what is this quantity, per timepoint?" — and shared 25 lines of identical
+# prologue, replicate-set-vs-solo-well dispatch and timepoint-union loop to do
+# it. What actually differs between them is one line on each branch: which field
+# of ``compute_rep_stats`` / ``compute_rep_per_fov_stats`` a rep-set reads, and
+# which field of an ``AggPoint`` a bare well reads.
+#
+# So the shape lives here once and each public function supplies those two
+# extractors. They stay *callables written next to their own docstring* rather
+# than flags on a merged function, for two reasons. The index choices carry
+# load-bearing explanations — ``member_frac_stats_series`` documents why
+# front-indexing ``res[2]``/``res[3]`` is correct for both the 4-tuple and the
+# 6-tuple, where a tail-unpack would silently read the per-FOV count fields —
+# and a flag-parameterised merge would concentrate every branch in one function
+# body, which ``tests/test_complexity_ratchet.py`` bounds at 40.
+#
+# An extractor returns ``None`` for "no value at this timepoint"; the skeleton
+# drops those, which is what every one of the six did with its own ``if``.
+
+
+def _rset_timepoints(
+    ctx, rset, *, threshold: float, val_col: str, per_fov_spread: bool, fluor_gates,
+) -> set[float]:
+    """The union of timepoints across a replicate set's wells.
+
+    Deliberately ``use_sem=False``: this call only enumerates the time axis, and
+    the spread it would compute is thrown away. Every one of the six did it this
+    way, whatever ``use_sem`` their own caller passed.
+    """
+    tps: set[float] = set()
+    for w in rset.wells:
+        pts = aggregate_well(ctx,
+            w, threshold=threshold, use_sem=False,
+            val_col=val_col, fluor_gates=fluor_gates,
+            per_fov_spread=per_fov_spread,
+        )
+        for pt in pts:
+            tps.add(float(pt[0]))
+    return tps
+
+
+def _member_series(
+    ctx, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool, fluor_gates,
+    rset_stat, well_stat,
+) -> dict:
+    """``{t: value}`` for *label*, whichever kind of member it names.
+
+    *rset_stat* is called as ``rset_stat(rset, t)`` and *well_stat* as
+    ``well_stat(pt)``; either returns ``None`` to omit that timepoint.
+    """
+    # Classification is shared with the well resolver (see
+    # ``resolve_control``). Deciding it here independently is what let a
+    # suffixed label resolve in one place and return nothing in this one.
+    kind, name = resolve_control(ctx, label)
+    if kind == "set":
+        rset = _label_to_replicate_set(ctx, label)
+        if rset is None:
+            return {}
+        out: dict = {}
+        for t in _rset_timepoints(ctx, rset, threshold=threshold, val_col=val_col,
+                                  per_fov_spread=per_fov_spread, fluor_gates=fluor_gates):
+            value = rset_stat(rset, t)
+            if value is not None:
+                out[t] = value
+        return out
+    if kind == "well":
+        pts = aggregate_well(ctx,
+            name, threshold=threshold, use_sem=use_sem,
+            val_col=val_col, fluor_gates=fluor_gates,
+            per_fov_spread=per_fov_spread,
+        )
+        out = {}
+        for pt in pts:
+            value = well_stat(pt)
+            if value is not None:
+                out[float(pt[0])] = value
+        return out
+    return {}
+
+
+def _finite_spread(value) -> float:
+    """A spread field as a float, or 0.0 when it is missing or not finite."""
+    return float(value) if is_number(value) else 0.0
+
+
+def member_n_series(
+    ctx, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> dict[float, tuple[float, float]]:
+    """``{t: (n_above, n_above_spread)}`` for a member.
+
+    N-events counterpart of :func:`member_frac_series`. Same rset /
+    solo-well dispatch.
+    """
+    def rset_stat(rset, t):
+        if per_fov_spread:
+            _, _, _, _, n_mean, n_spread = compute_rep_per_fov_stats(ctx,
+                rset, t, threshold, use_sem,
+            )
+            # ``_finite_spread`` is safe here now. It used to be stricter than
+            # this site — it required ``isinstance(value, (int, float))``, which
+            # a ``numpy.float32`` fails — so using it would have turned a real
+            # spread into "no error bar". Its guard is ``_is_number`` now, which
+            # asks whether the value can be used as a number rather than which
+            # class produced it, and the two sites agree.
+            return (float(n_mean), _finite_spread(n_spread))
+        # Mean of the per-well counts, with the cross-well spread — the same
+        # statistic both plotting tabs draw for a replicate set's Events panel.
+        # This used to be ``compute_rep_n_above``, a *total* across the set's
+        # wells, so a set normalised against itself came out at 1/n rather than
+        # 1.0: a per-well mean of 5 over a total of 10 reads 0.5.
+        n_mean, n_spread = compute_rep_n_above_stats(ctx, rset, t, use_sem, threshold)
+        return (float(n_mean),
+                float(n_spread) if math.isfinite(n_spread) else 0.0)
+
+    return _member_series(ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+        rset_stat=rset_stat,
+        well_stat=lambda pt: _pt_n_above(pt, per_fov_spread),
+    )
+
+
+def control_n_at_for_bar(
+    ctx, control_label: str, target_t: float, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> tuple[float, float] | None:
+    """``(n_above, n_above_spread)`` of the control at *target_t* for the
+    bar's N-events panel. Returns ``None`` when the control can't be
+    resolved or has no sample at *target_t*."""
+    return _series_at(member_n_series(
+        ctx, control_label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    ), target_t)
+
+
+def member_first_tp_n_resolved(
+    ctx, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+    baseline_tp: float | None = None,
+) -> tuple[float, float, float] | None:
+    """``(tp, n_above, n_above_spread)`` for the member's baseline timepoint.
+
+    N-events counterpart of :func:`member_first_tp_frac_resolved` with the
+    same matched-tp + fall-through-to-earliest semantics.
+    """
+    return _series_baseline(member_n_series(
+        ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    ), baseline_tp)
+
+
+def parse_fc_op_ctrl(ctx) -> str:
+    """Return the user's chosen vs-control operator (``"ratio"`` or
+    ``"subtract"``)."""
+    op = getattr(ctx.state.plot, "fc_op_ctrl", "ratio") or "ratio"
+    return op if op in ("ratio", "subtract") else "ratio"
+
+
+def parse_fc_op_t0(ctx) -> str:
+    """Return the user's chosen vs-baseline-tp operator (``"ratio"`` or
+    ``"subtract"``)."""
+    op = getattr(ctx.state.plot, "fc_op_t0", "ratio") or "ratio"
+    return op if op in ("ratio", "subtract") else "ratio"
+
+
+def parse_fc_order(ctx) -> str:
+    """Return the user's chosen FC application order (``"ctrl_first"`` or
+    ``"t0_first"``). Defaults to ``"ctrl_first"`` for back-compat."""
+    order = getattr(ctx.state.plot, "fc_order", "ctrl_first") or "ctrl_first"
+    return order if order in ("ctrl_first", "t0_first") else "ctrl_first"
+
+
+def parse_baseline_tp(ctx) -> float | None:
+    """Resolve ``PlotState.fc_baseline_tp`` (a tp string) to a float.
+
+    Returns ``None`` when no baseline tp is set, when the saved string
+    isn't parseable as a float, or when the user has parameterised
+    "earliest available point" via an empty value (which ``normalize_pts``
+    handles as the original ``vs t0`` semantics).
+    """
+    raw = getattr(ctx.state.plot, "fc_baseline_tp", "") or ""
+    raw = str(raw).strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def is_active(ctx) -> bool:
+    return fold_change_state(ctx).active
+
+
+def _fc_op_word(op: str) -> str:
+    """Human word for a fold-change operator token."""
+    return "subtraction" if str(op) == "subtract" else "ratio"
+
+
+def control_axis_phrase(control_label: str = "", *, controls=None) -> str:
+    """What the control half of an axis title says: ``vs …``.
+
+    Three branches on how many distinct controls are actually in use, because
+    an axis label that names one denominator while the bars under it used four
+    is a figure that misstates itself:
+
+    * one — today's string, unchanged. That matters beyond nostalgia:
+      ``Set all to DMSO`` is mathematically identical to single-control mode,
+      so it has to read identically too;
+    * two — both named, since two fit;
+    * three or more — ``vs own control``, with the per-bar tick lines and the
+      ``fold_change_control`` CSV column carrying which is which.
+
+    *controls* is a ``PerMemberControls``; without one this is the single
+    control's own label and the count is one.
+    """
+    if controls is None:
+        # A single-control plot with nothing named is the same state, one mode
+        # over: the axis is on, every bar came back NaN, and "vs control"
+        # describes a normalization against a denominator that does not exist.
+        return f"vs {control_label}" if control_label else "vs control (none resolved)"
+    distinct = controls.distinct_controls()
+    if not distinct:
+        # The user asked for per-sample controls and nothing resolved. Saying
+        # "vs control" here would describe a normalization that did not happen.
+        return "vs own control (none resolved)"
+    if len(distinct) == 1:
+        return f"vs {distinct[0].display_name}"
+    if len(distinct) == 2:
+        return f"vs {distinct[0].display_name} / {distinct[1].display_name}"
+    return "vs own control"
+
+
+def fold_change_suffix(vs_control_on: bool, vs_t0_on: bool,
+                       control_label: str = "",
+                       op_ctrl: str = "ratio", op_t0: str = "ratio",
+                       baseline_label: str = "", *, controls=None) -> str:
+    """Compact " (fold-change …)" label fragment for axis titles.
+
+    Names the operator (ratio vs subtraction) for each active axis so the plot
+    title makes explicit *how* the values were normalised, and — for the vs-t0
+    axis — *which* timepoint is the baseline (``baseline_label``, e.g.
+    ``"t=24h"``; falls back to ``"t0"``). Example:
+    ``"  (fold change vs DMSO (ratio), vs t=0h (subtraction))"``.
+
+    The positional signature is unchanged — ``base_panel`` calls it
+    positionally — and *controls* is keyword-only. See
+    :func:`control_axis_phrase` for what it changes.
+    """
+    parts: list[str] = []
+    if vs_control_on:
+        parts.append(f"{control_axis_phrase(control_label, controls=controls)}"
+                     f" ({_fc_op_word(op_ctrl)})")
+    if vs_t0_on:
+        base = baseline_label or "t0"
+        parts.append(f"vs {base} ({_fc_op_word(op_t0)})")
+    if not parts:
+        return ""
+    return "  (fold change " + ", ".join(parts) + ")"
+
+
+def fold_change_suffix_for(ctx, scope: str = "") -> str:
+    """``fold_change_suffix`` built from the live fold-change state.
+
+    *scope* (``"bar"`` / ``"line"``) is what lets the control half count the
+    distinct controls actually in use — the member list differs per tab, so a
+    caller that does not say which tab it is labelling gets the single-control
+    reading. Every on-tab caller passes one.
+    """
+    from review.domain.time_rescale import format_scaled, rescale_for
+
+    plot = ctx.state.plot
+    base_tp = parse_baseline_tp(ctx)
+    # The baseline hour through the app-wide time correction (Properties →
+    # Time), because this suffix is appended to a figure title that names its
+    # own timepoints corrected. Left raw it put the same moment on one title
+    # twice, once corrected and once not — "fold change vs t=6h" beside
+    # "t=[24, 48] h" for a plate imaged every four hours — which is the
+    # disagreement the correction exists to remove, arriving inside a single
+    # string. Bar and Line append this same suffix and already print corrected
+    # hours on their axes, so they were reading two ways too.
+    #
+    # No marker here: the figures that carry this suffix state the correction
+    # once elsewhere — Bar and Line on their axis label via
+    # ``plot_style.mark_time_rescale``, Response in its own timepoint clause —
+    # and a second copy in the suffix would read as a second correction.
+    baseline_label = (
+        f"t={format_scaled(base_tp, rescale_for(plot))}h"
+        if base_tp is not None else "first timepoint")
+    controls = None
+    if scope and bool(getattr(plot, "fc_vs_control_on", False)) \
+            and str(getattr(plot, "fc_control_mode", "single")) == "per_member":
+        from review.domain import plot_members as _members
+        from review.domain.fold_change_pairing import build_per_member_controls
+        controls = build_per_member_controls(
+            ctx, _members.plotted_member_keys(ctx, scope),
+            dict(getattr(plot, "fc_control_map", {}) or {}),
+            member_wells=_members.member_wells(ctx, scope),
+            member_rsets=_members.member_replicate_sets(ctx),
+            render=str(getattr(plot, "fc_control_render", "self") or "self"),
+        )
+    return fold_change_suffix(
+        bool(getattr(plot, "fc_vs_control_on", False)),
+        bool(getattr(plot, "fc_vs_t0_on", False)),
+        # The plain token: the combo's disambiguation suffix is chrome and
+        # must never reach a figure title.
+        (plot.fc_control.display_name if plot.fc_control is not None else ""),
+        op_ctrl=str(getattr(plot, "fc_op_ctrl", "ratio") or "ratio"),
+        op_t0=str(getattr(plot, "fc_op_t0", "ratio") or "ratio"),
+        baseline_label=baseline_label,
+        controls=controls,
+    )
+
+
+# ── Control-series helpers ──────────────────────────────────────────────────
+
+_WELL_DISAMBIG_SUFFIX = " (well)"
+
+
+def resolve_control_wells(ctx, control_label: str) -> list[str]:
+    """Translate a control selection string into a list of loaded well tokens.
+
+    Resolution order:
+      1. Suffixed " (well)" — explicit "this is a well token". The suffix
+         is stripped and the bare token is looked up in ``_well_paths``.
+      2. ReplicateSet name match in ``_selections``.
+      3. Bare well token in ``_well_paths``.
+
+    The suffix exists for the rep-set-name-vs-well-token collision case
+    (someone named a rep-set "A01"): the UI combo emits the suffixed
+    form for the well entry, so picking it bypasses the rep-set
+    precedence in (2). Unknown / empty selections return ``[]``.
+
+    The order above is what :func:`resolve_control` applies to a legacy
+    reference; this function is one of its callers rather than a second
+    implementation of it. A reference that states its own kind skips the
+    precedence entirely.
+    """
+    kind, name = resolve_control(ctx, control_label)
+    if kind == "set":
+        return [w for w in _selection_wells(ctx, name)
+                if w in (ctx.state.dataset.well_paths or {})]
+    if kind == "well":
+        return [name]
+    return []
+
+
+def control_pts_for_line(ctx, control_label: str, *, threshold: float,
+                         val_col: str,
+                         fluor_gates) -> list:
+    """Aggregate the control selection as a single pooled series.
+
+    Used by the line-plot path where we want a control mean at every
+    timepoint the data exposes. Returns an AggPoint list (or [] if the
+    control is unresolved).
+    """
+    wells = resolve_control_wells(ctx, control_label)
+    if not wells:
+        return []
+    return aggregate_group(ctx,
+        wells, threshold=threshold, use_sem=False,
+        val_col=val_col,
+        fluor_gates=fluor_gates,
+    )
+
+
+def blank_point(pt, *, mean: bool = True, frac: bool = True,
+                n: bool = True) -> tuple:
+    """An AggPoint with the named plotted values replaced by NaN.
+
+    What a trace becomes when its control cannot be resolved. Dropping the
+    point entirely would leave a gap the renderer bridges with a straight line
+    between the neighbours, which reads as data; NaN reads as absent, which is
+    what it is. The timepoint, the cell counts and the CDF values are untouched
+    — they were measured and are still true.
+
+    The three flags let a caller blank one panel and keep the others, which is
+    the rule everywhere a control can supply a mean and not a fraction (see
+    ``fold_change_pairing.panel_nan_flags``). Blanking all three is the default
+    because that is the whole-member case.
+
+    The Events panel has **two** representations and both are blanked together:
+    index 4 is the count the panel plots with Aggregate-FOVs off, index 7 the
+    per-FOV mean it plots with the toggle on. Blanking only index 4 left the
+    per-FOV figure drawing a raw count on a fold-change axis — the very defect
+    this function exists to prevent, in the representation it did not check.
+    Index 10 (``n_above_total``) is deliberately left alone: it is the CSV's
+    integer cross-well count, a measurement that no normalization applies to.
+    """
+    out = list(pt) + [None] * max(0, 11 - len(pt))
+    if mean:
+        out[1] = float("nan")   # mean
+        out[2] = 0.0            # its spread
+    if frac:
+        out[3] = float("nan")   # fraction above threshold
+        out[6] = 0.0            # its spread
+    if n:
+        out[4] = float("nan")   # events above threshold (count)
+        out[9] = 0.0            # its replicate spread
+        out[7] = float("nan")   # events above threshold (per-FOV mean)
+        out[8] = 0.0            # its per-FOV spread
+    return tuple(out[:max(11, len(pt))])
+
+
+def resolve_control(ctx, ref) -> tuple[str, str]:
+    """Decide what a control reference points at: ``("set"|"well"|"", name)``.
+
+    **The single answer to "what does this control mean".** Every path that
+    turns a control into data goes through here — the well resolver, the
+    replicate-set view and the denominator series builder — because when they
+    each decided for themselves they disagreed, and silently: one resolved a
+    label the others returned nothing for, so the Bar tab NaNed every bar while
+    the Line tab drew raw values under a fold-change axis.
+
+    A :class:`~review.domain.control_ref.ControlRef` states its own kind,
+    so there is nothing to guess: a well reference resolves against the loaded
+    wells and can never be captured by a replicate set of the same name, hidden
+    or not. Only a *legacy* reference — one read from a document written before
+    the kind was recorded, or a bare string — falls through to
+    :func:`classify_control_label`, which applies the precedence that value was
+    saved under.
+    """
+    from review.domain.control_ref import KIND_SET, KIND_WELL, ControlRef
+
+    ref = ControlRef.coerce(ref)
+    if ref is None:
+        return "", ""
+    well_paths = ctx.state.dataset.well_paths or {}
+    if ref.kind == KIND_WELL:
+        return ("well", ref.name) if ref.name in well_paths else ("", "")
+    if ref.kind == KIND_SET:
+        for s in (ctx.state.selection.selections or []):
+            if s.get("name") == ref.name:
+                if any(w in well_paths for w in (s.get("wells") or [])):
+                    return "set", ref.name
+                break
+        return "", ""
+    return classify_control_label(ctx, ref.name)
+
+
+def concrete_control(ctx, ref):
+    """Return *ref* with its kind decided, or ``None`` if it names nothing.
+
+    A legacy reference carries a name whose meaning depends on what is loaded
+    right now, which is fine while it is only being read and wrong the moment
+    something wants to *rewrite* it — renaming a replicate set has to know
+    whether the control was that set or a well that happens to share its
+    token, and after the rename there is no longer any way to find out. So a
+    rename resolves first and rewrites second.
+
+    A reference that already states its kind is returned unchanged even when it
+    currently resolves to nothing: an unloaded well is still that well.
+    """
+    from review.domain.control_ref import KIND_LEGACY, ControlRef
+
+    ref = ControlRef.coerce(ref)
+    if ref is None or ref.kind != KIND_LEGACY:
+        return ref
+    kind, name = classify_control_label(ctx, ref.name)
+    return ControlRef(kind, name) if kind else None
+
+
+def classify_control_label(ctx, label: str) -> tuple[str, str]:
+    """Resolve a *legacy* control label: ``("set"|"well"|"", name)``.
+
+    **The single answer to "what does this label refer to".** Every path that
+    turns a control label into data goes through here — the well resolver, the
+    replicate-set view, and the denominator series builder — because when they
+    each decided for themselves they disagreed, and the disagreement was
+    silent: a ``" (well)"``-suffixed label resolved to the well in one and to
+    nothing in the others, so the Bar tab NaNed every bar while the Line tab
+    drew raw values under a fold-change axis.
+
+    Resolution order, unchanged from what the well resolver has always done:
+
+      1. A ``" (well)"`` suffix is an explicit "this is a well token". The
+         suffix is stripped and the bare token looked up. It exists for the
+         collision case — someone naming a replicate set ``A01`` while a well
+         ``A01`` is loaded — and it must be tried *first*, or the set wins and
+         the user has no way to address the well.
+      2. A replicate-set name, when that selection has at least one loaded well.
+      3. A bare well token.
+
+    An empty label, or one matching nothing, returns ``("", "")``.
+    """
+    label = str(label or "").strip()
+    if not label:
+        return "", ""
+    well_paths = ctx.state.dataset.well_paths or {}
+    if label.endswith(_WELL_DISAMBIG_SUFFIX):
+        bare = label[: -len(_WELL_DISAMBIG_SUFFIX)]
+        return ("well", bare) if bare in well_paths else ("", "")
+    for s in (ctx.state.selection.selections or []):
+        if s.get("name") == label:
+            if any(w in well_paths for w in (s.get("wells") or [])):
+                return "set", label
+            # A set whose wells are all unloaded does NOT claim the label —
+            # it falls through to the well lookup below, so a plate holding
+            # well ``A01`` and an empty set also called ``A01`` still resolves
+            # to the well. Returning "unresolved" here instead would have been
+            # a silent behaviour change.
+            break
+    if label in well_paths:
+        return "well", label
+    return "", ""
+
+
+def _label_to_replicate_set(ctx, label: str) -> ReplicateSet | None:
+    """Resolve a control label to a ReplicateSet OR ``None``.
+
+    Returns the ReplicateSet view of a Sample-Definitions selection when the
+    label names one (and the selection has ≥1 loaded well). Returns ``None``
+    for unknown labels and well tokens — the caller falls back to per-well
+    handling in the well-token case. Classification is
+    :func:`resolve_control`; do not re-decide it here.
+    """
+    kind, name = resolve_control(ctx, label)
+    if kind != "set":
+        return None
+    wells = [w for w in (_selection_wells(ctx, name) or [])
+             if w in (ctx.state.dataset.well_paths or {})]
+    if not wells:
+        return None
+    from review.domain.batch_models import ReplicateSet
+    return ReplicateSet(name, wells)
+
+
+def _selection_wells(ctx, name: str) -> list:
+    """The raw ``wells`` list of the selection called *name*, or ``[]``."""
+    for s in (ctx.state.selection.selections or []):
+        if s.get("name") == name:
+            return list(s.get("wells") or [])
+    return []
+
+
+def member_mean_series(
+    ctx, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> dict[float, float]:
+    """``{t: mean}`` for a member (rep-set name or well token).
+
+    Uses the SAME stat the bar / curve renderer uses for that kind of
+    member:
+
+      * Rep-set, default mode → ``_compute_rep_stats`` (mean of per-well
+        means at each timepoint).
+      * Rep-set, Aggregate-FOVs mode → ``_compute_rep_per_fov_stats``
+        (per-FOV pool at each timepoint).
+      * Well token → ``_aggregate_well`` (the well's own per-cell mean).
+
+    This is the fix for the math inconsistency of the original
+    fold-change: the bar plot's numerator (e.g. mean-of-means via
+    ``_compute_rep_stats``) was being divided by a pooled-cells mean
+    via ``_aggregate_group`` — two different statistics, so the ratio
+    wasn't a clean fold-change. Both sides now use the same stat.
+    """
+    def rset_stat(rset, t):
+        compute = compute_rep_per_fov_stats if per_fov_spread else compute_rep_stats
+        gm, *_ = compute(ctx, rset, t, threshold, use_sem)
+        return float(gm) if math.isfinite(gm) else None
+
+    def well_stat(pt) -> float | None:
+        m = pt[1]
+        if is_number(m):
+            return float(m)
+        return None
+
+    return _member_series(ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+        rset_stat=rset_stat, well_stat=well_stat,
+    )
+
+
+def control_mean_at_for_bar(
+    ctx, control_label: str, target_t: float, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> float | None:
+    """Control mean at *target_t* using the same stat the bar plot uses.
+
+    For a rep-set control: mean-of-per-well-means (or per-FOV pool when
+    Aggregate-FOVs is on) — matches the rep-set bar's numerator. For a
+    single-well control: the well's own mean — matches the per-well
+    bar's numerator. Returns ``None`` when the control can't be resolved
+    or has no sample at *target_t*.
+    """
+    series = member_mean_series(
+        ctx, control_label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    )
+    return _match_control_mean(target_t, series)
+
+
+class CellScaleSpec(NamedTuple):
+    """Per-(well, tp) fold-change transform for a per-cell overlay.
+
+    Mirrors the axis arguments of :func:`scale_bar_value` so an overlaid
+    per-cell distribution lands on the *same* fold-change axis as its bar.
+    ``missing`` is set when a requested baseline could not be resolved (or a
+    ratio denominator is non-finite/zero) — the caller renders a blank slot
+    rather than misleading raw values.
+    """
+    control_mean: float | None
+    op_ctrl: str
+    t0_mean: float | None
+    op_t0: str
+    order: str
+    missing: bool
+
+
+def apply_cell_scale(vals, spec: CellScaleSpec | None):
+    """Apply *spec* to a 1-D array of per-cell values.
+
+    Uses the same per-axis operator (``"ratio"`` → divide, ``"subtract"`` →
+    subtract) and application ``order`` as :func:`scale_bar_value`, but
+    element-wise and without error propagation (individual cells carry no
+    spread). Returns the transformed array; an all-``nan`` array when a ratio
+    denominator is bad (so the caller can drop it). A ``None`` spec is a
+    no-op.
+    """
+    import numpy as _np
+
+    if spec is None:
+        return vals
+    out = _np.asarray(vals, dtype=float)
+
+    def _axis(a, denom, op):
+        if denom is None:
+            return a
+        if op == "subtract":
+            return a - float(denom)
+        # ratio
+        if not (is_number(denom) and denom != 0):
+            return _np.full_like(a, _np.nan)
+        return a / float(denom)
+
+    if spec.order == "t0_first":
+        out = _axis(out, spec.t0_mean, spec.op_t0)
+        out = _axis(out, spec.control_mean, spec.op_ctrl)
+    else:
+        out = _axis(out, spec.control_mean, spec.op_ctrl)
+        out = _axis(out, spec.t0_mean, spec.op_t0)
+    return out
+
+
+def build_cell_scaling(
+    ctx, wells, *, fc_state,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+    op_ctrl: str = "ratio", op_t0: str = "ratio",
+    order: str = "ctrl_first", baseline_tp: float | None = None,
+    control_by_member=None,
+) -> Callable[[str, float], CellScaleSpec]:
+    """Build a ``scale_for(well, tp) -> CellScaleSpec`` resolver for per-cell
+    violin/beeswarm fold-change overlays.
+
+    The returned spec applies the SAME per-axis operator (ratio vs subtract),
+    application ``order``, and ``baseline_tp`` the bars use
+    (:func:`scale_bar_value` / :func:`baseline_from_points`), so an overlaid
+    per-cell distribution sits on the same fold-change axis as its bar —
+    fixing the old always-divide behaviour (audit S1). ``tp`` is honoured per
+    call, so a multi-timepoint selection scales each column at its own
+    timepoint instead of collapsing to the first (audit S3).
+
+      * control_mean — the control's value at the requested tp, from
+        :func:`control_mean_at_for_bar` (the bar's stat), memoised per
+        ``(control, tp)``. ``None`` / ``missing`` when vs-control is requested
+        but unresolved.
+      * t0_mean — each well's own baseline from :func:`member_baseline_value`
+        (honouring ``baseline_tp``), resolved once per well.
+
+    *control_by_member* maps a member key to its own control reference. Without
+    it every member shares ``fc_state.control``, which is what a single global
+    control means. **With** per-sample controls it is not optional: the bars
+    would normalize per member while the violin drawn on top of them
+    normalized against a different denominator, and the two would sit on one
+    axis looking like one measurement.
+    """
+    _fc_req = coerce_fc_state(fc_state)
+    fc_vs_ctrl = _fc_req.vs_control_on
+    fc_ctrl_lbl = _fc_req.control
+    fc_vs_t0 = _fc_req.vs_t0_on
+
+    # t0 baseline is per-well and tp-independent — resolve once up front.
+    t0_by_well: dict[str, float | None] = {}
+    if fc_vs_t0:
+        for w in wells:
+            t0_by_well[w] = member_baseline_value(
+                ctx, w, baseline_tp=baseline_tp,
+                threshold=threshold, val_col=val_col, use_sem=use_sem,
+                per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+                op=op_t0,
+            )
+
+    control_cache: dict = {}
+
+    def _control_ref(member: str):
+        if control_by_member is None:
+            return fc_ctrl_lbl
+        return control_by_member.get(member)
+
+    def _control_at(member: str, tp: float) -> float | None:
+        ref = _control_ref(member)
+        if not (fc_vs_ctrl and ref is not None):
+            return None
+        key = (ref, tp)
+        if key not in control_cache:
+            control_cache[key] = control_mean_at_for_bar(
+                ctx, ref, tp,
+                threshold=threshold, val_col=val_col, use_sem=use_sem,
+                per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+            )
+        return control_cache[key]
+
+    def scale_for(well: str, tp: float) -> CellScaleSpec:
+        missing = False
+        cm: float | None = None
+        if fc_vs_ctrl:
+            # An unmapped member has no denominator, so its overlay is blank —
+            # the same answer its bar gets. Falling through to "no control
+            # requested" would draw the raw distribution on a fold-change axis.
+            cm = _control_at(well, float(tp))
+            if cm is None:
+                missing = True
+            elif op_ctrl == "ratio" and (not math.isfinite(cm) or cm == 0):
+                missing = True
+        t0: float | None = None
+        if fc_vs_t0:
+            t0 = t0_by_well.get(well)
+            if t0 is None:
+                missing = True
+            elif op_t0 == "ratio" and (not math.isfinite(t0) or t0 == 0):
+                missing = True
+        return CellScaleSpec(
+            control_mean=cm if fc_vs_ctrl else None,
+            op_ctrl=op_ctrl,
+            t0_mean=t0 if fc_vs_t0 else None,
+            op_t0=op_t0,
+            order=order,
+            missing=missing,
+        )
+
+    return scale_for
+
+
+def member_baseline_value(
+    ctx, label: str, *,
+    baseline_tp: float | None,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+    op: str = "ratio",
+) -> float | None:
+    """Member baseline honouring *baseline_tp* (audit S1).
+
+    Picks the member's own mean at ``baseline_tp`` when set and sampled;
+    otherwise falls back to the earliest finite mean — matching
+    :func:`baseline_from_points` / :func:`member_first_tp_value` so the
+    per-cell overlay baseline agrees with the bar's.
+
+    That agreement is why *op* is a parameter. This is the sixth baseline
+    finder in the file, and it was the one left behind when the other five were
+    taught that a zero baseline is usable under subtraction — which made the
+    per-cell overlay resolve a different timepoint from the bar it is drawn
+    over, in exactly the case the docstring above promises they agree.
+    """
+    series = member_mean_series(
+        ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    )
+    if not series:
+        return None
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for t, m in series.items():
+            if (abs(float(t) - tgt) <= _TP_REL_TOL * max(1.0, abs(float(t)), abs(tgt))
+                    and _baseline_usable(m, op=op)):
+                return float(m)
+        # Requested tp not sampled — fall through to earliest (mirrors the bar).
+    earliest = min(series)
+    return series[earliest]
+
+
+def member_first_tp_value(
+    ctx, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> float | None:
+    """Earliest finite mean for a member (using the member's own stat).
+
+    The t0 baseline counterpart to :func:`control_mean_at_for_bar`. Used
+    for the ``vs t0`` axis so the baseline divisor matches the numerator's
+    statistic — for a rep-set member this is mean-of-per-well-means at
+    the earliest tp where the rep-set has data, not the pool-of-cells
+    mean of the prior implementation.
+    """
+    series = member_mean_series(
+        ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    )
+    if not series:
+        return None
+    earliest = min(series)
+    return series[earliest]
+
+
+def member_stats_series(
+    ctx, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> dict[float, tuple[float, float]]:
+    """``{t: (mean, spread)}`` for a member — like :func:`member_mean_series`
+    but also returns the spread so callers can propagate error properly.
+
+    The spread is read from the same helper that produces the mean:
+    ``_compute_rep_stats[_per_fov]`` for rep-set members, the
+    ``_aggregate_well`` AggPoint's spread field for solo wells.
+    """
+    def rset_stat(rset, t) -> tuple | None:
+        compute = compute_rep_per_fov_stats if per_fov_spread else compute_rep_stats
+        gm, gerr, *_ = compute(ctx, rset, t, threshold, use_sem)
+        if not math.isfinite(gm):
+            return None
+        return (float(gm), _finite_spread(gerr))
+
+    def well_stat(pt) -> tuple | None:
+        m = pt[1]
+        if not is_number(m):
+            return None
+        return (float(m), _finite_spread(pt[2] if len(pt) > 2 else 0.0))
+
+    return _member_series(ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+        rset_stat=rset_stat, well_stat=well_stat,
+    )
+
+
+def member_frac_stats_series(
+    ctx, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> dict[float, tuple[float, float]]:
+    """``{t: (frac, frac_spread)}`` for a member — fraction-above-threshold + spread.
+
+    Mirrors :func:`member_stats_series` but extracts the fraction field. The
+    fraction lives at index [2] and its spread at index [3] of BOTH
+    ``compute_rep_stats`` (4-tuple) and ``compute_rep_per_fov_stats`` (6-tuple),
+    so front-indexing ``res[2]``/``res[3]`` is correct for either — a ``*_, gf,
+    ferr`` tail-unpack would wrongly grab the per-FOV count fields from the
+    6-tuple. Used by line-plot FC to scale the OnFraction panel.
+    """
+    def rset_stat(rset, t) -> tuple | None:
+        compute = compute_rep_per_fov_stats if per_fov_spread else compute_rep_stats
+        res = compute(ctx, rset, t, threshold, use_sem)
+        gf, ferr = res[2], res[3]
+        if not is_number(gf):
+            return None
+        return (float(gf), _finite_spread(ferr))
+
+    def well_stat(pt) -> tuple | None:
+        f = pt[3] if len(pt) > 3 else None
+        if not is_number(f):
+            return None
+        return (float(f), _finite_spread(pt[6] if len(pt) > 6 else 0.0))
+
+    return _member_series(ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+        rset_stat=rset_stat, well_stat=well_stat,
+    )
+
+
+def control_stats_at_for_bar(
+    ctx, control_label: str, target_t: float, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> tuple[float, float] | None:
+    """``(mean, spread)`` of the control at *target_t* using the bar's stat.
+
+    Stats-returning counterpart to :func:`control_mean_at_for_bar` —
+    the spread is needed for proper error propagation in
+    :func:`scale_bar_value`. Returns ``None`` when the control can't
+    be resolved or has no sample at *target_t*.
+    """
+    return _series_at(member_stats_series(
+        ctx, control_label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    ), target_t)
+
+
+def member_first_tp_stats(
+    ctx, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+    baseline_tp: float | None = None,
+) -> tuple[float, float] | None:
+    """``(mean, spread)`` for the member's baseline timepoint.
+
+    Returns the stats at ``baseline_tp`` when supplied (matched with a
+    relative tolerance to absorb float-printing drift) and falls back to
+    the member's earliest finite tp otherwise — matching the
+    ``normalize_pts`` line-scope semantics so a user who picks a
+    baseline tp the bar's rep-set doesn't sample gets the same fallback
+    the line scope already gives them, instead of a silent no-op that
+    looks indistinguishable from FC-off. Returns ``None`` only for
+    unknown / empty members.
+    """
+    series = member_stats_series(
+        ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    )
+    if not series:
+        return None
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for t, ms in series.items():
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                return ms
+        # Requested baseline tp not present for this member — fall
+        # through to earliest-finite so the bar still normalises, same
+        # as ``normalize_pts``. Without this the FC toggle is a silent
+        # no-op visually (see test_collect_bar_items_baseline_missing
+        # _tp_falls_back_silently for the regression).
+    earliest = min(series)
+    return series[earliest]
+
+
+def member_first_tp_stats_resolved(
+    ctx, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+    baseline_tp: float | None = None,
+) -> tuple[float, float, float] | None:
+    """Like :func:`member_first_tp_stats` but also returns the resolved tp.
+
+    Returns ``(tp, mean, spread)`` so the bar plot can look up the control's
+    value at the SAME baseline tp the member used — needed for correct
+    post-control baseline stacking when ops are mixed (e.g. ratio-control
+    + subtract-baseline). Returns ``None`` only for unknown / empty members.
+    """
+    return _series_baseline(member_stats_series(
+        ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    ), baseline_tp)
+
+
+# ── Bar-plot fraction-on FC helpers ─────────────────────────────────────────
+#
+# The "OnFraction" panel (fraction of cells above the gate) is its own bar
+# row. Mean and frac are independent quantities; FC for frac normalises
+# against the control / baseline's frac, not its mean. These helpers mirror
+# the mean-side trio so ``collect_bar_items`` can scale the frac panel the
+# same way it scales the mean panel.
+
+
+def member_frac_series(
+    ctx, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> dict[float, tuple[float, float]]:
+    """``{t: (frac, frac_spread)}`` for a member.
+
+    Fraction-on counterpart of :func:`member_stats_series`. Same rset /
+    solo-well dispatch.
+    """
+    def rset_stat(rset, t) -> tuple | None:
+        if per_fov_spread:
+            _, _, gf, gerr_f, *_ = compute_rep_per_fov_stats(ctx,
+                rset, t, threshold, use_sem,
+            )
+        else:
+            _, _, gf, gerr_f = compute_rep_stats(ctx, rset, t, threshold, use_sem)
+        if not is_number(gf):
+            return None
+        return (float(gf), _finite_spread(gerr_f))
+
+    def well_stat(pt):
+        f, fs = _pt_frac(pt)
+        return None if f is None else (f, fs)
+
+    return _member_series(ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+        rset_stat=rset_stat, well_stat=well_stat,
+    )
+
+
+def control_frac_at_for_bar(
+    ctx, control_label: str, target_t: float, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> tuple[float, float] | None:
+    """``(frac, frac_spread)`` of the control at *target_t* for the bar's frac
+    panel. Returns ``None`` when the control can't be resolved or has no
+    sample at *target_t*."""
+    return _series_at(member_frac_series(
+        ctx, control_label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    ), target_t)
+
+
+def member_first_tp_frac_resolved(
+    ctx, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+    baseline_tp: float | None = None,
+) -> tuple[float, float, float] | None:
+    """``(tp, frac, frac_spread)`` for the member's baseline timepoint —
+    the frac counterpart of :func:`member_first_tp_stats_resolved`."""
+    return _series_baseline(member_frac_series(
+        ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    ), baseline_tp)
+
+
+# ── Bar-plot scaling ────────────────────────────────────────────────────────
+
+def _apply_axis(value: float, spread: float, d_mean: float | None,
+                d_spread: float | None, op: str) -> tuple[float, float]:
+    """Apply a single FC axis to a (value, spread) pair.
+
+    ``ratio`` divides; ``subtract`` subtracts. Variances combine in
+    quadrature in both cases (independent quantities). Returns
+    ``(nan, 0.0)`` when the ratio denominator is non-finite or zero.
+    """
+    if d_mean is None:
+        return value, spread
+    if not math.isfinite(d_mean):
+        return float("nan"), 0.0
+    ds = float(d_spread) if (d_spread is not None and math.isfinite(d_spread)) else 0.0
+    s = float(spread) if (spread is not None and math.isfinite(spread)) else 0.0
+    if op == "subtract":
+        new_val = value - float(d_mean)
+        new_spread = math.sqrt(s * s + ds * ds)
+        return float(new_val), float(new_spread)
+    # default: ratio
+    if d_mean == 0:
+        return float("nan"), 0.0
+    new_val = value / float(d_mean)
+    rel_x_sq = _rel_err_sq(value, s)
+    rel_d_sq = _rel_err_sq(d_mean, ds)
+    if not math.isfinite(new_val):
+        return float("nan"), 0.0
+    new_spread = abs(new_val) * math.sqrt(rel_x_sq + rel_d_sq) if (rel_x_sq + rel_d_sq) > 0 else 0.0
+    return float(new_val), float(new_spread)
+
+
+def scale_bar_value(
+    mean: float,
+    spread: float,
+    *,
+    control_mean: float | None = None,
+    control_spread: float | None = None,
+    t0_mean: float | None = None,
+    t0_spread: float | None = None,
+    op: str = "ratio",
+    op_ctrl: str | None = None,
+    op_t0: str | None = None,
+    order: str = "ctrl_first",
+) -> tuple[float, float]:
+    """Apply control and/or t0 normalization with error propagation.
+
+    ``op_ctrl`` and ``op_t0`` select how each axis's denominator is
+    applied — independent so users can subtract one and divide by the
+    other. Each is ``"ratio"`` (``Y = X / D``, relative variances add in
+    quadrature) or ``"subtract"`` (``Y = X - D``, absolute variances add
+    in quadrature). When ``op_ctrl`` / ``op_t0`` are ``None`` they fall
+    back to ``op`` — the legacy single-op contract.
+
+    Application order: control first, then t0 on the post-control value
+    (preserving the ΔΔCt-style stacking when both are ratios).
+
+    *control_spread* / *t0_spread* default to ``None`` (treated as 0),
+    recovering the original "denominator treated as exact" behaviour.
+
+    Returns ``(scaled_mean, scaled_spread)`` with NaN propagation when
+    a ratio denominator is non-finite or zero. Spread is non-negative.
+    """
+    if not math.isfinite(mean):
+        return float("nan"), 0.0
+    effective_op_ctrl = op_ctrl if op_ctrl is not None else op
+    effective_op_t0 = op_t0 if op_t0 is not None else op
+    # An undefined input spread stays undefined through the normalization: it is
+    # not zero, and folding it to zero would hand the scaled bar an error bar
+    # that looks measured. The value is still scaled normally (it does not
+    # depend on its own spread). A *denominator* spread of None keeps meaning
+    # "treated as exact" — that is the documented contract for control / t0.
+    spread_undefined = spread is not None and not math.isfinite(spread)
+    val = float(mean)
+    sp = 0.0 if (spread is None or spread_undefined) else float(spread)
+    if order == "t0_first":
+        val, sp = _apply_axis(val, sp, t0_mean, t0_spread, effective_op_t0)
+        if not math.isfinite(val):
+            return float("nan"), 0.0
+        val, sp = _apply_axis(val, sp, control_mean, control_spread, effective_op_ctrl)
+    else:
+        val, sp = _apply_axis(val, sp, control_mean, control_spread, effective_op_ctrl)
+        if not math.isfinite(val):
+            return float("nan"), 0.0
+        val, sp = _apply_axis(val, sp, t0_mean, t0_spread, effective_op_t0)
+    if not math.isfinite(val):
+        return float("nan"), 0.0
+    return val, (float("nan") if spread_undefined else sp)
+
+
+def first_tp_value(pts) -> float | None:
+    """Return the mean of the earliest finite-mean AggPoint, or None."""
+    if not pts:
+        return None
+    for pt in sorted(pts, key=lambda p: p[0]):
+        m = pt[1]
+        if is_number(m):
+            return float(m)
+    return None

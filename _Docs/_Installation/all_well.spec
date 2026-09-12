@@ -9,7 +9,7 @@
 #   dist/AllWell-<version>[-<profile>].app   — double-clickable macOS app bundle
 #   (e.g. dist/AllWell-8.8.8.app, or dist/AllWell-8.8.8-thin.app for a subset)
 #
-# Requires: pyinstaller >= 6.0, all packages in _Docs/requirements.txt
+# Requires: pyinstaller >= 6.0, all packages in requirements.txt
 # installed in the active Python environment.
 
 import sys
@@ -34,7 +34,7 @@ sys.setrecursionlimit(max(sys.getrecursionlimit(), 5000))
 def pkg_dir(name: str) -> Path:
     spec = importlib.util.find_spec(name)
     if spec is None:
-        raise RuntimeError(f"Package {name!r} not found — install _Docs/requirements.txt first")
+        raise RuntimeError(f"Package {name!r} not found — install requirements.txt first")
     return Path(spec.origin).parent
 
 
@@ -63,7 +63,7 @@ APP_VERSION = _ver_ns["__version__"]
 # ---------------------------------------------------------------------------
 # `ALLWELL_PROFILE=<name> scripts/build_executable.sh` builds a binary that ships
 # only the profile's features (profiles/<name>.toml). Unset / "full" = the full
-# app. Excluded features' source dirs are omitted from the bundled `well_viewer`
+# app. Excluded features' source dirs are omitted from the bundled `review`
 # tree, their unique heavy deps are excluded from the module graph, and the
 # chosen profile is baked as `active_profile.txt` so the frozen app's registry
 # filters to match the bundled code (a frozen binary has no env at run time).
@@ -101,7 +101,7 @@ if _profile_active:
     _catalog = load_catalog(_parent / "profiles" / "full.toml")
     _ex = compute_exclusions(_catalog, _prof.get("features"),
                              _prof.get("subtabs") or {})
-    # repo_paths spans well_viewer/ tabs AND non-Qt units (pipeline/cellpose.py);
+    # repo_paths spans review/ tabs AND non-Qt units (pipeline/cellpose.py);
     # the bundling loop filters every first-party package against this list.
     _excluded_features = _ex.features
     # Apply the remote-manifest bundling floor: never exclude a file the remote
@@ -132,7 +132,7 @@ _DISPLAY_NAME = f"All Well {APP_VERSION}" + (f" ({_PROFILE})" if _profile_active
 def _pkg_datas(pkg_root: Path, dest: str, exclude_repo_dirs: list) -> list:
     """Per-file data tuples for *pkg_root* → *dest*, omitting excluded dirs.
 
-    Excludes are repo-relative (e.g. ``well_viewer/features/stats``); any file
+    Excludes are repo-relative (e.g. ``review/features/stats``); any file
     under one is dropped, so a profiled-out feature's source never lands in the
     bundle. __pycache__ is always skipped."""
     out: list = []
@@ -166,21 +166,22 @@ sibling_scripts = [
     (str(_parent / "version.py"),               "."),
     # Remote (SLURM/SSH) execution uploads the files in
     # services.remote_runner._REQUIRED_REMOTE_FILES to the worker; that list
-    # includes _Docs/requirements-remote.txt (the headless pip install). The
+    # includes requirements-remote.txt (the headless pip install). The
     # frozen app resolves those paths under _MEIPASS, so the file must ship at
-    # _MEIPASS/_Docs/requirements-remote.txt or remote runs abort with
+    # _MEIPASS/requirements-remote.txt or remote runs abort with
     # "missing local file". (The GUI-superset requirements.txt is NOT bundled —
     # only the remote install manifest is needed at runtime.)
-    (str(_parent / "_Docs" / "requirements-remote.txt"), "_Docs"),
-    # The Analyze → Remotes dialog provisions a remote host by spawning this
-    # bootstrap module as a subprocess (re-exec'd via the ``--run-bootstrap``
-    # launcher sentinel — sys.executable is the .app binary, not python). It's
-    # loaded by file path at _MEIPASS/scripts/_bootstrap_lib.py and its
-    # ``REPO_ROOT = __file__.parent.parent`` resolves to _MEIPASS, where the
-    # files it syncs to the remote (process_microscopy.py, pipeline/, util/,
-    # _Docs/requirements-remote.txt) are already bundled. Keep the ``scripts/``
-    # dest so that .parent.parent lands on the bundle root, not above it.
-    (str(_parent / "scripts" / "_bootstrap_lib.py"), "scripts"),
+    (str(_parent / "requirements-remote.txt"), "."),
+    # The remote bootstrap needs no entry here any more. It lives in
+    # ``services/``, which the package loop below bundles whole, so it already
+    # lands at _MEIPASS/services/remote_bootstrap.py — where
+    # ``all_well_launcher.py``'s ``--run-bootstrap`` dispatch loads it by path
+    # and its ``REPO_ROOT = __file__.parent.parent`` resolves to the bundle
+    # root, beside the files it syncs to the remote (process_microscopy.py,
+    # pipeline/, util/, requirements-remote.txt). The entry existed only
+    # because the module used to sit in ``scripts/``, which is not a bundled
+    # package; listing it again would ship the same file twice and give the
+    # destination a second place to drift from.
 ]
 
 # Bundle every first-party package so module imports resolve at runtime inside
@@ -188,8 +189,8 @@ sibling_scripts = [
 # filtered per-file against ``_excluded_repo_dirs`` (excluded feature dirs +
 # non-Qt units like pipeline/cellpose.py dropped); the full build ships them
 # whole.
-for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "util",
-             "startup",
+for _pkg in ("review", "widgets", "ui", "services", "pipeline", "util",
+             "startup", "core", "domain",
              "analyze", "datasets"):
     _pkg_path = _parent / _pkg
     if not _pkg_path.is_dir():
@@ -239,7 +240,7 @@ if _markdowns_dir.is_dir():
         extra_data.append((str(_markdowns_dir), "Markdowns"))
 
 # Bundled UI fonts (Inter + JetBrains Mono). Loaded at startup by
-# well_viewer.core.app_fonts, which resolves ``_MEIPASS/assets/fonts`` in a
+# startup.app_fonts, which resolves ``_MEIPASS/assets/fonts`` in a
 # frozen build — so without this the app silently falls back to the platform
 # font. Ship them under the same ``assets/fonts`` layout the loader expects.
 _fonts_dir = _parent / "assets" / "fonts"
@@ -253,7 +254,7 @@ if _icons_dir.is_dir():
     extra_data.append((str(_icons_dir), "assets/icons"))
 
 # Build-profile manifests + baked marker. Ship profiles/ so the frozen app's
-# ``well_viewer.core.profile.load_profile`` resolves the active manifest, and
+# ``core.profile.load_profile`` resolves the active manifest, and
 # write ``active_profile.txt`` at the bundle root so ``active_profile()`` picks
 # the profile with no run-time env var. Absent (full build) → the full app.
 _profiles_dir = _parent / "profiles"
@@ -308,7 +309,7 @@ hiddenimports = [
     "numpy.random._generator",
     "numpy.random.mtrand",
 
-    # scipy — stats and ndimage used by well_viewer + process_microscopy
+    # scipy — stats and ndimage used by review + process_microscopy
     "scipy.stats",
     "scipy.stats._stats_py",
     "scipy.stats._continuous_distns",
@@ -366,7 +367,7 @@ hiddenimports = [
 
     # PySide6 — the v2 UI runs on Qt6. PyInstaller picks up the visible
     # widgets via static analysis but the deferred-import paths in
-    # widgets/* and well_viewer/* need explicit hints.
+    # widgets/* and review/* need explicit hints.
     "PySide6",
     "PySide6.QtCore",
     "PySide6.QtGui",
@@ -387,7 +388,7 @@ hiddenimports = [
     "pandas.io.formats",
     "pandas.io.formats.style",
 
-    # pyarrow — the per-well Parquet frame cache (well_viewer/data/parquet_cache.py).
+    # pyarrow — the per-well Parquet frame cache (review/data/parquet_cache.py).
     # Imported lazily inside that module, so PyInstaller's module graph cannot
     # see it and it has to be named here. Absent, the app parses CSVs instead of
     # failing, but a shipped build should carry it: it is a 60x read.

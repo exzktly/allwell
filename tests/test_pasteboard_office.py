@@ -2,7 +2,7 @@
 
 These pin the dual-declaration of PDF (modern UTI + legacy NSPasteboard
 name) and the TIFF-then-PNG raster fallback. They use only the
-``well_viewer.features.export.style`` helper, NOT matplotlib, so they
+``review.features.export.style`` helper, NOT matplotlib, so they
 run in CI environments without matplotlib installed.
 """
 
@@ -77,7 +77,7 @@ def test_macos_pasteboard_declares_pdf_under_both_legacy_and_uti(monkeypatch):
     The native pasteboard writer must declare BOTH names with the
     legacy alias listed first so Office's vector-paste detector finds
     it before falling back to a raster type."""
-    from well_viewer.features.export.style import _macos_pasteboard_write
+    from review.features.export.style import _macos_pasteboard_write
 
     declared, calls = _patch_macos_clipboard(monkeypatch)
     ok = _macos_pasteboard_write(b"%PDF-1.4 fake", b"<svg/>", b"\x89PNG\r\n")
@@ -100,7 +100,7 @@ def test_macos_pasteboard_adds_tiff_when_pil_available(monkeypatch):
     """Office prefers TIFF over PNG for raster paste. When Pillow is
     importable the figure also lands on the pasteboard as TIFF; PNG
     stays as a fallback for apps that don't read TIFF."""
-    from well_viewer.features.export.style import _macos_pasteboard_write
+    from review.features.export.style import _macos_pasteboard_write
     PIL = pytest.importorskip("PIL")
 
     declared, _calls = _patch_macos_clipboard(monkeypatch)
@@ -121,6 +121,6 @@ def test_macos_pasteboard_adds_tiff_when_pil_available(monkeypatch):
 def test_macos_pasteboard_no_op_when_no_payload(monkeypatch):
     """Defensive: if every payload is empty, return False without
     touching the pasteboard at all."""
-    from well_viewer.features.export.style import _macos_pasteboard_write
+    from review.features.export.style import _macos_pasteboard_write
     _patch_macos_clipboard(monkeypatch)
     assert _macos_pasteboard_write(b"", b"", b"") is False

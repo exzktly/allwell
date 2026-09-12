@@ -14,7 +14,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.features.smfish.tab_view import build_smfish_tab
+from review.features.smfish.tab_view import build_smfish_tab
 from tests.widget_registry_helpers import assert_handles_registered
 
 _HANDLES = (

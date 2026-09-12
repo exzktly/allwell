@@ -28,8 +28,8 @@ import pytest
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import QApplication, QComboBox
 
-from well_viewer.core.channel_state_controller import refresh_heatmap_aggregation_options
-from well_viewer.features.heatmap.controller import (
+from review.core.channel_state_controller import refresh_heatmap_aggregation_options
+from review.features.heatmap.controller import (
     METRIC_COUNT, METRIC_FRACTION, METRIC_MEAN, METRIC_MEAN_ALL,
 )
 

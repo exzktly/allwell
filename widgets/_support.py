@@ -32,7 +32,7 @@ def set_variant(widget, variant: str) -> None:
 
     Changing ``setProperty("variant", ...)`` alone does nothing visible —
     Qt's stylesheet cache only re-evaluates property selectors on an
-    explicit repolish. ``well_viewer.core.plot_toggles.refresh_fov_btn_state``
+    explicit repolish. ``review.core.plot_toggles.refresh_fov_btn_state``
     is the precedent this generalises (a QPushButton's checked-state variant
     flips live the same way); kept here rather than duplicated per call site.
     """

@@ -17,13 +17,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from util.timepoint import parse_hours
-from well_viewer.data.image_identity import (
+from domain.image_identity import (
     PipelineSchema,
     load_schema,
     normalize_fov,
 )
-from well_viewer.domain.tp_match import tp_close
-from datasets._common.dataset_paths import (
+from domain.tp_match import tp_close
+from datasets.core.dataset_paths import (
     make_dataset_api,
     DatasetPaths,
     dataset_wells,
@@ -35,13 +35,13 @@ from datasets._common.dataset_paths import (
     out_csvs,
     out_zips,
 )
-from datasets._common.containers import (
+from datasets.core.containers import (
     FILENAME_COLUMN,
     TIMEPOINT_COLUMN,
     TIMEPOINT_HOURS_COLUMN,
 )
-from datasets._common.member_names import discover_parsed_member
-from datasets._common.dataset_paths import known_channel_tokens
+from datasets.core.member_names import discover_parsed_member
+from datasets.core.dataset_paths import known_channel_tokens
 
 IN_PROGRESS_MARKER = ".aw_subset_in_progress"
 
@@ -51,7 +51,7 @@ class SubsetError(Exception):
 
 
 # The five dataset entry points, bound to this tool's error class and its
-# own in-progress marker. See ``_common.dataset_paths.make_dataset_api``
+# own in-progress marker. See ``core.dataset_paths.make_dataset_api``
 # for why they are generated rather than written out: three tools carried
 # the same five wrappers, differing only in these two choices.
 _api = make_dataset_api(SubsetError, IN_PROGRESS_MARKER)
@@ -68,10 +68,10 @@ class SubsetFilter:
     ``timepoint_labels`` are the raw ``available_timepoints`` strings the UI
     lets the user check — resolved to hours (via :func:`util.timepoint.parse_hours`)
     once here, so every downstream comparison is numeric and tolerant of
-    floating-point drift the way ``well_viewer.domain.tp_match.tp_close``
+    floating-point drift the way ``domain.tp_match.tp_close``
     already is everywhere else in the app. ``fovs`` are likewise the raw
     ``available_fovs`` strings the UI checkboxes carry — resolved to
-    :func:`~well_viewer.data.image_identity.normalize_fov` tokens once here
+    :func:`~domain.image_identity.normalize_fov` tokens once here
     (:attr:`fov_tokens`) rather than at each comparison site, since every row/
     member's own FOV is read through the same normalizer (a purely-numeric
     label like ``"001"`` normalizes to ``"1"``; comparing that against a raw,
@@ -209,7 +209,7 @@ def member_matches(
 ) -> bool:
     """Whether a zip member's schema-parsed fields satisfy *filt*.
 
-    Resolves the member through :func:`~datasets._common.member_names.discover_parsed_member`
+    Resolves the member through :func:`~datasets.core.member_names.discover_parsed_member`
     rather than a bare ``parse_image_filename`` — a channel-scoped role suffix
     (``_tophat_gfp``, ``_smfish_nir``) doesn't resolve without trying each
     known channel token as the role-suffix discriminator, and without that a
@@ -294,7 +294,7 @@ def row_verdict(
     :data:`ROW_UNJUDGEABLE` when the row states no timepoint at all.
 
     The FOV axis has no unjudgeable state on purpose. A blank ``fov`` column
-    normalizes to ``"1"`` app-wide (:func:`~well_viewer.data.image_identity.normalize_fov`,
+    normalizes to ``"1"`` app-wide (:func:`~domain.image_identity.normalize_fov`,
     and ``CellKey`` in the override reader) — on a single-FOV dataset that is
     the FOV, not a missing value — so reading it as undefined here would invent
     a second meaning for a blank the rest of the app has already settled.

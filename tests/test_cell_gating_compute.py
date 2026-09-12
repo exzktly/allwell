@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import pandas as pd
 
-from well_viewer.features.home.cell_gating.gating_compute import (
+from review.features.home.cell_gating.gating_compute import (
     ThreshFracOptimizationResult,
     apply_fluor_gating,
     fraction_on_for_threshold,

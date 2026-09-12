@@ -22,10 +22,10 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtWidgets import QLabel
 
-from well_viewer.core.group_by_controller import (
+from review.core.group_by_controller import (
     GROUPING_READOUTS, grouping_summary, refresh_grouping_readouts,
 )
-from well_viewer.domain import sample_variables as sv
+from review.domain import sample_variables as sv
 
 
 class _Registry:
@@ -186,8 +186,8 @@ def test_the_summary_follows_the_seam_rather_than_the_setting():
     ``state.plot.group_by_variable`` alone would agree with the combo and
     disagree with the figure in exactly the fallback case above.
     """
-    import well_viewer.core.group_by_controller as gbc
-    from well_viewer.domain.batch_models import ReplicateSet
+    import review.core.group_by_controller as gbc
+    from review.domain.batch_models import ReplicateSet
 
     ctx = _ctx(variables=[_dose("0", "10")],
                assignments={"dose": {"A01": "d0", "A03": "d1"}},
@@ -198,7 +198,7 @@ def test_the_summary_follows_the_seam_rather_than_the_setting():
         seen["called"] = True
         return [ReplicateSet("only", ["A01"])]
 
-    import well_viewer.domain.plot_members as pm
+    import review.domain.plot_members as pm
     original = pm.plot_replicate_sets
     pm.plot_replicate_sets = fake_pool
     try:
@@ -265,7 +265,7 @@ def test_each_surface_actually_builds_its_label(key, qtbot):
 
     if key == "_sample_map_grouping_note":
         from tests.test_one_plate_on_the_sample_map import _ctx as sample_ctx
-        from well_viewer.features.home.sample_map.tab_view import (
+        from review.features.home.sample_map.tab_view import (
             build_sample_map_subtab,
         )
         host_ctx = sample_ctx()
@@ -301,7 +301,7 @@ def test_the_group_by_control_is_reachable_through_the_registry(qtbot):
 
     from tests._repo_scan import REPO_ROOT, parse_source
 
-    tree = parse_source(REPO_ROOT / "well_viewer" / "core" / "centre_view.py")
+    tree = parse_source(REPO_ROOT / "review" / "core" / "centre_view.py")
     registered = {
         node.args[0].value
         for node in ast.walk(tree)

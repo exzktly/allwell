@@ -61,7 +61,7 @@ def _band_is_blank(app) -> bool:
 
 def test_each_pane_draws_its_own_tab_strip(loaded_app):
     """Both panes' strips are on screen, each inside the pane it drives."""
-    from well_viewer.core import split_view as sv
+    from review.core import split_view as sv
 
     app = loaded_app
     _build_all_pages(app)
@@ -85,7 +85,7 @@ def test_pane_b_keeps_its_strip_when_pane_a_has_none(loaded_app):
     drawn nowhere — and Statistics' pane, having no strip to focus into, offered
     no way to bring it back.
     """
-    from well_viewer.core import split_view as sv
+    from review.core import split_view as sv
 
     app = loaded_app
     _build_all_pages(app)
@@ -102,7 +102,7 @@ def test_pane_b_keeps_its_strip_when_pane_a_has_none(loaded_app):
 
 def test_exit_hands_the_strips_back_to_the_band(loaded_app):
     """After exiting, the borrowed bars are in the band again and it shows one."""
-    from well_viewer.core import split_view as sv
+    from review.core import split_view as sv
 
     app = loaded_app
     _build_all_pages(app)
@@ -115,7 +115,7 @@ def test_exit_hands_the_strips_back_to_the_band(loaded_app):
         assert bar.parentWidget() is app._page_tabs_by_name[name]
         assert _band_bar(app, name) is bar
     app._notebook.setCurrentByName("Plotting")
-    from well_viewer.core.app_shell_view import show_page_tabs
+    from review.core.app_shell_view import show_page_tabs
 
     show_page_tabs(app, "Plotting")
     assert app._page_tabs_host.currentWidget() is app._page_tabs_by_name["Plotting"]

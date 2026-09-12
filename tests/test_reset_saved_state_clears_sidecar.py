@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.core.cell_gating_state import CellGatingState
+from review.core.cell_gating_state import CellGatingState
 
 
 def _sidecar(tmp_path: Path, payload: dict) -> Path:
@@ -43,7 +43,7 @@ def _ctx(tmp_path: Path, *, cell_gating=None):
 @pytest.fixture()
 def _no_widget_mirror(monkeypatch):
     """Stub the Cell-Gating widget mirror — it needs the built tab."""
-    from well_viewer.persistence import cell_gating as mod
+    from review.persistence import cell_gating as mod
     monkeypatch.setattr(mod, "_mirror_gating_to_widgets",
                         lambda _ctx, **_kw: True)
     return mod
@@ -100,7 +100,7 @@ def test_clear_is_a_no_op_without_a_loaded_dataset(_no_widget_mirror):
 # ── smFISH thresholds ───────────────────────────────────────────────────────
 
 def test_clear_thresholds_drops_the_block_and_the_cache(tmp_path):
-    from well_viewer.persistence.smfish import clear_thresholds
+    from review.persistence.smfish import clear_thresholds
 
     path = _sidecar(tmp_path, {
         "fluor_tokens": ["cy5"],
@@ -117,7 +117,7 @@ def test_clear_thresholds_drops_the_block_and_the_cache(tmp_path):
 
 
 def test_clear_thresholds_reports_nothing_removed_when_absent(tmp_path):
-    from well_viewer.persistence.smfish import clear_thresholds
+    from review.persistence.smfish import clear_thresholds
 
     _sidecar(tmp_path, {"fluor_tokens": ["cy5"]})
 
@@ -125,6 +125,6 @@ def test_clear_thresholds_reports_nothing_removed_when_absent(tmp_path):
 
 
 def test_clear_thresholds_survives_a_missing_sidecar(tmp_path):
-    from well_viewer.persistence.smfish import clear_thresholds
+    from review.persistence.smfish import clear_thresholds
 
     assert clear_thresholds(_ctx(tmp_path)) is False

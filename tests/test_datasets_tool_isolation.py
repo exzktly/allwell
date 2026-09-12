@@ -1,7 +1,7 @@
 """No Datasets tool imports another Datasets tool (ARCHITECTURE §6b).
 
 §6b states the rule and its purpose: helpers shared by more than one tool live
-in ``datasets/_common/`` "rather than being imported from one feature package
+in ``datasets/core/`` "rather than being imported from one feature package
 into another, so each feature stays independently deletable". Two tools had
 reached across anyway — ``subset_compute`` and ``merge_plates_compute`` both
 imported from ``concatenate_compute`` — so deleting the Concatenate package
@@ -12,7 +12,7 @@ here, the same way ``test_datasets_log_panel`` does it: a hardcoded list makes a
 sweep say "all six tools" while meaning "the six I knew about", and a seventh
 tool is covered from the moment it is registered.
 
-``_common`` is the sanctioned direction. So is a tool importing from itself.
+``datasets/core`` is the sanctioned direction. So is a tool importing from itself.
 Everything else is the coupling this test exists to prevent.
 """
 
@@ -62,7 +62,11 @@ def test_no_tool_imports_another_tool():
                     if len(parts) < 2 or parts[0] != "datasets":
                         continue
                     other = parts[1]
-                    if other in ("_common", tool):
+                    # `datasets/core` is shared by design; a tool importing
+                    # itself is not a crossing. Neither is ever a tool kind, so
+                    # this cannot mask a real one — it reads as a list of tool
+                    # names and is not.
+                    if other in ("core", tool):
                         continue
                     if other in tools:
                         offenders.append(
@@ -72,7 +76,7 @@ def test_no_tool_imports_another_tool():
     assert not offenders, (
         "A Datasets tool imports another Datasets tool, so deleting the second "
         "would break the first (ARCHITECTURE §6b). Move the shared symbol into "
-        "`datasets/_common/`:\n  " + "\n  ".join(sorted(offenders))
+        "`datasets/core/`:\n  " + "\n  ".join(sorted(offenders))
     )
 
 

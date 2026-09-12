@@ -21,8 +21,8 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 def _enter_scatter_cellbrowser_split(app):
     """Real two-pane split: Scatter Plot (Plotting) + Cell Browser (Image Browser)."""
-    from well_viewer.features.image_browser.controller import show_image_browser_subtab
-    from well_viewer.core.split_view import enter_split
+    from review.features.image_browser.controller import show_image_browser_subtab
+    from review.core.split_view import enter_split
 
     # Build the Cell Browser sub-tab (lazy) and make it the active Image Browser leaf.
     assert show_image_browser_subtab(app._ctx, "Cell Browser")
@@ -35,7 +35,7 @@ def _enter_scatter_cellbrowser_split(app):
 
 
 def _focus(app, top):
-    from well_viewer.core.split_view import focus_split
+    from review.core.split_view import focus_split
     focus_split(app._ctx, top)
     app._refresh_sidebar_map_now()  # drain the deferred sidebar repaint synchronously
 

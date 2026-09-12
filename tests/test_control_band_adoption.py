@@ -42,24 +42,24 @@ _BAND_CALLS = ("ControlBand", "build_page_body", "plotting_band_slot")
 ADOPTED = (
     "analyze/log_pane.py",                       # Analyze — the output pane
     "datasets/tab.py",                          # Datasets — the tool pages
-    "well_viewer/core/centre_view.py",          # Plotting — all five sub-tabs
-    "well_viewer/features/barplot/tab_view.py",
-    "well_viewer/features/distribution/tab_view.py",
-    "well_viewer/features/heatmap/tab_view.py",
-    "well_viewer/features/home/tab_view.py",     # Home — the page band + its tabs
-    "well_viewer/features/lineplot/tab_view.py",
-    "well_viewer/features/multivariate/tab_view.py",
-    "well_viewer/features/scatter/agg_tab_view.py",
-    "well_viewer/features/scatter/cells_tab_view.py",
-    "well_viewer/features/batch_export/tab_view.py",
-    "well_viewer/features/image_browser/cell_browser/tab_view.py",
-    "well_viewer/features/image_browser/playground/tab_view.py",
-    "well_viewer/features/preview/panel_view.py",          # Segmentation
-    "well_viewer/features/review_csv/tab_view.py",
-    "well_viewer/features/saved_plots/tab_view.py",
-    "well_viewer/features/smfish/tab_view.py",
-    "well_viewer/features/spatial/tab_view.py",
-    "well_viewer/features/stats/tab_view.py",
+    "review/core/centre_view.py",          # Plotting — all five sub-tabs
+    "review/features/barplot/tab_view.py",
+    "review/features/distribution/tab_view.py",
+    "review/features/heatmap/tab_view.py",
+    "review/features/home/tab_view.py",     # Home — the page band + its tabs
+    "review/features/lineplot/tab_view.py",
+    "review/features/multivariate/tab_view.py",
+    "review/features/scatter/agg_tab_view.py",
+    "review/features/scatter/cells_tab_view.py",
+    "review/features/batch_export/tab_view.py",
+    "review/features/image_browser/cell_browser/tab_view.py",
+    "review/features/image_browser/playground/tab_view.py",
+    "review/features/preview/panel_view.py",          # Segmentation
+    "review/features/review_csv/tab_view.py",
+    "review/features/saved_plots/tab_view.py",
+    "review/features/smfish/tab_view.py",
+    "review/features/spatial/tab_view.py",
+    "review/features/stats/tab_view.py",
 )
 
 
@@ -157,12 +157,12 @@ def test_adoption_list_only_grows():
 #: own slot in it; a leaf that constructed a band instead would put a second
 #: control row directly under the page's.
 PLOTTING_LEAVES = (
-    "well_viewer/features/barplot/tab_view.py",
-    "well_viewer/features/distribution/tab_view.py",
-    "well_viewer/features/heatmap/tab_view.py",
-    "well_viewer/features/lineplot/tab_view.py",
-    "well_viewer/features/scatter/agg_tab_view.py",
-    "well_viewer/features/scatter/cells_tab_view.py",
+    "review/features/barplot/tab_view.py",
+    "review/features/distribution/tab_view.py",
+    "review/features/heatmap/tab_view.py",
+    "review/features/lineplot/tab_view.py",
+    "review/features/scatter/agg_tab_view.py",
+    "review/features/scatter/cells_tab_view.py",
 )
 
 
@@ -191,10 +191,10 @@ def test_plotting_leaves_share_the_page_band():
 #: Modules that build a top-level page's tab strip. Each must hand it to the
 #: shell band rather than adding it to its own body.
 PAGE_TAB_OWNERS = (
-    "well_viewer/core/centre_view.py",                       # Plotting
-    "well_viewer/features/image_browser/tab_view.py",        # Image Browser
-    "well_viewer/features/home/tab_view.py",                 # Home
-    "well_viewer/features/batch_export/tab_view.py",          # Batch Export
+    "review/core/centre_view.py",                       # Plotting
+    "review/features/image_browser/tab_view.py",        # Image Browser
+    "review/features/home/tab_view.py",                 # Home
+    "review/features/batch_export/tab_view.py",          # Batch Export
 )
 
 _HOIST_CALLS = ("register_page_tabs", "mirror_tab_widget")

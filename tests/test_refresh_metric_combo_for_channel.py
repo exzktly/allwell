@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core.widget_registry import WidgetRegistry
-from well_viewer.core.channel_state_controller import (
+from review.core.widget_registry import WidgetRegistry
+from review.core.channel_state_controller import (
     refresh_metric_combo_for_channel,
     active_channel_label,
 )

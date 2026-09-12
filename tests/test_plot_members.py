@@ -16,15 +16,15 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.domain.plot_members import (
+from review.domain.plot_members import (
     bar_member_keys,
     line_member_keys,
     member_wells,
     member_replicate_sets,
     plotted_member_keys,
 )
-from well_viewer.features.barplot.collect import collect_bar_items
-from well_viewer.features.lineplot.controller import collect_line_series
+from review.features.barplot.collect import collect_bar_items
+from review.features.lineplot.controller import collect_line_series
 
 from tests.conftest import MockApp, make_agg
 

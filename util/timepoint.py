@@ -16,7 +16,7 @@ The grammar, tried in order:
    ``"day3"`` → 3.0.
 
 Anything else is ``None``: an opaque label the caller should keep as-is rather
-than guess at. That matters because :func:`well_viewer.data.image_identity.normalize_tp`
+than guess at. That matters because :func:`domain.image_identity.normalize_tp`
 turns a parsed value into the canonical key ``f"{hours:g}"`` and passes an
 unparsed one through unchanged — so a parser that guesses invents a key the
 rest of the app will not recognise.
@@ -36,7 +36,7 @@ on ``str.isascii``; a token whose digits come from anywhere else is opaque, and
 an opaque label is kept as-is rather than guessed at.
 
 Stdlib-only, so ``process_microscopy`` and ``services/`` can both import it
-without breaching the no-``well_viewer`` contract (ARCHITECTURE §6.2) — the same
+without breaching the no-``review`` contract (ARCHITECTURE §6.2) — the same
 reason ``util.well_token`` and ``util.schema`` live here. Listed in
 ``services.remote_runner._REQUIRED_REMOTE_FILES`` so a remote run receives it.
 """
@@ -69,10 +69,10 @@ def _token(value: Any) -> str:
     parsed filename field (``0.0``, falsy), so the two spellings disagreed at
     exactly ``t=0`` and nowhere else.
 
-    ``well_viewer.data.image_identity._raw_token`` is the same rule for the
+    ``domain.image_identity._raw_token`` is the same rule for the
     viewer's identity tokens. The duplication is the cost of this module's
     stdlib-only contract — the pipeline and ``services/`` import it and may not
-    reach into ``well_viewer``.
+    reach into ``review``.
     """
     return "" if value is None else str(value)
 

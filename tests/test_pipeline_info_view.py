@@ -61,7 +61,7 @@ def test_pipeline_info_shows_background_method(qapp, tmp_path):
                        "qc_remove_debris": True},
         "available_timepoints": ["24h"], "available_fovs": ["F001", "F002"],
     }))
-    from well_viewer.features.home.pipeline_info.tab_view import build_pipeline_info_subtab
+    from review.features.home.pipeline_info.tab_view import build_pipeline_info_subtab
     app = _stub_app(tmp_path)
     parent = QWidget()
     build_pipeline_info_subtab(app, parent)
@@ -77,7 +77,7 @@ def test_pipeline_info_reports_top_hat_run(qapp, tmp_path):
     # the whole point: a run that used the square method says so, plainly
     (tmp_path / "pipeline_info.json").write_text(json.dumps({
         "qc_options": {"background": "top_hat"}}))
-    from well_viewer.features.home.pipeline_info.tab_view import build_pipeline_info_subtab
+    from review.features.home.pipeline_info.tab_view import build_pipeline_info_subtab
     app = _stub_app(tmp_path)
     parent = QWidget()
     build_pipeline_info_subtab(app, parent)
@@ -85,7 +85,7 @@ def test_pipeline_info_reports_top_hat_run(qapp, tmp_path):
 
 
 def test_pipeline_info_no_dataset(qapp):
-    from well_viewer.features.home.pipeline_info.tab_view import build_pipeline_info_subtab
+    from review.features.home.pipeline_info.tab_view import build_pipeline_info_subtab
     app = _stub_app(None)
     parent = QWidget()
     build_pipeline_info_subtab(app, parent)          # must not raise

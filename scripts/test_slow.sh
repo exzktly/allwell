@@ -4,7 +4,7 @@
 # Why this needs a script rather than a pytest invocation: every test using the
 # `viewer_app` fixture (and its `loaded_app` / `image_table_app` /
 # `loaded_app_shape` / `loaded_app_multifov` dependents) builds a real
-# WellViewerApp whose Qt<->Python reference web is never reclaimed in-process.
+# ReviewApp whose Qt<->Python reference web is never reclaimed in-process.
 # RSS climbs ~40 MB per test, monotonically, so `pytest -m slow` across all 82
 # files hangs or gets OOM-killed. See ARCHITECTURE.md §10.4.
 #
@@ -35,7 +35,7 @@ SHARD_TOTAL=1
 #
 # It has to sit well above what a legitimately slow batch costs, because a batch
 # killed here writes no report and so reads as a failure. Every test in this lane
-# builds a real WellViewerApp, which dominates its runtime: the heaviest observed
+# builds a real ReviewApp, which dominates its runtime: the heaviest observed
 # pair (test_multivariate_tab + test_playground, 29 tests) takes ~12 minutes with
 # the machine to itself and passes. Per-test hangs are already covered by
 # --timeout=300 below, so this only has to catch the signal-proof C-level case —

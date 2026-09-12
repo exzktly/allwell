@@ -26,8 +26,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.domain import sample_variables as sv
-from well_viewer.domain.selections_model import (
+from review.domain import sample_variables as sv
+from review.domain.selections_model import (
     LABEL_FROM_CUSTOM,
     LABEL_FROM_TOKEN,
     LABEL_FROM_VARIABLES,
@@ -143,8 +143,8 @@ def test_a_prefixed_measurement_label_resolves_through_its_well_token():
 def test_the_bar_tabs_own_member_builder_draws_the_names():
     """``batch_members`` is what puts text under a bar. The seam being right
     is not the claim — the claim is that the bars are labelled."""
-    from well_viewer.domain.batch_models import BarGroup
-    from well_viewer.features.barplot.collect import batch_members
+    from review.domain.batch_models import BarGroup
+    from review.features.barplot.collect import batch_members
 
     ctx = _plate()
     ctx.runtime = SimpleNamespace(barplot=SimpleNamespace(current_keys=[]))
@@ -157,7 +157,7 @@ def test_a_unitless_numeric_dose_survives_the_bar_tabs_tick_guard():
     """The guard rewrites a numeric label into the well token, and a `Dose` of
     ``10`` declared without a unit is exactly the label this feature exists to
     put on the axis. It applies to a hand-typed label only."""
-    from well_viewer.features.barplot.collect import bar_well_display_label
+    from review.features.barplot.collect import bar_well_display_label
 
     ctx = _plate(unit="", dose_only=True)
     assert bar_well_display_label(ctx, "A03") == "10"
@@ -208,7 +208,7 @@ def _home_ctx(ctx, **plate):
 
 
 def test_home_counts_the_wells_the_figures_name():
-    from well_viewer.features.home.collect import wells_named_on_figures
+    from review.features.home.collect import wells_named_on_figures
 
     ctx = _home_ctx(_plate())
     assert wells_named_on_figures(ctx) == len(WELLS)
@@ -227,7 +227,7 @@ def test_home_only_asks_for_labels_when_nothing_names_the_wells(named):
     """The reported sentence. It was printed over figures already reading
     ``HeLa · 10 µM``, because it counted the Well Labels tab rather than the
     plate."""
-    from well_viewer.features.home.collect import next_step
+    from review.features.home.collect import next_step
 
     ctx = _home_ctx(_plate())
     if not named:
@@ -239,7 +239,7 @@ def test_home_only_asks_for_labels_when_nothing_names_the_wells(named):
 def test_home_does_not_ask_for_replicate_sets_when_a_variable_can_pool():
     """The rung below it, and the same mistake: a plate with a dose variable
     pools by dose, so "No replicate sets yet" is a nudge to redo the work."""
-    from well_viewer.features.home.collect import next_step
+    from review.features.home.collect import next_step
 
     assert "replicate" not in next_step(_home_ctx(_plate()))["text"].lower()
 
@@ -260,8 +260,8 @@ def test_the_spatial_summary_axis_uses_the_same_names():
     import matplotlib.pyplot as plt
     import numpy as np
 
-    from well_viewer.features.spatial import state as sp_state
-    from well_viewer.features.spatial.renderer import render_spatial
+    from review.features.spatial import state as sp_state
+    from review.features.spatial.renderer import render_spatial
 
     ctx = _plate(labels={"A01": "shCtrl"})
     fig = plt.figure()

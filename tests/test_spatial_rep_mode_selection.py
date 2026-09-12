@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.features.spatial import controller as spc
+from review.features.spatial import controller as spc
 
 _WP = {"A01": 1, "A02": 1, "B01": 1, "B02": 1}
 
@@ -71,8 +71,8 @@ def test_spatial_and_multivariate_in_rep_mirror_set():
     """
     from types import SimpleNamespace
 
-    from well_viewer.core.selection_controller import _rep_mirror_tabs
-    from well_viewer.features.registry import build_feature_registry
+    from review.core.selection_controller import _rep_mirror_tabs
+    from review.features.registry import build_feature_registry
 
     mirrored = _rep_mirror_tabs(SimpleNamespace(features=build_feature_registry()))
     assert "Spatial" in mirrored

@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from well_viewer.data.image_identity import normalize_tp
-from well_viewer.features.smfish.worker import (
+from domain.image_identity import normalize_tp
+from review.features.smfish.worker import (
     _write_counts_to_csvs,
     apply_global_threshold_async,
 )

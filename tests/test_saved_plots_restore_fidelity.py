@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.features.saved_plots.collect import capture_params
-from well_viewer.features.saved_plots.controller import (
+from review.features.saved_plots.collect import capture_params
+from review.features.saved_plots.controller import (
     _restore_thresholds,
     restore_saved_plot,
 )
-from well_viewer.features.saved_plots.state import SavedPlot, get_store
-from well_viewer.persistence import view_state
+from review.features.saved_plots.state import SavedPlot, get_store
+from review.persistence import view_state
 
 pytestmark = pytest.mark.qt
 
@@ -145,7 +145,7 @@ def test_axis_limits_round_trip_through_full_restore(loaded_app):
 def test_heatmap_display_settings_round_trip(loaded_app):
     """The Heat Map view_state_io hook captures + re-applies colormap / scale /
     vmin·vmax / toggles onto the typed heatmap slice."""
-    from well_viewer.features.heatmap.view_state_io import (
+    from review.features.heatmap.view_state_io import (
         apply_heatmap, snapshot_heatmap,
     )
     app = loaded_app
@@ -231,8 +231,8 @@ def test_restore_lands_on_the_saved_tab_in_the_real_app(loaded_app):
     applies every restored setting to a tab nobody is looking at, which is
     indistinguishable from a restore that did nothing.
     """
-    from well_viewer.core.tab_controller import current_centre_tab
-    from well_viewer.features.saved_plots.controller import save_plot_from_card
+    from review.core.tab_controller import current_centre_tab
+    from review.features.saved_plots.controller import save_plot_from_card
 
     app = loaded_app
     ctx = app._ctx

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 def _goto_cell_browser(app):
     """Open the Cell Browser sub-tab of the unified Image Browser rail entry."""
-    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    from review.features.image_browser.controller import show_image_browser_subtab
     assert show_image_browser_subtab(app._ctx, "Cell Browser")
 
 
@@ -60,7 +60,7 @@ def test_cell_browser_bar_survives_empty_refresh(loaded_app):
     app = loaded_app
     _goto_cell_browser(app)
 
-    from well_viewer.features.image_browser.cell_browser.tab_view import cell_browser_refresh
+    from review.features.image_browser.cell_browser.tab_view import cell_browser_refresh
 
     built = set((app._ctx.runtime.cell_browser.channel_chips or {}))
     assert built, "expected the bar to build from the dataset's channels"
@@ -90,8 +90,8 @@ def test_cell_browser_click_navigates_to_segmentation(loaded_app):
     _goto_cell_browser(app)
     app._set_selected_wells(set(app._app_state.dataset.well_paths))
 
-    from well_viewer.features.image_browser.cell_browser import controller as ctl
-    from well_viewer.features.image_browser.cell_browser.collect import collect_cells
+    from review.features.image_browser.cell_browser import controller as ctl
+    from review.features.image_browser.cell_browser.collect import collect_cells
 
     # None timepoints/FOVs → no tp/fov restriction (strict-list semantics: [] would
     # mean "0 selected → 0 cells"). We just need a cell to click.
@@ -115,8 +115,8 @@ def test_cell_browser_click_sets_normalized_timepoint(loaded_app):
     app = loaded_app
     _goto_cell_browser(app)
 
-    from well_viewer.features.image_browser.cell_browser import controller as ctl
-    from well_viewer.features.image_browser.cell_browser.collect import collect_cells
+    from review.features.image_browser.cell_browser import controller as ctl
+    from review.features.image_browser.cell_browser.collect import collect_cells
 
     cells = collect_cells(app._ctx, [], None, None)
     cell = next(c for c in cells if c.tp_token == "24h")
@@ -149,7 +149,7 @@ def test_cell_browser_apply_filters_no_criteria(loaded_app):
     app = loaded_app
     _goto_cell_browser(app)
 
-    from well_viewer.features.image_browser.cell_browser import controller as ctl
+    from review.features.image_browser.cell_browser import controller as ctl
 
     # No criteria + all timepoints/FOVs selected → every cell in the selected
     # wells qualifies. apply_filters must populate the state without raising.
@@ -167,8 +167,8 @@ def test_compose_loads_channels_before_mask(monkeypatch):
     import numpy as np
     from types import SimpleNamespace
 
-    import well_viewer.features.image_browser.cell_browser.worker as w
-    from well_viewer.features.image_browser.cell_browser.collect import CellDescriptor
+    import review.features.image_browser.cell_browser.worker as w
+    from review.features.image_browser.cell_browser.collect import CellDescriptor
 
     mask_key = ("A1", "__mask__", "raw")
     mask = np.zeros((10, 10), dtype=np.int32)

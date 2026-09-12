@@ -35,13 +35,13 @@ FIELDS = ("time_scale", "time_offset")
 #: return half a correction.
 ALLOWED = {
     # Declares them, and resets them together.
-    "well_viewer/core/plot_state.py",
+    "review/core/plot_state.py",
     # The single door: turns the two fields into one ``TimeRescale``.
-    "well_viewer/domain/time_rescale.py",
+    "review/domain/time_rescale.py",
     # Writes them, one control each, and reads them back for the preview.
-    "well_viewer/features/export/sidebar_view.py",
+    "review/features/export/sidebar_view.py",
     # Saves and restores them, under one key each.
-    "well_viewer/persistence/view_state.py",
+    "review/persistence/view_state.py",
 }
 
 
@@ -72,7 +72,7 @@ def test_only_the_four_owners_read_the_time_fields_apart():
         "These modules read PlotState.time_scale / .time_offset directly:\n  "
         + "\n  ".join(offenders)
         + "\n\nRead the correction through "
-          "``well_viewer.domain.time_rescale.rescale_for(ctx.state.plot)``, "
+          "``review.domain.time_rescale.rescale_for(ctx.state.plot)``, "
           "which returns both halves as one TimeRescale. A site that reads one "
           "field draws an axis corrected by half the user's setting and marked "
           "as though it had been corrected in full."

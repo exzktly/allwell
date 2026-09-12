@@ -158,7 +158,7 @@ def card(qapp):
 
 def test_a_tagged_artist_is_repainted_for_the_capture(card):
     """The reported defect, at the boundary that decides what the file holds."""
-    from well_viewer.core.plot_style import follows_theme, tokens_for
+    from review.core.plot_style import follows_theme, tokens_for
 
     ax = card.figure.add_subplot(111)
     screen_ink = tokens_for(ax)[1]
@@ -174,7 +174,7 @@ def test_a_tagged_artist_is_repainted_for_the_capture(card):
 
 
 def test_the_muted_role_takes_the_muted_token(card):
-    from well_viewer.core.plot_style import follows_theme, tokens_for
+    from review.core.plot_style import follows_theme, tokens_for
 
     ax = card.figure.add_subplot(111)
     note = follows_theme(ax.text(0, 0, "note", color=tokens_for(ax)[2]),
@@ -194,7 +194,7 @@ def test_an_untagged_data_colour_is_left_alone(card):
 
 def test_the_screen_ink_comes_back_when_the_capture_ends(card):
     """A capture is a round trip; the card is left as the user had it."""
-    from well_viewer.core.plot_style import follows_theme, tokens_for
+    from review.core.plot_style import follows_theme, tokens_for
 
     ax = card.figure.add_subplot(111)
     screen_ink = tokens_for(ax)[1]
@@ -207,7 +207,7 @@ def test_the_screen_ink_comes_back_when_the_capture_ends(card):
 def test_a_figure_level_footnote_is_repainted_too(card):
     """A footnote written with ``fig.text`` belongs to no axes, so a repaint
     that walked only ``figure.axes`` left it in the outgoing theme's ink."""
-    from well_viewer.core.plot_style import follows_theme, tokens_for
+    from review.core.plot_style import follows_theme, tokens_for
 
     ax = card.figure.add_subplot(111)
     screen_muted = tokens_for(ax)[2]
@@ -248,7 +248,7 @@ _ENTITLED_TO_BLACK = {
     # lines above), and the placeholder is the text inside one such cell. It is
     # not on a PlotCard and follows no Screen/Publication toggle, so there is no
     # theme for it to follow and black is the correct ink.
-    "well_viewer/features/image_browser/image_table/export.py::_build_export_figure",
+    "review/features/image_browser/image_table/export.py::_build_export_figure",
 }
 
 

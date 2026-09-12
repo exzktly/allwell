@@ -189,7 +189,7 @@ def test_the_helper_names_the_guard_relies_on_still_exist() -> None:
     missing = []
     for helper in _DRAW_HELPERS:
         hit = subprocess.run(
-            ["grep", "-rqE", rf"def {helper}\b", str(REPO_ROOT / "well_viewer")],
+            ["grep", "-rqE", rf"def {helper}\b", str(REPO_ROOT / "review")],
             capture_output=True,
         )
         if hit.returncode != 0:

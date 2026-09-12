@@ -17,7 +17,7 @@ written without it, and the remote pipeline would have processed it. A silent
 loss of input, from two spellings of one predicate.
 
 So the set lives here. ``util/`` is the one package both sides may import: the
-pipeline must stay free of ``well_viewer`` / ``widgets`` / Qt
+pipeline must stay free of ``review`` / ``widgets`` / Qt
 (``test_architecture_contracts.py::test_pipeline_is_self_sufficient``), and
 ``services/`` must stay free of Qt — ``util/`` satisfies both, which is why
 ``util/well_token.py`` already lives here for exactly this reason.

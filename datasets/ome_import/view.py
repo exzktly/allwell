@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
-from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
 from util.plate_grid import block_well_labels
 from widgets._support import set_variant
 from widgets.path_field import PathField
@@ -74,7 +74,7 @@ from datasets.ome_import.ome_import_compute import (
     read_layout,
     selection_target,
 )
-from datasets._common.dataset_fields import promote_open_button
+from datasets.core.dataset_fields import promote_open_button
 
 # Channel-name column in the per-channel role picker.
 _ROLE_LABEL_MIN_W = 120

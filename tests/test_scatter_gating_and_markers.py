@@ -184,7 +184,7 @@ def _fake_fig(lines):
 def test_style_pass_keeps_a_data_carrying_marker_shape():
     """The aggregate's points must survive the style pass with their own shape:
     the legend maps shape → well, so overwriting it mislabels every point."""
-    from well_viewer.core.plot_style import apply_export_style_prefs
+    from review.core.plot_style import apply_export_style_prefs
 
     square = _RecordingLine(marker="s", marker_is_data=True)
     fig, _ax = _fake_fig([square])
@@ -200,7 +200,7 @@ def test_style_pass_keeps_a_data_carrying_marker_shape():
 def test_style_pass_still_overrides_an_ordinary_marker():
     """Untagged lines keep honouring the Marker-style pref — the opt-out is
     per-artist, not a blanket disabling of the override."""
-    from well_viewer.core.plot_style import apply_export_style_prefs
+    from review.core.plot_style import apply_export_style_prefs
 
     plain = _RecordingLine(marker="s", marker_is_data=False)
     fig, _ax = _fake_fig([plain])
@@ -214,7 +214,7 @@ def test_style_pass_still_overrides_an_ordinary_marker():
 def test_style_pass_applies_open_markers_to_a_data_carrying_shape():
     """Open-vs-filled is a rendering choice, not an identity one, so it applies
     even where the shape is pinned."""
-    from well_viewer.core.plot_style import apply_export_style_prefs
+    from review.core.plot_style import apply_export_style_prefs
 
     square = _RecordingLine(marker="s", marker_is_data=True)
     fig, _ax = _fake_fig([square])
@@ -229,7 +229,7 @@ def test_style_pass_applies_open_markers_to_a_data_carrying_shape():
 # ── 2. the Cell Gating fluor gate reaches callers using display labels ──────
 
 def _gating_ctx(*, fluor_gates=None, thresh_frac_on=None):
-    from well_viewer.core.cell_gating_state import CellGatingState
+    from review.core.cell_gating_state import CellGatingState
 
     cg = CellGatingState()
     cg.fluor_gates = dict(fluor_gates or {})
@@ -240,7 +240,7 @@ def _gating_ctx(*, fluor_gates=None, thresh_frac_on=None):
 def test_fluor_gate_resolves_an_upper_case_channel_label():
     """The scatter passes ``"GFP"`` (its axis label); the gate is stored under
     ``"gfp"``. A missed lookup returned 0.0 — the gate silently off."""
-    from well_viewer.features.home.cell_gating.controller import (
+    from review.features.home.cell_gating.controller import (
         cell_gating_get_fluor_gate,
     )
 
@@ -253,7 +253,7 @@ def test_fluor_gate_resolves_an_upper_case_channel_label():
 def test_fluor_gate_resolves_when_only_the_gate_map_is_populated():
     """The resolver keys off the known rows; a gate edited before any
     threshold row exists must still be found."""
-    from well_viewer.features.home.cell_gating.controller import (
+    from review.features.home.cell_gating.controller import (
         cell_gating_get_fluor_gate,
     )
 
@@ -263,7 +263,7 @@ def test_fluor_gate_resolves_when_only_the_gate_map_is_populated():
 
 
 def test_thresh_frac_on_resolves_an_upper_case_channel_label():
-    from well_viewer.features.home.cell_gating.controller import (
+    from review.features.home.cell_gating.controller import (
         cell_gating_get_thresh_frac_on,
     )
 
@@ -273,7 +273,7 @@ def test_thresh_frac_on_resolves_an_upper_case_channel_label():
 
 
 def test_ratio_channels_still_resolve_through_the_ratio_prefix():
-    from well_viewer.features.home.cell_gating.controller import (
+    from review.features.home.cell_gating.controller import (
         cell_gating_get_fluor_gate,
     )
 
@@ -288,7 +288,7 @@ def test_resolver_tolerates_a_slice_carrying_only_one_map():
     """The review-image and plotting leaves' unit tests stand the slice up as a
     minimal namespace with just the map they need; the resolver must not demand
     both."""
-    from well_viewer.features.home.cell_gating.controller import (
+    from review.features.home.cell_gating.controller import (
         cell_gating_get_thresh_frac_on,
     )
 
@@ -301,7 +301,7 @@ def test_resolver_tolerates_a_slice_carrying_only_one_map():
 
 
 def test_an_unknown_channel_still_reports_the_gate_as_off():
-    from well_viewer.features.home.cell_gating.controller import (
+    from review.features.home.cell_gating.controller import (
         cell_gating_get_fluor_gate,
     )
 
@@ -313,7 +313,7 @@ def test_an_unknown_channel_still_reports_the_gate_as_off():
 # ── 3. the sidebar gate list names the axes each gate was drawn on ──────────
 
 def test_value_column_label_covers_all_three_column_kinds():
-    from well_viewer.data.metric_labels import value_column_label
+    from review.data.metric_labels import value_column_label
 
     assert value_column_label("gfp_mean_intensity") == "GFP Mean Intensity"
     assert value_column_label("cy5_smfish_count") == "CY5 (spots)"
@@ -324,7 +324,7 @@ def test_value_column_label_covers_all_three_column_kinds():
 
 
 def test_gate_axes_label_names_both_axes():
-    from well_viewer.data.metric_labels import gate_axes_label
+    from review.data.metric_labels import gate_axes_label
 
     text = gate_axes_label("gfp_mean_intensity", "mcherry_total_intensity")
 
@@ -336,14 +336,14 @@ def test_gate_axes_label_names_both_axes():
 def test_gate_axes_label_is_empty_when_no_axes_were_recorded():
     """Gates drawn before the columns were stamped carry neither; the sidebar
     omits the caption rather than printing a pair of dashes."""
-    from well_viewer.data.metric_labels import gate_axes_label
+    from review.data.metric_labels import gate_axes_label
 
     assert gate_axes_label(None, None) == ""
     assert gate_axes_label("", "") == ""
 
 
 def test_gate_axes_label_marks_a_half_recorded_gate():
-    from well_viewer.data.metric_labels import gate_axes_label
+    from review.data.metric_labels import gate_axes_label
 
     text = gate_axes_label("gfp_mean_intensity", None)
 

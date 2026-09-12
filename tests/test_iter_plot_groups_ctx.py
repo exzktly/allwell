@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from well_viewer.data.data_loading import iter_plot_groups
+from review.data.data_loading import iter_plot_groups
 
 
 def _ctx(selections, selected=(), solo=()):

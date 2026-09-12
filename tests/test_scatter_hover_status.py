@@ -31,7 +31,7 @@ import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from well_viewer.features.scatter import callbacks  # noqa: E402
+from review.features.scatter import callbacks  # noqa: E402
 
 
 class _Runtime:

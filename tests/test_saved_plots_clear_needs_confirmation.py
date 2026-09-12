@@ -21,8 +21,8 @@ from types import SimpleNamespace  # noqa: E402
 
 import pytest  # noqa: E402
 
-from well_viewer.features.saved_plots import controller as saved_plots_controller  # noqa: E402
-from well_viewer.features.saved_plots import tab_view  # noqa: E402
+from review.features.saved_plots import controller as saved_plots_controller  # noqa: E402
+from review.features.saved_plots import tab_view  # noqa: E402
 
 
 @pytest.fixture()

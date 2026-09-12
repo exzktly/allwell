@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.domain import fold_change as _fc
-from well_viewer.features.barplot.collect import collect_bar_items
-from well_viewer.features.lineplot.controller import collect_line_series
+from review.domain import fold_change as _fc
+from review.features.barplot.collect import collect_bar_items
+from review.features.lineplot.controller import collect_line_series
 
 from tests.conftest import MockApp, make_agg
 

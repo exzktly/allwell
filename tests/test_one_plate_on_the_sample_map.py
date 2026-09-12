@@ -22,7 +22,7 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.features.home.sample_map.controller import (
+from review.features.home.sample_map.controller import (
     LAYER_PLATES, LAYERS, SHARED_SELECTION_LAYERS, current_layer, selected_on,
     set_layer,
 )
@@ -48,8 +48,8 @@ def _wells():
 
 
 def _ctx(selections=()):
-    from well_viewer.core.selection_state import SelectionState
-    from well_viewer.features.home.state import HomeState
+    from review.core.selection_state import SelectionState
+    from review.features.home.state import HomeState
 
     selection = SelectionState()
     selection.selections = [dict(s) for s in selections]
@@ -79,7 +79,7 @@ def _ctx(selections=()):
 
 @pytest.fixture
 def tab(qtbot):
-    from well_viewer.features.home.sample_map.tab_view import build_sample_map_subtab
+    from review.features.home.sample_map.tab_view import build_sample_map_subtab
 
     ctx = _ctx()
     frame = QWidget()
@@ -123,7 +123,7 @@ def test_a_layer_with_something_to_show_shows_its_plate(tab):
     Driven per layer with that layer given something to draw: a group for
     Groups, a variable for Variables, and the label grid, which is always there.
     """
-    from well_viewer.domain.sample_variables import VariableSet, new_variable
+    from review.domain.sample_variables import VariableSet, new_variable
 
     set_layer(tab.ctx, "Well Labels")
     assert _visible_plates(tab.ctx) == ["Well Labels"]
@@ -145,7 +145,7 @@ def test_every_roster_entry_resolves_to_something_real(tab):
     and a plate key nothing registers both pass it while the tab is broken."""
     import importlib
 
-    from well_viewer.features.home.sample_map.controller import LAYER_BUILDERS
+    from review.features.home.sample_map.controller import LAYER_BUILDERS
 
     for layer, (module, builder) in LAYER_BUILDERS.items():
         assert callable(getattr(importlib.import_module(module), builder, None)), (
@@ -163,7 +163,7 @@ def test_every_roster_entry_resolves_to_something_real(tab):
 
 
 def test_the_switch_and_the_page_agree(tab):
-    from well_viewer.features.home.sample_map.controller import STACK_KEY, SWITCH_KEY
+    from review.features.home.sample_map.controller import STACK_KEY, SWITCH_KEY
 
     for layer in LAYERS:
         set_layer(tab.ctx, layer)
@@ -182,7 +182,7 @@ def _press(ctx, layer):
     file used to call ``set_layer`` directly, one step under the control, which
     is how a switch that carried nothing on a real press passed all of them.
     """
-    from well_viewer.features.home.sample_map.controller import SWITCH_KEY
+    from review.features.home.sample_map.controller import SWITCH_KEY
 
     ctx.widgets.get_or_none(SWITCH_KEY)._on_clicked(LAYERS.index(layer))
 
@@ -243,7 +243,7 @@ def test_a_selection_the_incoming_plate_cannot_show_is_not_thrown_away(tab):
 def test_clearing_a_plate_by_hand_still_clears_the_selection(tab):
     """The other half of that rule. A click that leaves nothing selected **is**
     a deselection, and suppressing it would be the opposite bug."""
-    from well_viewer.features.home.sample_map.controller import (
+    from review.features.home.sample_map.controller import (
         on_layer_selection_changed,
     )
 
@@ -260,7 +260,7 @@ def test_arriving_on_the_groups_layer_picks_no_group(tab):
     """Otherwise the first drag on the plate edits whichever group was left
     active from the last visit. Home's sub-tab handler did this while Groups was
     a tab; the merge left it reading a tab name the registry cannot produce."""
-    from well_viewer.features.home.sample_map.controller import on_tab_entered
+    from review.features.home.sample_map.controller import on_tab_entered
 
     tab.ctx.state.selection.selections = [
         {"id": "g1", "name": "Ctrl", "wells": ["A01"], "hidden": False,
@@ -287,7 +287,7 @@ def test_a_layer_switch_redraws_once_not_twice(tab):
 
     set_layer(tab.ctx, "Variables")
     tab.ctx.widgets.get_or_none("_var_plate").setSelectedWellIds(["A01", "A02"])
-    import well_viewer.core.selection_controller as sc
+    import review.core.selection_controller as sc
     real = sc.set_selected_wells
     sc.set_selected_wells = lambda ctx, wells, **kw: (
         seen.append(sorted(wells)), real(ctx, wells, **kw))[1]
@@ -323,7 +323,7 @@ def test_the_shared_layers_publish_to_the_app_wide_selection(tab):
     """Cell Gating's CDFs and Add Prefix's fallback read
     ``selection.selected_wells``, and Home's old rail plate never wrote it —
     measured, not assumed. Publishing here is what gives those two a picker."""
-    from well_viewer.features.home.sample_map.controller import (
+    from review.features.home.sample_map.controller import (
         on_layer_selection_changed,
     )
 
@@ -369,7 +369,7 @@ def test_switching_to_a_layer_publishes_what_that_layer_already_holds(
 def test_the_groups_layer_never_publishes(tab):
     """A group's membership is not "the wells I am about to act on", so it must
     not become the app-wide selection just because the layer is showing."""
-    from well_viewer.features.home.sample_map.controller import (
+    from review.features.home.sample_map.controller import (
         on_layer_selection_changed,
     )
 
@@ -390,8 +390,8 @@ def test_import_follows_the_layer_not_the_tab(tab):
     """
     from PySide6.QtWidgets import QPushButton
 
-    from well_viewer.features.home.controller import sync_home_sidebar
-    from well_viewer.features.home.tab_view import IMPORT_KEY
+    from review.features.home.controller import sync_home_sidebar
+    from review.features.home.tab_view import IMPORT_KEY
 
     button = tab.ctx.widgets.register(IMPORT_KEY, QPushButton(""))
     tab.ctx.runtime.home.subtabs = SimpleNamespace(
@@ -409,7 +409,7 @@ def test_import_follows_the_layer_not_the_tab(tab):
 def test_home_never_shows_a_rail_plate_frame(qtbot):
     """``activate_home``'s docstring has always said Home shows no rail frame.
     The sample frame contradicted it, and carried the second plate."""
-    from well_viewer.features.home.controller import sync_home_sidebar
+    from review.features.home.controller import sync_home_sidebar
 
     ctx = _ctx()
     frame = QWidget()

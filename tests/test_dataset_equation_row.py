@@ -3,7 +3,7 @@
 Merge Plates and Concatenate had built this row twice, in twenty statements
 each that differed only in two labels and the name of the slot the fields
 report to. It is one builder now
-(:mod:`datasets._common.equation_row`), and these tests are what say the two
+(:mod:`datasets.core.equation_row`), and these tests are what say the two
 pages still get what they got before.
 
 They read the **rendered row** — the field labels in order, the operator glyphs

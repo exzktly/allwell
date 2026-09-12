@@ -1,6 +1,6 @@
 """Tests for the Qt-free multivariate analysis engine.
 
-These exercise ``well_viewer.domain.multivariate_compute`` with synthetic
+These exercise ``review.domain.multivariate_compute`` with synthetic
 fixtures (planted clusters, known correlations) so the algorithms are validated
 without any Qt / matplotlib / dataset dependency — same contract as
 ``tests/test_stats_compute.py``.
@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from well_viewer.domain import multivariate_compute as mvc
+from review.domain import multivariate_compute as mvc
 
 
 # ── standardize ──────────────────────────────────────────────────────────────
@@ -62,7 +62,7 @@ def test_pca_loadings_csv_companion(tmp_path):
     the matrix, so PCA weightings are extractable for downstream analysis."""
     from types import SimpleNamespace
     import pandas as pd
-    from well_viewer.features.multivariate.controller import _write_pca_loadings_csv
+    from review.features.multivariate.controller import _write_pca_loadings_csv
 
     rng = np.random.default_rng(7)
     X = rng.normal(size=(60, 3))
@@ -111,7 +111,7 @@ def test_subsample_for_projection_caps_slow_methods_only():
     """t-SNE / UMAP get capped (so the main-thread projection can't hang on a big
     selection) with the parallel per-cell arrays sliced to match; PCA and small
     selections pass through untouched."""
-    from well_viewer.features.multivariate.controller import (
+    from review.features.multivariate.controller import (
         _subsample_for_projection, _MAX_PROJECTION_CELLS,
     )
     n = _MAX_PROJECTION_CELLS + 1000
@@ -137,7 +137,7 @@ def test_subsample_for_projection_caps_slow_methods_only():
 
 def test_pca_loadings_csv_skipped_when_matrix_too_small(tmp_path):
     from types import SimpleNamespace
-    from well_viewer.features.multivariate.controller import _write_pca_loadings_csv
+    from review.features.multivariate.controller import _write_pca_loadings_csv
 
     data = {"X": np.zeros((5, 1)), "feature_labels": ["only"]}  # < 2 features
     out = _write_pca_loadings_csv(None, SimpleNamespace(standardize=True),

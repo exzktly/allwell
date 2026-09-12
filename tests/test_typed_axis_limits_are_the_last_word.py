@@ -24,7 +24,7 @@ import logging
 
 import pytest
 
-from well_viewer.core.plot_style import (
+from review.core.plot_style import (
     DEFAULT_EXPORT_STYLE_PREFS, apply_export_style_prefs,
 )
 
@@ -71,7 +71,7 @@ def test_a_lost_limit_is_reported_rather_than_silently_fixed(monkeypatch, caplog
     so "my limits keep coming back wrong" has something to read. Staged by
     autoscaling the axis from inside the pass, after the limits are applied.
     """
-    from well_viewer.core import plot_style as ps
+    from review.core import plot_style as ps
 
     fig, ax, prefs = _fig_with_limits(y_lim_min="1", y_lim_max="1000")
 
@@ -85,7 +85,7 @@ def test_a_lost_limit_is_reported_rather_than_silently_fixed(monkeypatch, caplog
 
     monkeypatch.setattr(ps, "apply_log_minor_ticks", _autoscaling)
     prefs["y_log"] = True
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         apply_export_style_prefs(fig, prefs)
 
     assert ax.get_ylim() == pytest.approx((1.0, 1000.0)), (
@@ -99,7 +99,7 @@ def test_an_untyped_axis_is_left_alone(caplog):
     """No limit typed, nothing to hold, and nothing to say about it — otherwise
     every figure in the app would log on every redraw."""
     fig, ax, prefs = _fig_with_limits()
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         apply_export_style_prefs(fig, prefs)
     assert not [r for r in caplog.records if "limits" in r.getMessage()]
 
@@ -187,7 +187,7 @@ def test_the_refusal_is_said_rather_than_silent(caplog):
     """A dropped bound is a substitution: the number stays in the Properties
     field while the plot is drawn to a different range, and nothing on screen
     tells the two apart. So it is named, with what to do instead."""
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         _fraction_figure(y_log=True, lo="0", hi="1")
     said = [r.getMessage() for r in caplog.records
             if "logarithmic axis can take" in r.getMessage()]
@@ -197,7 +197,7 @@ def test_the_refusal_is_said_rather_than_silent(caplog):
 
 def test_nothing_is_said_when_every_bound_is_usable(caplog):
     """Otherwise every log figure in the app would log on every redraw."""
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         _fraction_figure(y_log=True, lo="0.01", hi="1")
     assert not [r for r in caplog.records
                 if "logarithmic axis can take" in r.getMessage()]
@@ -214,7 +214,7 @@ def test_nothing_is_said_when_every_bound_is_usable(caplog):
 def test_which_bounds_a_scale_can_take(scale, lo, hi, expect):
     """The rule itself, as values — a negative bound is refused for the same
     reason as zero, and a linear axis takes both."""
-    from well_viewer.core.plot_style import limits_a_log_axis_can_take
+    from review.core.plot_style import limits_a_log_axis_can_take
 
     out_lo, out_hi, dropped = limits_a_log_axis_can_take(scale, lo, hi)
     assert (out_lo, out_hi) == expect

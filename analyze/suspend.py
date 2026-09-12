@@ -50,7 +50,7 @@ from services.suspend_record import (
     load_all,
     save,
 )
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 
 
 @dataclass(frozen=True)
@@ -262,7 +262,7 @@ class AnalyzeSuspendMixin:
         one line. It fits where it is used because it is used on a *page* — the
         Job Queue borrows the wide right-hand area — and a sentence beside two
         buttons there still has most of the width. This strip lives in the
-        Analyze sidebar, which is ``app_shell_view.RAIL_W`` (329 px) and fixed,
+        Analyze sidebar, which is ``theme.Metrics.rail_w`` (329 px) and fixed,
         and whose scrolling viewport is 319 px of that. Measured in a real
         ``AnalyzeTab`` at the app's default window size, ``Resume`` and
         ``Discard`` beside the text leave the label **139 px**, so the offer

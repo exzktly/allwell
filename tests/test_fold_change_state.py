@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.domain.control_ref import ControlRef
-from well_viewer.domain.fold_change_state import (
+from review.domain.control_ref import ControlRef
+from review.domain.fold_change_state import (
     FC_STATE_OFF,
     FoldChangeState,
     coerce_fc_state,

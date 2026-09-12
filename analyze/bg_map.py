@@ -68,7 +68,7 @@ from util.well_token import (
     parse_background_well_map,
     split_background_wells,
 )
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
 

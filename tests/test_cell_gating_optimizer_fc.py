@@ -6,7 +6,7 @@ import numpy as np
 from pipeline.threshold_optimize import relative_gap
 import pandas as pd
 
-from well_viewer.features.home.cell_gating.gating_compute import (
+from review.features.home.cell_gating.gating_compute import (
     _optimize_thresh_frac_on_between_wells,
     scan_fc_fractions,
 )
@@ -69,7 +69,7 @@ def test_scan_fc_vs_baseline_reshapes_the_metric():
 
 
 def test_scan_fc_subtract_control_matches_scale_bar_value():
-    from well_viewer.domain.fold_change import scale_bar_value
+    from review.domain.fold_change import scale_bar_value
     th = np.array([0.0, 5.0])
     a = np.array([10.0, 10.0], float)  # frac-on = 1.0 at t=0, 0.5 at t=5
     b = np.array([0.0, 0.0], float)
@@ -112,7 +112,7 @@ def test_scan_fc_subtract_control_metric_not_inverted():
 
 
 def test_opt_curve_ylim_expands_for_out_of_range_curves():
-    from well_viewer.features.home.cell_gating.gating_compute import _opt_curve_ylim
+    from review.features.home.cell_gating.gating_compute import _opt_curve_ylim
 
     # Raw fraction-on case keeps the familiar [0, 1] frame.
     lo, hi = _opt_curve_ylim(np.array([0.0, 0.5, 1.0]), np.array([0.0, 0.2]),

@@ -6,7 +6,7 @@ page Review opens on, that its plate paints from the record, that its tabs and
 their sidebar behave, and that taking the eager first-tab slot did not cost the
 attribute twelve modules read off Plotting.
 
-Slow lane, deliberately one file — each of these builds a full ``WellViewerApp``
+Slow lane, deliberately one file — each of these builds a full ``ReviewApp``
 whose Qt↔Python reference web is never reclaimed in-process.
 """
 
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from well_viewer.features.home import collect as hc
+from review.features.home import collect as hc
 
 
 def _write_run_check(app, wells: dict, **kw) -> None:
@@ -85,7 +85,7 @@ def test_the_plate_paints_the_record(loaded_app):
     _write_run_check(loaded_app, {
         first: _well("partial", covered_any=4),
     })
-    from well_viewer.features.home.controller import refresh_home
+    from review.features.home.controller import refresh_home
     refresh_home(loaded_app._ctx)
 
     cells = hc.plate_cells(loaded_app._ctx)
@@ -96,7 +96,7 @@ def test_the_plate_paints_the_record(loaded_app):
 
 def test_clicking_a_well_selects_it_rather_than_navigating(loaded_app):
     first = sorted(loaded_app._app_state.dataset.well_paths)[0]
-    from well_viewer.features.home.controller import on_home_plate_selection
+    from review.features.home.controller import on_home_plate_selection
 
     on_home_plate_selection(loaded_app._ctx, [first])
 
@@ -113,7 +113,7 @@ def test_home_carries_the_only_notes_editor(loaded_app):
     writing back over an edit; one editor needs no such thing, and a second one
     reappearing without the roster knowing would resurrect that bug."""
     ctx = loaded_app._ctx
-    from well_viewer.core.ui_helpers import NOTES_WIDGET_KEYS, notes_schedule_save
+    from review.core.ui_helpers import NOTES_WIDGET_KEYS, notes_schedule_save
 
     assert NOTES_WIDGET_KEYS == ("_home_notes_edit",)
     home = ctx.widgets.get_or_none("_home_notes_edit")
@@ -127,7 +127,7 @@ def test_home_carries_the_only_notes_editor(loaded_app):
 
 def test_a_save_that_never_moved_focus_still_captures_the_home_edit(loaded_app):
     ctx = loaded_app._ctx
-    from well_viewer.core.ui_helpers import commit_focused_notes
+    from review.core.ui_helpers import commit_focused_notes
 
     home = ctx.widgets.get_or_none("_home_notes_edit")
     home.setPlainText("typed but not committed")
@@ -141,7 +141,7 @@ def test_a_save_that_never_moved_focus_still_captures_the_home_edit(loaded_app):
 
 def test_a_dataset_with_no_record_says_so_on_the_page(loaded_app):
     loaded_app._app_state.dataset.pipeline_info.pop("run_check", None)
-    from well_viewer.features.home.controller import refresh_home
+    from review.features.home.controller import refresh_home
     refresh_home(loaded_app._ctx)
 
     summary = loaded_app._home_plate_summary.text()
@@ -151,22 +151,22 @@ def test_a_dataset_with_no_record_says_so_on_the_page(loaded_app):
 
 def test_every_tile_reads_as_a_dash_without_a_record(loaded_app):
     loaded_app._app_state.dataset.pipeline_info.pop("run_check", None)
-    from well_viewer.features.home.controller import refresh_home
-    from well_viewer.features.home.tab_view import DASH
+    from review.features.home.controller import refresh_home
+    from review.features.home.tab_view import DASH
 
     refresh_home(loaded_app._ctx)
     tiles = hc.stat_tiles(loaded_app._ctx)
     unavailable = [t for t in tiles if not t.available]
     assert unavailable, "premise: some tiles depend on the record"
-    from well_viewer.features.home.tab_view import format_value
+    from review.features.home.tab_view import format_value
     assert all(format_value(t.value) == DASH for t in unavailable)
 
 
 # ── actions ─────────────────────────────────────────────────────────────────
 
 def test_the_analyze_action_switches_the_pane(loaded_app):
-    from well_viewer.core.tab_controller import PANE_MODES
-    from well_viewer.features.home.controller import run_home_action
+    from review.core.tab_controller import PANE_MODES
+    from review.features.home.controller import run_home_action
 
     stack = getattr(loaded_app, "_central_pane_stack", None)
     if stack is None or stack.count() < 2:
@@ -178,13 +178,13 @@ def test_the_analyze_action_switches_the_pane(loaded_app):
 
 def test_an_action_with_nothing_behind_it_does_nothing(viewer_app):
     """No dataset open: reload has nothing to reload and must not raise."""
-    from well_viewer.features.home.controller import run_home_action
+    from review.features.home.controller import run_home_action
     run_home_action(viewer_app._ctx, "reload")
     run_home_action(viewer_app._ctx, "not-an-action")
 
 
 def test_a_page_action_navigates(loaded_app):
-    from well_viewer.features.home.controller import run_home_action
+    from review.features.home.controller import run_home_action
     run_home_action(loaded_app._ctx, "plot")
     assert loaded_app._notebook.currentName() == "Plotting"
 
@@ -193,7 +193,7 @@ def test_a_page_action_navigates(loaded_app):
 
 def test_refresh_is_safe_before_the_page_is_built(viewer_app):
     """Hooks fire for pages whose bodies may never have been built."""
-    from well_viewer.features.home.controller import refresh_home
+    from review.features.home.controller import refresh_home
     for name in ("_home_title", "_home_plate"):
         viewer_app._ctx.widgets._m.pop(name, None) if hasattr(
             viewer_app._ctx.widgets, "_m") else None
@@ -203,7 +203,7 @@ def test_refresh_is_safe_before_the_page_is_built(viewer_app):
 def test_repainting_twice_leaves_one_set_of_rows(loaded_app):
     _write_run_check(loaded_app, {
         w: _well() for w in sorted(loaded_app._app_state.dataset.well_paths)[:2]})
-    from well_viewer.features.home.controller import refresh_home
+    from review.features.home.controller import refresh_home
 
     refresh_home(loaded_app._ctx)
     first = loaded_app._home_health.layout().count()
@@ -227,7 +227,7 @@ def test_a_record_written_while_the_user_was_in_another_pane_reaches_the_page(
     """
     from PySide6.QtWidgets import QWidget
 
-    from well_viewer.features.home.controller import refresh_home
+    from review.features.home.controller import refresh_home
 
     app = loaded_app
     app._app_state.dataset.pipeline_info.pop("run_check", None)
@@ -235,7 +235,7 @@ def test_a_record_written_while_the_user_was_in_another_pane_reaches_the_page(
     assert "no completeness record" in app._home_run_meta.text(), (
         "premise: the page starts out reporting no record")
 
-    # The panes the shell mounts around Review; a bare WellViewerApp has none,
+    # The panes the shell mounts around Review; a bare ReviewApp has none,
     # and the round trip is the whole subject of this test.
     app.mountAnalyzePane(QWidget())
     app.mountDatasetsPane(QWidget())
@@ -260,7 +260,7 @@ def test_a_record_written_while_the_user_was_in_another_pane_reaches_the_page(
 #
 # These are the only tests in this file that measure geometry, so they are the
 # only ones that need the window actually shown and its events pumped: an
-# unshown ``WellViewerApp`` has never laid anything out, and every height reads
+# unshown ``ReviewApp`` has never laid anything out, and every height reads
 # as a widget default.
 
 _RAIL_W, _RAIL_H = 1600, 1000
@@ -350,7 +350,7 @@ def test_a_page_with_a_rail_body_still_gets_the_space(loaded_app, qapp):
 
 def test_home_shows_the_load_prompt_rather_than_an_unfilled_page(viewer_app):
     """Home is the page the app launches on, so this is the first screen."""
-    from well_viewer.core.ui_helpers import NO_DATASET_TITLE
+    from review.core.ui_helpers import NO_DATASET_TITLE
 
     stack = viewer_app._ctx.widgets.get_or_none("_home_empty_stack")
     assert stack is not None, "premise: Home's body is wrapped"
@@ -465,10 +465,10 @@ def test_a_plate_drag_edits_the_group_only_from_the_groups_layer(loaded_app, qtb
     Home sub-tab's title; the layers of one tab are what say it now, and the
     question is the same one.
     """
-    from well_viewer.core.selection_controller import (
+    from review.core.selection_controller import (
         _plate_passive_in_group_mode, sel_by_id,
     )
-    from well_viewer.features.home.sample_map.controller import set_layer
+    from review.features.home.sample_map.controller import set_layer
 
     ctx = loaded_app._ctx
     wells = sorted(ctx.state.dataset.well_paths)
@@ -515,7 +515,7 @@ def test_one_plate_is_on_screen_on_every_home_tab(loaded_app, qtbot):
     appear once there is something to draw, or "at most one" would be satisfied
     by a tab that never draws anything.
     """
-    from well_viewer.features.home.sample_map.controller import (
+    from review.features.home.sample_map.controller import (
         LAYER_PLATES, LAYERS, set_layer,
     )
 
@@ -538,7 +538,7 @@ def test_one_plate_is_on_screen_on_every_home_tab(loaded_app, qtbot):
             f"{layer}: {_visible()} on screen")
 
     # And with something to draw, the layer's own plate is up.
-    from well_viewer.domain.sample_variables import new_variable
+    from review.domain.sample_variables import new_variable
     ctx.state.selection.variables, _id = new_variable(
         ctx.state.selection.variables, "Dose")
     set_layer(ctx, "Variables")
@@ -562,7 +562,7 @@ def test_import_is_offered_on_the_layers_it_writes(loaded_app, qtbot):
     a finer one — Variables is now a layer of the very tab whose other two
     layers are what Import writes, so the tab cannot answer for it.
     """
-    from well_viewer.features.home.sample_map.controller import set_layer
+    from review.features.home.sample_map.controller import set_layer
 
     ctx = loaded_app._ctx
     button = ctx.widgets.get("_home_import_btn")
@@ -635,7 +635,7 @@ def test_the_help_drawer_lands_on_the_current_tab_not_the_top_of_the_chapter(
     # them — and it would leave the three layer entries in ``SECTION_BY_PAGE``
     # with no reader at all. Asserted per layer rather than once, because a
     # version that answered "Replicates" for every layer passes a single check.
-    from well_viewer.features.home.sample_map.controller import LAYERS, set_layer
+    from review.features.home.sample_map.controller import LAYERS, set_layer
 
     _goto_subtab(loaded_app, qtbot, "Sample Map")
     for layer in LAYERS:
@@ -663,8 +663,8 @@ def test_the_recents_card_opens_the_dataset_it_names(loaded_app, tmp_path,
     handler. A control that is offered and does nothing is the failure this
     file exists for.
     """
-    from well_viewer.core.recent_datasets import record_open
-    from well_viewer.features.home.controller import refresh_home
+    from review.core.recent_datasets import record_open
+    from review.features.home.controller import refresh_home
 
     other = tmp_path / "another_plate"
     other.mkdir()
@@ -682,11 +682,11 @@ def test_the_recents_card_opens_the_dataset_it_names(loaded_app, tmp_path,
     settings = _Settings()
     record_open(settings, str(other), "another_plate", 1.0)
     # Patched at the module the app actually reads, not onto the app object.
-    # ``raising=False`` on a real ``WellViewerApp`` is what hid this feature
+    # ``raising=False`` on a real ``ReviewApp`` is what hid this feature
     # being dead: it created a ``_qsettings`` the class does not have and then
     # verified the card against it. ``tests/test_no_invented_app_attributes.py``
     # now fails on that shape.
-    from well_viewer.core import app_settings as app_settings_module
+    from core import app_settings as app_settings_module
     monkeypatch.setattr(app_settings_module, "app_settings", lambda: settings)
 
     opened = []
@@ -753,8 +753,8 @@ def test_no_sample_map_layer_starts_at_the_pane_edge(loaded_app):
     from PySide6.QtWidgets import QApplication, QWidget
 
     from ui import theme
-    from well_viewer.features.home.controller import _subtabs
-    from well_viewer.features.home.sample_map.controller import (
+    from review.features.home.controller import _subtabs
+    from review.features.home.sample_map.controller import (
         LAYERS, STACK_KEY, set_layer,
     )
 

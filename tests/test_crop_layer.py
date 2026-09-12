@@ -13,11 +13,11 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
-from well_viewer.data.data_loading import df_included_mask
-from well_viewer.features.crop.region import (
+from review.data.data_loading import df_included_mask
+from review.features.crop.region import (
     compute_crop_pass, normalize_region,
 )
-from well_viewer.features.crop import controller as crop
+from review.features.crop import controller as crop
 
 
 def _df(rows, cols):

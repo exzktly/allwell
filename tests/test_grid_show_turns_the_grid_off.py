@@ -29,7 +29,7 @@ import io
 
 from matplotlib.figure import Figure
 
-from well_viewer.core.plot_style import (
+from review.core.plot_style import (
     DEFAULT_EXPORT_STYLE_PREFS,
     apply_export_style_prefs,
 )

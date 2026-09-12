@@ -32,7 +32,7 @@ from collections.abc import Callable
 
 from services.job_kinds import KIND_LABEL
 from services.job_queue import JobSpec, JobState
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 
 class QueueSession:

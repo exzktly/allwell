@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from well_viewer.data.image_resolver import (
+from review.data.image_resolver import (
     _WELL_TOKEN_IN_TEXT_RE,
     well_token_matches_text,
 )
@@ -93,7 +93,7 @@ def _names(refs):
 
 
 def test_a_row_f_well_no_longer_shows_another_wells_field(loose_plate):
-    from well_viewer.data.image_discovery import find_well_images_and_masks
+    from review.data.image_discovery import find_well_images_and_masks
 
     f01, *_rest = find_well_images_and_masks(loose_plate, "F01", "GFP")
     f02, *_rest = find_well_images_and_masks(loose_plate, "F02", "GFP")
@@ -104,7 +104,7 @@ def test_a_row_f_well_no_longer_shows_another_wells_field(loose_plate):
 
 
 def test_the_wells_that_do_own_those_images_still_find_them(loose_plate):
-    from well_viewer.data.image_discovery import find_well_images_and_masks
+    from review.data.image_discovery import find_well_images_and_masks
 
     a01, *_rest = find_well_images_and_masks(loose_plate, "A01", "GFP")
     b02, *_rest = find_well_images_and_masks(loose_plate, "B02", "GFP")
@@ -114,7 +114,7 @@ def test_the_wells_that_do_own_those_images_still_find_them(loose_plate):
 
 def test_a_genuine_row_f_plate_still_resolves(tmp_path):
     pytest.importorskip("PIL")
-    from well_viewer.data.image_discovery import find_well_images_and_masks
+    from review.data.image_discovery import find_well_images_and_masks
 
     for name in ("F01_GFP_f1_t0.tif", "A01_GFP_f1_t0.tif"):
         _write_tif(tmp_path / name)

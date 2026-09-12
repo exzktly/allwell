@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import pytest  # noqa: E402
 
 from tests.test_bar_significance import _app, _axes, _bars  # noqa: E402
-from well_viewer.features.barplot.renderer import (  # noqa: E402
+from review.features.barplot.renderer import (  # noqa: E402
     SIGNIFICANCE_NOTE_TAG,
     draw_significance_brackets,
 )
@@ -145,7 +145,7 @@ def test_the_timepoint_note_reads_in_the_units_of_the_axis_beside_it():
     """The Properties → Time correction relabels every timepoint on the figure.
     A note naming raw filename hours next to ticks reading corrected ones would
     send the user to check a timepoint that appears nowhere on screen."""
-    from well_viewer.domain.time_rescale import TimeRescale
+    from review.domain.time_rescale import TimeRescale
 
     ax_mean, ax_frac = _axes()
     app = _app(list(MATCHING_RUN), active_val_col="gfp_mean_intensity")
@@ -161,7 +161,7 @@ def test_the_timepoint_note_reads_in_the_units_of_the_axis_beside_it():
     plt.close("all")
 
     rs = TimeRescale(factor=4.0, offset=-2.0)
-    from well_viewer.domain.time_rescale import format_scaled
+    from review.domain.time_rescale import format_scaled
     # 24 × 4 − 2 = 94 and 48 × 4 − 2 = 190 — the numbers the ticks carry.
     assert f"t={format_scaled(24.0, rs)}" in note
     assert f"t={format_scaled(48.0, rs)}" in note
@@ -203,9 +203,9 @@ def _per_cell_redraw(qtbot, monkeypatch, **bar_flags):
     """Run the real ``redraw_bars`` far enough to take the per-cell branch."""
     from types import SimpleNamespace as NS
 
-    from well_viewer.features.barplot import renderer as r
+    from review.features.barplot import renderer as r
 
-    from well_viewer.core.plot_state import PlotState
+    from review.core.plot_state import PlotState
 
     fig, (ax_mean, ax_frac, ax_n) = plt.subplots(3, 1)
     app = _app(list(MATCHING_RUN), active_val_col="gfp_mean_intensity")
@@ -232,7 +232,7 @@ def _per_cell_redraw(qtbot, monkeypatch, **bar_flags):
                         lambda *_a, **_k: 0.0)
     monkeypatch.setattr(r, "plot_replicate_sets", lambda *_a, **_k: [])
     # Deferred import inside ``redraw_bars``, so it is patched at its home.
-    import well_viewer.core.selection_controller as _sel
+    import review.core.selection_controller as _sel
     monkeypatch.setattr(_sel, "has_plottable_selection", lambda _c: True)
     plot.use_sem = True
     plot.use_fov_replicates = False
@@ -283,9 +283,9 @@ def test_a_per_cell_mode_says_the_brackets_cannot_be_drawn(qtbot, monkeypatch,
 
 def test_a_per_cell_mode_says_nothing_when_the_toggle_is_off(qtbot, monkeypatch):
     from types import SimpleNamespace as NS
-    from well_viewer.features.barplot import renderer as r
+    from review.features.barplot import renderer as r
 
-    from well_viewer.core.plot_state import PlotState
+    from review.core.plot_state import PlotState
 
     fig, (ax_mean, ax_frac, ax_n) = plt.subplots(3, 1)
     app = _app(list(MATCHING_RUN), active_val_col="gfp_mean_intensity")
@@ -304,7 +304,7 @@ def test_a_per_cell_mode_says_nothing_when_the_toggle_is_off(qtbot, monkeypatch)
     monkeypatch.setattr(r, "refresh_bar_layout_btn_state", lambda _c: None)
     monkeypatch.setattr(r, "on_cutoff_for_column", lambda *_a, **_k: 0.0)
     monkeypatch.setattr(r, "plot_replicate_sets", lambda *_a, **_k: [])
-    import well_viewer.core.selection_controller as _sel
+    import review.core.selection_controller as _sel
     monkeypatch.setattr(_sel, "has_plottable_selection", lambda _c: True)
     app._ax_bar_mean, app._ax_bar_frac, app._ax_bar_n = ax_mean, ax_frac, ax_n
     app._ctx.widgets = _HasW(app)
@@ -345,8 +345,8 @@ def _with_user_ylimit(ymax, *, bars=None):
     path, and the bug reproduced under a test that claimed to be exercising the
     fix.
     """
-    from well_viewer.core.export_prefs_state import ExportPrefsState
-    from well_viewer.core.plot_style import apply_export_style_prefs, figure_prefs
+    from review.core.export_prefs_state import ExportPrefsState
+    from review.core.plot_style import apply_export_style_prefs, figure_prefs
 
     fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
     ax_mean.set_ylim(0, 10)

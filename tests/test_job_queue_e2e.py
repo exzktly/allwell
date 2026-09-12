@@ -33,8 +33,8 @@ from datasets.subset.controller import SubsetController
 from datasets.validate.controller import ValidateController
 from services.job_queue import JobSpec, JobState
 from tests.fixtures.dataset_builder import build_dataset
-from well_viewer.data.data_loading import load_well_csv
-from well_viewer.domain.viewer_state import read_pipeline_info
+from review.data.data_loading import load_well_csv
+from review.domain.viewer_state import read_pipeline_info
 
 
 @pytest.fixture(scope="module")

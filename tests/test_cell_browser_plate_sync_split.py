@@ -24,8 +24,8 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 
 def _enter_split(app):
-    from well_viewer.features.image_browser.controller import show_image_browser_subtab
-    from well_viewer.core.split_view import enter_split
+    from review.features.image_browser.controller import show_image_browser_subtab
+    from review.core.split_view import enter_split
     assert show_image_browser_subtab(app._ctx, "Cell Browser")
     assert app._plotting_notebook.setCurrentByName("Scatter Plot")
     app._notebook.setCurrentByName("Plotting")
@@ -34,13 +34,13 @@ def _enter_split(app):
 
 
 def _focus(app, top):
-    from well_viewer.core.split_view import focus_split
+    from review.core.split_view import focus_split
     focus_split(app._ctx, top)
     app._refresh_sidebar_map_now()
 
 
 def test_gallery_mirrors_groups_over_stale_selection(loaded_app):
-    from well_viewer.features.image_browser.cell_browser.collect import cell_browser_source_wells
+    from review.features.image_browser.cell_browser.collect import cell_browser_source_wells
     app = loaded_app
     wells = list(app._app_state.dataset.well_paths.keys())
     _enter_split(app)
@@ -52,7 +52,7 @@ def test_gallery_mirrors_groups_over_stale_selection(loaded_app):
 
 
 def test_gallery_follows_groups_when_no_explicit_selection(loaded_app):
-    from well_viewer.features.image_browser.cell_browser.collect import cell_browser_source_wells
+    from review.features.image_browser.cell_browser.collect import cell_browser_source_wells
     app = loaded_app
     wells = list(app._app_state.dataset.well_paths.keys())
     _enter_split(app)
@@ -82,8 +82,8 @@ def test_plate_click_toggles_group_in_split(loaded_app):
     # With groups defined, the plate stays group-driven in the split: clicking a
     # well toggles its GROUP's visibility, which drives BOTH the scatter and the
     # cell browser — it does NOT create a per-well selection.
-    from well_viewer.core import selection_controller as sc
-    from well_viewer.features.image_browser.cell_browser.collect import cell_browser_source_wells
+    from review.core import selection_controller as sc
+    from review.features.image_browser.cell_browser.collect import cell_browser_source_wells
     app = loaded_app
     wells = list(app._app_state.dataset.well_paths.keys())
     _enter_split(app)
@@ -100,7 +100,7 @@ def test_gate_stays_live_as_wells_are_added_and_removed(loaded_app):
     # Combined model: the scatter gate filters cells, the well selection scopes
     # which wells, and add/remove updates the gallery live WITHOUT dropping the
     # gate. (gate admits everything so we isolate the well-scope effect.)
-    from well_viewer.features.image_browser.cell_browser.collect import collect_cells
+    from review.features.image_browser.cell_browser.collect import collect_cells
     app = loaded_app
     wells = list(app._app_state.dataset.well_paths.keys())
     assert len(wells) >= 3
@@ -125,8 +125,8 @@ def test_gate_stays_live_as_wells_are_added_and_removed(loaded_app):
 def test_inspecting_a_cell_does_not_rescope_wells(loaded_app):
     # Clicking a gallery thumbnail to inspect a cell must NOT change the well
     # scope — otherwise looking at a cell would collapse the gated view.
-    from well_viewer.features.image_browser.cell_browser import controller as ctl
-    from well_viewer.features.image_browser.cell_browser.collect import collect_cells
+    from review.features.image_browser.cell_browser import controller as ctl
+    from review.features.image_browser.cell_browser.collect import collect_cells
     app = loaded_app
     wells = list(app._app_state.dataset.well_paths.keys())
     _enter_split(app)

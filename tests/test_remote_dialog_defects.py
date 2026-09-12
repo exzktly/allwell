@@ -703,7 +703,7 @@ def test_every_probe_call_site_reads_the_return_before_taking_its_control():
 
 # ── the bootstrap path is asked for, never derived from this file's location ──
 #
-# `_spawn` located `scripts/_bootstrap_lib.py` by treating its own module's
+# `_spawn` located `services/remote_bootstrap.py` by treating its own module's
 # directory as the repository root. That held only while this file sat at the
 # top level: moving it into `analyze/` made the expression answer `analyze/`,
 # and the path it built has never existed. Nothing in the suite looked at it,
@@ -750,4 +750,4 @@ def test_the_bootstrap_path_spawn_builds_is_a_file_that_exists(qtbot, monkeypatc
         f"_spawn built a bootstrap path that does not exist: {bootstrap}. "
         "The repository root must come from services.remote_runner.repo_root, "
         "not from this module's own __file__, which moves with the file.")
-    assert bootstrap.name == "_bootstrap_lib.py"
+    assert bootstrap.name == "remote_bootstrap.py"

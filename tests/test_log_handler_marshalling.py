@@ -21,10 +21,10 @@ once.
 
 Two handlers had this, with the same wrong comment on the same line: the shell's
 ``_RingHandler`` (``allwell.py``) and Review's ``_GUILogHandler``
-(``well_viewer/core/status_view.py``). One was written from the other, which is
+(``review/core/status_view.py``). One was written from the other, which is
 why this is a guard rather than a fix — the shape is easy to reintroduce and
 statically obvious. The route that works is
-``well_viewer.core.worker_bridge.GuiLogRelay``: a ``QObject`` built on the GUI
+``core.worker_bridge.GuiLogRelay``: a ``QObject`` built on the GUI
 thread whose queued signal may be emitted from anywhere.
 
 Timer *construction* is flagged alongside ``singleShot``: ``QTimer(...)`` and
@@ -105,6 +105,6 @@ def test_no_timer_inside_a_logging_handler_emit():
         "thread: the callback never fires (the log line is lost) and tearing "
         "the thread down raises 'QObject::killTimer: Timers cannot be stopped "
         "from another thread'. Marshal with "
-        "well_viewer.core.worker_bridge.GuiLogRelay instead:\n  "
+        "core.worker_bridge.GuiLogRelay instead:\n  "
         + "\n  ".join(offenders)
     )

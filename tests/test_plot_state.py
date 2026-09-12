@@ -6,8 +6,8 @@ fold-change triple and its mutator, and the SEM / FOV toggles.
 
 from __future__ import annotations
 
-from well_viewer.core.plot_state import PlotState
-from well_viewer.domain.control_ref import ControlRef
+from review.core.plot_state import PlotState
+from review.domain.control_ref import ControlRef
 
 
 def test_defaults():

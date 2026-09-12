@@ -5,7 +5,7 @@ beside it". Without a marker a tooltip is invisible: nothing on screen tells you
 there is anything to hover, so the explanation only reaches the people who were
 already going to guess right.
 
-Lives in ``widgets/`` — no All-Well knowledge, no ``well_viewer`` import, just a
+Lives in ``widgets/`` — no All-Well knowledge, no ``review`` import, just a
 styled ``QLabel`` — so both the Analyze pane and the Review pane's tabs can use
 the one implementation. Styling is by object name (``InfoHint``) rather than a
 hardcoded colour, per the QSS convention.

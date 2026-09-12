@@ -24,10 +24,10 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.core.app_runtime import AppRuntime
-from well_viewer.core.cell_gating_state import CellGatingState
-from well_viewer.domain.gating_state import read_gating_params
-from well_viewer.persistence.cell_gating import (
+from review.core.app_runtime import AppRuntime
+from review.core.cell_gating_state import CellGatingState
+from review.domain.gating_state import read_gating_params
+from review.persistence.cell_gating import (
     load_from_pipeline_info,
     save_to_pipeline_info,
 )
@@ -87,7 +87,7 @@ def _full_config():
 
 def test_scatter_gate_config_round_trips_byte_identical(tmp_path, monkeypatch):
     # Patch only the pure-UI status/quick-edit refresh at the tail of load.
-    import well_viewer.core.channel_state_controller as csc
+    import review.core.channel_state_controller as csc
     monkeypatch.setattr(csc, "refresh_thresh_frac_quick_edit", lambda _ctx: None)
 
     (tmp_path / "pipeline_info.json").write_text(json.dumps({"channels": ["gfp"]}))
@@ -126,7 +126,7 @@ def test_scatter_gate_config_round_trips_byte_identical(tmp_path, monkeypatch):
 
 
 def test_default_config_removes_block(tmp_path, monkeypatch):
-    import well_viewer.core.channel_state_controller as csc
+    import review.core.channel_state_controller as csc
     monkeypatch.setattr(csc, "refresh_thresh_frac_quick_edit", lambda _ctx: None)
 
     # A sidecar carrying a stale block …

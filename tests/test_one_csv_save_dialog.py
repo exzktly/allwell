@@ -84,5 +84,5 @@ def test_only_csv_export_opens_a_csv_save_dialog():
         "these open their own CSV Save-As dialog, so the filter, the starting "
         "directory and the suggested filename drift from every other CSV "
         "export in the app:\n  " + "\n  ".join(offenders)
-        + "\nGo through well_viewer.core.csv_export.ask_save_csv."
+        + "\nGo through review.core.csv_export.ask_save_csv."
     )

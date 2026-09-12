@@ -1,16 +1,16 @@
-"""Ratchet guard: the count of *function-local* ``from well_viewer.features …``
+"""Ratchet guard: the count of *function-local* ``from review.features …``
 imports may only go **down**.
 
 Function-local (deferred) feature imports are the sanctioned escape hatch for a
 genuine, isolated cycle break (see ``tests/test_layering.py``). They are not
 free, though: a high count is the symptom of inter-feature cycles, and an audit
-of this codebase found ~47% of all ``from well_viewer`` imports were deferred
+of this codebase found ~47% of all ``from review`` imports were deferred
 cycle-workarounds. T2 broke the worst offenders (the scatter↔export cycle, via
 ``core/plot_style.py`` + ``scatter/collect.py``) and promoted the now-acyclic
 deferred imports to module scope.
 
 This guard locks that progress in: it counts every deferred
-``from well_viewer.features...`` import and asserts the total never exceeds the
+``from review.features...`` import and asserts the total never exceeds the
 current budget. The budget is a *ceiling that only ratchets down* — when you
 remove a deferred import (by breaking a cycle and promoting it to module level),
 lower ``MAX_DEFERRED_FEATURE_IMPORTS`` to the new count in the same commit so the
@@ -27,8 +27,8 @@ import ast
 from pathlib import Path
 from tests._repo_scan import parse_source
 
-ROOT = Path(__file__).resolve().parent.parent / "well_viewer"
-FEATURE_PREFIX = "well_viewer.features"
+ROOT = Path(__file__).resolve().parent.parent / "review"
+FEATURE_PREFIX = "review.features"
 
 # Ceiling. Seeded at the post-T2 count. ONLY EVER LOWER THIS NUMBER.
 # Lowered to 136 when the QC debris-gate controls moved to the Cell Gating tab:
@@ -135,7 +135,7 @@ def _is_feature_import(node: ast.ImportFrom) -> bool:
 
 
 def _deferred_feature_imports(tree: ast.Module):
-    """Yield ``(lineno, module)`` for every ``from well_viewer.features …``
+    """Yield ``(lineno, module)`` for every ``from review.features …``
     import that is NOT at module top level (i.e. nested in a function / method
     / conditional block)."""
     toplevel = {id(n) for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))}
@@ -171,7 +171,7 @@ def test_deferred_feature_imports_do_not_exceed_budget():
     hits = _collect()
     count = len(hits)
     assert count <= MAX_DEFERRED_FEATURE_IMPORTS, (
-        f"Deferred (function-local) 'from well_viewer.features …' imports rose to "
+        f"Deferred (function-local) 'from review.features …' imports rose to "
         f"{count}, above the budget of {MAX_DEFERRED_FEATURE_IMPORTS}. A deferred "
         f"feature import is a cycle-workaround — break the cycle (extract the "
         f"shared code into a lower layer, or invert the dependency) rather than "

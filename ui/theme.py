@@ -26,7 +26,7 @@ from __future__ import annotations
 #   * ``Colors.trace`` / ``CPub.trace`` below — what
 #     ``widgets/plot_card.plot_palette()`` feeds into matplotlib's
 #     ``axes.prop_cycle`` (used for screen + publication modes).
-#   * ``well_viewer.plate_layout.WELL_COLORS`` — a plain ``list()`` copy, read
+#   * ``review.domain.plate_layout.WELL_COLORS`` — a plain ``list()`` copy, read
 #     by the ``_rank_color_well`` / ``_rank_color_rset`` helpers and every
 #     plot renderer that needs a per-well colour by rank.
 #
@@ -423,6 +423,13 @@ class Metrics:
     # Review pane, so the Properties sidebar and the Playground's controls do
     # not open to different widths and read as two different kinds of panel.
     dock_w       = 360
+    # The navigation rail down the left of every pane: Review's sidebar,
+    # Analyze's form column, and the Datasets tool panel all set exactly this
+    # width, and the title bar's mode segment is pinned to it so the three
+    # line up as one column rather than three that nearly agree. It lived as
+    # `app_shell_view.RAIL_W` inside the Review pane while the other two panes
+    # imported it across a package boundary to stay aligned.
+    rail_w       = 329
     # Vertical and horizontal padding the item delegate takes inside a list or
     # tree row. Tokens rather than literals in the QSS because a caller sizing a
     # row's **index widget** has to add them back: Qt gives that widget the
@@ -1216,12 +1223,17 @@ QTabBar#PlottingSubTabs::tab:selected {{
 }}
 
 /* ── Plate-map well buttons (WellButton grid) ─────────────────────────── */
-/* Used by the picker grids that use ``WellButton`` / ``build_plate_grid``
-   (Statistics / Image Table / Segmentation / Home / Bar Plots).
-   Driven by ``WellButton.set_state(...)`` via the dynamic ``state`` property;
-   the per-widget overrides in ``WellViewerApp._style_plate_button`` (Stats /
-   bar pickers) take precedence for those grids. Keep the 18px box in sync with
-   ``well_viewer.views.well_button.WELL_SIZE``. */
+/* DEAD, and kept only until someone verifies it can go. Nothing in this tree
+   sets the ``WellButton`` object name, so none of these selectors can match:
+   `grep -rn WellButton --include='*.py'` finds this block and nothing else.
+   Every symbol the previous version of this comment cited is gone too —
+   ``WellButton``, ``build_plate_grid``, ``WellButton.set_state``,
+   ``_style_plate_button`` and ``review.views.well_button.WELL_SIZE`` — and the
+   package rename rewrote the last of those prefixes, which made a long-stale
+   reference read as freshly maintained. Plate maps are drawn by
+   ``widgets/well_plate_selector.py`` now. Removing the rules is a change to
+   the stylesheet and belongs in its own commit, with the QSS diffed before and
+   after. */
 QPushButton#WellButton {{
     min-width: 18px; min-height: 18px; max-width: 18px; max-height: 18px;
     padding: 0;

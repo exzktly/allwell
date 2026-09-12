@@ -9,7 +9,7 @@ an `install_…_controls` function — while §5's layer diagram called the pack
    frozen file list, `test_services_have_no_qt_imports` walked `services/`, and
    `test_widgets_do_not_import_the_app` guards a *direction* rather than Qt.
    `tests/test_layering.py` does cover `domain/`, but only against imports of
-   `well_viewer.features` — a different axis entirely.
+   `review.features` — a different axis entirely.
 2. **The naming guard cannot see outside `features/`.** Under `features/`, a Qt
    builder without a `_view` suffix fails `test_feature_module_naming`; that is
    the one automated signal saying "this file builds widgets", and it was scoped
@@ -25,7 +25,7 @@ pulling in PySide6". The Qt was known about and the pure half was deliberately
 split out; nothing said the Qt half had to leave `domain/` too.
 
 `widgets` is forbidden alongside Qt itself: importing a widget pulls Qt
-transitively, the same hole `test_services_do_not_import_well_viewer` plugs for
+transitively, the same hole `test_services_do_not_import_review` plugs for
 `services/`.
 
 `persistence/` is deliberately **not** listed. ARCHITECTURE claims Qt-freeness
@@ -48,12 +48,12 @@ FORBIDDEN = QT_ROOTS | {"widgets"}
 QT_FREE_ROOTS = {
     "pipeline": "§3 — the analysis-pipeline package, run headless on a worker",
     "util": "§3 — general Qt-free helpers the pipeline imports",
-    "services": "§13 — CLI-reusable, so no Qt and no well_viewer",
-    "well_viewer/domain": "§5 — Qt-free models + pure logic",
-    "well_viewer/data": "§5 — IO + decode",
+    "services": "§13 — CLI-reusable, so no Qt and no review",
+    "review/domain": "§5 — Qt-free models + pure logic",
+    "review/data": "§5 — IO + decode",
 }
 
-#: The one file `well_viewer/data` is still allowed to build widgets in.
+#: The one file `review/data` is still allowed to build widgets in.
 #: `crop_tool.py` is a rubber-band drag interaction (`QRubberBand`, `QLabel`,
 #: `QPushButton`) that hid behind §5's old "Qt-free where practical" hedge —
 #: untestable phrasing, which is why the hedge is gone and this is a number
@@ -61,7 +61,7 @@ QT_FREE_ROOTS = {
 #: `controller.py` is a separate decision this list makes visible rather than
 #: silent. Shrink-only: never add an entry without writing down why.
 ALLOWLIST = {
-    "well_viewer/data/crop_tool.py",
+    "review/data/crop_tool.py",
 }
 
 
@@ -90,7 +90,7 @@ def test_qt_free_layers_import_no_qt():
                     offenders.append(f"{rel}:{node.lineno} imports {top}  ({why})")
     assert not offenders, (
         "Qt reached a layer ARCHITECTURE describes as Qt-free. A Qt builder "
-        "belongs in `well_viewer/core/` (cross-cutting) or the owning "
+        "belongs in `review/core/` (cross-cutting) or the owning "
         "`features/<name>/` package, named `*_view.py`; the pure half it needs "
         "can stay where it is:\n  " + "\n  ".join(offenders)
     )
@@ -121,7 +121,7 @@ def test_the_allowlist_is_live():
 #: "Module scope" is not "``tree.body``": an import inside a module-level ``if``
 #: or ``try`` still runs at import time, and a first draft of this that walked
 #: only the top-level statement list was evaded by
-#: ``if os.environ.get(...) != "1": from well_viewer.core.ui_helpers import …``.
+#: ``if os.environ.get(...) != "1": from review.core.ui_helpers import …``.
 #: So the whole tree is walked and only imports *inside a function or class
 #: body* are skipped.
 def _module_scope_imports(tree: ast.Module) -> set[str]:
@@ -172,7 +172,7 @@ def _qt_path_from(start: str) -> list[str] | None:
             # test was written for, one module further out.
             if top in FORBIDDEN:
                 return path + [imported]
-            if top == "well_viewer" and imported not in seen:
+            if top == "review" and imported not in seen:
                 seen.add(imported)
                 queue.append((imported, path + [imported]))
     return None
@@ -186,7 +186,7 @@ def test_a_qt_free_layer_stays_importable_without_qt():
     packages cites that test as the guarantee. ``domain/stats_compute`` imported
     two pure ``ctx`` readers from ``core.channel_state_controller``, which
     imported ``core.ui_helpers``, which imports ``PySide6.QtCore``: ``import
-    well_viewer.domain.fold_change`` failed with ``ImportError:
+    review.domain.fold_change`` failed with ``ImportError:
     libQt6Core.so.6`` on a machine with no Qt libraries.
 
     The chain is reported in full, because the fix is almost never in the file
@@ -195,7 +195,7 @@ def test_a_qt_free_layer_stays_importable_without_qt():
     """
     offenders: list[str] = []
     for root, why in sorted(QT_FREE_ROOTS.items()):
-        if not root.startswith("well_viewer"):
+        if not root.startswith("review"):
             continue    # the direct check already covers packages outside it
         for path in sorted((REPO_ROOT / root).rglob("*.py")):
             if "__pycache__" in path.parts:

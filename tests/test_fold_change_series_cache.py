@@ -14,9 +14,9 @@ are the control.
 """
 from __future__ import annotations
 
-from well_viewer.domain import fold_change as _fc
-from well_viewer.domain.control_ref import ControlRef
-from well_viewer.domain.fold_change_series_cache import ControlSeriesCache
+from review.domain import fold_change as _fc
+from review.domain.control_ref import ControlRef
+from review.domain.fold_change_series_cache import ControlSeriesCache
 
 from tests.conftest import MockApp, make_agg
 
@@ -134,7 +134,7 @@ def test_a_multi_member_redraw_builds_each_control_series_once():
     both axes on — the configuration where the cross-axis stacking blocks
     resolve denominators inside the member loop.
     """
-    from well_viewer.features.barplot.collect import collect_bar_items
+    from review.features.barplot.collect import collect_bar_items
 
     n_members, n_tps = 6, 4
     pts, selections = {}, []

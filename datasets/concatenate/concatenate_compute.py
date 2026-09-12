@@ -38,8 +38,8 @@ from pathlib import Path
 
 from util.aw_safe import swallow
 from util.timepoint import parse_hours, sort_key
-from well_viewer.data.image_identity import PipelineSchema, load_schema
-from datasets._common.dataset_paths import (
+from domain.image_identity import PipelineSchema, load_schema
+from datasets.core.dataset_paths import (
     make_dataset_api,
     DatasetPaths,
     dataset_wells,
@@ -53,7 +53,7 @@ from datasets._common.dataset_paths import (
     check_compatible as _check_compatible,
     known_channel_tokens as _known_channel_tokens,
 )
-from datasets._common.member_names import rewrite_member_field
+from datasets.core.member_names import rewrite_member_field
 
 # Written at the start of a concatenation and removed only after the merged
 # sidecar is written — the sole authority for "a previous attempt into this
@@ -77,7 +77,7 @@ class ConcatError(Exception):
 
 
 # The five dataset entry points, bound to this tool's error class and its
-# own in-progress marker. See ``_common.dataset_paths.make_dataset_api``
+# own in-progress marker. See ``core.dataset_paths.make_dataset_api``
 # for why they are generated rather than written out: three tools carried
 # the same five wrappers, differing only in these two choices.
 _api = make_dataset_api(ConcatError, IN_PROGRESS_MARKER)
@@ -202,7 +202,7 @@ def remap_timepoint_label(old_label: str, offset_hours: float, fmt: TimepointFor
 def check_compatible(info1: dict, info2: dict) -> None:
     """Raise :class:`ConcatError` if the two sidecars aren't concatenatable.
 
-    The comparison itself is :func:`datasets._common.dataset_paths.check_compatible`,
+    The comparison itself is :func:`datasets.core.dataset_paths.check_compatible`,
     which Merge Plates needs too; this wrapper only names the error class, the
     same shape as :func:`resolve_dataset` above.
     """
@@ -310,7 +310,7 @@ def merge_info(info1: dict, info2: dict, *, offset_hours: float, tp_format: Time
 
 
 def known_channel_tokens(info1: dict, info2: dict) -> tuple[str, ...]:
-    """Re-export of :func:`datasets._common.dataset_paths.known_channel_tokens`,
+    """Re-export of :func:`datasets.core.dataset_paths.known_channel_tokens`,
     pinned to this module's two-dataset signature so existing callers and tests
     are unchanged."""
     return _known_channel_tokens(info1, info2)
@@ -367,7 +367,7 @@ def rewrite_member_name(
     shifted by *offset_hours*.
 
     A thin timepoint-shift wrapper over the field-agnostic
-    :func:`datasets._common.member_names.rewrite_member_field` — see that
+    :func:`datasets.core.member_names.rewrite_member_field` — see that
     module for the structural-conformance gate this shares with Merge
     plates' well-token rewrite.
     """

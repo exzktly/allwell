@@ -164,7 +164,7 @@ def test_no_exporter_formats_a_spread_without_a_blank_for_undefined():
 # ── what the rule itself does ────────────────────────────────────────────────
 
 def test_spread_cell_blanks_the_undefined_and_keeps_a_measured_zero():
-    from well_viewer.features.export.service import spread_cell
+    from review.features.export.service import spread_cell
 
     assert spread_cell(float("nan")) == ""
     assert spread_cell(None) == ""
@@ -179,7 +179,7 @@ def test_spread_cell_blanks_the_undefined_and_keeps_a_measured_zero():
 def test_spread_unit_names_the_replicate_the_app_is_using():
     """One spelling of the FOV rule — ``stats_compute.replicate_unit`` — so an
     exported column cannot disagree with the statistic the plot drew."""
-    from well_viewer.features.export.service import spread_unit_for
+    from review.features.export.service import spread_unit_for
     from tests.conftest import MockApp, make_agg
 
     ctx = getattr(MockApp(per_well_pts={"A01": [make_agg(0.0, 1.0)]}), "_ctx", None)
@@ -199,7 +199,7 @@ def test_the_bar_row_says_fov_for_a_lone_well_under_aggregate_fovs():
     branches, so a solo well's row states one — and used to state it under an
     empty unit with its spread blanked, while ``err_n_above_<band>`` two
     columns away carried that same spread. The Line tab says ``fov`` here."""
-    from well_viewer.features.export.service import (
+    from review.features.export.service import (
         _replicate_unit_for, bar_metric_row,
     )
 
@@ -223,7 +223,7 @@ def test_the_bar_row_says_fov_for_a_lone_well_under_aggregate_fovs():
 def test_the_bar_row_still_leaves_a_lone_well_empty_without_the_toggle():
     """The documented case must not move: one well is not a replicate
     aggregation, and a 0.000000 there would read as replicates that agreed."""
-    from well_viewer.features.export.service import (
+    from review.features.export.service import (
         _replicate_unit_for, bar_metric_row,
     )
 
@@ -249,7 +249,7 @@ def test_a_spread_that_was_not_computed_draws_no_whisker():
     """``capsize`` draws a cap at every point even where the bar has zero
     length, so the batch figure wore a cross at the centre of markers the tab
     left bare. Both figures ask the same function now."""
-    from well_viewer.features.scatter.controller import whiskers_or_none
+    from review.features.scatter.controller import whiskers_or_none
 
     assert whiskers_or_none([float("nan")]) is None
     assert whiskers_or_none([0.0]) is None
@@ -273,7 +273,7 @@ def _agg_export(tmp_path, monkeypatch, *, x_err, y_err, per_fov=False,
     import io
     import types
 
-    from well_viewer.features.export import service as EX
+    from review.features.export import service as EX
 
     out = tmp_path / "scatter_agg.csv"
     scatter_data = {
@@ -362,8 +362,8 @@ def test_a_bar_that_measured_nothing_names_no_unit_and_no_spread():
     whose every other cell is blank. That is the fabricated whisker this file
     exists to prevent, and it arrived by way of its own fix.
     """
-    from well_viewer.features.barplot.collect import BarItem
-    from well_viewer.features.export.service import (
+    from review.features.barplot.collect import BarItem
+    from review.features.export.service import (
         _replicate_unit_for, bar_metric_row,
     )
 
@@ -396,7 +396,7 @@ def test_the_events_spread_records_a_measured_zero():
     was zero and that there was none. That column is gone; the survivor keeps
     the measurement.
     """
-    from well_viewer.features.export.service import bar_metric_row
+    from review.features.export.service import bar_metric_row
 
     row = bar_metric_row(
         mean=1.0, spread=0.1, frac=0.5, frac_spread=0.0, has=True,
@@ -415,7 +415,7 @@ def test_the_bar_fold_change_spread_is_blank_when_it_is_undefined():
     undefined, so gating the spread on it wrote the literal ``nan`` — in the
     same row where ``err_<band>_<ch>_<metric>`` was correctly blank, and
     against a Line CSV that blanks the identical cell."""
-    from well_viewer.features.export.service import attach_bar_fold_change_columns
+    from review.features.export.service import attach_bar_fold_change_columns
 
     row: dict = {}
     attach_bar_fold_change_columns(
@@ -446,7 +446,7 @@ def test_a_blanked_fold_change_point_reports_no_spread_either():
     0.0, so guarding the two independently wrote ``0.000000`` beside an empty
     ``fold_change_mean`` on exactly the rows whose outcome says the control
     never resolved. Both line writers, on-tab and batch."""
-    from well_viewer.features.batch_export.base_panel import _attach_fc_row
+    from review.features.batch_export.base_panel import _attach_fc_row
 
     row: dict = {}
     blanked = (0.0, float("nan"), 0.0, float("nan"), 0.0, 0)

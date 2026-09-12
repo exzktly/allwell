@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from well_viewer.features.image_browser.image_table.image_compose import (
+from review.features.image_browser.image_table.image_compose import (
     OVERLAY_CHAN,
     composite_additive_rgb,
 )
@@ -55,7 +55,7 @@ def test_none_and_empty_inputs_return_none():
 def test_overlay_cell_rgb_blends_every_channel(monkeypatch):
     """overlay_cell_rgb loads + renders each channel through the per-channel path
     and additively merges them — so a red + green channel merge to yellow."""
-    from well_viewer.features.image_browser.image_table import image_compose as IC
+    from review.features.image_browser.image_table import image_compose as IC
 
     colors = {"R": _solid((255, 0, 0)), "G": _solid((0, 255, 0))}
     # Stub the two leaf calls so the test needs no real dataset: _load_array
@@ -83,8 +83,8 @@ def test_overlay_cell_rgb_blends_every_channel(monkeypatch):
 
 @pytest.mark.qt
 def test_overlay_collapses_channel_axis_and_marks_cells(image_table_app):
-    from well_viewer.features.image_browser.image_table import controller as C
-    from well_viewer.features.image_browser.image_table import builder_view as B
+    from review.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import builder_view as B
 
     app = image_table_app
     ctx = app._ctx
@@ -125,10 +125,10 @@ def test_overlay_collapses_channel_axis_and_marks_cells(image_table_app):
 
 @pytest.mark.qt
 def test_export_figure_reflects_collapsed_overlay(image_table_app):
-    from well_viewer.features.image_browser.image_table import controller as C
-    from well_viewer.features.image_browser.image_table import builder_view as B
-    from well_viewer.features.image_browser.image_table.export import _build_export_figure
-    from well_viewer.features.image_browser.image_table.renderer import FACET_GID
+    from review.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import builder_view as B
+    from review.features.image_browser.image_table.export import _build_export_figure
+    from review.features.image_browser.image_table.renderer import FACET_GID
 
     def _cell_axes(fig):
         # The figure also carries the facet label strips; count only image cells.

@@ -30,7 +30,7 @@ import types
 
 import pytest
 
-from well_viewer.core.ui_helpers import (
+from review.core.ui_helpers import (
     NOTES_WIDGET_KEYS,
     clear_notes_editors,
     commit_focused_notes,
@@ -273,7 +273,7 @@ def test_a_deleted_widget_does_not_take_the_save_down(fn):
 @pytest.fixture()
 def two_editors(monkeypatch):
     """Put a second key on the roster, the way adding an editor would."""
-    import well_viewer.core.ui_helpers as uh
+    import review.core.ui_helpers as uh
     keys = ("_home_notes_edit", "_second_notes_edit")
     monkeypatch.setattr(uh, "NOTES_WIDGET_KEYS", keys)
     return keys

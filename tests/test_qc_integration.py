@@ -9,9 +9,9 @@ pytestmark = pytest.mark.qt
 
 pd = pytest.importorskip("pandas")
 
-from well_viewer.data.data_loading import df_included_mask
-from well_viewer.features.qc.controller import get_qc_params, set_qc_params
-from well_viewer.features.qc.params import QCParams
+from review.data.data_loading import df_included_mask
+from review.features.qc.controller import get_qc_params, set_qc_params
+from review.features.qc.params import QCParams
 
 
 def test_qc_gate_excludes_small_cells_via_chokepoint(loaded_app):

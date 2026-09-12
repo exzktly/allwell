@@ -24,9 +24,9 @@ import pytest
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 _RENDERERS = [
-    "well_viewer/features/barplot/renderer.py",
-    "well_viewer/features/lineplot/controller.py",
-    "well_viewer/features/scatter/controller.py",
+    "review/features/barplot/renderer.py",
+    "review/features/lineplot/controller.py",
+    "review/features/scatter/controller.py",
 ]
 
 
@@ -66,7 +66,7 @@ def test_the_predicate_filters_by_well_paths():
     """The half the inline copies got wrong first: a stale label plots nothing."""
     import types
 
-    from well_viewer.core.selection_controller import has_plottable_selection
+    from review.core.selection_controller import has_plottable_selection
 
     def _ctx(selected, well_paths, selections=()):
         return types.SimpleNamespace(state=types.SimpleNamespace(

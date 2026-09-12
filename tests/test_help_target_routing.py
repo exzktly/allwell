@@ -84,21 +84,21 @@ def test_analyze_falls_back_to_its_own_overview(pane):
 # ── Review ───────────────────────────────────────────────────────────────────
 
 def test_review_still_resolves_its_leaf(monkeypatch):
-    import well_viewer.core.tab_controller as tc
+    import review.core.tab_controller as tc
     monkeypatch.setattr(tc, "current_centre_tab", lambda _ctx: "Heat Map")
     shell = _shell("review", leaf="Heat Map")
     assert shell._help_section_for_current_page() == "Heat Map"
 
 
 def test_review_loose_match_survives_a_prefixed_leaf(monkeypatch):
-    import well_viewer.core.tab_controller as tc
+    import review.core.tab_controller as tc
     monkeypatch.setattr(tc, "current_centre_tab", lambda _ctx: "Bar Plots (split)")
     shell = _shell("review", leaf="Bar Plots (split)")
     assert shell._help_section_for_current_page() == "Bar Plots"
 
 
 def test_review_unknown_leaf_lands_on_the_review_overview(monkeypatch):
-    import well_viewer.core.tab_controller as tc
+    import review.core.tab_controller as tc
     monkeypatch.setattr(tc, "current_centre_tab", lambda _ctx: "Nonesuch")
     shell = _shell("review", leaf="Nonesuch")
     assert shell._help_section_for_current_page() == help_topics.MODE_OVERVIEW["review"]
@@ -113,7 +113,7 @@ def test_review_without_a_ctx_lands_on_the_review_overview():
 
 
 def test_review_lands_on_the_overview_when_the_leaf_lookup_raises(monkeypatch):
-    import well_viewer.core.tab_controller as tc
+    import review.core.tab_controller as tc
 
     def _boom(_ctx):
         raise RuntimeError("tab controller not ready")

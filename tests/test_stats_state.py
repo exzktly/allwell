@@ -6,7 +6,7 @@ select / delete / rename / clear and the active-group cursor clamping.
 
 from __future__ import annotations
 
-from well_viewer.features.stats.state import StatsState
+from review.features.stats.state import StatsState
 
 
 def test_defaults():
@@ -96,7 +96,7 @@ def test_set_groups_empty_resets_cursor():
 def test_stats_cache_invalidate():
     # The group-statistics result cache moved off StatsState into the core
     # StatsCacheState slice (so plotting works without the Statistics feature).
-    from well_viewer.core.stats_cache_state import StatsCacheState
+    from review.core.stats_cache_state import StatsCacheState
     sc = StatsCacheState(cache={"k": 1})
     sc.invalidate()
     assert sc.cache == {}

@@ -88,30 +88,111 @@ def test_manifest_includes_all_pipeline_and_util_files():
     )
 
 
+def _spec_data_entries() -> list[tuple[str, str]]:
+    """The spec's ``(source, dest)`` data tuples, as repo-relative source paths.
+
+    Parsed from the spec's syntax tree rather than matched as text, because the
+    thing that matters here is the *pair*: a source path bundled to the wrong
+    destination ships the file somewhere the frozen app does not look.
+    """
+    import ast
+
+    spec = (REPO_ROOT / "_Docs" / "_Installation" / "all_well.spec").read_text()
+    out: list[tuple[str, str]] = []
+    for node in ast.walk(ast.parse(spec)):
+        if not isinstance(node, ast.Tuple) or len(node.elts) != 2:
+            continue
+        src, dest = node.elts
+        if not isinstance(dest, ast.Constant) or not isinstance(dest.value, str):
+            continue
+        # `str(_parent / "a" / "b")` → the segments after _parent.
+        parts: list[str] = []
+        cur = src
+        while isinstance(cur, ast.Call) and getattr(cur.func, "id", "") == "str":
+            cur = cur.args[0]
+        while isinstance(cur, ast.BinOp) and isinstance(cur.op, ast.Div):
+            if isinstance(cur.right, ast.Constant):
+                parts.insert(0, cur.right.value)
+            cur = cur.left
+        if isinstance(cur, ast.Name) and cur.id == "_parent" and parts:
+            out.append(("/".join(parts), dest.value))
+    return out
+
+
 def test_frozen_bundle_ships_the_remote_manifest():
-    """Every manifest file must be bundled into the frozen PyInstaller app.
+    """Every manifest file must be bundled, **and at the path the runner reads**.
 
     A built app resolves the remote-manifest paths under ``_MEIPASS`` (the runner
     uploads them to the SLURM/SSH worker), so each entry has to ship in the
-    bundle. ``all_well.spec`` bundles the first-party package dirs whole plus a
-    list of top-level scripts / data files; a manifest entry outside those — e.g.
-    ``_Docs/requirements-remote.txt`` — must be added to the spec explicitly or a
-    built-app remote run aborts with ``missing local file``. (Source runs are
-    unaffected — this guards the frozen build specifically.)"""
+    bundle *at its own relative path*. ``all_well.spec`` bundles the first-party
+    package dirs whole plus a list of explicit ``(source, dest)`` data tuples; a
+    manifest entry outside a bundled package — ``requirements-remote.txt``
+    is the only one today — must appear as such a tuple whose destination equals
+    the entry's own parent directory.
+
+    **The destination is the half that fails silently**, which is why this
+    checks the pair. The previous version asked only whether the file's
+    *basename* appeared anywhere in the spec text. Move the file and update the
+    manifest and the spec's source path while leaving the old destination, and
+    PyInstaller builds cleanly, this guard passes on the basename, and the only
+    symptom is a frozen-app remote run aborting with ``missing local file`` —
+    in a build the spec's own comments record as exercised by no test at all.
+
+    The bundled-package list is read out of the spec rather than restated here.
+    A second roster of the same thing is how a package added to one and not the
+    other goes unnoticed, and this file is not the place that list lives.
+    """
     from services.remote_runner import _REQUIRED_REMOTE_FILES
 
-    spec = (REPO_ROOT / "_Docs" / "_Installation" / "all_well.spec").read_text()
-    bundled_pkgs = ("well_viewer", "widgets", "ui", "services", "pipeline", "util")
-    missing = [
-        f for f in _REQUIRED_REMOTE_FILES
-        if f.split("/")[0] not in bundled_pkgs          # not in a bundled package
-        and f not in spec and Path(f).name not in spec  # nor named in the spec
-    ]
+    entries = _spec_data_entries()
+    assert entries, (
+        "parsed no (source, dest) data tuples out of all_well.spec — its "
+        "format changed and this guard would now pass whatever the spec says")
+
+    spec_text = (REPO_ROOT / "_Docs" / "_Installation" / "all_well.spec").read_text()
+    bundled_pkgs = _spec_bundled_packages(spec_text)
+    by_source = dict(entries)
+
+    missing, misplaced = [], []
+    for f in _REQUIRED_REMOTE_FILES:
+        if f.split("/")[0] in bundled_pkgs:
+            continue
+        if f not in by_source:
+            missing.append(f)
+            continue
+        want = str(Path(f).parent) if "/" in f else "."
+        got = by_source[f]
+        if got != want:
+            misplaced.append(f"{f} → bundled to {got!r}, must be {want!r}")
+
     assert not missing, (
         "remote-manifest file(s) not bundled by all_well.spec — a built-app "
         "remote run aborts with 'missing local file'. Add them to the spec's "
         "data list:\n  " + "\n  ".join(missing)
     )
+    assert not misplaced, (
+        "remote-manifest file(s) bundled to the wrong destination. The frozen "
+        "app looks for each at _MEIPASS/<its own relative path>, so the "
+        "destination must equal the parent directory of the manifest string:\n  "
+        + "\n  ".join(misplaced) + "\n\n"
+        "This is what happens when the file moves and only one of the two "
+        "halves follows. The build succeeds and only a remote run from the "
+        "shipped app notices."
+    )
+
+
+def _spec_bundled_packages(spec_text: str) -> set[str]:
+    """The package names the spec's `for _pkg in (...)` walk bundles whole."""
+    import ast
+
+    for node in ast.walk(ast.parse(spec_text)):
+        if (isinstance(node, ast.For) and getattr(node.target, "id", "") == "_pkg"
+                and isinstance(node.iter, ast.Tuple)):
+            return {e.value for e in node.iter.elts
+                    if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+    raise AssertionError(
+        "no `for _pkg in (...)` package walk found in all_well.spec — the "
+        "spec's bundling changed shape and this guard is measuring nothing")
 
 
 def test_no_profile_bundle_drops_a_remote_manifest_file():
@@ -178,6 +259,6 @@ def test_bootstrap_preflight_uses_the_runner_manifest():
     runner uploads, so the two can never drift (the old ``REQUIRED_FILES`` tuple
     silently rotted to a stale 4-of-14 subset)."""
     from services.remote_runner import _REQUIRED_REMOTE_FILES
-    from scripts._bootstrap_lib import _required_files
+    from services.remote_bootstrap import _required_files
 
     assert tuple(_required_files()) == tuple(_REQUIRED_REMOTE_FILES)

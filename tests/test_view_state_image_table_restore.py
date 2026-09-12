@@ -12,9 +12,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.persistence import view_state as vs
-from well_viewer.features.image_browser.image_table import controller as C
-from well_viewer.features.image_browser.image_table import view_state_io as vsio
+from review.persistence import view_state as vs
+from review.features.image_browser.image_table import controller as C
+from review.features.image_browser.image_table import view_state_io as vsio
 
 pytestmark = pytest.mark.qt
 
@@ -32,15 +32,15 @@ class _RuntimeNS:
         return None
 
 
-# ── Fast-lane coverage (no full WellViewerApp → not auto-marked ``slow``) ─────
+# ── Fast-lane coverage (no full ReviewApp → not auto-marked ``slow``) ─────
 
 def test_apply_image_table_crop_restore_does_not_generate():
     """Restoring a crop must NOT fire the CropTool's on_change
     (image_table_generate) — otherwise dataset load composites the whole grid
     off disk. Pure: no QApplication needed (CropTool builds no widgets)."""
     from types import SimpleNamespace
-    from well_viewer.data.crop_tool import CropTool
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from review.data.crop_tool import CropTool
+    from review.features.image_browser.image_table.state import ImageTableState
 
     calls = []
     ct = CropTool(on_change=lambda: calls.append(1))
@@ -58,8 +58,8 @@ def test_cells_and_channel_opts_round_trip_minimal():
     """Per-cell values (plain dicts) and per-channel render options round-trip
     through snapshot → apply, without constructing the full app."""
     from types import SimpleNamespace
-    from well_viewer.data.crop_tool import CropTool
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from review.data.crop_tool import CropTool
+    from review.features.image_browser.image_table.state import ImageTableState
 
     cells = [[{"well": "A01", "chan": "mCherry", "tp": "0", "fov": "1"}]]
     st = ImageTableState(rows=1, cols=1)
@@ -107,7 +107,7 @@ def test_the_tables_scope_round_trips():
     plate across the whole time course, with the right channels on it, which is
     why it read as "the settings did not restore".
     """
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from review.features.image_browser.image_table.state import ImageTableState
 
     st = ImageTableState(rows=3, cols=1)
     st.active_wells = {"A01", "A02", "B01"}
@@ -127,7 +127,7 @@ def test_the_scope_survives_json():
     into ``persistence.json``. A fix that stored them raw would round-trip in
     memory and fail on save, so the serialisable form is the contract."""
     import json
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from review.features.image_browser.image_table.state import ImageTableState
 
     st = ImageTableState(rows=1, cols=1)
     st.active_wells = {"B02", "A01"}
@@ -139,7 +139,7 @@ def test_the_scope_survives_json():
 def test_all_wells_round_trips_as_all():
     """An empty selection means "all", so it is omitted rather than written out
     as every well on the plate — and restores to the same table either way."""
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from review.features.image_browser.image_table.state import ImageTableState
 
     st = ImageTableState(rows=1, cols=1)
     snap = vsio.snapshot_image_table(_scope_ctx(st, [[{"well": "A01"}]]))
@@ -156,7 +156,7 @@ def test_a_saved_plot_from_before_this_does_not_clear_the_live_selection():
     for a missing key: every plot saved before the scope was captured is silent
     about it, and wiping the user's plate selection on their behalf would be a
     second bug rather than a graceful fallback."""
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from review.features.image_browser.image_table.state import ImageTableState
 
     st = ImageTableState()
     st.active_wells = {"C05"}
@@ -220,8 +220,8 @@ def test_apply_image_table_refreshes_the_builder_shelf(monkeypatch):
     it doesn't show stale chips is far more Qt-plumbing than the behavior
     itself warrants."""
     from types import SimpleNamespace
-    from well_viewer.data.crop_tool import CropTool
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from review.data.crop_tool import CropTool
+    from review.features.image_browser.image_table.state import ImageTableState
 
     calls = []
     # apply_image_table imports builder_refresh at module scope (no cycle: the
@@ -249,13 +249,13 @@ def test_image_table_selection_survives_dataset_reload_via_load_directory(image_
     ``load_directory``'s ``on_dataset_loaded`` fan-out (``registry.
     _loaded_image_table``) entirely, which is exactly the gap that let the
     shelf-staleness bug above go unexercised by any full-path test."""
-    from well_viewer.features.image_browser.image_table.state import (
+    from review.features.image_browser.image_table.state import (
         Axis, ChannelSpec, TableSpec,
     )
-    from well_viewer.features.image_browser.image_table.build_layout import (
+    from review.features.image_browser.image_table.build_layout import (
         image_table_apply_spec,
     )
-    from well_viewer.features.image_browser.image_table.builder_view import (
+    from review.features.image_browser.image_table.builder_view import (
         _base_channels,
     )
 
@@ -349,11 +349,11 @@ def test_restoring_a_saved_plot_does_not_regenerate_the_grid(image_table_app):
     match the controls, so the restored table is marked stale and the shelf
     header carries its "edited — press Generate" cue.
     """
-    from well_viewer.core.ui_helpers import clear_layout
-    from well_viewer.features.saved_plots.controller import (
+    from review.core.ui_helpers import clear_layout
+    from review.features.saved_plots.controller import (
         restore_saved_plot, save_plot_from_card,
     )
-    from well_viewer.features.saved_plots.state import get_store
+    from review.features.saved_plots.state import get_store
 
     app = image_table_app
     ctx = app._ctx
@@ -391,8 +391,8 @@ def test_a_record_with_no_image_table_block_says_so(image_table_app):
     cross-cutting state and nothing tab-specific. Silence there reads as a
     broken Restore, and the user re-clicks it rather than re-saving the plot —
     the one thing that would actually fix it."""
-    from well_viewer.features.saved_plots.controller import restore_saved_plot
-    from well_viewer.features.saved_plots.state import SavedPlot, get_store
+    from review.features.saved_plots.controller import restore_saved_plot
+    from review.features.saved_plots.state import SavedPlot, get_store
 
     app = image_table_app
     ctx = app._ctx

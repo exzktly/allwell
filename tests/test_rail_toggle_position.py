@@ -1,4 +1,4 @@
-"""The floating rail collapse toggle's position (well_viewer/core/app_shell_view.py).
+"""The floating rail collapse toggle's position (review/core/app_shell_view.py).
 
 Regression guard for two things at once: the toggle must sit vertically
 centred on whichever left panel is showing (not pinned level with the rail
@@ -24,7 +24,7 @@ def _settle(app) -> None:
 
 
 def test_toggle_never_overlaps_the_well_picker_plate(viewer_app):
-    from well_viewer.core.app_shell_view import position_rail_toggle
+    from review.core.app_shell_view import position_rail_toggle
 
     app = viewer_app
     # Drain synchronously rather than leaving deferred QTimer.singleShot(0, …)
@@ -66,7 +66,7 @@ def test_toggle_centres_on_the_panel_when_nothing_to_avoid(viewer_app):
     """With the plate collision out of the way, the toggle must land near
     the panel's true vertical centre -- not pinned near the top the way the
     old dataset-head-level positioning did."""
-    from well_viewer.core.app_shell_view import position_rail_toggle
+    from review.core.app_shell_view import position_rail_toggle
 
     app = viewer_app
     # Drain synchronously rather than leaving deferred QTimer.singleShot(0, …)

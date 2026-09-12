@@ -12,12 +12,12 @@ Versions of the fix had accumulated in four places — ``persistence/_io``,
 ``services/run_journal``, ``pipeline/io``, and a tmp + ``replace`` pair written
 out longhand in six more modules — while six other sites did not have it at all.
 Sitting in ``util`` puts it where every layer can reach it: ``datasets/``,
-``pipeline/``, ``services/``, ``well_viewer/`` and ``process_microscopy`` all
+``pipeline/``, ``services/``, ``review/`` and ``process_microscopy`` all
 import from here, and it pulls in nothing but the standard library and
 ``util.aw_safe``.
 
 One specialised version remains on purpose, and it is not a copy of this rule:
-``well_viewer.persistence._io.atomic_write_json`` wraps *both* the open and the
+``review.persistence._io.atomic_write_json`` wraps *both* the open and the
 replace in a retry for Windows ``PermissionError`` (an antivirus scanner or a
 cloud-sync client holding the handle), which is a different control flow rather
 than an argument.

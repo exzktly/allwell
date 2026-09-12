@@ -26,7 +26,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from well_viewer.data.data_loading import _STRING_COLS, load_well_csv
+from review.data.data_loading import _STRING_COLS, load_well_csv
 
 
 def _old_load(path):
@@ -35,7 +35,7 @@ def _old_load(path):
     Kept here rather than imported because the point is to compare the new
     result to what the old code produced, and the old code is gone.
     """
-    from well_viewer.data.data_loading import (
+    from review.data.data_loading import (
         _METRIC_SUFFIXES, normalize_fov_series,
     )
     df = pd.read_csv(path, dtype=str, keep_default_na=False)

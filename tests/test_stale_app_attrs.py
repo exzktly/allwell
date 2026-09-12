@@ -1,4 +1,4 @@
-"""Guardrail: a test must not name a ``WellViewerApp`` attribute that no longer
+"""Guardrail: a test must not name a ``ReviewApp`` attribute that no longer
 exists anywhere in the app.
 
 The `ctx` migration keeps moving loose ``app._foo`` attributes onto typed state
@@ -37,7 +37,7 @@ from tests._repo_scan import parse_source
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TESTS = Path(__file__).resolve().parent
 
-# The fixtures that yield a real ``WellViewerApp``. Mirrors
+# The fixtures that yield a real ``ReviewApp``. Mirrors
 # ``tests/test_frozen_ctx_guardrail.py::_REAL_APP_FIXTURES`` — a test that
 # receives one of these is talking to the real object, so its attribute names
 # have to be real too. A test building its own SimpleNamespace mock may invent
@@ -58,7 +58,7 @@ def _app_source_tokens() -> set:
     Analyze pane define app attributes too.
     """
     text = []
-    for path in sorted((REPO_ROOT / "well_viewer").rglob("*.py")):
+    for path in sorted((REPO_ROOT / "review").rglob("*.py")):
         text.append(path.read_text())
     for path in sorted(REPO_ROOT.glob("*.py")):
         text.append(path.read_text())
@@ -112,6 +112,6 @@ def test_tests_do_not_name_removed_app_attributes():
                         f"{how} {node.value.id}.{node.attr} — no such attribute "
                         "anywhere in the app")
     assert not violations, (
-        "Test(s) naming a WellViewerApp attribute that no longer exists. It "
+        "Test(s) naming a ReviewApp attribute that no longer exists. It "
         "moved to typed state or the widget registry — find its current home "
         "and use that:\n  " + "\n  ".join(violations))

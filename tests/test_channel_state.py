@@ -2,13 +2,13 @@
 
 No Qt, no app — these exercise the invariant-enforcing methods directly. The
 point of the teardown is that behaviour moved *into* the state type; this suite
-is what verifies it independently of ``WellViewerApp``.
+is what verifies it independently of ``ReviewApp``.
 """
 
 from __future__ import annotations
 
-from well_viewer.domain.ratio_models import RatioMetric
-from well_viewer.core.channel_state import ChannelState
+from review.domain.ratio_models import RatioMetric
+from review.core.channel_state import ChannelState
 
 
 def _ratio(name: str = "ng_ratio") -> RatioMetric:

@@ -27,7 +27,7 @@ def _repsets(app):
 @pytest.mark.slow
 def test_snapshot_restore_roundtrips_hidden_repsets(loaded_app):
     app = loaded_app
-    from well_viewer.persistence import view_state
+    from review.persistence import view_state
     _repsets(app)
     app._notebook.setCurrentByName("Plotting")
 
@@ -48,7 +48,7 @@ def test_restore_tolerates_missing_visibility_block(loaded_app):
     """Older saved plots carry no selection_visibility → restore leaves the
     current hidden flags untouched (no crash)."""
     app = loaded_app
-    from well_viewer.persistence import view_state
+    from review.persistence import view_state
     _repsets(app)
     app._app_state.selection.selections[0]["hidden"] = True
     view_state.restore(app._ctx, {"selected_wells": []})  # no visibility block

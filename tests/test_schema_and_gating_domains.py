@@ -14,7 +14,7 @@
   slot — its own ``--filename_schema`` help says so — so a valid ``well:fov``
   was rejected with an error naming a field the tool does not use.
 
-* ``well_viewer.data.auto_threshold`` rebuilt the persisted gating block
+* ``review.data.auto_threshold`` rebuilt the persisted gating block
   without telling ``build_gating_block`` which channel is nuclear. The nuclear
   channel's ThreshFracOn default is not the one every other channel gets, so a
   nuclear cutoff sitting at the ordinary readout default read as "unchanged"
@@ -98,7 +98,7 @@ def test_the_zipper_and_plate_grid_agree_on_the_plate():
 # ── the nuclear token reaching the gating block ─────────────────────────────
 
 def test_rebuilding_the_gating_block_keeps_a_nuclear_cutoff_at_the_readout_default(tmp_path):
-    from well_viewer.domain.gating_state import (
+    from review.domain.gating_state import (
         DEFAULT_THRESH_FRAC_ON, build_gating_block, read_nuclear_token,
     )
 
@@ -126,7 +126,7 @@ def test_the_auto_threshold_rebuild_passes_the_token():
     import inspect
     import textwrap
 
-    from well_viewer.data import auto_threshold
+    from review.data import auto_threshold
 
     src = textwrap.dedent(
         inspect.getsource(auto_threshold.apply_auto_thresholds_to_pipeline_info))
@@ -141,7 +141,7 @@ def test_the_auto_threshold_rebuild_passes_the_token():
 
 
 def test_read_nuclear_token_is_quiet_about_a_missing_sidecar(tmp_path):
-    from well_viewer.domain.gating_state import read_nuclear_token
+    from review.domain.gating_state import read_nuclear_token
     assert read_nuclear_token(tmp_path) == ""
 
 

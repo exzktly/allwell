@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from well_viewer.features.home.cell_gating.gating_compute import (
+from review.features.home.cell_gating.gating_compute import (
     format_inclusion_counts,
     inclusion_counts,
 )

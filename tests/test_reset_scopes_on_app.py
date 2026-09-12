@@ -26,8 +26,8 @@ def test_curation_scope_clears_the_cell_overrides_file(loaded_app_shape):
     only ever unlinked ``persistence.json`` — a different file — so every manual
     include/exclude survived a reset that said it had removed them.
     """
-    from well_viewer.features.crop.controller import set_crop_region
-    from well_viewer.persistence.reset_scopes import scope_by_key
+    from review.features.crop.controller import set_crop_region
+    from review.persistence.reset_scopes import scope_by_key
 
     app = loaded_app_shape
     ctx = app._ctx
@@ -57,7 +57,7 @@ def test_sample_definitions_scope_clears_both_copies_of_plot_groups(loaded_app_s
     ``pipeline_info.json`` carries a second copy that hydrates first. Deleting
     persistence.json therefore left the groups fully intact.
     """
-    from well_viewer.persistence.reset_scopes import scope_by_key
+    from review.persistence.reset_scopes import scope_by_key
 
     app = loaded_app_shape
     ctx = app._ctx
@@ -77,7 +77,7 @@ def test_sample_definitions_scope_clears_both_copies_of_plot_groups(loaded_app_s
         "the pipeline_info copy survived; the reload would restore the groups"
     )
     # And the state a reload lands on is genuinely empty.
-    from well_viewer.persistence import plot_groups
+    from review.persistence import plot_groups
     plot_groups.load_from_data_dir(ctx)
     assert ctx.state.selection.plot_groups == []
 
@@ -91,7 +91,7 @@ def test_view_reset_leaves_screen_and_disk_agreeing(loaded_app_shape):
     Those stayed on screen and vanished from disk. The section is now re-saved
     rather than deleted, so the two cannot disagree.
     """
-    from well_viewer.persistence import _doc, view_state
+    from review.persistence import _doc, view_state
 
     app = loaded_app_shape
     ctx = app._ctx
@@ -125,10 +125,10 @@ def test_gating_scope_returns_qc_to_the_run_settings(loaded_app_shape):
     """QC resets to ``None`` so the accessor re-seeds it from the run's own
     ``pipeline_info`` thresholds — blank thresholds would be a state this
     dataset was never in."""
-    from well_viewer.features.qc.controller import get_qc_params
-    from well_viewer.persistence import _doc
-    from well_viewer.persistence.qc_params import _SECTION
-    from well_viewer.persistence.reset_scopes import scope_by_key
+    from review.features.qc.controller import get_qc_params
+    from review.persistence import _doc
+    from review.persistence.qc_params import _SECTION
+    from review.persistence.reset_scopes import scope_by_key
 
     app = loaded_app_shape
     ctx = app._ctx

@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.domain.control_ref import ControlRef
-from well_viewer.domain.fold_change_pairing import (
+from review.domain.control_ref import ControlRef
+from review.domain.fold_change_pairing import (
     CONTROL_FIRST,
     CONTROL_LAST,
     ControlOutcome,
@@ -28,8 +28,8 @@ from well_viewer.domain.fold_change_pairing import (
     shortfall_text,
     summary_text,
 )
-from well_viewer.domain.fold_change_state import FoldChangeState
-from well_viewer.domain.plot_members import member_wells, plotted_member_keys
+from review.domain.fold_change_state import FoldChangeState
+from review.domain.plot_members import member_wells, plotted_member_keys
 
 from tests.conftest import MockApp, make_agg
 

@@ -155,7 +155,7 @@ Install the pip-managed packages. **Always pass `--no-build-isolation`** so
 pip honours the mamba-managed pins above:
 
 ```sh
-pip install --no-build-isolation -r _Docs/requirements.txt
+pip install --no-build-isolation -r requirements.txt
 ```
 
 On Apple Silicon, confirm TensorFlow sees the Metal GPU:
@@ -243,7 +243,7 @@ Install the pip-managed packages. Use the full path to the requirements
 file from repo root:
 
 ```powershell
-pip install --no-build-isolation -r _Docs\requirements.txt
+pip install --no-build-isolation -r requirements.txt
 ```
 
 Verify TensorFlow is CPU-only as expected:
@@ -367,7 +367,7 @@ Any string  preserved as-is and sorted lexicographically
 ### 2. Folders
 
 The input folder is resolved by
-[`services/input_resolution_service.py`](../services/input_resolution_service.py).
+[`services/input_resolution_service.py`](../../services/input_resolution_service.py).
 **Either the dataset folder or the `in/` inside it works** — the two are read the
 same way, so you never have to pick the inner one:
 
@@ -5437,9 +5437,9 @@ quick-reference notes.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the developer-oriented
   architectural overview: what each module does, how the pieces fit
   together, where to add features, and how to debug.
-- [`process_microscopy.py`](../process_microscopy.py) — the pipeline. It's
+- [`process_microscopy.py`](../../process_microscopy.py) — the pipeline. It's
   also a usable CLI (`python process_microscopy.py --help`).
-- [`_Docs/_Installation/`](../_Docs/_Installation/) — the PyInstaller spec
+- [`_Docs/_Installation/`](../_Installation/) — the PyInstaller spec
   + build script for producing the macOS bundle.
-- [`_Docs/requirements.txt`](../_Docs/requirements.txt) — the pinned
+- [`requirements.txt`](../../requirements.txt) — the pinned
   pip-managed dependencies, with environment-setup comments.

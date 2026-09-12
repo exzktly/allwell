@@ -11,9 +11,9 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
-from well_viewer.core.dataset_state import DatasetState
-from well_viewer.data import cache_projectors
-from well_viewer.data.well_repository import WellRepository
+from review.core.dataset_state import DatasetState
+from review.data import cache_projectors
+from review.data.well_repository import WellRepository
 
 
 def _ctx(dataset: DatasetState):

@@ -107,7 +107,7 @@ def test_one_background_well_parser():
     assert split_background_wells(["H12", " G12 "]) == ["H12", "G12"]
     assert split_background_wells("") == []
 
-    from well_viewer.features.image_browser.review_image import collect as RC
+    from review.features.image_browser.review_image import collect as RC
 
     assert RC._split_background_wells is split_background_wells, (
         "the review-image side is not using the shared parser"

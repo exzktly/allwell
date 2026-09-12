@@ -33,7 +33,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # ── 1. a merge keeps both plates' sample definitions ────────────────────────
 
 def _v2_block(pairs, notes="", groups=()):
-    from well_viewer.domain.selections_model import make_selection, to_block
+    from review.domain.selections_model import make_selection, to_block
     used_names, used_ids, used_colors = set(), set(), set()
     sels = [
         make_selection(name=n, wells=w, replicates=None, hidden=False, color=None,
@@ -126,7 +126,7 @@ def test_a_merge_of_nothing_is_still_nothing():
 #: Empty, and that is the point: the rule is stated structurally — a scope that
 #: renames what it wrote is doing by hand what ``write_json_atomic`` does — so
 #: the three implementations of the rule (``util/json_write``,
-#: ``well_viewer/persistence/_io``, ``services/run_journal``) clear it on their
+#: ``review/persistence/_io``, ``services/run_journal``) clear it on their
 #: own merits rather than by being named here. An earlier draft exempted them
 #: by name while the rule was too broad to recognise them, which is an
 #: allowlist standing in for a guard that does not work
@@ -436,7 +436,7 @@ def test_the_whole_file_tier_stages_like_every_other_tier(tmp_path, monkeypatch)
     destination. An interrupted copy left a truncated ``<WELL>.zip``."""
     import shutil
 
-    from datasets._common import containers
+    from datasets.core import containers
 
     src = tmp_path / "src.zip"
     with zipfile.ZipFile(src, "w") as zf:

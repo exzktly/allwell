@@ -72,7 +72,7 @@ from ui import theme
 from services import run_journal
 from services.input_resolution_service import plan_incremental_scope
 from pipeline import completeness
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 
 #: How long the input field must stay still before anything touches the disk.
 #: ``textChanged`` fires on every keystroke, so a path typed rather than picked

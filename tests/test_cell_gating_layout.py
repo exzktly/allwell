@@ -30,10 +30,10 @@ def _build(ctx, qtbot):
     test's own shortcut rather than the tab.
     """
     from PySide6.QtWidgets import QWidget
-    from well_viewer.features.home.cell_gating.controller import (
+    from review.features.home.cell_gating.controller import (
         cell_gating_load_cell_areas,
     )
-    from well_viewer.features.home.cell_gating.tab_view import build_cell_gating_tab
+    from review.features.home.cell_gating.tab_view import build_cell_gating_tab
 
     parent = QWidget()
     qtbot.addWidget(parent)
@@ -142,7 +142,7 @@ def test_the_scatter_source_wakes_up_when_a_gate_is_drawn(loaded_app, qtbot):
     Deciding it once would leave the option permanently dead for anyone who
     opened Cell Gating before drawing their first gate.
     """
-    from well_viewer.features.home.cell_gating.controller import (
+    from review.features.home.cell_gating.controller import (
         _cell_gating_refresh_gate_filter,
     )
 

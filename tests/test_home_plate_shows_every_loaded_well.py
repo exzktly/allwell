@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import types
 
-from well_viewer.features.home import collect as hc  # noqa: E402
-from well_viewer.features.home.collect import CELL_COMPLETE, CELL_UNCHECKED  # noqa: E402
+from review.features.home import collect as hc  # noqa: E402
+from review.features.home.collect import CELL_COMPLETE, CELL_UNCHECKED  # noqa: E402
 
 
 def _ctx(record_wells, loaded):

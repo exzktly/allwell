@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from well_viewer.features.scatter.controller import collect_scatter_data
+from review.features.scatter.controller import collect_scatter_data
 
 
 def _df(*, w3cy5_counts, w4gfp_counts, w3cy5_mfi=None):
@@ -40,7 +40,7 @@ def _df(*, w3cy5_counts, w4gfp_counts, w3cy5_mfi=None):
 def _make_app(label_to_df):
     """Minimal stub exposing only what ``collect_scatter_data`` reads on
     the no-rep-set / individual-wells path."""
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
         dataset=SimpleNamespace(well_paths=dict.fromkeys(label_to_df),

@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.persistence import reset_scopes
+from review.persistence import reset_scopes
 
 
 @pytest.fixture()
@@ -36,9 +36,9 @@ def stub(monkeypatch):
     section was re-saved, which the real ``reset`` does itself rather than
     through ``_save``.
     """
-    from well_viewer.features.heatmap.state import HeatmapState
-    from well_viewer.features.multivariate.state import MultivariateState
-    from well_viewer.persistence import view_state
+    from review.features.heatmap.state import HeatmapState
+    from review.features.multivariate.state import MultivariateState
+    from review.persistence import view_state
 
     written: list[tuple[str, list, list]] = []
     plot = SimpleNamespace(line_order_rsets=["rset-1"], line_order_wells=["A01"])

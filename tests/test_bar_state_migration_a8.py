@@ -11,8 +11,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.barplot.controller import toggle_swarm, toggle_violin
-from well_viewer.persistence import view_state as vs
+from review.features.barplot.controller import toggle_swarm, toggle_violin
+from review.persistence import view_state as vs
 
 
 def test_slice_defaults_false(viewer_app):

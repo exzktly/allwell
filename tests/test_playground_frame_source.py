@@ -23,9 +23,9 @@ import types
 import numpy as np
 import pytest
 
-from well_viewer.core.widget_registry import WidgetRegistry
-from well_viewer.features.image_browser.playground import controller as C
-from well_viewer.features.image_browser.playground.state import PlaygroundState
+from review.core.widget_registry import WidgetRegistry
+from review.features.image_browser.playground import controller as C
+from review.features.image_browser.playground.state import PlaygroundState
 
 
 class _FakeBar:

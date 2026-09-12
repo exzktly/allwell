@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from well_viewer.features.smfish.worker import _write_counts_to_csvs
+from review.features.smfish.worker import _write_counts_to_csvs
 
 
 def _make_csv(path: Path, well: str) -> None:

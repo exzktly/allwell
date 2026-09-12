@@ -34,7 +34,7 @@ def _untrusted_frame() -> pd.DataFrame:
 
 
 def test_the_recorder_stores_an_untrusted_verdict(ctx_stub):
-    from well_viewer.data.data_loading import record_fov_verdict
+    from review.data.data_loading import record_fov_verdict
 
     record_fov_verdict(ctx_stub, "A01", _untrusted_frame())
     verdict = ctx_stub.state.dataset.fov_integrity["A01"]
@@ -44,7 +44,7 @@ def test_the_recorder_stores_an_untrusted_verdict(ctx_stub):
 
 def test_a_well_with_real_field_labels_is_trusted(ctx_stub):
     """The control: the recorder must not condemn an ordinary well."""
-    from well_viewer.data.data_loading import record_fov_verdict
+    from review.data.data_loading import record_fov_verdict
 
     df = pd.DataFrame({
         "fov": ["1", "2", "3"],
@@ -75,8 +75,8 @@ def test_every_path_that_builds_a_frame_records_a_verdict():
     remembered.
     """
     sites: list[str] = []
-    for rel in ("well_viewer/data/data_loading.py",
-                "well_viewer/core/load_controller.py"):
+    for rel in ("review/data/data_loading.py",
+                "review/core/load_controller.py"):
         path = REPO_ROOT / rel
         tree = parse_source(path)
         for node in ast.walk(tree):

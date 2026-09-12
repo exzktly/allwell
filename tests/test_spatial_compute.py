@@ -1,4 +1,4 @@
-"""Pure-math unit tests for well_viewer.domain.spatial_compute.
+"""Pure-math unit tests for review.domain.spatial_compute.
 
 Qt-free — no PySide6 import, no display. Runs entirely on synthetic point
 patterns so failures point at the algorithm, not at the pipeline / GUI.
@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from well_viewer.domain import spatial_compute as spc
+from review.domain import spatial_compute as spc
 
 
 # ── nearest-neighbour + k-NN + local density ─────────────────────────────────

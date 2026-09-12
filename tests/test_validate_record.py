@@ -175,7 +175,7 @@ def test_a_sidecar_that_cannot_be_parsed_raises_rather_than_writing_nothing(tmp_
 # ── what Home then reads ────────────────────────────────────────────────────
 
 def test_home_reads_the_scans_record_the_same_way_it_reads_a_runs(tmp_path):
-    from well_viewer.features.home import collect as hc
+    from review.features.home import collect as hc
 
     build_dataset(tmp_path, wells=["A01", "B02"], timepoints=["0h", "24h"])
     _truncate(tmp_path, "B02")
@@ -200,7 +200,7 @@ def test_home_picks_up_a_record_written_while_the_dataset_was_open(tmp_path):
     been checked, sends the user to Validate, and has to show the answer when
     they come back. Review holds the sidecar in memory, so without a re-read
     the page that prompted the scan still reports no record."""
-    from well_viewer.core.record_sync import resync_run_check
+    from review.core.record_sync import resync_run_check
 
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
     info = {"schema": "well_fov_timepoint", "notes": "typed but not saved"}
@@ -223,7 +223,7 @@ def test_the_resync_reports_whether_the_record_actually_changed(tmp_path):
     and almost never brings a new record with it, so the caller repaints only
     when this says something arrived — which means "no change" has to be the
     answer for a re-read of the same block, not merely for a failed read."""
-    from well_viewer.core.record_sync import resync_run_check
+    from review.core.record_sync import resync_run_check
 
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
     info = {"schema": "well_fov_timepoint"}
@@ -240,7 +240,7 @@ def test_the_resync_reports_whether_the_record_actually_changed(tmp_path):
 
 
 def test_a_record_deleted_on_disk_stops_being_reported(tmp_path):
-    from well_viewer.core.record_sync import resync_run_check
+    from review.core.record_sync import resync_run_check
 
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
     block = write_record(vc.build_report(tmp_path))
@@ -259,7 +259,7 @@ def test_a_record_deleted_on_disk_stops_being_reported(tmp_path):
 
 def test_an_unreadable_sidecar_keeps_the_record_already_loaded(tmp_path):
     """A transient read failure must not cost a record the page already has."""
-    from well_viewer.core.record_sync import resync_run_check
+    from review.core.record_sync import resync_run_check
 
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
     block = write_record(vc.build_report(tmp_path))

@@ -102,5 +102,5 @@ def test_text_mode_subprocesses_declare_utf8():
         + "\n  ".join(bad)
         + "\n\nSplat services.subprocess_text.TEXT_UTF8 into the call, or pass "
           "encoding=/errors= explicitly where that module cannot be imported "
-          "(scripts/_bootstrap_lib.py is stdlib-only by design)."
+          "(services/remote_bootstrap.py is stdlib-only by design)."
     )

@@ -13,7 +13,7 @@
 #   scripts/test.sh -k threshold         # a subset of it
 #   scripts/test.sh tests/test_app_smoke.py -m ""   # one full-app file
 #
-# NOT covered here: the `slow` full-app tests. Each builds a real WellViewerApp
+# NOT covered here: the `slow` full-app tests. Each builds a real ReviewApp
 # whose Qt objects are never reclaimed in-process (~40 MB/test), so a bulk run
 # hangs or gets OOM-killed. Run those a file or two at a time, as the last
 # example above shows. See ARCHITECTURE.md §10.4.

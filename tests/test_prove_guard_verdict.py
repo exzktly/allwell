@@ -41,9 +41,9 @@ ASSERTED = """\
 tests/test_divider_naming.py F                                           [100%]
 =================================== FAILURES ===================================
 E       AssertionError: Divider frame(s) with no sanctioned object name.
-E           well_viewer/core/status_view.py:95 — top_sep.setFrameShape(...)
-E           well_viewer/features/batch_export/bar_panel.py:68 — sep.setFrameShape(...)
-E           well_viewer/features/batch_export/bar_panel.py:68 — sep.setFrameShape(...)
+E           review/core/status_view.py:95 — top_sep.setFrameShape(...)
+E           review/features/batch_export/bar_panel.py:68 — sep.setFrameShape(...)
+E           review/features/batch_export/bar_panel.py:68 — sep.setFrameShape(...)
 =========================== short test summary info ============================
 FAILED tests/test_divider_naming.py::test_no_unnamed_divider_frames
 ============================== 1 failed in 4.13s ===============================
@@ -51,7 +51,7 @@ FAILED tests/test_divider_naming.py::test_no_unnamed_divider_frames
 
 IMPORT_ERROR = """\
 tests/test_plot_card_roster.py F                                         [100%]
-E       ImportError: cannot import name 'PLOT_CARD_ATTRS' from 'well_viewer.core.plot_card_actions'
+E       ImportError: cannot import name 'PLOT_CARD_ATTRS' from 'review.core.plot_card_actions'
 =========================== short test summary info ============================
 FAILED tests/test_plot_card_roster.py::test_the_shell_imports_the_roster
 ========================= 1 failed, 1 passed in 2.06s ==========================
@@ -60,7 +60,7 @@ FAILED tests/test_plot_card_roster.py::test_the_shell_imports_the_roster
 COLLECTION_ERROR = """\
 ==================================== ERRORS ====================================
 _____________ ERROR collecting tests/test_datasets_controller_lifecycle.py _____
-E   ModuleNotFoundError: No module named 'datasets._common.tool_controller'
+E   ModuleNotFoundError: No module named 'datasets.core.tool_controller'
 =========================== short test summary info ============================
 ERROR tests/test_datasets_controller_lifecycle.py
 !!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
@@ -99,8 +99,8 @@ def test_an_assertion_with_offenders_is_a_proof():
     assert kind == "ASSERTED"
     # Deduplicated: the same site printed twice is one site.
     assert offenders == [
-        "well_viewer/core/status_view.py:95",
-        "well_viewer/features/batch_export/bar_panel.py:68",
+        "review/core/status_view.py:95",
+        "review/features/batch_export/bar_panel.py:68",
     ]
 
 

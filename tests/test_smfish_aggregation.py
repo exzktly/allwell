@@ -23,8 +23,8 @@ import logging
 
 import pandas as pd
 
-from well_viewer.data import data_loading as _dl
-from well_viewer.data.data_loading import (
+from review.data import data_loading as _dl
+from review.data.data_loading import (
     aggregate_with_threshold_df,
     resolve_value_series,
 )
@@ -93,16 +93,16 @@ def test_resolve_value_series_missing_column_returns_nan(caplog):
     # the WARN regardless of test-order interactions with other suites that
     # may have already emitted (and dedup-suppressed) the same key.
     _dl._missing_col_warned.clear()
-    # status_view sets `propagate = False` on the "well_viewer" logger when a
-    # WellViewerApp is constructed (so GUI log records do not double-print on
+    # status_view sets `propagate = False` on the "review" logger when a
+    # ReviewApp is constructed (so GUI log records do not double-print on
     # the root handler). caplog attaches to the root, so after any test that
     # builds an app this WARN never reaches it. Re-enable propagation for the
     # duration of this test.
-    _wv_logger = logging.getLogger("well_viewer")
+    _wv_logger = logging.getLogger("review")
     _prev_propagate = _wv_logger.propagate
     _wv_logger.propagate = True
     try:
-        caplog.set_level(logging.WARNING, logger="well_viewer")
+        caplog.set_level(logging.WARNING, logger="review")
         out = resolve_value_series(df, "w4gfp_smfish_count", {})
         assert len(out) == 3
         assert out.isna().all()

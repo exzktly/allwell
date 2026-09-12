@@ -8,8 +8,8 @@ from __future__ import annotations
 import threading
 import types
 
-from well_viewer.core.app_runtime import AppRuntime
-from well_viewer.runtime_app import teardown_review_pane
+from review.core.app_runtime import AppRuntime
+from review.runtime_app import teardown_review_pane
 
 
 def test_teardown_sets_smfish_cancel_event():
@@ -41,9 +41,9 @@ def test_teardown_cancels_a_running_cell_export():
     """
     import queue
 
-    from well_viewer.features.export.worker import DONE
+    from review.features.export.worker import DONE
 
-    from well_viewer.features.export.service import cancel_cell_export
+    from review.features.export.service import cancel_cell_export
 
     ev = threading.Event()
     chunks: queue.Queue = queue.Queue(maxsize=2)

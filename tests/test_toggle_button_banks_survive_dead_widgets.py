@@ -18,7 +18,7 @@ import types
 
 import pytest
 
-from well_viewer.core import plot_toggles  # noqa: E402
+from review.core import plot_toggles  # noqa: E402
 
 
 class _DeadButton:

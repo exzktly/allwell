@@ -9,9 +9,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import builder_view as B
-from well_viewer.features.image_browser.image_table import controller as C
-from well_viewer.features.image_browser.image_table.build_layout import (
+from review.features.image_browser.image_table import builder_view as B
+from review.features.image_browser.image_table import controller as C
+from review.features.image_browser.image_table.build_layout import (
     image_table_apply_spec,
 )
 

@@ -27,7 +27,7 @@ import math
 
 import pytest
 
-from well_viewer.core.plot_style import (
+from review.core.plot_style import (
     DEFAULT_EXPORT_STYLE_PREFS, apply_axis_log_scale, apply_export_style_prefs,
     log_minor_subs,
 )
@@ -81,7 +81,7 @@ def test_every_base_the_panel_offers_actually_subdivides():
     without typing. Driven from ``LOG_BASE_CHOICES`` rather than from a list
     written here, so a base added to the panel is covered by having been added.
     """
-    from well_viewer.core.plot_style import LOG_BASE_CHOICES, log_base_value
+    from review.core.plot_style import LOG_BASE_CHOICES, log_base_value
 
     for text in LOG_BASE_CHOICES:
         base = log_base_value(text)
@@ -93,7 +93,7 @@ def test_every_base_the_panel_offers_actually_subdivides():
 def test_the_offered_bases_are_the_ones_worth_a_click():
     """Pinned as the list, because the field is editable and the list is the
     only part that is a decision — anything else is typed."""
-    from well_viewer.core.plot_style import LOG_BASE_CHOICES
+    from review.core.plot_style import LOG_BASE_CHOICES
 
     assert LOG_BASE_CHOICES == ("10", "2", "3", "e")
 
@@ -232,10 +232,10 @@ def _response_axis():
     the first would be measuring an axis the app never draws."""
     from types import SimpleNamespace
 
-    from well_viewer.features.response.collect import (
+    from review.features.response.collect import (
         ResponseCurve, ResponseData, ResponsePoint,
     )
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
 
     fig, ax = _fig()
     points = [ResponsePoint(x=x, y=1.0 + i, err=float("nan"), n=3,

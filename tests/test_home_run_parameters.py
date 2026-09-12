@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from well_viewer.features.home import collect as hc
+from review.features.home import collect as hc
 
 
 def _ctx(*, qc=None, execution=None):

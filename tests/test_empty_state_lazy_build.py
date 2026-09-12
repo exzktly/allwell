@@ -76,7 +76,7 @@ def test_an_image_browser_subtab_does_not_ask_for_a_dataset_either(loaded_app):
     reproduced the original bug in a new place, showing "Load a directory." over
     a loaded dataset.
     """
-    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    from review.features.image_browser.controller import show_image_browser_subtab
 
     app = loaded_app
     assert app._app_state.dataset.well_paths

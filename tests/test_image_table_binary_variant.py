@@ -14,11 +14,11 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import controller as C
-from well_viewer.features.image_browser.image_table.image_compose import (
+from review.features.image_browser.image_table import controller as C
+from review.features.image_browser.image_table.image_compose import (
     _binary_base, _binary_variant, _is_binary_variant,
 )
-from well_viewer.features.image_browser.image_table.state import ImageTableState
+from review.features.image_browser.image_table.state import ImageTableState
 
 
 def _fake_app(*, channels, active_channels=None):
@@ -31,7 +31,7 @@ def _fake_app(*, channels, active_channels=None):
         image_table=ImageTableState(active_channels=set(active_channels or [])),
     )
     app._parse_rc = lambda w: (w[0], int(w[1:]))
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app._ctx = SimpleNamespace(app=app, state=app._app_state, runtime=AppRuntime(app))
     return app
 

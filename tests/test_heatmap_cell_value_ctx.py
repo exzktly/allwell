@@ -15,9 +15,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core.app_runtime import AppRuntime
-from well_viewer.features.heatmap import controller as C
-from well_viewer.features.heatmap.controller import (
+from review.core.app_runtime import AppRuntime
+from review.features.heatmap import controller as C
+from review.features.heatmap.controller import (
     METRIC_COUNT, METRIC_FRACTION, METRIC_MEAN,
 )
 
@@ -47,8 +47,8 @@ def _ctx(*, pts_by_group, well_paths, repset_avg=False):
 
     app._aggregate_well = _aggregate_well
 
-    from well_viewer.core.app_state import AppState
-    from well_viewer.features.registry import attach_feature_state
+    from review.core.app_state import AppState
+    from review.features.registry import attach_feature_state
     st = AppState()
     attach_feature_state(st)
     st.dataset.well_paths = dict(well_paths)

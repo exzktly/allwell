@@ -5,7 +5,7 @@ match: it would still pass if a rule were present but inert. These tests build
 one widget at a time under the offscreen platform and read the resolved
 palette back, so a rule that exists but changes nothing fails here.
 
-Single widgets only — no ``WellViewerApp``. Anything touching the ``viewer_app``
+Single widgets only — no ``ReviewApp``. Anything touching the ``viewer_app``
 fixture is auto-marked ``slow`` by ``conftest.py`` and excluded from the lane CI
 runs, which would make these assertions invisible.
 """

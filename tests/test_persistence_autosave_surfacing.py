@@ -12,7 +12,7 @@ import logging
 
 import pytest
 
-from well_viewer.persistence.registry import PersistenceRegistry
+from review.persistence.registry import PersistenceRegistry
 
 
 class _FakeApp:
@@ -28,7 +28,7 @@ def test_flush_logs_and_swallows_a_raising_save(caplog):
     reg.register("view_state", save=_boom)
     reg._pending.add("view_state")
 
-    with caplog.at_level(logging.ERROR, logger="well_viewer"):
+    with caplog.at_level(logging.ERROR, logger="review"):
         # Must NOT raise — the failure is logged, not propagated.
         reg._flush("view_state")
 

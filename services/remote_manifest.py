@@ -9,7 +9,7 @@ budget, and the budget could only be met by not adding it. Here, a new entry
 costs the runner nothing.
 
 ``remote_runner`` re-exports ``_REQUIRED_REMOTE_FILES``, so every existing
-importer — ``scripts/_bootstrap_lib``, the PyInstaller spec, the manifest tests
+importer — ``services/remote_bootstrap``, the PyInstaller spec, the manifest tests
 and the several ``util/`` and ``pipeline/`` docstrings that cite it by that
 path — keeps working unchanged. A re-export is a binding, though: a test that
 patches the name on ``remote_runner`` will not be seen by a reader that
@@ -138,7 +138,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/suspend.py",
     "pipeline/threshold_optimize.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
-    # — the remote doesn't run the GUI). See _Docs/requirements.txt for
+    # — the remote doesn't run the GUI). See requirements.txt for
     # the GUI superset.
-    "_Docs/requirements-remote.txt",
+    "requirements-remote.txt",
 )

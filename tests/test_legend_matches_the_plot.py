@@ -30,12 +30,12 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from matplotlib.colors import to_hex  # noqa: E402
 
-from well_viewer.core.plot_style import (  # noqa: E402
+from review.core.plot_style import (  # noqa: E402
     DEFAULT_EXPORT_STYLE_PREFS,
     apply_export_style_prefs,
     sync_legend_handles,
 )
-from well_viewer.features.lineplot.controller import (  # noqa: E402
+from review.features.lineplot.controller import (  # noqa: E402
     LineAxes,
     LinePoint,
     LineSeries,
@@ -170,7 +170,7 @@ def test_an_entry_that_names_no_trace_is_left_alone():
     that stands for nothing. Pairing by position rather than by label would
     shift every swatch by one the moment a plate-wide selection overflowed —
     so the legend would be *confidently* wrong instead of merely stale."""
-    from well_viewer.features.lineplot.controller import _capped_legend
+    from review.features.lineplot.controller import _capped_legend
 
     fig, ax = plt.subplots()
     for i in range(4):

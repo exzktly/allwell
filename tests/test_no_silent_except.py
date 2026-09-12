@@ -1,8 +1,8 @@
-"""Guardrail: no silent broad-except handlers in well_viewer/.
+"""Guardrail: no silent broad-except handlers in review/.
 
 A broad ``except Exception:`` (or bare ``except:``) whose entire body is a single
 ``pass`` or ``continue`` swallows failures with no trace — indistinguishable
-from "nothing went wrong". Those were migrated to ``well_viewer.core.safe``'s
+from "nothing went wrong". Those were migrated to ``core.safe``'s
 ``swallowed()`` (which logs a DEBUG breadcrumb). This test fails if any new one
 is introduced, nudging authors toward ``swallowed()`` / ``swallow()`` or a
 specific exception type.
@@ -17,11 +17,11 @@ from pathlib import Path
 from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-WELL_VIEWER = REPO_ROOT / "well_viewer"
+REVIEW = REPO_ROOT / "review"
 
-# The reusable widget library. It may not import ``well_viewer`` (that is the
+# The reusable widget library. It may not import ``review`` (that is the
 # whole point of the package), so it uses ``util.aw_safe`` — the same helper the
-# Qt-free pipeline side uses — rather than ``well_viewer.core.safe``. It was the
+# Qt-free pipeline side uses — rather than ``core.safe``. It was the
 # last un-guarded body of GUI code in the repo, and it is where a swallowed
 # exception is hardest to notice: a widget that quietly fails to paint or to
 # recolour just looks like a widget that was never asked to.
@@ -36,7 +36,7 @@ WIDGETS = REPO_ROOT / "widgets"
 DATASETS = REPO_ROOT / "datasets"
 
 # Pipeline / services side (Qt-free; uses aw_safe.swallowed instead of
-# well_viewer.core.safe). Guarded so these don't silently regress either.
+# core.safe). Guarded so these don't silently regress either.
 PIPELINE_DIRS = [REPO_ROOT / "services"]
 PIPELINE_FILES = [
     REPO_ROOT / "process_microscopy.py",
@@ -66,25 +66,40 @@ def _silent_body(handler: ast.ExceptHandler) -> bool:
 
 
 def _offenders(paths):
-    out = []
-    for path in paths:
-        tree = parse_source(path)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ExceptHandler) and _is_broad(node) and _silent_body(node):
-                kind = type(node.body[0]).__name__.lower()
-                out.append(f"{path.relative_to(REPO_ROOT)}:{node.body[0].lineno} (silent {kind})")
-    return out
+    """Silent broad-except handlers in *paths*, minus the reviewed exemptions.
+
+    The allowlist is honoured here as well as in
+    `test_no_silent_broad_except_anywhere`, because this file states one rule
+    and two tests were enforcing it with different answers. The per-area tests
+    ignored `SILENT_EXCEPT_ALLOWLIST` entirely and passed only because no
+    exempted site happened to live in an area they walked — so moving the
+    remote bootstrap from `scripts/` (outside every scan root) into
+    `services/` failed the pipeline test on a handler the allowlist already
+    covered by name. A rule enforced twice with two answers is worse than a
+    rule enforced once: the looser test is the one that decides, right up until
+    a file moves and the stricter one does.
+
+    The exemption is keyed on `(file, containing function)`, never on a file,
+    so it cannot excuse the next handler added to the same module.
+    """
+    allowed = {(f, fn) for f, fn in SILENT_EXCEPT_ALLOWLIST}
+    wanted = {str(p.relative_to(REPO_ROOT)) for p in paths}
+    return [
+        f"{file}:{line} (silent pass, in {func})"
+        for file, func, line in _silent_sites()
+        if file in wanted and (file, func) not in allowed
+    ]
 
 
 def _walk(root):
     return [p for p in sorted(root.rglob("*.py")) if "__pycache__" not in p.parts]
 
 
-def test_no_silent_broad_except_in_well_viewer():
-    offenders = _offenders(_walk(WELL_VIEWER))
+def test_no_silent_broad_except_in_review():
+    offenders = _offenders(_walk(REVIEW))
     assert not offenders, (
         "Silent broad-except handler(s) found. Use "
-        "well_viewer.core.safe.swallowed()/swallow() or catch a specific "
+        "core.safe.swallowed()/swallow() or catch a specific "
         "exception type instead of a bare pass/continue:\n  "
         + "\n  ".join(offenders)
     )
@@ -95,20 +110,20 @@ def test_no_silent_broad_except_in_widgets():
     assert not offenders, (
         "Silent broad-except handler(s) found in widgets/. Use "
         "util.aw_safe.swallowed()/swallow() — widgets/ cannot import "
-        "well_viewer.core.safe — or catch a specific exception type instead of "
+        "core.safe — or catch a specific exception type instead of "
         "a bare pass/continue:\n  " + "\n  ".join(offenders)
     )
 
 
 def test_no_silent_broad_except_in_datasets():
-    """The Datasets pane mixes both helpers: its Qt-free halves (`_common/`,
+    """The Datasets pane mixes both helpers: its Qt-free halves (`core/`,
     the `*_compute` planners, `apply.py`, the workers) use `util.aw_safe`,
-    while the controllers and views may use `well_viewer.core.safe`. Either is
+    while the controllers and views may use `core.safe`. Either is
     fine; a bare pass is not."""
     offenders = _offenders(_walk(DATASETS))
     assert not offenders, (
         "Silent broad-except handler(s) found in datasets/. Use "
-        "well_viewer.core.safe.swallowed()/swallow() on the Qt side, "
+        "core.safe.swallowed()/swallow() on the Qt side, "
         "util.aw_safe's equivalents in the Qt-free halves, or catch a specific "
         "exception type instead of a bare pass/continue:\n  " + "\n  ".join(offenders)
     )
@@ -156,7 +171,7 @@ SILENT_EXCEPT_ALLOWLIST = {
     # write to the real stderr; when *that* write fails too there is no
     # remaining channel to report on, which is the one honest case for a bare
     # pass. Everything else in this module now goes through `_quietly`.
-    ("scripts/_bootstrap_lib.py", "_quietly"),
+    ("services/remote_bootstrap.py", "_quietly"),
     # Rebuilding matplotlib's font cache. The handler's own comment states the
     # trade: "a functioning (if unlimited) font manager beats a crash", and the
     # fallback is a working app with the system font list rather than the
@@ -208,7 +223,7 @@ def test_no_silent_broad_except_anywhere():
     ]
     assert not offenders, (
         "Silent broad-except handler(s) found. Use the swallow()/swallowed() "
-        "pair for the area (well_viewer.core.safe on the GUI side, "
+        "pair for the area (core.safe on the GUI side, "
         "util.aw_safe elsewhere), or catch a specific exception type:\n  "
         + "\n  ".join(sorted(offenders))
     )

@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import types
 
-from well_viewer.features.saved_plots import collect
+from review.features.saved_plots import collect
 
 
 def test_capture_selections_logs_on_failure(caplog):
@@ -18,7 +18,7 @@ def test_capture_selections_logs_on_failure(caplog):
 
     ctx = types.SimpleNamespace(state=types.SimpleNamespace(selection=_Boom()))
     with caplog.at_level(logging.ERROR,
-                         logger="well_viewer.features.saved_plots.collect"):
+                         logger="review.features.saved_plots.collect"):
         assert collect._capture_selections(ctx) is None
     assert any("selections" in r.getMessage() for r in caplog.records), \
         "a failed selection capture must be logged, not swallowed"

@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import types
 
-from well_viewer.core.app_runtime import AppRuntime
-from well_viewer.core.cell_gating_state import CellGatingState
-from well_viewer.core.load_controller import _reset_gating_state
+from review.core.app_runtime import AppRuntime
+from review.core.cell_gating_state import CellGatingState
+from review.core.load_controller import _reset_gating_state
 
 
 def test_reset_clears_all_leaky_gating_attrs():
@@ -66,9 +66,9 @@ def test_the_swap_reset_survives_a_build_without_heat_map():
     """
     import types
 
-    from well_viewer.core.app_runtime import AppRuntime
-    from well_viewer.core.load_controller import _reset_gating_state
-    from well_viewer.core.cell_gating_state import CellGatingState
+    from review.core.app_runtime import AppRuntime
+    from review.core.load_controller import _reset_gating_state
+    from review.core.cell_gating_state import CellGatingState
 
     rt = AppRuntime()
     state = types.SimpleNamespace(cell_gating=CellGatingState())

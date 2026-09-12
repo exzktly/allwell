@@ -23,7 +23,7 @@ import pytest
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
 
-from well_viewer.data.inclusion import (
+from review.data.inclusion import (
     drop_excluded_labels, excluded_nids_by_frame, excluded_nids_for_frame,
 )
 
@@ -131,7 +131,7 @@ def test_load_mask_array_drops_excluded_cells(monkeypatch):
     """Asserted at the boundary: every mask the tab draws from — boundaries,
     Binary (mask), Binary (threshold), the mask channel's LUT pass — comes back
     through this one call."""
-    from well_viewer.features.image_browser.image_table import image_compose
+    from review.features.image_browser.image_table import image_compose
 
     raw = np.array([[1, 1, 0], [2, 2, 3]], dtype=np.int32)
     monkeypatch.setattr(image_compose, "load_mask_array",
@@ -148,7 +148,7 @@ def test_load_mask_array_drops_excluded_cells(monkeypatch):
 
 def test_excluded_cells_lose_their_boundary(monkeypatch):
     """The pixels, not the decision: an excluded cell draws no outline."""
-    from well_viewer.features.image_browser.image_table import image_compose
+    from review.features.image_browser.image_table import image_compose
 
     labels = np.zeros((8, 8), dtype=np.int32)
     labels[1:4, 1:4] = 1      # kept
@@ -205,7 +205,7 @@ def test_a_well_this_dataset_does_not_have_is_quiet(caplog):
     a restored layout still names logged a full traceback per cell — 96 of them
     for a plate grid — for a condition with nothing to report."""
     ctx = _ctx({"A01": _df([(1, "1", "0", 1, 1, 1)])})
-    with caplog.at_level("DEBUG", logger="well_viewer"):
+    with caplog.at_level("DEBUG", logger="review"):
         assert excluded_nids_for_frame(ctx, "Z99", "1", "0") == frozenset()
     assert not [r for r in caplog.records if r.levelname in ("WARNING", "ERROR")]
 
@@ -216,7 +216,7 @@ def test_a_well_with_exclusions_but_no_nucleus_ids_says_so(caplog):
     df = pd.DataFrame({"fov": ["1", "1"], "timepoint": ["0", "0"],
                        "Included": [1, 0]})
     ctx = _ctx({"A01": df})
-    with caplog.at_level("WARNING", logger="well_viewer"):
+    with caplog.at_level("WARNING", logger="review"):
         assert excluded_nids_for_frame(ctx, "A01", "1", "0") == frozenset()
     assert any("no nucleus_id" in r.getMessage() and "A01" in r.getMessage()
                for r in caplog.records)
@@ -244,7 +244,7 @@ def test_an_inclusion_edit_cues_a_generate_on_a_drawn_grid():
     the tab agrees with the plots only if the user happens to press Generate —
     the "degraded output indistinguishable from good output" failure this whole
     change is about."""
-    from well_viewer.core.selection_controller import invalidate_stats_cache
+    from review.core.selection_controller import invalidate_stats_cache
 
     marked: list[int] = []
     review_image = SimpleNamespace(override_version=0)
@@ -268,7 +268,7 @@ def test_an_inclusion_edit_cues_a_generate_on_a_drawn_grid():
 
 
 def test_the_cue_is_a_no_op_when_the_image_table_was_never_built():
-    from well_viewer.core.selection_controller import invalidate_stats_cache
+    from review.core.selection_controller import invalidate_stats_cache
 
     ctx = SimpleNamespace(
         state=SimpleNamespace(

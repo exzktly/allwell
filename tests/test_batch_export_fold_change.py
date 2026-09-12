@@ -28,18 +28,18 @@ import types
 
 import pytest
 
-from well_viewer.domain.batch_models import BarGroup, ReplicateSet
-from well_viewer.domain.control_ref import ControlRef
-from well_viewer.domain.fold_change import fold_change_state
-from well_viewer.domain.selections_model import active_replicate_sets
-from well_viewer.features.barplot.collect import (
+from review.domain.batch_models import BarGroup, ReplicateSet
+from review.domain.control_ref import ControlRef
+from review.domain.fold_change import fold_change_state
+from review.domain.selections_model import active_replicate_sets
+from review.features.barplot.collect import (
     collect_bar_items,
     collect_bar_items_for_group,
 )
-from well_viewer.features.batch_export._line_series_runner import (
+from review.features.batch_export._line_series_runner import (
     collect_line_series_for_group,
 )
-from well_viewer.features.batch_export.base_panel import BatchExportPanel
+from review.features.batch_export.base_panel import BatchExportPanel
 
 from tests.conftest import MockApp, make_agg
 
@@ -109,7 +109,7 @@ def _both_group():
 
 def test_a_control_in_another_group_resolves(ctx):
     """The defect: `('','')` and every curve blank."""
-    from well_viewer.domain.fold_change import resolve_control_wells
+    from review.domain.fold_change import resolve_control_wells
 
     panel = _panel(ctx, control=_SET("CTRL"))
     with BatchExportPanel._app_group_scope(panel, _treat_group()):
@@ -126,7 +126,7 @@ def test_the_carried_control_is_not_drawn(ctx):
 
 
 def test_a_per_sample_mapping_carries_every_control_it_names(ctx):
-    from well_viewer.domain.fold_change import resolve_control_wells
+    from review.domain.fold_change import resolve_control_wells
 
     panel = _panel(ctx, control_map={"DRUG": _SET("CTRL")})
     with BatchExportPanel._app_group_scope(panel, _treat_group()):
@@ -142,7 +142,7 @@ def test_a_control_the_group_already_holds_is_not_duplicated(ctx):
 def test_a_control_naming_nothing_loaded_is_left_unresolved(ctx):
     """No synthetic empty group standing in for one the user deleted — the
     outcome vocabulary is what reports that, and it needs it to stay missing."""
-    from well_viewer.domain.fold_change import resolve_control_wells
+    from review.domain.fold_change import resolve_control_wells
 
     panel = _panel(ctx, control=_SET("DELETED"))
     with BatchExportPanel._app_group_scope(panel, _treat_group()):
@@ -253,7 +253,7 @@ def test_a_replicate_point_keeps_its_fractional_mean_and_its_spread():
     """Index 4 is a per-well *mean* on a collector-built point, and index 9 is
     its cross-well spread. Rounding one and zeroing the other was harmless only
     while nothing but well points reached this."""
-    from well_viewer.domain.fold_change import _pt_n_above
+    from review.domain.fold_change import _pt_n_above
 
     rset_point = (0.0, 100.0, 0.0, 0.5, 7.5, 0, 0.0, 0.0, 0.0, 1.25, 15)
     assert _pt_n_above(rset_point) == (7.5, 1.25)
@@ -262,7 +262,7 @@ def test_a_replicate_point_keeps_its_fractional_mean_and_its_spread():
 def test_a_well_point_still_reports_no_spread():
     """An ``aggregate_well`` point is a 9-tuple with a true count and no index
     9, so the length check preserves it without a flag."""
-    from well_viewer.domain.fold_change import _pt_n_above
+    from review.domain.fold_change import _pt_n_above
 
     well_point = (0.0, 100.0, 0.0, 0.5, 7, 10, 0.0, 0.0, 0.0)
     assert _pt_n_above(well_point) == (7.0, 0.0)
@@ -270,7 +270,7 @@ def test_a_well_point_still_reports_no_spread():
 
 def test_a_fractional_baseline_normalizes_to_exactly_one():
     """The truncation, at the size it would show: 7.5 / 7 is 1.071, not 1.0."""
-    from well_viewer.domain.fold_change import baseline_n_from_points_resolved
+    from review.domain.fold_change import baseline_n_from_points_resolved
 
     pt = (0.0, 100.0, 0.0, 0.5, 7.5, 0, 0.0, 0.0, 0.0, 0.0, 15)
     _tp, n, _spread = baseline_n_from_points_resolved([pt])
@@ -308,8 +308,8 @@ def test_a_typed_well_control_is_not_captured_by_the_batch_scope():
     the legacy shape is recorded beside it so a change of precedence cannot
     quietly widen the divergence.
     """
-    from well_viewer.domain.control_ref import KIND_WELL, ControlRef
-    from well_viewer.domain.fold_change import resolve_control
+    from review.domain.control_ref import KIND_WELL, ControlRef
+    from review.domain.fold_change import resolve_control
 
     from tests.conftest import MockApp, make_agg
 

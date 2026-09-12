@@ -28,7 +28,7 @@ pytest.importorskip("scipy")
 
 import numpy as np  # noqa: E402
 
-from well_viewer.domain.spatial_compute import radial_profile, ripley_l  # noqa: E402
+from review.domain.spatial_compute import radial_profile, ripley_l  # noqa: E402
 
 
 # ── spatial statistics ──────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ def _n_panel_bars(monkeypatch, pts_by_well):
     from matplotlib.colors import to_rgb
 
     from ui import theme
-    from well_viewer.features.barplot import renderer
+    from review.features.barplot import renderer
 
     ctx = types.SimpleNamespace(state=types.SimpleNamespace(
         channel=types.SimpleNamespace(active_val_col="Nuclear_Mean",
@@ -153,7 +153,7 @@ def test_a_nan_count_is_undefined_not_zero(monkeypatch):
 def _bar_items_src():
     import inspect
 
-    from well_viewer.features.barplot import collect
+    from review.features.barplot import collect
 
     return inspect.getsource(collect)
 
@@ -199,7 +199,7 @@ def test_the_events_bar_is_never_gated_on_has_mean_either():
     import inspect
     import textwrap
 
-    from well_viewer.features.barplot import controller
+    from review.features.barplot import controller
 
     src = textwrap.dedent(inspect.getsource(controller.render_bar_items))
     for node in ast.walk(ast.parse(src)):

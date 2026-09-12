@@ -2,7 +2,7 @@
 
 A plate died in the Line tab's CDF panel:
 
-    File "well_viewer/features/lineplot/controller.py", line 458, in <listcomp>
+    File "review/features/lineplot/controller.py", line 458, in <listcomp>
         fluor_s, [(k + 1) / n for k in range(n)],
     MemoryError
 
@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from well_viewer.features.lineplot.controller import (
+from review.features.lineplot.controller import (
     LineAxes, LinePoint, LineSeries, _paint_series, render_line_series,
 )
 

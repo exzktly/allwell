@@ -11,7 +11,7 @@ import ast
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-WELL_VIEWER = REPO_ROOT / "well_viewer"
+REVIEW = REPO_ROOT / "review"
 
 QT_ROOTS = {"PySide6", "PyQt5", "PyQt6", "shiboken6"}
 
@@ -35,7 +35,7 @@ def _walk_py(root: Path):
     return [p for p in sorted(root.rglob("*.py")) if "__pycache__" not in p.parts]
 
 
-# ── §6.2 — the pipeline is self-sufficient: no well_viewer/widgets/Qt ─────────
+# ── §6.2 — the pipeline is self-sufficient: no review/widgets/Qt ─────────
 
 # Whole directories, not a hand-written file list. The list this replaced named
 # twelve files and had fallen five `pipeline/` modules and nine `util/` modules
@@ -61,10 +61,10 @@ def _pipeline_paths():
 def test_pipeline_is_self_sufficient():
     """§6.2: the pipeline (`process_microscopy` + the Qt-free `pipeline/` and
     `util/` packages) must run on a headless worker with no GUI installed — so it
-    must never import `well_viewer`, `widgets`, or Qt, at ANY level (module *or*
+    must never import `review`, `widgets`, or Qt, at ANY level (module *or*
     function-local, since a function-local import still crashes when the path
     runs on the worker)."""
-    forbidden = {"well_viewer", "widgets"} | QT_ROOTS
+    forbidden = {"review", "widgets"} | QT_ROOTS
     offenders = []
     for path in _pipeline_paths():
         name = path.relative_to(REPO_ROOT).as_posix()
@@ -73,7 +73,7 @@ def test_pipeline_is_self_sufficient():
                 offenders.append(f"{name}:{node.lineno} imports {top}")
     assert not offenders, (
         "Pipeline self-sufficiency (ARCHITECTURE §6.2) violated — these files "
-        "must not import well_viewer / widgets / Qt at any level:\n  "
+        "must not import review / widgets / Qt at any level:\n  "
         + "\n  ".join(offenders)
     )
 
@@ -93,22 +93,83 @@ def test_services_have_no_qt_imports():
     )
 
 
-def test_services_do_not_import_well_viewer():
+def test_services_do_not_import_review():
     """ARCHITECTURE §13: `services/` stays Qt-free specifically so it can be
     reused headless — but nothing stopped a service from reaching into the
     Review pane's package for a helper and dragging its whole (Qt-heavy)
     import graph in transitively. `services/run_spec.py` and
     `services/job_queue.py` are the modules this protects: a job queue that
-    imports `well_viewer` for a convenience helper stops being usable from a
+    imports `review` for a convenience helper stops being usable from a
     headless worker even though it imports no Qt module directly itself."""
     offenders = []
     for path in _walk_py(REPO_ROOT / "services"):
         for node, top in _all_imports(_parse(path)):
-            if top == "well_viewer":
-                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports well_viewer")
+            if top == "review":
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports review")
     assert not offenders, (
-        "services/ must not import well_viewer (would pull Qt in transitively "
+        "services/ must not import review (would pull Qt in transitively "
         "through a package the Qt-free contract can't see):\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_core_does_not_import_a_pane():
+    """`core/` is infrastructure the panes reach into, never the reverse.
+
+    The package exists because the Review pane held five modules that all three
+    panes used. The one thing that keeps it from becoming a fourth pane is the
+    direction of the arrow: a module that has to reach back down into
+    `review/`, `analyze/` or `datasets/` is not shared infrastructure, it is a
+    pane's module that happens to sit here, and its presence would re-create
+    exactly the tangle the lift removed — `analyze` importing `core` importing
+    `review`.
+
+    Its docstring already claims this. A claim is worth what its guard is worth,
+    which is why this exists rather than the sentence alone.
+    """
+    panes = {"review", "analyze", "datasets"}
+    offenders = []
+    for path in _walk_py(REPO_ROOT / "core"):
+        for node, top in _all_imports(_parse(path)):
+            if top in panes:
+                offenders.append(
+                    f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports {top}")
+    assert not offenders, (
+        "core/ must not import a pane — the dependency runs one way, from a "
+        "pane into this package:\n  " + "\n  ".join(offenders) + "\n\n"
+        "A module here that needs a pane has been misfiled by that fact. Move "
+        "it back into the pane that owns it, or push the part the panes share "
+        "down into core/ and leave the rest behind."
+    )
+
+
+def test_domain_imports_nothing_above_it():
+    """`domain/` is the bottom of the shared stack: no pane, no GUI, no infra.
+
+    It holds the application's shared subject matter — what an image filename
+    means, when two timepoints are the same measurement — which Review and
+    Datasets must answer identically or they disagree about the same plate.
+    A module here that reaches up into a pane inverts the dependency that makes
+    it shareable, and one that reaches into `core/`, `ui/` or `widgets/` drags
+    the GUI into code the pipeline's own docstrings already cite as canonical.
+
+    `util/` is excluded from the forbidden set deliberately: it is Qt-free and
+    below this layer, so a domain module may use its string and path helpers.
+    """
+    forbidden = {"review", "analyze", "datasets", "core", "ui", "widgets"}
+    offenders = []
+    for path in _walk_py(REPO_ROOT / "domain"):
+        for node, top in _all_imports(_parse(path)):
+            if top in forbidden:
+                offenders.append(
+                    f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports {top}")
+    assert not offenders, (
+        "domain/ must not import a pane, the GUI layers, or core/:\n  "
+        + "\n  ".join(offenders) + "\n\n"
+        "The arrow runs one way — panes and infrastructure depend on shared "
+        "domain, never the reverse. If a domain module needs something from "
+        "above, either the thing it needs is itself domain (move it down) or "
+        "the module is not shared domain at all (move it back into the pane "
+        "that owns it)."
     )
 
 
@@ -116,21 +177,21 @@ def test_services_do_not_import_well_viewer():
 
 def test_widgets_do_not_import_the_app():
     """ARCHITECTURE §13 (widgets): reusable widgets carry no All-Well-specific
-    knowledge — they must not import `well_viewer`, `analyze`, or `allwell`.
+    knowledge — they must not import `review`, `analyze`, or `allwell`.
     (They may compose other `widgets.*` primitives.)"""
-    forbidden = {"well_viewer", "analyze", "allwell"}
+    forbidden = {"review", "analyze", "allwell"}
     offenders = []
     for path in _walk_py(REPO_ROOT / "widgets"):
         for node, top in _all_imports(_parse(path)):
             if top in forbidden:
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports {top}")
     assert not offenders, (
-        "widgets/ must not couple to the app (well_viewer / analyze / "
+        "widgets/ must not couple to the app (review / analyze / "
         "allwell):\n  " + "\n  ".join(offenders)
     )
 
 
-# ── controllers/state never import WellViewerApp at runtime (circular) ────────
+# ── controllers/state never import ReviewApp at runtime (circular) ────────
 
 def _type_checking_line_ranges(tree: ast.Module):
     """Line ranges of `if TYPE_CHECKING:` bodies (imports there are type-only)."""
@@ -146,26 +207,26 @@ def _type_checking_line_ranges(tree: ast.Module):
     return ranges
 
 
-def test_nothing_imports_wellviewerapp_at_runtime():
+def test_nothing_imports_reviewapp_at_runtime():
     """ARCHITECTURE §9: controllers reach the app via the `app` argument and must
-    NOT import `WellViewerApp` (that's circular). Allowed: `runtime_app.py` (home),
-    `well_viewer/__init__.py` (lazy PEP-562 getattr), and `TYPE_CHECKING`-only
+    NOT import `ReviewApp` (that's circular). Allowed: `runtime_app.py` (home),
+    `review/__init__.py` (lazy PEP-562 getattr), and `TYPE_CHECKING`-only
     imports for type hints."""
     offenders = []
-    for path in _walk_py(WELL_VIEWER):
-        if path.name == "runtime_app.py" or path == WELL_VIEWER / "__init__.py":
+    for path in _walk_py(REVIEW):
+        if path.name == "runtime_app.py" or path == REVIEW / "__init__.py":
             continue
         tree = _parse(path)
         tc_ranges = _type_checking_line_ranges(tree)
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and any(
-                a.name == "WellViewerApp" for a in node.names
+                a.name == "ReviewApp" for a in node.names
             ):
                 if any(lo <= node.lineno <= hi for lo, hi in tc_ranges):
                     continue  # type-only import
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
     assert not offenders, (
-        "Runtime import of WellViewerApp (circular) — reach the app via the "
+        "Runtime import of ReviewApp (circular) — reach the app via the "
         "`app` arg, or guard the import under `if TYPE_CHECKING:`:\n  "
         + "\n  ".join(offenders)
     )
@@ -205,7 +266,7 @@ def _feature_pkg_of(path: Path):
     """The ``features/<pkg>`` package a file belongs to, or None if not under
     features/."""
     try:
-        parts = path.relative_to(WELL_VIEWER).parts
+        parts = path.relative_to(REVIEW).parts
     except ValueError:
         return None
     if len(parts) >= 2 and parts[0] == "features":
@@ -214,7 +275,7 @@ def _feature_pkg_of(path: Path):
 
 
 def _module_of(path: Path) -> str:
-    """Dotted module name for a repo file, e.g. ``well_viewer.features.home.controller``."""
+    """Dotted module name for a repo file, e.g. ``review.features.home.controller``."""
     return ".".join(path.relative_to(REPO_ROOT).with_suffix("").parts)
 
 
@@ -261,13 +322,13 @@ def test_no_module_scope_imports_of_removable_features():
     """Every removable feature (every ``features/<X>`` except the support libs
     ``export`` / ``preview`` / ``crop`` / ``qc`` and the assembly module
     ``registry.py``) must be importable on demand only: nothing may import
-    ``well_viewer.features.<X>`` at import time, except inside
+    ``review.features.<X>`` at import time, except inside
     ``features/registry.py`` (the sanctioned lazy-wrapper assembly point) and
     intra-feature imports. This is what makes a feature removable by commenting
     its descriptor out — AND deletable from disk — without breaking startup."""
     offenders = []
     for path in python_sources():
-        if path == WELL_VIEWER / "features" / "registry.py":
+        if path == REVIEW / "features" / "registry.py":
             continue
         tree = _parse(path)
         here = _module_of(path)
@@ -280,7 +341,7 @@ def test_no_module_scope_imports_of_removable_features():
             if any(lo <= node.lineno <= hi for lo, hi in tc_ranges):
                 continue                          # type-only
             for mod in _imported_modules(node, here):
-                if not mod.startswith("well_viewer.features."):
+                if not mod.startswith("review.features."):
                     continue
                 target = mod.split(".")[2]
                 if target == "registry" or target in _SUPPORT_LIBS:
@@ -297,7 +358,7 @@ def test_no_module_scope_imports_of_removable_features():
 
 
 def _nested_removable_packages() -> dict[str, str]:
-    """``{"well_viewer.features.home.ratios": "Ratios", …}`` — every removable
+    """``{"review.features.home.ratios": "Ratios", …}`` — every removable
     unit in ``profiles/full.toml`` whose package sits *inside* another feature.
 
     The catalog is the authority on what gets physically deleted, so it is also
@@ -311,8 +372,8 @@ def _nested_removable_packages() -> dict[str, str]:
     for entry in catalog.get("feature", []):
         for rel in entry.get("paths") or []:
             parts = Path(rel).parts
-            # well_viewer / features / <container> / <sub-package>
-            if len(parts) == 4 and parts[:2] == ("well_viewer", "features"):
+            # review / features / <container> / <sub-package>
+            if len(parts) == 4 and parts[:2] == ("review", "features"):
                 out[".".join(parts)] = str(entry.get("name"))
     return out
 
@@ -327,12 +388,12 @@ def _nested_removable_packages() -> dict[str, str]:
 #: `features/registry.py` is exempt wholesale (it is the assembly point) and is
 #: skipped before this is consulted.
 _DISPATCH_EXEMPT = {
-    ("well_viewer/features/image_browser/controller.py",
-     "well_viewer.features.image_browser.image_table"),
-    ("well_viewer/features/image_browser/controller.py",
-     "well_viewer.features.image_browser.cell_browser"),
-    ("well_viewer/features/image_browser/controller.py",
-     "well_viewer.features.image_browser.playground"),
+    ("review/features/image_browser/controller.py",
+     "review.features.image_browser.image_table"),
+    ("review/features/image_browser/controller.py",
+     "review.features.image_browser.cell_browser"),
+    ("review/features/image_browser/controller.py",
+     "review.features.image_browser.playground"),
 }
 
 
@@ -342,7 +403,7 @@ def _nested_offenders():
     nested = _nested_removable_packages()
     found = []
     for path in python_sources():
-        if path == WELL_VIEWER / "features" / "registry.py":
+        if path == REVIEW / "features" / "registry.py":
             continue
         rel = str(path.relative_to(REPO_ROOT))
         here = _module_of(path)
@@ -420,9 +481,9 @@ def test_disabling_a_leaf_feature_drops_it_everywhere():
     entry, dispatch, and state slice — with no dangling references. Exercised on
     a leaf feature (Review CSV) by filtering the registry and asserting it
     vanishes from every surface the core consults."""
-    from well_viewer.core.app_state import AppState
-    from well_viewer.core.feature_registry import FeatureRegistry
-    from well_viewer.features.registry import attach_feature_state, build_feature_registry
+    from review.core.app_state import AppState
+    from review.core.feature_registry import FeatureRegistry
+    from review.features.registry import attach_feature_state, build_feature_registry
 
     full = build_feature_registry()
     assert full.get("Review CSV") is not None  # present by default
@@ -454,7 +515,7 @@ def test_event_bus_signal_catalogue_is_capped():
         "channel_changed", "selection_changed", "dataset_loaded",
         "plot_options_changed",
     }
-    tree = _parse(WELL_VIEWER / "core" / "event_bus.py")
+    tree = _parse(REVIEW / "core" / "event_bus.py")
     signals = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
@@ -481,7 +542,7 @@ def test_every_event_bus_signal_is_reachable():
     outside its own module and outside the tests — an ``.emit(`` or a
     ``.connect(`` on ``bus.<name>``, or a subscriber wiring it up.
     """
-    tree = _parse(WELL_VIEWER / "core" / "event_bus.py")
+    tree = _parse(REVIEW / "core" / "event_bus.py")
     signals = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
@@ -536,7 +597,7 @@ FEATURE_NAME_EXCEPTIONS = {
     # controller.py to hold its line budget; paired with it and the grid_layout math.
     "build_layout.py",
     # the feature registry: the single assembly point for FeatureDescriptors and
-    # the sole sanctioned importer of well_viewer.features.* (the import-inversion
+    # the sole sanctioned importer of review.features.* (the import-inversion
     # seam) — not a per-feature module, so it sits outside the naming scheme.
     "registry.py",
     # image_table's feature-owned view-state (de)serialization — the snapshot /
@@ -569,7 +630,7 @@ def test_feature_module_naming():
     ``renderer.py`` (e.g. scatter)."""
     offenders = [
         str(p.relative_to(REPO_ROOT))
-        for p in _walk_py(WELL_VIEWER / "features")
+        for p in _walk_py(REVIEW / "features")
         if not _feature_name_ok(p.name)
     ]
     assert not offenders, (

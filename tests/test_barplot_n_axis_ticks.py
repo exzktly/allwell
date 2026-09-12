@@ -28,8 +28,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.ticker import MaxNLocator  # noqa: E402
 
-from well_viewer.features.barplot.collect import BarItem  # noqa: E402
-from well_viewer.features.barplot.controller import render_bar_items  # noqa: E402
+from review.features.barplot.collect import BarItem  # noqa: E402
+from review.features.barplot.controller import render_bar_items  # noqa: E402
 
 
 def _items():
@@ -98,7 +98,7 @@ def test_the_other_path_asks_only_about_per_fov_mode():
     different quantities."""
     import inspect
 
-    from well_viewer.features.barplot import renderer
+    from review.features.barplot import renderer
 
     src = inspect.getsource(renderer.draw_per_well_n_bars)
     assert "MaxNLocator(integer=not per_fov_spread)" in src

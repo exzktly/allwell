@@ -9,7 +9,7 @@ Which cutoff it edits follows the selected Property: an intensity metric edits
 range and the write target move together, because a box that displays one
 number while writing another would quietly destroy the cutoff it is not
 showing. Covers the controller layer with fakes, then the real wiring on an
-offscreen ``WellViewerApp``.
+offscreen ``ReviewApp``.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
-from well_viewer.core.channel_state_controller import (
+from review.core.channel_state_controller import (
     get_thresh_count_on,
     get_thresh_frac_on,
     refresh_thresh_frac_quick_edit,
@@ -136,7 +136,7 @@ class _FakeBus:
 class _FakeState:
     def __init__(self) -> None:
         from types import SimpleNamespace
-        from well_viewer.core.cell_gating_state import CellGatingState
+        from review.core.cell_gating_state import CellGatingState
         self.channel = _FakeChannel()
         self.dataset = _FakeDataset()
         # Doubles as the plot_options_changed emit payload AND the source the
@@ -180,8 +180,8 @@ class _FakeApp:
         # The gate accessors read the slice via ctx (post-R6 pure state); the
         # cell_gating change handler also reaches ctx.bus (plot_options_changed)
         # and ctx.runtime.cell_gating (the edit banks stamped on app._cell_gating_*).
-        from well_viewer.core.app_runtime import AppRuntime
-        from well_viewer.core.widget_registry import WidgetRegistry
+        from review.core.app_runtime import AppRuntime
+        from review.core.widget_registry import WidgetRegistry
         # A8/D-thresh: refresh_thresh_frac_quick_edit resolves the steppers +
         # status chips via ctx.widgets, so the double needs a real registry.
         # And the write fires the Cell Gating change handler through the
@@ -189,7 +189,7 @@ class _FakeApp:
         # real feature registry too — a stub without one would make the write
         # silently stop short of the handler, which is the half these tests are
         # about.
-        from well_viewer.features.registry import build_feature_registry
+        from review.features.registry import build_feature_registry
         self._ctx = SimpleNamespace(
             state=self._app_state, app=self, bus=self._event_bus,
             runtime=AppRuntime(self), widgets=WidgetRegistry(self),
@@ -209,7 +209,7 @@ def test_set_writes_through_active_channel_edit(monkeypatch):
     app = _FakeApp()
     # The cell-gating change handler fans out via the ctx-native redraw_app
     # orchestrator (was ctx.app._redraw()); route it back to the fake's counter.
-    import well_viewer.features.home.cell_gating.controller as cg
+    import review.features.home.cell_gating.controller as cg
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
     set_thresh_frac_on(app._ctx, 123.0)       # active channel == gfp
     assert app._cell_gating_thresh_frac_edits["gfp"].text() == "123.0"
@@ -222,7 +222,7 @@ def test_set_writes_through_active_channel_edit(monkeypatch):
 
 def test_set_targets_explicit_channel(monkeypatch):
     app = _FakeApp()
-    import well_viewer.features.home.cell_gating.controller as cg
+    import review.features.home.cell_gating.controller as cg
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
     set_thresh_frac_on(app._ctx, 77.0, channel="mcherry")
     assert get_thresh_frac_on(app._ctx, "mcherry") == 77.0
@@ -307,7 +307,7 @@ def test_write_follows_the_displayed_target(monkeypatch):
     the channel's intensity cutoff exactly where the user put it.
     """
     app = _FakeApp()
-    import well_viewer.features.home.cell_gating.controller as cg
+    import review.features.home.cell_gating.controller as cg
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
     # A committed intensity cutoff: the edit is the input surface and the slice
     # the source of truth, so a real one has both (the change handler syncs the
@@ -324,14 +324,14 @@ def test_write_follows_the_displayed_target(monkeypatch):
 
 def test_write_still_targets_the_intensity_cutoff_for_an_intensity_metric(monkeypatch):
     app = _FakeApp()
-    import well_viewer.features.home.cell_gating.controller as cg
+    import review.features.home.cell_gating.controller as cg
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
     set_on_cutoff(app._ctx, 120.0)
     assert get_thresh_frac_on(app._ctx, "gfp") == 120.0
     assert get_thresh_count_on(app._ctx, "gfp") == -1.0
 
 
-# ── real wiring on an offscreen WellViewerApp ────────────────────────────────
+# ── real wiring on an offscreen ReviewApp ────────────────────────────────
 
 def test_ctxbar_stepper_exists(loaded_app):
     assert hasattr(loaded_app, "_plotting_thresh_frac_stepper")
@@ -350,7 +350,7 @@ def test_stepper_edit_writes_through_to_cell_gating(loaded_app):
 
 
 def test_stepper_follows_channel_switch(loaded_app):
-    from well_viewer.core.channel_state_controller import set_active_channel
+    from review.core.channel_state_controller import set_active_channel
 
     loaded_app._set_thresh_frac_on(123.0, "gfp")
     loaded_app._set_thresh_frac_on(77.0, "mcherry")
@@ -485,8 +485,8 @@ def test_a_channel_without_counts_keeps_the_intensity_cutoff(monkeypatch):
     only builds a count field for smFISH channels, so the write would find no
     edit and return. Such a channel stays on the cutoff it actually has.
     """
-    from well_viewer.core.channel_state_controller import quick_edit_cutoff_is_count
-    import well_viewer.features.home.cell_gating.controller as cg
+    from review.core.channel_state_controller import quick_edit_cutoff_is_count
+    import review.features.home.cell_gating.controller as cg
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
 
     app = _FakeApp()

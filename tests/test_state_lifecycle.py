@@ -32,7 +32,7 @@ def test_plot_state_reset_clears_everything_that_names_a_well_or_timepoint():
     resolve to nothing, and the loudest case is silent: plate B came up
     normalised against plate A's group, so every bar was NaN under an axis
     still labelled as a fold change."""
-    from well_viewer.core.plot_state import PlotState
+    from review.core.plot_state import PlotState
 
     st = PlotState()
     st.fc_vs_control_on = True
@@ -64,7 +64,7 @@ def test_plot_state_reset_clears_everything_that_names_a_well_or_timepoint():
 def test_a_look_the_user_chose_is_not_reset():
     """The distinction the reset rests on: *which data* versus *how I like to
     look at it*. SEM-vs-SD is the second kind and must follow the user."""
-    from well_viewer.core.plot_state import PlotState
+    from review.core.plot_state import PlotState
 
     st = PlotState()
     st.use_sem = not st.use_sem
@@ -78,7 +78,7 @@ def test_export_prefs_reset_drops_axis_views_and_keeps_the_style():
     re-applying plate A's ``y_lim_max`` to plate B happens on every redraw and
     looks exactly like a plot that has decided to clip itself. ``style_prefs``
     is a publication look and should follow the user."""
-    from well_viewer.core.export_prefs_state import ExportPrefsState
+    from review.core.export_prefs_state import ExportPrefsState
 
     st = ExportPrefsState()
     st.style_prefs = {"font": "Arial"}
@@ -92,7 +92,7 @@ def test_image_view_reset_clears_luts_and_tints():
     """A LUT is a pair of intensities, and intensities belong to the plate that
     produced them: a bright plate's window renders the next plate black, with
     the histogram controls showing the numbers, so it reads as the data."""
-    from well_viewer.core.image_view_state import ImageViewState
+    from review.core.image_view_state import ImageViewState
 
     st = ImageViewState()
     st.set_lut("gfp", 100.0, 4000.0)
@@ -106,7 +106,7 @@ def test_the_load_path_calls_every_per_dataset_reset():
     load path has to actually ask. ``view_state.restore`` cannot stand in for
     this: it early-returns when the new plate has no saved block, which is
     exactly the case where the old plate's settings would carry over."""
-    src = (REPO_ROOT / "well_viewer" / "core" / "load_controller.py").read_text()
+    src = (REPO_ROOT / "review" / "core" / "load_controller.py").read_text()
     for slice_name in ("plot", "export_prefs", "image_view"):
         assert f"{slice_name}.reset_for_new_dataset()" in src, (
             f"the {slice_name} slice is not reset when a dataset is opened")
@@ -115,7 +115,7 @@ def test_the_load_path_calls_every_per_dataset_reset():
 # ── 2. a queued save is not a lost save ──────────────────────────────────────
 
 def test_the_registry_can_flush_every_pending_save():
-    from well_viewer.persistence.registry import PersistenceRegistry
+    from review.persistence.registry import PersistenceRegistry
 
     written: list[str] = []
     ctx = types.SimpleNamespace()
@@ -133,7 +133,7 @@ def test_the_registry_can_flush_every_pending_save():
 def test_one_domain_failing_does_not_strand_the_others():
     """``flush_all`` runs on the way out; a disk error in one domain must not
     stop the rest being written."""
-    from well_viewer.persistence.registry import PersistenceRegistry
+    from review.persistence.registry import PersistenceRegistry
 
     written: list[str] = []
 
@@ -150,7 +150,7 @@ def test_one_domain_failing_does_not_strand_the_others():
 
 
 @pytest.mark.parametrize(
-    "path", ["allwell.py", "well_viewer/core/load_controller.py"])
+    "path", ["allwell.py", "review/core/load_controller.py"])
 def test_both_moments_the_debounce_never_fires_flush_it(path):
     """Quitting, and swapping the data directory. On quit the edit was lost —
     only ``view_state`` had a force-save. On a swap it was worse than lost: a
@@ -175,7 +175,7 @@ def test_a_corrupt_persistence_file_is_kept_rather_than_overwritten(tmp_path):
     nothing saved. Writing it back erased every section the file still held —
     every ratio, layout, override, note and sample definition — because one
     byte failed to parse."""
-    from well_viewer.persistence import _doc
+    from review.persistence import _doc
 
     out = tmp_path / "out"
     out.mkdir()
@@ -199,7 +199,7 @@ def test_a_corrupt_persistence_file_is_kept_rather_than_overwritten(tmp_path):
 
 def test_an_ordinary_write_keeps_no_backup(tmp_path):
     """The control: a readable document is replaced in place, as before."""
-    from well_viewer.persistence import _doc
+    from review.persistence import _doc
 
     out = tmp_path / "out"
     out.mkdir()
@@ -244,7 +244,7 @@ def test_both_cell_gating_workers_are_stopped_at_teardown():
     the moment the loop was extracted into a helper, which is a test of the
     implementation, not of the rule.
     """
-    from well_viewer import runtime_app
+    from review import runtime_app
 
     worker, auto = _FakeWorker(), _FakeWorker()
     runtime = types.SimpleNamespace(
@@ -270,8 +270,8 @@ def test_teardown_survives_a_build_without_the_feature():
     ``None``" — not "no slice". A namespace with the attribute missing tests a
     state the app cannot reach, and it passed before the helper existed.
     """
-    from well_viewer.core.app_runtime import AppRuntime
-    from well_viewer.core.worker_bridge import stop_runtime_workers
+    from review.core.app_runtime import AppRuntime
+    from core.worker_bridge import stop_runtime_workers
 
     runtime = AppRuntime(store={})
     assert runtime.cell_gating is not None, (
@@ -286,7 +286,7 @@ def test_teardown_survives_a_build_without_the_feature():
 def test_teardown_clears_the_thread_reference_it_stopped():
     """A stopped QThread left hanging off the runtime slice is a dead C++
     object for whatever looks at it next."""
-    from well_viewer.core.worker_bridge import stop_runtime_workers
+    from core.worker_bridge import stop_runtime_workers
 
     class _Worker:
         def __init__(self):
@@ -309,7 +309,7 @@ def test_a_failing_cancel_does_not_skip_the_wait():
     ``try`` turned "cancel raised" into "the thread was never joined either",
     which is the case where a live worker emits into a widget tree being
     deleted."""
-    from well_viewer.core.worker_bridge import stop_runtime_workers
+    from core.worker_bridge import stop_runtime_workers
 
     class _Worker:
         def __init__(self):
@@ -342,7 +342,7 @@ def test_a_cancelled_auto_threshold_scan_actually_stops():
     asserted only that a ``cancel`` method existed and that the restart site
     contained the string ``prev.cancel()``, which is why it shipped.
     """
-    from well_viewer.data import auto_threshold as at
+    from review.data import auto_threshold as at
 
     # A directory that exists and names wells, so the scan gets past its own
     # "data directory not found" guard and reaches the per-well loop. Pointed
@@ -380,7 +380,7 @@ def test_a_scan_nobody_cancelled_runs_to_the_end():
     """The control for the test above: the same fixture with a predicate that
     says no must *not* stop early, or the one above would pass against code
     that simply refuses to run."""
-    from well_viewer.data import auto_threshold as at
+    from review.data import auto_threshold as at
 
     with tempfile.TemporaryDirectory() as tmp:
         out_dir = pathlib.Path(tmp)
@@ -410,7 +410,7 @@ def test_every_worker_restart_cancels_first_and_waits_briefly():
     at all and therefore blocks the GUI thread until the previous pass finishes
     reading a well.
     """
-    src = (REPO_ROOT / "well_viewer" / "features" / "home" / "cell_gating"
+    src = (REPO_ROOT / "review" / "features" / "home" / "cell_gating"
            / "controller.py").read_text()
     tree = ast.parse(src)
     checked = 0
@@ -451,7 +451,7 @@ def test_zip_handles_are_closed_under_the_reader_lock():
     because ZipFile is not safe for concurrent reads; eviction, stale-mtime
     replacement and ``invalidate`` all closed it without taking that lock, and
     the readers are off-thread."""
-    src = (REPO_ROOT / "well_viewer" / "data" / "zipfile_cache.py").read_text()
+    src = (REPO_ROOT / "review" / "data" / "zipfile_cache.py").read_text()
     tree = ast.parse(src)
     closes = [
         n for n in ast.walk(tree)
@@ -476,7 +476,7 @@ def test_the_run_receipt_reads_the_qc_keys_the_pipeline_writes():
     """``qc_options`` is written with un-prefixed names; the ``qc_`` prefix
     belongs to the CLI flags they come from. Three rows of the receipt showed
     "—" and the literal "None, None" for every run ever made."""
-    src = (REPO_ROOT / "well_viewer" / "features" / "home" / "pipeline_info"
+    src = (REPO_ROOT / "review" / "features" / "home" / "pipeline_info"
            / "tab_view.py").read_text()
     for key in ("qc_remove_debris", "qc_min_area", "qc_max_area", "qc_min_solidity"):
         assert f'qc.get("{key}")' not in src, (
@@ -490,7 +490,7 @@ def test_the_ratio_count_reads_live_state_not_a_sidecar_key():
     so the row said "None yet" however many ratios were defined. It cannot read
     the persistence document either — this page's premise is that it opens no
     files — so it counts what the loader already put in memory."""
-    src = (REPO_ROOT / "well_viewer" / "features" / "home" / "collect.py").read_text()
+    src = (REPO_ROOT / "review" / "features" / "home" / "collect.py").read_text()
     assert 'info.get("ratios")' not in src
     assert "ratio_metrics" in src
 
@@ -506,7 +506,7 @@ def test_a_drained_save_does_not_fire_again_when_its_timer_lands():
     crop into the new plate's document. That is the exact bug ``flush_all``
     exists to prevent, so the pending set has to be the authority on whether a
     save is still owed."""
-    from well_viewer.persistence.registry import PersistenceRegistry
+    from review.persistence.registry import PersistenceRegistry
 
     writes: list[str] = []
     reg = PersistenceRegistry(types.SimpleNamespace())
@@ -526,7 +526,7 @@ def test_a_log_scale_and_mark_styling_survive_a_dataset_swap():
     ``axis_prefs`` also reset the user's log axes and mark styling on every
     dataset switch — the "how I like to look at it" half of the rule the reset
     is built on, and the half ARCHITECTURE says follows the user."""
-    from well_viewer.core.export_prefs_state import ExportPrefsState
+    from review.core.export_prefs_state import ExportPrefsState
 
     st = ExportPrefsState()
     st.axis_prefs = {
@@ -542,7 +542,7 @@ def test_the_time_scale_multiplier_does_not_follow_the_user_to_the_next_plate():
     cadence does not match the hours it was imaged at, and the factor is
     printed in the axis label — so carrying it over relabels every time axis on
     the next plate in a way that reads as the data."""
-    from well_viewer.core.plot_state import PlotState
+    from review.core.plot_state import PlotState
 
     st = PlotState()
     st.time_scale = 4.0
@@ -555,7 +555,7 @@ def test_a_document_from_a_newer_build_is_left_alone(tmp_path):
     corrupt. Renaming it aside would make a user who alternates builds lose the
     other one's state on every launch, under a filename claiming it was
     unreadable; refusing to write is enough to keep both safe."""
-    from well_viewer.persistence import _doc
+    from review.persistence import _doc
 
     out = tmp_path / "out"
     out.mkdir()
@@ -578,7 +578,7 @@ def test_a_document_from_a_newer_build_is_left_alone(tmp_path):
 def test_an_unpreservable_corrupt_file_is_not_overwritten(tmp_path, monkeypatch):
     """If the copy cannot be made — a read-only directory, a permission problem
     — writing anyway destroys the very file the rename exists to preserve."""
-    from well_viewer.persistence import _doc
+    from review.persistence import _doc
 
     out = tmp_path / "out"
     out.mkdir()
@@ -620,7 +620,7 @@ def test_a_committed_note_is_queued_not_merely_folded_in():
     which passed with the note still being lost; this one drives the commit and
     looks at the queue.
     """
-    from well_viewer.core import ui_helpers
+    from review.core import ui_helpers
 
     # A stub rather than a real QPlainTextEdit: this asserts what the commit
     # does with the text, which needs no Qt and no QApplication.
@@ -645,7 +645,7 @@ def test_a_committed_note_is_queued_not_merely_folded_in():
 def test_committing_an_unchanged_note_queues_nothing():
     """The control: the save paths commit on every write, and queuing there
     would schedule a write of what was just written."""
-    from well_viewer.core import ui_helpers
+    from review.core import ui_helpers
 
     edit = types.SimpleNamespace(
         toPlainText=lambda: "same text", hasFocus=lambda: True)
@@ -671,7 +671,7 @@ def test_a_dataset_switch_drops_the_axis_limits_a_panel_kept_in_its_bucket():
     limit exactly where it was — a plate whose values run 0–1000 opening under
     the previous plate's 0–12.
     """
-    from well_viewer.core.export_prefs_state import ExportPrefsState
+    from review.core.export_prefs_state import ExportPrefsState
 
     state = ExportPrefsState()
     state.axis_prefs = {
@@ -704,10 +704,10 @@ def test_every_caller_that_forgets_a_limit_goes_through_one_helper():
     unfixed code and measured nothing. It now resolves module-level tuple and
     list constants, which is how a key list is actually written.
     """
-    import well_viewer.core.plot_style as ps
+    import review.core.plot_style as ps
 
     limit_keys = set(ps.AXIS_LIMIT_PREF_KEYS)
-    roots = [REPO_ROOT / "well_viewer", REPO_ROOT / "widgets"]
+    roots = [REPO_ROOT / "review", REPO_ROOT / "widgets"]
     offenders: list[str] = []
     for root in roots:
         for path in sorted(root.rglob("*.py")):
@@ -767,7 +767,7 @@ def test_a_plate_with_no_saved_ratios_clears_the_previous_plate_s():
     is decided, rather than through a roster in ``load_directory`` that the
     next domain will not be added to.
     """
-    from well_viewer.persistence import _doc, ratios
+    from review.persistence import _doc, ratios
 
     applied: list[list] = []
     app = types.SimpleNamespace(
@@ -786,7 +786,7 @@ def test_a_plate_with_no_saved_ratios_clears_the_previous_plate_s():
 def test_a_plate_with_no_saved_heatmap_layouts_clears_the_previous_plate_s():
     """Same rule, the other domain that was still inheriting: a layout names
     wells and a metric, and the next plate need have neither."""
-    from well_viewer.persistence import heatmap_layouts as hl
+    from review.persistence import heatmap_layouts as hl
 
     heatmap_slice = types.SimpleNamespace(persisted_settings={"metric": "gfp"})
     runtime_heatmap = types.SimpleNamespace(layouts=["a layout from plate A"])
@@ -814,7 +814,7 @@ def test_the_variable_band_does_not_survive_a_dataset_swap():
     exclude is the one that clears *Group by* alone: the two decorations are on
     a separate roster and were the half that was missed.
     """
-    from well_viewer.core.plot_state import PlotState
+    from review.core.plot_state import PlotState
 
     st = PlotState()
     st.group_by_variable = "variable-1111"

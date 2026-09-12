@@ -19,13 +19,13 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import controller as C
-from well_viewer.features.image_browser.image_table.build_layout import (
+from review.features.image_browser.image_table import controller as C
+from review.features.image_browser.image_table.build_layout import (
     image_table_apply_spec,
 )
-from well_viewer.features.image_browser.image_table import facet_view as F
-from well_viewer.features.image_browser.image_table import grid_layout as G
-from well_viewer.features.image_browser.image_table.state import (
+from review.features.image_browser.image_table import facet_view as F
+from review.features.image_browser.image_table import grid_layout as G
+from review.features.image_browser.image_table.state import (
     Axis, ChannelSpec, ImageTableState, TableSpec,
     spec_from_state, spec_to_state_fields,
 )
@@ -41,7 +41,7 @@ def _fake_app(*, wells, channels=("gfp",), active_wells=None):
                                 ratio_metrics=[], seg_channel_token=""),
         image_table=ImageTableState(active_wells=set(active_wells or [])),
     )
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app._ctx = SimpleNamespace(app=app, state=app._app_state, runtime=AppRuntime(app),
                                notify=SimpleNamespace(set_status=lambda *a, **k: None))
     return app
@@ -193,7 +193,7 @@ def test_dropping_on_an_axis_exits_plate_mode():
     Columns was silently discarded — ``spec_to_state_fields`` kept forcing
     well_row/well_col — so the user's row/column spec was ignored. A drop onto an
     axis is a manual layout and must turn Plate off so it takes effect."""
-    from well_viewer.features.image_browser.image_table import builder_view as B
+    from review.features.image_browser.image_table import builder_view as B
 
     app = _fake_app(wells=["A01", "A02", "B01", "B02"],
                     channels=("gfp", "mcherry"),
@@ -222,7 +222,7 @@ def test_dropping_on_an_axis_exits_plate_mode():
 def test_dropping_a_root_on_fixed_leaves_plate_mode_untouched():
     """Only an axis (rows/cols) drop cancels plate mode — pinning a root under
     Fixed does not (plate already auto-derives the fixed dims)."""
-    from well_viewer.features.image_browser.image_table import builder_view as B
+    from review.features.image_browser.image_table import builder_view as B
 
     app = _fake_app(wells=["A01", "B02"], channels=("gfp",), active_wells=["A01", "B02"])
     ctx = app._ctx

@@ -21,7 +21,7 @@ import zipfile
 
 import pytest
 
-from datasets._common.dataset_paths import DatasetPaths, in_containers
+from datasets.core.dataset_paths import DatasetPaths, in_containers
 from datasets.concatenate.concatenate_compute import ConcatError, build_merge_plan
 from datasets.merge_plates.merge_plates_compute import (
     MergePlatesError,

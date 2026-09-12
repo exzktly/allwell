@@ -22,14 +22,14 @@ import matplotlib.pyplot as plt  # noqa: E402
 import pytest  # noqa: E402
 
 from tests.test_bar_significance import _app, _axes, _bars  # noqa: E402
-from well_viewer.domain.significance import (  # noqa: E402
+from review.domain.significance import (  # noqa: E402
     SIGNIFICANCE_LABEL_MODE_NAMES,
     SIGNIFICANCE_LABEL_MODES,
     format_p_value,
     significance_label,
     significance_stars,
 )
-from well_viewer.features.barplot.renderer import (  # noqa: E402
+from review.features.barplot.renderer import (  # noqa: E402
     SIGNIFICANCE_NOTE_TAG,
     draw_significance_brackets,
 )
@@ -140,7 +140,7 @@ _ONE_RUN = [{"a": "CTRL", "b": "DRUG", "p": 0.0312, "p_adj": 0.0312,
 
 
 def test_the_bracket_draws_stars_by_default():
-    from well_viewer.core.plot_state import PlotState
+    from review.core.plot_state import PlotState
     assert PlotState().significance_label_mode == "stars"
     assert _bracket_texts(_ONE_RUN, "stars") == ["*"]
 
@@ -202,7 +202,7 @@ def _draw_n_groups(n_groups, mode):
     figure would answer it for a panel the app never draws.
     """
     from types import SimpleNamespace
-    from well_viewer.features.barplot.tab_view import _DPI, _FIG_H, _FIG_W
+    from review.features.barplot.tab_view import _DPI, _FIG_H, _FIG_W
 
     fig, axes = plt.subplots(3, 1, figsize=(_FIG_W, _FIG_H), dpi=_DPI)
     ax_mean, ax_frac = axes[0], axes[1]
@@ -283,7 +283,7 @@ def test_the_stars_are_never_withheld_for_want_of_room():
 def test_a_p_value_label_is_drawn_a_point_smaller_than_the_stars():
     """One label per bracket is a lot of text on a busy panel; a whole
     expression takes the smaller of the two sizes and a glyph does not."""
-    from well_viewer.features.barplot.renderer import (
+    from review.features.barplot.renderer import (
         _BRACKET_P_VALUE_PT, _BRACKET_STARS_PT, _bracket_font_pt,
     )
     assert _BRACKET_P_VALUE_PT < _BRACKET_STARS_PT
@@ -308,7 +308,7 @@ def test_the_report_prints_a_p_value_the_way_a_bracket_does():
     have fixed half the divergence. The report used ``:.4g`` and a bracket
     ``%.3g``, so one run read ``p = 0.03125`` in the text and ``p = 0.0312`` on
     the panel beside it."""
-    from well_viewer.features.stats.controller import _format_pairwise_lines
+    from review.features.stats.controller import _format_pairwise_lines
 
     rows = [("A", "B", "t", 3.0, 0.0312456, None)]
     line = [ln for ln in _format_pairwise_lines(rows, {}, False) if "t =" in ln][0]
@@ -321,7 +321,7 @@ def test_the_report_never_prints_p_equals_zero_either():
     *not* the one it was written for. An underflowed p reported as ``p = 0``
     claims a probability of zero — and this line printed exactly that while the
     bracket beside it printed the bound."""
-    from well_viewer.features.stats.controller import _format_pairwise_lines
+    from review.features.stats.controller import _format_pairwise_lines
 
     rows = [("A", "B", "t", 12.3, 0.0, None), ("A", "C", "t", 9.0, 0.0, None)]
     lines = [ln for ln in _format_pairwise_lines(rows, {0: 0.0, 1: 0.0}, True)
@@ -339,7 +339,7 @@ def test_the_report_never_prints_p_equals_zero_either():
 def test_the_mode_round_trips_through_view_state(loaded_app):
     """Captured beside the toggle that draws the brackets: a saved plot whose
     brackets quoted their p-values must not come back showing bare asterisks."""
-    from well_viewer.persistence import view_state as vs
+    from review.persistence import view_state as vs
 
     app = loaded_app
     app._app_state.plot.significance_label_mode = "both"
@@ -364,8 +364,8 @@ def test_a_restore_puts_the_toggle_and_the_picker_back_in_step(loaded_app, qtbot
     on the main path that gets brackets back.
     """
     from PySide6.QtWidgets import QWidget
-    from well_viewer.features.barplot import tab_view as bar_tab_view
-    from well_viewer.persistence import view_state as vs
+    from review.features.barplot import tab_view as bar_tab_view
+    from review.persistence import view_state as vs
 
     app = loaded_app
     parent = QWidget()
@@ -395,7 +395,7 @@ def test_a_bar_tab_built_later_opens_on_the_mode_already_chosen(viewer_app, qtbo
     live value; seeding it from the default would show ``Stars (*)`` over a
     figure drawing p-values."""
     from PySide6.QtWidgets import QWidget
-    from well_viewer.features.barplot import tab_view as bar_tab_view
+    from review.features.barplot import tab_view as bar_tab_view
 
     app = viewer_app
     app._app_state.plot.significance_label_mode = "both"
@@ -418,7 +418,7 @@ def test_an_unrecognised_saved_mode_restores_to_the_stars(loaded_app):
     this one cannot draw. Restoring it verbatim would leave every bracket
     blank — the silent-substitution shape CLAUDE.md §7 names — so the restore
     validates against the known set and falls back to what every build draws."""
-    from well_viewer.persistence import view_state as vs
+    from review.persistence import view_state as vs
 
     app = loaded_app
     app._app_state.plot.significance_label_mode = "p"
@@ -428,7 +428,7 @@ def test_an_unrecognised_saved_mode_restores_to_the_stars(loaded_app):
 
 def test_a_new_dataset_keeps_the_chosen_mode():
     """A presentation preference, not a statement about this plate's wells."""
-    from well_viewer.core.plot_state import PlotState
+    from review.core.plot_state import PlotState
     plot = PlotState()
     plot.significance_label_mode = "both"
     plot.reset_for_new_dataset()
@@ -455,7 +455,7 @@ def test_the_display_popover_s_picker_moves_the_state(viewer_app, qtbot,
     a redraw only when there are brackets on the figure for it to change.
     """
     from PySide6.QtWidgets import QWidget
-    from well_viewer.features.barplot import tab_view as bar_tab_view
+    from review.features.barplot import tab_view as bar_tab_view
 
     redraws: list[int] = []
     monkeypatch.setattr(bar_tab_view, "redraw_bars",
@@ -497,7 +497,7 @@ def test_the_report_and_the_brackets_share_one_ladder():
     same comparison. They had a private copy of these thresholds each; a p of
     0.05 reading 'ns' in one place and '*' in the other is the divergence one
     shared function exists to prevent."""
-    from well_viewer.features.stats.controller import _sig_marker
+    from review.features.stats.controller import _sig_marker
     for p in (0.0, 5e-4, 0.001, 0.005, 0.01, 0.03, 0.05, 0.2, 1.0):
         assert _sig_marker(p) == significance_stars(p), p
 

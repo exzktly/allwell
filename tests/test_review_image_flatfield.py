@@ -8,8 +8,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.review_image import controller as C
-from well_viewer.features.image_browser.review_image.renderer import set_review_image_source
+from review.features.image_browser.review_image import controller as C
+from review.features.image_browser.review_image.renderer import set_review_image_source
 
 
 def _set_flatfield_mode(app, mode, background_well=""):
@@ -26,7 +26,7 @@ def _build_segmentation_panel(app):
     builder in ``preview/panel_view.build_review_image_panel`` is what assigns
     it. Every other Image Browser sub-tab test does the same thing.
     """
-    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    from review.features.image_browser.controller import show_image_browser_subtab
     assert show_image_browser_subtab(app._ctx, "Segmentation")
     return app._ctx.runtime.review_image.source_seg
 

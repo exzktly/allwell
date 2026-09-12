@@ -5,7 +5,7 @@ app/window-level services (status bar, Save-As dialog, …) so feature code name
 them instead of reaching through ``ctx.app``. This test freezes that set: adding
 an accessor requires editing ``_ALLOWED`` here — a deliberate, reviewed act. The
 list is the enumerable spec of what features legitimately need from
-``WellViewerApp``; if it grows past a handful, that is the signal to decompose
+``ReviewApp``; if it grows past a handful, that is the signal to decompose
 the god-object itself, not to keep adding accessors (which would let unbounded
 coupling hide behind named methods and defeat the ``ctx.app`` burn-down).
 """
@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import inspect
 
-from well_viewer.viewer_context import ViewerContext
+from review.viewer_context import ViewerContext
 
 # The frozen set of public, callable service accessors on ViewerContext.
-# Keep this SMALL. Each entry is a genuine WellViewerApp service with no typed
+# Keep this SMALL. Each entry is a genuine ReviewApp service with no typed
 # home yet — not a convenience wrapper for arbitrary god-object access.
 _ALLOWED = {
     # NOTE (A5): ``set_status`` / ``toast`` were extracted into
@@ -24,7 +24,7 @@ _ALLOWED = {
     # ``open_export_style_panel`` into ``FigureService`` (``ctx.figures.save`` /
     # ``ctx.figures.open_style_panel``). All are now held collaborators, not
     # accessor methods on the context.
-    # ``window`` exposes the WellViewerApp *qua QMainWindow* for the operations
+    # ``window`` exposes the ReviewApp *qua QMainWindow* for the operations
     # that genuinely need the widget (dialog parenting, isinstance/findChildren)
     # and can never be god-object-free. Named so those needs don't count against
     # the ctx.app burn-down while staying enumerable + frozen here.
@@ -44,7 +44,7 @@ _ALLOWED = {
 
 def _public_methods() -> set[str]:
     # Count both plain methods and property accessors: a property is just as much
-    # a named surface onto WellViewerApp, so it must be frozen here too (else a
+    # a named surface onto ReviewApp, so it must be frozen here too (else a
     # property could smuggle in unreviewed coupling the isfunction check misses).
     return {
         name

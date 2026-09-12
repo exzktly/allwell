@@ -24,8 +24,8 @@ pytest.importorskip("scipy")
 
 import numpy as np  # noqa: E402
 
-from well_viewer.domain import spatial_compute  # noqa: E402
-from well_viewer.domain.spatial_compute import _dbscan  # noqa: E402
+from review.domain import spatial_compute  # noqa: E402
+from review.domain.spatial_compute import _dbscan  # noqa: E402
 
 
 def _field(n: int) -> np.ndarray:

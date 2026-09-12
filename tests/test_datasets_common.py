@@ -1,4 +1,4 @@
-"""Qt-free tests for the shared Datasets-pane helpers under ``datasets/_common``.
+"""Qt-free tests for the shared Datasets-pane helpers under ``datasets/core``.
 
 Complements ``tests/test_concatenate_compute.py`` (which exercises these
 through Concatenate's re-exports) with direct coverage of the generalised
@@ -12,13 +12,13 @@ import zipfile
 
 import pytest
 
-from datasets._common import containers as ct
-from datasets._common import dataset_paths as dp
-from datasets._common import member_names as mn
+from datasets.core import containers as ct
+from datasets.core import dataset_paths as dp
+from datasets.core import member_names as mn
 from tests.fixtures.dataset_builder import build_dataset
 from util.timepoint import parse_hours
 from util.well_token import canonical_well_label
-from well_viewer.data.image_identity import load_schema
+from domain.image_identity import load_schema
 
 
 def _schema():

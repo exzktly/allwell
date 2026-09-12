@@ -22,8 +22,8 @@ import types
 
 import pytest
 
-from well_viewer.domain.stats_compute import group_replicate_stats
-from well_viewer.features.heatmap import controller as HM
+from review.domain.stats_compute import group_replicate_stats
+from review.features.heatmap import controller as HM
 
 _VAL = "gfp_mean_intensity"
 _TP = 0.0

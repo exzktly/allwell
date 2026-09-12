@@ -19,9 +19,9 @@ from __future__ import annotations
 import logging
 from types import SimpleNamespace
 
-from well_viewer.core.widget_registry import WidgetRegistry
-from well_viewer.features.heatmap.state import HeatmapState
-from well_viewer.persistence import heatmap_layouts
+from review.core.widget_registry import WidgetRegistry
+from review.features.heatmap.state import HeatmapState
+from review.persistence import heatmap_layouts
 
 
 class _Combo:
@@ -101,7 +101,7 @@ def test_a_saved_timepoint_this_plate_lacks_restores_nothing_and_says_so(caplog)
     # 12 h, which looks exactly like a successful restore.
     _app2, ctx2, hm2, combo2 = _plate([4.0, 8.0, 12.0], selected=0)
     hm2.persisted_settings = settings
-    with caplog.at_level(logging.INFO, logger="well_viewer"):
+    with caplog.at_level(logging.INFO, logger="review"):
         heatmap_layouts.apply_persisted_settings(ctx2)
 
     assert combo2.currentIndex() == 0, (

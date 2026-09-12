@@ -38,16 +38,16 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.colors import to_hex  # noqa: E402
 
 from ui import theme  # noqa: E402
-from well_viewer.core.plot_state import PlotState  # noqa: E402
-from well_viewer.domain.line_colors import (  # noqa: E402
+from review.core.plot_state import PlotState  # noqa: E402
+from review.domain.line_colors import (  # noqa: E402
     LINE_MARKERS, LINE_STYLES, grey_trace_style,
 )
-from well_viewer.domain.response_colors import (  # noqa: E402
+from review.domain.response_colors import (  # noqa: E402
     RESPONSE_COLOR_MODES, grey_series_style, response_color_mode,
     response_grey_cues, series_styles,
 )
-from well_viewer.features.response import collect as rc  # noqa: E402
-from well_viewer.features.response.renderer import draw_response  # noqa: E402
+from review.features.response import collect as rc  # noqa: E402
+from review.features.response.renderer import draw_response  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -227,7 +227,7 @@ def test_the_export_style_pass_does_not_stamp_over_the_encodings():
     mode is. Without it one pref pattern replaced four timepoints' worth while
     the legend went on naming all four.
     """
-    from well_viewer.core.plot_style import apply_export_style_prefs
+    from review.core.plot_style import apply_export_style_prefs
 
     prefs = {"marker_style": "s", "marker_open": True, "line_style": "-"}
     for mode in RESPONSE_COLOR_MODES:
@@ -262,7 +262,7 @@ def test_the_mode_survives_a_save_and_reload(loaded_app):
     faking the two halves would assert that a dict literal round-trips through
     itself, which passes against a key nothing writes.
     """
-    from well_viewer.persistence import view_state as vs
+    from review.persistence import view_state as vs
 
     app = loaded_app
     app._app_state.plot.response_color_mode = "grey"
@@ -279,7 +279,7 @@ def test_a_junk_value_on_disk_does_not_reach_the_state(loaded_app):
     """An edited ``persistence.json`` is dropped rather than stored, so the
     resolver's degrade-to-default is not the only thing between a typo and a
     figure drawn in no mode at all."""
-    from well_viewer.persistence import view_state as vs
+    from review.persistence import view_state as vs
 
     app = loaded_app
     app._app_state.plot.response_color_mode = "grey"
@@ -356,7 +356,7 @@ def test_no_series_style_carries_a_dash_the_timepoint_is_using():
     answer as an argument, and why this reads them off that one function:
     exactly one of the two owns the dash, on either shape of figure.
     """
-    from well_viewer.features.response.renderer import _curve_styles
+    from review.features.response.renderer import _curve_styles
 
     for data, dashed_timepoints in ((_two_by_two(), True),
                                     (_one_timepoint_three_series(), False)):

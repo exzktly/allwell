@@ -31,7 +31,7 @@ from tests._repo_scan import parse_source, python_sources, rel
 
 def _declared_keys() -> set[str]:
     pytest.importorskip("PySide6")
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
 
     # The full profile deliberately: a subset build drops features *and* their
     # services together, which is the point of the seam, not a violation of it.

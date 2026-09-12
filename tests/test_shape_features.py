@@ -16,8 +16,8 @@ import pytest
 from PySide6.QtWidgets import QApplication, QComboBox
 
 import pipeline.shape_features as sfc
-from well_viewer.core.channel_state import ChannelState
-from well_viewer.core.ui_helpers import set_combo_values_sectioned
+from review.core.channel_state import ChannelState
+from review.core.ui_helpers import set_combo_values_sectioned
 
 pytestmark = pytest.mark.qt
 
@@ -103,8 +103,8 @@ class _FakeApp:
 
 
 def test_populate_metric_combo_collapses_for_shape(qapp):
-    from well_viewer.core.channel_state_controller import populate_metric_combo
-    from well_viewer.data.metric_labels import CALCULATED_VAL_LABEL, METRIC_ORDER
+    from review.core.channel_state_controller import populate_metric_combo
+    from review.data.metric_labels import CALCULATED_VAL_LABEL, METRIC_ORDER
 
     app = _FakeApp()
 
@@ -227,7 +227,7 @@ def test_scatter_menus_offer_shape_features(loaded_app_shape):
 
 def test_scatter_draw_with_shape_axis(loaded_app_shape):
     """End-to-end: a shape feature on the X axis plots real per-cell points."""
-    from well_viewer.features.scatter.controller import (
+    from review.features.scatter.controller import (
         update_scatter_menus, redraw_scatter_orchestrate,
     )
     from tests.fixtures.mini_dataset import WELLS
@@ -249,7 +249,7 @@ def test_scatter_draw_with_shape_axis(loaded_app_shape):
     assert len(cache["points"]) > 0
     # Scatter axes default to the log10(value+1) display transform, which
     # annotates the axis label with a "(log₁₀, +1)" suffix.
-    from well_viewer.features.scatter._layout import log1p_axis_suffix
+    from review.features.scatter._layout import log1p_axis_suffix
     assert app._ax_scatter.get_xlabel() == "Eccentricity" + log1p_axis_suffix(True)
 
 
@@ -259,7 +259,7 @@ def test_scatter_menus_preserve_timepoint_selection(loaded_app_shape):
     can't change them — update_scatter_menus used to re-check every timepoint,
     silently pulling all timepoints back into the plot whenever a well was added.
     """
-    from well_viewer.features.scatter.controller import update_scatter_menus
+    from review.features.scatter.controller import update_scatter_menus
     from tests.fixtures.mini_dataset import WELLS
 
     app = loaded_app_shape
@@ -283,10 +283,10 @@ def test_scatter_menus_preserve_timepoint_selection(loaded_app_shape):
 # ── End-to-end: label → key → active state → value resolution ────────────────
 
 def test_label_key_value_roundtrip():
-    from well_viewer.core.channel_state_controller import (
+    from review.core.channel_state_controller import (
         channel_key_for_label, active_channel_label,
     )
-    from well_viewer.data.data_loading import resolve_value_series
+    from review.data.data_loading import resolve_value_series
     pd = pytest.importorskip("pandas")
 
     app = _FakeApp()

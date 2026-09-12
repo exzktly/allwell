@@ -15,8 +15,8 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.features.heatmap.tab_view import build_heatmap_tab
-from well_viewer.persistence import heatmap_layouts as hl
+from review.features.heatmap.tab_view import build_heatmap_tab
+from review.persistence import heatmap_layouts as hl
 
 
 def test_slice_defaults(viewer_app):

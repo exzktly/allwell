@@ -13,8 +13,8 @@ from __future__ import annotations
 import pytest
 
 from tests.test_scatter_agg_count_cutoff import _ctx, _well_df
-from well_viewer.features.scatter.collect import collect_scatter_agg_data
-from well_viewer.features.scatter._messages import agg_empty_message
+from review.features.scatter.collect import collect_scatter_agg_data
+from review.features.scatter._messages import agg_empty_message
 
 
 def _cut_sink_for(ctx, stat="smFISH Count W3CY5"):

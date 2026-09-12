@@ -6,7 +6,7 @@ it onto the existing ImageTableState fields the layout math consumes, and
 data — no Qt, no ctx — so they run in the fast lane.
 """
 
-from well_viewer.features.image_browser.image_table.state import (
+from review.features.image_browser.image_table.state import (
     Axis,
     ChannelSpec,
     ImageTableState,

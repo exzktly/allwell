@@ -24,8 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from util.timepoint import parse_hours, sort_key as tp_sort_key
-from well_viewer.data.image_identity import load_schema
-from datasets._common.dataset_paths import (
+from domain.image_identity import load_schema
+from datasets.core.dataset_paths import (
     collect_available_schema_values,
     out_zips,
     resolve_dataset,

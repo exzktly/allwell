@@ -1,6 +1,6 @@
 """Audit A8 — ``ctx.app`` burn-down ratchet.
 
-``ViewerContext`` exists to decouple features from the ``WellViewerApp``
+``ViewerContext`` exists to decouple features from the ``ReviewApp``
 god-object, yet features reach straight back through ``ctx.app`` hundreds of
 times, so the abstraction leaks and provides near-zero isolation. There is no
 single mechanical fix — it's a strangler migration to typed state / dedicated
@@ -77,7 +77,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   298 -> 293  P3.4-1 make_plot_view_switcher takes ctx (owns the plotting-
 #              notebook navigation; 6 builder call sites drop ctx.app, one
 #              internal touch remains in ui_helpers).
-# --- A8-teardown epic (293 -> 0): decompose WellViewerApp; see
+# --- A8-teardown epic (293 -> 0): decompose ReviewApp; see
 #     _Docs/Markdowns/A8_TEARDOWN_EPIC.md.
 #   293 -> 279  T2 smFISH runtime holder: 17 builder writes of live objects
 #              (bridge/extractor/figures/decoded arrays/cdf popup) move to
@@ -130,7 +130,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              ctx, label) does the lazy load + QC/Crop projection over ctx.state
 #              (QC/crop projectors get_qc_params/apply_qc_to_cache/get_crop_region/
 #              apply_crop_to_cache flipped to ctx, pure typed state after R4).
-#              WellViewerApp._get_rows delegates to it; get_all_timepoints reads
+#              ReviewApp._get_rows delegates to it; get_all_timepoints reads
 #              get_rows(ctx) instead of ctx.app._get_rows -> its last residual is
 #              gone. The service is reusable by stats_compute + every collect
 #              module (their own ctx passes come later).
@@ -211,7 +211,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              tail — _redraw / _invalidate_stats_cache / _parse_rc /
 #              _refresh_review_csv / persistence save+restore / recalculate_threshold
 #              — bridged through ctx.app pending their own ctx conversion.
-#   202 -> 201  Extract the pure WellViewerApp._parse_rc god-method to a free
+#   202 -> 201  Extract the pure ReviewApp._parse_rc god-method to a free
 #              function domain.viewer_state.parse_rc (a well-label sort key that
 #              never touched self); the delegate now forwards to it and the smFISH
 #              well-sort drops its ctx.app._parse_rc. First core god-method fully
@@ -229,7 +229,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              genuine app services (_persistence, _rep_sets_active,
 #              _rank_color_well, refresh_plot_empty_states, QMessageBox/QFileDialog
 #              main-window parents) + wrap_with_empty_state, bridged via ctx.app.
-#   187 -> 186  Extract the pure WellViewerApp._rank_color_well god-method to
+#   187 -> 186  Extract the pure ReviewApp._rank_color_well god-method to
 #              domain.selections_model.color_for_well (WELL_COLORS[well_rank%N]);
 #              the delegate forwards to it and multivariate collect drops its
 #              ctx.app._rank_color_well. Second pure core god-method decomposed.
@@ -251,7 +251,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              letting the heatmap and smfish tabs drop their
 #              ctx.app._invalidate_stats_cache() calls for invalidate_stats_cache(ctx)
 #              (the guarded hasattr + silent-except wrapper goes with them).
-#   173 -> 165  New frozen ctx.window accessor (the WellViewerApp *qua QMainWindow*)
+#   173 -> 165  New frozen ctx.window accessor (the ReviewApp *qua QMainWindow*)
 #              gives genuine Qt widget-parenting a non-god-object home. The
 #              wrap_with_empty_state(...) parents across the plot tabs and the two
 #              multivariate QMessageBox parents move ctx.app -> ctx.window — a
@@ -327,7 +327,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              _set_status→ctx.set_status, _event_bus→ctx.bus, dialogs→ctx.window.
 #              cell_gating_compute already app-free. Deliberate bridges remain
 #              (redraw/progress-bar/save+load gating/quick-edit refresh/qc controls/
-#              fold-change member labels/status). Callers across well_viewer + tests
+#              fold-change member labels/status). Callers across review + tests
 #              pass app._ctx; SimpleNamespace fakes get a ctx w/ AppRuntime.
 #   97  -> 98   Fix a latent load-path bug surfaced by the cell_gating slow tests:
 #              sample_definitions.load_from_pipeline_info was called with ctx
@@ -372,7 +372,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              _show_batch_mode stay app bridges (converting adds ctx.app).
 #   74 -> 73    cell_gating _cell_gating_on_failed uses ctx.set_status instead of
 #              a getattr(ctx.app,"show_status_message") probe — which was a dead
-#              no-op (WellViewerApp has no show_status_message), so gating-failure
+#              no-op (ReviewApp has no show_status_message), so gating-failure
 #              messages never surfaced. Now they do (latent silent-failure fix).
 #   73 -> 72    heatmap refresh_metric_combo_for_channel /
 #              refresh_heatmap_aggregation_options take ctx (core unwrap). The
@@ -450,7 +450,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              load time). batch_export's _build_spread_row now takes ctx and calls
 #              the toggles directly (a core import, not a banned cross-feature one),
 #              dropping its ctx.app at the call site. _show_batch_mode stays an app
-#              bridge: it constructs the batch panels, which take the WellViewerApp
+#              bridge: it constructs the batch panels, which take the ReviewApp
 #              god-object, so converting it would relocate (not remove) the god-
 #              object reach and net-add ctx.app. Also drops 3 deferred feature
 #              imports (the two redraw_bars function-locals + selection_controller's
@@ -839,7 +839,7 @@ CTX_APP_BUDGET = 0
 def _count_ctx_app() -> tuple[int, dict[str, int]]:
     total = 0
     per_file: dict[str, int] = {}
-    for p in (REPO_ROOT / "well_viewer").rglob("*.py"):
+    for p in (REPO_ROOT / "review").rglob("*.py"):
         n = len(_CTX_APP.findall(p.read_text()))
         if n:
             per_file[str(p.relative_to(REPO_ROOT))] = n

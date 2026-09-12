@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core.timepoint_sync import (
+from review.core.timepoint_sync import (
     current_focus_tp,
     nearest_index,
     set_focus_tp,

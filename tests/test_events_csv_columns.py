@@ -19,13 +19,13 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.domain.batch_models import BarGroup, ReplicateSet
-from well_viewer.features.barplot.collect import (
+from review.domain.batch_models import BarGroup, ReplicateSet
+from review.features.barplot.collect import (
     collect_bar_items,
     collect_bar_items_for_group,
 )
-from well_viewer.features.export.service import bar_metric_row, line_metric_row
-from well_viewer.features.lineplot.controller import collect_line_series
+from review.features.export.service import bar_metric_row, line_metric_row
+from review.features.lineplot.controller import collect_line_series
 
 from tests.conftest import MockApp, make_agg
 

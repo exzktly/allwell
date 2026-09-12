@@ -8,7 +8,7 @@ runs one itself. The thing that actually launches a job is
 ``datasets.job_queue.controller.QueueBridge``, driving whichever controller
 (a Datasets controller, or ``AnalyzeTab`` via ``AnalyzeRunMixin``) is
 registered for that job's ``kind`` — kept in a separate, Qt-touching module
-so this one stays import-clean of Qt and ``well_viewer``.
+so this one stays import-clean of Qt and ``review``.
 
 Persisted, never auto-started. Loading a queue interrupts any job that was
 recorded as ``running`` (the process that owned it is gone) and repairs a

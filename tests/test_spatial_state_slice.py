@@ -7,9 +7,9 @@ declared defaults from ``SpatialState``.
 
 from __future__ import annotations
 
-from well_viewer.core.app_state import AppState
-from well_viewer.features.registry import attach_feature_state
-from well_viewer.features.spatial import state as sp_state
+from review.core.app_state import AppState
+from review.features.registry import attach_feature_state
+from review.features.spatial import state as sp_state
 
 
 def test_spatial_slice_attached_with_defaults():
@@ -29,7 +29,7 @@ def test_spatial_slice_attached_with_defaults():
 
 
 def test_spatial_config_round_trip():
-    from well_viewer.features.spatial.state import SpatialState
+    from review.features.spatial.state import SpatialState
     a = SpatialState()
     a.level = sp_state.LEVEL_INTRA
     a.viz = sp_state.VIZ_RADIAL_PROFILE

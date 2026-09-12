@@ -1,4 +1,4 @@
-"""Tests for scripts/_bootstrap_lib (v5.2.2 additions).
+"""Tests for services/remote_bootstrap (v5.2.2 additions).
 
 Coverage is intentionally narrow: the bootstrap module is a sequence
 of shell-outs to ssh/rsync/conda whose real behaviour can only be
@@ -15,19 +15,12 @@ contract.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 
 # scripts/ isn't a package; the wrappers add the repo root to sys.path
 # at runtime. Mirror that here so the import works under pytest.
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPTS_DIR = REPO_ROOT / "scripts"
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-
-import _bootstrap_lib as bl
+import services.remote_bootstrap as bl
 
 
 # ── _ssh_run: -i flag handling (v5.2.2) ────────────────────────────────────

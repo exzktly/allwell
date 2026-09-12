@@ -11,7 +11,7 @@ These cover the pure mapping; no application fixture needed.
 
 from __future__ import annotations
 
-from well_viewer.core.sidebar_view import plot_group_visibility_plan
+from review.core.sidebar_view import plot_group_visibility_plan
 
 
 def test_sets_the_group_touches_are_shown_and_the_rest_hidden():

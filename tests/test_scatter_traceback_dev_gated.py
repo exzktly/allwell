@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import types
 
-from well_viewer.features.scatter.cell_viewer_view import ScatterCellViewer
+from review.features.scatter.cell_viewer_view import ScatterCellViewer
 
 
 def _make_viewer():
@@ -32,7 +32,7 @@ def test_traceback_not_in_panel_concise_message_is(caplog):
     v._load_cell_data_impl = _boom
 
     with caplog.at_level(logging.DEBUG,
-                         logger="well_viewer.features.scatter.cell_viewer_view"):
+                         logger="review.features.scatter.cell_viewer_view"):
         v._load_cell_data()
 
     panel = "\n".join(v._debug_lines)

@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import types
 
-from well_viewer.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
-from well_viewer.persistence.view_state import _nondefault_export_prefs
+from review.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
+from review.persistence.view_state import _nondefault_export_prefs
 
 
 def _app(prefs):
-    from well_viewer.core.export_prefs_state import ExportPrefsState
+    from review.core.export_prefs_state import ExportPrefsState
     return types.SimpleNamespace(
         state=types.SimpleNamespace(export_prefs=ExportPrefsState(style_prefs=prefs)))
 

@@ -16,7 +16,7 @@ import types
 
 import pytest
 
-from well_viewer.features.home import collect as hc
+from review.features.home import collect as hc
 
 WELLS = ("A01", "A02", "A03", "A04", "A05")
 

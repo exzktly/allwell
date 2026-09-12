@@ -50,20 +50,20 @@ GUARDED = (
 #: other closure of that name added anywhere in a 1,300-line module.
 ALLOWED: frozenset[tuple[str, str]] = frozenset({
     # The resolver itself.
-    ("well_viewer/core/channel_state_controller.py", "on_cutoff_for_column"),
+    ("review/core/channel_state_controller.py", "on_cutoff_for_column"),
     # The quick-edit display sync reads the value it is about to show. It picks
     # its accessor from ``quick_edit_cutoff_is_count`` — the same predicate the
     # resolver uses — so it cannot disagree with what the write path stores.
-    ("well_viewer/core/channel_state_controller.py",
+    ("review/core/channel_state_controller.py",
      "refresh_thresh_frac_quick_edit._sync"),
     # The Playground's binary preview is an image-pixel cut, so it always wants
     # the intensity cutoff whatever Property the plots are showing — routing it
     # through the resolver handed it a spot tally to compare against pixels.
-    ("well_viewer/features/image_browser/playground/controller.py",
+    ("review/features/image_browser/playground/controller.py",
      "_effective_threshold"),
     # The god-object shim, kept while the burn-down runs, and its import line.
-    ("well_viewer/runtime_app.py", "_get_thresh_frac_on"),
-    ("well_viewer/runtime_app.py", "<module>"),
+    ("review/runtime_app.py", "_get_thresh_frac_on"),
+    ("review/runtime_app.py", "<module>"),
 })
 
 

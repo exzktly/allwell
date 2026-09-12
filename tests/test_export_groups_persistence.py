@@ -13,13 +13,13 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 
 def _panel(app):
-    from well_viewer.features.batch_export import BarBatchExportPanel
+    from review.features.batch_export import BarBatchExportPanel
     return BarBatchExportPanel(app._ctx, None, use_sidebar_groups=False)
 
 
 def _add_solo_group(panel, app, name="G1"):
     """Add an export group with one solo well, triggering the persist chokepoint."""
-    from well_viewer.features.batch_export._common import BarGroup
+    from review.features.batch_export._common import BarGroup
     well = next(iter(app._app_state.dataset.well_paths))
     grp = BarGroup(name)
     grp.solo_wells.append(well)
@@ -31,13 +31,13 @@ def _add_solo_group(panel, app, name="G1"):
 
 def test_no_manual_save_load_route():
     # The file-picker save/load methods are gone entirely.
-    from well_viewer.features.batch_export.base_panel import BatchExportPanel
+    from review.features.batch_export.base_panel import BatchExportPanel
     assert not hasattr(BatchExportPanel, "_save_groups")
     assert not hasattr(BatchExportPanel, "_load_groups")
 
 
 def test_editing_groups_mirrors_to_app_doc(loaded_app):
-    from well_viewer.features.batch_export.base_panel import SHARED_PERSIST_KEY
+    from review.features.batch_export.base_panel import SHARED_PERSIST_KEY
 
     panel = _panel(loaded_app)
     _add_solo_group(panel, loaded_app)
@@ -48,8 +48,8 @@ def test_editing_groups_mirrors_to_app_doc(loaded_app):
 
 
 def test_groups_round_trip_through_persistence_json(loaded_app):
-    from well_viewer.features.batch_export.base_panel import SHARED_PERSIST_KEY
-    from well_viewer.persistence import _doc, export_groups
+    from review.features.batch_export.base_panel import SHARED_PERSIST_KEY
+    from review.persistence import _doc, export_groups
 
     panel = _panel(loaded_app)
     well = _add_solo_group(panel, loaded_app)
@@ -82,8 +82,8 @@ def test_every_panel_shares_one_slot(loaded_app):
     so a group built on one mode was invisible on the other and the same
     conditions had to be rebuilt per plot type. Export groups describe the
     dataset's conditions, not the plot they are drawn as."""
-    from well_viewer.features.batch_export import BatchExportPanel
-    from well_viewer.features.batch_export.base_panel import SHARED_PERSIST_KEY
+    from review.features.batch_export import BatchExportPanel
+    from review.features.batch_export.base_panel import SHARED_PERSIST_KEY
 
     bar = _panel(loaded_app)
     well = _add_solo_group(bar, loaded_app, name="BarGrp")
@@ -128,7 +128,7 @@ def test_groups_get_distinct_colors_by_index(loaded_app):
     """Plate-map / group-card colouring is by group index, so different groups
     get different colours (previously well-position rank gave same-column groups
     the same colour)."""
-    from well_viewer.features.batch_export._common import BarGroup
+    from review.features.batch_export._common import BarGroup
     panel = _panel(loaded_app)
     wells = list(loaded_app._app_state.dataset.well_paths)
     g0 = BarGroup("G0"); g0.solo_wells.append(wells[0])
@@ -140,7 +140,7 @@ def test_groups_get_distinct_colors_by_index(loaded_app):
 # ── one set of groups for every Batch Export mode ───────────────────────────
 
 def _panel_for(app, mode: str):
-    from well_viewer.features.batch_export import (
+    from review.features.batch_export import (
         BarBatchExportPanel, BatchExportPanel, ScatterBatchExportPanel,
     )
     if mode == "line":
@@ -158,7 +158,7 @@ def test_every_mode_reads_the_same_slot(loaded_app):
     """Line / Bar / Scatter (cells) / Scatter (aggregate) used to keep four
     private sets, so groups built in one mode were invisible in the others and
     anyone exporting the same conditions four ways built them four times."""
-    from well_viewer.features.batch_export.base_panel import SHARED_PERSIST_KEY
+    from review.features.batch_export.base_panel import SHARED_PERSIST_KEY
 
     keys = {m: _panel_for(loaded_app, m)._persist_key
             for m in ("line", "bar", "scatter_cells", "scatter_agg")}
@@ -199,7 +199,7 @@ def test_a_legacy_document_merges_its_four_slots(loaded_app):
 def test_the_shared_slot_wins_over_the_legacy_ones(loaded_app):
     """Once the shared key exists it is the whole answer — otherwise deleting
     a group would be undone by a legacy slot re-supplying it on every load."""
-    from well_viewer.features.batch_export.base_panel import SHARED_PERSIST_KEY
+    from review.features.batch_export.base_panel import SHARED_PERSIST_KEY
 
     wells = list(loaded_app._app_state.dataset.well_paths)[:1]
     loaded_app._ctx.runtime.batch_export.export_groups_doc = {
@@ -213,7 +213,7 @@ def test_the_shared_slot_wins_over_the_legacy_ones(loaded_app):
 def test_an_empty_shared_slot_is_not_treated_as_missing(loaded_app):
     """Clearing every group writes an empty list, which must stay empty rather
     than falling through to the legacy merge and resurrecting them."""
-    from well_viewer.features.batch_export.base_panel import SHARED_PERSIST_KEY
+    from review.features.batch_export.base_panel import SHARED_PERSIST_KEY
 
     wells = list(loaded_app._app_state.dataset.well_paths)[:1]
     loaded_app._ctx.runtime.batch_export.export_groups_doc = {

@@ -16,12 +16,7 @@ _logger = logging.getLogger("review.runtime_app")
 # Central-pane stack order, shared with runtime_app / allwell so the index↔name
 # mapping lives in one place. Review is always index 0; Analyze and Datasets are
 # mounted after it in this order (see ReviewApp.mount*Pane).
-PANE_MODES = ("review", "analyze", "datasets")
-
-
-def pane_mode(idx: int) -> str:
-    """The mode name for a central-pane stack index (out-of-range → review)."""
-    return PANE_MODES[idx] if 0 <= idx < len(PANE_MODES) else "review"
+from core.panes import PANE_MODES, pane_mode  # noqa: F401  (re-exported)
 
 # The review-image (Segmentation) panel builder is a feature-layer god-method
 # (~30 app-bound method lambdas); bind it as a lazy proxy so this core module

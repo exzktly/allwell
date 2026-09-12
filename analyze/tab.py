@@ -37,7 +37,7 @@ from services.pipeline_runner import (
 )
 from services.pipeline_service import find_pipeline_script
 from ui import theme
-from review.core.app_shell_view import RAIL_W
+from ui import theme
 from core.safe import swallowed
 from analyze.bg_map import AnalyzeBackgroundMapMixin
 from analyze.input import AnalyzeInputMixin
@@ -169,7 +169,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         # Left — scrollable form
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        # Fixed, not just a minimum: RAIL_W (review/core/app_shell_view.py)
+        # Fixed, not just a minimum: theme.Metrics.rail_w (review/core/app_shell_view.py)
         # is the one width shared by Review's rail, Datasets' sidebar, and this
         # panel, so switching modes never visibly resizes the window. It was
         # widened here twice before landing at its current value (280→350→438)
@@ -178,7 +178,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         # not the other way around; don't narrow it without re-checking those
         # rows. A QSplitter child still respects setFixedWidth's equal min/max,
         # so the handle can't be dragged past it either.
-        scroll.setFixedWidth(RAIL_W)
+        scroll.setFixedWidth(theme.Metrics.rail_w)
         form_host = QWidget()
         self._form_layout = QVBoxLayout(form_host)
         self._form_layout.setContentsMargins(0, 8, 0, 8)
@@ -197,7 +197,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         splitter.setStretchFactor(1, 1)
         self._build_log(right)
 
-        splitter.setSizes([RAIL_W, 600])
+        splitter.setSizes([theme.Metrics.rail_w, 600])
 
     # ------------------------------------------------------------------
     # Form orchestration

@@ -64,21 +64,13 @@ ALLOWED: dict[str, str] = {
         "most of Review's domain layer, and leaving it in a root package would "
         "have shared code importing a pane. The serialisation format is shared; "
         "the model of it is Review's.",
-    "review/core/app_shell_view.py":
-        "Analyze, Datasets and the title bar take the single layout constant "
-        "`RAIL_W` from it. The module imports seven of Review's own modules "
-        "(rail_plate, recent_view, sidebar_view, split_view, status_view, "
-        "ui_helpers, domain.dataset_name) and is the Review pane's shell; "
-        "hosting the other panes is a fact about the window, not shared "
-        "infrastructure.",
-    "review/core/centre_view.py":
-        "Analyze and Datasets take `NamedPageStack` from it. The module makes "
-        "fifteen imports of Review's internals, so only the widget itself can "
-        "travel.",
     "review/core/tab_controller.py":
-        "The title bar takes `PANE_MODES` and `current_centre_tab`. Thirteen "
-        "imports of Review's internals, including the fold-change scopes and "
-        "the persistence layer.",
+        "The title bar asks `current_centre_tab` which Review leaf is showing, "
+        "to pick the help topic for it — a question only Review can answer "
+        "about itself. Thirteen imports of Review's internals, including the "
+        "fold-change scopes and the persistence layer, so the module cannot "
+        "travel; the roster of panes that used to sit beside it did, to "
+        "`core/panes.py`.",
     "review/core/reset_scopes_view.py":
         "The title bar's two reset actions (`prompt_reset_view`, "
         "`prompt_reset_analysis`) live here because the scopes they reset are "

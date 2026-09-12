@@ -47,7 +47,6 @@ from review.domain.dataset_name import dataset_display_name
 #: narrow field. 329 is 438 reduced by 25%, and every row was re-verified
 #: (word-wrap included) to fit inside it — see
 #: ``tests/test_analyze_narrow_sidebar_fit.py``.
-RAIL_W = 329
 
 
 def _dataset_button(win, parent):
@@ -499,7 +498,7 @@ def build_ui(win) -> None:
     # tab or its content (a wide row wraps/scales to fit instead of stretching
     # the rail). A single fixed value (min == max) keeps every tab's rail
     # identical.
-    sidebar.setFixedWidth(RAIL_W)
+    sidebar.setFixedWidth(theme.Metrics.rail_w)
     # A tab can stack more content than the rail is tall — the Cell Browser, for
     # instance, shows the well plate AND its filter frame together, which used to
     # overlap ("crushed sidebar"). Host the content in a VERTICAL scroll area so

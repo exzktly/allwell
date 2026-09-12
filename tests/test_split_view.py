@@ -73,7 +73,7 @@ def _reset_split_providers():
 def _new_stack(names):
     from PySide6.QtWidgets import QApplication, QLabel
 
-    from review.core.centre_view import NamedPageStack
+    from widgets.page_stack import NamedPageStack
 
     QApplication.instance() or QApplication([])
     st = NamedPageStack()
@@ -202,7 +202,7 @@ def test_toggle_hidden_outside_review_mode():
             return self._mode
 
     app = _ModedApp()
-    from review.core.centre_view import NamedPageStack
+    from widgets.page_stack import NamedPageStack
     app._notebook = NamedPageStack()
     top = QWidget()
     QHBoxLayout(top)

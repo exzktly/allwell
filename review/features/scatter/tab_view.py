@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from review.core.centre_view import NamedPageStack
+from widgets.page_stack import NamedPageStack
 from review.features.scatter.agg_tab_view import build_scatter_agg_tab
 from review.features.scatter.cells_tab_view import build_scatter_cells_tab
 from review.features.scatter.controller import redraw_scatter_agg_orchestrate

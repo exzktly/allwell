@@ -268,8 +268,12 @@ def test_no_inline_pixel_sizes():
         "Pixel size(s) written at the call site. Give the number a name: a "
         "`theme.Metrics` token when the role is shared across panes, a "
         "module-level constant when it belongs to one module's controls "
-        "(the precedent is `analyze.form_chrome._ROW_LABEL_W`, "
-        "`core/app_shell_view.RAIL_W`):\n  " + "\n  ".join(sorted(offenders))
+        "(the precedent is `analyze.form_chrome._ROW_LABEL_W`). A number more "
+        "than one pane sets is a shared role by definition and belongs in "
+        "`theme.Metrics`: the navigation-rail width was named right here as "
+        "the precedent for a module-local constant while it sat inside the "
+        "Review pane and Analyze and Datasets imported it across a package "
+        "boundary to stay aligned:\n  " + "\n  ".join(sorted(offenders))
     )
 
 

@@ -121,7 +121,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
 
         The layout is a :class:`~widgets.flow_layout.FlowLayout`, not a
         ``QHBoxLayout``. The four buttons want 398px and the panel they sit in
-        is ``RAIL_W`` (329) wide and fixed, so a box layout — which cannot wrap
+        is ``theme.Metrics.rail_w`` (329) wide and fixed, so a box layout — which cannot wrap
         — would compress them until their labels were unreadable. FlowLayout
         also watches its children for show/hide, which matters here: "+ Queue"
         appears only once the Datasets pane injects a sink, and the row has to

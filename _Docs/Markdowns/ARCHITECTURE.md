@@ -1058,7 +1058,7 @@ than the tab asked for.
 
 #### The rail head
 
-The window's left column is one thing from the top down. `app_shell_view.RAIL_W`
+The window's left column is one thing from the top down. `theme.Metrics.rail_w`
 is the single statement of the Review rail's width, and the mode bar starts
 there; it fills the header strip's height (`ModeBar.setFillHeight`) and sits
 flush, with no inset — the topbar's left content margin is zero and the widgets
@@ -1066,7 +1066,7 @@ after the bar carry their own leading pad, so the bar and the panel below it are
 one column rather than a chip row floating over one.
 
 All three modes put a panel down the left edge, and all three pin to the same
-`RAIL_W` — Review's rail, the Datasets sidebar, and Analyze's form panel (fixed
+`rail_w` — Review's rail, the Datasets sidebar, and Analyze's form panel (fixed
 there too, not merely a minimum inside a resizable splitter) — so switching
 modes never visibly resizes the window. `AllWellApp._sync_mode_bar`
 still matches the bar to whichever panel is current, re-running on every mode
@@ -1160,11 +1160,11 @@ backticks; both render as themselves in the drawer and on GitHub.
 The action cluster sits on the band
 rather than in the window header a row above because that put a second strip of
 chrome across the top of the window carrying controls for a mode the user might
-not be in. An earlier pass set `RAIL_W` to whichever mode's content needed the
+not be in. An earlier pass set `rail_w` to whichever mode's content needed the
 most room (Analyze's, at 438) and let the other two panes — neither of which
 needs anywhere near that width — inherit it unchanged; the result read as an
 oversized sidebar with no content to justify it in Review and Datasets.
-`RAIL_W` is now 329 (438 reduced 25%) with Analyze's own form narrowed to fit
+`rail_w` is now 329 (438 reduced 25%) with Analyze's own form narrowed to fit
 it instead: `analyze/form.py`'s row label column shrank
 (`_row()`'s `_ROW_LABEL_W`, 150→108) and word-wraps instead of clipping a
 label that doesn't fit on one line, its two widest fixed-width combos
@@ -1174,7 +1174,7 @@ Options page's inline "(…)" hints moved to their own wrapped line below the
 row instead of squeezing in beside a narrow field. `tests/test_analyze_narrow_sidebar_fit.py`
 drives every collapsible section open (a real `QTest.mouseClick`, since a
 collapsed section contributes nothing to the form's measured width until
-expanded) and asserts the form's laid-out minimum width fits inside `RAIL_W`.
+expanded) and asserts the form's laid-out minimum width fits inside `rail_w`.
 
 **The page tab bars are in this band too**, to the right of the mode bar and
 sharing its bottom edge. They used to sit inside each tab's own body, one row
@@ -5693,7 +5693,7 @@ Run / Suspend / + Queue / Stop — is `_build_run_row`, called by
 `analyze/form.py` in one line, both because that file is at its line
 budget (moving the row out lowered it) and because the queue button belongs
 beside the queue hooks. Its layout is a `widgets/flow_layout.FlowLayout`, not
-a `QHBoxLayout`: the four buttons want 398px and the panel is `RAIL_W` (329)
+a `QHBoxLayout`: the four buttons want 398px and the panel is `rail_w` (329)
 wide and *fixed*, so a box layout cannot fit them and simply compresses the
 labels. FlowLayout also watches its children for show/hide, which this row
 needs — "+ Queue" appears only once `DatasetsTab` injects a sink via
@@ -7252,7 +7252,7 @@ widget (§9) is the app's banner idiom and the right first reach, but it is one
 `QHBoxLayout` — glyph, sentence, confirm, cancel — and it fits where it is used
 because it is used on a *page*, where a sentence beside two buttons still has
 most of the width. This strip lives in the Analyze sidebar, which is
-`app_shell_view.RAIL_W` and fixed at it, with 319 px of scrolling viewport
+`theme.Metrics.rail_w` and fixed at it, with 319 px of scrolling viewport
 inside that. Measured in a real `AnalyzeTab` at the app's default window size,
 `Resume` and `Discard` beside the label leave the offer **139 px**, so it
 reflows into a 192-px column of twelve lines running down the side of two

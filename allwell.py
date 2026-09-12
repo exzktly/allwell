@@ -37,6 +37,7 @@ _boot_diag.boot("PySide6 imported OK")
 
 from ui import help_topics
 from ui import theme as theme_v2
+from core.panes import pane_index, pane_mode
 from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
@@ -265,8 +266,7 @@ class AllWellApp(QMainWindow):
         # and the panel under it are one column — see ``_sync_mode_bar``.
         # The rail's width is only the starting value, for the first paint
         # before any panel has been laid out.
-        from review.core.app_shell_view import RAIL_W as _RAIL_W
-        self._mode_seg.setFixedWidth(_RAIL_W)
+        self._mode_seg.setFixedWidth(theme_v2.Metrics.rail_w)
         self._mode_seg.setFillHeight(True)
         hl.addWidget(self._mode_seg)
 
@@ -1041,9 +1041,8 @@ class AllWellApp(QMainWindow):
         Each mode owns its own: Review's well-picker rail, and the scrolling
         form both Analyze and Datasets put down their left edge.
         """
-        from review.core.tab_controller import PANE_MODES
         idx = self._mode_seg.currentIndex()
-        mode = PANE_MODES[idx] if 0 <= idx < len(PANE_MODES) else "review"
+        mode = pane_mode(idx)
         if mode == "review":
             return getattr(self._review, "_sidebar_root", None)
         pane = getattr(self, f"_{mode}", None)
@@ -1061,7 +1060,7 @@ class AllWellApp(QMainWindow):
         only route back to Analyze and Datasets while collapsed.
 
         Width matches the panel. All three modes' panels now pin to the same
-        `RAIL_W` (`review.core.app_shell_view`), so this is a defensive
+        `theme.Metrics.rail_w`, so this is a defensive
         floor rather than reconciling genuinely different widths — it still runs
         on every mode switch and panel resize in case that ever changes, or a
         panel is momentarily narrower than the bar's own natural width. Floored
@@ -1185,8 +1184,7 @@ class AllWellApp(QMainWindow):
 
     def _on_review_mode_changed(self, mode: str) -> None:
         """Mirror ReviewApp's mode change into the titlebar seg + status."""
-        from review.core.tab_controller import PANE_MODES
-        idx = PANE_MODES.index(mode) if mode in PANE_MODES else 0
+        idx = pane_index(mode)
         seg = getattr(self, "_mode_seg", None)
         if seg is not None and seg.currentIndex() != idx:
             blocked = seg.blockSignals(True)

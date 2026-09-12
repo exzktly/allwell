@@ -423,6 +423,13 @@ class Metrics:
     # Review pane, so the Properties sidebar and the Playground's controls do
     # not open to different widths and read as two different kinds of panel.
     dock_w       = 360
+    # The navigation rail down the left of every pane: Review's sidebar,
+    # Analyze's form column, and the Datasets tool panel all set exactly this
+    # width, and the title bar's mode segment is pinned to it so the three
+    # line up as one column rather than three that nearly agree. It lived as
+    # `app_shell_view.RAIL_W` inside the Review pane while the other two panes
+    # imported it across a package boundary to stay aligned.
+    rail_w       = 329
     # Vertical and horizontal padding the item delegate takes inside a list or
     # tree row. Tokens rather than literals in the QSS because a caller sizing a
     # row's **index widget** has to add them back: Qt gives that widget the

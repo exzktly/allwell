@@ -81,7 +81,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSizePolicy
 
 #: Widest a plate card may render — a shade over the Review rail's own width
-#: (``review.core.app_shell_view.RAIL_W``, which a sidebar plate spans
+#: (``theme.Metrics.rail_w``, which a sidebar plate spans
 #: edge to edge), so the rail plate is effectively the reference size and every
 #: other plate in the app is capped to it. Not imported from there: ``widgets/``
 #: must not import ``review``, and the cap is a plate-map property rather

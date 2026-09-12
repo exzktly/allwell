@@ -128,7 +128,14 @@ EXPRESSION_ALLOWLIST = {
 #: Matched on the repository-relative path, not the basename: `theme.py` as a
 #: basename exempts any file of that name anywhere in the tree, which is a
 #: standing invitation to add a second one and inherit the exemption for free.
-_TOKEN_HOMES = {"ui/theme.py"}
+_TOKEN_HOMES = {
+    "ui/theme.py",
+    # The 96 well-rank colours themselves. They left ``ui/theme.py`` for
+    # ``domain/`` because they are baked into the ``color`` field on disk and
+    # both panes must agree on them; the exemption follows the tuple rather
+    # than staying with the module it used to live in.
+    "domain/well_palette.py",
+}
 
 
 def _bare_ints(node: ast.AST) -> list[int]:

@@ -7,66 +7,33 @@ one place a raw colour literal may be written — and the application-wide chrom
 comes from :func:`qss`.
 
 It lives in :mod:`ui` because all three panes share it and none of them owns
-it. It imports nothing from the application: ``widgets/`` is required to reach
-for this module and nothing else, so a dependency here would be a dependency
-every reusable widget inherits.
+it. It imports nothing above the shared domain layer: ``widgets/`` is required
+to reach for this module and nothing else, so a dependency here is a dependency
+every reusable widget inherits. Its one import — :mod:`domain.well_palette`,
+the 96 well-rank colours — is a module that imports nothing at all, and it sits
+there rather than here because those colours are written to disk and two panes
+must agree on them.
 """
 
 from __future__ import annotations
 
+# ── Well palette ─────────────────────────────────────────────────────────────
+# The 96 well-rank colours live in :mod:`domain.well_palette` and are
+# re-exported here under the same name, so ``theme.WELL_COLORS_TUPLE`` reads
+# the same as it always has.
+#
+# They are not screen chrome: a selection's colour is baked from its lowest
+# well's rank and then *written to disk* in the ``sample_definitions`` block,
+# where Review writes it and Datasets re-bakes it on a merge. Two panes that
+# disagreed about the list would write two colours for the same well into the
+# same file, which makes the palette shared subject matter and puts it below
+# the GUI layers rather than inside them.
+#
+# ``widgets/`` still reaches for this module and nothing else. The dependency
+# it now inherits is a module that imports nothing and holds one tuple, which
+# is the reason that rule exists rather than an exception to it.
+from domain.well_palette import WELL_COLORS_TUPLE
 
-# ── Well palette (single source of truth) ────────────────────────────────────
-# 48 maximally-distinct colours used everywhere the app needs to assign a
-# colour to a well, replicate, or trace. Generated via a greedy max-min
-# selection in OKLab space (min pairwise distance ≈ 0.09). The first colour
-# (light blue) is positioned in the most-used slot — the original first colour
-# was a dark red that read as too heavy at a single-well selection.
-#
-# This tuple is the canonical list. Two other consumers reference it:
-#   * ``Colors.trace`` / ``CPub.trace`` below — what
-#     ``widgets/plot_card.plot_palette()`` feeds into matplotlib's
-#     ``axes.prop_cycle`` (used for screen + publication modes).
-#   * ``review.domain.plate_layout.WELL_COLORS`` — a plain ``list()`` copy, read
-#     by the ``_rank_color_well`` / ``_rank_color_rset`` helpers and every
-#     plot renderer that needs a per-well colour by rank.
-#
-# Keeping the list here lets the ``widgets`` package — which is supposed to
-# import only this module — see the full palette without reaching into
-# application-side modules.
-# NOTE — length must be **96** (one colour per 96-well plate position), not a
-# submultiple of it. Well colour is ``WELL_COLORS[well_rank(token) % len]`` and
-# ranks step by 12 (the column count) going *down* a plate column, so any length
-# that divides a multiple of 12 within one column (e.g. 48 = 4×12) makes the
-# colours visibly repeat down each column — rows E–H mirror A–D in "sets of
-# four". 96 distinct entries give every well its own colour and remove the wrap.
-WELL_COLORS_TUPLE: tuple = (
-    "#6AB2FB", "#06F906", "#0606F9", "#DF2020",
-    "#138613", "#D406F9", "#FAAC38", "#6E2277",
-    "#6AFBE5", "#2E719E", "#EC79B8", "#FAFA38",
-    "#774C22", "#131386", "#05C783", "#806AFB",
-    "#B37D19", "#C7058D", "#5C05C7", "#2E9E9E",
-    "#950437", "#FA7238", "#AAC705", "#224877",
-    "#9C39C6", "#D4DD88", "#AA88DD", "#779E2E",
-    "#F906BC", "#0553C7", "#068CF9", "#20D6DF",
-    "#E56AFB", "#FA387C", "#DD9D88", "#777222",
-    "#79EC7F", "#227762", "#6938FA", "#05C705",
-    "#B34F19", "#D16167", "#C7A005", "#471386",
-    "#B0F906", "#950495", "#0667F9", "#1929B3",
-    # ── ranks 48–95 (rows E–H): perceptually spread to the same separation
-    #    (min ΔE*ab ≈ 10.8) as the ranks 0–47 block above ──────────────────
-    "#7F4660", "#7F0000", "#007F43", "#33337F",
-    "#EAC081", "#7F0C51", "#70ADCC", "#EAE15D",
-    "#EA965D", "#A55B9B", "#7ACC33", "#7F3333",
-    "#70CCA1", "#5D7F46", "#EA3A52", "#A5875B",
-    "#DC81EA", "#46747F", "#CC14CC", "#9BA55B",
-    "#EACB00", "#8ECC70", "#5B60A5", "#A56A5B",
-    "#EA7D00", "#EA5DC5", "#00EA6D", "#CCB351",
-    "#CC337A", "#CC708E", "#BBEA5D", "#A5A510",
-    "#6A42A5", "#6DEA00", "#00A579", "#EA795D",
-    "#21A500", "#1482CC", "#7F3B00", "#00EABB",
-    "#A5425C", "#6C467F", "#42A54F", "#A43AEA",
-    "#81EAA4", "#3A46EA", "#17C0EA", "#EA5D83",
-)
 
 
 class Colors:

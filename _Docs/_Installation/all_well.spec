@@ -162,9 +162,7 @@ def _pkg_datas(pkg_root: Path, dest: str, exclude_repo_dirs: list) -> list:
 # holds this list against the tree.
 sibling_scripts = [
     (str(_parent / "allwell.py"),               "."),
-    (str(_parent / "boot_diag.py"),             "."),
     (str(_parent / "help_topics.py"),           "."),
-    (str(_parent / "mpl_bootstrap.py"),         "."),
     (str(_parent / "process_microscopy.py"),    "."),
     (str(_parent / "WellPlateZipper.py"),       "."),
     (str(_parent / "theme.py"),                 "."),
@@ -194,6 +192,7 @@ sibling_scripts = [
 # non-Qt units like pipeline/cellpose.py dropped); the full build ships them
 # whole.
 for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "util",
+             "startup",
              "analyze", "datasets"):
     _pkg_path = _parent / _pkg
     if not _pkg_path.is_dir():

@@ -20,8 +20,8 @@ from pathlib import Path
 # Startup diagnostics FIRST — before PySide6 — so a silent launch failure (a
 # native crash in the Qt DLL import, a Qt platform-plugin abort, or a cold-cache
 # matplotlib font-scan hang) leaves a trail on disk instead of an empty terminal.
-# See boot_diag: it truncates a per-launch log and arms faulthandler onto it.
-import boot_diag as _boot_diag
+# See startup.boot_diag: it truncates a per-launch log and arms faulthandler onto it.
+from startup import boot_diag as _boot_diag
 _boot_diag.arm_faulthandler()
 _boot_diag.install_excepthook()
 _boot_diag.boot(f"start pid={__import__('os').getpid()} python={sys.version.split()[0]} platform={sys.platform}")
@@ -1706,13 +1706,13 @@ def main() -> None:
     # stall here is visible as the last-reached milestone.)
     _boot_diag.boot("mpl_bootstrap.configure() — limiting matplotlib font scan …")
     try:
-        import mpl_bootstrap
+        from startup import mpl_bootstrap
         mpl_bootstrap.configure()
     except Exception:
         swallowed()
     _boot_diag.boot("mpl_bootstrap done")
 
-    # faulthandler is already armed onto the boot log by boot_diag at import
+    # faulthandler is already armed onto the boot log by startup.boot_diag at import
     # time; nothing more to do here.
 
     # Surface any misconfigured ALLWELL_* overrides once at startup (audit

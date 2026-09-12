@@ -1167,7 +1167,7 @@ the answer is "none of the ones I ran", that is the work, not a formality.
   title bar → `allwell.py`.
 - Tab body doesn't appear: its lazy builder raised. Check the log drawer or run
   from a terminal.
-- Native crash with no traceback: `boot_diag.arm_faulthandler()` runs at import
+- Native crash with no traceback: `startup.boot_diag.arm_faulthandler()` runs at import
   and writes the C stack to the **boot log**, so it survives a crash that left
   nothing in the terminal. `~/.cache/allwell/allwell-boot.log`
   (`%LOCALAPPDATA%\allwell` on Windows, the temp dir if neither is writable),

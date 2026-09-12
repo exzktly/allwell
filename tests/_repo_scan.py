@@ -43,6 +43,7 @@ PACKAGE_ROOTS = (
     "pipeline",
     "util",
     "ui",
+    "startup",
     "scripts",
 )
 

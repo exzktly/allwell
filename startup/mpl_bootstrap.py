@@ -27,8 +27,15 @@ import glob
 import os
 import sys as _sys
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_FONTS_DIR = os.path.join(_HERE, "assets", "fonts")
+# Both paths below are resolved against the *repository root* (the bundle root
+# in a frozen build), not against this file's own directory: `assets/fonts` and
+# `.mplcache` are repository-level, and this module lives one level down in
+# `startup/`. Deriving them from `__file__` alone would put the font directory
+# at `startup/assets/fonts` — which does not exist, so `_bundled_fonts()` would
+# return nothing and `configure()` would silently leave matplotlib unrestricted,
+# the exact cost this module exists to remove.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_FONTS_DIR = os.path.join(_ROOT, "assets", "fonts")
 
 
 def _bundled_fonts() -> list[str]:
@@ -41,18 +48,19 @@ def _bundled_fonts() -> list[str]:
 def _cache_root() -> str:
     """Where the pinned font cache lives — and it has to survive the launch.
 
-    From source that is ``.mplcache`` beside this file, which is stable across
-    launches and easy to pre-warm during provisioning. In a **frozen** build it
-    cannot be: PyInstaller unpacks the bundle into ``sys._MEIPASS``, a fresh
-    temp tree per launch, and ``_HERE`` points inside it — so the "stable"
-    cache was thrown away and rebuilt every single time the app started, which
-    is exactly the cost this module exists to remove. A frozen build uses the
-    per-user state directory instead, the same one the boot log goes to.
+    From source that is ``.mplcache`` at the repository root, which is stable
+    across launches and easy to pre-warm during provisioning. In a **frozen**
+    build it cannot be: PyInstaller unpacks the bundle into ``sys._MEIPASS``, a
+    fresh temp tree per launch, and ``_ROOT`` points inside it — so the
+    "stable" cache was thrown away and rebuilt every single time the app
+    started, which is exactly the cost this module exists to remove. A frozen
+    build uses the per-user state directory instead, the same one the boot log
+    goes to.
     """
     if getattr(_sys, "frozen", False) or hasattr(_sys, "_MEIPASS"):
-        from boot_diag import user_state_dir
+        from startup.boot_diag import user_state_dir
         return os.path.join(str(user_state_dir()), "mplcache")
-    return os.path.join(_HERE, ".mplcache")
+    return os.path.join(_ROOT, ".mplcache")
 
 
 def _set_cachedir() -> None:

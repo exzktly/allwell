@@ -58,17 +58,17 @@ ALLOWED: dict[str, str] = {
     "review/domain/selections_model.py":
         "Datasets' plate merge reads and writes the same `sample_definitions` "
         "block through `from_block` / `to_block` (one import site). The module "
-        "itself cannot follow: it makes eleven imports of six other Review "
-        "domain modules — plate_layout, sample_variables, viewer_state, "
-        "plot_members, batch_models, plot_groups — so lifting it means lifting "
-        "most of Review's domain layer, and leaving it in a root package would "
-        "have shared code importing a pane. The serialisation format is shared; "
-        "the model of it is Review's.",
+        "itself cannot follow: it reaches six other Review domain modules — "
+        "plate_layout, sample_variables, viewer_state, plot_members, "
+        "batch_models, plot_groups — so lifting it means lifting most of "
+        "Review's domain layer, and leaving it in a root package would have "
+        "shared code importing a pane. The serialisation format is shared; the "
+        "model of it is Review's.",
     "review/core/tab_controller.py":
         "The title bar asks `current_centre_tab` which Review leaf is showing, "
         "to pick the help topic for it — a question only Review can answer "
-        "about itself. Thirteen imports of Review's internals, including the "
-        "fold-change scopes and the persistence layer, so the module cannot "
+        "about itself. The module reaches deep into Review's internals, the "
+        "fold-change scopes and the persistence layer among them, so it cannot "
         "travel; the roster of panes that used to sit beside it did, to "
         "`core/panes.py`.",
     "review/core/reset_scopes_view.py":
@@ -78,8 +78,8 @@ ALLOWED: dict[str, str] = {
         "shell rather than from another pane.",
     "review/core/plot_card_actions.py":
         "The title bar reads `PLOT_CARD_ATTRS` to decide which menu entries to "
-        "enable. Plotting is Review's subject outright, and the module imports "
-        "the plot orchestrator.",
+        "enable. Plotting is Review's subject outright, and the module reaches "
+        "the plot orchestrator to do it.",
     "review/core/ui_helpers.py":
         "`allwell.py` calls `commit_focused_notes` to make the Review pane "
         "flush an in-progress edit before a save. That is the shell asking a "
@@ -96,6 +96,25 @@ ALLOWED: dict[str, str] = {
         "`teardown_review_pane` is the pane's own shutdown, called by the shell "
         "that built it.",
 }
+
+
+def _internal_import_count(rel: str) -> int:
+    """How many of its own pane's modules this file imports.
+
+    The number that decides whether a module can travel or only its symbols
+    can, reported at the moment someone needs it rather than typed into the
+    roster — two of the counts written there by hand had drifted within a day
+    of being written, because the symbol moves this branch made changed them.
+    """
+    pane = _pane_of(rel)
+    if pane is None:
+        return 0
+    tree = parse_source(REPO_ROOT / rel)
+    return sum(
+        1 for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+        and node.module.split(".")[0] == pane
+    )
 
 
 def _pane_of(rel: str) -> str | None:
@@ -152,7 +171,11 @@ def test_no_module_inside_a_pane_is_imported_from_outside_it():
             users.pop(entry)
 
     offenders = sorted(set(users) - set(ALLOWED))
-    lines = [f"{t}  ← imported by {', '.join(sorted(users[t]))}" for t in offenders]
+    lines = [
+        f"{t}  ← imported by {', '.join(sorted(users[t]))}"
+        f"  [it makes {_internal_import_count(t)} imports of its own pane]"
+        for t in offenders
+    ]
     assert not offenders, (
         "these modules sit inside one pane while something outside that pane "
         "imports them:\n  " + "\n  ".join(lines) + "\n\n"

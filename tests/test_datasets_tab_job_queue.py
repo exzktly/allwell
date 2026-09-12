@@ -443,7 +443,7 @@ def test_current_help_page_names_the_selected_tool(qapp, tmp_path):
     """What the help drawer asks the pane so it can open on that tool's section
     of the manual. The rail key is the label is the help-topic key — there is no
     second name map, which is the point."""
-    import help_topics
+    from ui import help_topics
 
     tab, _ = _make_tab(tmp_path)
     try:

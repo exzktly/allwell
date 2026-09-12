@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 )
 _boot_diag.boot("PySide6 imported OK")
 
-import help_topics
+from ui import help_topics
 from ui import theme as theme_v2
 from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
@@ -911,7 +911,7 @@ class AllWellApp(QMainWindow):
         user is currently viewing, or ``""`` when it can't be determined.
 
         All three modes answer this, each asking its own pane which page is
-        showing; the maps live in ``help_topics``. A pane that cannot say
+        showing; the maps live in ``ui.help_topics``. A pane that cannot say
         (nothing built yet, scrolled above the first section) falls back to its
         mode's overview heading rather than to another mode's page.
         """

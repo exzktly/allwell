@@ -619,7 +619,7 @@ def test_the_help_drawer_lands_on_the_current_tab_not_the_top_of_the_chapter(
     pane it is handed, so the loaded app stands in for it directly.
     """
     import allwell
-    import help_topics
+    from ui import help_topics
 
     resolve = allwell.AllWellApp._review_help_section
 

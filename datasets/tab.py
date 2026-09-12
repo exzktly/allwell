@@ -289,7 +289,7 @@ class DatasetsTab(QWidget):
 
         The help drawer asks for this so it can open on that tool's section of
         the manual. The label doubles as the ``RailNav`` key and as the
-        ``help_topics.DATASETS_PAGE_HELP`` key, so no second name map exists to
+        ``ui.help_topics.DATASETS_PAGE_HELP`` key, so no second name map exists to
         drift out of step.
         """
         nav = getattr(self, "_nav", None)

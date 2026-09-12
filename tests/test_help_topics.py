@@ -1,7 +1,7 @@
 """Every page of the app has a help topic, and every topic is a real heading.
 
 The help drawer scrolls to a heading in ``README_WellViewer.md`` chosen from the
-maps in :mod:`help_topics`. Both halves of that arrangement can rot silently:
+maps in :mod:`ui.help_topics`. Both halves of that arrangement can rot silently:
 
 * a value that names no heading scrolls nowhere, and the drawer opens at the top
   of a 2600-line manual with no sign that anything was meant to happen;
@@ -23,7 +23,7 @@ import ast
 import re
 from pathlib import Path
 
-import help_topics
+from ui import help_topics
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

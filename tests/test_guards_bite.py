@@ -514,7 +514,8 @@ def test_axes_selection_guard_clears_a_non_prompt(tmp_path, monkeypatch, shape):
 # ── help topics ─────────────────────────────────────────────────────────────
 #
 # The help-topic guard cannot be proven with `scripts/prove_guard.sh`: the maps
-# it reads live in `help_topics.py`, a module the base branch does not have, so
+# it reads live in `ui/help_topics.py`, a module the base branch does not have
+# at that path, so
 # the run there dies on an import before measuring anything. This is the whole
 # proof it gets, so both rules are exercised in both directions.
 
@@ -577,7 +578,7 @@ def test_help_topic_guard_catches_a_topic_naming_no_heading(monkeypatch):
     with or without the repointing — the case would go green while proving
     nothing about the entry it claims to be testing.
     """
-    import help_topics
+    from ui import help_topics
     from tests import test_help_topics as guard
 
     guard.test_every_topic_names_a_real_heading()      # clean before
@@ -851,7 +852,7 @@ _HOME_REGISTRY_SRC = (
 
 
 def _run_home_topic_scan(monkeypatch, tmp_path, topics: dict):
-    import help_topics
+    from ui import help_topics
 
     (tmp_path / "well_viewer" / "features").mkdir(parents=True, exist_ok=True)
     (tmp_path / "well_viewer" / "features" / "registry.py").write_text(

@@ -142,7 +142,7 @@ def test_the_tab_is_spelled_sample_map_everywhere():
     """A tab name is one string in twenty-six files, and a half-done rename
     leaves the two halves disagreeing where it matters most.
 
-    Three of the sites are load-bearing rather than prose: ``help_topics`` maps
+    Three of the sites are load-bearing rather than prose: ``ui.help_topics`` maps
     the tab's name to a **manual heading** and both sides have to move together
     or Help lands nowhere; ``scripts/profile_build`` checks feature names
     against those headings; and the ``FeatureDescriptor`` name is what

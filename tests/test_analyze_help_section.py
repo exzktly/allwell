@@ -39,7 +39,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
-import help_topics
+from ui import help_topics
 
 VIEWPORT_H = 700
 

@@ -162,7 +162,6 @@ def _pkg_datas(pkg_root: Path, dest: str, exclude_repo_dirs: list) -> list:
 # holds this list against the tree.
 sibling_scripts = [
     (str(_parent / "allwell.py"),               "."),
-    (str(_parent / "help_topics.py"),           "."),
     (str(_parent / "process_microscopy.py"),    "."),
     (str(_parent / "WellPlateZipper.py"),       "."),
     (str(_parent / "version.py"),               "."),

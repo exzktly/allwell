@@ -159,7 +159,7 @@ def test_the_row_divider_does_not_cascade_onto_its_children(qapp):
                  if hasattr(w, "styleSheet") and "border-bottom" in (w.styleSheet() or "")]
     assert not offenders
 
-    import theme
+    from ui import theme
     assert "QWidget#JobRow" in theme.qss()
 
 

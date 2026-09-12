@@ -16,7 +16,7 @@ and inter-group spacers. The controller places each cell widget at
 
 from __future__ import annotations
 
-import theme
+from ui import theme
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QLabel

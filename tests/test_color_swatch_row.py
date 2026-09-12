@@ -28,7 +28,7 @@ from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: E402
 from PySide6.QtGui import QColor, QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-import theme  # noqa: E402
+from ui import theme  # noqa: E402
 from widgets.color_swatch_row import ColorSwatchRow  # noqa: E402
 
 CURATED = ["#101010", "#202020", "#303030"]

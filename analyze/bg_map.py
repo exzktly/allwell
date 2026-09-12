@@ -61,7 +61,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
-from theme import WELL_COLORS_TUPLE
+from ui.theme import WELL_COLORS_TUPLE
 from util.well_token import (
     canonical_well_label,
     format_background_well_map,

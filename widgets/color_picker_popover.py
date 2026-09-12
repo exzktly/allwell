@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
     QFormLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from widgets.color_swatch_row import ColorSwatchRow
 from widgets.popover import Popover
 

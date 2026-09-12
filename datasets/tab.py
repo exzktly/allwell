@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import theme
+from ui import theme
 from widgets.context_banner import ContextBanner
 from widgets.page_body import build_page_body
 from widgets.rail_nav import RailNav

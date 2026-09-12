@@ -36,7 +36,7 @@ from well_viewer.core.group_by_controller import (
     DECORATION_CONTROLS as _DECORATION_CONTROLS,
 )
 from well_viewer.core.safe import swallow, swallowed
-import theme
+from ui import theme
 from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
 
 
@@ -270,7 +270,7 @@ def build_centre(win, parent: QWidget) -> None:
         """
         from PySide6.QtWidgets import QTabBar
 
-        from theme import Colors as _C, Radii as _R, Typography as _T
+        from ui.theme import Colors as _C, Radii as _R, Typography as _T
 
         # A standalone QTabBar carrying the nested-sub-tab object name, which
         # theme.qss styles alongside Home's bar — one rule, so the

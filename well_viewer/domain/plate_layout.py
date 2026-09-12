@@ -6,7 +6,7 @@ reach plate geometry without importing the GUI monolith.
 
 from __future__ import annotations
 
-import theme
+from ui import theme
 
 PLATE_ROWS = list("ABCDEFGH")
 PLATE_COLS = [f"{c:02d}" for c in range(1, 13)]  # "01" … "12"

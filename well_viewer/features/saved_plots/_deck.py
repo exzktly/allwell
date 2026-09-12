@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-import theme
+from ui import theme
 from well_viewer.features.saved_plots._align import (
     AnchorBox, axes_rect_points, plan_anchor,
 )

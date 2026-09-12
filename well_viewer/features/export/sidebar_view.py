@@ -36,7 +36,7 @@ from well_viewer.core.plot_style import (
 # (CollapsibleSection, ToggleSwitch) plus theme-styled stock widgets. The
 # binding layer (_bind_getter_setter / _getters / _setters / _persist /
 # apply_export_style_to_current) is unchanged — only the layout was re-skinned.
-import theme
+from ui import theme
 from widgets.collapsible_section import CollapsibleSection
 from widgets.toggle_switch import ToggleSwitch
 from well_viewer.core.lazy import lazy as _lazy

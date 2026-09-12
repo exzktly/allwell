@@ -17,7 +17,7 @@ import math
 
 import numpy as np
 
-import theme
+from ui import theme
 from well_viewer.core.plot_style import apply_time_rescale, style_legend, tokens_for
 from well_viewer.domain.time_rescale import axis_label as time_axis_label
 from well_viewer.domain.time_rescale import format_scaled as format_scaled_tp

@@ -165,7 +165,6 @@ sibling_scripts = [
     (str(_parent / "help_topics.py"),           "."),
     (str(_parent / "process_microscopy.py"),    "."),
     (str(_parent / "WellPlateZipper.py"),       "."),
-    (str(_parent / "theme.py"),                 "."),
     (str(_parent / "version.py"),               "."),
     # Remote (SLURM/SSH) execution uploads the files in
     # services.remote_runner._REQUIRED_REMOTE_FILES to the worker; that list

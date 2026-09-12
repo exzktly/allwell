@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QToolButton, QWidget,
 )
 
-import theme
+from ui import theme
 
 
 def segment_text_color(seg) -> str:

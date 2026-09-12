@@ -28,7 +28,7 @@ class FigureService:
     def save(self, fig, default_name: str) -> None:
         """Open the Save-As dialog for *fig*, honouring the shared file-type
         filter and the active dataset directory."""
-        import theme
+        from ui import theme
         from well_viewer.core.plot_orchestrator import save_matplotlib_fig
         save_matplotlib_fig(self._ctx, fig, default_name, plot_bg=theme.CPub.bg)
 

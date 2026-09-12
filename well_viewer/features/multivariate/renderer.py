@@ -12,7 +12,7 @@ import logging
 
 import numpy as np
 
-import theme
+from ui import theme
 from well_viewer.core.plot_style import (
     apply_ax_style, follows_theme, style_legend, tokens_for,
 )

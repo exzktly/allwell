@@ -18,13 +18,19 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import theme
+from tests._repo_scan import REPO_ROOT
+from ui import theme
 
 # ``image: url(/abs/path/to/glyph.svg);`` — capture the path inside url(...),
 # tolerating optional surrounding quotes.
 _URL_RE = re.compile(r"url\(\s*['\"]?([^'\")]+)['\"]?\s*\)")
 
-_ICONS_DIR = (Path(theme.__file__).resolve().parent / "assets" / "icons")
+#: Anchored on the repository root, not on ``theme.__file__``: `assets/icons` is
+#: repository-level while the module is one level down in `ui/`, and a test that
+#: re-derives the directory the same way the module does accepts whatever the
+#: module answers. Deriving it independently is what caught `_icon_path`
+#: resolving `ui/assets/icons` after the move.
+_ICONS_DIR = (REPO_ROOT / "assets" / "icons").resolve()
 
 
 def _svg_urls() -> list[str]:

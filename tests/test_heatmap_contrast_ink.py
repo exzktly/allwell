@@ -19,7 +19,7 @@ import pytest
 
 pytest.importorskip("matplotlib")
 
-import theme
+from ui import theme
 from well_viewer.features.heatmap.controller import _contrast_ink
 
 

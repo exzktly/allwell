@@ -58,7 +58,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from widgets._support import with_alpha
 
 _ROW_LETTERS = "ABCDEFGH"

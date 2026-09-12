@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from widgets import icons
 from widgets.selection_chip import SelectionChip
 

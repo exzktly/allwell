@@ -25,7 +25,7 @@ from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
-import theme
+from ui import theme
 from widgets._support import with_alpha
 
 _STATUS_TOKENS = {

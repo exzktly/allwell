@@ -24,7 +24,7 @@ from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QSlider
 
-import theme
+from ui import theme
 from widgets._support import with_alpha
 
 

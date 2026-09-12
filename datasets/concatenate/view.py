@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import theme
+from ui import theme
 from widgets._support import set_variant
 from datasets._common.dataset_paths import preview_wells
 from datasets._common.equation_row import build_equation_row

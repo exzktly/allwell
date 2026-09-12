@@ -39,7 +39,7 @@ from well_viewer.domain.fold_change_scopes import (
 )
 from well_viewer.core.safe import swallow, swallowed
 from well_viewer.domain.control_ref import KIND_LEGACY
-import theme
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes

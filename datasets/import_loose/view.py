@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import theme
+from ui import theme
 from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
 from widgets._support import set_variant

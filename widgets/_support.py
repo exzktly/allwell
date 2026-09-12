@@ -14,7 +14,7 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-import theme  # after the sys.path fix above
+from ui import theme  # after the sys.path fix above
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QColor
 from util.aw_safe import swallowed

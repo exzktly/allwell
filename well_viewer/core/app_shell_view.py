@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-import theme
+from ui import theme
 from well_viewer.core.sidebar_view import build_sidebar
 from well_viewer.core.status_view import build_bottom
 from well_viewer.core.ui_helpers import build_hline_separator

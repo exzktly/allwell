@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QButtonGroup, QHBoxLayout, QSizePolicy, QToolButton, QWidget,
 )
 
-import theme
+from ui import theme
 
 
 class ChipGroup(QWidget):

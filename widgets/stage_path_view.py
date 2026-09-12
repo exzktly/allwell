@@ -31,7 +31,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
-import theme
+from ui import theme
 from widgets.plate_geometry import PLATE_MAX_HEIGHT, PLATE_MAX_WIDTH
 
 _N_ROWS, _N_COLS = 8, 12

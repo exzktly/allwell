@@ -1,12 +1,15 @@
-"""
-theme.py
---------
-Design tokens for the All-Well interface, plus a base Qt stylesheet
-builder.
+"""Design tokens for the All-Well interface, plus a base Qt stylesheet builder.
 
-This module is the single source of truth for colors, typography, spacing,
-and radii. Widget code should read the constants here rather than hardcoding
-values, and the application-wide chrome comes from :func:`qss`.
+This module is the single source of truth for colours, typography, spacing and
+radii. Widget code reads the constants here rather than hardcoding values —
+``tests/test_hardcoded_tokens.py`` enforces that, and names this module as the
+one place a raw colour literal may be written — and the application-wide chrome
+comes from :func:`qss`.
+
+It lives in :mod:`ui` because all three panes share it and none of them owns
+it. It imports nothing from the application: ``widgets/`` is required to reach
+for this module and nothing else, so a dependency here would be a dependency
+every reusable widget inherits.
 """
 
 from __future__ import annotations
@@ -27,9 +30,9 @@ from __future__ import annotations
 #     by the ``_rank_color_well`` / ``_rank_color_rset`` helpers and every
 #     plot renderer that needs a per-well colour by rank.
 #
-# Keeping the list here (not in ui/theme/styles.py) lets the ``widgets``
-# package — which is supposed to import only ``theme`` — see the full
-# palette without reaching into application-side modules.
+# Keeping the list here lets the ``widgets`` package — which is supposed to
+# import only this module — see the full palette without reaching into
+# application-side modules.
 # NOTE — length must be **96** (one colour per 96-well plate position), not a
 # submultiple of it. Well colour is ``WELL_COLORS[well_rank(token) % len]`` and
 # ranks step by 12 (the column count) going *down* a plate column, so any length
@@ -468,7 +471,15 @@ def _icon_path(name: str) -> str:
     import os
     import sys
 
-    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    # `assets/` is repository-level and this module is one level down in `ui/`,
+    # so the source-tree base is the *parent* of this file's directory. Resolving
+    # it beside the file instead points at `ui/assets/icons`, which does not
+    # exist — and `qss()` embeds the path into a stylesheet string rather than
+    # opening it, so Qt silently draws no glyph and every affected control loses
+    # its chevron with nothing logged. A frozen build keeps `_MEIPASS`, the
+    # bundle root, where the spec ships `assets/icons` directly.
+    base = getattr(sys, "_MEIPASS",
+                   os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     return os.path.join(base, "assets", "icons", name).replace(os.sep, "/")
 
 
@@ -1772,9 +1783,9 @@ def available_themes() -> tuple:
 def register_theme_hook(fn):
     """Register ``fn(name)`` to run after every :func:`apply_theme`.
 
-    Used by ``ui/theme/styles.py`` to re-derive its ``get_color()`` palette from
-    the freshly-applied ``Colors``. Idempotent; returns ``fn`` (usable as a
-    decorator).
+    Used by :func:`refresh_legacy_palette` at the bottom of this module to
+    re-derive its ``get_color()`` palette from the freshly-applied ``Colors``.
+    Idempotent; returns ``fn`` (usable as a decorator).
     """
     if fn not in _THEME_HOOKS:
         _THEME_HOOKS.append(fn)
@@ -1822,3 +1833,49 @@ def select_theme_from_env(default: str = DEFAULT_THEME,
                      var, name, default, ", ".join(available_themes()))
         name = default
     return apply_theme(name)
+
+
+# ── Legacy colour accessor ───────────────────────────────────────────────────
+#
+# The last two named colours without a `Colors` home of their own, and the
+# `get_color` accessor that reads them. Everything else this pair used to carry
+# has migrated into `Colors` above — as a direct alias, as a new attribute, or
+# by fixing a call site that hardcoded a stale pre-v2 hex value. What is left is
+# the two `batch_export` progress-label colours: `CLR_DANGER` tracks
+# `Colors.danger`, and `CLR_SUCCESS_DARK` is its own value because it does not
+# match `Colors.success` closely enough for the swap to be safe. Give those an
+# exact `Colors` home and this whole section goes.
+
+def _build_legacy_palette() -> dict[str, str]:
+    # Rebuilt on demand rather than captured once, so a theme switch — which
+    # mutates `Colors` in place — is reflected by `get_color()`. The hook
+    # registered at the bottom of this block is what re-runs it.
+    return {
+        "CLR_DANGER": Colors.danger,
+        "CLR_SUCCESS_DARK": "#047857",
+    }
+
+
+_LEGACY_PALETTE: dict[str, str] = _build_legacy_palette()
+
+
+def get_color(name: str) -> str:
+    """The named legacy colour, or black for a name that has no entry."""
+    return _LEGACY_PALETTE.get(name, "#000000")
+
+
+def refresh_legacy_palette(_name: str | None = None) -> None:
+    """Re-derive the legacy tokens from the freshly-applied :class:`Colors`.
+
+    Registered below as a theme hook, so after :func:`apply_theme` runs,
+    ``get_color("CLR_DANGER")`` tracks the active theme's ``danger`` token.
+    """
+    _LEGACY_PALETTE.clear()
+    _LEGACY_PALETTE.update(_build_legacy_palette())
+
+
+# Keep get_color() in sync when the app applies a non-default theme. Registering
+# here, in the module that owns both halves, is why no caller has to import
+# anything for the side effect of wiring it up: the hook exists as soon as the
+# theme module does.
+register_theme_hook(refresh_legacy_palette)

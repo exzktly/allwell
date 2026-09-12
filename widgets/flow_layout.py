@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QLayoutItem
 
 from PySide6.QtCore import QEvent, QMargins, QObject, QPoint, QRect, QSize, Qt
-import theme
+from ui import theme
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLayout, QSizePolicy, QStyle, QWidget,
 )

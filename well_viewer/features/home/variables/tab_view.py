@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 
 #: The definition column's width. A fixed rail, so the plate beside it does not
 #: reflow every time a variable is renamed.

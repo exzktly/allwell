@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget,
 )
 
-import theme
+from ui import theme
 from widgets import icons
 
 _VARIANTS = ("accent", "muted")

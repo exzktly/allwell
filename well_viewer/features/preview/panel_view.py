@@ -32,7 +32,7 @@ from widgets.labeled_combo import LabeledComboBox
 from functools import partial
 from well_viewer.core.safe import swallowed
 from well_viewer.core.lazy import lazy as _lazy
-import theme
+from ui import theme
 
 # Height of the colour swatch chip beside a control (its width is the
 # shared theme.Metrics.swatch_w).

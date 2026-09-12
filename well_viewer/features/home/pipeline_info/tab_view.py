@@ -78,7 +78,7 @@ def build_pipeline_info_subtab(ctx, parent: QWidget) -> None:
     # the text stayed light). Drop it and pin themed colours explicitly so every
     # row is the dark panel background with high-contrast text, regardless of any
     # ambient palette.
-    import theme as _theme
+    from ui import theme as _theme
     _c = _theme.Colors
     tree.setAlternatingRowColors(True)
     tree.setStyleSheet(

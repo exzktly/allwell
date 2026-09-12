@@ -42,7 +42,7 @@ from well_viewer.domain.ratio_models import (
     RatioMetric, is_ratio_key, ratio_name_from_key)
 from pipeline.shape_features import is_shape_column, label_for as shape_label_for
 from well_viewer.core.safe import swallowed
-import theme
+from ui import theme
 
 _logger = logging.getLogger("well_viewer")
 

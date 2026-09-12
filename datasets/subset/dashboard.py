@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
-import theme
+from ui import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
 
 WELL_STATES = ("pending", "copying", "done", "empty")

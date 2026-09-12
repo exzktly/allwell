@@ -313,7 +313,7 @@ def test_progress_dial_paints_the_state_colour_for_the_done_part(qtbot):
     well further along."""
     from PySide6.QtGui import QColor
 
-    import theme
+    from ui import theme
     from widgets.well_plate_selector import _PlateGrid
 
     grid = _PlateGrid()
@@ -371,7 +371,7 @@ def test_progress_dial_is_the_same_shape_as_a_plain_well(qtbot):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QColor, QImage, QPainter
 
-    import theme
+    from ui import theme
     from widgets.well_plate_selector import _PlateGrid
 
     grid = _PlateGrid()

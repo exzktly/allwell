@@ -44,7 +44,7 @@ _AGGS = ("mean", "median", "count", "std")
 
 from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
-import theme
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes

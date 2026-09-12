@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 _boot_diag.boot("PySide6 imported OK")
 
 import help_topics
-import theme as theme_v2
+from ui import theme as theme_v2
 from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
@@ -198,7 +198,7 @@ class AllWellApp(QMainWindow):
 
     # ── UI construction ──────────────────────────────────────────────────
     def _apply_stylesheet(self) -> None:
-        # Single source of truth for the app stylesheet — see theme.py. The
+        # Single source of truth for the app stylesheet — see ui/theme.py. The
         # active theme's tokens are already applied by ``main`` (via
         # ``theme.select_theme_from_env``) before this runs, so ``qss()`` here
         # reflects the selected theme (ALLWELL_THEME); default is grey.
@@ -1787,9 +1787,6 @@ def main() -> None:
         theme_v2.Typography.family_mono = _mono_family or ""
     # Select the UI theme (dev-facing ALLWELL_THEME env var) BEFORE building any
     # widgets, so qss() and every widget's cached inline QSS pick up its tokens.
-    # Importing ui.theme.styles here guarantees its theme-refresh hook is
-    # registered before the theme is applied, so get_color() tracks the theme.
-    import ui.theme.styles as _ui_styles  # noqa: F401  (registers a theme hook)
     _active_theme = (theme_v2.apply_theme(args.theme) if args.theme
                      else theme_v2.select_theme_from_env())
     _boot_diag.boot(f"theme applied: {_active_theme}")

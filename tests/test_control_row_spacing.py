@@ -37,7 +37,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QCheckBox, QStyle, QStyleOptionButton, QWidget
 
-import theme
+from ui import theme
 from widgets.flow_layout import (
     _DEFAULT_H_SPACING,
     _DEFAULT_V_SPACING,

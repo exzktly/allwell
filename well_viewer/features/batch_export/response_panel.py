@@ -32,7 +32,7 @@ import logging
 import re
 from pathlib import Path
 
-import theme
+from ui import theme
 
 from PySide6.QtWidgets import (
     QComboBox,

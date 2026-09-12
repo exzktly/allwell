@@ -434,7 +434,7 @@ def _retint_axes_text(ctx) -> None:
     card = ctx.widgets.get_or_none("_distribution_card")
     mode = getattr(card, "_plot_theme", "screen") if card is not None else "screen"
     _bg, fg, _muted, _grid, _spine = plot_tokens(mode)
-    import theme as _theme
+    from ui import theme as _theme
     sec = fg if mode == "publication" else _theme.Colors.text_secondary
     for ax in fig.axes:
         try:

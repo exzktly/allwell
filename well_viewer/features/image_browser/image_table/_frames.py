@@ -29,7 +29,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-import theme
+from ui import theme
 from well_viewer.domain.image_frames import (
     BarMark, FramedGrid, ImageFrame, Rect, TextMark,
 )

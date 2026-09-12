@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QInputDialog, QLabel, QLineEdit, QPushButton,
     QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
-import theme
+from ui import theme
 from well_viewer.core import empty_state_copy
 from well_viewer.core.safe import swallow
 from well_viewer.data.image_identity import normalize_tp
@@ -940,7 +940,7 @@ def _themed_nav_toolbar_class():
             pm = QPixmap(filename)
             pm.setDevicePixelRatio(self.devicePixelRatioF() or 1)
             try:
-                import theme
+                from ui import theme
                 icon_color = QColor(theme.Colors.text_primary)
             except Exception:
                 icon_color = self.palette().color(self.foregroundRole())
@@ -1286,7 +1286,7 @@ def apply_theme(ctx) -> None:
     embedded under AllWell).
     """
     try:
-        import theme  # type: ignore
+        from ui import theme  # type: ignore
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(theme.qss())

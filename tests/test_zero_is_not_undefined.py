@@ -89,7 +89,7 @@ def _n_panel_bars(monkeypatch, pts_by_well):
     import matplotlib.pyplot as plt
     from matplotlib.colors import to_rgb
 
-    import theme
+    from ui import theme
     from well_viewer.features.barplot import renderer
 
     ctx = types.SimpleNamespace(state=types.SimpleNamespace(

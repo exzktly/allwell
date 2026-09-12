@@ -27,7 +27,7 @@ from well_viewer.features.image_browser.cell_browser.sort_view import (
     build_cell_browser_sort_section,
     cell_browser_sort_refresh,
 )
-import theme
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes

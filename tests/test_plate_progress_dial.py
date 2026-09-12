@@ -28,7 +28,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtGui import QColor  # noqa: E402
 
-import theme  # noqa: E402
+from ui import theme  # noqa: E402
 from widgets.run_dashboard import RunDashboard
 from widgets.well_plate_selector import WellPlateSelector
 
@@ -291,7 +291,7 @@ def test_an_unfilled_dial_keeps_the_state_colour(qapp, token):
     asked whether the unfilled share was *brighter* — and white is the
     brightest thing there is.
     """
-    import theme
+    from ui import theme
 
     base = QColor(getattr(theme.Colors, token))
     plate = WellPlateSelector()

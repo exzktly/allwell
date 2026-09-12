@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-import theme
+from ui import theme
 from well_viewer.features.home import collect as hc
 from well_viewer.features.home.plate_panel import (
     NEUTRAL_STATES,

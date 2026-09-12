@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-import theme
+from ui import theme
 
 #: The two values ``PlotState.bar_color_mode`` may hold. ``"plate"`` is the
 #: default and reproduces the historical behaviour exactly.

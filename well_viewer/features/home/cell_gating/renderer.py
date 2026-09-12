@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-import theme
+from ui import theme
 from well_viewer.core.safe import swallowed
 
 

@@ -47,7 +47,7 @@ VIEWPORT_H = 700
 @pytest.fixture(scope="module")
 def qapp():
     app = QApplication.instance() or QApplication([])
-    import theme
+    from ui import theme
     app.setStyleSheet(theme.qss())
     return app
 

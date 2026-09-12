@@ -22,7 +22,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QLabel, QLineEdit
 
-import theme
+from ui import theme
 from widgets import icons
 
 

@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 
 # Height of the colour swatch chip beside a control (its width is the
 # shared theme.Metrics.swatch_w).

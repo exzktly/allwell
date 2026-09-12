@@ -20,7 +20,7 @@ import math
 from collections.abc import Iterable
 
 import numpy as np
-import theme
+from ui import theme
 from matplotlib import patches as mpatches
 from matplotlib import colormaps as mpl_colormaps
 

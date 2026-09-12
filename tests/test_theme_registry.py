@@ -18,7 +18,7 @@ import ast
 
 import pytest
 
-import theme as _theme
+from ui import theme as _theme
 from tests._repo_scan import REPO_ROOT, parse_source
 
 
@@ -88,7 +88,7 @@ def test_every_registered_theme_applies(name):
 
 
 def _themes_assignment() -> ast.Dict:
-    tree = parse_source(REPO_ROOT / "theme.py")
+    tree = parse_source(REPO_ROOT / "ui" / "theme.py")
     for node in tree.body:
         if (isinstance(node, ast.Assign)
                 and any(isinstance(t, ast.Name) and t.id == "THEMES"
@@ -97,7 +97,7 @@ def _themes_assignment() -> ast.Dict:
                 "THEMES is no longer a dict literal; this guard reads the "
                 "literal's keys and can no longer see them")
             return node.value
-    raise AssertionError("no module-level THEMES assignment in theme.py")
+    raise AssertionError("no module-level THEMES assignment in ui/theme.py")
 
 
 def test_every_theme_name_is_spelled_out_in_the_registry():

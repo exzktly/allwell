@@ -14,7 +14,7 @@ import types
 
 import pytest
 
-import theme
+from ui import theme
 from well_viewer.features.home import collect as hc
 
 

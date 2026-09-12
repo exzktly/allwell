@@ -53,7 +53,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import theme
+from ui import theme
 
 #: The two values ``PlotState.line_color_mode`` may hold. ``"plate"`` is the
 #: default and reproduces the historical behaviour exactly.

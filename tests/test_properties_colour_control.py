@@ -32,7 +32,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import theme
+from ui import theme
 from well_viewer.core.cell_gating_state import CellGatingState
 from well_viewer.core.export_prefs_state import ExportPrefsState
 from well_viewer.core.plot_state import PlotState

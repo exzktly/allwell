@@ -27,7 +27,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-import theme  # noqa: E402
+from ui import theme  # noqa: E402
 from widgets.segmented_control import SegmentedControl, segment_text_color  # noqa: E402
 
 

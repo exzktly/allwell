@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import theme
+from ui import theme
 from datasets._common.log_panel import hrule as _hrule
 from services.job_kinds import KIND_LABEL
 from services.job_queue import JobSpec, JobState

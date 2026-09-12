@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-import theme
+from ui import theme
 from util.fov import sort_key as fov_sort_key
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap

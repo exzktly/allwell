@@ -17,7 +17,7 @@ from a real value — none of the three is the palette's first colour by acciden
 
 from __future__ import annotations
 
-import theme
+from ui import theme
 from well_viewer.domain.sample_variables import MIXED
 
 #: What a member whose wells disagree is called, wherever it is named. The same

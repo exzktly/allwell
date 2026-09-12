@@ -28,7 +28,7 @@ from well_viewer.core.ui_helpers import (
     clear_layout as _clear_layout_helper,
 )
 from well_viewer.domain.viewer_state import groups_with_loaded_wells as _groups_with_loaded_wells
-import theme
+from ui import theme
 
 _logger = logging.getLogger("well_viewer")
 

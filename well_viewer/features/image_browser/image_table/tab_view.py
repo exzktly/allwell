@@ -63,7 +63,7 @@ from well_viewer.features.image_browser.image_table.export import (
     gallery_quality_px,
     set_gallery_quality,
 )
-import theme
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes

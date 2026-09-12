@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
 from util.well_token import canonical_well_label
-import theme
+from ui import theme
 
 #: Gap between the plate column and the stage rail beside it. Off the 4-px
 #: scale on purpose, like the 6-px root spacing below: this row has to hold a

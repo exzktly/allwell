@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-import theme
+from ui import theme
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (

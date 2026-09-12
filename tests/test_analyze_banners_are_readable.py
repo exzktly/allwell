@@ -30,7 +30,7 @@ from __future__ import annotations
 import pytest
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-import theme
+from ui import theme
 from services import run_journal as J
 from well_viewer.core.app_shell_view import RAIL_W
 

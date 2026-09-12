@@ -46,7 +46,7 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from widgets.icon_button import IconButton
 from widgets.mpl_toolbar import MplToolbar
 from util.aw_safe import swallowed

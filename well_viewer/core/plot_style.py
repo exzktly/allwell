@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from collections.abc import MutableMapping
 
-import theme
+from ui import theme
 from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
@@ -40,7 +40,7 @@ def _plot_font_family() -> str:
         except Exception:
             swallowed()
     try:
-        import theme as _theme
+        from ui import theme as _theme
         return _theme.Typography.family or "Helvetica"
     except Exception:
         return "Helvetica"

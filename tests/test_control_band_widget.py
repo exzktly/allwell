@@ -14,7 +14,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-import theme  # noqa: E402
+from ui import theme  # noqa: E402
 
 
 @pytest.fixture(scope="module")

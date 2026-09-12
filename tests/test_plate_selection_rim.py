@@ -22,7 +22,7 @@ import pytest
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor
 
-import theme
+from ui import theme
 from widgets.well_plate_selector import WellPlateSelector
 
 pytestmark = pytest.mark.qt

@@ -27,7 +27,7 @@ from __future__ import annotations
 import pytest
 from PySide6.QtWidgets import QHBoxLayout, QSpinBox, QWidget
 
-import theme
+from ui import theme
 
 pytestmark = pytest.mark.qt
 

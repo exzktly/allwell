@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
     QButtonGroup, QFrame, QHBoxLayout, QLabel, QWidget,
 )
 
-import theme
+from ui import theme
 from widgets.icon_button import IconButton
 from util.aw_safe import swallowed
 

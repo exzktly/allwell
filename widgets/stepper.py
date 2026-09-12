@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLineEdit, QSizePolicy, QToolButton, QVBoxLayout,
 )
 
-import theme
+from ui import theme
 
 
 def control_row_height() -> int:

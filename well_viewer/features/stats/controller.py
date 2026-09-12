@@ -844,7 +844,7 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
 
 import copy as _copy
 
-import theme
+from ui import theme
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
@@ -1466,7 +1466,7 @@ def stats_refresh_colors(ctx) -> None:
     Widget colours are driven by the app-level QSS stylesheet; only the
     embedded matplotlib figure needs an explicit repaint.
     """
-    import theme
+    from ui import theme
     app = ctx.window  # transitional: figure handles still on app._stats_*
 
     if hasattr(app, "_stats_fig"):

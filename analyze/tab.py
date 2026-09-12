@@ -36,7 +36,7 @@ from services.pipeline_runner import (
     is_transient_progress,
 )
 from services.pipeline_service import find_pipeline_script
-import theme
+from ui import theme
 from well_viewer.core.app_shell_view import RAIL_W
 from well_viewer.core.safe import swallowed
 from analyze.bg_map import AnalyzeBackgroundMapMixin

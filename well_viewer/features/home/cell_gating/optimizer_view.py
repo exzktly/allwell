@@ -30,7 +30,7 @@ from well_viewer.features.home.cell_gating.controller import (
     _cell_gating_on_opt_scope_changed,
     cell_gating_optimize_thresh_frac_on,
 )
-import theme
+from ui import theme
 
 # Pixel geometry for this module's controls (ARCHITECTURE §8: named once, never
 # written inline at a call site).

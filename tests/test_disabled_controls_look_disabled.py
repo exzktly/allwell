@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QPushButton, QRadioButton, QSpinBox, QToolButton,
 )
 
-import theme
+from ui import theme
 from widgets.labeled_combo import LabeledComboBox
 from widgets.styled_slider import StyledSlider
 from widgets.well_plate_selector import WellPlateSelector

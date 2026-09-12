@@ -68,7 +68,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from services import run_journal
 from services.input_resolution_service import plan_incremental_scope
 from pipeline import completeness

@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import theme
+from ui import theme
 from well_viewer.core.safe import swallow
 from widgets import menu_exec
 from well_viewer.domain import plot_members as _members

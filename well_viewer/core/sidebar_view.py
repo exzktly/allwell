@@ -22,7 +22,7 @@ import logging
 from well_viewer.core.safe import swallowed
 from well_viewer.domain.plot_groups import make_plot_group
 from well_viewer.domain.viewer_state import parse_rc
-import theme
+from ui import theme
 
 _logger = logging.getLogger("well_viewer")
 

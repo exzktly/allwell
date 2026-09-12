@@ -230,7 +230,8 @@ well_viewer/            Review pane — the bulk of the app
   features/<name>/      one package per tab — controller/renderer/collect/state/tab_view
   persistence/          JSON read/write, one module per on-disk block
 widgets/                reusable Qt widgets, zero app coupling
-theme.py, ui/theme/     design tokens + QSS (never hardcode colours)
+ui/                     app-level UI shared by every pane — theme.py (design
+                        tokens + QSS, never hardcode colours), help_topics.py
 profiles/*.toml         build profiles (feature subsets)
 tests/                  ~490 test files, incl. the guardrails
 _Docs/Markdowns/        the three live docs — ARCHITECTURE.md, README_WellViewer.md,
@@ -315,7 +316,7 @@ function, remove its stale allowlist entry (the test fails until you do).
   `swallowed()` on the GUI side, `util.aw_safe` equivalents on the pipeline /
   `services` side. Two near-identical helpers exist because the pipeline may not
   import `well_viewer`.
-- **Never hardcode colours or pixel sizes.** `theme.Colors.*`, `ui/theme/styles.get_color`,
+- **Never hardcode colours or pixel sizes.** `ui.theme.Colors.*`, `ui.theme.get_color`,
   or QSS object names.
 - **Never block the UI thread.** Heavy work goes to a worker (`features/smfish/worker.py`,
   `services/pipeline_runner.py` are the patterns). Cross-thread callbacks must go

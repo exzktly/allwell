@@ -72,7 +72,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     user is already working in, beside the cards that name the group it paints
     into.
     """
-    import theme
+    from ui import theme
     from well_viewer.core.ui_helpers import make_scrollable_canvas
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
     from widgets.responsive_row import ResponsiveRow

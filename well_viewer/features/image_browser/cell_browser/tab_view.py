@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from functools import partial
 
-import theme
+from ui import theme
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,

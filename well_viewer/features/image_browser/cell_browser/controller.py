@@ -12,7 +12,7 @@ from well_viewer.core.ui_helpers import norm_timepoint
 
 import logging
 
-import theme
+from ui import theme
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap

@@ -43,7 +43,7 @@ def entry_row_text(label: str, sublabel: str) -> str:
     """
     return f"{label}\n{sublabel}" if sublabel else label
 
-import theme
+from ui import theme
 from widgets import icons
 
 

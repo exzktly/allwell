@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
     QFrame, QGraphicsDropShadowEffect, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 
 
 class Popover(QWidget):

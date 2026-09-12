@@ -752,7 +752,7 @@ def test_no_sample_map_layer_starts_at_the_pane_edge(loaded_app):
     from PySide6.QtCore import QPoint
     from PySide6.QtWidgets import QApplication, QWidget
 
-    import theme
+    from ui import theme
     from well_viewer.features.home.controller import _subtabs
     from well_viewer.features.home.sample_map.controller import (
         LAYERS, STACK_KEY, set_layer,

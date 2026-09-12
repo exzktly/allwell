@@ -27,7 +27,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-import theme  # noqa: E402
+from ui import theme  # noqa: E402
 from widgets.plate_progress import PlateProgress  # noqa: E402
 
 SHARED_MEMBERS = ("set_done", "set_failed", "set_cancelled")

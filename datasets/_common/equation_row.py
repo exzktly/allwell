@@ -29,7 +29,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-import theme
+from ui import theme
 from widgets.path_field import PathField, folder_picker
 
 #: Width of the ``+`` / ``=`` column between the fields. Narrow enough that the

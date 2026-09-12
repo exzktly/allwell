@@ -147,7 +147,7 @@ def test_every_ink_coloured_artist_follows_the_theme():
 
 @pytest.fixture
 def card(qapp):
-    import theme
+    from ui import theme
     from widgets.plot_card import PlotCard
 
     theme.apply_theme("blue")

@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget,
 )
 
-import theme
+from ui import theme
 
 
 class KbdHint(QLabel):

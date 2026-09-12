@@ -273,8 +273,14 @@ review/                 Review pane — the bulk of the app
   persistence/          JSON read/write, one module per on-disk block
 core/                   cross-cutting APP infrastructure every pane shares and no pane
                         owns — safe.py (swallow/swallowed), app_settings.py, profile.py
-                        (ALLWELL_PROFILE), debug_flags.py, worker_bridge.py. Nothing here
-                        may import a pane; the arrow runs one way and a test says so
+                        (ALLWELL_PROFILE), debug_flags.py, worker_bridge.py, panes.py.
+                        Nothing here may import a pane; the arrow runs one way and a
+                        test says so
+domain/                 Qt-free models + pure logic more than ONE pane needs —
+                        image_identity, text_columns, tp_match. The bottom of the
+                        stack: may not import a pane, the GUI layers, or core/.
+                        Distinguished from core/ by subject — core/ is plumbing
+                        that owns no subject, this is All-Well's own nouns
 widgets/                reusable Qt widgets, zero app coupling — incl. separator.py
 ui/                     app-level UI every pane shares and none owns —
                         theme.py (design tokens + QSS, never hardcode colours),
@@ -285,12 +291,12 @@ startup/                what runs before the app exists — boot_diag.py (boot l
 assets/                 runtime resources — fonts/, icons/
 profiles/*.toml         build profiles (feature subsets)
 tests/                  ~490 test files, incl. the guardrails
-domain/                 Qt-free models + pure logic more than ONE pane needs —
-                        image_identity, text_columns, tp_match. Below everything:
-                        may not import a pane, the GUI layers, or core/
-requirements.txt        repo metadata, like version.py — the GUI superset;
-requirements-remote.txt   requirements-remote.txt is the headless subset the
-                        remote worker is sent, by that exact string
+
+── repo metadata, like version.py: read by pip, the remote bootstrap and the
+   PyInstaller spec, none of them from Python ──
+requirements.txt        the GUI superset
+requirements-remote.txt the headless subset the remote worker is sent, by that
+                        exact string — see services/remote_manifest.py
 _Docs/                  everything that is not source — Markdowns/ (the three live
                         docs: ARCHITECTURE.md, README_WellViewer.md,
                         GOD_OBJECT_REPOSITORY_ROADMAP.md), _Installation/ (spec +

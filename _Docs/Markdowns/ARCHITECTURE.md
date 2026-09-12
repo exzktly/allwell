@@ -114,6 +114,68 @@ they're shell-wide:
 
 ## 3. Top-level directory map
 
+### The four rules that decide where a module lives
+
+Placement in this repository is answered by rules rather than by taste, and each
+rule is stated so that it can be measured. A module in the wrong package breaks
+nothing — an import resolves identically wherever the file sits — so the whole
+cost falls on whoever next goes looking for it. That makes the drift one-way and
+silent, which is why every rule below has a test beside it.
+
+**Rule 1 — a module belongs to the narrowest package that contains all of its
+users.** Used by one pane, it is that pane's. Used by two, it is the
+application's and moves to a root-level package. This is the rule the other
+three serve, and the one that has caught the most: the design-token module sat
+at the root while only widgets read it; five infrastructure modules sat inside
+the Review pane while all three panes read them; `image_identity` — the one
+definition of what an image filename means — sat in Review's `data/` while seven
+Datasets modules imported it and the pipeline's own docstrings cited it as
+canonical. Guarded by `tests/test_a_module_lives_at_its_widest_use.py`, which
+fails on any module inside a pane that something outside that pane imports.
+
+**Rule 2 — the same directory name means the same thing at every level, and the
+path says the scope.** `core/` is cross-cutting infrastructure that owns no
+subject; `domain/` is Qt-free models and pure logic; `data/` is IO and decode.
+`review/core/` is the Review pane's infrastructure and `core/` is the
+application's; `review/domain/` is Review's subject matter and `domain/` is what
+more than one pane has to agree about. Learning the vocabulary once means
+knowing what any `core/` or `domain/` in the tree holds, and the three panes use
+it identically: Analyze's Qt-free half is `analyze/domain/`, Datasets' shared
+parts are `datasets/core/`, and a Datasets tool's pure logic is
+`<tool>/<tool>_compute.py` — a suffix rather than a directory, because that
+pane's logic is one file per tool rather than one body.
+
+**Rule 3 — the dependency arrow runs one way, from panes into shared code.** A
+pane may import `core/`, `domain/`, `ui/`, `widgets/` and `util/`. None of those
+may import a pane, and `domain/` may not import the GUI layers or `core/`
+either, since it sits below them. A shared module that reaches back down into a
+pane has been misfiled by that fact alone: it re-creates the tangle the shared
+package existed to remove. Guarded by
+`test_architecture_contracts.py::test_core_does_not_import_a_pane` and
+`::test_domain_imports_nothing_above_it`, each proved against every forbidden
+package in turn.
+
+**Rule 4 — Qt is a boundary, and it separates packages that would otherwise look
+alike.** `widgets/` holds Qt widgets that know nothing about All-Well; `ui/` is
+app-level UI every pane shares; `core/` is app infrastructure and may import Qt;
+`domain/`, `util/`, `pipeline/` and `services/` are Qt-free. The distinction
+between `ui/` and `widgets/` is ownership rather than subject — a widget knows
+nothing about the application, a module in `ui/` knows the application and
+belongs to no one pane. The distinction between `domain/` and `util/` is subject
+rather than purity: both are Qt-free, but every file in `util/` is rsynced to a
+remote worker for a headless run, so `util/` is about strings, paths, retries
+and disks while `domain/` is about plates, wells and timepoints. That deployment
+fact is also why `core.safe` and `util.aw_safe` remain near-identical twins
+rather than one module.
+
+**When a rule needs an exemption, that is first a claim about where the code
+lives.** Every roster in the guards above carries a written reason per entry and
+a liveness test that fails when an entry stops describing a real crossing — a
+module left inside a pane on purpose and one nobody remembered are
+indistinguishable in a directory listing six months later, and the reason is the
+only thing that tells them apart.
+
+
 The root holds three kinds of thing and nothing else: the programs you **run**,
 the repository's own **configuration**, and **packages**. Every other module
 lives in a package, where the directory it sits in says what it is. The rule is

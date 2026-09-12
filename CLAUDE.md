@@ -218,6 +218,25 @@ other module lives in a package, where the directory says what it is.
 roster with a written reason, and a loose module there fails the suite. Adding
 one breaks nothing at runtime, which is exactly why it is a test.
 
+**Four rules decide where a module goes** (ARCHITECTURE §3 states them in full,
+each with its guard):
+
+1. **Narrowest scope that holds all its users.** One pane uses it → that pane's.
+   Two → a root package. `test_a_module_lives_at_its_widest_use.py`.
+2. **The same name means the same thing at every level; the path says the
+   scope.** `review/core/` is the pane's infra, root `core/` is the app's;
+   `review/domain/` is Review's subject matter, root `domain/` is what more than
+   one pane must agree about.
+3. **The arrow runs one way.** Panes import shared code; shared code never
+   imports a pane, and `domain/` sits below the GUI layers too.
+   `test_architecture_contracts.py::test_core_does_not_import_a_pane`,
+   `::test_domain_imports_nothing_above_it`.
+4. **Qt is a boundary.** `widgets/` = Qt, no app knowledge. `ui/` = app-level UI.
+   `core/` = app infra, Qt allowed. `domain/`/`util/`/`pipeline/`/`services/` =
+   Qt-free. `domain/` vs `util/` is subject, not purity: everything in `util/` is
+   rsynced to a remote worker, so it holds strings and paths while `domain/`
+   holds plates and wells.
+
 ```
 ── entry points (the three commands a person runs) ──
 allwell.py              app entry + title-bar shell (Review / Analyze / Datasets)
@@ -235,8 +254,15 @@ pipeline/               Qt-free analysis modules (background, stardist, cellpose
 util/                   Qt-free general helpers (well_token, aw_safe)
 services/               Analyze-side services (pipeline/remote runners, config) — Qt-free
 analyze/                Analyze pane — AnalyzeTab (tab.py) + the mixins it is
-                        assembled from (form, input, preflight, progress,
-                        suspend, run_spec, …) + the Remotes dialogs
+                        assembled from (form, preflight, progress, suspend,
+                        run_spec, …) + the Remotes dialogs
+  domain/               the pane's Qt-free half (fields, input, job_edit)
+datasets/               Datasets pane — DatasetsTab (tab.py) + one package per tool
+  core/                 what more than one tool needs (dataset_paths, dataset_fields,
+                        log_panel, tool_controller) — the pane's answer to review/core/
+  <tool>/               concatenate, subset, merge_plates, validate, ome_import,
+                        import_loose, job_queue — each with its own Qt-free
+                        <tool>_compute.py beside its view
 review/                 Review pane — the bulk of the app
   core/                 Review's own cross-cutting infra (state, event bus, controllers,
                         shell views). Not to be confused with the root `core/` below:
@@ -259,10 +285,16 @@ startup/                what runs before the app exists — boot_diag.py (boot l
 assets/                 runtime resources — fonts/, icons/
 profiles/*.toml         build profiles (feature subsets)
 tests/                  ~490 test files, incl. the guardrails
+domain/                 Qt-free models + pure logic more than ONE pane needs —
+                        image_identity, text_columns, tp_match. Below everything:
+                        may not import a pane, the GUI layers, or core/
+requirements.txt        repo metadata, like version.py — the GUI superset;
+requirements-remote.txt   requirements-remote.txt is the headless subset the
+                        remote worker is sent, by that exact string
 _Docs/                  everything that is not source — Markdowns/ (the three live
                         docs: ARCHITECTURE.md, README_WellViewer.md,
                         GOD_OBJECT_REPOSITORY_ROADMAP.md), _Installation/ (spec +
-                        build scripts), requirements*.txt, design/, visual_audit/
+                        build scripts), design/, visual_audit/
 ```
 
 Where new code goes: pipeline work → `process_microscopy.py` / `pipeline/`; a new
@@ -340,6 +372,10 @@ enforces it.
 | `services/` stay Qt-free; `widgets/` carry no app coupling | `test_architecture_contracts.py` |
 | Nothing imports `ReviewApp` (controllers take `app` / `ctx` as an arg) | `test_architecture_contracts.py` |
 | `domain/` and `data/` never import `features/` | `test_layering.py` |
+| A module inside a pane is imported by nothing outside that pane — or carries a written reason | `test_a_module_lives_at_its_widest_use.py` |
+| `core/` never imports a pane; `domain/` imports nothing above it | `test_architecture_contracts.py::test_core_does_not_import_a_pane`, `::test_domain_imports_nothing_above_it` |
+| Every first-party `from X import name` names something X defines | `test_first_party_imports_resolve.py` |
+| `core.profile` and `startup.app_fonts` resolve the repository root (both fail silently otherwise) | `test_profile_repo_root.py`, `test_app_fonts_dir.py` |
 | Core never imports a feature at module scope — `features/registry.py` is the sole importer | `test_architecture_contracts.py`, `test_guardrails.py` |
 | No `ctx.app`; features reach the shell only via frozen `ViewerContext` accessors | `test_ctx_app_burndown.py` (`CTX_APP_BUDGET = 0`) |
 | No silent `except Exception: pass` anywhere | `test_no_silent_except.py` |

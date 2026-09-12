@@ -215,13 +215,41 @@ document, not part of this package rename.
 
 ---
 
-## Verification owed before any of this is called done
+## Verification — what was actually run, and against which commit
 
-- `scripts/prove_guard.sh` cannot prove a guard over code that is new on this
-  branch, so anything new here is mutation-proved on HEAD instead.
-- The rename is mechanical, which is exactly why it needs the **slow lane**: the
-  fast lane never builds an application, so an import that only the real window
-  reaches would survive it. `tests/test_app_smoke.py` at minimum.
-- After the rename, `scripts/rename_sweep_check.sh review review review`
-  for the prose half — a path substitution leaves the bare basename in directory
-  trees and layer diagrams, and leaves sentences that now contradict themselves.
+- **`ruff check .`** clean on every round.
+- **The guard family** (the twelve files CLAUDE.md §2 names), green on every
+  round — 52 tests.
+- **The full `scripts/test.sh` fast lane** against `887d29b`: **9,079 passed,
+  8 skipped, 1 failed** in 9m54s. The one failure was
+  `test_profile_meipass.py::test_repo_root_falls_back_to_source_tree_when_not_frozen`,
+  a test that computed its expected value the same way the function computed the
+  real one and so could never have caught the defect it appeared to catch. It is
+  rewritten and anchored on the repository root in `b9aa00e`; the demonstration
+  is in that commit message.
+  An earlier lane against the same tree was **interrupted during collection** by
+  two modules importing a symbol the separator lift had moved. That is the run
+  that earned `tests/test_first_party_imports_resolve.py`.
+- **`tests/test_app_smoke.py`** (slow lane, full application), 6 passed. The fast
+  lane never builds an application, so a rename touching 866 files needs it: an
+  import that only the real window reaches would survive the fast lane
+  completely.
+- **`scripts/rename_sweep_check.sh well_viewer review well_viewer`** — clean on
+  both queries, the bare basename and the old name claimed near the new one.
+- **Every new guard mutation-proved on HEAD**, each watched failing for its
+  stated reason: the two path guards (four mutations), the `core/` layering
+  guard (three, one per pane), the import-resolution guard (two), and the four
+  renamed rule-guards that forbid importing the pane (four).
+
+`scripts/prove_guard.sh` was not used: it proves a guard against the base ref,
+and every guard here is over code that is new on this branch, where it reports
+`NOT PROVEN (ImportError)` and measures nothing.
+
+## One casualty of the sweep, recorded because it is funny and instructive
+
+The blanket rewrite of `well_viewer` → `review` ran over this file too, and
+turned the verification command above into
+`scripts/rename_sweep_check.sh review review review` — a command to check that
+nothing still says `review` where it should say `review`. A document describing a
+rename is the one place the rename must not be applied blindly, and nothing but
+reading it would have noticed.

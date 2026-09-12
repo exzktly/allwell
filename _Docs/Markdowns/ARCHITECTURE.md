@@ -114,13 +114,31 @@ they're shell-wide:
 
 ## 3. Top-level directory map
 
+The root holds three kinds of thing and nothing else: the programs you **run**,
+the repository's own **configuration**, and **packages**. Every other module
+lives in a package, where the directory it sits in says what it is. The rule is
+enforced by `tests/test_root_holds_only_entry_points.py`, whose `ROOT_MODULES`
+roster carries a written reason per entry — because a module left at the root
+deliberately and one nobody got round to moving look identical in a listing six
+months later.
+
 ```
 allwell/
-├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (read by the pill + the PyInstaller spec)
-├── help_topics.py               ← Qt-free: which manual heading documents which page (help drawer)
-├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
-├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
+│
+│  ── entry points: the four things that are *run* ──
+├── allwell.py                   ← `python allwell.py` — the GUI, plus the title-bar shell and help drawer
+├── process_microscopy.py        ← the analysis pipeline orchestrator + its CLI (decomposed; see §6.2)
+├── WellPlateZipper.py           ← the loose-TIF grouping utility, spawned as a subprocess (§6.1)
+├── all_well_launcher.py         ← the module PyInstaller boots + the --run-pipeline / --run-bootstrap dispatch
+│
+│  ── repository configuration ──
+├── version.py                   ← single source of truth for the app version. Parsed *by path* from
+│                                  outside Python — by scripts/preflight.sh and the PyInstaller spec —
+│                                  which is why it cannot move into a package
+├── pyproject.toml               ← ruff + pytest + coverage config (there is no packaging metadata)
+├── CLAUDE.md                    ← the operational layer on top of this document
+│
+│  ── packages ──
 ├── analyze/                     ← Analyze pane: the form, the run controls, the live log.
 │   │                              Every module but `remote_dialog` is a mixin of the one
 │   │                              `AnalyzeTab`; the split answers the line budgets in
@@ -144,8 +162,10 @@ allwell/
 │   ├── job_edit.py             ← the inverse of collect_spec, for the queue's edit flow
 │   └── remote_dialog.py        ← the Remotes dialogs (form, SSH-key wizard,
 │                                  bootstrap log, manage remotes)
-├── datasets/tab.py              ← Datasets pane (page-rail shell; see §6b)
-├── datasets/                    ← dataset tools: Qt-free compute/apply + their feature views (§6b)
+├── datasets/                    ← Datasets pane: the page-rail shell + the dataset tools —
+│   │                              Qt-free compute/apply beneath their feature views (§6b)
+│   ├── tab.py                  ← the pane itself — DatasetsTab, and the _FEATURES roster
+│   │                              every tool is registered in
 │   ├── _common/                ← what more than one tool needs: dataset_paths,
 │   │                              containers, zip_passthrough, member_names,
 │   │                              concurrency, log_panel, tool_controller,
@@ -157,7 +177,6 @@ allwell/
 │   ├── validate/               ← Validate & Repair an existing dataset
 │   ├── job_queue/              ← the queue the six tools (and Analyze) submit runs to
 │   └── ome_import/             ← Convert OME-TIFF (de-interleave a packed OME-TIFF → dataset folder)
-├── process_microscopy.py        ← analysis pipeline orchestrator + CLI (decomposed; see §6.2)
 ├── pipeline/                    ← Qt-free analysis-pipeline modules (re-exported by pm)
 │   ├── background.py            ← background/illumination-correction math
 │   ├── auto_threshold.py       ← Otsu / threshold helpers (GUI Cell-Gating reads these
@@ -232,17 +251,31 @@ allwell/
 │                                  per-well archives (pipeline, services, remote),
 │                                  and replace_folder_with_archive(): the one way
 │                                  to consume the folder an archive was built from
-├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
-├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
 ├── well_viewer/                 ← Review pane (the bulk of the app)
+├── ui/                          ← app-level UI every pane shares and none owns. The distinction
+│   │                              from widgets/ is ownership, not subject: a widget knows nothing
+│   │                              about All-Well, a module here knows the app but belongs to no
+│   │                              one pane. Nothing here imports a pane
+│   ├── theme.py                ← the design tokens (Colors / Typography / Spacing / Radii), the
+│   │                              theme registry, and qss() — the one place a raw colour literal
+│   │                              may be written (tests/test_hardcoded_tokens.py names it)
+│   └── help_topics.py          ← Qt-free: which manual heading documents which page (help drawer)
 ├── widgets/                     ← reusable Qt widgets (no app coupling)
-├── ui/theme/                    ← legacy remnant: two colours with no theme.Colors home yet
+├── startup/                     ← what runs before the application exists (§4)
+│   ├── boot_diag.py            ← the per-launch boot log + faulthandler, so a native crash or a
+│   │                              hang names the step that never returned
+│   └── mpl_bootstrap.py        ← restrict matplotlib to the bundled fonts (called first in main)
 ├── services/                    ← Analyze-side service modules
-├── scripts/                     ← build_executable.sh / .ps1, dev helpers
-├── _Docs/                       ← installer / requirements / visual-audit screenshots
-│   └── Markdowns/               ← live docs (this file, README_WellViewer.md, the roadmap)
-├── tests/                       ← pytest suite (+ tests/visual/ render harness)
-└── design/                      ← HTML mockups — visual reference only
+├── assets/                      ← runtime resources: fonts/ (Inter, JetBrains Mono) + icons/ (SVG)
+├── profiles/                    ← build profiles — the feature subsets ALLWELL_PROFILE selects
+├── scripts/                     ← build_executable.sh / .ps1, preflight.sh, dev helpers
+├── _Docs/                       ← everything that is not source
+│   ├── Markdowns/              ← live docs (this file, README_WellViewer.md, the roadmap)
+│   ├── _Installation/          ← the PyInstaller spec, its hooks, the build scripts
+│   ├── requirements.txt        ← the GUI superset; requirements-remote.txt is the headless subset
+│   ├── design/                 ← HTML mockups — visual reference only
+│   └── visual_audit/           ← rendered screenshots
+└── tests/                       ← pytest suite (+ tests/visual/ render harness)
 ```
 
 The `pipeline/` package (the Qt-free analysis-pipeline modules:
@@ -251,10 +284,11 @@ The `pipeline/` package (the Qt-free analysis-pipeline modules:
 `pipeline.io`, `pipeline.capacity`) and the `util/` package
 (`util.well_token`, `util.aw_safe`, `util.zip_write`, `util.retry_io`,
 `util.disk_space`)
-are *deliberately at repo root* (not under `well_viewer/`): the pipeline
-contract forbids `well_viewer` / `widgets` / Qt imports, so anything both the
-pipeline and the GUI need to agree on has to live in a Qt-free module the
-pipeline can import. `pipeline/` holds the analysis-domain modules — some used
+are *deliberately top-level packages* (not nested under `well_viewer/`): the
+pipeline contract forbids `well_viewer` / `widgets` / Qt imports, so anything
+both the pipeline and the GUI need to agree on has to live in a Qt-free module
+the pipeline can import, and a module under the GUI's own package could not be
+one. `pipeline/` holds the analysis-domain modules — some used
 only by the pipeline (`background`, `cellpose`, `stardist`, `io`), others the
 GUI also reads (`auto_threshold` for Cell-Gating, `flatfield` /
 `shape_features` for validation/labelling); the GUI is free to import
@@ -552,11 +586,12 @@ A few rules of thumb so you know where to put something new:
   in `well_viewer/core/`. Persistence stays in `well_viewer/persistence/`.
 - **It's a reusable Qt widget with no All-Well-specific knowledge →**
   `widgets/`.
-- **It's a design token / colour / size →** `theme.py` (chrome QSS + tokens,
+- **It's a design token / colour / size →** `ui/theme.py` (chrome QSS + tokens,
   including `CPub` for publication-mode plot colour and `WELL_COLORS_TUPLE`
   for categorical well/trace identity — the single source of truth for
-  almost everything); never hardcode hex values in code. `ui/theme/styles.py`
-  is a two-token legacy remnant (see §8) — new colours never go there.
+  almost everything); never hardcode hex values in code. The two legacy tokens
+  `get_color` reads sit in a marked block at the bottom of that module (see
+  §8) — new colours never go there.
 
 ---
 
@@ -569,15 +604,20 @@ all_well_launcher.main()                       (PyInstaller bundle only)
     │
     ▼ regular Python run jumps in here:
 allwell.main()
-    ├── mpl_bootstrap.configure()   ← FIRST, before anything imports matplotlib:
+    ├── startup.mpl_bootstrap.configure()  ← FIRST, before anything imports matplotlib:
     │       restricts font_manager.findSystemFonts to the bundled fonts (+ DejaVu)
     │       and pins MPLCONFIGDIR, so the system-font scan (minutes on a Windows 365
     │       Cloud PC) never runs. Defensive — failure leaves matplotlib untouched.
-    │       The cache lives beside this file when running from source and in
-    │       boot_diag.user_state_dir() in a frozen build: PyInstaller unpacks the
-    │       bundle into sys._MEIPASS, a fresh temp tree per launch, so a cache
-    │       pinned there was thrown away and rebuilt every single start — exactly
-    │       the cost this step exists to remove.
+    │       Both `assets/fonts` and the cache resolve against the *repository*
+    │       root (the bundle root when frozen), not against the module's own
+    │       directory one level down in `startup/` — a font directory resolved
+    │       beside the module finds nothing, and configure() then leaves
+    │       matplotlib unrestricted with no error, which is the whole cost this
+    │       step exists to remove. From source the cache is `.mplcache` at the
+    │       repository root; a frozen build uses startup.boot_diag.user_state_dir()
+    │       instead, because PyInstaller unpacks the bundle into sys._MEIPASS, a
+    │       fresh temp tree per launch, so a cache pinned there was thrown away
+    │       and rebuilt every single start.
     ├── QApplication(sys.argv)
     ├── app_fonts.register_qt_fonts() → theme_v2.Typography.family/_mono
     │       ← register bundled Inter / JetBrains Mono (static instances),
@@ -1067,7 +1107,7 @@ That is what the focus branch is for, and it is the only route to those sections
 help; `tests/test_analyze_help_section.py` asserts focus reaches every entry in
 `ANALYZE_SECTION_HELP`, not a subset.
 
-`help_topics.py` holds the maps from a page to the exact manual heading that
+`ui/help_topics.py` holds the maps from a page to the exact manual heading that
 documents it — `SECTION_BY_PAGE` for Review leaves, `ANALYZE_SECTION_HELP` for
 form sections, `DATASETS_PAGE_HELP` for rail labels, and `MODE_OVERVIEW` for the
 fallback each mode uses when its pane cannot say. It is Qt-free so
@@ -1145,7 +1185,7 @@ each one's own bar and drives it from a `QTabBar` in the band instead.
 Converting them to a bar plus a page stack would have broken every one of those
 readers to change where a strip of tabs is drawn. Hiding the bar also means the
 pane border around the body has no frame left to close, so `mirror_tab_widget`
-puts the widget in document mode and `theme.py` clears
+puts the widget in document mode and `ui/theme.py` clears
 `QTabWidget#ImageBrowserSubTabs::pane` / `#HomeSubTabs::pane` —
 otherwise that border's top edge starts every nested body a pixel below where an
 un-nested page's body starts.
@@ -1504,7 +1544,7 @@ every page and sub-tab built: each page's band starts at the centre stack's top
 in all three modes, no page root re-introduces a top inset, no band is shorter
 than one row, and a body nested in a `QTabWidget` starts at that widget's own
 top. That last one is why `mirror_tab_widget` sets `setDocumentMode(True)` and
-`theme.py` clears the pane border for `ImageBrowserSubTabs` and
+`ui/theme.py` clears the pane border for `ImageBrowserSubTabs` and
 `HomeSubTabs` — with the bar hidden, `QTabWidget::pane`'s border
 closed a frame that is not drawn and started every nested body a pixel low.
 
@@ -6219,7 +6259,7 @@ boxes).
 
 **Decomposition.** `process_microscopy.py` is the orchestrator + CLI; the heavy
 cohesive clusters were extracted into the Qt-free **`pipeline/` package** (at
-repo root, so the pipeline can import it without the GUI) and **re-exported** so
+a top-level package, so the pipeline can import it without the GUI) and **re-exported** so
 `pm.<name>` call sites (and the remote worker) are unchanged:
 `pipeline.background` (background/illumination math), `pipeline.cellpose`
 (Cellpose segmenters; Torch lazy), `pipeline.stardist` (StarDist segmenters +
@@ -6414,7 +6454,7 @@ Output dir
 (area/eccentricity/solidity/perimeter/…, plus the **always-on**
 `shape_centroid_row/col` that cell tracking links across timepoints) into each
 cell record; the selection comes from `--shape_features` and is recorded in
-`pipeline_info.json`. The feature catalog lives in the Qt-free repo-root
+`pipeline_info.json`. The feature catalog lives in the Qt-free top-level
 `pipeline.shape_features` so the pipeline (emit) and the GUI (detect/label) can't
 drift. On the Review side `data_loading.detect_shape_features` finds the columns
 and the channel dropdown surfaces them as **sectioned virtual channels** (a
@@ -9516,7 +9556,7 @@ the queue page.
 
 Every widget under `widgets/` is:
 
-- **Standalone.** It only imports from `theme`, Qt, and the Qt-free repo-root
+- **Standalone.** It only imports from `ui.theme`, Qt, and the Qt-free top-level
   helpers under `util/` (`util.well_token`, `util.aw_safe`) — plus
   `widgets._support` for tiny RGB helpers and `set_variant`, a runtime
   dynamic-property + repolish helper (see below). It does *not* import
@@ -9687,32 +9727,29 @@ that opens a small demo window so you can iterate visually with
 
 ## 8. Theming
 
-The app has two complementary theme surfaces:
+`ui/theme.py` is the whole theme surface. It holds the Python-side design
+tokens — `Colors`, `Typography`, `Spacing`, `Radii`, `Metrics` (control padding,
+themeable for density) — plus the `qss()` builder that produces the full
+application stylesheet, and the **theme registry** (`THEMES` / `apply_theme` /
+`select_theme_from_env`, see "Selecting a theme" below). The `widgets/` package
+and most of the app shell read `theme.Colors.*`; the `blue` palette is the class
+values written in the module, and is the baseline every theme is applied onto and
+restored to — the app itself starts on `grey`.
 
-1. **`theme.py`** (repo root) — Python-side design tokens for the v2
-   redesign. `Colors`, `Typography`, `Spacing`, `Radii`, `Metrics` (control
-   padding — themeable for density), plus a `qss()` builder that produces the
-   full application stylesheet. The `widgets/` package and most of the app shell
-   read from `theme.Colors.*`; the `blue` palette is the class values here,
-   and is the baseline every theme is applied onto and restored to — the app
-   itself starts on `grey`. This is the single source of the app chrome QSS.
-   `theme.py`
-   *also* holds the **theme registry** (`THEMES` / `apply_theme` /
-   `select_theme_from_env`) — see "Selecting a theme" below.
-2. **`ui/theme/`** — a legacy remnant, down to exactly two colours with no
-   `theme.Colors` equivalent yet: `CLR_DANGER` and `CLR_SUCCESS_DARK`, read via
-   `ui.theme.get_color(name)` by batch-export's progress label (their hex
-   doesn't match `theme.Colors.danger`/`.success` closely enough to be a safe
-   direct swap). Everything else this module used to carry — surfaces,
-   borders, text, accent, warn, the well palette, the Publication-mode plot
-   palette — has migrated to `theme.Colors` / `theme.CPub` /
-   `theme.WELL_COLORS_TUPLE` directly. If a future change gives the remaining
-   two tokens a `theme.Colors` home too, `ui/theme/` can be deleted outright.
+There is no stylesheet driver, no theme-manager class and no per-theme `.qss`
+file: `theme.qss()` is the one stylesheet builder, and it lives beside the tokens
+it reads.
 
-`ui/theme/` is colour tokens only: it holds `styles.py` and nothing else — no
-stylesheet driver, no theme-manager class, no per-theme `.qss` files. The theme
-registry lives in `theme.py` (below), and `theme.qss()` is the one stylesheet
-builder.
+At the bottom of the module, in a block marked as such, sit the last two named
+colours with no `Colors` home of their own — `CLR_DANGER` and
+`CLR_SUCCESS_DARK`, read through `ui.theme.get_color(name)` by batch-export's
+progress label. `CLR_DANGER` tracks `Colors.danger`; `CLR_SUCCESS_DARK` is its
+own value, because its hex does not match `Colors.success` closely enough for the
+swap to be safe. That is the only reason the pair still exists — everything else
+the accessor used to carry (surfaces, borders, text, accent, warn, the well
+palette, the Publication-mode plot palette) has migrated to `Colors` / `CPub` /
+`WELL_COLORS_TUPLE` directly. Give those two an exact `Colors` home and the whole
+block goes. New colours never go there.
 
 **Every interactive class the app disables needs a `:disabled` rule, and the
 base rule's `color` is why.** A stylesheet colour declared with no disabled
@@ -9827,16 +9864,16 @@ per-widget rewiring**.
   a dev-facing env var / flag.
 - `WELL_COLORS_TUPLE` (categorical data identity) and `CPub` (white-bg
   publication export) are deliberately **theme-independent**.
-- `ui/theme/styles.py` registers `refresh_from_theme` as a theme hook, so its
+- `ui/theme.py` registers `refresh_legacy_palette` as a theme hook, so its
   `get_color()` palette (`CLR_DANGER`/`CLR_SUCCESS_DARK` only, batch-export's
   progress label) re-derives from the freshly-applied `Colors`.
 
 When you add a colour or size: add it to `theme.Colors` / `theme.CPub` (for a
 publication-mode plot colour) / `theme.Spacing` / `theme.Metrics` / etc. To
 let a theme override it, add the attribute to the relevant bundle in
-`THEMES`. **Do not** hardcode hex / px values inline, and never add a new
-entry to `ui/theme/styles.py` — that module is a two-token legacy remnant
-(see above), not a place to route new colours.
+`THEMES`. **Do not** hardcode hex / px values inline, and never add an entry to
+the legacy-accessor block at the bottom of `ui/theme.py` — those two tokens are
+a remnant (see above), not a place to route new colours.
 
 ### Section headers
 
@@ -11627,7 +11664,7 @@ in sync.
 
 Adding a Review tab, a Datasets tool, or an Analyze form section means adding
 two things: a section in `_Docs/Markdowns/README_WellViewer.md`, and an entry in
-the matching map in `help_topics.py` whose value is that heading's exact text.
+the matching map in `ui/help_topics.py` whose value is that heading's exact text.
 Without both, the drawer opens on the mode overview for that page and nothing
 says so.
 
@@ -11733,8 +11770,8 @@ Three places to check:
 
 ### 12.8 "The app died with no Python traceback (segfault / access violation)"
 
-`boot_diag` is imported before PySide6 and arms `faulthandler` onto a per-launch
-**boot log** in `boot_diag.user_state_dir()` — `%LOCALAPPDATA%\allwell` on
+`startup.boot_diag` is imported before PySide6 and arms `faulthandler` onto a per-launch
+**boot log** in `startup.boot_diag.user_state_dir()` — `%LOCALAPPDATA%\allwell` on
 Windows, `~/.cache/allwell` elsewhere, the system temp directory if neither is
 writable, and also where a frozen build's matplotlib font cache goes — so a
 hard native crash dumps a
@@ -11780,7 +11817,7 @@ selections schema) is described in the `well_viewer/domain/selections_model.py`
 module docstring; that module is the live source of truth for the
 contract.
 
-`design/` (at the repo root) holds the **non-Markdown** design artifacts — the
+`_Docs/design/` holds the **non-Markdown** design artifacts — the
 HTML mockups (`grey_theme_mockup.html`, `image_table_builder_mockup.html`) — for
 visual reference only. Rendered screenshots live under
 `_Docs/visual_audit/screenshots/`, produced by `tests/visual/render_views.py` —
@@ -11842,10 +11879,10 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
   correct are allowlisted by *file and function*, never by file, so an exemption
   cannot cover the next handler added beside it; a liveness test fails when an
   entry stops naming a real handler. Those sites are the crash reporter in
-  `boot_diag.py` — where an escaping exception loses the crash report, the one
+  `startup/boot_diag.py` — where an escaping exception loses the crash report, the one
   artifact that makes a native crash diagnosable — matplotlib's font-cache
   rebuild, and `_bootstrap_lib._quietly`'s own last-resort note to stderr.
-- **Never hardcode colours.** Use `theme.Colors.*` or QSS object names.
+- **Never hardcode colours.** Use `ui.theme.Colors.*` or QSS object names.
 - **Never block the UI thread.** Heavy operations spawn workers (see
   `well_viewer/features/smfish/worker.py` and the `services.pipeline_runner`
   pattern). Streaming progress messages route through `logging` and the
@@ -11968,6 +12005,7 @@ The map (each rule links to the test that holds it):
 | `services/` stay Qt-free (CLI-reusable, §13) | `test_architecture_contracts.py::test_services_have_no_qt_imports` |
 | `widgets/` carry no app coupling (§13) | `test_architecture_contracts.py::test_widgets_do_not_import_the_app` |
 | Every top-level package of application code is in `tests/_repo_scan.py`'s `PACKAGE_ROOTS`, and every entry there names a directory that exists. A package the roster omits is invisible to every AST guard at once, and the omission makes the suite *greener* — there is nothing else that measures a guard walking past code it was never handed | `tests/test_scan_surface_is_complete.py` |
+| The repository root holds only entry points, repository configuration and packages (§3) — every root `.py` is in a roster with a written reason, and no roster entry names a file that has gone. A loose module imports exactly as well as a packaged one, so the entire cost of misplacement falls on whoever next goes looking for it, and nothing else would report it. The same test holds `_Docs/_Installation/build_all_well.sh`'s `REQUIRED` preflight roster against the tree — it required `analyze_tab.py` long after the Analyze pane became `analyze/tab.py`, and since the script exits 1 on the first missing entry, no release could be cut from it | `tests/test_root_holds_only_entry_points.py` |
 | Controllers reach the app via the `app` arg, not by importing `WellViewerApp` (§9) | `test_architecture_contracts.py::test_nothing_imports_wellviewerapp_at_runtime` |
 | EventBus is a capped catalogue of exactly 5 signals (§9) | `test_architecture_contracts.py::test_event_bus_signal_catalogue_is_capped` |
 | Feature-module naming scheme (§3) | `test_architecture_contracts.py::test_feature_module_naming` |

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import theme
+from ui import theme
 from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells

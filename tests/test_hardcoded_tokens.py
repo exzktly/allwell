@@ -68,7 +68,6 @@ COLOUR_ALLOWLIST = {
     "widgets/gradient_strip.py": "__main__ demo block",
     "widgets/saved_selections_list.py":
         "widgets/ may not import well_viewer; the two fallbacks restate theme's",
-    "ui/theme/styles.py": "the two-token legacy remnant ARCHITECTURE §8 documents",
     "allwell.py": "the app-icon painter's own art palette (see _ICON_* below it)",
 }
 
@@ -125,7 +124,11 @@ EXPRESSION_ALLOWLIST = {
 
 #: The modules that *define* the tokens, and so may write the literals. Same
 #: shape as the well-token guard exempting ``util/well_token.py``.
-_TOKEN_HOMES = {"theme.py"}
+#:
+#: Matched on the repository-relative path, not the basename: `theme.py` as a
+#: basename exempts any file of that name anywhere in the tree, which is a
+#: standing invitation to add a second one and inherit the exemption for free.
+_TOKEN_HOMES = {"ui/theme.py"}
 
 
 def _bare_ints(node: ast.AST) -> list[int]:
@@ -189,9 +192,9 @@ def _hex_offenders() -> list[str]:
     """
     offenders = []
     for path in python_sources():
-        if path.name in _TOKEN_HOMES:
-            continue
         rel = _rel(path)
+        if rel in _TOKEN_HOMES:
+            continue
         whole_literals_exempt = rel in COLOUR_ALLOWLIST
         tree = parse_source(path)
         docs = _docstring_nodes(tree)
@@ -226,9 +229,9 @@ def test_the_embedded_hex_allowlist_is_live():
     line number."""
     live = set()
     for path in python_sources():
-        if path.name in _TOKEN_HOMES:
-            continue
         rel = _rel(path)
+        if rel in _TOKEN_HOMES:
+            continue
         tree = parse_source(path)
         docs = _docstring_nodes(tree)
         for node in ast.walk(tree):
@@ -245,9 +248,9 @@ def test_the_embedded_hex_allowlist_is_live():
 def test_no_inline_pixel_sizes():
     offenders = []
     for path in python_sources():
-        if path.name in _TOKEN_HOMES:
-            continue
         rel = _rel(path)
+        if rel in _TOKEN_HOMES:
+            continue
         tree = parse_source(path)
         for node in ast.walk(tree):
             if (not isinstance(node, ast.Call)

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QWidget
 
-import theme
+from ui import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
 
 # Phase-name column in the rail, so every row's bar starts at one x.

@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from pipeline.stardist import NMS_THRESH_HELP, PROB_THRESH_HELP
 from process_microscopy import BACKGROUND_METHODS, FLATFIELD_MODES
 from widgets.info_icon import info_icon

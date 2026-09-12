@@ -41,7 +41,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # The retry-with-backoff shield behind every pipeline write that lands on
     # the output volume (pipeline.io imports it at module scope).
     # Rebinds sys.stdout / sys.stderr when a frozen windowed build nulls them;
-    # imported by process_microscopy at module load (and by WellPlateZipper). A
+    # imported by process_microscopy at module load (and by well_plate_zipper). A
     # remote run never hits the frozen-windowed case, but the manifest must list
     # every ``util/`` file so the completeness guard (test_remote_manifest) passes.
     "util/frozen_io.py",
@@ -117,6 +117,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # remote receives ordinary loose TIFs), but listed so the manifest stays a
     # complete mirror of ``pipeline/`` per test_remote_manifest.
     "pipeline/ome_explode.py",
+    # The loose-TIF grouping pre-pass, spawned as a subprocess. Like
+    # ``ome_explode`` it runs client-side — the remote is sent per-well archives
+    # that are already grouped — but the manifest mirrors every ``pipeline/``
+    # file, so it is listed rather than made an exception nobody can see.
+    "pipeline/well_plate_zipper.py",
     "pipeline/run_report.py",
     # Where the settings digest is recorded beside each well's output, and
     # the reuse decision that reads it back — consulted by both skip

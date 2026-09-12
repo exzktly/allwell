@@ -671,7 +671,7 @@ def update_active_group_label(ctx) -> None:
     sid = sel_state.current_selection_id
     sel = next((s for s in sel_state.selections if s.get("id") == sid), None) if sid else None
     try:
-        import theme as _theme
+        from ui import theme as _theme
     except Exception:
         _theme = None
     if sel is None:

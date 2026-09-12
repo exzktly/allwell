@@ -91,7 +91,7 @@ _stats_draw_ks_cdf = _lazy("well_viewer.features.stats.controller", "draw_ks_cdf
 
 from well_viewer.domain.viewer_state import read_pipeline_info as _read_pipeline_info_shared
 from well_viewer.domain.viewer_state import parse_rc
-import theme
+from ui import theme
 
 
 try:

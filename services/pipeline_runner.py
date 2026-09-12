@@ -624,7 +624,7 @@ class PipelineRunner:
         )
         self.log_q._on_error = self._latch_error_state
         self._proc: subprocess.Popen | None = None
-        # The grouping-phase subprocess (WellPlateZipper). Tracked
+        # The grouping-phase subprocess (well_plate_zipper). Tracked
         # separately so a Stop click during grouping cancels it instead
         # of waiting for it to finish before reaching the pipeline.
         self._zipper_proc: subprocess.Popen | None = None

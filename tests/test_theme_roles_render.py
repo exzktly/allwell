@@ -14,7 +14,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-import theme  # noqa: E402
+from ui import theme  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -105,7 +105,7 @@ def _stylesheet_sources():
     one, so checking only ``qss()`` would miss exactly the sheets nothing else
     looks at.
     """
-    import theme as _theme
+    from ui import theme as _theme
     from widgets.empty_state import EmptyState
 
     yield "theme.qss()", _theme.qss()
@@ -148,7 +148,7 @@ def test_the_two_link_row_hosts_are_styled_identically(qapp):
     share ``theme.link_row_qss`` — and this is what notices if one of them stops
     doing so.
     """
-    import theme as _theme
+    from ui import theme as _theme
 
     home = _theme.link_row_qss("HomeRecentTile")
     entry = _theme.link_row_qss("EmptyStateEntry")

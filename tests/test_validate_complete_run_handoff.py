@@ -96,7 +96,7 @@ def test_datasets_tab_forwards_the_incremental_request(qtbot, tmp_path):
     """The `DatasetsTab` seam between a feature controller and the shell has to
     carry both extra arguments through; dropping either one downgrades the
     handoff back to a bare path with no error anywhere."""
-    from datasets_tab import DatasetsTab
+    from datasets.tab import DatasetsTab
 
     calls, on_open = _handoff_recorder()
     tab = DatasetsTab(on_open_in_analyze=on_open)
@@ -382,7 +382,7 @@ def test_open_tool_shows_the_tool_and_carries_the_dataset_path(qtbot, tmp_path):
     empty folder field, does less than it says and makes them re-find a folder
     the app already has open.
     """
-    from datasets_tab import DatasetsTab
+    from datasets.tab import DatasetsTab
 
     tab = DatasetsTab(queue_state_dir=tmp_path)
     qtbot.addWidget(tab)
@@ -398,7 +398,7 @@ def test_open_tool_shows_the_tool_and_carries_the_dataset_path(qtbot, tmp_path):
 def test_open_tool_reports_a_tool_this_build_does_not_have(qtbot, tmp_path):
     """A profiled build can drop a tool. The caller has to be able to tell
     "shown" from "nothing happened" rather than assuming it worked."""
-    from datasets_tab import DatasetsTab
+    from datasets.tab import DatasetsTab
 
     tab = DatasetsTab(queue_state_dir=tmp_path)
     qtbot.addWidget(tab)

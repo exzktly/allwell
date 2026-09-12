@@ -30,7 +30,7 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, QObject, QSize, Qt
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
-import theme
+from ui import theme
 
 #: Side of the × button, in pixels. The same 18 the Variables rail's row delete
 #: uses — it is the smallest square that still takes a click without demanding

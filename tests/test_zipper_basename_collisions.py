@@ -1,6 +1,6 @@
 """Two source TIFs with one basename must not silently become one file.
 
-``WellPlateZipper.folder_well`` placed every grouped file at
+``well_plate_zipper.folder_well`` placed every grouped file at
 ``<well>/<basename>`` with ``shutil.copy2`` / ``shutil.move`` and no existence
 check. Under ``--recursive`` two subfolders can hold the same filename, and
 either call simply overwrites: the first file's bytes were replaced by the
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 
-import WellPlateZipper as wpz
+from pipeline import well_plate_zipper as wpz
 
 _SCHEMA = ["experiment", "channel", "well", "fov", "timepoint"]
 _SEP = "_"

@@ -25,7 +25,7 @@ import pytest
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QWidget
 
-import theme
+from ui import theme
 from well_viewer.domain import sample_variables as sv
 
 

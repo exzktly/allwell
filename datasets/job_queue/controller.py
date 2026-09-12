@@ -5,7 +5,7 @@ tool controllers (the five Datasets controllers, plus ``AnalyzeTab`` via
 :class:`QueueBridge` is the only place that knows how to run a job — the
 queue model itself (``services/job_queue.py``) only orders and gates. It owns
 a ``kind -> QueueableController`` registry built by whoever constructs
-:class:`~datasets_tab.DatasetsTab` (each Datasets controller registers
+:class:`~datasets.tab.DatasetsTab` (each Datasets controller registers
 itself; ``allwell.py`` injects the already-built ``AnalyzeTab`` under kind
 ``"analyze"`` the same way it injects ``on_open_in_review`` /
 ``on_open_in_analyze`` today) — so this module never imports ``analyze.tab``

@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from well_viewer.data.image_resolver import resolve_ref_by_fov_tp
 from well_viewer.features.smfish.controller import (
     SmfishImgRef as _ImgRef,  # noqa: F401 - re-exported for callers

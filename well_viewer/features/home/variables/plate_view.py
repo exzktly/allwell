@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from well_viewer.domain.plate_layout import FILL_ALONG_COLS, FILL_ALONG_ROWS
 
 

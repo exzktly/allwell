@@ -48,7 +48,7 @@ def user_state_dir() -> Path:
     Platform-appropriate, with fallbacks: ``%LOCALAPPDATA%\\allwell`` on
     Windows, ``~/.cache/allwell`` elsewhere, the system temp dir if neither is
     writable. The boot log lives here, and so does matplotlib's font cache in a
-    frozen build — ``mpl_bootstrap`` used the directory holding its own source
+    frozen build — ``startup.mpl_bootstrap`` used the directory holding its own source
     file, which under PyInstaller is inside ``sys._MEIPASS``, a fresh temp tree
     unpacked per launch. The cache was therefore rebuilt every single launch,
     which is precisely what that module exists to prevent.

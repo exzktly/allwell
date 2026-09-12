@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import theme
+from ui import theme
 
 #: ``gid`` stamped on every label axes, so callers that count image cells can tell
 #: chrome from content. matplotlib also writes it as the ``id`` attribute in SVG.

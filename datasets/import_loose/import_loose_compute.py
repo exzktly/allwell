@@ -1,12 +1,12 @@
 """Pure preview scanner for the Import Loose Folder feature.
 
-Mirrors ``WellPlateZipper._extract_well_from_filename``'s rule exactly —
+Mirrors ``well_plate_zipper._extract_well_from_filename``'s rule exactly —
 schema-position lookup, ``canonical_well_label``, and ``os.path.isfile`` to
 drop dangling symlinks the way ``os.walk`` lists them — so this preview and
-the executor (which shells out to ``WellPlateZipper.py`` for the in-place
+the executor (which shells out to ``pipeline/well_plate_zipper.py`` for the in-place
 mode, or writes zips directly for the new-destination mode) can never
 disagree about what counts as a match. It deliberately does **not** call
-``WellPlateZipper.group_by_well`` directly: that function ``print()``s
+``well_plate_zipper.group_by_well`` directly: that function ``print()``s
 unconditionally (a scan banner, a per-5000-files progress line, a completion
 line) to give the Analyze log something to show during a long directory
 walk, and calling it in-process here would pollute this app's own captured
@@ -249,7 +249,7 @@ def scan_folder(
     """Scan *search_dir* for loose TIFs and report how they'd split into
     wells/FOVs/timepoints/channels, without writing anything.
 
-    Non-recursive by default, matching ``WellPlateZipper``'s own default (a
+    Non-recursive by default, matching ``well_plate_zipper``'s own default (a
     single ``os.walk`` level) — the in-place mode this preview describes only
     ever groups the folder it's pointed at, not its subfolders.
     """

@@ -29,8 +29,8 @@ _ACCENT_FAMILY = {"accent", "accent_hover", "accent_pressed", "accent_dim"}
 
 
 def _theme_overrides() -> dict[str, set[str]]:
-    """Every `_<NAME> = {"Colors": {...}}` override table in `theme.py`."""
-    tree = parse_source((REPO_ROOT / "theme.py"))
+    """Every `_<NAME> = {"Colors": {...}}` override table in `ui/theme.py`."""
+    tree = parse_source((REPO_ROOT / "ui" / "theme.py"))
     out: dict[str, set[str]] = {}
     for node in tree.body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
@@ -52,7 +52,7 @@ def test_there_is_at_least_one_override_table():
     """The anchor: if the parse finds nothing, the test below passes on an
     empty dict and measures nothing."""
     tables = _theme_overrides()
-    assert tables, "no theme override tables found in theme.py — has the shape changed?"
+    assert tables, "no theme override tables found in ui/theme.py — has the shape changed?"
 
 
 def test_a_theme_that_moves_its_accent_moves_accent2_too():
@@ -74,7 +74,7 @@ def test_the_pair_stays_a_neighbouring_hue(theme_name, qapp):
     family, whatever the override table says."""
     from PySide6.QtGui import QColor
 
-    import theme as _theme
+    from ui import theme as _theme
 
     _theme.apply_theme(theme_name)
     accent = QColor(_theme.Colors.accent)
@@ -98,7 +98,7 @@ def qapp():
 def _restore_theme(qapp):
     """`apply_theme` is global state; put it back so this file cannot colour
     whatever runs after it."""
-    import theme as _theme
+    from ui import theme as _theme
 
     yield
     _theme.apply_theme("blue")

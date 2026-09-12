@@ -19,8 +19,8 @@ from util.zip_write import (
     atomic_zip, replace_folder_with_archive)
 
 HERE = Path(__file__).resolve().parent.parent
-ZIPPER_SCRIPT = HERE / "WellPlateZipper.py"
-#: Kept for the WellPlateZipper subprocess, which takes glob patterns on its
+ZIPPER_SCRIPT = HERE / "pipeline" / "well_plate_zipper.py"
+#: Kept for the well_plate_zipper subprocess, which takes glob patterns on its
 #: command line and answers a different question — packing a well *folder*,
 #: where `.tif`/`.tiff` is the deliberate rule. `tif_files_in` no longer uses
 #: it: deciding which loose files are this run's input is
@@ -53,10 +53,10 @@ def build_zipper_cmd(
     *,
     move_source_tifs: bool = False,
 ) -> list[str]:
-    """Build the argv for the WellPlateZipper subprocess.
+    """Build the argv for the well_plate_zipper subprocess.
 
     Frozen bundle: re-invoke the launcher with the ``--run-zipper`` sentinel,
-    which routes argv into ``WellPlateZipper.main()`` (mirrors the pipeline's
+    which routes argv into ``well_plate_zipper.main()`` (mirrors the pipeline's
     ``--run-pipeline`` path in :mod:`services.pipeline_service`). Passing the
     ``.py`` path there would make ``sys.executable`` (the .app binary) relaunch
     the GUI instead of running the zipper — the frozen-only failure this guards.
@@ -113,7 +113,7 @@ def tif_files_in(folder: Path) -> list[Path]:
     exactly twice as many "images" as it has images.
 
     It used ``folder.glob`` with no ``is_file()``, so a dangling symlink named
-    ``*.tif`` came back as an input image. ``WellPlateZipper.group_by_well``
+    ``*.tif`` came back as an input image. ``well_plate_zipper.group_by_well``
     skips such a link as unreadable, so the two disagreed in the one direction
     that matters: the zipper never grouped it, and the deletion pass counted
     its well as landed and unlinked it.
@@ -315,7 +315,7 @@ GROUPED = "grouped"
 GROUP_LOOSE = "group_loose"
 #: The grouped root holds loose TIFs *alongside* well zips — fold them in.
 FOLD_LOOSE = "fold_loose"
-#: The selected root holds enough loose TIFs to run WellPlateZipper into ``in/``.
+#: The selected root holds enough loose TIFs to run well_plate_zipper into ``in/``.
 ZIP_ROOT = "zip_root"
 #: An ``in/`` that holds something, none of which parses as a well.
 UNRECOGNISED = "unrecognised"
@@ -490,7 +490,7 @@ def plan_input_layout(raw: Path, *, filename_schema: str = "",
 
     Loose TIFs sitting at the selected root still win over an ``in/`` that has
     nothing recognisable in it: that is a fresh drop next to a folder a previous
-    interrupted run created, and it must still reach WellPlateZipper.
+    interrupted run created, and it must still reach well_plate_zipper.
     """
     if detect_ome_input(raw) is not None:
         return InputPlan(PACKED_OME, None, None, 0, PACKED_OME_MESSAGE)
@@ -519,7 +519,7 @@ def plan_input_layout(raw: Path, *, filename_schema: str = "",
     if tifs > 3:
         return InputPlan(
             ZIP_ROOT, in_sub, out_dir, tifs,
-            f"✓ Will run WellPlateZipper on {tifs} TIF file(s) → in/",
+            f"✓ Will group {tifs} loose TIF file(s) by well → in/",
         )
     if nested is not None:
         return nested
@@ -561,7 +561,7 @@ def _layout_error(plan: InputPlan, raw: Path) -> str:
         '  \u2022 Selected folder is named "in"\n'
         '  \u2022 Selected folder contains a sub-folder named "in"\n'
         "  \u2022 Selected folder contains more than 3 TIF files\n"
-        "    (will be grouped by well using WellPlateZipper)\n\n"
+        "    (these will be grouped into per-well folders first)\n\n"
         f"Folder selected: {raw}\n"
         f"TIF files found: {plan.loose_count}"
     )
@@ -1151,7 +1151,8 @@ def run_zipper(
 ) -> None:
     zipper = find_zipper_script()
     if zipper is None:
-        raise RuntimeError(f"WellPlateZipper.py not found. Expected: {ZIPPER_SCRIPT}")
+        raise RuntimeError(
+            f"pipeline/well_plate_zipper.py not found. Expected: {ZIPPER_SCRIPT}")
 
     out_folder.mkdir(parents=True, exist_ok=True)
     cmd = build_zipper_cmd(
@@ -1200,7 +1201,8 @@ def run_zipper(
                 progress_fn(m.group(1).upper())
         proc.wait()
         if proc.returncode != 0:
-            raise RuntimeError(f"WellPlateZipper exited with code {proc.returncode}.")
+            raise RuntimeError(
+                f"Grouping step exited with code {proc.returncode}.")
     finally:
         # Reap it whatever ended the read. The zipper is spawned into its own
         # process group so Stop can reach it, which also means nothing else
@@ -1610,7 +1612,7 @@ def _group_loose_tifs_in_place(
     *partially-grouped* ``in/`` left by an interrupted prior run (some
     ``in/<well>/`` folders already exist, the rest of the wells still loose).
     Such a folder used to be mistaken for already-grouped input, so the grouper
-    never ran on the leftovers. Here we run WellPlateZipper with
+    never ran on the leftovers. Here we run well_plate_zipper with
     ``search == output == folder`` so the loose TIFs become ``folder/<well>/``
     folders the pipeline reads in folder mode; existing well folders are left
     untouched (the walk is non-recursive) and added to where wells overlap.
@@ -1635,7 +1637,7 @@ def _group_loose_tifs_in_place(
     )
     if not has_well_content(folder):
         raise ValueError(
-            "WellPlateZipper ran but produced no well folders.\n\n"
+            "The grouping step ran but produced no well folders.\n\n"
             "Common causes:\n"
             "  • The 'well' position in the Filename Schema does not match the actual well token in your filenames.\n"
             "  • The separator character does not match your filenames.\n"
@@ -1802,7 +1804,7 @@ def resolve_input_output(
         source_tifs = tuple(tif_files_in(raw))
         if log_fn:
             log_fn(
-                f"[zipper] Found {len(source_tifs)} TIF files — running WellPlateZipper to create per-well folders in in/\n"
+                f"[zipper] Found {len(source_tifs)} TIF files — grouping them into per-well folders in in/\n"
             )
         run_zipper(
             raw,
@@ -1816,7 +1818,7 @@ def resolve_input_output(
         )
         if not grouped.is_dir() or not has_well_content(grouped):
             raise ValueError(
-                "WellPlateZipper ran but produced no well folders or zip files.\n\n"
+                "The grouping step ran but produced no well folders or zip files.\n\n"
                 "Common causes:\n"
                 "  \u2022 The 'well' position in the Filename Schema does not match the actual well token in your filenames.\n"
                 "  \u2022 The separator character does not match your filenames.\n"
@@ -1906,7 +1908,7 @@ def resolve_input_output(
             filename_sep=filename_sep)
         if not any(tok in landed for tok in claimed.values() if tok):
             raise ValueError(
-                "WellPlateZipper ran but none of the loose images at the "
+                "The grouping step ran but none of the loose images at the "
                 "dataset root were grouped into a well.\n\n"
                 "Common causes:\n"
                 "  \u2022 The 'well' position in the Filename Schema does not match "

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 
 def test_section_role_is_styled_in_theme():
-    import theme
+    from ui import theme
     qss = theme.qss()
     assert 'role="section"' in qss, (
         "build_section_header sets role='section' expecting a theme rule; "

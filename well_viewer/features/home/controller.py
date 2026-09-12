@@ -14,7 +14,7 @@ from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-import theme
+from ui import theme
 from well_viewer.core.lazy import lazy
 from well_viewer.core.record_sync import resync_run_check
 from well_viewer.core.safe import swallow

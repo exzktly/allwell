@@ -114,7 +114,7 @@ def test_no_module_keeps_its_own_whole_token_well_regex():
     # The full application surface, including `pipeline/` and the repo-root
     # modules. Those are not incidental: `util/well_token.py`'s own docstring
     # names `process_microscopy._canonical_well_label` and
-    # `WellPlateZipper._extract_well_from_filename` as the copies it unified,
+    # `well_plate_zipper._extract_well_from_filename` as the copies it unified,
     # and §15's story is a folder that was a well to one of them and not to the
     # other — so a guard blind to the pipeline could not see half the bug it
     # exists to prevent.

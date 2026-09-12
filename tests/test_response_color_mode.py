@@ -37,7 +37,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.colors import to_hex  # noqa: E402
 
-import theme  # noqa: E402
+from ui import theme  # noqa: E402
 from well_viewer.core.plot_state import PlotState  # noqa: E402
 from well_viewer.domain.line_colors import (  # noqa: E402
     LINE_MARKERS, LINE_STYLES, grey_trace_style,

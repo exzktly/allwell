@@ -7,7 +7,7 @@ from well_viewer.data.metric_labels import spread_label
 import csv
 import re
 
-import theme
+from ui import theme
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (

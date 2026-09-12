@@ -78,7 +78,7 @@ class _FakeWorker:
 
 
 def _controllers() -> dict[str, type]:
-    from datasets_tab import _FEATURES
+    from datasets.tab import _FEATURES
 
     out = {}
     for feature in _FEATURES:

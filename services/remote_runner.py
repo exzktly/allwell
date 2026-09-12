@@ -11,7 +11,7 @@ The five transfer-minimizing levers from the v5.0.0 plan are implemented
 here:
 
 * **Per-well zip granularity** — :class:`LocalZipper` runs the existing
-  ``WellPlateZipper`` locally first, so a 1500-image plate ships as
+  ``well_plate_zipper`` locally first, so a 1500-image plate ships as
   ~100 large zips instead of 1500 small TIFs.
 * **Persistent dataset cache** — :class:`DatasetCache` keys uploads by a
   stat-based content hash so re-runs of the same input are a metadata
@@ -412,7 +412,7 @@ def stage_local_zips(
 
     For inputs that are already ``{well}.zip``, this is a no-op pointer.
     For loose-TIF or folder layouts, runs the existing
-    ``WellPlateZipper`` (re-used via :mod:`services.input_resolution_service`)
+    ``well_plate_zipper`` (re-used via :mod:`services.input_resolution_service`)
     into a temp directory and returns that.
 
     Phase-3 selective staging: when ``fluor_tokens`` is restricted, the
@@ -525,7 +525,7 @@ def stage_local_zips(
             log_fn=log_fn,
         )
 
-    # Folder or flat mode: shell out to WellPlateZipper. The zipper writes
+    # Folder or flat mode: shell out to well_plate_zipper. The zipper writes
     # ``{well}.zip`` files directly into ``input_dir`` (alongside the
     # source loose TIFs / well folders). Source artifacts persist
     # through the entire run so a failure can be re-tried from scratch;
@@ -611,7 +611,7 @@ def stage_local_zips(
             "to zip-up.\n"
         )
 
-    # Step 1: WellPlateZipper groups loose TIFs into per-well
+    # Step 1: well_plate_zipper groups loose TIFs into per-well
     # subfolders (the v5.x.x ``--move-source-tifs`` flag and copy
     # default both produce folders, never zips — the zip-up step is
     # separate and lives in ``_zip_well_folder`` below). Skipped when
@@ -703,7 +703,7 @@ def stage_local_zips(
     well_zips = tuple(sorted(_well_zips_in(input_dir)))
     if not well_zips:
         raise RuntimeError(
-            "WellPlateZipper produced no per-well zips; check filename_schema and separator."
+            "The grouping step produced no per-well zips; check filename_schema and separator."
         )
 
     # The post-success hook needs to delete every well folder the zip-up step

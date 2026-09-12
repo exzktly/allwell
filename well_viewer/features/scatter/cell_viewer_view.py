@@ -38,7 +38,7 @@ from well_viewer.data.image_resolver import (
     resolve_filename_candidates,
 )
 from well_viewer.core.safe import swallowed
-import theme
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes

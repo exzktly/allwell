@@ -13,7 +13,7 @@ import numpy as np
 
 from PySide6.QtWidgets import QDialog, QVBoxLayout
 
-import theme
+from ui import theme
 from well_viewer.data.data_loading import get_rows
 from well_viewer.features.home.cell_gating.gating_compute import (
     ThreshFracOptimizationResult,

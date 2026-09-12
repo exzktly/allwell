@@ -47,7 +47,7 @@ from services import remote_config
 from services import ssh_key_setup
 from services.subprocess_kill import signal_subprocess
 from services.subprocess_text import TEXT_UTF8
-import theme
+from ui import theme
 
 
 # Alias must look like a TOML bare key — letters, digits, dash, underscore.

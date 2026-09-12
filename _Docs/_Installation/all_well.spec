@@ -162,13 +162,7 @@ def _pkg_datas(pkg_root: Path, dest: str, exclude_repo_dirs: list) -> list:
 # holds this list against the tree.
 sibling_scripts = [
     (str(_parent / "allwell.py"),               "."),
-    (str(_parent / "boot_diag.py"),             "."),
-    (str(_parent / "datasets_tab.py"),          "."),
-    (str(_parent / "help_topics.py"),           "."),
-    (str(_parent / "mpl_bootstrap.py"),         "."),
     (str(_parent / "process_microscopy.py"),    "."),
-    (str(_parent / "WellPlateZipper.py"),       "."),
-    (str(_parent / "theme.py"),                 "."),
     (str(_parent / "version.py"),               "."),
     # Remote (SLURM/SSH) execution uploads the files in
     # services.remote_runner._REQUIRED_REMOTE_FILES to the worker; that list
@@ -195,6 +189,7 @@ sibling_scripts = [
 # non-Qt units like pipeline/cellpose.py dropped); the full build ships them
 # whole.
 for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "util",
+             "startup",
              "analyze", "datasets"):
     _pkg_path = _parent / _pkg
     if not _pkg_path.is_dir():
@@ -276,7 +271,7 @@ if _profile_active:
 # (the build then starts on theme.DEFAULT_THEME). Mirrors the profile marker above.
 _BAKED_THEME = os.environ.get("ALLWELL_THEME", "").strip()
 if _BAKED_THEME:
-    import theme as _thememod  # Qt-free; safe at build time
+    from ui import theme as _thememod  # Qt-free; safe at build time
     if _BAKED_THEME in _thememod.available_themes():
         _theme_marker = Path(_tempfile.mkdtemp()) / "allwell_theme.txt"
         _theme_marker.write_text(_BAKED_THEME, encoding="utf-8")

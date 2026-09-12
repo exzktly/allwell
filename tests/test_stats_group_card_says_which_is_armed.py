@@ -76,7 +76,7 @@ def qapp_style():
     """
     import re
 
-    import theme
+    from ui import theme
     qss = theme.qss()
 
     def _rule(selector: str) -> str:

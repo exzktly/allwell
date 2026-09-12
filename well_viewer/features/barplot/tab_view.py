@@ -33,7 +33,7 @@ from functools import partial
 from well_viewer.features.export.service import (
     export_bar_plot_data, export_cell_data_from)
 from well_viewer.features.barplot.cell_scope_compute import cell_scope
-import theme
+from ui import theme
 
 # The Bar Plots figure: three stacked subplots (mean / fraction / n).
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100

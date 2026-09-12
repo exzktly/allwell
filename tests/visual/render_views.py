@@ -43,8 +43,7 @@ _manifest: list[tuple[str, str]] = []
 # ── infra ────────────────────────────────────────────────────────────────
 def setup_app() -> QApplication:
     app = QApplication.instance() or QApplication(sys.argv)
-    import theme as th
-    import ui.theme.styles as _styles  # noqa: F401  (registers a theme hook)
+    from ui import theme as th
     from well_viewer.core.app_fonts import register_qt_fonts
 
     # Mirror allwell.main(): prefer the bundled Inter / JetBrains Mono so the

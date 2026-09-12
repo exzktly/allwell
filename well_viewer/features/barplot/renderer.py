@@ -49,7 +49,7 @@ import math
 
 _logger = logging.getLogger(__name__)
 
-import theme
+from ui import theme
 
 from well_viewer.core.plot_annotations import (
     LABEL_SPAN_HEADROOM as _LABEL_HEADROOM,

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QWidget
 
-import theme
+from ui import theme
 from widgets.flow_layout import FlowLayout, sync_flow_height
 
 

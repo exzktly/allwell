@@ -81,7 +81,7 @@ def test_dashboard_set_wells_enables_only_participating_wells(qapp):
 
 def test_dashboard_well_stage_updates_color_and_overall_bar(qapp):
     from datasets.concatenate.dashboard import ConcatDashboard
-    import theme
+    from ui import theme
     d = ConcatDashboard()
     d.set_wells(["A01", "A02"])
     d.set_well_stage("A01", "merging")
@@ -178,7 +178,7 @@ def test_reset_disables_all_wells_instead_of_a_false_96_well_pending_grid(qapp):
 
 def test_dashboard_phase_rail_marks_earlier_phases_done(qapp):
     from datasets.concatenate.dashboard import ConcatDashboard
-    import theme
+    from ui import theme
     d = ConcatDashboard()
     d.reset()
     d.set_phase("verify")

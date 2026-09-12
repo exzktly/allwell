@@ -44,7 +44,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
-import theme
+from ui import theme
 from widgets.checkbox_fit import fit_checkbox_width
 from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 

@@ -13,10 +13,10 @@ Two modes, one code path each:
   pool.
 * **In-place** (opt-in, destructive) — shells out through the existing
   ``services.input_resolution_service.run_zipper`` (which invokes
-  ``WellPlateZipper.py`` as a subprocess) so this destructive path stays the
+  ``pipeline/well_plate_zipper.py`` as a subprocess) so this destructive path stays the
   exact one Analyze already exercises when it finds loose TIFs, rather than
   a second reimplementation of the same grouping. ``run_zipper`` produces
-  per-well *folders* (`WellPlateZipper.py` never zips anything itself); this
+  per-well *folders* (`pipeline/well_plate_zipper.py` never zips anything itself); this
   module's own :func:`_zip_well_folders` then converts every one of them to
   ``<well>.zip`` so the folder ends up in the same ready-to-run layout as the
   new-destination mode. **Deliberately not**
@@ -293,7 +293,7 @@ def convert_in_place(
     *progress*, when given, reports the same ``(well, "writing"|"done")``
     stages :func:`convert_to_new_destination` does, so one dashboard callback
     drives both conversion modes. ``run_zipper``'s own ``progress_fn`` only
-    reports a well once WellPlateZipper.py finishes grouping its files into a
+    reports a well once pipeline/well_plate_zipper.py finishes grouping its files into a
     folder — there is no earlier "started" signal from the subprocess — so
     that single event is reported as "writing" (grouped, awaiting its zip);
     :func:`_zip_well_folders` then reports "done" once that well's zip
@@ -301,7 +301,7 @@ def convert_in_place(
 
     *sub_progress* is likewise the same ``(well, done, total)`` callback the
     other mode takes, but it only covers the zipping half: ``run_zipper``
-    shells out to WellPlateZipper.py, which reports nothing until a whole
+    shells out to pipeline/well_plate_zipper.py, which reports nothing until a whole
     well has been grouped, so there is no per-file signal to forward from the
     grouping half at all. A well therefore sits at an empty dial while it is
     being grouped, then fills as it is zipped.

@@ -56,7 +56,7 @@ central pane stack. The central stack has three pages:
 |------|------|----------------|-------------|
 | Page 0 | **Review** | `WellViewerApp(QWidget)` | `well_viewer/runtime_app.py` |
 | Page 1 | **Analyze** | `AnalyzeTab(QWidget)` | `analyze/tab.py` |
-| Page 2 | **Datasets** | `DatasetsTab(QWidget)` | `datasets_tab.py` |
+| Page 2 | **Datasets** | `DatasetsTab(QWidget)` | `datasets/tab.py` |
 
 The mode bar (`Review` / `Analyze` / `Datasets`) drives the stack; segment index
 maps straight to stack index. It is built by `AllWellApp` but lives on the
@@ -114,13 +114,33 @@ they're shell-wide:
 
 ## 3. Top-level directory map
 
+The root holds three kinds of thing and nothing else: the programs you **run**,
+the repository's own **configuration**, and **packages**. Every other module
+lives in a package, where the directory it sits in says what it is. The rule is
+enforced by `tests/test_root_holds_only_entry_points.py`, whose `ROOT_MODULES`
+roster carries a written reason per entry — because a module left at the root
+deliberately and one nobody got round to moving look identical in a listing six
+months later.
+
 ```
 allwell/
-├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (read by the pill + the PyInstaller spec)
-├── help_topics.py               ← Qt-free: which manual heading documents which page (help drawer)
-├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
-├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
+│
+│  ── entry points: the three commands a person runs ──
+├── allwell.py                   ← `python allwell.py` — the GUI, plus the title-bar shell and help drawer
+├── process_microscopy.py        ← the analysis pipeline orchestrator + its CLI (decomposed; see §6.2)
+├── all_well_launcher.py         ← the module PyInstaller boots + the --run-pipeline / --run-zipper
+│                                  / --run-bootstrap dispatch. A helper the *app* spawns is not an entry
+│                                  point in this sense and does not belong here — it lives in the package
+│                                  whose work it does (see pipeline/well_plate_zipper.py below)
+│
+│  ── repository configuration ──
+├── version.py                   ← single source of truth for the app version. Parsed *by path* from
+│                                  outside Python — by scripts/preflight.sh and the PyInstaller spec —
+│                                  which is why it cannot move into a package
+├── pyproject.toml               ← ruff + pytest + coverage config (there is no packaging metadata)
+├── CLAUDE.md                    ← the operational layer on top of this document
+│
+│  ── packages ──
 ├── analyze/                     ← Analyze pane: the form, the run controls, the live log.
 │   │                              Every module but `remote_dialog` is a mixin of the one
 │   │                              `AnalyzeTab`; the split answers the line budgets in
@@ -144,8 +164,10 @@ allwell/
 │   ├── job_edit.py             ← the inverse of collect_spec, for the queue's edit flow
 │   └── remote_dialog.py        ← the Remotes dialogs (form, SSH-key wizard,
 │                                  bootstrap log, manage remotes)
-├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
-├── datasets/                    ← dataset tools: Qt-free compute/apply + their feature views (§6b)
+├── datasets/                    ← Datasets pane: the page-rail shell + the dataset tools —
+│   │                              Qt-free compute/apply beneath their feature views (§6b)
+│   ├── tab.py                  ← the pane itself — DatasetsTab, and the _FEATURES roster
+│   │                              every tool is registered in
 │   ├── _common/                ← what more than one tool needs: dataset_paths,
 │   │                              containers, zip_passthrough, member_names,
 │   │                              concurrency, log_panel, tool_controller,
@@ -157,8 +179,16 @@ allwell/
 │   ├── validate/               ← Validate & Repair an existing dataset
 │   ├── job_queue/              ← the queue the six tools (and Analyze) submit runs to
 │   └── ome_import/             ← Convert OME-TIFF (de-interleave a packed OME-TIFF → dataset folder)
-├── process_microscopy.py        ← analysis pipeline orchestrator + CLI (decomposed; see §6.2)
 ├── pipeline/                    ← Qt-free analysis-pipeline modules (re-exported by pm)
+│   ├── well_plate_zipper.py    ← the loose-TIF grouping pre-pass that produces the
+│   │                              per-well input layout the rest of the pipeline reads.
+│   │                              Spawned as a subprocess by Analyze, the remote runner
+│   │                              and Datasets → Zip loose folder; never imported by
+│   │                              them. Puts the repository root on sys.path itself,
+│   │                              because being run by path seeds sys.path[0] with
+│   │                              `pipeline/` and `util.*` would not resolve. Despite
+│   │                              the name it writes no archives — it copies each image
+│   │                              into its per-well folder and the caller zips those
 │   ├── background.py            ← background/illumination-correction math
 │   ├── auto_threshold.py       ← Otsu / threshold helpers (GUI Cell-Gating reads these
 │   │                              too) + the run's own estimator over *_out.zip
@@ -193,16 +223,16 @@ allwell/
 │   │                              difference between instant and twenty minutes when the
 │   │                              folder is on a Windows network or cloud-synced volume
 │   ├── well_token.py           ← canonical 96-well token parser (single source of truth:
-│   │                              process_microscopy, WellPlateZipper, analyze.tab and
+│   │                              process_microscopy, well_plate_zipper, analyze.tab and
 │   │                              input_resolution_service all parse well names through it)
 │   ├── plate_grid.py           ← position index → 96-well label mapping: serpentine
 │   │                              (boustrophedon) + normalize_well_order (arbitrary
 │   │                              click-defined order); used by the OME-TIFF de-interleave.
 │   │                              PLATE_ROWS / PLATE_MAX_COL are the plate's geometry,
-│   │                              and WellPlateZipper.generate_wells reads them rather
+│   │                              and well_plate_zipper.generate_wells reads them rather
 │   │                              than spelling "ABCDEFGH" a third time
 │   ├── schema.py               ← filename-schema vocabulary + parse/validate
-│   │                              (shared by process_microscopy and WellPlateZipper).
+│   │                              (shared by process_microscopy and well_plate_zipper).
 │   │                              validate_schema takes the fields the *caller*
 │   │                              needs: the pipeline's ("channel", "well") by
 │   │                              default, ("well",) from the zipper, which reads
@@ -232,17 +262,31 @@ allwell/
 │                                  per-well archives (pipeline, services, remote),
 │                                  and replace_folder_with_archive(): the one way
 │                                  to consume the folder an archive was built from
-├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
-├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
 ├── well_viewer/                 ← Review pane (the bulk of the app)
+├── ui/                          ← app-level UI every pane shares and none owns. The distinction
+│   │                              from widgets/ is ownership, not subject: a widget knows nothing
+│   │                              about All-Well, a module here knows the app but belongs to no
+│   │                              one pane. Nothing here imports a pane
+│   ├── theme.py                ← the design tokens (Colors / Typography / Spacing / Radii), the
+│   │                              theme registry, and qss() — the one place a raw colour literal
+│   │                              may be written (tests/test_hardcoded_tokens.py names it)
+│   └── help_topics.py          ← Qt-free: which manual heading documents which page (help drawer)
 ├── widgets/                     ← reusable Qt widgets (no app coupling)
-├── ui/theme/                    ← legacy remnant: two colours with no theme.Colors home yet
+├── startup/                     ← what runs before the application exists (§4)
+│   ├── boot_diag.py            ← the per-launch boot log + faulthandler, so a native crash or a
+│   │                              hang names the step that never returned
+│   └── mpl_bootstrap.py        ← restrict matplotlib to the bundled fonts (called first in main)
 ├── services/                    ← Analyze-side service modules
-├── scripts/                     ← build_executable.sh / .ps1, dev helpers
-├── _Docs/                       ← installer / requirements / visual-audit screenshots
-│   └── Markdowns/               ← live docs (this file, README_WellViewer.md, the roadmap)
-├── tests/                       ← pytest suite (+ tests/visual/ render harness)
-└── design/                      ← HTML mockups — visual reference only
+├── assets/                      ← runtime resources: fonts/ (Inter, JetBrains Mono) + icons/ (SVG)
+├── profiles/                    ← build profiles — the feature subsets ALLWELL_PROFILE selects
+├── scripts/                     ← build_executable.sh / .ps1, preflight.sh, dev helpers
+├── _Docs/                       ← everything that is not source
+│   ├── Markdowns/              ← live docs (this file, README_WellViewer.md, the roadmap)
+│   ├── _Installation/          ← the PyInstaller spec, its hooks, the build scripts
+│   ├── requirements.txt        ← the GUI superset; requirements-remote.txt is the headless subset
+│   ├── design/                 ← HTML mockups — visual reference only
+│   └── visual_audit/           ← rendered screenshots
+└── tests/                       ← pytest suite (+ tests/visual/ render harness)
 ```
 
 The `pipeline/` package (the Qt-free analysis-pipeline modules:
@@ -251,10 +295,11 @@ The `pipeline/` package (the Qt-free analysis-pipeline modules:
 `pipeline.io`, `pipeline.capacity`) and the `util/` package
 (`util.well_token`, `util.aw_safe`, `util.zip_write`, `util.retry_io`,
 `util.disk_space`)
-are *deliberately at repo root* (not under `well_viewer/`): the pipeline
-contract forbids `well_viewer` / `widgets` / Qt imports, so anything both the
-pipeline and the GUI need to agree on has to live in a Qt-free module the
-pipeline can import. `pipeline/` holds the analysis-domain modules — some used
+are *deliberately top-level packages* (not nested under `well_viewer/`): the
+pipeline contract forbids `well_viewer` / `widgets` / Qt imports, so anything
+both the pipeline and the GUI need to agree on has to live in a Qt-free module
+the pipeline can import, and a module under the GUI's own package could not be
+one. `pipeline/` holds the analysis-domain modules — some used
 only by the pipeline (`background`, `cellpose`, `stardist`, `io`), others the
 GUI also reads (`auto_threshold` for Cell-Gating, `flatfield` /
 `shape_features` for validation/labelling); the GUI is free to import
@@ -552,11 +597,12 @@ A few rules of thumb so you know where to put something new:
   in `well_viewer/core/`. Persistence stays in `well_viewer/persistence/`.
 - **It's a reusable Qt widget with no All-Well-specific knowledge →**
   `widgets/`.
-- **It's a design token / colour / size →** `theme.py` (chrome QSS + tokens,
+- **It's a design token / colour / size →** `ui/theme.py` (chrome QSS + tokens,
   including `CPub` for publication-mode plot colour and `WELL_COLORS_TUPLE`
   for categorical well/trace identity — the single source of truth for
-  almost everything); never hardcode hex values in code. `ui/theme/styles.py`
-  is a two-token legacy remnant (see §8) — new colours never go there.
+  almost everything); never hardcode hex values in code. The two legacy tokens
+  `get_color` reads sit in a marked block at the bottom of that module (see
+  §8) — new colours never go there.
 
 ---
 
@@ -569,15 +615,20 @@ all_well_launcher.main()                       (PyInstaller bundle only)
     │
     ▼ regular Python run jumps in here:
 allwell.main()
-    ├── mpl_bootstrap.configure()   ← FIRST, before anything imports matplotlib:
+    ├── startup.mpl_bootstrap.configure()  ← FIRST, before anything imports matplotlib:
     │       restricts font_manager.findSystemFonts to the bundled fonts (+ DejaVu)
     │       and pins MPLCONFIGDIR, so the system-font scan (minutes on a Windows 365
     │       Cloud PC) never runs. Defensive — failure leaves matplotlib untouched.
-    │       The cache lives beside this file when running from source and in
-    │       boot_diag.user_state_dir() in a frozen build: PyInstaller unpacks the
-    │       bundle into sys._MEIPASS, a fresh temp tree per launch, so a cache
-    │       pinned there was thrown away and rebuilt every single start — exactly
-    │       the cost this step exists to remove.
+    │       Both `assets/fonts` and the cache resolve against the *repository*
+    │       root (the bundle root when frozen), not against the module's own
+    │       directory one level down in `startup/` — a font directory resolved
+    │       beside the module finds nothing, and configure() then leaves
+    │       matplotlib unrestricted with no error, which is the whole cost this
+    │       step exists to remove. From source the cache is `.mplcache` at the
+    │       repository root; a frozen build uses startup.boot_diag.user_state_dir()
+    │       instead, because PyInstaller unpacks the bundle into sys._MEIPASS, a
+    │       fresh temp tree per launch, so a cache pinned there was thrown away
+    │       and rebuilt every single start.
     ├── QApplication(sys.argv)
     ├── app_fonts.register_qt_fonts() → theme_v2.Typography.family/_mono
     │       ← register bundled Inter / JetBrains Mono (static instances),
@@ -1067,7 +1118,7 @@ That is what the focus branch is for, and it is the only route to those sections
 help; `tests/test_analyze_help_section.py` asserts focus reaches every entry in
 `ANALYZE_SECTION_HELP`, not a subset.
 
-`help_topics.py` holds the maps from a page to the exact manual heading that
+`ui/help_topics.py` holds the maps from a page to the exact manual heading that
 documents it — `SECTION_BY_PAGE` for Review leaves, `ANALYZE_SECTION_HELP` for
 form sections, `DATASETS_PAGE_HELP` for rail labels, and `MODE_OVERVIEW` for the
 fallback each mode uses when its pane cannot say. It is Qt-free so
@@ -1145,7 +1196,7 @@ each one's own bar and drives it from a `QTabBar` in the band instead.
 Converting them to a bar plus a page stack would have broken every one of those
 readers to change where a strip of tabs is drawn. Hiding the bar also means the
 pane border around the body has no frame left to close, so `mirror_tab_widget`
-puts the widget in document mode and `theme.py` clears
+puts the widget in document mode and `ui/theme.py` clears
 `QTabWidget#ImageBrowserSubTabs::pane` / `#HomeSubTabs::pane` —
 otherwise that border's top edge starts every nested body a pixel below where an
 un-nested page's body starts.
@@ -1504,7 +1555,7 @@ every page and sub-tab built: each page's band starts at the centre stack's top
 in all three modes, no page root re-introduces a top inset, no band is shorter
 than one row, and a body nested in a `QTabWidget` starts at that widget's own
 top. That last one is why `mirror_tab_widget` sets `setDocumentMode(True)` and
-`theme.py` clears the pane border for `ImageBrowserSubTabs` and
+`ui/theme.py` clears the pane border for `ImageBrowserSubTabs` and
 `HomeSubTabs` — with the bar hidden, `QTabWidget::pane`'s border
 closed a frame that is not drawn and started every nested body a pixel low.
 
@@ -5484,7 +5535,7 @@ pipeline (`unrecognised`) with the readout saying what was not recognised —
 this module cannot name wells for but the pipeline is what reads it. More than
 three loose TIFs at the *selected* root outrank an `in/` with nothing usable in
 it (`zip_root`), because that is a fresh drop beside a folder an interrupted run
-left behind, and it still has to reach `WellPlateZipper`. What remains is
+left behind, and it still has to reach `well_plate_zipper`. What remains is
 unrunnable and says which: an `in/` that exists and is empty (`empty_in`), a
 packed OME-TIFF (`packed_ome`, redirected to the Datasets converter), a path
 that is not a directory, or nothing usable at all.
@@ -5748,7 +5799,7 @@ stage position to a 96-well label via `util.plate_grid`, and writes the planes
 named
 `<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif` **directly into per-well
 `<destination>/in/<WELL>.zip` archives** — the exact layout `resolve_input_output`
-accepts as ready input, so Analyze uses it with **no** `WellPlateZipper` pass.
+accepts as ready input, so Analyze uses it with **no** `well_plate_zipper` pass.
 Wells are converted **in parallel** across a `ThreadPoolExecutor` (`workers`,
 0 = auto), each worker owning a disjoint set of wells and its own read handle and
 writing that well's archive alone (via `util.zip_write.atomic_zip`, so no locking
@@ -6219,7 +6270,7 @@ boxes).
 
 **Decomposition.** `process_microscopy.py` is the orchestrator + CLI; the heavy
 cohesive clusters were extracted into the Qt-free **`pipeline/` package** (at
-repo root, so the pipeline can import it without the GUI) and **re-exported** so
+a top-level package, so the pipeline can import it without the GUI) and **re-exported** so
 `pm.<name>` call sites (and the remote worker) are unchanged:
 `pipeline.background` (background/illumination math), `pipeline.cellpose`
 (Cellpose segmenters; Torch lazy), `pipeline.stardist` (StarDist segmenters +
@@ -6414,7 +6465,7 @@ Output dir
 (area/eccentricity/solidity/perimeter/…, plus the **always-on**
 `shape_centroid_row/col` that cell tracking links across timepoints) into each
 cell record; the selection comes from `--shape_features` and is recorded in
-`pipeline_info.json`. The feature catalog lives in the Qt-free repo-root
+`pipeline_info.json`. The feature catalog lives in the Qt-free top-level
 `pipeline.shape_features` so the pipeline (emit) and the GUI (detect/label) can't
 drift. On the Review side `data_loading.detect_shape_features` finds the columns
 and the channel dropdown surfaces them as **sectioned virtual channels** (a
@@ -6782,13 +6833,13 @@ PyInstaller entry point. Two responsibilities:
    interpreter on `sys.executable`, so re-exec'ing the launcher with the
    sentinel argv routes the same Python process into the pipeline.
    `--run-zipper` and `--run-bootstrap` are the same trick for
-   `WellPlateZipper.main()` and `scripts/_bootstrap_lib.main()`.
+   `well_plate_zipper.main()` and `scripts/_bootstrap_lib.main()`.
 
 A frozen **windowed** (`console=False`) build leaves `sys.stdout` /
 `sys.stderr` — and `sys.__stdout__` / `sys.__stderr__` — set to None even
 though the parent attached a live pipe to fd 1/2 and is reading it line by
 line. `util.frozen_io.ensure_std_streams` wraps the descriptors back up;
-`process_microscopy` and `WellPlateZipper` call it from their own `main()`,
+`process_microscopy` and `well_plate_zipper` call it from their own `main()`,
 and the launcher calls it in the `--run-bootstrap` branch because that entry
 point is reached through `importlib` rather than through a `main()` of its
 own. The repair covers `sys.stdout` / `sys.stderr` only, so the bootstrap's
@@ -6810,7 +6861,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_scratch.py` | The leaves of the remote staging work, stdlib + `util` only: where transient bytes go while a transfer is in flight (`_scratch_dir`, `_transit_dir`, `TRANSIT_SUBDIR`), how a stale one is swept (`sweep_stale_scratch`), whether an archive arrived whole (`_zip_is_complete`), and what the user's own input archives hash to (`fingerprint_archives`, `source_fingerprint` — the discriminator the remote re-attach is keyed on). Nine functions whose only tie to `remote_runner` was one constant; `remote_runner` re-exports every name, so call sites and tests import them from where they always did. |
 | `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. **It pulls `pipeline_info.json` too, as early as the remote has one**, so the plate can be opened in Review while the run is still going: per-well CSVs arrive as each well finishes, and without the sidecar there is nothing to interpret them with — no filename schema, no channel tokens, no `available_timepoints` / `available_fovs`, so the viewer falls back to guessing channels from CSV column names. Nothing on stdout announces that file, so `Fetcher._sidecar_loop` polls for it on its own thread every `SIDECAR_POLL_S` rather than waiting on a marker; the first attempt waits out an interval, because the thread starts in the same breath as the ssh that launches the pipeline and at that instant the remote cannot have written it. The window is hours (`SIDECAR_POLL_MAX_S`) since what it waits out is the scheduler queue, not the pipeline's start-up. Two rules keep it from fighting the other writers of that path. It **never overwrites**: a sidecar already present locally belongs to a previous run of this dataset and carries cell-gating thresholds, sample definitions, ratios, notes and the `run_report`, none of which the remote's copy has. And what it installs is **stamped `provisional`**, because a sidecar written by a job still running describes only the input that job was handed — one batch's split, in batched mode — so its `available_*` are short of the plate and there is no `run_report` at all; `verify_and_cleanup` replaces the file wholesale at the end and the mark goes with it, while a run that never got there leaves the mark in place, which is the honest outcome. The poll is off by default (`poll_sidecar`) so a `Fetcher` built to exercise one method in a test never reaches the network on a timer; both production call sites enable it and `tests/test_remote_midrun_sidecar.py` fails if a third one forgets. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/11/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive; 11 is *error in file I/O*, what a fault on the local end of a transfer looks like). Every write the client itself makes on a user volume — staging copies off the input dir, `Fetcher._materialize`, the `pipeline_info.json` rewrite — goes through `util.retry_io.retry_io` for the same reason (§6.5). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Which conda env the pipeline runs in** is `_conda_env_selector`'s answer, resolved once per runner from the host's `remote_python` and used by both the argv builder and the shell composer so they cannot disagree: left at its default the field is a *placeholder* and the env is resolved by name (`conda run -n allwell`), which is what makes a host with a pre-existing system conda work at all; set by the user to an `<env>/bin/python` it selects that prefix (`conda run -p <env>`). `_conda_env_guard` then verifies the env exists on the remote — inside the scheduler allocation when there is one, since the compute node is where it has to exist — and aborts with a `[remote]`-prefixed message naming the host, conda's base, the envs it can see, and the fix. Without it the run reached `conda run` and died on conda's bare `EnvironmentLocationNotFound`, which in a scrolling log is indistinguishable from an error the pipeline raised. A cache hit execs `true` and skips the check. **"Does the env exist" is conda's own question** — a prefix is an environment iff it holds `conda-meta/history` — and the shell that answers it, `CONDA_ENV_SHELL_HELPERS`, is shared with `scripts/_bootstrap_lib.py` so the runner's check and the bootstrap's create-or-skip decision cannot disagree. See §6.6 for why that mattered. **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. Empty `compute_launcher` = direct-on-host execution (the default). **A queue wait is announced, timed, and named**, because it is otherwise indistinguishable from a hang: the upload finishes and the log stops. `_scheduler_handoff_lines` writes the hand-off and is called from **every** launch path — the batched one composed the same launcher but announced nothing, so a batched run fell silent at the exact moment it began waiting. `ProgressTracker` turns those lines, plus the scheduler's own `srun: job N queued and waiting for resources` / `has been allocated resources`, into a `sched` event, and `AnalyzeProgressMixin._on_scheduler` runs a 1-Hz clock reading *Waiting for the scheduler — 4m12s (job 4812345)* with a log breadcrumb every two minutes repeating the elapsed time, the job id and the **request** (an unsatisfiable one — a partition that does not exist, a `--gres` the cluster cannot honour — is the usual cause of an indefinite queue). The job id comes from the scheduler's stderr rather than the `.slurm` sidecar because the sidecar is written from *inside* the allocation and so does not exist while the job is pending; a site whose scheduler words those lines differently still gets the wait announced and timed off the app's own lines, and loses only the id. The wait is what finally retracts the plate-wide `Transferring… N%` label: `set_transfer(None)` otherwise fires only on a *compute* event, which by definition has not happened while the job is queued, which is why the status sat on `Transferring… 100%` for the whole wait. **A remote run does not write to the client's home volume.** Every downloaded `<well>_out.zip` used to be staged through `~/.allwell/scratch` and then materialised into the output directory, so each byte of a plate's results crossed two filesystems and the first of them was one the run had no reason to touch — a full home volume stopped runs whose own input and output volumes had room, which is the `ENOSPC` users hit. `_transit_dir` puts a file in transit beside the volume it is going to (or, for the upload-side archive rewrites, the one it came from): a dot-prefixed `.allwell-transit`, so every dataset scan in the app skips it, removed as soon as the file it held is in place, and swept by `sweep_stale_scratch(also=…)` when a hard quit leaks one. This does not re-create what `pipeline.io.scratch_base_for` warns about — that warning is about the *pipeline's* per-FOV working set, tens of thousands of create/fsync/rename operations from every worker, where this is one file per well written once and moved once, onto a volume that already receives exactly those bytes by copy. What changes is that the move becomes a same-volume rename and the home volume is off the path. A volume that refuses the directory falls back to the scratch base and **says so**, once per volume; falling back silently would be the original failure with the explanation removed. **The pipeline's scratch on the remote is a per-host setting**, `remote_scratch_dir`, exported as `ALLWELL_SCRATCH_DIR` inside both composed commands (single-shot and batch driver) because that is what `pipeline.io.scratch_base_for` reads; `services/pipeline_runner` sets the same variable in the GUI's own environment, which reaches a local subprocess and nothing else. Empty leaves the remote on its `~/.allwell/scratch`, which on a cluster is the home quota — the worst available volume for a working set of several uncompressed images per field. It is the one path in the file deliberately **not** run through `_remote_quote`: the values that matter (`$TMPDIR`, `$SLURM_TMPDIR`, `/scratch/$USER`) need remote-side expansion, so it is emitted in double quotes with a leading `~` rewritten to `$HOME` first, and a value carrying shell syntax is refused rather than composed into a command that would fail on the remote naming nothing. The `remotes.toml` schema is the live contract in `services/remote_config.py`. **The end-of-run completeness check runs client-side, once, after the fetch.** `_build_remote_argv` appends `--no_run_check` to every remote launch and `verify_and_cleanup` calls `run_client_side_completeness_check` instead, immediately after `refresh_pipeline_info_available_from_outputs` (which rewrites the very `available_*` fields a check would otherwise read stale) and before the `ok` gate, since a run that came back short is exactly the one whose record is worth having. Three reasons it cannot run remotely, and they compound: an incremental run's remote output dir holds only the uploaded split, so a record written there inventories the wrong tree; the fetched sidecar overwrites the local one, so the record would be destroyed on arrival; and a batched run is N separate pipeline launches, each of which would describe its own slice as if it were the plate. Running on the client also answers a strictly better question — *did it get here*, rather than *did the remote produce it*. Whatever `run_check` the fetch brought back is **dropped before the local check runs**: the remote's suppression writes the same "turned off" stub a user's own `--no_run_check` would, and that stub surviving would tell a user they had turned the check off when they had not. The two outcomes are therefore an honest record or none at all, and none reads as "not checked", which is what happened. **Empty-well correction reaches every batch from one upload.** The pipeline builds its `empty_well` background and flat-field fields from whatever blank wells are in the directory it is pointed at, at the moment it starts — and batched mode stages one batch at a time, so a blank left in the ordinary slicing corrected the batch it landed in and nothing else. Wells sort alphabetically and blanks are conventionally H12/G12, so in practice it was the last batch, and every earlier one produced numbers with the background left in whole. Nothing marked them: `_empty_well_field` returns `None` for a channel with no model and the frame passes through untouched, so the output is bit-for-bit the raw input and indistinguishable from a corrected well. A blank is a full well of uncompressed frames — the same size as any other — so it cannot be copied into each batch. `_empty_well_blanks` reads the run's own argv for `--background_well` plus an `empty_well` mode, holds those archives out of the batch slicing, and uploads them **once** to `runs/<run_id>/bg/`, outside the staging the driver's `rm -rf in && mv b<i> in` replaces. The pipeline's `--background_dir` names that directory, so every batch builds the same reference; the driver hard-links each blank that still needs processing into the final batch (`ln`, one filesystem, no bytes) so it is run once for its own output — named one by one rather than globbing `bg/`, since on a re-run some blanks are references only and linking those back in would reprocess a well the user's own re-run declined. **The staging filters do not touch a blank at all**: `stage_local_zips` takes the background wells and `_plan_staging` stages them whole, the way a `--force_wells` well bypasses the incremental diff. Without that, an incremental re-run finds every one of the blank's FOVs already processed, drops it, and starves the whole plate of the correction — and a blank with *some* new fields would be thinned to those, so the field would be estimated from a fraction of the reference while the log reported it built. When the only wells left to run are blanks, they are treated as ordinary wells instead: an empty batch would be uploaded to a directory the driver cannot then `mv`. **And a correction that cannot be built stops the run.** `_require_empty_well_models` raises when `empty_well` was requested with named wells and no model came back, naming the wells and the directory searched — an `INFO` line reading `(none found)` was the only previous signal, for a run that had explicitly asked for the correction. **Rewriting a well archive is a cost decision, and it says why.** The upload planner (`_plan_staging`) reads each archive's central directory — member names *and* compressed sizes, one read — and rewrites an archive only when the channel filter (or an incremental run's already-done FOV-groups) drops members worth at least `remote_config.REWRITE_MIN_SAVING` of its bytes. Rewriting costs a full local read and write before a byte is uploaded and buys only a smaller transfer, so shedding two small frames from a multi-gigabyte well is a bad trade — the remote ignores channels it was not asked for anyway, so sending them costs bandwidth and nothing else. Either way the plan line names the count, the fraction and **the reason**: the channel token parsed out of the dropped members' own names (or the bare filename, when the name does not decompose under the run's schema, since a guessed token is worse than none), or the FOV-group count for an incremental drop. Previously the log said only *that* it was rewriting, which left "every channel is selected, so why is it copying my plate?" answerable from no line the run emits. An archive from which nothing is dropped is passed through untouched and logs nothing — `keep is None` holds exactly when nothing was dropped, which is the invariant every diagnosis of this path rests on. **What counts as an image is one question with one answer**, `util/image_exts.GROUP_IMAGE_EXTS`, read by both `process_microscopy`'s scanners and this planner: they had drifted to `.tif`/`.tiff` here against `.tif`/`.tiff`/`.png`/`.jpg`/`.jpeg` there, so a `.png` member was invisible to the planner and was silently dropped from any archive rewritten for another reason — input the remote would have processed. **Batched mode** (`remote_batch_size > 0` → `_BatchedRemoteProcess`) uploads and runs the plate in slices so peak remote disk is one batch of input plus about one well of output. **One allocation serves every batch.** Each batch used to compose its own `srun`, so a scheduler-backed host queued once per batch and handed the node back in between — an allocation is the expensive thing to obtain and the cheap thing to keep. `_batch_driver_snippet` builds a loop that stays inside one job: it waits for each batch's `BATCH_READY` file, swaps that batch's staged directory into place, runs the pipeline, writes the exit code into `BATCH_DONE` and prints `BATCH_DONE_MARKER`, which the local reader thread consumes (it never reaches the log — `ProgressTracker` has no reason to see the handshake). **The swap is the barrier.** Batched input now lives in the run directory rather than the shared dataset cache, batch *i* is uploaded to `b<i>` beside it, and the driver does `rm -rf in && mv b<i> in` — atomic within one filesystem, so a batch's pipeline sees exactly its own zips. The old shared directory relied on the Fetcher having deleted the previous batch's input in time and nothing waited for it, which is what `ProgressTracker.well_repeats` counts. **A failed batch keeps the node**: the loop carries on, the run's own code carries the first failure, and an end-of-run tally names which batches failed. **The stream ending is the only signal that the run is over.** Stop reaches the batched wrapper through `signal_subprocess`, which reads `proc.pid`; with one driver held for the whole run that is always a real pid, so the process group is killed and `terminate()` — the method that sets the stop flag and cancels the Fetcher — never runs. The reader thread therefore treats EOF with batches still unreported as the run being over: it sets the flag and cancels the Fetcher itself, which is what gets the worker out of the rsync it is sitting in (`upload_subset` watches that flag). A walltime expiry or a node failure arrives the same way and is reported differently, since one is the user's doing and the other is not. Two things do end it, both meaning the app is gone rather than slow — a heartbeat that stopped advancing and a batch that never arrived — and each batch is additionally wrapped in `timeout` at the budget the operator's original `--time` set for one batch, so one wedged well cannot burn the whole run's walltime. That `--time` is scaled by the batch count *plus one* (`remote_config.scale_launcher_time`, clamped at `MAX_HELD_ALLOCATION_S`) because it sized a single launch and now has to cover the plate: the node is also held through every upload after the first, since the driver waits for each batch inside the allocation, so budgeting only the compute puts the expiry somewhere in the last batch of any run whose transfers are not free. The extra batch's budget is a guess and the log line says so. A launcher that sets no `--time` is left alone, since inventing a number is worse than inheriting the cluster's. Each batch is still its own pipeline invocation and so emits its own "N well(s) to process" banner for its own slice; `_run_batches` therefore injects one synthetic `Zip mode: <N> wells — batched` line ahead of batch 1, and `ProgressTracker` locks the run's denominator onto the first banner it sees. That `<N>` is the whole **staged** plate, including the wells the batched path skips because their per-well CSV is already complete locally — each skipped well gets its own `SKIP well …` marker on the same stream, so it is counted and painted on the plate map instead of leaving the run reporting 100% against a denominator smaller than the plate the user staged. **The allocation is asked for before the plate is uploaded.** A queue wait and a transfer are independent waits, and spending them end to end adds the whole queue to every run; requested first, they overlap. The job `srun` places starts the moment a node is granted, which may be long before the last byte lands, so the composed command blocks on an `UPLOAD_SENTINEL` file written into the run directory once rsync returns — announcing both edges of that wait, because a granted node waiting on bytes looks exactly like a hung one. `UPLOAD_WAIT_TIMEOUT_S` bounds it, since the node is idle and billed throughout; a failed upload cancels the allocation immediately rather than leaving it to time out. That deadline is for an uploader that is alive but wedged — the case that actually happens is the app being *killed*, and for that the uploader beats `UPLOAD_HEARTBEAT` every `UPLOAD_HEARTBEAT_S` (a daemon thread, not a per-file hook: rsync can spend minutes inside one large archive). A beat that stops advancing frees the node within `UPLOAD_HEARTBEAT_STALE_S` however long the upload legitimately needed. The file is touched over ssh, so the mtime the job compares against its own `date` is the remote clock and no skew between two machines is being measured. **Crash recovery closes the other half.** `close_remote_job` covers every exit the app survives — clean quit, finished run, Stop — because it reads the job id from memory; a SIGKILL, segfault or power cut runs none of it. The id is on the shared filesystem the whole time and `run_id` is deterministic in (input, arguments), so `_sweep_orphaned_allocation` lets the *next* run of the same plate find and cancel exactly the job the crashed one left. That determinism cuts both ways — two sessions on the same plate compute the same `run_id` — so the sweep refuses to touch a job whose heartbeat is fresh or whose sidecar was written moments ago, and returns which of the four verdicts it reached (`swept`, `owned`, `notmine`, `unknown`) rather than only logging it: the batched path is about to `rm -rf` that same run directory, and on `owned` it stops the run instead, since both sessions would otherwise stage batches into one directory. **Nothing it cannot measure is treated as dead.** The ages come from `stat -c %Y` *or* BSD's `stat -f %m`, and a host that answers neither gets `unknown` and keeps its job — the earlier code gave the two files opposite defaults for the same failure (epoch 0 for the heartbeat, *now* for the sidecar), so such a host silently never swept anything. The beat itself runs for the **whole** run rather than just the upload, on both paths, because it is what the sweep reads: stopping it when the transfer ended made an hour-long compute look abandoned to the next session on the same plate. **Neither cancel path will touch a job that is not the caller's**: both ask `squeue` who owns the id and stop if the answer is not `id -un`, and both pass `-u` to `scancel` as well, so a job that changed hands between the question and the answer still cannot be cancelled. Slurm would refuse a non-owner anyway — but that is the scheduler's policy rather than this app's promise, and it does not hold for an operator account. The overlap is taken **only** where there is something to queue for: a host with no launcher runs on the login node as soon as ssh connects, and a cache hit runs `true`, so both keep the old upload-first order — starting either early would run the pipeline against an input directory that is still filling. The run directory can be known in advance because `cache_key` is a local computation over the input archives; `spawn` checks the upload landed under that same key, since a divergence means the bytes went somewhere the waiting job will never look.  It is the largest module in the repo and now carries a line budget (`test_monolith_budgets.py::test_remote_runner_line_budget`), which the complexity ratchet cannot supply here — `spawn` is 394 lines across a dozen concerns at a cyclomatic complexity of 22, well under the threshold of 40, so length is the dimension that needs the limit. Every recurring fault in this file has been a half-finished sweep of a fact derived in N places, and a module keeps acquiring those for as long as adding one more costs nothing. |
 | `remote_config.py` | Per-host remote definitions loaded from `~/.config/allwell/remotes.toml` (or `$ALLWELL_REMOTES`). Each `[remote.<name>]` entry is an SSH alias + `remote_python` / staging dirs / cache budget, plus the optional **`compute_launcher`** (the `srun …` scheduler line consumed by `remote_runner`) and **`jupyterhub_config_path`** (where to find `jupyterhub_config.py` on the remote). Hosts are picked + edited in `analyze/remote_dialog.py`, which can **Fetch** the cluster's discrete compute options by reading the remote's `jupyterhub_config.py` spawner `profile_list` over SSH (no JupyterHub webpage needed) — picking a profile fills in the whole scheduler command. |
-| `input_resolution_service.py` | `plan_input_layout` is the one answer to "what will this folder do?" — pure, returning an `InputPlan` that Analyze's readout displays and `resolve_input_output` executes (§6.1). Around it, the module validates the input folder shape (zip set vs flat) and drives the loose-TIF **grouping (zipper) phase** — `run_zipper` shells out to `WellPlateZipper.py`, which discovers every TIF with one `os.walk` and copies (or, with `--move-source-tifs`, moves) each into its per-well subfolder. `group_by_well` filters discovered entries through `os.path.isfile` (which follows symlinks) so a **broken symlink** — a link whose target is on an unmounted/moved volume, still listed by `os.walk` among `files` because it is a non-directory entry — is skipped at discovery with a per-file warning rather than being handed to `folder_well`'s symlink-following `shutil.copy2`, where opening the missing target raised a bare `FileNotFoundError` that crashed the subprocess and failed the whole plate. This matches the rest of the pipeline's discovery, which already treats a broken link as absent (`process_microscopy.organize_loose_tifs_into_well_folders` and `find_image_groups` both gate on `Path.is_file()` / an existence check). `folder_well` places each discovered file into its per-well subfolder **first-write-wins**, the rule the zip writers already apply to a duplicate member name. `copy2`/`move` onto an existing name simply overwrite it, and under `--recursive` two subfolders can hold one basename: the first file's bytes were replaced by the second's, and with `--move-source-tifs` the loser's original was gone as well — one image destroyed with no copy anywhere — while the per-well progress line printed the *source* count, so the pipeline read one image fewer than the log claimed. The loser is left untouched where it is, the collision is named on stderr with both paths (`run_zipper` merges stderr into the Analyze log), and the count printed is what actually landed. `_same_file` makes a file already sitting in its own well folder a no-op that still counts as placed — the state a recursive re-run over `--output-dir == --search-dir` produces, which previously raised `shutil.SameFileError` — and treats a path it cannot compare as a different file, so the caller warns and leaves both alone rather than overwriting on a guess. The app never passes `-r` (`services.input_resolution_service.build_zipper_cmd` has no `--recursive`), so the collision is reachable only from the CLI today; it is still a documented, supported entry point. `WellPlateZipper.main` first calls `util.frozen_io.ensure_std_streams` — in a frozen windowed (`console=False`) build the bootloader leaves this subprocess's `sys.stdout` / `sys.stderr` set to `None` even though the parent piped fd 1 / fd 2, so without the rebind every per-well progress line and every skip warning is a silent no-op and the grouping phase looks frozen; the same shim backs `process_microscopy._ensure_pipeline_io_ready`, so both subprocess entry points share one implementation. |
+| `input_resolution_service.py` | `plan_input_layout` is the one answer to "what will this folder do?" — pure, returning an `InputPlan` that Analyze's readout displays and `resolve_input_output` executes (§6.1). Around it, the module validates the input folder shape (zip set vs flat) and drives the loose-TIF **grouping (zipper) phase** — `run_zipper` shells out to `pipeline/well_plate_zipper.py`, which discovers every TIF with one `os.walk` and copies (or, with `--move-source-tifs`, moves) each into its per-well subfolder. `group_by_well` filters discovered entries through `os.path.isfile` (which follows symlinks) so a **broken symlink** — a link whose target is on an unmounted/moved volume, still listed by `os.walk` among `files` because it is a non-directory entry — is skipped at discovery with a per-file warning rather than being handed to `folder_well`'s symlink-following `shutil.copy2`, where opening the missing target raised a bare `FileNotFoundError` that crashed the subprocess and failed the whole plate. This matches the rest of the pipeline's discovery, which already treats a broken link as absent (`process_microscopy.organize_loose_tifs_into_well_folders` and `find_image_groups` both gate on `Path.is_file()` / an existence check). `folder_well` places each discovered file into its per-well subfolder **first-write-wins**, the rule the zip writers already apply to a duplicate member name. `copy2`/`move` onto an existing name simply overwrite it, and under `--recursive` two subfolders can hold one basename: the first file's bytes were replaced by the second's, and with `--move-source-tifs` the loser's original was gone as well — one image destroyed with no copy anywhere — while the per-well progress line printed the *source* count, so the pipeline read one image fewer than the log claimed. The loser is left untouched where it is, the collision is named on stderr with both paths (`run_zipper` merges stderr into the Analyze log), and the count printed is what actually landed. `_same_file` makes a file already sitting in its own well folder a no-op that still counts as placed — the state a recursive re-run over `--output-dir == --search-dir` produces, which previously raised `shutil.SameFileError` — and treats a path it cannot compare as a different file, so the caller warns and leaves both alone rather than overwriting on a guess. The app never passes `-r` (`services.input_resolution_service.build_zipper_cmd` has no `--recursive`), so the collision is reachable only from the CLI today; it is still a documented, supported entry point. `well_plate_zipper.main` first calls `util.frozen_io.ensure_std_streams` — in a frozen windowed (`console=False`) build the bootloader leaves this subprocess's `sys.stdout` / `sys.stderr` set to `None` even though the parent piped fd 1 / fd 2, so without the rebind every per-well progress line and every skip warning is a silent no-op and the grouping phase looks frozen; the same shim backs `process_microscopy._ensure_pipeline_io_ready`, so both subprocess entry points share one implementation. |
 | `env.py` | `validate_env` — a pure startup check of the `ALLWELL_*` overrides (`ALLWELL_SCRATCH_DIR` / `ALLWELL_REMOTES` / `ALLWELL_SEG_DEBUG`), returning warnings for any that are set but unusable so a mistyped path is not a silent fallback. |
 | `ssh_key_setup.py` | Ed25519 keypair generation at `~/.ssh/allwell_<alias>` + the `ssh-copy-id` walkthrough behind the remote-host wizard. |
 | `subprocess_kill.py` | Kills a spawned pipeline's whole process group / session (what Stop uses). |
@@ -7582,7 +7633,7 @@ tests of this behaviour pass against the broken script too.
 
 ## 6b. The Datasets side
 
-The Datasets pane (`datasets_tab.py`) is the third top-level mode. Structurally
+The Datasets pane (`datasets/tab.py`) is the third top-level mode. Structurally
 it mirrors `AnalyzeTab`: a self-contained `QWidget` whose left `_left_sidebar` is
 a `RailNav` page navigator (no well picker) over a `NamedPageStack`, with one
 page per feature. Features are declared in one local tuple (`_FEATURES`) — a
@@ -7591,7 +7642,7 @@ one-line change, without pulling in Review's well/selection-scoped
 `FeatureRegistry`/`ViewerContext` machinery. The rail's `currentChanged` drives
 `NamedPageStack.setCurrentByName`.
 
-Each feature is one `_Feature` entry in `datasets_tab.py::_FEATURES` and a
+Each feature is one `_Feature` entry in `datasets/tab.py::_FEATURES` and a
 `datasets/<name>/` package on the standard view/controller/worker + Qt-free
 compute/apply split; a completed run hands its output to another pane through
 an injected callback (`on_open_in_review` → `AllWellApp._open_dataset_in_review`;
@@ -7656,7 +7707,7 @@ specific reason: without one, a fix to any of this lands on one page of six,
 and the other five keep whatever they had.
 
 Two properties the seam makes enforceable, both swept parametrically over
-`datasets_tab._FEATURES` by `tests/test_datasets_log_panel.py` — driven off the
+`datasets.tab._FEATURES` by `tests/test_datasets_log_panel.py` — driven off the
 registry rather than a roster written in the test, so a seventh tool is covered
 from the moment it exists. No page may re-define a shared member, and every
 page needs a trailing `outer.addStretch(1)` after its last real widget — since
@@ -8792,7 +8843,7 @@ two ask about the same filenames with the same vocabulary.
 `_can_run` refuses three things, each with its reason on screen, because a
 button that goes dark with no explanation is indistinguishable from a broken
 one. A schema `util.schema.validate_schema` rejects — the in-place route shells
-out to `WellPlateZipper.py`, which exits 2 on exactly those errors, and a schema
+out to `pipeline/well_plate_zipper.py`, which exits 2 on exactly those errors, and a schema
 with no `channel` yields archives Analyze cannot read. A scan that found no
 wells, which the page already knows from the preview it holds; offering that run
 spends a click to report what the readout above the button says. And a
@@ -8803,7 +8854,7 @@ the same rule and the same wording as Concatenate, Subset and Merge Plates.
 
 `ImportPreview.summary` distinguishes the three ways a scan comes back empty:
 no images in the folder, images only in subfolders (the scan is deliberately
-non-recursive, matching `WellPlateZipper`), and images that the schema does not
+non-recursive, matching `well_plate_zipper`), and images that the schema does not
 describe. One sentence covered all three, and two of them are not about the
 schema — a per-condition subfolder layout is the ordinary shape of a loose
 export, so the page sent those users to rebuild a schema that was never wrong.
@@ -8813,7 +8864,7 @@ nothing matches, directly above that run's own success headline) and disarms
 Run, which otherwise stayed live and traded the result for a failure.
 
 It does **not** modify
-`WellPlateZipper.py` or `services.input_resolution_service.resolve_input_output`
+`pipeline/well_plate_zipper.py` or `services.input_resolution_service.resolve_input_output`
 — Analyze's own loose-TIF handling keeps working exactly as it does today.
 Conversion progress is a per-well plate map
 (`dashboard.py::ImportLooseDashboard`, a `PlateProgress` subclass — see the
@@ -8837,10 +8888,10 @@ empty "Ready — 0 well(s)" plate, which would read as "broken" rather than
 "not ready yet".
 
 The preview (`import_loose_compute.scan_folder`) mirrors
-`WellPlateZipper._extract_well_from_filename`'s rule exactly — schema-index
+`well_plate_zipper._extract_well_from_filename`'s rule exactly — schema-index
 lookup, `canonical_well_label`, and `os.path.isfile` to drop dangling
 symlinks the way `os.walk` lists them — rather than calling
-`WellPlateZipper.group_by_well` directly, which `print()`s unconditionally (a
+`well_plate_zipper.group_by_well` directly, which `print()`s unconditionally (a
 scan banner, a per-5000-files progress line, a completion line) for the
 Analyze log and would otherwise pollute this app's own captured output.
 `scan_folder` and the executor's `group_files_by_well` share one `_walk`
@@ -8873,9 +8924,9 @@ Two conversion modes, one code path each, both in `apply.py`:
   just been armed, easy to miss since a layout jump is the only thing that
   changes. Behaviourally it shells out through the existing
   `services.input_resolution_service.run_zipper` (which invokes
-  `WellPlateZipper.py` as a subprocess) rather than reimplementing the same
+  `pipeline/well_plate_zipper.py` as a subprocess) rather than reimplementing the same
   grouping a second time; `run_zipper` produces per-well *folders* only
-  (`WellPlateZipper.py` never zips anything itself), so `apply.py`'s own
+  (`pipeline/well_plate_zipper.py` never zips anything itself), so `apply.py`'s own
   `_zip_well_folders` then converts every one of them into `<well>.zip`,
   removing the folder once packed, so the result lands in the same
   ready-to-run layout the new-destination mode writes. This is deliberately
@@ -8888,9 +8939,9 @@ Two conversion modes, one code path each, both in `apply.py`:
   `move_source_tifs` is threaded through unconditionally from the
   in-place checkbox (`ImportLooseController._launch`) so the "delete loose
   TIFs on success" promise in the checkbox label and confirm dialog is
-  actually honored — `WellPlateZipper.py`'s `folder_well()` copies rather
+  actually honored — `pipeline/well_plate_zipper.py`'s `folder_well()` copies rather
   than moving originals when this is left false. `run_zipper`'s own
-  `progress_fn` only reports a well once WellPlateZipper.py finishes
+  `progress_fn` only reports a well once pipeline/well_plate_zipper.py finishes
   grouping its files into a folder — there is no earlier "started" signal
   from the subprocess — so that single event is reported as the dashboard's
   "writing" stage; `_zip_well_folders` then reports "done" once that well's
@@ -8953,7 +9004,7 @@ they queued it.
 blocks inside `services.input_resolution_service.run_zipper`'s subprocess
 stdout-read loop, which never polls anything — `QThread.requestInterruption()`
 alone was a no-op there. `ImportLooseWorker.request_stop()` also signals the
-tracked `WellPlateZipper.py` subprocess directly (`_track_proc`, wired through
+tracked `pipeline/well_plate_zipper.py` subprocess directly (`_track_proc`, wired through
 `convert_in_place`'s existing `proc_hook` parameter, via
 `services.subprocess_kill.signal_subprocess` — the same cross-platform
 pgid-aware kill `PipelineRunner.stop()` uses for its own zipper subprocess).
@@ -9490,14 +9541,14 @@ banner already sits. Its Cancel routes through
 the controller owns whether a session exists, and dropping only the strip
 would leave it believing one was live and willing to save it later.
 
-`datasets_tab.py` wires all of this: each of the six Datasets controllers is
+`datasets/tab.py` wires all of this: each of the six Datasets controllers is
 constructed with `on_add_to_queue=tab._add_to_queue` and stashes itself in
 `tab._controllers[kind]`; the `"Job Queue"` `_Feature` entry is built **last**
 so `_build_job_queue` can register every already-built controller (plus the
 injected `AnalyzeTab`, under kind `"analyze"`) against a single
 `JobQueueController`. `allwell.py` injects the already-built `AnalyzeTab` as
 `DatasetsTab(analyze_controller=...)` the same way it injects
-`on_open_in_review`/`on_open_in_analyze` — so neither `datasets_tab.py` nor
+`on_open_in_review`/`on_open_in_analyze` — so neither `datasets/tab.py` nor
 anything under `datasets/job_queue/` ever imports `analyze.tab`. The reverse
 direction goes the same way: `_build_job_queue` calls the injected tab's
 `set_queue_sink`, which is where Analyze's own "+ Queue" button sends a run,
@@ -9516,7 +9567,7 @@ the queue page.
 
 Every widget under `widgets/` is:
 
-- **Standalone.** It only imports from `theme`, Qt, and the Qt-free repo-root
+- **Standalone.** It only imports from `ui.theme`, Qt, and the Qt-free top-level
   helpers under `util/` (`util.well_token`, `util.aw_safe`) — plus
   `widgets._support` for tiny RGB helpers and `set_variant`, a runtime
   dynamic-property + repolish helper (see below). It does *not* import
@@ -9542,7 +9593,7 @@ Notable members worth knowing about by name:
 | `ResponsiveScroll` (`widgets/responsive_row.py`) | The vertically-scrolling host a `ResponsiveRow` belongs in when the page it is on can run out of height. Horizontal scrolling is **on demand**, not off: the rows flip on the viewport's width, which a horizontal bar does not change, so the bar costs the decision nothing — and below the floor, where a stacked row cannot be narrower than its widest panel, it is the difference between a shortfall the user can reach and one drawn behind the page's edge. That is also why the scroll area has to push its viewport width into the rows on resize rather than leaving each row to read its own — with horizontal scrolling off, the area sizes its inner widget to at least that widget's minimum, so once a row is too wide the whole page is too wide and every width up the chain repeats the same inflated number; and a row already pinned at its minimum need not receive a resize of its own to react to. `ResponsiveRow` walks up for an enclosing scroll area and reads the viewport itself for the same reason. |
 | `ResponsiveRow` (`widgets/responsive_row.py`) | **Panels side by side while the width holds them, a column when it does not.** A `QBoxLayout` handed less width than its children's minimums does not decline to lay them out — it places them in order at the widths they demand and runs the tail off its own right edge — which is how the Statistics comparison-group editor came to show a section title reading "COMP GROU" and a load button cut off mid-word on a 350px pane (an 1100×800 window with the rail open and the pane split). The panels do not overlap and no arrangement of them does; a short box layout clips, so a test asserting they never overlap cannot fail for that reason and the clipping is what has to be measured. The flip point is not a chosen number: it is the panels' own effective minimum widths plus the spacing between them, so the row stacks exactly when one line would start clipping and nobody has to keep a threshold in step with what the panels contain. *Effective* is both halves and neither alone — `minimumSizeHint` is what a widget derives from its own contents and ignores a floor set on it from outside, `minimumWidth` is that floor and is 0 on a widget that never had one, and Qt takes the larger; a first cut reading only the hint missed the map's `setMinimumWidth(PLATE_MIN_WIDTH)` and would have gone on clipping in the place it was written to fix. `add_panel` rather than `addWidget`, because each panel carries the stretch it takes on one line — dropped when stacked, or the panel that grabbed the horizontal slack would grab the vertical and the page below would lose the room the row was meant to leave — and an alignment per orientation, so the map is top-aligned beside the cards and centred above them. Hysteresis on the way back, since the two orientations have different heights and therefore different scrollbar states, and a width sitting on the flip point would oscillate. `features/batch_export/base_panel.py` grew this behaviour first, wired into that panel's class and reading its scroll viewport's width rather than its own; it is not converted here because its version also drives a separator's orientation and its own width caps. |
 | `checkbox_fit` (`widgets/checkbox_fit.py`) | **A checkbox wide enough for its own label, under whatever style is painting it.** `QCheckBox.sizeHint()` budgets an indicator, the QSS `spacing` gap and the text; a style that places the label further right than that budget assumed leaves the tail outside the widget, and `FlowLayout` then packs the next control at `x + width + spacing`, so the neighbour butts straight against the cut rather than leaving a gap that would make the clipping legible. Reported on macOS for the Distribution tab's `log x` / `log y` boxes, at every window width — width-independence is what places the defect in the item's own size rather than in pressure from the row. Deliberately not a constant: `theme.Metrics.checkbox_chrome_w` exists for call sites that run before the stylesheet is applied and cannot use `sizeHint()` at all, and the `QCheckBox::indicator` QSS comment records an earlier fixed `margin` added for this and removed for stacking on `spacing` everywhere it was not wanted — the shortfall is per-style and per-context. So it is asked of the style that will paint the widget: `SE_CheckBoxContents` is the rect reserved for the label, and when it is narrower than the text needs, that difference is the floor to add. Measured at the width a layout will actually give the widget (`sizeHint().expandedTo(minimumSize())`), not the bare hint — measuring at the hint reports a shortfall the helper has already closed. Fusion reserves ~6px more than `log x` needs, so it is a no-op there and can only ever add space a style is already clipping away; `tests/test_checkbox_label_fits.py` models the divergence with a checkbox whose `sizeHint` under-reports what its style paints, because CI cannot see this class of bug — exactly as `flow_layout.py` documents for `QMacStyle`'s layout spacing. A `QProxyStyle` overriding `SE_CheckBoxContents` does **not** work for that: once a global stylesheet is installed Qt wraps the widget's style in `QStyleSheetStyle`, which derives checkbox geometry from the stylesheet and never delegates the sub-element back, so the case reproduced when the file ran alone and was silently absorbed in the fast lane. |
-| `build_page_body` (`widgets/page_body.py`) | The standard body of a main page: a `ControlBand` flush against the page's top, then the page's content beneath it. `build_page_body(parent, *, content_margins=(left, right, bottom), horizontal=False)` strips the page root's own margins and spacing, adds the band, and returns it together with a content host. There is no top-margin parameter — side and bottom padding are a page's own business, the top is what every page's first row is aligned by. **The band is added whether or not the page has controls for it**: a page with none (Image Table, the Playground, Batch Export, the Datasets tool pages) reserves the row so its content starts level with its neighbours', the same reservation the mode band's page-tabs host makes for a page with no sub-tab bar. `horizontal=True` gives the content host a `QHBoxLayout` for a page whose body is a row rather than a column (the Playground's canvas beside its property dock). No All-Well coupling, so the Review feature packages, `analyze/log_pane.py` and `datasets_tab.py` all build their bodies through it. Measured by `tests/test_page_alignment.py` (§5.2). |
+| `build_page_body` (`widgets/page_body.py`) | The standard body of a main page: a `ControlBand` flush against the page's top, then the page's content beneath it. `build_page_body(parent, *, content_margins=(left, right, bottom), horizontal=False)` strips the page root's own margins and spacing, adds the band, and returns it together with a content host. There is no top-margin parameter — side and bottom padding are a page's own business, the top is what every page's first row is aligned by. **The band is added whether or not the page has controls for it**: a page with none (Image Table, the Playground, Batch Export, the Datasets tool pages) reserves the row so its content starts level with its neighbours', the same reservation the mode band's page-tabs host makes for a page with no sub-tab bar. `horizontal=True` gives the content host a `QHBoxLayout` for a page whose body is a row rather than a column (the Playground's canvas beside its property dock). No All-Well coupling, so the Review feature packages, `analyze/log_pane.py` and `datasets/tab.py` all build their bodies through it. Measured by `tests/test_page_alignment.py` (§5.2). |
 | `ModeBar` (`widgets/mode_bar.py`) | The app's top-level Review / Analyze / Datasets selector. These are three applications sharing a window, not three tabs of one screen, and the control says so at rest: **every segment is filled at all times** — the active one accent-filled, the inactive ones on `panel_elevated` with full-strength `text_primary` and full-opacity glyphs. Nothing here is muted, because muting is how the rail's section list and the centre tab bar express "not currently selected", and borrowing it demotes a switch between applications to a third tab strip. Segments are flush — no gutters, no radius — so the bar is one band rather than three chips. `addSegment` takes a `widgets.icons` glyph *name*, not a `QIcon`, and repaints it in whichever foreground the segment's state calls for; a fixed `QIcon` draws its Normal pixmap in `text_secondary`, which on the accent fill is a dark glyph on saturated blue. The bar's default height is `tab_bar_height()`, measured off a throwaway polished `QTabBar` so the two bands share a bottom edge through any change to tab padding. That measurement is deliberately uncached — it depends on the application stylesheet and font, and a module-level cache freezes whichever were in force at the first call, which for a widget built during startup is a stylesheet that has not been applied yet. |
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |
 | `WellPlateSelector` | **The app's only painted well grid.** Every 8×12 plate the user sees is this control — Review's rails and the sample-definitions editor, the Datasets tools' pickers and status maps, Convert OME-TIFF's acquisition-path editor, and Batch Export's group map. What differs between them is which *selection model* the host drives it in (`setSelectionModel`): `"set"` (the default, an unordered selection), `"path"` (an ordered acquisition route — a click appends an off-path well or removes an on-path one, the wells carry their visit numbers derived from the list's own order, and an alpha-blended arrow traces the route across the plate), or `"paint"` (the grid owns **nothing** — it reports the press/drag/release gesture as `wellPaintPressed` / `wellPaintDragged` / `paintDragFinished` and the host applies it to whatever it is editing). The corner select-all toggle appears only in `"set"`, since it toggles a selection set the other two models do not have, and a paint gesture ends with `paintDragFinished` rather than `selectionDragFinished` — the latter means "the selection settled", and a paint gesture never changed one. Supports per-well colour overrides, drag-to-select, and drag mime types for the heatmap layout (a drag source arms on press and applies the ordinary click on release, so clicking still selects — see §9.2). **`setSelectionRim(True)`** is for a host that has spent the fill on data of its own. Normally selection is said by the fill — a selected well is lit and an unselected one recessed — but `_paint_lit` takes a colour override as its `base` whether or not the well is in the selection, so on a plate whose colour *is* the data a selected well and an unselected one render identically, and "select these wells, then act on them" has no feedback at all. The rim is drawn **inset**, because outside is taken: `_paint_ring` annotates a well from 7% beyond its edge and a host may need both marks on one well at once. It is `text_primary` rather than the accent for the same reason — the accent is the ring's, and a near-white rim is the one ink no host value can take, so it cannot read as one more category. Turning it on also stops selection *lighting* an uncoloured well: the rank-cycled `traces` palette a lit selection reaches for opens with the same `#6AB2FB` that `variable_series.VALUE_PICKS` opens with, so picking an unannotated well used to paint it the exact colour of a value nobody had given it. Off by default, so every other plate is unchanged — on a plate whose fill is free, lit-versus-recessed already says it and a second mark saying the same thing is noise. `tests/test_plate_selection_rim.py` measures one well rendered twice, selected and not, at one position: its first version compared two neighbouring wells and reported them different against the *unfixed* painter, because each cell rasterises at its own sub-pixel offset and no two wells ever hash alike whatever is drawn in them. The per-well body is `_paint_well`, lifted out of `paintEvent` — that method carries the headers, the grid, the rubber band, the path and the disabled scrim, and a well is the one part of it with a decision tree of its own. Every lightening of a state colour goes through `_lighten` (an RGB blend toward white), never `QColor.lighter`: Qt's version raises the HSV *value* and, once value is at the ceiling, starts dropping *saturation* — it lightens toward white rather than toward a pale version of the hue. Every state colour in the app sits at value 245–253, so `accent2 #B98CF7` came back as literally `#ffffff`; a dial's unfilled share and the sphere gradient's highlight both used it, which is how an uploaded well rendered as a white disc with no hue left to say which stage it was in. `_blend` is the one lerp behind `_lighten` and `_mix_with_rail`. `darker()` needs no equivalent — lowering value never touches saturation. **The sphere gradient is damped on a dial and only on a dial** (`_DIAL_RELIEF`, scaling the stops `_sphere_stops` returns). Blending toward white keeps the hue but *compresses two tones together* — the nearer both are to white, the smaller the gap — so at a plain well's full relief the done and remaining halves of a green well came within 25 luminance of each other under the highlight, against 39 at the centre, and the completed wedge was itself 35 % of the way to white. Reported as "the completed portion is too light and I can't see the difference between complete and incomplete". At 0.43 relief the highlight is 15 % toward white and that worst case is 33. A plain well keeps the full relief because it has no internal boundary for the highlight to compress; only the dial carries a second signal in the same pixels, so only the dial pays. Tone alone still cannot carry green, so the wedge's radii and arc are **stroked** in `base.darker(170)` — skipped at a full dial, where the boundary *is* the rim the well already has. A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus three decoration layers that stack independently of each other and of the fill: a `setWellMarker` glyph, a `setWellFraction` / `clearWellFractions` progress dial, and a `setWellRing` / `setWellRings` / `clearWellRings` accent ring drawn just *outside* the well body. The dial is used by every live plate map that reports a run, whether that is a dashboard's own status plate (Analyze, Concatenate, Import Loose, Merge Plates) or a page's input plate doubling as the progress display (Subset's picker, Convert OME-TIFF's path editor); Validate has no dial because it inspects rather than copies. The ring exists because a host can need a third channel: Batch Export colours a well by which group owns it and rings the wells of the group *currently being edited*, two different questions that would otherwise fight over the same fill. **Every Batch Export mode shares one set of export groups.** Line, Bar, Scatter (cells) and Scatter (aggregate) used to persist under four private slots chosen by `_compute_persist_key`, so groups built in one mode were invisible in the others and anyone exporting the same conditions four ways built them four times; the groups describe the dataset's conditions, not the plot type, so they live in one slot (`base_panel.SHARED_PERSIST_KEY`). A document written before that has its four legacy keys merged in a fixed order and de-duplicated by name, and only when the shared key is absent — otherwise deleting a group would be undone by a legacy slot re-supplying it on the next load. The four panels are cached children of one host toggled by `setVisible`, so `tab_view._show_mode` calls `_reload_persisted_groups()` on the panel it reveals; that is not the auto-resync from the *sample-definition* replicate sets which the same function's comment rules out (that one wiped the user's export groups on every visit). No `EventBus` signal — the catalogue is capped at five by contract and a mode switch is local. Batch Export drives the plate in `"paint"` because an export group's model is replicate sets plus solo wells, not a flat set of clicked wells: `_apply_drag` resolves the well under the cursor to the sample definition that owns it and adds or removes that whole **member**, falling back to a solo well only for a well no sample claims. Membership is compared **by name** — `domain.selections_model.replicate_sets_loaded` builds a fresh `ReplicateSet` on every call and the class defines no `__eq__`, so an identity test never matched an already-present member: dragging across two wells of one sample appended it twice (and the group then exported that condition twice), while dragging a sample back off a group removed nothing. The name is already the identity key everywhere else, being what `_serialize_groups` persists and what hydration matches on. All three decorations, plus the path, are pruned by `setEnabledWells` / `setWellEnabled` — a disabled well paints as an empty socket, and a ring or a dial on a socket describes a well that is not there. Per-well rank colours are now pushed on **every** tab (not just the plotting tabs), so a given well reads as the same colour everywhere in the app. Every host sizes and places its plate through `plate_geometry.apply_plate_geometry` (below) rather than setting its own caps. |
@@ -9687,32 +9738,29 @@ that opens a small demo window so you can iterate visually with
 
 ## 8. Theming
 
-The app has two complementary theme surfaces:
+`ui/theme.py` is the whole theme surface. It holds the Python-side design
+tokens — `Colors`, `Typography`, `Spacing`, `Radii`, `Metrics` (control padding,
+themeable for density) — plus the `qss()` builder that produces the full
+application stylesheet, and the **theme registry** (`THEMES` / `apply_theme` /
+`select_theme_from_env`, see "Selecting a theme" below). The `widgets/` package
+and most of the app shell read `theme.Colors.*`; the `blue` palette is the class
+values written in the module, and is the baseline every theme is applied onto and
+restored to — the app itself starts on `grey`.
 
-1. **`theme.py`** (repo root) — Python-side design tokens for the v2
-   redesign. `Colors`, `Typography`, `Spacing`, `Radii`, `Metrics` (control
-   padding — themeable for density), plus a `qss()` builder that produces the
-   full application stylesheet. The `widgets/` package and most of the app shell
-   read from `theme.Colors.*`; the `blue` palette is the class values here,
-   and is the baseline every theme is applied onto and restored to — the app
-   itself starts on `grey`. This is the single source of the app chrome QSS.
-   `theme.py`
-   *also* holds the **theme registry** (`THEMES` / `apply_theme` /
-   `select_theme_from_env`) — see "Selecting a theme" below.
-2. **`ui/theme/`** — a legacy remnant, down to exactly two colours with no
-   `theme.Colors` equivalent yet: `CLR_DANGER` and `CLR_SUCCESS_DARK`, read via
-   `ui.theme.get_color(name)` by batch-export's progress label (their hex
-   doesn't match `theme.Colors.danger`/`.success` closely enough to be a safe
-   direct swap). Everything else this module used to carry — surfaces,
-   borders, text, accent, warn, the well palette, the Publication-mode plot
-   palette — has migrated to `theme.Colors` / `theme.CPub` /
-   `theme.WELL_COLORS_TUPLE` directly. If a future change gives the remaining
-   two tokens a `theme.Colors` home too, `ui/theme/` can be deleted outright.
+There is no stylesheet driver, no theme-manager class and no per-theme `.qss`
+file: `theme.qss()` is the one stylesheet builder, and it lives beside the tokens
+it reads.
 
-`ui/theme/` is colour tokens only: it holds `styles.py` and nothing else — no
-stylesheet driver, no theme-manager class, no per-theme `.qss` files. The theme
-registry lives in `theme.py` (below), and `theme.qss()` is the one stylesheet
-builder.
+At the bottom of the module, in a block marked as such, sit the last two named
+colours with no `Colors` home of their own — `CLR_DANGER` and
+`CLR_SUCCESS_DARK`, read through `ui.theme.get_color(name)` by batch-export's
+progress label. `CLR_DANGER` tracks `Colors.danger`; `CLR_SUCCESS_DARK` is its
+own value, because its hex does not match `Colors.success` closely enough for the
+swap to be safe. That is the only reason the pair still exists — everything else
+the accessor used to carry (surfaces, borders, text, accent, warn, the well
+palette, the Publication-mode plot palette) has migrated to `Colors` / `CPub` /
+`WELL_COLORS_TUPLE` directly. Give those two an exact `Colors` home and the whole
+block goes. New colours never go there.
 
 **Every interactive class the app disables needs a `:disabled` rule, and the
 base rule's `color` is why.** A stylesheet colour declared with no disabled
@@ -9827,16 +9875,16 @@ per-widget rewiring**.
   a dev-facing env var / flag.
 - `WELL_COLORS_TUPLE` (categorical data identity) and `CPub` (white-bg
   publication export) are deliberately **theme-independent**.
-- `ui/theme/styles.py` registers `refresh_from_theme` as a theme hook, so its
+- `ui/theme.py` registers `refresh_legacy_palette` as a theme hook, so its
   `get_color()` palette (`CLR_DANGER`/`CLR_SUCCESS_DARK` only, batch-export's
   progress label) re-derives from the freshly-applied `Colors`.
 
 When you add a colour or size: add it to `theme.Colors` / `theme.CPub` (for a
 publication-mode plot colour) / `theme.Spacing` / `theme.Metrics` / etc. To
 let a theme override it, add the attribute to the relevant bundle in
-`THEMES`. **Do not** hardcode hex / px values inline, and never add a new
-entry to `ui/theme/styles.py` — that module is a two-token legacy remnant
-(see above), not a place to route new colours.
+`THEMES`. **Do not** hardcode hex / px values inline, and never add an entry to
+the legacy-accessor block at the bottom of `ui/theme.py` — those two tokens are
+a remnant (see above), not a place to route new colours.
 
 ### Section headers
 
@@ -11627,12 +11675,12 @@ in sync.
 
 Adding a Review tab, a Datasets tool, or an Analyze form section means adding
 two things: a section in `_Docs/Markdowns/README_WellViewer.md`, and an entry in
-the matching map in `help_topics.py` whose value is that heading's exact text.
+the matching map in `ui/help_topics.py` whose value is that heading's exact text.
 Without both, the drawer opens on the mode overview for that page and nothing
 says so.
 
 For a **Datasets tool or an Analyze form section**, `tests/test_help_topics.py`
-fails until they are there: it reads the Datasets roster out of `datasets_tab.py`
+fails until they are there: it reads the Datasets roster out of `datasets/tab.py`
 and the section titles out of `analyze/form.py`, so neither can be added
 without the guard noticing.
 
@@ -11733,8 +11781,8 @@ Three places to check:
 
 ### 12.8 "The app died with no Python traceback (segfault / access violation)"
 
-`boot_diag` is imported before PySide6 and arms `faulthandler` onto a per-launch
-**boot log** in `boot_diag.user_state_dir()` — `%LOCALAPPDATA%\allwell` on
+`startup.boot_diag` is imported before PySide6 and arms `faulthandler` onto a per-launch
+**boot log** in `startup.boot_diag.user_state_dir()` — `%LOCALAPPDATA%\allwell` on
 Windows, `~/.cache/allwell` elsewhere, the system temp directory if neither is
 writable, and also where a frozen build's matplotlib font cache goes — so a
 hard native crash dumps a
@@ -11780,7 +11828,7 @@ selections schema) is described in the `well_viewer/domain/selections_model.py`
 module docstring; that module is the live source of truth for the
 contract.
 
-`design/` (at the repo root) holds the **non-Markdown** design artifacts — the
+`_Docs/design/` holds the **non-Markdown** design artifacts — the
 HTML mockups (`grey_theme_mockup.html`, `image_table_builder_mockup.html`) — for
 visual reference only. Rendered screenshots live under
 `_Docs/visual_audit/screenshots/`, produced by `tests/visual/render_views.py` —
@@ -11842,10 +11890,10 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
   correct are allowlisted by *file and function*, never by file, so an exemption
   cannot cover the next handler added beside it; a liveness test fails when an
   entry stops naming a real handler. Those sites are the crash reporter in
-  `boot_diag.py` — where an escaping exception loses the crash report, the one
+  `startup/boot_diag.py` — where an escaping exception loses the crash report, the one
   artifact that makes a native crash diagnosable — matplotlib's font-cache
   rebuild, and `_bootstrap_lib._quietly`'s own last-resort note to stderr.
-- **Never hardcode colours.** Use `theme.Colors.*` or QSS object names.
+- **Never hardcode colours.** Use `ui.theme.Colors.*` or QSS object names.
 - **Never block the UI thread.** Heavy operations spawn workers (see
   `well_viewer/features/smfish/worker.py` and the `services.pipeline_runner`
   pattern). Streaming progress messages route through `logging` and the
@@ -11963,11 +12011,15 @@ The map (each rule links to the test that holds it):
 
 | Contract (§) | Enforced by |
 |---|---|
-| Pipeline self-sufficiency — no `well_viewer`/`widgets`/Qt anywhere under `pipeline/` or `util/`, nor in `process_microscopy.py` / `WellPlateZipper.py`, at any nesting (§6.2). Scoped by directory walk rather than a file list, so a new module in either package is covered from the moment it exists | `tests/test_architecture_contracts.py::test_pipeline_is_self_sufficient` |
+| Pipeline self-sufficiency — no `well_viewer`/`widgets`/Qt anywhere under `pipeline/` or `util/`, nor in `process_microscopy.py` / `pipeline/well_plate_zipper.py`, at any nesting (§6.2). Scoped by directory walk rather than a file list, so a new module in either package is covered from the moment it exists | `tests/test_architecture_contracts.py::test_pipeline_is_self_sufficient` |
 | Every repo-root module the pipeline imports is uploaded to the remote (§6.2) | `tests/test_remote_manifest.py` + `test_remote_runner.py::test_required_files_list_is_what_we_promised` |
 | `services/` stay Qt-free (CLI-reusable, §13) | `test_architecture_contracts.py::test_services_have_no_qt_imports` |
 | `widgets/` carry no app coupling (§13) | `test_architecture_contracts.py::test_widgets_do_not_import_the_app` |
 | Every top-level package of application code is in `tests/_repo_scan.py`'s `PACKAGE_ROOTS`, and every entry there names a directory that exists. A package the roster omits is invisible to every AST guard at once, and the omission makes the suite *greener* — there is nothing else that measures a guard walking past code it was never handed | `tests/test_scan_surface_is_complete.py` |
+| The repository root holds only entry points, repository configuration and packages (§3) — every root `.py` is in a roster with a written reason, and no roster entry names a file that has gone. A loose module imports exactly as well as a packaged one, so the entire cost of misplacement falls on whoever next goes looking for it, and nothing else would report it. The same test holds `_Docs/_Installation/build_all_well.sh`'s `REQUIRED` preflight roster against the tree — it required `analyze_tab.py` long after the Analyze pane became `analyze/tab.py`, and since the script exits 1 on the first missing entry, no release could be cut from it | `tests/test_root_holds_only_entry_points.py` |
+| The PyInstaller spec's own **imports** resolve, not just the rosters it bundles. PyInstaller executes the spec as Python, and it imports first-party code at module scope — `scripts.profile_build`, `services.remote_runner`, `ui.theme` to validate a baked `ALLWELL_THEME`. A stale one is not a missing file in the bundle, it is a build that will not start, and the `ALLWELL_THEME` import sits inside a conditional so only a themed build reaches it: the default build stays green while the themed one is broken. Nothing in the suite executes the spec, so the first symptom is otherwise a release that cannot be built | `tests/test_spec_ships_every_first_party_module.py::test_the_spec_imports_only_modules_that_exist` |
+| Every `--run-*` branch of `all_well_launcher._dispatch` imports a module that exists **and** calls that module's own `main()`. Both halves are needed: importing the zipper and then calling the pipeline's `main()` satisfies the import check while a frozen grouping run silently performs a pipeline run instead. Checked against the syntax tree, because `all_well_launcher` is the one module no test may import | `tests/test_zipper_frozen_dispatch.py` |
+| `services.input_resolution_service.ZIPPER_SCRIPT` resolves to the `pipeline.well_plate_zipper` module itself. The grouping pre-pass is reached by **path** rather than by import, so nothing in Python notices when the path stops describing the tree: `find_zipper_script()` answers `None` and `run_zipper` raises only at the moment a user starts a run on a folder of loose TIFs. Identity rather than existence, because a constant pointing at `pipeline/__init__.py` would satisfy an `.exists()` check while spawning a subprocess that does nothing. The other rosters naming this file (`services.remote_manifest`, the build script's `REQUIRED` array, the spec's package walk) each read their own list against the tree and none of them reads this constant | `tests/test_zipper_script_path_resolves.py` |
 | Controllers reach the app via the `app` arg, not by importing `WellViewerApp` (§9) | `test_architecture_contracts.py::test_nothing_imports_wellviewerapp_at_runtime` |
 | EventBus is a capped catalogue of exactly 5 signals (§9) | `test_architecture_contracts.py::test_event_bus_signal_catalogue_is_capped` |
 | Feature-module naming scheme (§3) | `test_architecture_contracts.py::test_feature_module_naming` |
@@ -12237,7 +12289,7 @@ CSVs don't have a `timepoint_hours` column. Confirm the schema you ran the
 pipeline with included a `timepoint` field. Single-timepoint experiments show
 one entry (e.g. `0`).
 
-**`WellPlateZipper` produces no zip files.** — Schema or separator does not
+**The grouping step produces no zip files.** — Schema or separator does not
 match the filenames. Make sure `well` points at the right token, the separator
 is right, and the token is a valid plate position (`A01`–`H12` or `A1`–`H12`).
 The schema used is logged at the start of every run.

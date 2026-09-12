@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import theme
+from ui import theme
 from widgets.icons import make_icon
 
 # Pixel geometry for this module's controls. Named rather than written

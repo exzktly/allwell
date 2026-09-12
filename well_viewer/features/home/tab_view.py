@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from well_viewer.core.app_shell_view import mirror_tab_widget
 from well_viewer.core.selection_controller import import_selections_from_json
 from well_viewer.core.ui_helpers import notes_schedule_save
@@ -144,7 +144,7 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     band.add_action(import_btn)
 
     sub_tabs = QTabWidget(parent)
-    # One theme.py rule names every nested sub-tab bar in the pane — this one,
+    # One ui/theme.py rule names every nested sub-tab bar in the pane — this one,
     # Plotting's and the Image Browser's — so the three cannot drift apart.
     sub_tabs.setObjectName("HomeSubTabs")
     sub_tabs.tabBar().setExpanding(False)

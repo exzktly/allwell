@@ -22,7 +22,7 @@ from typing import Any
 
 import numpy as np
 
-import theme
+from ui import theme
 from well_viewer.core.safe import swallowed
 from well_viewer.domain.tp_match import tp_close_mask
 from well_viewer.features.scatter.collect import timepoint_color_map

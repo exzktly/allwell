@@ -8,7 +8,7 @@ by contrast, is filename-token driven: it wants one 2-D TIFF per
 
 This module bridges the two by *exploding* the packed file directly into the
 per-well ``<WELL>.zip`` archives the pipeline reads — the same layout
-``resolve_input_output`` accepts as ready input (no ``WellPlateZipper`` pass).
+``resolve_input_output`` accepts as ready input (no ``well_plate_zipper`` pass).
 Wells are converted in parallel across a thread pool, each written as one atomic
 archive (``util.zip_write.atomic_zip``), which also collapses the thousands of
 per-file fsyncs a loose-TIF explode would cost into two per well.
@@ -1448,7 +1448,7 @@ def explode_ome_tiff(
     2-D plane and stored as a member named
     ``<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif`` inside that well's
     archive (the default filename schema -- the layout the pipeline reads
-    directly, so no ``WellPlateZipper`` pass is needed). Each stage position maps
+    directly, so no ``well_plate_zipper`` pass is needed). Each stage position maps
     to a 96-well label by acquisition order: *well_order*, an explicit ordered
     list of wells (which need not be rectangular), is used verbatim when given;
     otherwise the label list is the serpentine sweep of the *grid_rows* x

@@ -225,7 +225,7 @@ def test_convert_in_place_writes_real_zips_not_bare_folders(tmp_path):
     convert_in_place() used to call
     services.input_resolution_service._consolidate_mixed_to_zips after
     run_zipper, which is a documented no-op when zero zips already exist —
-    exactly the state after a fresh WellPlateZipper.py run (it only ever
+    exactly the state after a fresh pipeline/well_plate_zipper.py run (it only ever
     produces per-well folders, never zips). Every well was left as a bare
     folder forever, with the run still reporting success. This test drives
     the real subprocess-backed run_zipper (stdlib-only, no imaging stack, the
@@ -258,7 +258,7 @@ def test_convert_in_place_with_move_source_tifs_deletes_originals(tmp_path):
     move_source_tifs plumbing, isolated from the dashboard/worker layers
     above it. Without ``move_source_tifs=True`` (this module's default is
     False, exercised by test_convert_in_place_writes_real_zips_not_bare_folders
-    above), WellPlateZipper.folder_well() copies rather than moves, so the
+    above), well_plate_zipper.folder_well() copies rather than moves, so the
     loose top-level originals survive a successful run despite the run_zipper
     subprocess having already grouped them into a zip."""
     src = tmp_path / "loose"

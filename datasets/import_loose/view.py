@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import theme
+from ui import theme
 from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
 from widgets._support import set_variant
@@ -516,7 +516,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         # typed. A schema with no "well" cannot say which archive a file belongs
         # to and one with two cannot choose, so the scan examines every file and
         # groups none — a tidy zero with no reason attached. In-place runs fail
-        # harder still: they shell out to WellPlateZipper.py, which exits 2 on
+        # harder still: they shell out to pipeline/well_plate_zipper.py, which exits 2 on
         # exactly these errors. And a schema with no "channel" produces archives
         # Analyze cannot then read, which is the only reason to build them.
         if self._schema_picker.errors():

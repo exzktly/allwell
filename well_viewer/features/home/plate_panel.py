@@ -47,7 +47,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QWidget
 
-import theme
+from ui import theme
 from widgets.plate_geometry import apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
 

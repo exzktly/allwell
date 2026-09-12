@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 
 from dataclasses import dataclass
 
-import theme
+from ui import theme
 from services import run_journal
 from services.run_spec import RunSpec, RunSpecError
 from services.suspend_record import (

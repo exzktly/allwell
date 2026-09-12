@@ -21,7 +21,7 @@ the render seam are downstream of it.
 ctx-native — reads ``ctx.state`` / ``ctx.runtime`` / ``ctx.widgets`` only, never the
 unwrapped app god-object (the tab-unwrap guardrail is 0). Styling: a scoped QSS
 block (``_QSS``) on the shelf root reproduces the design mockup with the app's
-theme tokens (mirrors ``theme.py``).
+theme tokens (mirrors ``ui/theme.py``).
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 
 from well_viewer.core.safe import swallow
 from widgets import menu_exec
@@ -94,7 +94,7 @@ _STANDARD_CMAP = (
 )
 
 # Scoped stylesheet — applied to the shelf root; object-name selectors keep it
-# from leaking onto the rest of the app. Colours mirror ``theme.py`` tokens.
+# from leaking onto the rest of the app. Colours mirror ``ui/theme.py`` tokens.
 _QSS_TEMPLATE = Template("""
 QWidget#ITBShelf { background: transparent; }
 QLabel#ITBTitle { color: $text_primary; font-weight: 640; font-size: 12.5px; }

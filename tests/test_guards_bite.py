@@ -514,7 +514,8 @@ def test_axes_selection_guard_clears_a_non_prompt(tmp_path, monkeypatch, shape):
 # ── help topics ─────────────────────────────────────────────────────────────
 #
 # The help-topic guard cannot be proven with `scripts/prove_guard.sh`: the maps
-# it reads live in `help_topics.py`, a module the base branch does not have, so
+# it reads live in `ui/help_topics.py`, a module the base branch does not have
+# at that path, so
 # the run there dies on an import before measuring anything. This is the whole
 # proof it gets, so both rules are exercised in both directions.
 
@@ -547,7 +548,7 @@ class Form:
 def _help_topics_root(tmp_path: Path) -> Path:
     """A synthetic repo root holding the three files the guard reads."""
     _write(tmp_path, "_Docs/Markdowns/README_WellViewer.md", _FAKE_README)
-    _write(tmp_path, "datasets_tab.py", _FAKE_DATASETS_TAB)
+    _write(tmp_path, "datasets/tab.py", _FAKE_DATASETS_TAB)
     _write(tmp_path, "analyze/form.py", _FAKE_ANALYZE_FORM)
     return tmp_path
 
@@ -577,7 +578,7 @@ def test_help_topic_guard_catches_a_topic_naming_no_heading(monkeypatch):
     with or without the repointing — the case would go green while proving
     nothing about the entry it claims to be testing.
     """
-    import help_topics
+    from ui import help_topics
     from tests import test_help_topics as guard
 
     guard.test_every_topic_names_a_real_heading()      # clean before
@@ -851,7 +852,7 @@ _HOME_REGISTRY_SRC = (
 
 
 def _run_home_topic_scan(monkeypatch, tmp_path, topics: dict):
-    import help_topics
+    from ui import help_topics
 
     (tmp_path / "well_viewer" / "features").mkdir(parents=True, exist_ok=True)
     (tmp_path / "well_viewer" / "features" / "registry.py").write_text(
@@ -3906,3 +3907,388 @@ def test_response_hour_guard_catches_every_spelling(shape):
 def test_response_hour_guard_clears_the_sanctioned_shapes(shape):
     offenders = _response_hour_offenders(RESPONSE_HOUR_GOOD[shape])
     assert not offenders, f"the {shape!r} shape was wrongly flagged: {offenders}"
+
+
+# ── root placement ──────────────────────────────────────────────────────────
+#
+# `tests/test_root_holds_only_entry_points.py` has three rules, and two of them
+# already held on the base branch, so `scripts/prove_guard.sh` can only ever
+# prove the first. These are the cases for all three, driven against a synthetic
+# root so they keep biting after the fix has merged.
+
+def _root_guard(monkeypatch, test_name: str, root: Path, extra: dict | None = None):
+    return _run_rooted_scan(monkeypatch, "tests.test_root_holds_only_entry_points",
+                            test_name, root, extra)
+
+
+def _fake_root(tmp_path: Path, *, modules: list[str], required: list[str]) -> Path:
+    """A synthetic repository root: some root `.py` files and a build script."""
+    for name in modules:
+        _write(tmp_path, name, '"""Stub."""\n')
+    body = "REQUIRED=(\n" + "".join(f'    "{p}"\n' for p in required) + ")\n"
+    _write(tmp_path, "_Docs/_Installation/build_all_well.sh", body)
+    return tmp_path
+
+
+@pytest.mark.parametrize("loose", ["theme.py", "datasets_tab.py", "helpers.py"])
+def test_root_guard_catches_a_loose_module(tmp_path, monkeypatch, loose):
+    """The shape that shipped: a library module living beside the entry points."""
+    root = _fake_root(tmp_path, modules=["allwell.py", loose], required=[])
+    exc = _root_guard(monkeypatch, "test_no_loose_module_at_the_repository_root", root,
+                      {"ROOT_MODULES": {"allwell.py": "entry point"}})
+    assert exc is not None, f"a loose {loose} at the root went uncaught"
+    assert loose in str(exc)
+
+
+def test_root_guard_clears_a_root_of_entry_points_only(tmp_path, monkeypatch):
+    root = _fake_root(tmp_path, modules=["allwell.py", "version.py"], required=[])
+    exc = _root_guard(monkeypatch, "test_no_loose_module_at_the_repository_root", root,
+                      {"ROOT_MODULES": {"allwell.py": "entry point",
+                                        "version.py": "repository metadata"}})
+    assert exc is None, f"an entry-point-only root was wrongly flagged: {exc}"
+
+
+def test_root_guard_catches_a_roster_entry_whose_file_has_gone(tmp_path, monkeypatch):
+    """A stale allowlist entry is a permission under a name that has left."""
+    root = _fake_root(tmp_path, modules=["allwell.py"], required=[])
+    exc = _root_guard(monkeypatch, "test_the_roster_names_nothing_that_has_gone", root,
+                      {"ROOT_MODULES": {"allwell.py": "entry point",
+                                        "analyze_tab.py": "long gone"}})
+    assert exc is not None, "a roster entry naming a missing file went uncaught"
+    assert "analyze_tab.py" in str(exc)
+
+
+def test_root_guard_catches_a_build_roster_requiring_a_missing_file(tmp_path, monkeypatch):
+    """The shape that shipped: `analyze_tab.py`, required long after it moved."""
+    root = _fake_root(tmp_path, modules=["allwell.py"],
+                      required=["allwell.py", "analyze_tab.py"])
+    module = importlib.import_module("tests.test_root_holds_only_entry_points")
+    monkeypatch.setattr(module, "_BUILD_SCRIPT",
+                        root / "_Docs" / "_Installation" / "build_all_well.sh")
+    exc = _root_guard(monkeypatch,
+                      "test_the_build_script_requires_only_files_that_exist", root)
+    assert exc is not None, "a build roster requiring a missing file went uncaught"
+    assert "analyze_tab.py" in str(exc)
+
+
+#: Rosters the guard must refuse to read, and the phrase that says *why* it
+#: refused. Asserting the phrase rather than merely "it raised" is the point: the
+#: guard has a floor assertion ("parsed no entries") that also fires on a renamed
+#: array, so a parse that returned an empty list instead of raising would still
+#: produce an AssertionError mentioning `REQUIRED=(`, and a case checking only
+#: that much passes against both implementations. Mutating the parse to return
+#: `[]` left the first version of these cases green.
+UNPARSEABLE_ROSTERS = {
+    # The array was renamed or moved — nothing to read at all.
+    "renamed": ('FILES=(\n    "x.py"\n)\n', "moved or was renamed"),
+    # It parses one entry and then the file ends: the shape that reports the
+    # paths it happened to reach as if they were the whole roster.
+    "unclosed": ('REQUIRED=(\n    "allwell.py"\n', "ran off the end"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(UNPARSEABLE_ROSTERS))
+def test_root_guard_notices_a_build_roster_it_cannot_parse(tmp_path, monkeypatch, shape):
+    """An unparseable roster must fail, and say which way it was unreadable."""
+    body, phrase = UNPARSEABLE_ROSTERS[shape]
+    _write(tmp_path, "_Docs/_Installation/build_all_well.sh", body)
+    module = importlib.import_module("tests.test_root_holds_only_entry_points")
+    monkeypatch.setattr(module, "_BUILD_SCRIPT",
+                        tmp_path / "_Docs" / "_Installation" / "build_all_well.sh")
+    exc = _root_guard(monkeypatch,
+                      "test_the_build_script_requires_only_files_that_exist", tmp_path)
+    assert exc is not None, f"a {shape!r} REQUIRED array passed silently"
+    assert phrase in str(exc), (
+        f"a {shape!r} roster failed, but not for the reason claimed — expected "
+        f"{phrase!r} in: {exc}")
+
+
+# ── frozen-dispatch imports ─────────────────────────────────────────────────
+#
+# `tests/test_zipper_frozen_dispatch.py` checks that every `--run-*` branch in
+# `all_well_launcher._dispatch` imports something that exists. The rule held on
+# the base branch, so `scripts/prove_guard.sh` cannot prove it; these are the
+# cases, driven against a synthetic launcher.
+#
+# The third one is the reason this block exists. The guard's first version
+# decided "submodule or symbol?" by asking whether the submodule file existed,
+# which made a *moved* submodule indistinguishable from a symbol import — so it
+# recorded the parent package, found that the parent exists, and passed. It
+# survived four mutations and fell to the fifth.
+
+_FAKE_LAUNCHER_HEAD = '''import sys
+
+
+def _dispatch() -> None:
+'''
+
+DISPATCH_IMPORT_BAD = {
+    # A submodule that does not exist under a package that does — the shape a
+    # move inside the tree leaves behind.
+    "gone_submodule": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        from pipeline import zipper_that_moved_away
+        zipper_that_moved_away.main()
+        return
+''',
+    # A module that does not exist under a package that does, imported plainly.
+    "gone_dotted_module": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        import pipeline.zipper_that_moved_away
+        pipeline.zipper_that_moved_away.main()
+        return
+''',
+    # A symbol that does not exist inside a module that does.
+    "gone_symbol": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        from pipeline.well_plate_zipper import no_such_entry
+        no_such_entry()
+        return
+''',
+}
+
+DISPATCH_IMPORT_GOOD = {
+    # A real first-party submodule import.
+    "real_submodule": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        from pipeline import well_plate_zipper
+        well_plate_zipper.main()
+        return
+''',
+    # Stdlib, which the check is not entitled to judge — `importlib.util` read as
+    # a missing submodule of the first-party `util` package is what made the
+    # domain of this predicate explicit.
+    "stdlib_lookalike": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        import importlib.util
+        from pipeline import well_plate_zipper
+        well_plate_zipper.main()
+        return
+''',
+    # A symbol (not a submodule) out of a real first-party module.
+    "real_symbol": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        from util.frozen_io import ensure_std_streams
+        from pipeline import well_plate_zipper
+        ensure_std_streams()
+        well_plate_zipper.main()
+        return
+''',
+}
+
+
+def _dispatch_offenders(monkeypatch, tmp_path: Path, body: str) -> dict:
+    """Run the guard's collector over a synthetic launcher and return what fails.
+
+    The synthetic launcher is written into `tmp_path`, but `REPO_ROOT` stays the
+    real one: the rule is "does this import resolve *against this repository*",
+    and pointing it at an empty tree would make every import unresolvable and
+    every case pass for the wrong reason.
+    """
+    import importlib
+
+    module = importlib.import_module("tests.test_zipper_frozen_dispatch")
+    fake = _write(tmp_path, "all_well_launcher.py", _FAKE_LAUNCHER_HEAD + body)
+    real_root = module.REPO_ROOT
+
+    class _Root:
+        """Hands back the synthetic launcher, everything else the real tree."""
+
+        def __truediv__(self, other):
+            return fake if other == "all_well_launcher.py" else real_root / other
+
+        def joinpath(self, *parts):
+            return real_root.joinpath(*parts)
+
+        def iterdir(self):
+            return real_root.iterdir()
+
+        def glob(self, pat):
+            return real_root.glob(pat)
+
+    monkeypatch.setattr(module, "REPO_ROOT", _Root(), raising=False)
+    return {s: sorted(m for m in mods if not module._resolves(m))
+            for s, mods in module._dispatch_imports().items()}
+
+
+@pytest.mark.parametrize("shape", sorted(DISPATCH_IMPORT_BAD))
+def test_dispatch_import_guard_catches_an_import_that_cannot_resolve(
+        tmp_path, monkeypatch, shape):
+    broken = _dispatch_offenders(monkeypatch, tmp_path, DISPATCH_IMPORT_BAD[shape])
+    assert any(v for v in broken.values()), (
+        f"the {shape!r} dispatch import resolved against the tree, so a frozen "
+        f"run would die on ModuleNotFoundError with nothing to have warned: {broken}")
+
+
+@pytest.mark.parametrize("shape", sorted(DISPATCH_IMPORT_GOOD))
+def test_dispatch_import_guard_clears_a_working_dispatch(tmp_path, monkeypatch, shape):
+    broken = _dispatch_offenders(monkeypatch, tmp_path, DISPATCH_IMPORT_GOOD[shape])
+    offenders = {k: v for k, v in broken.items() if v}
+    assert not offenders, f"the {shape!r} dispatch was wrongly flagged: {offenders}"
+
+
+def test_the_zipper_branch_is_pinned_by_name_not_only_by_resolution(
+        tmp_path, monkeypatch):
+    """The resolution check has one blind spot, and a second assertion covers it.
+
+    `import WellPlateZipper` — the exact line the move left stale — cannot be
+    caught by asking whether the import resolves: once the file leaves the root,
+    `WellPlateZipper` is no longer a first-party top-level name, and a vanished
+    first-party name is indistinguishable from a third-party one that simply is
+    not installed here. Widening the check to flag every unknown top-level import
+    would flag `PySide6` and `numpy` too.
+
+    So the `--run-zipper` branch is *also* pinned positively: it must import
+    something named `well_plate_zipper`. That is what actually fires on the stale
+    line, and this is the case proving it does.
+    """
+    import importlib
+
+    module = importlib.import_module("tests.test_zipper_frozen_dispatch")
+    stale = '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        import WellPlateZipper
+        WellPlateZipper.main()
+        return
+'''
+    broken = _dispatch_offenders(monkeypatch, tmp_path, stale)
+    assert not any(v for v in broken.values()), (
+        "the resolution check reported the stale root import — if it can now see "
+        "a vanished top-level name, this case and the docstring above are out of "
+        "date, and the second assertion may no longer be needed")
+
+    # The assertion that does catch it, run over the same synthetic launcher.
+    fake = _write(tmp_path, "all_well_launcher.py", _FAKE_LAUNCHER_HEAD + stale)
+    real_root = module.REPO_ROOT
+
+    class _Root:
+        def __truediv__(self, other):
+            return fake if other == "all_well_launcher.py" else real_root / other
+
+        def joinpath(self, *parts):
+            return real_root.joinpath(*parts)
+
+        def iterdir(self):
+            return real_root.iterdir()
+
+        def glob(self, pat):
+            return real_root.glob(pat)
+
+    monkeypatch.setattr(module, "REPO_ROOT", _Root(), raising=False)
+    named = module._dispatch_imports()["--run-zipper"]
+    assert not any(m.endswith("well_plate_zipper") for m in named), (
+        f"the stale branch imports {named}, which already names the zipper — "
+        "this case is no longer reproducing the shape it was written for")
+
+
+# ── the spec's own imports ──────────────────────────────────────────────────
+#
+# `tests/test_spec_ships_every_first_party_module.py` gained a check over the
+# imports the spec makes, after a stale `import theme` shipped in it: PyInstaller
+# executes the spec as Python, so the import aborts the build — but only for a
+# build that takes the branch it sits in (`ALLWELL_THEME=<name>`), which is why
+# the default build stayed green and nothing said a word.
+#
+# Its first version copied a "skip anything not first-party" filter from the
+# dispatch guard, which made it blind to exactly that line: a module that has
+# *gone* is not a first-party name either. Both mutations passed. The default is
+# now inverted — not stdlib and not on a short allowlist means it must resolve
+# here — and these are the cases.
+
+SPEC_IMPORT_BAD = {
+    # The line that shipped.
+    "gone_root_module": "import theme as _thememod\n",
+    # A first-party package that moved.
+    "gone_package": "from build.profile_build import compute_exclusions\n",
+    # A third-party import nobody declared.
+    "undeclared_third_party": "import numpy\n",
+}
+
+SPEC_IMPORT_GOOD = {
+    "stdlib": "import importlib.util\n",
+    "allowlisted_external": "from PyInstaller.utils.hooks import collect_all\n",
+    "real_first_party_symbol": "from scripts.profile_build import bundle_name\n",
+    "real_first_party_submodule": "from ui import theme as _thememod\n",
+}
+
+
+def _spec_import_offenders(monkeypatch, tmp_path: Path, line: str):
+    """Run the spec guard's import collector over a synthetic spec."""
+    import importlib
+
+    module = importlib.import_module(
+        "tests.test_spec_ships_every_first_party_module")
+    fake = _write(tmp_path, "all_well.spec", line)
+    monkeypatch.setattr(module, "SPEC", fake, raising=False)
+    return [(ln, m) for ln, m in module._spec_repo_imports()
+            if not module._is_module(m)]
+
+
+@pytest.mark.parametrize("shape", sorted(SPEC_IMPORT_BAD))
+def test_spec_import_guard_catches_an_import_that_cannot_resolve(
+        tmp_path, monkeypatch, shape):
+    offenders = _spec_import_offenders(monkeypatch, tmp_path, SPEC_IMPORT_BAD[shape])
+    assert offenders, (
+        f"the {shape!r} spec import resolved, so PyInstaller would abort while "
+        "executing the spec with nothing here to have warned")
+
+
+@pytest.mark.parametrize("shape", sorted(SPEC_IMPORT_GOOD))
+def test_spec_import_guard_clears_a_legitimate_import(tmp_path, monkeypatch, shape):
+    offenders = _spec_import_offenders(monkeypatch, tmp_path, SPEC_IMPORT_GOOD[shape])
+    assert not offenders, f"the {shape!r} spec import was wrongly flagged: {offenders}"
+
+
+# ── the launcher dispatches to the module it imported ───────────────────────
+#
+# Importing the zipper is not dispatching to it. A branch that imports
+# `well_plate_zipper` and then calls `process_microscopy.main()` passed every
+# import-side assertion; a frozen grouping run would start a pipeline run
+# instead, which looks like work happening rather than like a failure.
+
+DISPATCH_CALL_BAD = {
+    "calls_the_wrong_module": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        from pipeline import well_plate_zipper
+        import process_microscopy
+        process_microscopy.main()
+        return
+''',
+    "calls_nothing": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        from pipeline import well_plate_zipper
+        return
+''',
+}
+
+
+def _dispatch_calls(monkeypatch, tmp_path: Path, body: str) -> dict:
+    import importlib
+
+    module = importlib.import_module("tests.test_zipper_frozen_dispatch")
+    fake = _write(tmp_path, "all_well_launcher.py", _FAKE_LAUNCHER_HEAD + body)
+    real_root = module.REPO_ROOT
+
+    class _Root:
+        def __truediv__(self, other):
+            return fake if other == "all_well_launcher.py" else real_root / other
+
+        def joinpath(self, *parts):
+            return real_root.joinpath(*parts)
+
+        def iterdir(self):
+            return real_root.iterdir()
+
+        def glob(self, pat):
+            return real_root.glob(pat)
+
+    monkeypatch.setattr(module, "REPO_ROOT", _Root(), raising=False)
+    return module._dispatch_main_calls()
+
+
+@pytest.mark.parametrize("shape", sorted(DISPATCH_CALL_BAD))
+def test_dispatch_call_guard_catches_a_branch_that_runs_the_wrong_thing(
+        tmp_path, monkeypatch, shape):
+    called = _dispatch_calls(monkeypatch, tmp_path, DISPATCH_CALL_BAD[shape])
+    zipper_calls = [n for n in called.get("--run-zipper", [])
+                    if "well_plate_zipper" in n]
+    assert not zipper_calls, (
+        f"the {shape!r} branch reads as dispatching to the zipper when it does "
+        f"not: {called}")
+
+
+def test_dispatch_call_guard_clears_a_correct_branch(tmp_path, monkeypatch):
+    called = _dispatch_calls(monkeypatch, tmp_path, DISPATCH_IMPORT_GOOD["real_submodule"])
+    assert any("well_plate_zipper" in n for n in called.get("--run-zipper", [])), (
+        f"a correct dispatch was not recognised: {called}")

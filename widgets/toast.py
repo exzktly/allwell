@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QWidget,
 )
 
-import theme
+from ui import theme
 from widgets._support import with_alpha
 from widgets.status_dot import StatusDot
 from util.aw_safe import swallowed

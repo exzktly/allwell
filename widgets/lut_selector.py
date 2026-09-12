@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from widgets.gradient_strip import GradientStrip
 from widgets.popover import Popover
 from widgets.search_input import SearchInput

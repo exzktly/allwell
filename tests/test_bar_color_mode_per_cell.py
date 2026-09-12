@@ -29,7 +29,7 @@ import pytest
 from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
 
-import theme
+from ui import theme
 from well_viewer.core.cell_gating_state import CellGatingState
 from well_viewer.core.channel_state import ChannelState
 from well_viewer.core.plot_state import PlotState

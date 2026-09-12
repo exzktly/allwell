@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 
 from well_viewer.domain.plate_layout import PLATE_COLS
 from well_viewer.core.ui_helpers import btn_primary, btn_secondary, build_hline_separator
@@ -118,7 +118,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     # Active-group banner — until the user clicks a group below, plate
     # clicks have no effect. Make that state legible so the user isn't
     # left wondering why nothing happens.
-    import theme as _theme
+    from ui import theme as _theme
     active_row = QWidget(parent)
     active_row.setObjectName("ActiveGroupBanner")
     active_l = QHBoxLayout(active_row)

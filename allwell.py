@@ -20,8 +20,8 @@ from pathlib import Path
 # Startup diagnostics FIRST — before PySide6 — so a silent launch failure (a
 # native crash in the Qt DLL import, a Qt platform-plugin abort, or a cold-cache
 # matplotlib font-scan hang) leaves a trail on disk instead of an empty terminal.
-# See boot_diag: it truncates a per-launch log and arms faulthandler onto it.
-import boot_diag as _boot_diag
+# See startup.boot_diag: it truncates a per-launch log and arms faulthandler onto it.
+from startup import boot_diag as _boot_diag
 _boot_diag.arm_faulthandler()
 _boot_diag.install_excepthook()
 _boot_diag.boot(f"start pid={__import__('os').getpid()} python={sys.version.split()[0]} platform={sys.platform}")
@@ -35,8 +35,8 @@ from PySide6.QtWidgets import (
 )
 _boot_diag.boot("PySide6 imported OK")
 
-import help_topics
-import theme as theme_v2
+from ui import help_topics
+from ui import theme as theme_v2
 from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
@@ -198,7 +198,7 @@ class AllWellApp(QMainWindow):
 
     # ── UI construction ──────────────────────────────────────────────────
     def _apply_stylesheet(self) -> None:
-        # Single source of truth for the app stylesheet — see theme.py. The
+        # Single source of truth for the app stylesheet — see ui/theme.py. The
         # active theme's tokens are already applied by ``main`` (via
         # ``theme.select_theme_from_env``) before this runs, so ``qss()`` here
         # reflects the selected theme (ALLWELL_THEME); default is grey.
@@ -208,7 +208,7 @@ class AllWellApp(QMainWindow):
 
     def _build_ui(self) -> None:
         from analyze.tab import AnalyzeTab
-        from datasets_tab import DatasetsTab
+        from datasets.tab import DatasetsTab
         from well_viewer import WellViewerApp
 
         root = QWidget(objectName="AppRoot")
@@ -409,7 +409,7 @@ class AllWellApp(QMainWindow):
         # the OME-TIFF converter hands its produced input folder to Analyze via
         # _open_dataset_in_analyze. The already-built AnalyzeTab is injected so
         # the Datasets pane's Job Queue page can queue and start Analyze runs
-        # without datasets_tab.py importing analyze.tab.
+        # without datasets/tab.py importing analyze.tab.
         self._datasets = DatasetsTab(
             parent=None,
             on_open_in_review=self._open_dataset_in_review,
@@ -911,7 +911,7 @@ class AllWellApp(QMainWindow):
         user is currently viewing, or ``""`` when it can't be determined.
 
         All three modes answer this, each asking its own pane which page is
-        showing; the maps live in ``help_topics``. A pane that cannot say
+        showing; the maps live in ``ui.help_topics``. A pane that cannot say
         (nothing built yet, scrolled above the first section) falls back to its
         mode's overview heading rather than to another mode's page.
         """
@@ -1706,13 +1706,13 @@ def main() -> None:
     # stall here is visible as the last-reached milestone.)
     _boot_diag.boot("mpl_bootstrap.configure() — limiting matplotlib font scan …")
     try:
-        import mpl_bootstrap
+        from startup import mpl_bootstrap
         mpl_bootstrap.configure()
     except Exception:
         swallowed()
     _boot_diag.boot("mpl_bootstrap done")
 
-    # faulthandler is already armed onto the boot log by boot_diag at import
+    # faulthandler is already armed onto the boot log by startup.boot_diag at import
     # time; nothing more to do here.
 
     # Surface any misconfigured ALLWELL_* overrides once at startup (audit
@@ -1787,9 +1787,6 @@ def main() -> None:
         theme_v2.Typography.family_mono = _mono_family or ""
     # Select the UI theme (dev-facing ALLWELL_THEME env var) BEFORE building any
     # widgets, so qss() and every widget's cached inline QSS pick up its tokens.
-    # Importing ui.theme.styles here guarantees its theme-refresh hook is
-    # registered before the theme is applied, so get_color() tracks the theme.
-    import ui.theme.styles as _ui_styles  # noqa: F401  (registers a theme hook)
     _active_theme = (theme_v2.apply_theme(args.theme) if args.theme
                      else theme_v2.select_theme_from_env())
     _boot_diag.boot(f"theme applied: {_active_theme}")

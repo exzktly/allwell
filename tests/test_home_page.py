@@ -619,7 +619,7 @@ def test_the_help_drawer_lands_on_the_current_tab_not_the_top_of_the_chapter(
     pane it is handed, so the loaded app stands in for it directly.
     """
     import allwell
-    import help_topics
+    from ui import help_topics
 
     resolve = allwell.AllWellApp._review_help_section
 
@@ -752,7 +752,7 @@ def test_no_sample_map_layer_starts_at_the_pane_edge(loaded_app):
     from PySide6.QtCore import QPoint
     from PySide6.QtWidgets import QApplication, QWidget
 
-    import theme
+    from ui import theme
     from well_viewer.features.home.controller import _subtabs
     from well_viewer.features.home.sample_map.controller import (
         LAYERS, STACK_KEY, set_layer,

@@ -80,7 +80,7 @@ def test_concatenate_heading_matches_the_rest_of_the_codebase_title_case(qapp):
 
 
 def test_sidebar_entry_matches_the_page_heading_case(qapp):
-    from datasets_tab import _FEATURES
+    from datasets.tab import _FEATURES
 
     names = [feat.name for feat in _FEATURES]
     assert "Concatenate Datasets" in names

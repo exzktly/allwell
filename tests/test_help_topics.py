@@ -1,7 +1,7 @@
 """Every page of the app has a help topic, and every topic is a real heading.
 
 The help drawer scrolls to a heading in ``README_WellViewer.md`` chosen from the
-maps in :mod:`help_topics`. Both halves of that arrangement can rot silently:
+maps in :mod:`ui.help_topics`. Both halves of that arrangement can rot silently:
 
 * a value that names no heading scrolls nowhere, and the drawer opens at the top
   of a 2600-line manual with no sign that anything was meant to happen;
@@ -23,7 +23,7 @@ import ast
 import re
 from pathlib import Path
 
-import help_topics
+from ui import help_topics
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -66,11 +66,11 @@ def _analyze_section_titles() -> list[str]:
 def _datasets_page_names() -> list[str]:
     """The Datasets rail labels, imported from the tab's own feature roster.
 
-    ``datasets_tab`` pulls in PySide6 and every tool controller, so the roster is
+    ``datasets.tab`` pulls in PySide6 and every tool controller, so the roster is
     read from source here too — this test must stay in the fast lane and must not
     depend on a Qt import succeeding.
     """
-    src = (REPO_ROOT / "datasets_tab.py").read_text(encoding="utf-8")
+    src = (REPO_ROOT / "datasets/tab.py").read_text(encoding="utf-8")
     names: list[str] = []
     for node in ast.walk(ast.parse(src)):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
@@ -122,7 +122,7 @@ def test_headings_are_unique():
 
 def test_every_datasets_tool_has_a_topic():
     names = _datasets_page_names()
-    assert names, "found no _Feature entries in datasets_tab.py — parser drifted"
+    assert names, "found no _Feature entries in datasets/tab.py — parser drifted"
     missing = [n for n in names if n not in help_topics.DATASETS_PAGE_HELP]
     assert not missing, (
         "Datasets tools with no entry in help_topics.DATASETS_PAGE_HELP; the "

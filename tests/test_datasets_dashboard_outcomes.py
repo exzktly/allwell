@@ -13,7 +13,7 @@ these already subclasses. A dashboard with something extra to do on a terminal
 state overrides `_on_outcome_changed`, not the setter — otherwise the
 no-override rule below could not hold, and the copies would be back.
 
-The roster is read from `datasets_tab._FEATURES`, so a seventh tool is swept
+The roster is read from `datasets.tab._FEATURES`, so a seventh tool is swept
 from the moment it is registered.
 """
 
@@ -27,7 +27,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-import theme  # noqa: E402
+from ui import theme  # noqa: E402
 from widgets.plate_progress import PlateProgress  # noqa: E402
 
 SHARED_MEMBERS = ("set_done", "set_failed", "set_cancelled")
@@ -45,7 +45,7 @@ def _dashboards() -> dict[str, type]:
     acquisition plate the page already carries), so a missing module is a
     legitimate answer rather than a failure.
     """
-    from datasets_tab import _FEATURES
+    from datasets.tab import _FEATURES
 
     out = {}
     for feature in _FEATURES:

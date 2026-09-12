@@ -19,7 +19,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-import help_topics
+from ui import help_topics
 from allwell import AllWellApp
 
 

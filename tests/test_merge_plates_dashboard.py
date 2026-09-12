@@ -38,7 +38,7 @@ def test_dataset2_wells_use_accent2_not_the_anomaly_accent_colour(qapp):
     on one side" and Subset uses for "no rows matched the filter". A well
     that's simply "the other dataset" isn't an anomaly and must not share
     that colour with two dashboards that mean something is wrong."""
-    import theme
+    from ui import theme
 
     d = MergePlatesDashboard()
     d.set_wells(["A01"], ["C03"])

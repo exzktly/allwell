@@ -1,7 +1,37 @@
+"""Group a folder of loose TIFs into the per-well layout the pipeline reads.
+
+Run as a **subprocess**, never imported by the code that uses it: the Analyze
+pane's grouping phase (`services.input_resolution_service.run_zipper`), the
+remote runner's staging pass, and the Datasets *Zip loose folder* tool all spawn
+it and read its stdout. It is also usable directly from a shell.
+
+Being spawned by path is why the `sys.path` repair below exists. The parent
+passes `[sys.executable, "<this file>", ...]` with no `cwd`, so Python seeds
+`sys.path[0]` with *this file's directory* — `pipeline/`, which is one level
+below the `util` package this module imports. Without the repair the subprocess
+dies on `ModuleNotFoundError: No module named 'util'` before parsing a single
+argument, and nothing in the test suite would see it: no test spawns the real
+binary (CLAUDE.md §2 forbids it), so the failure surfaces only when a user
+actually groups a plate.
+
+Despite the name it does not create archives. `folder_well()` copies (or, with
+`--move-source-tifs`, moves) each discovered image into its per-well subfolder;
+the caller is what zips those folders afterwards.
+"""
+
 import os
 import sys
 import shutil
 import argparse
+
+# The repository root, so `util.*` resolves when this file is run by path as a
+# subprocess (see the module docstring). Inserted rather than appended so a
+# stray same-named module beside the caller cannot shadow ours, and guarded so
+# repeated runs in one interpreter do not stack duplicates. In a frozen bundle
+# `sys.path` already carries `_MEIPASS` and this is a no-op.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 # ---------------------------------------------------------------------------
 # Schema vocabulary + parser — shared with process_microscopy via util.schema so

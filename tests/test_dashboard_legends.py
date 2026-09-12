@@ -24,7 +24,7 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
-import theme  # noqa: E402
+from ui import theme  # noqa: E402
 
 
 @pytest.fixture(scope="module")

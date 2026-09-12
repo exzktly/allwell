@@ -69,7 +69,7 @@ def test_empty_channel_does_not_shift_or_blank_later_channels():
     own titled subplot, and only the truly-empty one is left blank."""
     from well_viewer.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 
-    import theme
+    from ui import theme
 
     fluor_data = {
         "ch_a": [1.0, 2.0, 3.0],

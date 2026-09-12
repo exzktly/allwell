@@ -212,10 +212,24 @@ before explaining it.
 
 ## 3. Layout
 
+**The root holds entry points, repo config, and packages — nothing else.** Every
+other module lives in a package, where the directory says what it is.
+`tests/test_root_holds_only_entry_points.py` enforces it: each root `.py` is in a
+roster with a written reason, and a loose module there fails the suite. Adding
+one breaks nothing at runtime, which is exactly why it is a test.
+
 ```
-allwell.py              app entry + title-bar shell (two-mode: Review / Analyze)
-version.py              SINGLE source of truth for the app version
+── entry points (the three commands a person runs) ──
+allwell.py              app entry + title-bar shell (Review / Analyze / Datasets)
 process_microscopy.py   pipeline orchestrator + CLI (Qt-free, self-sufficient)
+all_well_launcher.py    the module PyInstaller boots (+ --run-pipeline / --run-zipper
+                        / --run-bootstrap dispatch)
+
+── repo config ──
+version.py              SINGLE source of truth for the app version
+pyproject.toml          ruff + pytest + coverage config
+
+── packages ──
 pipeline/               Qt-free analysis modules (background, stardist, cellpose,
                         flatfield, shape_features, auto_threshold, io) — re-exported by pm
 util/                   Qt-free general helpers (well_token, aw_safe)
@@ -230,11 +244,18 @@ well_viewer/            Review pane — the bulk of the app
   features/<name>/      one package per tab — controller/renderer/collect/state/tab_view
   persistence/          JSON read/write, one module per on-disk block
 widgets/                reusable Qt widgets, zero app coupling
-theme.py, ui/theme/     design tokens + QSS (never hardcode colours)
+ui/                     app-level UI every pane shares and none owns —
+                        theme.py (design tokens + QSS, never hardcode colours),
+                        help_topics.py (page → manual heading)
+startup/                what runs before the app exists — boot_diag.py (boot log
+                        + faulthandler), mpl_bootstrap.py (bundled fonts only)
+assets/                 runtime resources — fonts/, icons/
 profiles/*.toml         build profiles (feature subsets)
 tests/                  ~490 test files, incl. the guardrails
-_Docs/Markdowns/        the three live docs — ARCHITECTURE.md, README_WellViewer.md,
-                        GOD_OBJECT_REPOSITORY_ROADMAP.md
+_Docs/                  everything that is not source — Markdowns/ (the three live
+                        docs: ARCHITECTURE.md, README_WellViewer.md,
+                        GOD_OBJECT_REPOSITORY_ROADMAP.md), _Installation/ (spec +
+                        build scripts), requirements*.txt, design/, visual_audit/
 ```
 
 Where new code goes: pipeline work → `process_microscopy.py` / `pipeline/`; a new
@@ -242,7 +263,24 @@ Review tab → a new `well_viewer/features/<name>/` package registered in
 `features/registry.py`; behaviour for an existing feature → that feature's
 `controller.py`; Analyze-form behaviour → the `analyze/` module that owns that
 part of the form; cross-cutting behaviour → `well_viewer/core/`; a reusable widget
-with no All-Well knowledge → `widgets/`.
+with no All-Well knowledge → `widgets/`; something every pane shares and none owns
+→ `ui/`; something that has to happen before the app exists → `startup/`.
+
+**Never at the root.** The only reason to add a root module is that it is a
+command *a person is meant to type*, and then it goes in
+`tests/test_root_holds_only_entry_points.py::ROOT_MODULES` with the reason
+written down. The root was five loose library modules deep before this rule
+existed — including the 1,800-line design-token module, which the hierarchy
+pointed at `ui/theme/` for, where a 48-line remnant sat instead.
+
+"Something gets spawned" is **not** the test. A helper the app runs behind the
+user's back is an implementation detail of whatever spawns it: nobody types it,
+nobody needs to find it, and it belongs in the package whose work it does —
+which is how the loose-TIF grouper sat at the root for a long time and is now
+`pipeline/well_plate_zipper.py`. Being spawned *by path* only means the module
+must put the repository root on `sys.path` itself, since Python seeds
+`sys.path[0]` with the script's own directory; that is four lines, and without
+them the subprocess dies on `ModuleNotFoundError` somewhere no test looks.
 
 A new top-level package must be added to `PACKAGE_ROOTS` in
 `tests/_repo_scan.py` in the same commit that creates it. Every AST guard
@@ -315,7 +353,7 @@ function, remove its stale allowlist entry (the test fails until you do).
   `swallowed()` on the GUI side, `util.aw_safe` equivalents on the pipeline /
   `services` side. Two near-identical helpers exist because the pipeline may not
   import `well_viewer`.
-- **Never hardcode colours or pixel sizes.** `theme.Colors.*`, `ui/theme/styles.get_color`,
+- **Never hardcode colours or pixel sizes.** `ui.theme.Colors.*`, `ui.theme.get_color`,
   or QSS object names.
 - **Never block the UI thread.** Heavy work goes to a worker (`features/smfish/worker.py`,
   `services/pipeline_runner.py` are the patterns). Cross-thread callbacks must go
@@ -1167,7 +1205,7 @@ the answer is "none of the ones I ran", that is the work, not a formality.
   title bar → `allwell.py`.
 - Tab body doesn't appear: its lazy builder raised. Check the log drawer or run
   from a terminal.
-- Native crash with no traceback: `boot_diag.arm_faulthandler()` runs at import
+- Native crash with no traceback: `startup.boot_diag.arm_faulthandler()` runs at import
   and writes the C stack to the **boot log**, so it survives a crash that left
   nothing in the terminal. `~/.cache/allwell/allwell-boot.log`
   (`%LOCALAPPDATA%\allwell` on Windows, the temp dir if neither is writable),

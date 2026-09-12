@@ -25,7 +25,7 @@ import pytest
 from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
 
-import theme
+from ui import theme
 from well_viewer.core.plot_state import PlotState
 from well_viewer.domain.bar_colors import (
     BAR_COLOR_MODES,

@@ -171,14 +171,14 @@ def _dispatch() -> None:
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
         # Same frozen-dispatch trick as ``--run-pipeline``: the Analyze tab's
-        # grouping phase spawns WellPlateZipper as a subprocess, but in a frozen
+        # grouping phase spawns the zipper as a subprocess, but in a frozen
         # bundle ``sys.executable`` is the .app binary, not a Python interpreter,
-        # so ``[sys.executable, "WellPlateZipper.py", ...]`` would just relaunch
-        # the GUI and the zipper would never run. Route argv past the sentinel
-        # into WellPlateZipper.main() (which parse_args() the rest).
+        # so ``[sys.executable, "pipeline/well_plate_zipper.py", ...]`` would just
+        # relaunch the GUI and the zipper would never run. Route argv past the
+        # sentinel into its ``main()`` (which parse_args() the rest).
         sys.argv = [sys.argv[0]] + sys.argv[2:]
-        import WellPlateZipper
-        WellPlateZipper.main()
+        from pipeline import well_plate_zipper
+        well_plate_zipper.main()
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--run-bootstrap":
         # Same frozen-dispatch trick again: the Analyze → Remotes dialog spawns
@@ -196,7 +196,7 @@ def _dispatch() -> None:
         # The bootstrap writes to sys.stdout directly (say(), the tee), so
         # without this repair its very first message raises AttributeError on
         # None and the Remotes dialog's log stays empty for a subprocess that
-        # died before it did anything. process_microscopy and WellPlateZipper
+        # died before it did anything. process_microscopy and well_plate_zipper
         # call the same helper from their own main(); this entry point reaches
         # its module through importlib, so the repair belongs here.
         from util.frozen_io import ensure_std_streams

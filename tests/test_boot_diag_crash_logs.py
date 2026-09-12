@@ -23,7 +23,7 @@ import traceback
 
 import pytest
 
-import boot_diag
+from startup import boot_diag
 
 
 @pytest.fixture

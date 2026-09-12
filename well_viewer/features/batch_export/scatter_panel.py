@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import theme
+from ui import theme
 
 from PySide6.QtWidgets import (
     QCheckBox,

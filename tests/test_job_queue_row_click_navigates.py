@@ -29,7 +29,7 @@ import pytest
 from PySide6.QtCore import QObject, Signal
 
 from datasets.job_queue.controller import JobQueueController
-from datasets_tab import DatasetsTab
+from datasets.tab import DatasetsTab
 from services.job_queue import JobSpec, JobState
 
 

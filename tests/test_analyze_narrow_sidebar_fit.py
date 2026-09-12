@@ -40,7 +40,7 @@ from PySide6.QtWidgets import QApplication, QLabel
 @pytest.fixture(scope="module")
 def qapp():
     app = QApplication.instance() or QApplication([])
-    import theme
+    from ui import theme
     app.setStyleSheet(theme.qss())
     return app
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
-import theme
+from ui import theme
 from pipeline.completeness import HEALTH_STATES as _WELL_STATES
 from pipeline.completeness import NEEDS_ATTENTION as _NEEDS_ATTENTION
 from widgets.plate_progress import PlateProgress, canon_well, status_dot

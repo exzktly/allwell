@@ -24,7 +24,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QTabBar, QWidget
 
-import theme
+from ui import theme
 from widgets import icons as _icons
 
 # Pixel geometry for this module's controls. Named rather than written

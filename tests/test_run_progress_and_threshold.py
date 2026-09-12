@@ -48,7 +48,7 @@ def qapp():
 
 def test_grouped_well_is_pending_not_processing(qapp):
     from widgets.run_dashboard import RunDashboard
-    from theme import Colors
+    from ui.theme import Colors
     d = RunDashboard()
     d.reset(remote=False, total=3)
 
@@ -69,7 +69,7 @@ def test_grouped_well_is_pending_not_processing(qapp):
 
 def test_grouped_well_is_pending_remote(qapp):
     from widgets.run_dashboard import RunDashboard
-    from theme import Colors
+    from ui.theme import Colors
     d = RunDashboard()
     d.reset(remote=True, total=2)
     d.set_well_stage("A01", "group")

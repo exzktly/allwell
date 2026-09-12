@@ -32,7 +32,7 @@ if _ROOT not in _sys.path:
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
 
-import theme
+from ui import theme
 from widgets.icons import make_icon
 
 

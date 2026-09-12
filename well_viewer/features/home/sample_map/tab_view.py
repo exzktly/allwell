@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
-import theme
+from ui import theme
 from well_viewer.features.home.sample_map.controller import (
     LAYER_BUILDERS, LAYER_PLATES, LAYERS, SHARED_SELECTION_LAYERS, STACK_KEY,
     STRIP_KEY, SWITCH_KEY, on_layer_selection_changed, set_layer,

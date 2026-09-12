@@ -33,7 +33,7 @@ def test_equal_large_sizes_split_evenly_despite_unequal_minimums(qapp):
 
 
 def test_theme_qss_sizes_the_splitter_handle():
-    import theme
+    from ui import theme
     qss = theme.qss()
     assert "QSplitter::handle:horizontal" in qss
     assert "width: 6px" in qss

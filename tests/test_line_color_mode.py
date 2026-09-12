@@ -39,7 +39,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from matplotlib.colors import to_hex  # noqa: E402
 
-import theme  # noqa: E402
+from ui import theme  # noqa: E402
 from well_viewer.core.plot_state import PlotState  # noqa: E402
 from well_viewer.domain.line_colors import (  # noqa: E402
     LINE_COLOR_MODES,
@@ -238,7 +238,7 @@ def test_the_ramp_is_a_theme_token_not_a_literal():
     literals = re.findall(r"#[0-9A-Fa-f]{6}\b", src)
     assert not literals, (
         f"line_colors.py carries colour literal(s) {literals} — the ramp "
-        "belongs to theme.py, which is where a palette edit is looked for")
+        "belongs to ui/theme.py, which is where a palette edit is looked for")
 
 
 def _contrast(a: str, b: str) -> float:

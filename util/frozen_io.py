@@ -1,6 +1,6 @@
 """Repair ``sys.stdout`` / ``sys.stderr`` when a frozen windowed build nulls them.
 
-Both ``process_microscopy`` and ``WellPlateZipper`` run as subprocesses the
+Both ``process_microscopy`` and ``well_plate_zipper`` run as subprocesses the
 Analyze tab spawns with ``subprocess.Popen([sys.executable, "--run-pipeline" /
 "--run-zipper", ...], stdout=PIPE, stderr=STDOUT)``. The parent attaches a pipe
 to the child's fd 1 and dups fd 2 onto it, then reads that pipe line by line to
@@ -17,7 +17,7 @@ grouping / processing progress freezes, and any diagnostic warning is lost.
 
 :func:`ensure_std_streams` restores a working text wrapper around fd 1 / fd 2 so
 both entry points' output reaches the parent again. It is deliberately Qt-free
-and stdlib-only so the lightweight ``WellPlateZipper`` subprocess can call it
+and stdlib-only so the lightweight ``well_plate_zipper`` subprocess can call it
 without importing the heavy pipeline stack.
 """
 

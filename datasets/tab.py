@@ -1,4 +1,4 @@
-"""datasets_tab.py — DatasetsTab widget, the third top-level pane.
+"""datasets/tab.py — DatasetsTab widget, the third top-level pane.
 
 The Datasets pane sits beside Analyze and Review. Like Review it has a left
 sidebar that lists page "features"; unlike Review it has **no well picker** — the
@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import theme
+from ui import theme
 from widgets.context_banner import ContextBanner
 from widgets.page_body import build_page_body
 from widgets.rail_nav import RailNav
@@ -289,7 +289,7 @@ class DatasetsTab(QWidget):
 
         The help drawer asks for this so it can open on that tool's section of
         the manual. The label doubles as the ``RailNav`` key and as the
-        ``help_topics.DATASETS_PAGE_HELP`` key, so no second name map exists to
+        ``ui.help_topics.DATASETS_PAGE_HELP`` key, so no second name map exists to
         drift out of step.
         """
         nav = getattr(self, "_nav", None)

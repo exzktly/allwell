@@ -22,7 +22,7 @@ if _ROOT not in _sys.path:
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QToolButton
 
-import theme
+from ui import theme
 from widgets import icons
 
 

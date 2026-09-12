@@ -3,7 +3,7 @@
 Three call sites previously kept their own copy of the same regex and
 normalisation logic:
 
-* `WellPlateZipper._extract_well_from_filename`
+* `well_plate_zipper._extract_well_from_filename`
 * `process_microscopy._canonical_well_label`
 * `services/input_resolution_service._is_well_named` /
   `analyze.tab._WELL_NAME_RE`

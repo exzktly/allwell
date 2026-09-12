@@ -8,7 +8,7 @@ import csv
 import re
 import tempfile
 
-import theme
+from ui import theme
 from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Callable

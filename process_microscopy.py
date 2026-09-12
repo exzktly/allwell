@@ -370,7 +370,7 @@ def _ensure_pipeline_io_ready() -> None:
     This shim restores a working text wrapper around fd 1 / fd 2 when
     needed, so the module-level ``logging.basicConfig`` below picks up
     a valid sink and every subsequent ``log.<level>(...)`` reaches the
-    parent's pipe. The mechanism is shared with the ``WellPlateZipper``
+    parent's pipe. The mechanism is shared with the ``well_plate_zipper``
     grouping subprocess (which has the identical frozen-windowed stdio
     problem) via :func:`util.frozen_io.ensure_std_streams`.
     """
@@ -641,7 +641,7 @@ def compress_folder_images_to_zip_and_remove(folder: Path, out_zip: Path) -> int
 # ---------------------------------------------------------------------------
 
 # The schema vocabulary and its parser live in ``util.schema`` — the single
-# source of truth shared with WellPlateZipper, which reads the same filenames in
+# source of truth shared with well_plate_zipper, which reads the same filenames in
 # its grouping pre-pass. Re-exported here because the pipeline's own call sites
 # and the tests import them from this module.
 

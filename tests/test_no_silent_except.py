@@ -148,10 +148,10 @@ SILENT_EXCEPT_ALLOWLIST = {
     # `sys.excepthook` itself. An exception escaping any of them loses the
     # crash report, which is the one artifact that makes a native crash
     # diagnosable (ARCHITECTURE §12.8). There is nowhere left to report to.
-    ("boot_diag.py", "boot"),
-    ("boot_diag.py", "arm_faulthandler"),
-    ("boot_diag.py", "_hook"),
-    ("boot_diag.py", "install_excepthook"),
+    ("startup/boot_diag.py", "boot"),
+    ("startup/boot_diag.py", "arm_faulthandler"),
+    ("startup/boot_diag.py", "_hook"),
+    ("startup/boot_diag.py", "install_excepthook"),
     # The bootstrap's own last-resort note. `_quietly` reports a failed log
     # write to the real stderr; when *that* write fails too there is no
     # remaining channel to report on, which is the one honest case for a bare
@@ -161,14 +161,14 @@ SILENT_EXCEPT_ALLOWLIST = {
     # trade: "a functioning (if unlimited) font manager beats a crash", and the
     # fallback is a working app with the system font list rather than the
     # bundled one.
-    ("mpl_bootstrap.py", "configure"),
+    ("startup/mpl_bootstrap.py", "configure"),
 }
 
 
 def _silent_sites():
     """``(file, innermost enclosing function, line)`` per silent broad handler.
 
-    *Innermost* matters: ``boot_diag.install_excepthook`` defines the ``_hook``
+    *Innermost* matters: ``startup.boot_diag.install_excepthook`` defines the ``_hook``
     it installs, and attributing ``_hook``'s handlers to the outer function
     would let one exemption cover two different functions' worth of swallowing.
     A handler outside any function is reported under ``"<module>"``.

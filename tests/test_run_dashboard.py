@@ -103,7 +103,7 @@ def test_uploaded_and_computing_are_different_colours(qapp):
     Now that a computing well also carries a dial, the two differed in shape
     while their colour still claimed they were the same state.
     """
-    import theme
+    from ui import theme
     from widgets.run_dashboard import RunDashboard
 
     d = RunDashboard()
@@ -165,7 +165,7 @@ def test_remote_threshold_does_not_count_as_download(qapp):
         d.set_well_stage(w, "threshold")      # server finished all wells
     assert d._count("threshold") == 3
     assert d._count("download") == 0          # nothing fetched yet
-    from theme import Colors
+    from ui.theme import Colors
     assert d._well_color("A01") == Colors.accent      # blue: computed, awaiting fetch
     d.set_well_stage("A01", "download")
     assert d._count("download") == 1
@@ -174,7 +174,7 @@ def test_remote_threshold_does_not_count_as_download(qapp):
 
 def test_dashboard_error_wins(qapp):
     from widgets.run_dashboard import RunDashboard
-    from theme import Colors
+    from ui.theme import Colors
     d = RunDashboard(); d.reset(remote=True, total=1)
     d.set_well_stage("A01", "process")
     d.set_well_stage("A01", "error")
@@ -313,7 +313,7 @@ def test_a_transfer_is_painted_in_the_colour_it_is_heading_toward(qtbot):
     simply *was* blue: dark blue, then pale blue, then green. The colour change
     should be the arrival.
     """
-    import theme
+    from ui import theme
     from widgets.run_dashboard import RunDashboard
 
     dash = RunDashboard()
@@ -337,7 +337,7 @@ def test_an_upload_in_flight_reads_as_heading_to_the_remote(qtbot):
     """Same rule the other way: a well being uploaded is becoming "over there",
     so it takes the colour of a well that has landed there rather than the
     grouped-and-queued grey it is leaving."""
-    import theme
+    from ui import theme
     from widgets.run_dashboard import RunDashboard
 
     dash = RunDashboard()
@@ -425,7 +425,7 @@ def _colour_spy(d):
 
 
 def test_a_download_repaints_the_well_green_not_just_the_dial(qapp):
-    import theme
+    from ui import theme
     from widgets.run_dashboard import RunDashboard
 
     d = RunDashboard()
@@ -440,7 +440,7 @@ def test_a_download_repaints_the_well_green_not_just_the_dial(qapp):
 
 
 def test_an_upload_repaints_the_well_too(qapp):
-    import theme
+    from ui import theme
     from widgets.run_dashboard import RunDashboard
 
     d = RunDashboard()
@@ -460,7 +460,7 @@ def test_a_finished_zip_freezes_the_ring_instead_of_reverting_to_blue(qapp):
     short of full, so "still fetching" cannot be read as either "not started" or
     "finished".
     """
-    import theme
+    from ui import theme
     from widgets.run_dashboard import RunDashboard
 
     d = RunDashboard()

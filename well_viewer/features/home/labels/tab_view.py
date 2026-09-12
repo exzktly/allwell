@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from well_viewer.core.ui_helpers import build_hline_separator
 
 # Pixel geometry for this module's controls. Named rather than written

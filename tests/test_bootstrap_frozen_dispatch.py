@@ -61,7 +61,7 @@ def test_spec_bundles_the_bootstrap_module():
 # A frozen ``console=False`` build leaves ``sys.stdout`` / ``sys.stderr`` — and
 # ``sys.__stdout__`` / ``sys.__stderr__`` — set to None, even though the parent
 # attached a live pipe to fd 1/2 and is reading it. ``process_microscopy`` and
-# ``WellPlateZipper`` each repair the pair from their own ``main()`` via
+# ``well_plate_zipper`` each repair the pair from their own ``main()`` via
 # ``util.frozen_io.ensure_std_streams``; the bootstrap is the third subprocess
 # entry point and was the one that did not, so the very first ``say()`` raised
 # ``AttributeError: 'NoneType' object has no attribute 'isatty'`` and the

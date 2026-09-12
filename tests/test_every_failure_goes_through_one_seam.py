@@ -121,7 +121,7 @@ def test_a_stop_during_grouping_is_not_painted_as_a_failure():
     """
     r = _runner()
     r._stop_requested.set()
-    r.log_q.put(("error", "Input error: WellPlateZipper exited with code -15.\n"))
+    r.log_q.put(("error", "Input error: Grouping step exited with code -15.\n"))
     assert r.cancel_state_at_failure == (True, False), (
         "the GUI would read this as a failure rather than the user's own Stop, "
         "paint the dashboard red and force the raw log pane open"

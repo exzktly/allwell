@@ -419,7 +419,7 @@ def _page_with_source(tmp_path):
 
 
 def test_a_failed_conversion_is_visible_without_opening_the_log(qapp, tmp_path):
-    import theme
+    from ui import theme
 
     ctrl = _page_with_source(tmp_path)
     page = ctrl.page
@@ -448,7 +448,7 @@ def test_a_failed_conversion_stops_the_indeterminate_progress_bar(qapp, tmp_path
 
 
 def test_a_cancelled_conversion_reads_as_cancelled_not_failed(qapp, tmp_path):
-    import theme
+    from ui import theme
 
     ctrl = _page_with_source(tmp_path)
     ctrl._on_failed("Cancelled — partial output was left in the destination.")
@@ -460,7 +460,7 @@ def test_a_cancelled_conversion_reads_as_cancelled_not_failed(qapp, tmp_path):
 
 
 def test_a_successful_conversion_says_so_on_the_page(qapp, tmp_path):
-    import theme
+    from ui import theme
 
     ctrl = _page_with_source(tmp_path)
     ctrl._on_succeeded(str(tmp_path / "out"), "Wrote 8 image(s) for 4 well(s)")

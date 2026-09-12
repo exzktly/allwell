@@ -54,7 +54,7 @@ class ImportLooseWorker(QThread):
     def request_stop(self) -> None:
         """Signals both the QThread interruption flag (polled between wells
         by convert_to_new_destination's is_cancelled) and the tracked
-        WellPlateZipper.py subprocess convert_in_place shells out to for its
+        pipeline/well_plate_zipper.py subprocess convert_in_place shells out to for its
         in-place mode -- requestInterruption() alone is a no-op while run()
         is blocked inside that subprocess's stdout read loop, since nothing
         in the in-place path ever polls the interruption flag."""

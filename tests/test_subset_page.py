@@ -74,7 +74,7 @@ def test_selected_wells_get_a_uniform_pre_run_tint(qapp, tmp_path):
     the exact hue an unselected-but-enabled well already renders as a faint
     default tint). Every selected well must instead get the same single
     accent_dim tint, and an unselected well must get none."""
-    import theme
+    from ui import theme
     from datasets.subset.controller import SubsetController
 
     src = tmp_path / "src"

@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from well_viewer.domain.sample_variables import NUMBER, TEXT
 
 #: Side of the square swatch on a value row, in pixels.

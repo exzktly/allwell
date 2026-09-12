@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.safe import swallowed
 from well_viewer.features.image_browser.cell_browser.collect import sort_field_options
-import theme
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes

@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import theme
+from ui import theme
 from widgets.icon_button import IconButton
 from widgets import menu_exec
 from widgets.icons import make_icon

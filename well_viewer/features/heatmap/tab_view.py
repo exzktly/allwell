@@ -28,7 +28,7 @@ from well_viewer.features.export.service import (
 from well_viewer.features.heatmap.cell_scope_compute import cell_scope
 from well_viewer.core.channel_state_controller import refresh_heatmap_aggregation_options
 from well_viewer.core.safe import swallowed
-import theme
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes

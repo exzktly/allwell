@@ -56,7 +56,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
-import theme
+from ui import theme
 from util.well_token import canonical_well_label
 from util.aw_safe import swallowed
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry

@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-import theme
+from ui import theme
 from well_viewer.features.home.collect import DeclarationRole
 
 

@@ -80,7 +80,7 @@ def test_every_help_target_has_an_anchor_to_scroll_to(rendered):
     does not move — so a broken target looks exactly like help that opened at
     the top on purpose."""
     import allwell
-    import help_topics
+    from ui import help_topics
 
     anchors = _anchors(rendered)
     targets: set[str] = set()

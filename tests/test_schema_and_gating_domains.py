@@ -10,7 +10,7 @@
   than one distinct value, and only once the timepoint slot has been taken.
 
 * ``util.schema.validate_schema`` demanded ``channel`` *and* ``well`` of every
-  caller. ``WellPlateZipper`` groups files by well and never reads the channel
+  caller. ``well_plate_zipper`` groups files by well and never reads the channel
   slot — its own ``--filename_schema`` help says so — so a valid ``well:fov``
   was rejected with an error naming a field the tool does not use.
 
@@ -72,9 +72,9 @@ def test_the_zipper_validates_against_well_alone():
     import inspect
     import textwrap
 
-    import WellPlateZipper
+    from pipeline import well_plate_zipper
 
-    src = textwrap.dedent(inspect.getsource(WellPlateZipper.main))
+    src = textwrap.dedent(inspect.getsource(well_plate_zipper.main))
     calls = [n for n in ast.walk(ast.parse(src))
              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
              and n.func.id == "validate_schema"]
@@ -88,9 +88,9 @@ def test_the_zipper_validates_against_well_alone():
 
 def test_the_zipper_and_plate_grid_agree_on_the_plate():
     from util.plate_grid import PLATE_MAX_COL, PLATE_ROWS
-    import WellPlateZipper
+    from pipeline import well_plate_zipper
 
-    wells = WellPlateZipper.generate_wells()
+    wells = well_plate_zipper.generate_wells()
     assert len(wells) == len(PLATE_ROWS) * PLATE_MAX_COL
     assert wells[0] == "A01" and wells[-1] == "H12"
 

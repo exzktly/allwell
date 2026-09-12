@@ -463,7 +463,7 @@ def test_a_png_channel_survives_the_run_that_consumes_it(tmp_path):
     """The delete side and the group side are one operation.
 
     `tif_files_in` collects what a run will consume and its `_on_success`
-    unlinks it; `WellPlateZipper.group_by_well` decides what is actually
+    unlinks it; `well_plate_zipper.group_by_well` decides what is actually
     grouped. Widening the first to `.png`/`.jpg` without widening the second
     meant a two-channel plate whose fluorescent channel was PNG had that
     channel counted, deleted, and never grouped — gone from disk with no copy
@@ -507,10 +507,10 @@ def test_the_grouper_and_the_deleter_read_the_same_predicate():
     """The structural half, so the two cannot drift apart again silently."""
     import inspect
 
-    import WellPlateZipper
+    from pipeline import well_plate_zipper
     from services import input_resolution_service
 
-    for mod in (WellPlateZipper, input_resolution_service):
+    for mod in (well_plate_zipper, input_resolution_service):
         src = inspect.getsource(mod)
         assert "is_run_input_member" in src, (
             f"{mod.__name__} does not use the shared input predicate, so the "

@@ -3907,3 +3907,97 @@ def test_response_hour_guard_catches_every_spelling(shape):
 def test_response_hour_guard_clears_the_sanctioned_shapes(shape):
     offenders = _response_hour_offenders(RESPONSE_HOUR_GOOD[shape])
     assert not offenders, f"the {shape!r} shape was wrongly flagged: {offenders}"
+
+
+# ── root placement ──────────────────────────────────────────────────────────
+#
+# `tests/test_root_holds_only_entry_points.py` has three rules, and two of them
+# already held on the base branch, so `scripts/prove_guard.sh` can only ever
+# prove the first. These are the cases for all three, driven against a synthetic
+# root so they keep biting after the fix has merged.
+
+def _root_guard(monkeypatch, test_name: str, root: Path, extra: dict | None = None):
+    return _run_rooted_scan(monkeypatch, "tests.test_root_holds_only_entry_points",
+                            test_name, root, extra)
+
+
+def _fake_root(tmp_path: Path, *, modules: list[str], required: list[str]) -> Path:
+    """A synthetic repository root: some root `.py` files and a build script."""
+    for name in modules:
+        _write(tmp_path, name, '"""Stub."""\n')
+    body = "REQUIRED=(\n" + "".join(f'    "{p}"\n' for p in required) + ")\n"
+    _write(tmp_path, "_Docs/_Installation/build_all_well.sh", body)
+    return tmp_path
+
+
+@pytest.mark.parametrize("loose", ["theme.py", "datasets_tab.py", "helpers.py"])
+def test_root_guard_catches_a_loose_module(tmp_path, monkeypatch, loose):
+    """The shape that shipped: a library module living beside the entry points."""
+    root = _fake_root(tmp_path, modules=["allwell.py", loose], required=[])
+    exc = _root_guard(monkeypatch, "test_no_loose_module_at_the_repository_root", root,
+                      {"ROOT_MODULES": {"allwell.py": "entry point"}})
+    assert exc is not None, f"a loose {loose} at the root went uncaught"
+    assert loose in str(exc)
+
+
+def test_root_guard_clears_a_root_of_entry_points_only(tmp_path, monkeypatch):
+    root = _fake_root(tmp_path, modules=["allwell.py", "version.py"], required=[])
+    exc = _root_guard(monkeypatch, "test_no_loose_module_at_the_repository_root", root,
+                      {"ROOT_MODULES": {"allwell.py": "entry point",
+                                        "version.py": "repository metadata"}})
+    assert exc is None, f"an entry-point-only root was wrongly flagged: {exc}"
+
+
+def test_root_guard_catches_a_roster_entry_whose_file_has_gone(tmp_path, monkeypatch):
+    """A stale allowlist entry is a permission under a name that has left."""
+    root = _fake_root(tmp_path, modules=["allwell.py"], required=[])
+    exc = _root_guard(monkeypatch, "test_the_roster_names_nothing_that_has_gone", root,
+                      {"ROOT_MODULES": {"allwell.py": "entry point",
+                                        "analyze_tab.py": "long gone"}})
+    assert exc is not None, "a roster entry naming a missing file went uncaught"
+    assert "analyze_tab.py" in str(exc)
+
+
+def test_root_guard_catches_a_build_roster_requiring_a_missing_file(tmp_path, monkeypatch):
+    """The shape that shipped: `analyze_tab.py`, required long after it moved."""
+    root = _fake_root(tmp_path, modules=["allwell.py"],
+                      required=["allwell.py", "analyze_tab.py"])
+    module = importlib.import_module("tests.test_root_holds_only_entry_points")
+    monkeypatch.setattr(module, "_BUILD_SCRIPT",
+                        root / "_Docs" / "_Installation" / "build_all_well.sh")
+    exc = _root_guard(monkeypatch,
+                      "test_the_build_script_requires_only_files_that_exist", root)
+    assert exc is not None, "a build roster requiring a missing file went uncaught"
+    assert "analyze_tab.py" in str(exc)
+
+
+#: Rosters the guard must refuse to read, and the phrase that says *why* it
+#: refused. Asserting the phrase rather than merely "it raised" is the point: the
+#: guard has a floor assertion ("parsed no entries") that also fires on a renamed
+#: array, so a parse that returned an empty list instead of raising would still
+#: produce an AssertionError mentioning `REQUIRED=(`, and a case checking only
+#: that much passes against both implementations. Mutating the parse to return
+#: `[]` left the first version of these cases green.
+UNPARSEABLE_ROSTERS = {
+    # The array was renamed or moved — nothing to read at all.
+    "renamed": ('FILES=(\n    "x.py"\n)\n', "moved or was renamed"),
+    # It parses one entry and then the file ends: the shape that reports the
+    # paths it happened to reach as if they were the whole roster.
+    "unclosed": ('REQUIRED=(\n    "allwell.py"\n', "ran off the end"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(UNPARSEABLE_ROSTERS))
+def test_root_guard_notices_a_build_roster_it_cannot_parse(tmp_path, monkeypatch, shape):
+    """An unparseable roster must fail, and say which way it was unreadable."""
+    body, phrase = UNPARSEABLE_ROSTERS[shape]
+    _write(tmp_path, "_Docs/_Installation/build_all_well.sh", body)
+    module = importlib.import_module("tests.test_root_holds_only_entry_points")
+    monkeypatch.setattr(module, "_BUILD_SCRIPT",
+                        tmp_path / "_Docs" / "_Installation" / "build_all_well.sh")
+    exc = _root_guard(monkeypatch,
+                      "test_the_build_script_requires_only_files_that_exist", tmp_path)
+    assert exc is not None, f"a {shape!r} REQUIRED array passed silently"
+    assert phrase in str(exc), (
+        f"a {shape!r} roster failed, but not for the reason claimed — expected "
+        f"{phrase!r} in: {exc}")

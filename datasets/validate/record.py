@@ -42,7 +42,7 @@ from pipeline.completeness import (
     utc_iso,
     well_record,
 )
-from datasets._common.dataset_paths import resolve_dataset
+from datasets.core.dataset_paths import resolve_dataset
 from datasets.validate.validate_compute import DatasetReport, WellReport
 from util.json_write import write_json_atomic
 

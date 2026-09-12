@@ -66,14 +66,29 @@ def _silent_body(handler: ast.ExceptHandler) -> bool:
 
 
 def _offenders(paths):
-    out = []
-    for path in paths:
-        tree = parse_source(path)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ExceptHandler) and _is_broad(node) and _silent_body(node):
-                kind = type(node.body[0]).__name__.lower()
-                out.append(f"{path.relative_to(REPO_ROOT)}:{node.body[0].lineno} (silent {kind})")
-    return out
+    """Silent broad-except handlers in *paths*, minus the reviewed exemptions.
+
+    The allowlist is honoured here as well as in
+    `test_no_silent_broad_except_anywhere`, because this file states one rule
+    and two tests were enforcing it with different answers. The per-area tests
+    ignored `SILENT_EXCEPT_ALLOWLIST` entirely and passed only because no
+    exempted site happened to live in an area they walked — so moving the
+    remote bootstrap from `scripts/` (outside every scan root) into
+    `services/` failed the pipeline test on a handler the allowlist already
+    covered by name. A rule enforced twice with two answers is worse than a
+    rule enforced once: the looser test is the one that decides, right up until
+    a file moves and the stricter one does.
+
+    The exemption is keyed on `(file, containing function)`, never on a file,
+    so it cannot excuse the next handler added to the same module.
+    """
+    allowed = {(f, fn) for f, fn in SILENT_EXCEPT_ALLOWLIST}
+    wanted = {str(p.relative_to(REPO_ROOT)) for p in paths}
+    return [
+        f"{file}:{line} (silent pass, in {func})"
+        for file, func, line in _silent_sites()
+        if file in wanted and (file, func) not in allowed
+    ]
 
 
 def _walk(root):
@@ -101,7 +116,7 @@ def test_no_silent_broad_except_in_widgets():
 
 
 def test_no_silent_broad_except_in_datasets():
-    """The Datasets pane mixes both helpers: its Qt-free halves (`_common/`,
+    """The Datasets pane mixes both helpers: its Qt-free halves (`core/`,
     the `*_compute` planners, `apply.py`, the workers) use `util.aw_safe`,
     while the controllers and views may use `core.safe`. Either is
     fine; a bare pass is not."""
@@ -156,7 +171,7 @@ SILENT_EXCEPT_ALLOWLIST = {
     # write to the real stderr; when *that* write fails too there is no
     # remaining channel to report on, which is the one honest case for a bare
     # pass. Everything else in this module now goes through `_quietly`.
-    ("scripts/_bootstrap_lib.py", "_quietly"),
+    ("services/remote_bootstrap.py", "_quietly"),
     # Rebuilding matplotlib's font cache. The handler's own comment states the
     # trade: "a functioning (if unlimited) font manager beats a crash", and the
     # fallback is a working app with the system font list rather than the

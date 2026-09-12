@@ -50,7 +50,7 @@ from tests._repo_scan import parse_source
 # ``widgets.separator.build_hline_separator`` / ``build_vline_separator`` apply, and is
 # how a divider should be built; ``HRule`` / ``VRule`` are the equivalent
 # hand-rolled spellings, needed by the frames that choose an orientation at run
-# time and by ``datasets/_common/log_panel.hrule``.
+# time and by ``datasets/core/log_panel.hrule``.
 SANCTIONED_NAMES = frozenset({"Separator", "HRule", "VRule"})
 SANCTIONED_PROPS = frozenset({"hline", "vline"})
 

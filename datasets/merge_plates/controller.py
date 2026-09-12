@@ -10,7 +10,7 @@ from collections.abc import Callable
 from PySide6.QtCore import QObject
 
 from util.aw_safe import swallowed
-from datasets._common.dataset_paths import shorten_headline
+from datasets.core.dataset_paths import shorten_headline
 from datasets.merge_plates.merge_plates_compute import (
     MergePlatesError,
     block_shift_well_map,
@@ -20,7 +20,7 @@ from datasets.merge_plates.merge_plates_compute import (
 )
 from datasets.merge_plates.view import MergePlatesPage
 from datasets.merge_plates.worker import MergePlatesWorker
-from datasets._common.tool_controller import DestinationToolController
+from datasets.core.tool_controller import DestinationToolController
 
 
 class MergePlatesController(DestinationToolController):

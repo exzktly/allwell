@@ -6,7 +6,7 @@ rest, best-effort.
 """
 from __future__ import annotations
 
-from scripts._bootstrap_lib import _prune_bootstrap_logs
+from services.remote_bootstrap import _prune_bootstrap_logs
 
 
 def _seed(log_dir, n):

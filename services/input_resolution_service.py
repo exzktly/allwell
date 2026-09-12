@@ -85,7 +85,7 @@ def build_bootstrap_cmd(bootstrap: Path, alias: str) -> list[str]:
     """Build the argv for the remote-provisioning bootstrap subprocess.
 
     Frozen bundle: re-invoke the launcher with the ``--run-bootstrap`` sentinel,
-    which routes argv into ``scripts/_bootstrap_lib.main()`` (mirrors the
+    which routes argv into ``services/remote_bootstrap.main()`` (mirrors the
     ``--run-zipper`` / ``--run-pipeline`` paths). Passing the ``.py`` path there
     would make ``sys.executable`` (the .app binary) relaunch the GUI instead of
     running the bootstrap — the frozen-only failure this guards. From source,

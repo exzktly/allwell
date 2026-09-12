@@ -28,12 +28,12 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
-from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
 from widgets.path_field import PathField, folder_picker
-from datasets._common.dataset_paths import preview_wells
+from datasets.core.dataset_paths import preview_wells
 from datasets.validate.dashboard import ValidateDashboard
 from datasets.validate.validate_compute import DatasetReport, wells_needing_force
-from datasets._common.dataset_fields import is_dataset
+from datasets.core.dataset_fields import is_dataset
 
 
 

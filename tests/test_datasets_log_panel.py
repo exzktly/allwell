@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from datasets._common.log_panel import LogPanelMixin  # noqa: E402
+from datasets.core.log_panel import LogPanelMixin  # noqa: E402
 
 
 @pytest.fixture(scope="module")

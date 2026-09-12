@@ -1,4 +1,4 @@
-"""Analyze-pane run splitting, mirroring ``analyze/input.py``'s precedent.
+"""Analyze-pane run splitting, mirroring ``analyze/domain/input.py``'s precedent.
 
 ``AnalyzeTab`` mixes in :class:`AnalyzeRunMixin` for two members that split
 "what would be run" from "actually run it": :meth:`_collect_run_spec` turns
@@ -9,7 +9,7 @@ persist a Analyze run's configuration as a plain, JSON-round-trippable
 same values it had at enqueue time.
 
 The queue's *edit* flow needs the opposite direction too — a spec written back
-into the form — which is :class:`analyze.job_edit.AnalyzeJobEditMixin`, mixed
+into the form — which is :class:`analyze.domain.job_edit.AnalyzeJobEditMixin`, mixed
 in here because it is part of the same queue-facing surface. ``show_job`` below
 stays a shallow preview; ``hydrate_job`` is the full inverse.
 
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QPushButton, QWidget
 
-from analyze.job_edit import AnalyzeJobEditMixin
+from analyze.domain.job_edit import AnalyzeJobEditMixin
 from services.pipeline_service import find_pipeline_script
 from services.run_spec import RunSpec, RunSpecError
 from widgets.flow_layout import FlowLayout

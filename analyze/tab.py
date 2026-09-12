@@ -40,7 +40,7 @@ from ui import theme
 from ui import theme
 from core.safe import swallowed
 from analyze.bg_map import AnalyzeBackgroundMapMixin
-from analyze.input import AnalyzeInputMixin
+from analyze.domain.input import AnalyzeInputMixin
 from analyze.preflight import AnalyzePreflightMixin
 from analyze.progress import AnalyzeProgressMixin
 from analyze.run_spec import AnalyzeRunMixin

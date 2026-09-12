@@ -22,7 +22,7 @@ literals: both mean "no constraint" rather than a measurement, and naming them
 makes a call site harder to read, not easier.
 
 `datasets/` is out of scope for now — its six tool pages are mid-consolidation
-into `datasets/_common/`, and naming constants inside modules that are about to
+into `datasets/core/`, and naming constants inside modules that are about to
 move would land the same numbers twice.
 """
 

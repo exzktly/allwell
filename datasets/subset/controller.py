@@ -25,7 +25,7 @@ from PySide6.QtCore import QObject
 from util.aw_safe import swallowed
 from util.well_token import canonical_well_label
 from widgets.plate_progress import canon_well, fraction_or_none
-from datasets._common.dataset_paths import shorten_headline
+from datasets.core.dataset_paths import shorten_headline
 from datasets.subset.dashboard import well_color, well_tooltip_label
 from datasets.subset.subset_compute import (
     SubsetFilter,
@@ -33,7 +33,7 @@ from datasets.subset.subset_compute import (
 )
 from datasets.subset.view import SubsetPage
 from datasets.subset.worker import SubsetWorker
-from datasets._common.tool_controller import DestinationToolController
+from datasets.core.tool_controller import DestinationToolController
 
 
 class SubsetController(DestinationToolController):

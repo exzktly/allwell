@@ -102,7 +102,7 @@ ROOT_DIRS = {
     "util": "package — Qt-free general helpers",
     "review": "package — the Review pane",
     "widgets": "package — reusable Qt widgets",
-    "scripts": "dev tooling + `_bootstrap_lib.py`, which ships in the bundle",
+    "scripts": "dev tooling + `remote_bootstrap.py`, which ships in the bundle",
     "tests": "the pytest suite",
     "assets":
         "runtime resources read by path — `ui.theme._icon_path` and "

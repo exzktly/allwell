@@ -3,7 +3,7 @@
 ``stardist_tile_px`` is read by exactly one segmentation routine, and its widget
 appears on exactly one page of the segmentation stack. Two places have to know
 that, and they are in layers that cannot import one another —
-``analyze.fields`` is the form's boundary validator and ``services`` must
+``analyze.domain.fields`` is the form's boundary validator and ``services`` must
 stay free of the form — so the rule is restated rather than shared, and a
 restated rule is two rules the day one of them changes.
 
@@ -18,7 +18,7 @@ reach its pixels.
 
 from __future__ import annotations
 
-from analyze.fields import _METHOD_GATED_INT_FIELDS
+from analyze.domain.fields import _METHOD_GATED_INT_FIELDS
 from services.pipeline_service import build_pipeline_args
 
 _METHODS = ("stardist_nuclei", "stardist_seeded_watershed_cell", "cellpose",

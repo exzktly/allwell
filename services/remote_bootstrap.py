@@ -14,7 +14,7 @@ machine.
 
 Usage::
 
-    python scripts/_bootstrap_lib.py <ssh-alias> [--force]
+    python services/remote_bootstrap.py <ssh-alias> [--force]
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from pathlib import Path
 
 # Repo root resolved from this file's location. Used to locate the
 # required pipeline files to sync to the remote (and, when frozen, resolves
-# to _MEIPASS since this module ships at _MEIPASS/scripts/_bootstrap_lib.py).
+# to _MEIPASS since this module ships at _MEIPASS/services/remote_bootstrap.py).
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 

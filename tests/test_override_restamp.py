@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import zipfile
 
-from datasets._common.dataset_paths import DatasetPaths
+from datasets.core.dataset_paths import DatasetPaths
 from datasets.concatenate.apply import execute_plan as concat_execute
 from datasets.concatenate.concatenate_compute import build_merge_plan
 from datasets.merge_plates.apply import execute_plan as merge_execute

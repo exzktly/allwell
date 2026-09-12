@@ -205,7 +205,7 @@ def _index_members(zf, reader: _SchemaReader, channels: set[str]):
         # The two skips ahead of the extension test are for what a user's file
         # manager adds after the fact: opening the archive in Finder leaves a
         # ``.DS_Store`` and an ``__MACOSX/`` tree inside it. The repo's shared
-        # OS-junk predicate (``datasets._common.member_names.is_os_junk_member``)
+        # OS-junk predicate (``datasets.core.member_names.is_os_junk_member``)
         # cannot be used here — it imports ``review``, which the pipeline
         # may not — so this is the local spelling of the same two rules.
         #

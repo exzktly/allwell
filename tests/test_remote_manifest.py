@@ -259,6 +259,6 @@ def test_bootstrap_preflight_uses_the_runner_manifest():
     runner uploads, so the two can never drift (the old ``REQUIRED_FILES`` tuple
     silently rotted to a stale 4-of-14 subset)."""
     from services.remote_runner import _REQUIRED_REMOTE_FILES
-    from scripts._bootstrap_lib import _required_files
+    from services.remote_bootstrap import _required_files
 
     assert tuple(_required_files()) == tuple(_REQUIRED_REMOTE_FILES)

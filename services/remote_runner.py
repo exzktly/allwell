@@ -2105,7 +2105,7 @@ def _remote_scratch_export(value: str) -> str:
 # installed (``$HOME/miniforge3`` for bootstrap-managed installs OR
 # whatever ``conda info --base`` reports for pre-existing system
 # condas) and sources it. Mirrors the discovery logic in
-# ``scripts/_bootstrap_lib.py`` so the runner doesn't care which path
+# ``services/remote_bootstrap.py`` so the runner doesn't care which path
 # bootstrap actually used.
 #
 # Why ``conda run --no-capture-output -n <env>`` rather than the old
@@ -2193,7 +2193,7 @@ def _conda_run_prefix_for(selector: EnvSelector) -> list[str]:
 
 
 # Shell helpers for locating and validating a conda env on the remote. Shared
-# with ``scripts/_bootstrap_lib.py`` so the runner's pre-launch check and the
+# with ``services/remote_bootstrap.py`` so the runner's pre-launch check and the
 # bootstrap's create-or-skip decision cannot disagree about whether an
 # environment exists — the state where they *did* disagree is the one that
 # stranded users (see :func:`_conda_env_guard`).

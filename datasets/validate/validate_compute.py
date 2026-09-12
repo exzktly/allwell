@@ -49,7 +49,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from datasets._common.concurrency import pick_workers
+from datasets.core.concurrency import pick_workers
 from pipeline.completeness import (
     csv_keys_from_rows,
     done_keys,
@@ -63,7 +63,7 @@ from util.aw_safe import swallow
 from util.well_token import canonical_well_label
 from domain.image_identity import load_schema
 from domain.tp_match import tp_close
-from datasets._common.dataset_paths import (
+from datasets.core.dataset_paths import (
     DatasetPathsError,
     collect_input_image_stems,
     in_containers,
@@ -1029,7 +1029,7 @@ def build_report(
     point is to describe a broken dataset rather than refuse to look at it.
 
     The per-well diff runs in parallel — *workers* threads (0 = auto, see
-    :func:`datasets._common.concurrency.pick_workers`). Pass a
+    :func:`datasets.core.concurrency.pick_workers`). Pass a
     :class:`ScanProgress` to follow the scan as it runs rather than only
     seeing its finished report; a full plate takes long enough that a caller
     with no progress channel has nothing to show for the duration.

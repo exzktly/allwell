@@ -37,12 +37,12 @@ def tab(qtbot, monkeypatch):
     ValueError("embedded null byte"),
 ])
 def test_a_check_that_could_not_run_blocks_the_run(tab, monkeypatch, raised):
-    import analyze.input
+    import analyze.domain.input
 
     def _boom(_path):
         raise raised
 
-    monkeypatch.setattr(analyze.input, "detect_ome_input", _boom)
+    monkeypatch.setattr(analyze.domain.input, "detect_ome_input", _boom)
     tab._input_edit.setText("/some/plate")
 
     hint = tab._ome_input_hint()
@@ -55,9 +55,9 @@ def test_a_check_that_could_not_run_blocks_the_run(tab, monkeypatch, raised):
 
 def test_a_readable_ordinary_folder_still_starts(tab, monkeypatch, tmp_path):
     """The guard must not become a blanket refusal."""
-    import analyze.input
+    import analyze.domain.input
 
-    monkeypatch.setattr(analyze.input, "detect_ome_input", lambda _p: None)
+    monkeypatch.setattr(analyze.domain.input, "detect_ome_input", lambda _p: None)
     tab._input_edit.setText(str(tmp_path))
     assert tab._ome_input_hint() is None
 

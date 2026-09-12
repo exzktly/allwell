@@ -1,7 +1,7 @@
 """No Datasets tool imports another Datasets tool (ARCHITECTURE §6b).
 
 §6b states the rule and its purpose: helpers shared by more than one tool live
-in ``datasets/_common/`` "rather than being imported from one feature package
+in ``datasets/core/`` "rather than being imported from one feature package
 into another, so each feature stays independently deletable". Two tools had
 reached across anyway — ``subset_compute`` and ``merge_plates_compute`` both
 imported from ``concatenate_compute`` — so deleting the Concatenate package
@@ -72,7 +72,7 @@ def test_no_tool_imports_another_tool():
     assert not offenders, (
         "A Datasets tool imports another Datasets tool, so deleting the second "
         "would break the first (ARCHITECTURE §6b). Move the shared symbol into "
-        "`datasets/_common/`:\n  " + "\n  ".join(sorted(offenders))
+        "`datasets/core/`:\n  " + "\n  ".join(sorted(offenders))
     )
 
 

@@ -54,9 +54,9 @@ from pathlib import Path
 
 from util.well_token import canonical_well_label
 from util.zip_write import atomic_zip, replace_folder_with_archive
-from datasets._common.concurrency import pick_workers
-from datasets._common.containers import WellFraction
-from datasets._common.dataset_paths import DatasetPaths, destination_has_content
+from datasets.core.concurrency import pick_workers
+from datasets.core.containers import WellFraction
+from datasets.core.dataset_paths import DatasetPaths, destination_has_content
 from datasets.import_loose.import_loose_compute import (
     existing_well_folders,
     group_files_by_well,

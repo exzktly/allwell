@@ -906,7 +906,7 @@ def dataset_root(ctx) -> str:
     the pipeline writes that is the ``out/`` subfolder — Analyze's own loader
     descends into it (``load_controller.load_path``). Every Datasets tool wants
     the folder *above* it, the one holding both ``in/`` and ``out/``, because
-    that is what a dataset is to them (``datasets._common.dataset_paths``).
+    that is what a dataset is to them (``datasets.core.dataset_paths``).
     Handing them ``out/`` fails their check and leaves the user re-picking a
     folder the app already had open.
 

@@ -133,7 +133,7 @@ class DestinationToolController(DatasetToolController):
         """True if *dest_path* holds this tool's own unfinished attempt."""
         from pathlib import Path
 
-        from datasets._common.dataset_paths import DatasetPaths
+        from datasets.core.dataset_paths import DatasetPaths
 
         root = Path(dest_path)
         return self._destination_has_marker(

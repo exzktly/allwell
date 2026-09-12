@@ -14,7 +14,7 @@ from __future__ import annotations
 import csv
 import json
 import threading
-from datasets._common.containers import container_dest, publish_container
+from datasets.core.containers import container_dest, publish_container
 from util.json_write import write_json_atomic
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,9 +22,9 @@ from pathlib import Path
 
 from util.aw_safe import swallow
 from util.well_token import canonical_well_label
-from datasets._common.concurrency import pick_workers
-from datasets._common.dataset_paths import split_stem_well
-from datasets._common.containers import (
+from datasets.core.concurrency import pick_workers
+from datasets.core.dataset_paths import split_stem_well
+from datasets.core.containers import (
     FILENAME_COLUMN,
     OVERRIDES_FILENAME,
     OVERRIDES_SCHEMA_VERSION,
@@ -34,7 +34,7 @@ from datasets._common.containers import (
     restamp_overrides,
     unstamped_note,
 )
-from datasets._common.member_names import (
+from datasets.core.member_names import (
     IMAGE_EXTS,
     is_os_junk_member,
     rewrite_member_field,
@@ -386,7 +386,7 @@ def execute_plan(
     of a binary merging/merged state. The four passes a well takes (read then
     write, for the raw input and again for the QC archive) are fused into one
     sweep from 0 to *total* by
-    :class:`~datasets._common.containers.WellFraction` — without that, each
+    :class:`~datasets.core.containers.WellFraction` — without that, each
     pass would fill the same dial from empty on its own. ``sub_progress`` is
     called from the worker threads without the callback lock: every call names
     its own well, so interleaving is harmless, and locking once per member
@@ -394,7 +394,7 @@ def execute_plan(
 
     Dataset 1's and dataset 2's wells are merged together in one parallel
     pass — *workers* threads (0 = auto, see
-    :func:`datasets._common.concurrency.pick_workers`). Each unit of work
+    :func:`datasets.core.concurrency.pick_workers`). Each unit of work
     owns one *destination* well's own files; a destination well only ever
     comes from one source (`build_plate_merge_plan` already refused a
     post-remap collision when the plan was built), so the two source sides

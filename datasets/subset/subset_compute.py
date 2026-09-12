@@ -23,7 +23,7 @@ from domain.image_identity import (
     normalize_fov,
 )
 from domain.tp_match import tp_close
-from datasets._common.dataset_paths import (
+from datasets.core.dataset_paths import (
     make_dataset_api,
     DatasetPaths,
     dataset_wells,
@@ -35,13 +35,13 @@ from datasets._common.dataset_paths import (
     out_csvs,
     out_zips,
 )
-from datasets._common.containers import (
+from datasets.core.containers import (
     FILENAME_COLUMN,
     TIMEPOINT_COLUMN,
     TIMEPOINT_HOURS_COLUMN,
 )
-from datasets._common.member_names import discover_parsed_member
-from datasets._common.dataset_paths import known_channel_tokens
+from datasets.core.member_names import discover_parsed_member
+from datasets.core.dataset_paths import known_channel_tokens
 
 IN_PROGRESS_MARKER = ".aw_subset_in_progress"
 
@@ -51,7 +51,7 @@ class SubsetError(Exception):
 
 
 # The five dataset entry points, bound to this tool's error class and its
-# own in-progress marker. See ``_common.dataset_paths.make_dataset_api``
+# own in-progress marker. See ``core.dataset_paths.make_dataset_api``
 # for why they are generated rather than written out: three tools carried
 # the same five wrappers, differing only in these two choices.
 _api = make_dataset_api(SubsetError, IN_PROGRESS_MARKER)
@@ -209,7 +209,7 @@ def member_matches(
 ) -> bool:
     """Whether a zip member's schema-parsed fields satisfy *filt*.
 
-    Resolves the member through :func:`~datasets._common.member_names.discover_parsed_member`
+    Resolves the member through :func:`~datasets.core.member_names.discover_parsed_member`
     rather than a bare ``parse_image_filename`` — a channel-scoped role suffix
     (``_tophat_gfp``, ``_smfish_nir``) doesn't resolve without trying each
     known channel token as the role-suffix discriminator, and without that a

@@ -12,7 +12,7 @@ Hierarchy:
   AnalyzeTab's "Manage…" button.
 * :class:`RemoteFormDialog` — the add/edit form.
 * :class:`BootstrapLogDialog` — modal sub-dialog that streams the
-  ``scripts/_bootstrap_lib.py`` subprocess output line by line so the
+  ``services/remote_bootstrap.py`` subprocess output line by line so the
   user sees progress through the 10–30 minute pip install.
 """
 
@@ -1190,7 +1190,7 @@ class SSHKeyWizardDialog(QDialog):
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# BootstrapLogDialog — live stdout from scripts/_bootstrap_lib.py
+# BootstrapLogDialog — live stdout from services/remote_bootstrap.py
 # ────────────────────────────────────────────────────────────────────────────
 
 
@@ -1198,7 +1198,7 @@ class BootstrapLogDialog(QDialog):
     """Streams bootstrap output line by line and lets the user cancel.
 
     Reuses the v5.0.0 PipelineRunner queue+QTimer pattern. Spawns
-    ``python scripts/_bootstrap_lib.py <alias>`` in its own session so
+    ``python services/remote_bootstrap.py <alias>`` in its own session so
     Cancel sends SIGTERM to the whole group (via the shared
     ``services.subprocess_kill.signal_subprocess`` helper).
     """
@@ -1285,7 +1285,7 @@ class BootstrapLogDialog(QDialog):
         # the bootstrap script's own helpers.
         from services.remote_runner import repo_root
 
-        bootstrap = repo_root() / "scripts" / "_bootstrap_lib.py"
+        bootstrap = repo_root() / "scripts" / "remote_bootstrap.py"
         # Source runs invoke the interpreter on the ``.py`` path, so it must
         # exist; the frozen build re-execs the .app binary via the
         # ``--run-bootstrap`` sentinel and never touches this path.

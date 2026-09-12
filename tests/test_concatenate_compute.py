@@ -793,7 +793,7 @@ def test_a_real_name_collision_still_fails_the_merge(tmp_path):
 def test_junk_is_recognised_by_name_not_by_being_unparseable():
     """The predicate names specific OS files rather than "anything that isn't
     an image" — a file a user put in an archive on purpose is not debris."""
-    from datasets._common.member_names import is_os_junk_member
+    from datasets.core.member_names import is_os_junk_member
 
     for name in (
         ".DS_Store", "frames/.DS_Store", "Thumbs.db", "desktop.ini",

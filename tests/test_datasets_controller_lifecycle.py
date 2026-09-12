@@ -3,7 +3,7 @@
 `stop`, `is_busy` and `shutdown` were six copies of the same eight lines,
 differing only in which method asks the worker to stop and which label a
 swallowed teardown error is logged under. They live on
-`datasets._common.tool_controller.DatasetToolController` now, with those two
+`datasets.core.tool_controller.DatasetToolController` now, with those two
 differences as a hook and a class attribute.
 
 The hook is the load-bearing part, and this file is where its reason is
@@ -39,7 +39,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from datasets._common.tool_controller import (  # noqa: E402
+from datasets.core.tool_controller import (  # noqa: E402
     DatasetToolController, DestinationToolController,
 )
 

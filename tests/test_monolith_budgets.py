@@ -194,7 +194,7 @@ ANALYZE_TAB_BUDGET = 855
 # and the form chrome (_section / _row / _entry / _info_icon / reveal_section →
 # analyze.form_chrome.AnalyzeFormChromeMixin) and the entry-boundary field
 # validation (the field tables and _numeric_option_errors →
-# analyze/fields.py) all did.
+# analyze/domain/fields.py) all did.
 # 1170 -> 1107: the per-method segmentation parameter pages (the NamedPageStack
 # and its StarDist / watershed / Cellpose / label-free / classical pages) moved
 # to analyze.seg_params.AnalyzeSegParamsMixin, which is also where the

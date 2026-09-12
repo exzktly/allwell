@@ -20,7 +20,7 @@ class SubsetWorker(QThread):
     wellStage = Signal(str, str)   # (well, "pending"|"copying"|"done"|"empty")
     # (well, done, total) — sub-progress *within* one well, so its plate cell
     # can render as a filling dial instead of a flat "copying" until the whole
-    # well lands. See datasets._common.containers.WellFraction for how the
+    # well lands. See datasets.core.containers.WellFraction for how the
     # well's several read/write passes are fused into one 0 → total sweep.
     wellFraction = Signal(str, int, int)
     succeeded = Signal(str, str)   # (destination root, summary line)

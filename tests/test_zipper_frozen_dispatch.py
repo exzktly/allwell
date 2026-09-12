@@ -246,7 +246,7 @@ def test_the_run_zipper_branch_calls_the_zipper_s_own_main():
 
     The import check next door passes on a branch that imports
     `well_plate_zipper` and then calls `process_microscopy.main()` — verified by
-    mutation, which is why this exists. `_bootstrap_lib` is loaded by file path
+    mutation, which is why this exists. `remote_bootstrap` is loaded by file path
     rather than imported and calls no `<name>.main()`, so only the two branches
     that do are asserted.
     """
@@ -274,7 +274,7 @@ def test_every_launcher_sentinel_imports_something_real():
     """The same rule for the other dispatch branches, so none rots alone.
 
     `--run-pipeline` and `--run-bootstrap` break identically and just as
-    quietly. `_bootstrap_lib` is loaded by file path rather than imported, so a
+    quietly. `remote_bootstrap` is loaded by file path rather than imported, so a
     branch that names no module at all is not a failure here — an import naming
     a module that has gone is.
     """

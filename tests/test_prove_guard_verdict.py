@@ -60,7 +60,7 @@ FAILED tests/test_plot_card_roster.py::test_the_shell_imports_the_roster
 COLLECTION_ERROR = """\
 ==================================== ERRORS ====================================
 _____________ ERROR collecting tests/test_datasets_controller_lifecycle.py _____
-E   ModuleNotFoundError: No module named 'datasets._common.tool_controller'
+E   ModuleNotFoundError: No module named 'datasets.core.tool_controller'
 =========================== short test summary info ============================
 ERROR tests/test_datasets_controller_lifecycle.py
 !!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!

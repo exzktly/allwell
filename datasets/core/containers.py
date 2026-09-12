@@ -16,7 +16,7 @@ three tiers:
    by hand in Finder — so it must cost what Finder costs.
 2. **Raw member passthrough.** Otherwise each kept member's *already
    compressed* bytes are streamed into the destination by
-   :mod:`datasets._common.zip_passthrough` — no inflate, no deflate, no CRC
+   :mod:`datasets.core.zip_passthrough` — no inflate, no deflate, no CRC
    recomputation. A dropped member is never read at all, so a filter that
    keeps a quarter of an archive costs about a quarter of it.
 3. **Fallback.** A folder source, or a member the passthrough is not entitled
@@ -49,8 +49,8 @@ from pathlib import Path
 
 from util.aw_safe import swallow
 from util.zip_write import atomic_zip
-from datasets._common.dataset_paths import DatasetPaths
-from datasets._common.zip_passthrough import copy_member_raw, member_is_raw_copyable
+from datasets.core.dataset_paths import DatasetPaths
+from datasets.core.zip_passthrough import copy_member_raw, member_is_raw_copyable
 
 TIMEPOINT_COLUMN = "timepoint"
 TIMEPOINT_HOURS_COLUMN = "timepoint_hours"

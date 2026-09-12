@@ -436,7 +436,7 @@ def test_the_whole_file_tier_stages_like_every_other_tier(tmp_path, monkeypatch)
     destination. An interrupted copy left a truncated ``<WELL>.zip``."""
     import shutil
 
-    from datasets._common import containers
+    from datasets.core import containers
 
     src = tmp_path / "src.zip"
     with zipfile.ZipFile(src, "w") as zf:

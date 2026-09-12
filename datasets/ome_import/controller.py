@@ -18,7 +18,7 @@ from core.safe import swallowed
 from datasets.ome_import.ome_import_compute import ConversionParams
 from datasets.ome_import.view import OmeImportPage
 from datasets.ome_import.worker import OmeImportWorker
-from datasets._common.tool_controller import DatasetToolController
+from datasets.core.tool_controller import DatasetToolController
 
 
 class OmeImportController(DatasetToolController):

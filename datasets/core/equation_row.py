@@ -8,7 +8,7 @@ differed only in two field labels and the name of the slot they connected the
 ``changed`` signal to — including a byte-identical nested ``_operator`` helper
 and a second copy of the operator column's width.
 
-That is the duplication ``_common/dataset_fields.py`` and ``_common/log_panel.py``
+That is the duplication ``core/dataset_fields.py`` and ``core/log_panel.py``
 were each written to end, arriving a third time. The wording, the geometry and
 the cross-plate hint underneath now have one definition, so the two pages
 cannot drift apart one small inconsistency at a time.

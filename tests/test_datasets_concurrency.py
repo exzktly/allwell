@@ -1,11 +1,11 @@
-"""Qt-free tests for datasets._common.concurrency.pick_workers — the shared
+"""Qt-free tests for datasets.core.concurrency.pick_workers — the shared
 worker-count heuristic Import Loose Folder, Concatenate, Subset, and Merge
 Plates all use for their per-well thread pools.
 """
 
 from __future__ import annotations
 
-from datasets._common.concurrency import pick_workers
+from datasets.core.concurrency import pick_workers
 
 
 def test_zero_units_returns_one():

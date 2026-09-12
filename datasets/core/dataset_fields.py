@@ -6,7 +6,7 @@ Each tool page asks the same two questions of a folder the user has typed —
 to its buttons once a run succeeds. Those were written out per page, four
 near-identical copies each, which is how six pages drift one small
 inconsistency at a time (§6b tells that story about the log furniture, and
-`_common/log_panel.py` is the fix it describes).
+`core/log_panel.py` is the fix it describes).
 
 The wording of a rejection is deliberately shared too. A user moving between
 Subset and Merge Plates should not be told the same thing two different ways.
@@ -38,7 +38,7 @@ def is_free_destination(
     """``""`` if *root* is usable as a destination, else a short reason.
 
     *has_unrecognized* comes from the caller because each tool binds it to its
-    own in-progress marker (see ``_common.dataset_paths.make_dataset_api``): a
+    own in-progress marker (see ``core.dataset_paths.make_dataset_api``): a
     folder holding *this* tool's interrupted attempt is a resume, while the same
     folder holding another tool's leftovers is not. *is_complete* is not
     marker-scoped — it only asks whether ``out/pipeline_info.json`` is there —
@@ -47,7 +47,7 @@ def is_free_destination(
     Cross-field rules — "the destination must differ from both sources" — stay
     on the page, since they need fields this function cannot see.
     """
-    from datasets._common.dataset_paths import DatasetPaths
+    from datasets.core.dataset_paths import DatasetPaths
 
     dest = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
     if is_complete(dest):

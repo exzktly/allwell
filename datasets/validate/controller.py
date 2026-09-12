@@ -12,7 +12,7 @@ from collections.abc import Callable
 from PySide6.QtCore import QObject
 
 from util.aw_safe import swallowed
-from datasets._common.dataset_paths import preview_wells
+from datasets.core.dataset_paths import preview_wells
 from datasets.validate.validate_compute import (
     DatasetReport,
     WellReport,
@@ -22,7 +22,7 @@ from datasets.validate.validate_compute import (
 )
 from datasets.validate.view import ValidatePage
 from datasets.validate.worker import ValidateWorker
-from datasets._common.tool_controller import DatasetToolController
+from datasets.core.tool_controller import DatasetToolController
 
 
 class ValidateController(DatasetToolController):

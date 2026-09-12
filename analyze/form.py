@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from analyze.form_chrome import AnalyzeFormChromeMixin
-from analyze.fields import (  # noqa: F401 — re-exported for analyze.tab
+from analyze.domain.fields import (  # noqa: F401 — re-exported for analyze.tab
     _INT_FIELDS,
     _numeric_option_errors,
 )

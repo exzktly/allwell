@@ -14,7 +14,7 @@ the other two differed by a docstring and by one extra widget in an existing
 overrides**: it checks ``_status``, ``_log_sep`` and ``_log_hdr``, and a page
 that has no ``_log_hdr`` simply contributes ``None`` there.
 
-`datasets/_common/` held only logic before this (containers, dataset paths,
+`datasets/core/` held only logic before this (containers, dataset paths,
 member names, zip passthrough). The absence of a shared *view* layer is how the
 six pages drifted apart in the first place, one small inconsistency at a time.
 

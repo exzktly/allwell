@@ -322,7 +322,7 @@ def test_tool_isolation_guard_catches_a_cross_tool_import(tmp_path, monkeypatch)
 
 def test_tool_isolation_guard_clears_a_common_import(tmp_path, monkeypatch):
     _write(tmp_path, "datasets/subset/subset_compute.py",
-           "from datasets._common.dataset_paths import known_channel_tokens\n")
+           "from datasets.core.dataset_paths import known_channel_tokens\n")
     module = importlib.import_module("tests.test_datasets_tool_isolation")
     monkeypatch.setattr(module, "_tool_packages", lambda: ["subset", "concatenate"])
     assert _run_rooted_scan(monkeypatch, "tests.test_datasets_tool_isolation",
@@ -2994,7 +2994,7 @@ def test_text_decode_guard_catches_a_locale_decode(tmp_path, monkeypatch, shape)
     'from services.subprocess_text import TEXT_UTF8\n\n'
     'def probe(cmd):\n'
     '    return subprocess.run(cmd, capture_output=True, **TEXT_UTF8)\n',
-    # Spelled out, which is what scripts/_bootstrap_lib.py must do (stdlib-only).
+    # Spelled out, which is what services/remote_bootstrap.py must do (stdlib-only).
     'import subprocess\n\n'
     'def probe(cmd):\n'
     '    return subprocess.run(cmd, text=True, encoding="utf-8", errors="replace")\n',

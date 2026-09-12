@@ -123,7 +123,7 @@ def test_a_sidecar_never_re_arms_the_low_disk_override(qtbot, tmp_path):
     someone happened to open — a volume the user has not measured and may not
     even be writing to now. Re-arming it from that is a safety override nobody
     chose. A *queued job* is the opposite case and does restore it; see
-    ``analyze.job_edit._hydrate_opts_without_sidecar_equivalents``.
+    ``analyze.domain.job_edit._hydrate_opts_without_sidecar_equivalents``.
     """
     from analyze.tab import AnalyzeTab
 

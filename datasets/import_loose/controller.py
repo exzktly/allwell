@@ -11,10 +11,10 @@ from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QMessageBox
 
 from util.aw_safe import swallowed
-from datasets._common.dataset_paths import shorten_headline
+from datasets.core.dataset_paths import shorten_headline
 from datasets.import_loose.view import ImportLoosePage
 from datasets.import_loose.worker import ImportLooseWorker
-from datasets._common.tool_controller import DatasetToolController
+from datasets.core.tool_controller import DatasetToolController
 
 
 class ImportLooseController(DatasetToolController):
@@ -165,7 +165,7 @@ class ImportLooseController(DatasetToolController):
         is about to act on rather than describing the operation in the
         abstract — the counts are the whole difference between "yes, that is my
         plate" and "wait, that is the wrong folder". The path goes on its own
-        line (the house shape, ``_common/tool_controller.py``) instead of being
+        line (the house shape, ``core/tool_controller.py``) instead of being
         interpolated mid-sentence with ``!r``, where a long path made one very
         wide line wrapped in quotes.
 

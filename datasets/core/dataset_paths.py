@@ -499,7 +499,7 @@ def schema_values_from_stems(
 # These read a dataset's ``pipeline_info.json`` rather than its folders, but
 # they live here because this module is already the one that produces those
 # dicts (:func:`read_info`) and because ARCHITECTURE §6b requires anything more
-# than one tool needs to sit in ``_common`` — Concatenate owned both of these,
+# than one tool needs to sit in ``core`` — Concatenate owned both of these,
 # and Subset and Merge Plates reached across into it, which is precisely the
 # import that stops a feature being independently deletable.
 

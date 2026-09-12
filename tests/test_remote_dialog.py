@@ -204,7 +204,7 @@ def test_bootstrap_dialog_streams_subprocess_stdout(qtbot, tmp_path, monkeypatch
     """Substitute the real bootstrap with a tiny shim that prints three
     lines and exits cleanly. The dialog should see the lines flow into
     its log pane and end with a Complete title."""
-    shim = tmp_path / "_bootstrap_lib.py"
+    shim = tmp_path / "remote_bootstrap.py"
     shim.write_text(
         "import sys, time\n"
         "for i in range(3):\n"
@@ -214,11 +214,11 @@ def test_bootstrap_dialog_streams_subprocess_stdout(qtbot, tmp_path, monkeypatch
         encoding="utf-8",
     )
 
-    # Point the dialog at our shim by symlinking scripts/_bootstrap_lib.py
+    # Point the dialog at our shim by symlinking services/remote_bootstrap.py
     # to it for the duration of the test. (The dialog resolves the path
     # relative to its own __file__.)
     scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
-    target = scripts_dir / "_bootstrap_lib.py"
+    target = scripts_dir / "remote_bootstrap.py"
     backup = target.with_suffix(".py.bak")
     target.rename(backup)
     try:

@@ -21,14 +21,11 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-
-from _bootstrap_lib import env_setup_script, force_clean_script  # noqa: E402
+from services.remote_bootstrap import env_setup_script, force_clean_script
 
 pytestmark = pytest.mark.skipif(
     shutil.which("bash") is None, reason="needs a POSIX shell to run the script")

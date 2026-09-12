@@ -1,7 +1,7 @@
 """Qt builder for the Merge Plates page.
 
 An equation-style dataset 1 + dataset 2 = destination row (the shared
-:mod:`datasets._common.equation_row`, which Concatenate draws from too, with
+:mod:`datasets.core.equation_row`, which Concatenate draws from too, with
 this page's own labels and destination rule), a block-placement control for
 remapping dataset 2's wells
 onto free positions, and the usual Analyze-style status view (a live per-well
@@ -31,11 +31,11 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
-from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
 from util.well_token import canonical_well_label
 from widgets._support import set_variant
-from datasets._common.dataset_paths import preview_wells
-from datasets._common.equation_row import build_equation_row
+from datasets.core.dataset_paths import preview_wells
+from datasets.core.equation_row import build_equation_row
 from datasets.merge_plates.dashboard import MergePlatesDashboard
 from datasets.merge_plates.merge_plates_compute import (
     MergePlatesError,
@@ -43,8 +43,8 @@ from datasets.merge_plates.merge_plates_compute import (
     destination_has_unrecognized_content,
     destination_is_complete_dataset,
 )
-from datasets._common.dataset_fields import is_dataset, is_free_destination
-from datasets._common.dataset_fields import promote_open_button
+from datasets.core.dataset_fields import is_dataset, is_free_destination
+from datasets.core.dataset_fields import promote_open_button
 
 # Well-token field for the remap origin (e.g. `A01`).
 _ORIGIN_EDIT_W = 60

@@ -19,7 +19,7 @@ from review.domain.bar_colors import apply_bar_color_mode, mono_bar_color
 from review.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from review.core.empty_state_copy import NO_DATASET_MESSAGE
 from review.data.data_loading import get_rows
-from review.domain.text_columns import timepoint_text
+from domain.text_columns import timepoint_text
 from review.domain.time_rescale import format_scaled as _rescale_tp
 from review.domain.time_rescale import rescale_for as _time_rescale_for
 from review.domain import fold_change_pairing as _pairing_mod
@@ -55,7 +55,7 @@ from review.core.plot_annotations import (
     LABEL_SPAN_HEADROOM as _LABEL_HEADROOM,
     value_label_settings,
 )
-from review.domain.tp_match import tp_close, tp_close_mask
+from domain.tp_match import tp_close, tp_close_mask
 from review.features.barplot._annotations import (
     label_bar,
     user_y_ceiling as _user_y_ceiling,

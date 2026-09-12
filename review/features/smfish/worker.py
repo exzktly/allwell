@@ -17,7 +17,7 @@ from collections.abc import Callable
 import numpy as np
 import pandas as pd
 
-from review.data.image_identity import (
+from domain.image_identity import (
     CellKey, cell_keys_for_dataframe,
     normalize_fov, normalize_nucleus_id, normalize_tp, normalize_well,
 )

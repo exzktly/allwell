@@ -103,7 +103,7 @@ def test_remap_timepoint_label_matches_dataset1_format():
 
 # ── zip-member filename rewrite (the traps the shipped version hit) ──────────
 def _schema():
-    from review.data.image_identity import load_schema
+    from domain.image_identity import load_schema
     return load_schema(_BASE_INFO)
 
 

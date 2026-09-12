@@ -45,7 +45,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from review.data.image_identity import normalize_tp
+from domain.image_identity import normalize_tp
 
 __all__ = [
     "DEFAULT_FACTOR",

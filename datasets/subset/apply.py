@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from util.aw_safe import swallow
-from review.data.image_identity import normalize_fov, normalize_tp
+from domain.image_identity import normalize_fov, normalize_tp
 from datasets._common.concurrency import pick_workers
 from datasets._common.containers import (
     FILENAME_COLUMN,

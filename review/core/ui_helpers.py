@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from ui import theme
 from review.core import empty_state_copy
 from core.safe import swallow
-from review.data.image_identity import normalize_tp
+from domain.image_identity import normalize_tp
 from core.safe import swallowed
 
 

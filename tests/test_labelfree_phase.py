@@ -83,7 +83,7 @@ def _set_method(tab, value: str) -> None:
 # ── image_identity: Role.PHASE ───────────────────────────────────────────────
 
 def test_role_phase_catalog():
-    from review.data.image_identity import Role, ROLE_CATALOG, role_for_kind
+    from domain.image_identity import Role, ROLE_CATALOG, role_for_kind
     assert Role.PHASE.value == "phase"
     assert Role.PHASE in ROLE_CATALOG
     spec = ROLE_CATALOG[Role.PHASE]

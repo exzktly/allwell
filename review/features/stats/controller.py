@@ -19,7 +19,7 @@ from review.features.stats._report import (
     dunnett_lines, effect_size_text, omnibus_lines, paired_lines, two_way_lines,
 )
 from review.domain.stats_compute import group_replicate_stats
-from review.domain.tp_match import tp_close_mask
+from domain.tp_match import tp_close_mask
 
 
 #: Every entry the Test combo offers, in the order it offers them, with what

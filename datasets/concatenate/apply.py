@@ -30,7 +30,7 @@ from pathlib import Path
 
 from util.timepoint import parse_hours
 from util.aw_safe import swallow
-from review.domain.tp_match import tp_close
+from domain.tp_match import tp_close
 from datasets._common.concurrency import pick_workers
 from datasets._common.containers import (
     FILENAME_COLUMN as _FILENAME_COLUMN,

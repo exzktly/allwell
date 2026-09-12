@@ -21,7 +21,7 @@ import pandas as pd
 from util.fov import sort_key as _fov_sort_key
 from review.data.data_loading import parse_timepoint_hours
 from review.data.image_resolver import normalize_numeric_token
-from review.domain.text_columns import text_column, timepoint_text
+from domain.text_columns import text_column, timepoint_text
 
 # Local alias for the shared numeric-token normaliser: a raw FOV token collapses
 # to ``%g`` form so ``1``, ``01`` and ``1.0`` index the same field of view.

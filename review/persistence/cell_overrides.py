@@ -28,7 +28,7 @@ from pathlib import Path
 
 from util.well_token import canonical_well_label
 from core.safe import swallowed
-from review.data.image_identity import CellKey
+from domain.image_identity import CellKey
 from review.persistence._io import atomic_write_json
 
 _logger = logging.getLogger("review")

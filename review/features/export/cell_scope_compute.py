@@ -44,7 +44,7 @@ from review.data.data_loading import (
     resolved_timepoints,
 )
 from review.domain.gating_state import active_fluor_gates
-from review.domain.tp_match import tp_close_mask
+from domain.tp_match import tp_close_mask
 
 #: Verdict columns the app computes and the CSV on disk never carries. Absent is
 #: not unknown: ``data/cache_projectors.project_verdict_column`` *drops* one of

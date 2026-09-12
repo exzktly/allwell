@@ -135,7 +135,7 @@ def scope_options(ctx) -> tuple[list[str], list[str], list[str]]:
     the tab is built lazily and can outlive several datasets, so a list captured
     once would offer the previous plate's wells.
     """
-    from review.data.image_identity import normalize_fov, normalize_tp
+    from domain.image_identity import normalize_fov, normalize_tp
     wells = sorted(ctx.state.dataset.well_paths.keys(), key=_well_sort_key)
     fovs = [normalize_fov(f) for f in (ctx.state.dataset.all_fovs_cache or [])]
     tps = [normalize_tp(t) for t in (ctx.state.dataset.all_timepoints_cache or [])]
@@ -150,7 +150,7 @@ def current_frame(ctx) -> tuple[str, str, str]:
     combo reading ``T01`` and an option list holding ``1`` are the same
     timepoint, and comparing them raw would leave the dropdown looking empty.
     """
-    from review.data.image_identity import normalize_fov, normalize_tp
+    from domain.image_identity import normalize_fov, normalize_tp
     # The well stays as the dataset spells it — see ``callbacks.override_key``.
     well = str(ctx.state.preview.selected_well or "").strip()
     fov_menu = (ctx.runtime.review_image.fov_menu

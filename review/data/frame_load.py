@@ -61,7 +61,7 @@ if TYPE_CHECKING:
 import logging
 
 from review.data.image_resolver import normalize_numeric_token
-from review.domain.tp_match import tp_close
+from domain.tp_match import tp_close
 
 logger = logging.getLogger(__name__)
 

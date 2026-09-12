@@ -26,7 +26,7 @@ from review.features.multivariate.collect import (
     available_feature_columns, column_display_label,
 )
 from review.features.multivariate.feature_picker_view import build_feature_picker
-from review.domain.tp_match import tp_close
+from domain.tp_match import tp_close
 
 _FIG_W, _FIG_H, _DPI = 7.6, 6.6, 100
 

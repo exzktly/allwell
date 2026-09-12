@@ -93,6 +93,7 @@ ROOT_MODULES = {
 ROOT_DIRS = {
     "analyze": "package — the Analyze pane",
     "core": "package — cross-cutting app infrastructure no pane owns",
+    "domain": "package — Qt-free models and pure logic more than one pane needs",
     "datasets": "package — the Datasets pane and its tools",
     "pipeline": "package — the Qt-free analysis pipeline",
     "services": "package — the Analyze-side service layer",

@@ -22,7 +22,7 @@ from review.domain.selections_model import (
 from review.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from review.data.data_loading import extract_well_token as _extract_well_token
 from review.data.data_loading import get_rows
-from review.domain.text_columns import fov_text
+from domain.text_columns import fov_text
 from review.domain.viewer_state import parse_rc
 
 import logging
@@ -57,7 +57,7 @@ from review.domain.stats_compute import (
     replicate_unit,
 )
 from core import debug_flags as debug_flags
-from review.domain.tp_match import tp_close
+from domain.tp_match import tp_close
 from review.domain.gating_state import active_fluor_gates
 
 _logger = logging.getLogger(__name__)

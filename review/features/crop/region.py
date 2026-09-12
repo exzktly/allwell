@@ -21,7 +21,7 @@ been; a scoped crop leaves every out-of-scope cell passing, which is the same
 fail-open direction the rest of this module takes.
 
 This module is Qt-free and dependency-light (pandas only, plus the shared token
-normalisers in :mod:`review.data.image_identity`) so the verdict is
+normalisers in :mod:`domain.image_identity`) so the verdict is
 unit-tested without the app.
 """
 
@@ -54,7 +54,7 @@ class FrameScope(NamedTuple):
     Wells are matched against the dataset's own labels, uncanonicalised, for the
     reason given in ``review_image.callbacks.override_key`` — every reader keys
     off the label the loader produced. FOVs and timepoints are matched in the
-    canonical token forms :mod:`review.data.image_identity` produces, so a
+    canonical token forms :mod:`domain.image_identity` produces, so a
     combo reading ``T01`` and a CSV column holding ``1.0`` are the same
     timepoint.
     """
@@ -84,7 +84,7 @@ def _frame_tokens(df):
     verdict and the outline's frame test ask it, on the projection path and on
     every canvas redraw respectively, so it is memoised rather than repeated.
     """
-    from review.data.image_identity import frame_token_series
+    from domain.image_identity import frame_token_series
     key = (id(df), len(df))
     try:
         cached = df.attrs.get(_TOKENS_ATTR)
@@ -103,7 +103,7 @@ def rows_in_scope(df, scope: FrameScope | None, well: str | None = None):
     The well is a property of the frame, not of the row: the caller passes the
     label of the well ``df`` was loaded for, and an out-of-scope well makes the
     whole frame ``False`` in one step rather than per row. FOV and timepoint are
-    read off the row through :func:`~review.data.image_identity.frame_token_series`,
+    read off the row through :func:`~domain.image_identity.frame_token_series`,
     the same normalisation the override keys use.
 
     A frame that carries no timepoint column reads as ``""`` and therefore
@@ -125,7 +125,7 @@ def rows_in_scope(df, scope: FrameScope | None, well: str | None = None):
     if scope.fovs is None and scope.tps is None:
         return pd.Series(True, index=df.index, dtype=bool)
 
-    from review.data.image_identity import normalize_fov, normalize_tp
+    from domain.image_identity import normalize_fov, normalize_tp
     fov_n, tp_n = _frame_tokens(df)
     inside = pd.Series(True, index=df.index, dtype=bool)
     # The armed tokens are normalised here as well as where they are picked: a
@@ -168,7 +168,7 @@ def frame_in_scope(df, scope: FrameScope | None, well: str | None,
         # normalisation, and this runs on every canvas redraw.
         return True
 
-    from review.data.image_identity import normalize_fov, normalize_tp
+    from domain.image_identity import normalize_fov, normalize_tp
     want_fov, want_tp = normalize_fov(fov), normalize_tp(tp)
     if df is not None and len(df) > 0:
         # One token pass, shared between locating the frame and judging it —

@@ -61,8 +61,8 @@ from pipeline.incremental_keys import fov_keys_from_member_names
 from util.timepoint import parse_hours, sort_key as tp_sort_key
 from util.aw_safe import swallow
 from util.well_token import canonical_well_label
-from review.data.image_identity import load_schema
-from review.domain.tp_match import tp_close
+from domain.image_identity import load_schema
+from domain.tp_match import tp_close
 from datasets._common.dataset_paths import (
     DatasetPathsError,
     collect_input_image_stems,

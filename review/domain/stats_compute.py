@@ -26,10 +26,10 @@ from review.data.data_loading import (
     resolve_value_series,
 )
 from review.domain.batch_models import ReplicateSet
-from review.domain.text_columns import fov_text
+from domain.text_columns import fov_text
 from review.domain.fov_integrity import check_fov_labels
 from review.domain.ratio_models import RATIO_PREFIX
-from review.domain.tp_match import tp_close, tp_close_mask
+from domain.tp_match import tp_close, tp_close_mask
 from review.domain.gating_state import active_fluor_gates
 from review.core.channel_state_controller import (
     get_all_fluor_gates,

@@ -28,7 +28,7 @@ from pipeline.shape_features import is_shape_column
 from review.data.data_loading import df_included_mask, resolve_value_series
 from review.domain import spatial_compute as spc
 from review.domain.metric_registry import METRICS
-from review.domain.tp_match import tp_close_mask
+from domain.tp_match import tp_close_mask
 
 _logger = logging.getLogger(__name__)
 

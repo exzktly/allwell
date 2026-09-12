@@ -38,7 +38,7 @@ from pathlib import Path
 
 from util.aw_safe import swallow
 from util.timepoint import parse_hours, sort_key
-from review.data.image_identity import PipelineSchema, load_schema
+from domain.image_identity import PipelineSchema, load_schema
 from datasets._common.dataset_paths import (
     make_dataset_api,
     DatasetPaths,

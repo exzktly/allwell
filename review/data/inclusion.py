@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 
 from review.data.data_loading import df_included_mask, get_rows
-from review.data.image_identity import (
+from domain.image_identity import (
     frame_token_series, normalize_fov, normalize_tp, resolve_identity_column,
 )
 

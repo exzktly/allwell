@@ -142,6 +142,37 @@ def test_core_does_not_import_a_pane():
     )
 
 
+def test_domain_imports_nothing_above_it():
+    """`domain/` is the bottom of the shared stack: no pane, no GUI, no infra.
+
+    It holds the application's shared subject matter — what an image filename
+    means, when two timepoints are the same measurement — which Review and
+    Datasets must answer identically or they disagree about the same plate.
+    A module here that reaches up into a pane inverts the dependency that makes
+    it shareable, and one that reaches into `core/`, `ui/` or `widgets/` drags
+    the GUI into code the pipeline's own docstrings already cite as canonical.
+
+    `util/` is excluded from the forbidden set deliberately: it is Qt-free and
+    below this layer, so a domain module may use its string and path helpers.
+    """
+    forbidden = {"review", "analyze", "datasets", "core", "ui", "widgets"}
+    offenders = []
+    for path in _walk_py(REPO_ROOT / "domain"):
+        for node, top in _all_imports(_parse(path)):
+            if top in forbidden:
+                offenders.append(
+                    f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports {top}")
+    assert not offenders, (
+        "domain/ must not import a pane, the GUI layers, or core/:\n  "
+        + "\n  ".join(offenders) + "\n\n"
+        "The arrow runs one way — panes and infrastructure depend on shared "
+        "domain, never the reverse. If a domain module needs something from "
+        "above, either the thing it needs is itself domain (move it down) or "
+        "the module is not shared domain at all (move it back into the pane "
+        "that owns it)."
+    )
+
+
 # ── widgets/ have no All-Well app coupling ────────────────────────────────────
 
 def test_widgets_do_not_import_the_app():

@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from review.data.image_identity import (
+from domain.image_identity import (
     ParsedName,
     PipelineSchema,
     ROLE_CATALOG,

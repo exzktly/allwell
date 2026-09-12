@@ -38,7 +38,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from review.data.image_identity import normalize_tp
+from domain.image_identity import normalize_tp
 from review.features.smfish.worker import (
     _drop_case_equivalent_columns,
     _resolve_csv_path,

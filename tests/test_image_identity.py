@@ -1,4 +1,4 @@
-"""Tests for the unified ``review.data.image_identity`` module.
+"""Tests for the unified ``domain.image_identity`` module.
 
 Pins the contract every other site relies on:
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from review.data.image_identity import (
+from domain.image_identity import (
     CellKey,
     Role,
     ROLE_CATALOG,

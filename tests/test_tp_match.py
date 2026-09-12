@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from review.domain.tp_match import tp_close, tp_close_mask
+from domain.tp_match import tp_close, tp_close_mask
 
 
 def test_whole_numbers_match_and_distinguish():

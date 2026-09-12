@@ -30,7 +30,7 @@ import pandas as pd
 
 from core.safe import swallowed
 from review.data.data_loading import get_rows
-from review.data.image_identity import cell_key_tuples_for_dataframe
+from domain.image_identity import cell_key_tuples_for_dataframe
 
 
 def _coerce_included(val: object) -> int:

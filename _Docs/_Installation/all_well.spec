@@ -189,7 +189,7 @@ sibling_scripts = [
 # non-Qt units like pipeline/cellpose.py dropped); the full build ships them
 # whole.
 for _pkg in ("review", "widgets", "ui", "services", "pipeline", "util",
-             "startup", "core",
+             "startup", "core", "domain",
              "analyze", "datasets"):
     _pkg_path = _parent / _pkg
     if not _pkg_path.is_dir():

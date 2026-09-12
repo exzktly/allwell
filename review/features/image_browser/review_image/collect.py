@@ -52,7 +52,7 @@ def review_row_keys_series(ctx, df: pd.DataFrame) -> pd.Series | None:
     and the curation projector use — no more drift between the review-image
     overrides side (used to use ``:g`` float format) and the smFISH writer side
     (used to strip only). ``ctx`` is unused and kept for the call shape."""
-    from review.data.image_identity import cell_key_tuples_for_dataframe
+    from domain.image_identity import cell_key_tuples_for_dataframe
     return cell_key_tuples_for_dataframe(df)
 
 
@@ -105,7 +105,7 @@ def _load_arrays_from_refs(refs, *, limit: int, tp=None):
 
     When *tp* is given, only frames whose timepoint normalizes to the same key
     are decoded (per-timepoint empty-well field); otherwise all frames pool."""
-    from review.data.image_identity import normalize_tp
+    from domain.image_identity import normalize_tp
     from review.data.image_repository import ImageRepository
     want = normalize_tp(tp) if tp is not None else None
     out = []
@@ -194,7 +194,7 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None,
         return _ffc.estimate_gaussian_flatfield(fluor_arr)
 
     chan = str(channel or "").lower()
-    from review.data.image_identity import normalize_tp
+    from domain.image_identity import normalize_tp
     tp_key = normalize_tp(tp) if (mode == "empty_well" and tp is not None) else ""
     blanks = _preview_blank_wells(ctx, well) if mode == "empty_well" else []
     cache = ctx.state.review_image.flatfield_field_cache
@@ -758,13 +758,13 @@ def collect_region_delete_targets(
 
     Returns ``(targets, stats)`` where ``targets`` is a list of canonical
     ``(well, fov, tp, nid)`` keys — built through
-    :func:`~review.data.image_identity.cell_keys_for_dataframe`, so they
+    :func:`~domain.image_identity.cell_keys_for_dataframe`, so they
     match the ``included_overrides`` map and ``cell_overrides.json`` exactly —
     and ``stats`` is a dict with ``frames`` (distinct frames contributing at
     least one target), ``wells`` (likewise for wells), ``scanned_wells``,
     ``no_centroid_wells`` and ``unreadable_wells``.
     """
-    from review.data.image_identity import cell_keys_for_dataframe
+    from domain.image_identity import cell_keys_for_dataframe
 
     targets: list[tuple[str, str, str, str]] = []
     stats = {

@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from review.domain.batch_models import BarGroup
-from review.domain.tp_match import tp_close
+from domain.tp_match import tp_close
 
 
 @dataclass

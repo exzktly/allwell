@@ -16,7 +16,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from collections.abc import Callable, Mapping
 from util.well_token import canonical_well_label
-from review.data.image_identity import (
+from domain.image_identity import (
     ROLE_CATALOG,
     Role,
     classify_filename_role,

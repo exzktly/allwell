@@ -42,7 +42,7 @@ def override_key(well: str, fov: object, tp: object, nid: object) -> tuple | Non
     """Canonical ``(well, fov, tp, nid)`` override-map key.
 
     The FOV / timepoint / nucleus tokens go through
-    :class:`~review.data.image_identity.CellKey`, the same constructor
+    :class:`~domain.image_identity.CellKey`, the same constructor
     ``collect.review_row_keys_series`` uses to look overrides back up when
     projecting them onto the row cache, so those three cannot drift between the
     write and the read.
@@ -59,7 +59,7 @@ def override_key(well: str, fov: object, tp: object, nid: object) -> tuple | Non
     Returns ``None`` when any component normalises away to empty, which means
     the row cannot be identified and must not be written.
     """
-    from review.data.image_identity import CellKey
+    from domain.image_identity import CellKey
     key = CellKey.from_row({"fov": fov, "timepoint": tp, "nucleus_id": nid}, well="")
     well = str(well or "").strip()
     if not (well and key.fov and key.tp and key.nid):
@@ -134,7 +134,7 @@ def resolve_delete_scope(ctx, well: str, fov: str, tp: str):
     has. An armed field the user emptied resolves to an empty set, which selects
     nothing rather than everything.
     """
-    from review.data.image_identity import normalize_fov, normalize_tp
+    from domain.image_identity import normalize_fov, normalize_tp
     ri = ctx.state.review_image
     wells = ({str(well or "").strip()} if ri.delete_scope_wells is None
              else {str(w).strip() for w in ri.delete_scope_wells})

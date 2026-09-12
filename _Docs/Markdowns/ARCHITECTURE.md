@@ -7914,7 +7914,7 @@ the wrong field would silently succeed rather than fail loudly.
 is structurally conformant to the schema — a recognised image extension,
 exactly as many separator-delimited fields as the schema declares once any role
 suffix (`_labels`, `_overlay`, `_tophat_<chan>`, `_smfish_<chan>`, …) is
-stripped via `review.data.image_identity.parse_image_filename` /
+stripped via `domain.image_identity.parse_image_filename` /
 `build_image_filename`, and a timepoint field that parses to a finite hour
 value. A name that fails any check is copied unchanged rather than guessed at,
 and the merge reports how many members that happened to.
@@ -7976,7 +7976,7 @@ rather than because every well is genuinely empty — the old code had nothing
 left to check and let the merge report success over a destination with
 copied images and zero rows of data. Per well, it further checks that every
 row's `timepoint` and `timepoint_hours` agree (via
-`review.domain.tp_match.tp_close`), that dataset-2's shifted hours never
+`domain.tp_match.tp_close`), that dataset-2's shifted hours never
 collide with or fall before dataset 1's, that every dataset-2 row's `filename`
 is actually present in the merged `in/<WELL>.zip`, and that every distinct hour
 across the merged CSVs is listed in the merged `available_timepoints`. Any
@@ -8752,7 +8752,7 @@ for which no such archive was written has the entry's `seg_fp` **removed**
 rather than left holding the source's, and the count comes back for this tool's
 own cell-override log line. The membership-test
 keys `_copy_one_well` builds from each kept row's raw CSV `fov`/`timepoint`
-values are normalized (`review.data.image_identity.normalize_fov`/
+values are normalized (`domain.image_identity.normalize_fov`/
 `normalize_tp`) before the comparison in `_copy_filtered_overrides` — a
 `cell_overrides.json` entry's `fov`/`tp` are already normalized on write
 (`CellKey.as_tuple()`, per `review/persistence/cell_overrides.py`), so

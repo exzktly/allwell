@@ -16,7 +16,7 @@ The grammar, tried in order:
    ``"day3"`` → 3.0.
 
 Anything else is ``None``: an opaque label the caller should keep as-is rather
-than guess at. That matters because :func:`review.data.image_identity.normalize_tp`
+than guess at. That matters because :func:`domain.image_identity.normalize_tp`
 turns a parsed value into the canonical key ``f"{hours:g}"`` and passes an
 unparsed one through unchanged — so a parser that guesses invents a key the
 rest of the app will not recognise.
@@ -69,7 +69,7 @@ def _token(value: Any) -> str:
     parsed filename field (``0.0``, falsy), so the two spellings disagreed at
     exactly ``t=0`` and nowhere else.
 
-    ``review.data.image_identity._raw_token`` is the same rule for the
+    ``domain.image_identity._raw_token`` is the same rule for the
     viewer's identity tokens. The duplication is the cost of this module's
     stdlib-only contract — the pipeline and ``services/`` import it and may not
     reach into ``review``.

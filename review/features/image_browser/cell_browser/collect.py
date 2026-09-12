@@ -30,7 +30,7 @@ from review.data.data_loading import (
 from review.data.metric_labels import split_metric_col
 from review.domain.metric_registry import intensity_keys
 from review.core.lazy import lazy as _lazy
-from review.domain.tp_match import tp_close_mask
+from domain.tp_match import tp_close_mask
 
 # Scatter is a removable feature, so reach its gate-inclusion helper through the
 # lazy proxy (a call, not a module-scope import) — keeps cell_browser importable

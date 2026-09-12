@@ -170,6 +170,7 @@ REQUIRED=(
     "ui/theme.py"
     "startup/__init__.py"
     "core/__init__.py"
+    "domain/__init__.py"
     "services/__init__.py"
     "_Docs/_Installation/all_well.spec"
     "_Docs/_Installation/hooks/hook-stardist.py"

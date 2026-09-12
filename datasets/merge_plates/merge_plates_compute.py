@@ -32,7 +32,7 @@ from pathlib import Path
 
 from util.timepoint import parse_hours, sort_key as tp_sort_key
 from util.well_token import canonical_well_label
-from review.data.image_identity import PipelineSchema, load_schema
+from domain.image_identity import PipelineSchema, load_schema
 from datasets._common.dataset_paths import (
     make_dataset_api,
     DatasetPaths,

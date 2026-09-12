@@ -17,12 +17,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from util.timepoint import parse_hours
-from review.data.image_identity import (
+from domain.image_identity import (
     PipelineSchema,
     load_schema,
     normalize_fov,
 )
-from review.domain.tp_match import tp_close
+from domain.tp_match import tp_close
 from datasets._common.dataset_paths import (
     make_dataset_api,
     DatasetPaths,
@@ -68,10 +68,10 @@ class SubsetFilter:
     ``timepoint_labels`` are the raw ``available_timepoints`` strings the UI
     lets the user check — resolved to hours (via :func:`util.timepoint.parse_hours`)
     once here, so every downstream comparison is numeric and tolerant of
-    floating-point drift the way ``review.domain.tp_match.tp_close``
+    floating-point drift the way ``domain.tp_match.tp_close``
     already is everywhere else in the app. ``fovs`` are likewise the raw
     ``available_fovs`` strings the UI checkboxes carry — resolved to
-    :func:`~review.data.image_identity.normalize_fov` tokens once here
+    :func:`~domain.image_identity.normalize_fov` tokens once here
     (:attr:`fov_tokens`) rather than at each comparison site, since every row/
     member's own FOV is read through the same normalizer (a purely-numeric
     label like ``"001"`` normalizes to ``"1"``; comparing that against a raw,
@@ -294,7 +294,7 @@ def row_verdict(
     :data:`ROW_UNJUDGEABLE` when the row states no timepoint at all.
 
     The FOV axis has no unjudgeable state on purpose. A blank ``fov`` column
-    normalizes to ``"1"`` app-wide (:func:`~review.data.image_identity.normalize_fov`,
+    normalizes to ``"1"`` app-wide (:func:`~domain.image_identity.normalize_fov`,
     and ``CellKey`` in the override reader) — on a single-FOV dataset that is
     the FOV, not a missing value — so reading it as undefined here would invent
     a second meaning for a blank the rest of the app has already settled.

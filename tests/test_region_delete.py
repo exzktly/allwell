@@ -278,7 +278,7 @@ def test_zero_timepoint_survives_normalisation():
     """``normalize_tp(0.0)`` used to return "" because 0.0 is falsy, so a
     numeric ``t=0`` baseline — the first column of most time courses — read as
     "no timepoint" and dropped out of every scope and every override key."""
-    from review.data.image_identity import normalize_tp
+    from domain.image_identity import normalize_tp
     from review.core.ui_helpers import norm_timepoint
 
     assert normalize_tp(0.0) == "0"

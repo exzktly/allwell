@@ -33,7 +33,7 @@ from util import timepoint as tp_mod
 from util.channel_roles import channel_tokens_from_roles, default_channel_roles
 from util.schema_infer import infer_schema
 from review.data.frame_load import match_image_ref
-from review.data.image_identity import (
+from domain.image_identity import (
     PipelineSchema,
     Role,
     classify_filename_role,
@@ -274,6 +274,6 @@ def test_no_absolute_timepoint_tolerance_in_features():
                 rel = path.relative_to(REPO_ROOT)
                 offenders.append(f"{rel}:{lineno}: {line.strip()}")
     assert not offenders, (
-        "timepoint comparisons must go through review.domain.tp_match:\n"
+        "timepoint comparisons must go through domain.tp_match:\n"
         + "\n".join(offenders)
     )

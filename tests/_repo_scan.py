@@ -45,6 +45,7 @@ PACKAGE_ROOTS = (
     "ui",
     "startup",
     "core",
+    "domain",
     "scripts",
 )
 

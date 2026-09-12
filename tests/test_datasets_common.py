@@ -18,7 +18,7 @@ from datasets._common import member_names as mn
 from tests.fixtures.dataset_builder import build_dataset
 from util.timepoint import parse_hours
 from util.well_token import canonical_well_label
-from review.data.image_identity import load_schema
+from domain.image_identity import load_schema
 
 
 def _schema():

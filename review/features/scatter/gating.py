@@ -24,7 +24,7 @@ import numpy as np
 
 from ui import theme
 from core.safe import swallowed
-from review.domain.tp_match import tp_close_mask
+from domain.tp_match import tp_close_mask
 from review.features.scatter.collect import timepoint_color_map
 
 

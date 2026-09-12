@@ -217,7 +217,7 @@ def test_frame_tokens_are_computed_once_per_frame(monkeypatch):
     """Normalising a well's tokens is the dominant cost of every scope question
     — ~430 ms on a 200k-row well — and both the row verdict and the outline's
     frame test ask it, the latter on every canvas redraw."""
-    from review.data import image_identity
+    import domain.image_identity as image_identity
     from review.features.crop import region as region_mod
 
     calls: list[int] = []
@@ -249,7 +249,7 @@ def test_a_copied_frame_does_not_inherit_the_token_memo():
 def test_a_well_only_scope_needs_no_token_pass(monkeypatch):
     """The commonest scoping — a few wells, all FOVs and timepoints — is decided
     by the well alone, and this runs on every canvas redraw."""
-    from review.data import image_identity
+    import domain.image_identity as image_identity
     from review.features.crop import region as region_mod
 
     monkeypatch.setattr(

@@ -21,12 +21,12 @@ from review.data.cache_projectors import iter_cache_projectors
 from review.domain.fov_integrity import check_fov_labels
 from review.domain.gating_state import active_fluor_gates
 from review.domain.ratio_models import RatioMetric, is_ratio_key
-from review.domain.text_columns import (
+from domain.text_columns import (
     TEXT_COLUMNS,
     fov_text,
     timepoint_text,
 )
-from review.domain.tp_match import tp_close_mask
+from domain.tp_match import tp_close_mask
 
 
 _logger = logging.getLogger("review")
@@ -55,7 +55,7 @@ _METRIC_SUFFIXES = (
 )
 
 
-from review.data.image_identity import (  # after _METRIC_SUFFIXES decl
+from domain.image_identity import (  # after _METRIC_SUFFIXES decl
     parse_timepoint_hours,  # re-export: single source of truth in image_identity
     normalize_fov_series as _normalize_fov_series,
 )
@@ -63,7 +63,7 @@ from core.safe import swallowed
 
 
 def normalize_fov_series(fov: pd.Series) -> pd.Series:
-    """Re-exported from :mod:`review.data.image_identity` — the
+    """Re-exported from :mod:`domain.image_identity` — the
     single source of truth for FOV normalisation. Empty/``"-1"`` → ``"1"``
     matches the single-FOV-extractor convention so plots, gating, and the
     smFISH apply-global writer agree on which rows belong to which image."""

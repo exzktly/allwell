@@ -114,7 +114,7 @@ def offenders_in(source: str, path: str) -> list[str]:
         out.append(
             f"{path}:{node.lineno} `[{column!r}].fillna(...)` raises on a "
             f"plate whose {column!r} column is stored as categories — read it "
-            f"through review.domain.text_columns ({_HELPERS})"
+            f"through domain.text_columns ({_HELPERS})"
         )
     return out
 
@@ -122,11 +122,11 @@ def offenders_in(source: str, path: str) -> list[str]:
 def test_the_column_roster_matches_the_app() -> None:
     """The restated roster above is the loader's own set, not a stale copy."""
     from review.data.data_loading import _STRING_COLS
-    from review.domain.text_columns import TEXT_COLUMNS as APP_COLUMNS
+    from domain.text_columns import TEXT_COLUMNS as APP_COLUMNS
 
     assert set(TEXT_COLUMNS) == set(APP_COLUMNS) == set(_STRING_COLS), (
         "this guard's copy of the text-column roster has drifted from "
-        "review.domain.text_columns.TEXT_COLUMNS"
+        "domain.text_columns.TEXT_COLUMNS"
     )
 
 

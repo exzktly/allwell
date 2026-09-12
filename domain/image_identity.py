@@ -653,7 +653,7 @@ def frame_token_series(df):
     """
     import pandas as pd
 
-    from review.domain.text_columns import as_text
+    from domain.text_columns import as_text
     if df is None or df.empty:
         empty = pd.Series([], dtype=object)
         return empty, empty
@@ -681,7 +681,7 @@ def cell_keys_for_dataframe(
     from the same constructor. Lazy pandas import."""
     import pandas as pd
 
-    from review.domain.text_columns import as_text
+    from domain.text_columns import as_text
     if df is None or df.empty:
         return pd.Series([], dtype=object)
 

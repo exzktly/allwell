@@ -28,10 +28,10 @@ from review.data.data_loading import (
     aggregate_with_threshold_df,
     load_well_csv,
 )
-from review.data.image_identity import cell_keys_for_dataframe
+from domain.image_identity import cell_keys_for_dataframe
 from review.domain.fov_integrity import check_fov_labels
 from review.domain.stats_compute import _norm_fov
-from review.domain.text_columns import as_text, fov_text, text_column
+from domain.text_columns import as_text, fov_text, text_column
 from review.features.home.cell_gating.gating_compute import (
     _cell_gating_first_frame_rows,
 )

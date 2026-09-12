@@ -24,7 +24,7 @@ from review.domain.metric_registry import METRIC_BY_KEY
 from review.domain.viewer_state import parse_rc
 from review.domain.plot_members import plot_replicate_sets
 from review.domain.selections_model import color_for_replicate_set, color_for_well
-from review.domain.tp_match import tp_close_mask
+from domain.tp_match import tp_close_mask
 
 _logger = logging.getLogger(__name__)
 

@@ -45,7 +45,7 @@ from review.core.channel_state_controller import (
     on_cutoff_for_column,
 )
 from review.core.timepoint_sync import current_focus_tp, nearest_index
-from review.domain.tp_match import tp_close
+from domain.tp_match import tp_close
 
 
 # The labels themselves live in ``domain/heatmap_metrics`` — they are

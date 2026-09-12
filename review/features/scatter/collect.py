@@ -67,7 +67,7 @@ def timepoint_color_map(timepoints) -> dict[float, Any]:
 # distribution / heat map, so it lives in the data layer now; re-exported here
 # for the existing ``scatter.collect`` / ``scatter.controller`` import paths.
 from review.data.data_loading import get_all_timepoints  # noqa: F401
-from review.domain.tp_match import tp_close_mask
+from domain.tp_match import tp_close_mask
 
 # Lazy: ``gating`` imports ``timepoint_color_map`` from this module, so a
 # module-scope import back would cycle. Same binding style the Cell Gating

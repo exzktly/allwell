@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from review.domain.text_columns import text_column, timepoint_text
+from domain.text_columns import text_column, timepoint_text
 
 
 @dataclass(frozen=True)

@@ -33,7 +33,7 @@ from pipeline.threshold_optimize import (  # noqa: F401 (re-export)
     sweep_thresholds as _sweep_thresholds,
 )
 from review.data.data_loading import resolve_value_series
-from review.domain.text_columns import fov_text, timepoint_text
+from domain.text_columns import fov_text, timepoint_text
 from review.core.lazy import lazy as _lazy
 from review.domain.gating_state import active_fluor_gates
 

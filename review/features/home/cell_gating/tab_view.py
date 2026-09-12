@@ -38,10 +38,10 @@ from PySide6.QtWidgets import (
 from core.safe import swallowed
 from widgets import menu_exec
 from review.core.ui_helpers import (
-    build_hline_separator,
     build_section_header,
     install_canvas_wheel_scroll,
 )
+from widgets.separator import build_hline_separator
 from review.features.qc.tab_view import build_qc_gate_controls
 from review.features.home.cell_gating.controller import (
     _GATE_BUTTON_ATTR,

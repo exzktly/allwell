@@ -14,9 +14,14 @@ from PySide6.QtWidgets import (
 )
 
 from review.core.ui_helpers import (
-    build_hline_separator, install_canvas_wheel_scroll,
-    build_plot_save_menu, make_band_controls, make_plot_with_right_dock,
-    make_properties_button, plotting_band_slot)
+    build_plot_save_menu,
+    install_canvas_wheel_scroll,
+    make_band_controls,
+    make_plot_with_right_dock,
+    make_properties_button,
+    plotting_band_slot,
+)
+from widgets.separator import build_hline_separator
 from review.features.barplot.controller import (
     bar_reset_order,
     on_bar_drag_motion,

@@ -18,12 +18,12 @@ def _ctx(has_canvas: bool):
 
 
 def test_channel_multivariate_forwards_ctx(monkeypatch):
-    import well_viewer.features.multivariate.controller as mv
+    import review.features.multivariate.controller as mv
 
     seen = []
     monkeypatch.setattr(mv, "mv_on_channel_changed", lambda ctx: seen.append(ctx))
 
-    from well_viewer.features.registry import _channel_multivariate
+    from review.features.registry import _channel_multivariate
 
     ctx = _ctx(has_canvas=True)
     _channel_multivariate(ctx)
@@ -32,12 +32,12 @@ def test_channel_multivariate_forwards_ctx(monkeypatch):
 
 
 def test_channel_multivariate_noop_without_canvas(monkeypatch):
-    import well_viewer.features.multivariate.controller as mv
+    import review.features.multivariate.controller as mv
 
     seen = []
     monkeypatch.setattr(mv, "mv_on_channel_changed", lambda ctx: seen.append(ctx))
 
-    from well_viewer.features.registry import _channel_multivariate
+    from review.features.registry import _channel_multivariate
 
     _channel_multivariate(_ctx(has_canvas=False))  # no _mv_canvas → hook must not fire
 

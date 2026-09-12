@@ -27,11 +27,11 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
-from well_viewer.domain.sample_variables import (
+from review.domain.sample_variables import (
     Variable, VariableSet, VariableValue,
 )
-from well_viewer.persistence import _io, sample_variables
-from well_viewer.persistence.registry import PersistenceRegistry
+from review.persistence import _io, sample_variables
+from review.persistence.registry import PersistenceRegistry
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -194,7 +194,7 @@ def test_a_failed_background_write_reaches_the_status_line_and_the_log(
 
     monkeypatch.setattr(_io, "_replace_with_text", _boom)
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         reg.schedule_save("sample_variables")
         reg.flush_all()
         QCoreApplication.processEvents()    # deliver the queued failure signal
@@ -287,7 +287,7 @@ def test_queued_writes_run_in_the_order_they_were_made(tmp_path):
     """One serialized worker, FIFO: the last edit the user made has to be the
     last one on disk. Two threads, or a pool, would let an earlier edit land
     last and silently win."""
-    from well_viewer.persistence._writer import PersistenceWriter
+    from review.persistence._writer import PersistenceWriter
 
     writer = PersistenceWriter()
     order: list[int] = []

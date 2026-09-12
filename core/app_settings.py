@@ -8,7 +8,7 @@ recent-datasets list to end up in the same file.
 That duplication was not the expensive part. The expensive part was that
 reaching the handle meant reaching for ``_qsettings`` on *some* object, and the
 object a feature has is not the one that defines it: ``ctx.window`` is the
-``WellViewerApp`` review widget, while ``_qsettings`` is a method of the
+``ReviewApp`` review widget, while ``_qsettings`` is a method of the
 ``AllWellApp`` main window that *contains* it, with no forwarding between them.
 A ``getattr(ctx.window, "_qsettings", None)`` therefore reads ``None`` in the
 shipped application and every value silently reads as absent — which is what

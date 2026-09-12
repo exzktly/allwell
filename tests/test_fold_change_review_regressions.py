@@ -26,11 +26,11 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication, QComboBox
 
-from well_viewer.domain.batch_models import BarGroup
-from well_viewer.domain.control_ref import KIND_LEGACY, ControlRef
-from well_viewer.domain.fold_change import FC_STATE_OFF
-from well_viewer.domain.fold_change_state import FoldChangeState
-from well_viewer.features.barplot.collect import collect_bar_items_for_group
+from review.domain.batch_models import BarGroup
+from review.domain.control_ref import KIND_LEGACY, ControlRef
+from review.domain.fold_change import FC_STATE_OFF
+from review.domain.fold_change_state import FoldChangeState
+from review.features.barplot.collect import collect_bar_items_for_group
 
 from tests.conftest import MockApp, make_agg
 
@@ -113,7 +113,7 @@ def legacy_ctx():
 
 @pytest.mark.parametrize("name,kind", [("CTRL", "set"), ("B01", "well")])
 def test_a_legacy_control_selects_its_own_entry(qapp, legacy_ctx, name, kind):
-    from well_viewer.core.fold_change_controls_view import _repopulate_control_combo
+    from review.core.fold_change_controls_view import _repopulate_control_combo
 
     legacy_ctx.state.plot.fc_control = ControlRef.legacy(name)
     combo = QComboBox()
@@ -128,7 +128,7 @@ def test_a_legacy_control_selects_its_own_entry(qapp, legacy_ctx, name, kind):
 def test_a_legacy_control_is_written_concrete(qapp, legacy_ctx):
     """The claim the docs already made: the ambiguity retires once per
     document. It did not — ``concrete_control`` had one caller, in rename."""
-    from well_viewer.core.fold_change_controls_view import _repopulate_control_combo
+    from review.core.fold_change_controls_view import _repopulate_control_combo
 
     legacy_ctx.state.plot.fc_control = ControlRef.legacy("CTRL")
     combo = QComboBox()
@@ -140,7 +140,7 @@ def test_a_legacy_control_is_written_concrete(qapp, legacy_ctx):
 def test_a_legacy_control_that_resolves_to_nothing_stays_legacy(qapp, legacy_ctx):
     """A dataset that has not finished loading must not have its control
     guessed at — that is what the kind exists to stop."""
-    from well_viewer.core.fold_change_controls_view import _repopulate_control_combo
+    from review.core.fold_change_controls_view import _repopulate_control_combo
 
     legacy_ctx.state.plot.fc_control = ControlRef.legacy("GONE")
     combo = QComboBox()
@@ -156,7 +156,7 @@ def test_the_summary_counts_the_tab_it_is_shown_on(qapp):
     """Bar and Line draw different member lists once pooling is off, so a count
     taken against one and shown on the other reports a plot that is not on
     screen."""
-    from well_viewer.core.fold_change_controls_view import per_sample_combo_text
+    from review.core.fold_change_controls_view import per_sample_combo_text
 
     app = MockApp(
         per_well_pts={w: [make_agg(0.0, 1.0)] for w in
@@ -180,7 +180,7 @@ def test_the_summary_counts_the_tab_it_is_shown_on(qapp):
 def test_a_control_reference_never_reaches_a_figure_title():
     """Passing the reference itself printed its dataclass repr into the title
     of every batch bar figure."""
-    from well_viewer.domain.fold_change import fold_change_suffix
+    from review.domain.fold_change import fold_change_suffix
 
     got = fold_change_suffix(True, False, _WELL("A01").display_name)
     assert got == "  (fold change vs A01 (ratio))"
@@ -215,7 +215,7 @@ def test_a_batch_bar_member_whose_control_is_gone_is_blank(qapp):
 # shortfall the feature exists to prevent, applied to the feature itself.
 
 def _bar(display, outcome, control=None):
-    from well_viewer.features.barplot.collect import BarItem
+    from review.features.barplot.collect import BarItem
     return BarItem(key=display, display=display, color="#000000",
                    mean=1.0, spread=0.0, has_mean=True,
                    frac=0.0, frac_spread=0.0, has_frac=True,
@@ -225,14 +225,14 @@ def _bar(display, outcome, control=None):
 
 def test_one_control_leaves_the_ticks_alone():
     """The axis title already names it; repeating it under every bar is noise."""
-    from well_viewer.domain.fold_change_pairing import tick_labels
+    from review.domain.fold_change_pairing import tick_labels
 
     assert tick_labels([_bar("A", "ok", _SET("D")),
                         _bar("B", "ok", _SET("D"))]) == ["A", "B"]
 
 
 def test_differing_controls_are_named_under_each_bar():
-    from well_viewer.domain.fold_change_pairing import tick_labels
+    from review.domain.fold_change_pairing import tick_labels
 
     assert tick_labels([_bar("A", "self", _SET("A")),
                         _bar("B", "ok", _SET("A")),
@@ -243,7 +243,7 @@ def test_differing_controls_are_named_under_each_bar():
 def test_a_failed_pairing_always_says_so():
     """Even under one control: an empty slot beside bars that drew is exactly
     the ambiguity the outcome vocabulary exists for."""
-    from well_viewer.domain.fold_change_pairing import tick_labels
+    from review.domain.fold_change_pairing import tick_labels
 
     assert tick_labels([_bar("A", "ok", _SET("D")),
                         _bar("B", "unmapped"),
@@ -252,7 +252,7 @@ def test_a_failed_pairing_always_says_so():
 
 
 def test_the_control_axis_being_off_leaves_the_ticks_alone():
-    from well_viewer.domain.fold_change_pairing import tick_labels
+    from review.domain.fold_change_pairing import tick_labels
 
     assert tick_labels([_bar("A", ""), _bar("B", "")]) == ["A", "B"]
 
@@ -263,7 +263,7 @@ def test_a_replicate_spread_of_zero_is_written_as_zero():
     """A two-well set holding 5 and 5 has a spread of exactly 0.0, which is a
     measurement. Blanking it conflated "the replicates agreed" with "there was
     one replicate and nothing could be computed"."""
-    from well_viewer.features.export.service import bar_metric_row
+    from review.features.export.service import bar_metric_row
 
     row = bar_metric_row(
         mean=1.0, spread=0.0, frac=0.5, frac_spread=0.0, has=True,
@@ -276,7 +276,7 @@ def test_a_replicate_spread_of_zero_is_written_as_zero():
 def test_a_single_well_row_leaves_the_replicate_columns_empty():
     """Nothing to average over, so nothing computed — and the unit column is
     what says which of the two an empty spread means."""
-    from well_viewer.features.export.service import bar_metric_row
+    from review.features.export.service import bar_metric_row
 
     row = bar_metric_row(
         mean=1.0, spread=0.0, frac=0.5, frac_spread=0.0, has=True,
@@ -293,7 +293,7 @@ def test_each_row_takes_the_colour_of_its_own_bar(qapp):
     """``color_for_well`` hands an unparseable token the same fallback for
     every group, so every chip came out identical — and identical to no bar on
     the plate. The row is meant to be findable in the figure."""
-    from well_viewer.core.fold_change_pairing_view import member_color
+    from review.core.fold_change_pairing_view import member_color
 
     app = MockApp(
         per_well_pts={"A01": [make_agg(0.0, 1.0)], "B01": [make_agg(0.0, 2.0)]},

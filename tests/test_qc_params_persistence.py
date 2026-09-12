@@ -7,12 +7,12 @@ import json
 from types import SimpleNamespace
 
 
-from well_viewer.persistence import qc_params
-from well_viewer.features.qc.params import QCParams
+from review.persistence import qc_params
+from review.features.qc.params import QCParams
 
 
 def _app(tmp_path, pipeline_info=None):
-    from well_viewer.core.qc_state import QcState
+    from review.core.qc_state import QcState
     ds = SimpleNamespace(data_dir=tmp_path, persistence_doc=None,
                          pipeline_info=pipeline_info or {})
     app = SimpleNamespace(_app_state=SimpleNamespace(dataset=ds, qc=QcState()))
@@ -59,7 +59,7 @@ def test_no_persisted_state_clears_then_controller_seeds(tmp_path):
     # switch). The QC controller's accessor then lazily seeds from this dataset's
     # pipeline_info — which is exactly what the load sequence's apply_qc_to_cache
     # triggers next. This keeps persistence from importing feature code.
-    from well_viewer.features.qc.controller import get_qc_params
+    from review.features.qc.controller import get_qc_params
 
     app = _app(tmp_path, pipeline_info={"qc_options": {"remove_debris": True,
                                                        "min_area": 15}})

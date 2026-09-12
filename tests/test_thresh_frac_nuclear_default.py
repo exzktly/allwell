@@ -21,9 +21,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.core.channel_state_controller import get_thresh_frac_on
-from well_viewer.domain.gating_state import build_gating_block, default_thresh_frac_on
-from well_viewer.domain.viewer_state import read_pipeline_info
+from review.core.channel_state_controller import get_thresh_frac_on
+from review.domain.gating_state import build_gating_block, default_thresh_frac_on
+from review.domain.viewer_state import read_pipeline_info
 
 NUCLEAR = "rfp"
 READOUT = "gfp"
@@ -115,7 +115,7 @@ def test_nuclear_channel_comes_from_pipeline_info(tmp_path: Path):
 # ── the Image Table's own render path ────────────────────────────────────────
 
 def test_image_table_binary_view_of_the_nuclear_channel_uses_zero():
-    from well_viewer.features.image_browser.review_image.collect import _binary_gate_columns
+    from review.features.image_browser.review_image.collect import _binary_gate_columns
     ctx = _ctx()
     assert _binary_gate_columns(ctx, NUCLEAR) == (f"{NUCLEAR}_mean_intensity", 0.0)
     assert _binary_gate_columns(ctx, READOUT) == (f"{READOUT}_mean_intensity", 50.0)
@@ -158,7 +158,7 @@ def test_cell_gating_rows_seed_the_nuclear_channel_at_zero():
     thresh_inner = QWidget()
     QVBoxLayout(thresh_inner)
 
-    from well_viewer.features.home.cell_gating.controller import (
+    from review.features.home.cell_gating.controller import (
         _cell_gating_build_channel_controls,
     )
     ctx = _ctx()

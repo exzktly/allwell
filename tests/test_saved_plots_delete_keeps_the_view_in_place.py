@@ -23,11 +23,11 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from well_viewer.core.app_runtime import AppRuntime
-from well_viewer.core.widget_registry import WidgetRegistry
-from well_viewer.features.saved_plots import controller as C
-from well_viewer.features.saved_plots.state import SavedPlot, get_store
-from well_viewer.features.saved_plots.tab_view import (
+from review.core.app_runtime import AppRuntime
+from review.core.widget_registry import WidgetRegistry
+from review.features.saved_plots import controller as C
+from review.features.saved_plots.state import SavedPlot, get_store
+from review.features.saved_plots.tab_view import (
     build_saved_plots_tab,
     populate_saved_plots_grid,
 )

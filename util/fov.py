@@ -21,7 +21,7 @@ depends on this — equality still compares the raw token strings, so this never
 merges two distinct FOVs.
 
 Stdlib-only, so ``process_microscopy`` and ``services/`` can both import it
-without breaching the no-``well_viewer`` contract (ARCHITECTURE §6.2) — the same
+without breaching the no-``review`` contract (ARCHITECTURE §6.2) — the same
 reason ``util.timepoint`` and ``util.well_token`` live here. Listed in
 ``services.remote_runner._REQUIRED_REMOTE_FILES`` so a remote run receives it.
 """

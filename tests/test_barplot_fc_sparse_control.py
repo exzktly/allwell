@@ -21,7 +21,7 @@ import math
 
 import pytest
 
-from well_viewer.features.barplot.collect import collect_bar_items
+from review.features.barplot.collect import collect_bar_items
 
 from tests.conftest import MockApp, make_agg
 

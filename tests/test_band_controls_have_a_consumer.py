@@ -33,7 +33,7 @@ from tests._repo_scan import parse_source
 #: for a toolbar, so the consumer is that caller's package, not this one.
 #: Paired with :func:`test_the_exemption_still_describes_a_real_call` below, so
 #: the entry cannot outlive the call it exempts.
-EXEMPT = {"well_viewer/core/ui_helpers.py"}
+EXEMPT = {"review/core/ui_helpers.py"}
 
 _HELPER = "make_band_controls"
 _FLAG = "use_sem"
@@ -133,16 +133,16 @@ def test_every_band_control_has_a_consumer():
 
 def test_the_guard_bites():
     """The rule fires on a mount with no reader, and clears one with a reader."""
-    mounts = {"well_viewer/features/example/tab_view.py": "well_viewer/features/example"}
+    mounts = {"review/features/example/tab_view.py": "review/features/example"}
     assert find_bandless_consumers(mounts, set()) == [
-        "well_viewer/features/example/tab_view.py"
+        "review/features/example/tab_view.py"
     ]
-    assert find_bandless_consumers(mounts, {"well_viewer/features/example"}) == []
+    assert find_bandless_consumers(mounts, {"review/features/example"}) == []
 
 
 def test_an_import_alias_does_not_evade_the_guard():
     tree = ast.parse(
-        "from well_viewer.core.ui_helpers import make_band_controls as _band\n"
+        "from review.core.ui_helpers import make_band_controls as _band\n"
         "def build(ctx, card):\n"
         "    card.setControlsWidget(_band(ctx, card))\n"
     )
@@ -173,7 +173,7 @@ def test_the_distribution_tab_does_not_mount_the_band_control():
     package to *mention* use_sem without drawing a band. This says the control
     is not on that tab.
     """
-    path = REPO_ROOT / "well_viewer/features/distribution/tab_view.py"
+    path = REPO_ROOT / "review/features/distribution/tab_view.py"
     tree = parse_source(path)
     assert not _calls_helper(tree), (
         "The Distribution tab mounts the shared SEM/SD band control again. Its "

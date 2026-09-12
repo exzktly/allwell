@@ -46,7 +46,7 @@ MODE_OVERVIEW: dict[str, str] = {
     "datasets": "Datasets mode — dataset-level tools",
 }
 
-#: Review leaf tab (as returned by ``well_viewer.core.tab_controller.
+#: Review leaf tab (as returned by ``review.core.tab_controller.
 #: current_centre_tab``) -> manual heading. Every Review leaf has its own
 #: per-feature heading; a leaf missing from here falls back to the Review
 #: overview, and a renamed or prefixed leaf ("Bar Plots (split)") is caught by

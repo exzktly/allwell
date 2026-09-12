@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core.widget_registry import WidgetRegistry
+from review.core.widget_registry import WidgetRegistry
 
 
 
@@ -75,7 +75,7 @@ def test_sync_metric_combos_pushes_value_into_global_combo():
     """The bug-reproducer: the global metric combo exists at app open
     but defaults to 'Mean Intensity'. After restoring active_metric to
     smfish_count, the combo must reflect 'smFISH Count'."""
-    from well_viewer.core.channel_state_controller import sync_metric_combos
+    from review.core.channel_state_controller import sync_metric_combos
 
     app = _make_app(metric="smfish_count")
     app._ctx.widgets.register("_plotting_metric_cb", _FakeCombo(
@@ -92,7 +92,7 @@ def test_sync_metric_combos_pushes_value_into_global_combo():
 def test_sync_metric_combos_is_noop_when_already_correct():
     """When the combo already shows the right label, no setCurrentIndex
     call — avoids redundant work."""
-    from well_viewer.core.channel_state_controller import sync_metric_combos
+    from review.core.channel_state_controller import sync_metric_combos
 
     app = _make_app()
     app._ctx.widgets.register("_plotting_metric_cb", _FakeCombo(
@@ -107,7 +107,7 @@ def test_sync_metric_combos_is_noop_when_already_correct():
 def test_sync_metric_combos_skips_combo_that_lacks_the_label():
     """Combos populated from a smaller metric set (e.g. legacy hidden
     per-tab combo) shouldn't crash on a label they don't carry."""
-    from well_viewer.core.channel_state_controller import sync_metric_combos
+    from review.core.channel_state_controller import sync_metric_combos
 
     app = _make_app()
     app._ctx.widgets.register("_metric_cb", _FakeCombo(items=["Mean Intensity"], current_index=0))
@@ -123,7 +123,7 @@ def test_sync_metric_combos_skips_combo_that_lacks_the_label():
 def test_sync_metric_combos_handles_missing_combos():
     """Combos that don't exist yet (e.g. per-tab combos on tabs not
     built yet) must be silently skipped."""
-    from well_viewer.core.channel_state_controller import sync_metric_combos
+    from review.core.channel_state_controller import sync_metric_combos
 
     app = _make_app()
     # Only one combo present — _metric_cb, _metric_cb_bar, _stats_property_cb absent.
@@ -137,7 +137,7 @@ def test_sync_metric_combos_handles_missing_combos():
 def test_set_active_metric_still_delegates_to_sync():
     """The real ``set_active_metric`` path also goes through the helper
     so a normal user-initiated metric change keeps every combo in sync."""
-    from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL
+    from review.data.metric_labels import METRIC_KEY_TO_LABEL
 
     # Smoke check: METRIC_KEY_TO_LABEL contains the keys we test on, so
     # downstream logic that looks up labels can't silently regress.

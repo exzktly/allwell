@@ -6,7 +6,7 @@ cohesive behaviours — view reset and cache invalidation.
 
 from __future__ import annotations
 
-from well_viewer.features.image_browser.review_image.state import PreviewState, ReviewImageState
+from review.features.image_browser.review_image.state import PreviewState, ReviewImageState
 
 
 # ── ReviewImageState ─────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ def test_review_image_mutable_defaults_are_per_instance():
 
 def test_image_view_state_per_channel_lut():
     # The per-channel display LUT now lives on the shared ImageViewState (S4).
-    from well_viewer.core.image_view_state import ImageViewState
+    from review.core.image_view_state import ImageViewState
 
     a, b = ImageViewState(), ImageViewState()
     a.set_lut("GFP", 3.0, 27.0)
@@ -46,7 +46,7 @@ def test_image_view_state_per_channel_lut():
 def test_image_view_state_per_channel_tint():
     # Per-channel display colour for the Cell Browser composite (mirrors the LUT
     # API). Override is case-insensitive, clamped 0-255, per-instance, clearable.
-    from well_viewer.core.image_view_state import ImageViewState
+    from review.core.image_view_state import ImageViewState
 
     a, b = ImageViewState(), ImageViewState()
     a.set_tint("GFP", (10, 300, -5))

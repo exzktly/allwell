@@ -151,7 +151,7 @@ class _IsDirCalls:
     #: ``util.zip_write``'s per-member ones, to the production frame beneath them.
     #: It passed in the main checkout and failed in every worktree, which is the
     #: harness being wrong rather than the code.
-    ROOTS = ("services", "pipeline", "util", "analyze", "well_viewer",
+    ROOTS = ("services", "pipeline", "util", "analyze", "review",
              "widgets", "tests")
 
     def __init__(self) -> None:

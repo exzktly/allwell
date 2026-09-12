@@ -142,7 +142,7 @@ umap-learn==0.5.5
 
 # ── Per-well frame cache (Review-side only) ──────────────────────────────────
 # The Parquet cache beside each measurements CSV
-# (well_viewer/data/parquet_cache.py). Measured through the app's own read path
+# (review/data/parquet_cache.py). Measured through the app's own read path
 # on a 120,000-row x 37-column well: 3,068 ms to parse the CSV against 51 ms for
 # the cached frame, and 7 ms for the six columns a plot needs.
 #

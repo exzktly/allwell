@@ -19,7 +19,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from well_viewer.data.image_discovery import find_well_images_and_masks
+from review.data.image_discovery import find_well_images_and_masks
 
 
 def _touch(p: Path) -> None:

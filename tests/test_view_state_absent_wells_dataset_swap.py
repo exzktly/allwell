@@ -23,9 +23,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.core.plot_state import PlotState
-from well_viewer.core.widget_registry import WidgetRegistry
-from well_viewer.persistence import _doc, view_state
+from review.core.plot_state import PlotState
+from review.core.widget_registry import WidgetRegistry
+from review.persistence import _doc, view_state
 
 
 @pytest.fixture(autouse=True)

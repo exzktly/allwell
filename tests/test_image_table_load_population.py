@@ -18,15 +18,15 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QFrame
 
-from well_viewer.core.tab_controller import current_centre_tab
+from review.core.tab_controller import current_centre_tab
 
 
 @pytest.mark.slow
 def test_image_table_populates_on_load_without_tab_switch(qtbot, mini_dataset):
-    from well_viewer.features.image_browser.controller import build_image_browser_subtab
-    from well_viewer.runtime_app import WellViewerApp
+    from review.features.image_browser.controller import build_image_browser_subtab
+    from review.runtime_app import ReviewApp
 
-    app = WellViewerApp()
+    app = ReviewApp()
     qtbot.addWidget(app)
 
     # Build Image Browser + the Image Table sub-tab and make it the ACTIVE tab

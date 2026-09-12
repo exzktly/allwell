@@ -8,8 +8,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from well_viewer.domain.significance import significance_stars
-from well_viewer.features.barplot.renderer import draw_significance_brackets
+from review.domain.significance import significance_stars
+from review.features.barplot.renderer import draw_significance_brackets
 
 
 def test_significance_marker_thresholds():
@@ -45,7 +45,7 @@ def _app(pairwise, *, rsets=(), active_val_col="gfp_mean_intensity"):
     # exposing only ``pairwise`` sends the renderer down a path production never
     # takes — and would have made every test here measure a shape the app does
     # not have.
-    from well_viewer.features.stats.state import StatsState
+    from review.features.stats.state import StatsState
     _stats = StatsState()
     _stats.pairwise = list(pairwise or [])
     state = SimpleNamespace(
@@ -68,7 +68,7 @@ def _app(pairwise, *, rsets=(), active_val_col="gfp_mean_intensity"):
         _rep_sets_active=lambda: list(rsets),
         _set_status=lambda *_a, **_k: None,
     )
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app._ctx = SimpleNamespace(app=app, state=app._app_state, widgets=_W(app),
                                runtime=AppRuntime(app),
                                notify=SimpleNamespace(
@@ -93,7 +93,7 @@ def _artists(ax):
     panel that drew a bracket and fail on one that correctly explained itself.
     ``tests/test_bar_significance_says_why.py`` is where the note is asserted.
     """
-    from well_viewer.features.barplot.renderer import SIGNIFICANCE_NOTE_TAG
+    from review.features.barplot.renderer import SIGNIFICANCE_NOTE_TAG
     texts = [t for t in ax.texts if not getattr(t, SIGNIFICANCE_NOTE_TAG, False)]
     return len(ax.lines) + len(texts)
 
@@ -222,7 +222,7 @@ def test_no_match_says_why_on_the_panel_and_draws_nothing():
     on the figure only, where the redraw that resolves it is the same redraw
     that clears it.
     """
-    from well_viewer.features.barplot.renderer import SIGNIFICANCE_NOTE_TAG
+    from review.features.barplot.renderer import SIGNIFICANCE_NOTE_TAG
 
     ax_mean, ax_frac = _axes()
     msgs = []
@@ -250,7 +250,7 @@ def test_export_style_skips_tagged_bracket_lines():
     # Regression: the export-style pass used to stamp the per-plot data marker
     # onto *every* Line2D in ``ax.lines`` — including the significance bracket —
     # turning the flat bracket into a row of circles. Tagged lines must opt out.
-    from well_viewer.core.plot_style import apply_export_style_prefs
+    from review.core.plot_style import apply_export_style_prefs
 
     fig, ax = plt.subplots()
     (data_line,) = ax.plot([0, 1], [0, 1], marker="None", linestyle="-")

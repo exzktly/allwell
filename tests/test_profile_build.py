@@ -24,13 +24,13 @@ _REPO = Path(__file__).resolve().parents[1]
 
 def _catalog():
     return [
-        {"name": "Multivariate", "paths": ["well_viewer/features/multivariate"],
+        {"name": "Multivariate", "paths": ["review/features/multivariate"],
          "deps": ["sklearn", "umap", "pynndescent"]},
         {"name": "Cellpose", "paths": ["pipeline/cellpose.py"],
          "deps": ["cellpose", "torch", "torchvision"]},
         {"name": "Image Table", "parent": "Image Browser",
-         "paths": ["well_viewer/features/image_browser/image_table"]},
-        {"name": "Spatial", "paths": ["well_viewer/features/spatial"]},
+         "paths": ["review/features/image_browser/image_table"]},
+        {"name": "Spatial", "paths": ["review/features/spatial"]},
     ]
 
 
@@ -325,7 +325,7 @@ def test_always_subtabs_matches_the_registrys_non_removable_leaves():
     binary still ships, which reads to the user as the feature being absent.
     """
     from scripts.profile_build import README_ALWAYS_SUBTABS, README_SUBTAB_TITLES
-    from well_viewer.features.registry import _features
+    from review.features.registry import _features
 
     actual: dict = {}
     for d in _features():

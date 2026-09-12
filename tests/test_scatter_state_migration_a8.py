@@ -13,8 +13,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.scatter.tab_view import scatter_active_mode
-from well_viewer.persistence import view_state as vs
+from review.features.scatter.tab_view import scatter_active_mode
+from review.persistence import view_state as vs
 
 
 def test_slice_defaults(viewer_app):

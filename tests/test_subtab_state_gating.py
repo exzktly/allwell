@@ -5,7 +5,7 @@ are narrowed to ``["Segmentation", "Image Table"]``. Its ``playground`` state sl
 lives on the *parent* descriptor (not on the sub-leaf descriptors, which carry
 no state), and its state module is physically stripped from a subset bundle.
 Without sub-tab gating, ``attach_feature_state`` imports that stripped module
-eagerly in ``WellViewerApp.__init__`` and a frozen thin build silently exits.
+eagerly in ``ReviewApp.__init__`` and a frozen thin build silently exits.
 
 These lock in the fix: the tagged slices are pruned when the profile drops their
 sub-tab (reproducing the frozen "module absent" condition in a dev tree), and kept
@@ -17,9 +17,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.core.app_state import AppState
+from review.core.app_state import AppState
 from core.profile import FULL, load_profile
-from well_viewer.features.registry import (
+from review.features.registry import (
     _features,
     attach_feature_state,
     build_feature_registry,

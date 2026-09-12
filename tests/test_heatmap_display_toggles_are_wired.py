@@ -29,7 +29,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.features.heatmap.tab_view import build_heatmap_tab
+from review.features.heatmap.tab_view import build_heatmap_tab
 
 
 #: Every tab parent this module builds, kept alive for the whole session.

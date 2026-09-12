@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.persistence.cell_overrides import _well_zip_fingerprints
+from review.persistence.cell_overrides import _well_zip_fingerprints
 
 
 def test_fingerprints_keyed_by_canonical_well(tmp_path):

@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from well_viewer.features.image_browser.image_table.image_compose import (
+from review.features.image_browser.image_table.image_compose import (
     apply_cell_chrome,
     bar_fits,
     bar_margin,
@@ -179,7 +179,7 @@ def test_the_generate_status_line_carries_the_clause():
     rather than on the clause is what stops the clause being computed and
     dropped.
     """
-    from well_viewer.features.image_browser.image_table.controller import (
+    from review.features.image_browser.image_table.controller import (
         generate_status_message,
     )
     ctx = _Ctx()
@@ -197,7 +197,7 @@ def test_one_wording_serves_every_surface():
     """
     import inspect
 
-    from well_viewer.features.image_browser.image_table import controller, export
+    from review.features.image_browser.image_table import controller, export
     for mod in (controller, export):
         src = inspect.getsource(mod)
         assert "scale_bar_refusal_clause" in src, (

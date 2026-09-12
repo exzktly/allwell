@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QApplication, QComboBox, QHBoxLayout, QWidget,
 )
 
-from well_viewer.features.batch_export.base_panel import BatchExportPanel  # noqa: E402
+from review.features.batch_export.base_panel import BatchExportPanel  # noqa: E402
 from tests._repo_scan import parse_source
 
 
@@ -134,7 +134,7 @@ def test_no_per_job_closure_reads_a_live_combo():
             "_selected_export_channel"}
     offenders = []
     for name in ("base_panel.py", "bar_panel.py"):
-        path = Path("well_viewer/features/batch_export") / name
+        path = Path("review/features/batch_export") / name
         tree = parse_source(path)
         for outer in ast.walk(tree):
             if not isinstance(outer, ast.FunctionDef):
@@ -159,11 +159,11 @@ def test_no_per_job_closure_reads_a_live_combo():
 # ── item 99: the multi-tp scatter aggregate keeps its timepoint colour ──────
 
 def test_the_multi_tp_scatter_aggregate_draws_each_point_in_its_timepoint_colour(monkeypatch):
-    from well_viewer.features.batch_export.scatter_panel import (
+    from review.features.batch_export.scatter_panel import (
         ScatterAxes,
         ScatterBatchExportPanel,
     )
-    import well_viewer.features.scatter.controller as SC
+    import review.features.scatter.controller as SC
 
     data = {
         "A01_tp0.0": {"x": [1.0], "y": [2.0], "x_err": [0.1], "y_err": [0.2],
@@ -246,7 +246,7 @@ class _FcStub:
 
 
 def _fc_panel(mode, control_map):
-    from well_viewer.domain.control_ref import ControlRef
+    from review.domain.control_ref import ControlRef
 
     s = _FcStub()
     s._ctx = SimpleNamespace(state=SimpleNamespace(
@@ -322,7 +322,7 @@ def _scatter_panel_fn(name: str):
     import ast
 
     src = (Path(__file__).resolve().parents[1]
-           / "well_viewer" / "features" / "batch_export"
+           / "review" / "features" / "batch_export"
            / "scatter_panel.py").read_text()
     tree = ast.parse(src)
     for node in ast.walk(tree):

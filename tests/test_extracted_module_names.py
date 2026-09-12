@@ -23,9 +23,9 @@ REPO = Path(__file__).resolve().parent.parent
 
 # The modules split out during the T4 decomposition (plus the form mixin).
 EXTRACTED = [
-    "well_viewer/features/image_browser/review_image/collect.py",
-    "well_viewer/features/barplot/collect.py",
-    "well_viewer/features/scatter/collect.py",
+    "review/features/image_browser/review_image/collect.py",
+    "review/features/barplot/collect.py",
+    "review/features/scatter/collect.py",
     "analyze/form.py",
     "analyze/log_pane.py",
 ]

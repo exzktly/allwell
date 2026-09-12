@@ -43,7 +43,7 @@ _IMAGE_SUFFIXES = frozenset({
 })
 
 #: The surface this rule governs: the code that decides what a *run* takes as
-#: input. Deliberately not the whole repo. `well_viewer/data/` answers "what can
+#: input. Deliberately not the whole repo. `review/data/` answers "what can
 #: Review display", which legitimately includes formats the pipeline never
 #: groups, and `services/remote_runner.py`'s planner questions were funnelled
 #: through `util.image_exts` in an earlier pass and are checked by

@@ -33,7 +33,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import image_compose as IC
+from review.features.image_browser.image_table import image_compose as IC
 
 CHAN = "GFP"
 
@@ -137,7 +137,7 @@ def test_the_mark_survives_alongside_the_identity_label():
 def test_pooled_auto_lut_ignores_a_raw_fallback_cell(monkeypatch):
     """The whole point: a raw cell's offset must not stretch the window every
     corrected cell of that channel then shares."""
-    from well_viewer.features.image_browser.image_table import controller as CT
+    from review.features.image_browser.image_table import controller as CT
 
     corrected = np.full((8, 8), 100.0, dtype=np.float32)
     raw = np.full((8, 8), 9000.0, dtype=np.float32)   # camera offset + background
@@ -162,7 +162,7 @@ def test_pooled_auto_lut_ignores_a_raw_fallback_cell(monkeypatch):
 
 
 def test_pooled_auto_lut_still_pools_when_nothing_fell_back(monkeypatch):
-    from well_viewer.features.image_browser.image_table import controller as CT
+    from review.features.image_browser.image_table import controller as CT
 
     arrays = {"A01": np.full((8, 8), 100.0, dtype=np.float32),
               "A02": np.full((8, 8), 300.0, dtype=np.float32)}
@@ -185,7 +185,7 @@ def test_pooled_auto_lut_still_pools_when_nothing_fell_back(monkeypatch):
 # ── plate mode offers a LUT row only for the channel it displays ────────────
 
 def _spec(channels, *, plate=False):
-    from well_viewer.features.image_browser.image_table.state import (
+    from review.features.image_browser.image_table.state import (
         Axis, ChannelSpec, TableSpec,
     )
     specs = [ChannelSpec(channel=c, render=r) for c, r in channels]
@@ -193,21 +193,21 @@ def _spec(channels, *, plate=False):
 
 
 def test_plate_mode_offers_one_lut_row():
-    from well_viewer.features.image_browser.image_table import builder_view as BV
+    from review.features.image_browser.image_table import builder_view as BV
 
     spec = _spec([("GFP", "corrected"), ("DAPI", "corrected")], plate=True)
     assert list(BV._table_channels(spec)) == ["GFP"]
 
 
 def test_plate_mode_names_the_channels_it_does_not_show():
-    from well_viewer.features.image_browser.image_table import builder_view as BV
+    from review.features.image_browser.image_table import builder_view as BV
 
     spec = _spec([("GFP", "corrected"), ("DAPI", "corrected")], plate=True)
     assert BV._plate_hidden_channels(spec) == ["DAPI"]
 
 
 def test_a_hidden_channel_with_no_display_range_is_named_only_once():
-    from well_viewer.features.image_browser.image_table import builder_view as BV
+    from review.features.image_browser.image_table import builder_view as BV
 
     spec = _spec([("GFP", "corrected"), ("DAPI", "mask")], plate=True)
     assert BV._plate_hidden_channels(spec) == [], (
@@ -217,7 +217,7 @@ def test_a_hidden_channel_with_no_display_range_is_named_only_once():
 
 
 def test_outside_plate_mode_every_channel_keeps_its_row():
-    from well_viewer.features.image_browser.image_table import builder_view as BV
+    from review.features.image_browser.image_table import builder_view as BV
 
     spec = _spec([("GFP", "corrected"), ("DAPI", "corrected")], plate=False)
     assert list(BV._table_channels(spec)) == ["GFP", "DAPI"]

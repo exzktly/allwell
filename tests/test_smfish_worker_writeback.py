@@ -1,4 +1,4 @@
-"""Regression tests for ``well_viewer.features.smfish.worker._write_counts_to_csvs``.
+"""Regression tests for ``review.features.smfish.worker._write_counts_to_csvs``.
 
 Pins four writer bugs that made Apply Global Threshold appear to do nothing:
 
@@ -38,8 +38,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from well_viewer.data.image_identity import normalize_tp
-from well_viewer.features.smfish.worker import (
+from review.data.image_identity import normalize_tp
+from review.features.smfish.worker import (
     _drop_case_equivalent_columns,
     _resolve_csv_path,
     _write_counts_to_csvs,
@@ -344,7 +344,7 @@ def test_writer_skips_locked_well_and_continues(tmp_path, caplog, monkeypatch):
     written."""
     import logging
     from unittest.mock import patch
-    from well_viewer.persistence import _io as _atomic_io
+    from review.persistence import _io as _atomic_io
 
     # Two wells. Lock the first; the second must still receive its update.
     locked_csv = tmp_path / "A02.csv"

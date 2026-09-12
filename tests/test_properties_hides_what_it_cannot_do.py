@@ -33,16 +33,16 @@ import types
 
 import pytest
 
-from well_viewer.core.cell_gating_state import CellGatingState
-from well_viewer.core.export_prefs_state import ExportPrefsState
-from well_viewer.core.plot_state import PlotState
-from well_viewer.core.plot_style import (
+from review.core.cell_gating_state import CellGatingState
+from review.core.export_prefs_state import ExportPrefsState
+from review.core.plot_state import PlotState
+from review.core.plot_style import (
     DEFAULT_EXPORT_STYLE_PREFS,
     apply_export_style_prefs,
 )
-from well_viewer.features.heatmap import controller as HM
-from well_viewer.features.heatmap.models import HeatmapLayout
-from well_viewer.features.scatter.state import ScatterState
+from review.features.heatmap import controller as HM
+from review.features.heatmap.models import HeatmapLayout
+from review.features.scatter.state import ScatterState
 
 pytestmark = pytest.mark.qt
 
@@ -85,7 +85,7 @@ def _stub_app():
         cell_gating=CellGatingState(),
     )
     app._app_state.cell_gating.scatter_gates = []
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app._ctx = types.SimpleNamespace(
         app=app,
         state=app._app_state,
@@ -120,7 +120,7 @@ def _sidebar(qtbot, monkeypatch, *, kind: str):
     """
     from matplotlib.figure import Figure
 
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
 
     fig = Figure(figsize=(4, 3))
     fig.add_subplot(1, 2, 1)
@@ -260,7 +260,7 @@ def test_the_response_figure_predicate_is_defined_once(qtbot, monkeypatch):
     import ast
     import inspect
 
-    from well_viewer.features.export import sidebar_view
+    from review.features.export import sidebar_view
 
     tree = ast.parse(inspect.getsource(sidebar_view))
     names = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]

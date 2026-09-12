@@ -4,7 +4,7 @@ allwell.py
 Composition root for the All-Well application (PySide6).
 
 Tabs:
-  * Review  - WellViewerApp (from well_viewer package runtime)
+  * Review  - ReviewApp (from review package runtime)
   * Analyze - AnalyzeTab (from analyze/tab.py)
 
 Run:
@@ -209,7 +209,7 @@ class AllWellApp(QMainWindow):
     def _build_ui(self) -> None:
         from analyze.tab import AnalyzeTab
         from datasets.tab import DatasetsTab
-        from well_viewer import WellViewerApp
+        from review import ReviewApp
 
         root = QWidget(objectName="AppRoot")
         rl = QVBoxLayout(root)
@@ -265,7 +265,7 @@ class AllWellApp(QMainWindow):
         # and the panel under it are one column — see ``_sync_mode_bar``.
         # The rail's width is only the starting value, for the first paint
         # before any panel has been laid out.
-        from well_viewer.core.app_shell_view import RAIL_W as _RAIL_W
+        from review.core.app_shell_view import RAIL_W as _RAIL_W
         self._mode_seg.setFixedWidth(_RAIL_W)
         self._mode_seg.setFillHeight(True)
         hl.addWidget(self._mode_seg)
@@ -363,9 +363,9 @@ class AllWellApp(QMainWindow):
         rl.addWidget(build_hline_separator(None))
 
         # Phase 11: the outer Review/Analyze QStackedWidget is gone — Analyze
-        # now lives inside WellViewerApp's central pane stack so that the
+        # now lives inside ReviewApp's central pane stack so that the
         # left rail (mode-seg + section nav + plate + saved) stays visible
-        # in both modes. The mode-seg itself moved into WellViewerApp's
+        # in both modes. The mode-seg itself moved into ReviewApp's
         # sidebar above the SECTION header.
         self._central_host = QWidget()
         self._central_host.setObjectName("CentralHost")
@@ -374,10 +374,10 @@ class AllWellApp(QMainWindow):
         ch_layout.setSpacing(0)
         rl.addWidget(self._central_host, 1)
 
-        self._review = WellViewerApp(parent=None)
+        self._review = ReviewApp(parent=None)
         ch_layout.addWidget(self._review, 1)
         # Back-compat for code paths that read self._nb (legacy after the
-        # outer-stack retirement) — point it at WellViewerApp's central
+        # outer-stack retirement) — point it at ReviewApp's central
         # pane stack so e.g. ``self._nb.setCurrentIndex(0)`` still means
         # "show Review".
         self._nb = self._review._central_pane_stack
@@ -385,7 +385,7 @@ class AllWellApp(QMainWindow):
         self._review.modeChanged.connect(self._on_review_mode_changed)
         self._wrap_review_load_path()
 
-        # The directory-name label that used to live in WellViewerApp's
+        # The directory-name label that used to live in ReviewApp's
         # topbar is hidden; its slot now hosts the Review / Analyze
         # SegmentedControl (re-parented out of the outer header).
         try:
@@ -533,7 +533,7 @@ class AllWellApp(QMainWindow):
         review = getattr(self, "_review", None)
         if review is None:
             return
-        from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
+        from review.core.plot_card_actions import PLOT_CARD_ATTRS
         for attr in PLOT_CARD_ATTRS:
             card = getattr(review, attr, None)
             if card is None or not card.isVisible():
@@ -715,7 +715,7 @@ class AllWellApp(QMainWindow):
         )
         if self._review is None:
             return
-        from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
+        from review.core.plot_card_actions import PLOT_CARD_ATTRS
         for attr in PLOT_CARD_ATTRS:
             card = getattr(self._review, attr, None)
             if card is None or not hasattr(card, "setPlotTheme"):
@@ -833,7 +833,7 @@ class AllWellApp(QMainWindow):
                         readme_text, _prof.features, _prof.subtabs)
                 except Exception:
                     import logging as _logging
-                    _logging.getLogger("well_viewer").warning(
+                    _logging.getLogger("review").warning(
                         "Could not trim the manual to the active feature "
                         "profile; showing the full manual, which may describe "
                         "features this build does not have.", exc_info=True)
@@ -956,7 +956,7 @@ class AllWellApp(QMainWindow):
         if ctx is None:
             return overview
         try:
-            from well_viewer.core.tab_controller import current_centre_tab
+            from review.core.tab_controller import current_centre_tab
             leaf = current_centre_tab(ctx) or ""
         except Exception:
             return overview
@@ -971,7 +971,7 @@ class AllWellApp(QMainWindow):
                 # current *layer* where there is one, since each has a heading
                 # of its own under the tab's — without which the layer entries
                 # in ``SECTION_BY_PAGE`` had no reader at all.
-                from well_viewer.features.home.controller import current_help_subject
+                from review.features.home.controller import current_help_subject
                 sub = current_help_subject(ctx)
                 if sub in pages:
                     return pages[sub]
@@ -1001,10 +1001,10 @@ class AllWellApp(QMainWindow):
 
     def _current_data_dir(self) -> Path | None:
         """Return the directory of the dataset currently loaded in the
-        embedded WellViewer, or ``None`` when nothing is loaded.
+        embedded Review pane, or ``None`` when nothing is loaded.
 
         The canonical source is ``review._app_state.dataset.data_dir``
-        (set by ``well_viewer/core/load_controller.py``). An older ``_data_dir``
+        (set by ``review/core/load_controller.py``). An older ``_data_dir``
         attribute was never actually assigned, so callers that consulted it
         always behaved as if no dataset were loaded."""
         review = getattr(self, "_review", None)
@@ -1041,7 +1041,7 @@ class AllWellApp(QMainWindow):
         Each mode owns its own: Review's well-picker rail, and the scrolling
         form both Analyze and Datasets put down their left edge.
         """
-        from well_viewer.core.tab_controller import PANE_MODES
+        from review.core.tab_controller import PANE_MODES
         idx = self._mode_seg.currentIndex()
         mode = PANE_MODES[idx] if 0 <= idx < len(PANE_MODES) else "review"
         if mode == "review":
@@ -1061,7 +1061,7 @@ class AllWellApp(QMainWindow):
         only route back to Analyze and Datasets while collapsed.
 
         Width matches the panel. All three modes' panels now pin to the same
-        `RAIL_W` (`well_viewer.core.app_shell_view`), so this is a defensive
+        `RAIL_W` (`review.core.app_shell_view`), so this is a defensive
         floor rather than reconciling genuinely different widths — it still runs
         on every mode switch and panel resize in case that ever changes, or a
         panel is momentarily narrower than the bar's own natural width. Floored
@@ -1167,7 +1167,7 @@ class AllWellApp(QMainWindow):
 
     # ── Phase 10 / 11 handlers ───────────────────────────────────────────
     def _on_titlebar_mode_seg(self, idx: int) -> None:
-        """Titlebar mode-seg → WellViewerApp's central pane stack.
+        """Titlebar mode-seg → ReviewApp's central pane stack.
 
         Segment order (Review, Analyze, Datasets) matches the central-pane stack
         index order, so the segment index maps straight through.
@@ -1184,8 +1184,8 @@ class AllWellApp(QMainWindow):
         self._sync_review_actions()
 
     def _on_review_mode_changed(self, mode: str) -> None:
-        """Mirror WellViewerApp's mode change into the titlebar seg + status."""
-        from well_viewer.core.tab_controller import PANE_MODES
+        """Mirror ReviewApp's mode change into the titlebar seg + status."""
+        from review.core.tab_controller import PANE_MODES
         idx = PANE_MODES.index(mode) if mode in PANE_MODES else 0
         seg = getattr(self, "_mode_seg", None)
         if seg is not None and seg.currentIndex() != idx:
@@ -1218,14 +1218,14 @@ class AllWellApp(QMainWindow):
         review = self._review
         if review is None:
             return
-        from well_viewer.core.reset_scopes_view import prompt_reset_view
+        from review.core.reset_scopes_view import prompt_reset_view
         prompt_reset_view(review._ctx)
 
     def _on_reset_saves_clicked(self) -> None:
         """Reset analysis decisions, chosen from a checklist, then reload.
 
         The scopes and what each one clears live in
-        ``well_viewer/persistence/reset_scopes.py``; this handler only supplies
+        ``review/persistence/reset_scopes.py``; this handler only supplies
         the reload. It used to delete ``persistence.json`` and name the cleared
         state in its own dialog text, which is how that text came to promise two
         things the action did not do — manual cell curation, which lives in
@@ -1246,7 +1246,7 @@ class AllWellApp(QMainWindow):
             if hasattr(review, "_load_path"):
                 review._load_path(Path(root))
 
-        from well_viewer.core.reset_scopes_view import prompt_reset_analysis
+        from review.core.reset_scopes_view import prompt_reset_analysis
         prompt_reset_analysis(review._ctx, reload_after=_reload)
 
     def _toggle_log_drawer(self) -> None:
@@ -1309,10 +1309,10 @@ class AllWellApp(QMainWindow):
         ``self._log_ring`` (so the Log drawer has history to show) and appends
         new records live while the drawer is open.
 
-        The whole app logs under the ``"well_viewer"`` logger, which sets
+        The whole app logs under the ``"review"`` logger, which sets
         ``propagate = False`` (see ``core/status_view.build_bottom``) — so a
         handler on the *root* logger, as this used to be, never receives those
-        records and the drawer stays empty. Attach directly to ``"well_viewer"``
+        records and the drawer stays empty. Attach directly to ``"review"``
         (plus root, for the few ``__name__`` loggers under ``services/`` that
         still propagate). Called once at startup so records emitted before the
         drawer is first opened are captured. Idempotent."""
@@ -1351,7 +1351,7 @@ class AllWellApp(QMainWindow):
         # (progress streams, status updates, …). Lower the handler and each
         # target logger to INFO so the user sees what the app is doing.
         h.setLevel(_logging.INFO)
-        for _name in ("well_viewer", ""):
+        for _name in ("review", ""):
             lg = _logging.getLogger(_name)
             if lg.level == _logging.NOTSET or lg.level > _logging.INFO:
                 lg.setLevel(_logging.INFO)
@@ -1373,7 +1373,7 @@ class AllWellApp(QMainWindow):
         Open-directory dialog when no dataset is loaded yet."""
         # The previously-loaded directory lives on
         # ``review._app_state.dataset.data_dir`` (set by
-        # ``well_viewer/core/load_controller.py``). Earlier code consulted a
+        # ``review/core/load_controller.py``). Earlier code consulted a
         # never-set ``_data_dir``/``_loaded_path`` attribute and therefore
         # always fell into the "open a dataset" dialog branch.
         cur = self._current_data_dir()
@@ -1414,7 +1414,7 @@ class AllWellApp(QMainWindow):
         # the mode-seg).
         if idx == 0:
             QTimer.singleShot(50, self._nudge_review)
-        # WellViewerApp's own mode-seg syncs via its _on_central_pane_changed;
+        # ReviewApp's own mode-seg syncs via its _on_central_pane_changed;
         # nothing to do at this layer.
 
     def _on_analyze_pipeline_complete(self, output_dir: Path) -> None:
@@ -1555,7 +1555,7 @@ class AllWellApp(QMainWindow):
             except Exception:
                 swallowed()  # was: pass (silent except)
         try:
-            from well_viewer.features.barplot.renderer import redraw_bars
+            from review.features.barplot.renderer import redraw_bars
             redraw_bars(self._review)
         except Exception:
             swallowed()  # was: pass (silent except)
@@ -1625,7 +1625,7 @@ class AllWellApp(QMainWindow):
                 # state slice *and* queues it, which is why it runs before the
                 # drain below rather than after: draining first would write
                 # everything except the thing the user was typing.
-                from well_viewer.core.ui_helpers import commit_focused_notes
+                from review.core.ui_helpers import commit_focused_notes
                 commit_focused_notes(self._review._ctx)
             except Exception:
                 swallowed()
@@ -1661,7 +1661,7 @@ class AllWellApp(QMainWindow):
         # and disconnect the app-global focus watcher on close (audit L3/L4).
         if self._review is not None:
             try:
-                from well_viewer.runtime_app import teardown_review_pane
+                from review.runtime_app import teardown_review_pane
                 teardown_review_pane(self._review)
             except Exception:
                 swallowed()

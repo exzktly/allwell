@@ -9,7 +9,7 @@ where Inter may well be installed system-wide — it may not read as anything at
 all.
 
 The count was `parents[2]` while the module lived at
-`well_viewer/core/app_fonts.py`; lifting it to `startup/app_fonts.py` left it
+`review/core/app_fonts.py`; lifting it to `startup/app_fonts.py` left it
 pointing one directory above the checkout until this test was written. Its
 sibling `startup/mpl_bootstrap.py` carries the same shape and the same kind of
 test, for the same reason: both resolve a repository-level asset path against

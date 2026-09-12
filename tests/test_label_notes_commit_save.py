@@ -17,7 +17,7 @@ pytestmark = pytest.mark.qt
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.home.labels.tab_view import LabelGrid
+from review.features.home.labels.tab_view import LabelGrid
 
 
 class _Persistence:
@@ -29,7 +29,7 @@ class _Persistence:
 
 
 def _fake_app():
-    from well_viewer.core.app_state import AppState
+    from review.core.app_state import AppState
 
     app = SimpleNamespace()
     app._app_state = AppState()

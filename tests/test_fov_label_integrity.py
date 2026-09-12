@@ -26,11 +26,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from well_viewer.data.data_loading import (
+from review.data.data_loading import (
     aggregate_with_threshold_df,
     normalize_fov_series,
 )
-from well_viewer.domain.fov_integrity import check_fov_labels
+from review.domain.fov_integrity import check_fov_labels
 
 
 def _rows(fov_tokens, files, n_per=20, tp="8h", seed=1):
@@ -178,7 +178,7 @@ def test_undefined_spread_is_nan_not_zero_in_per_cell_mode():
 
 
 def test_export_writes_a_blank_cell_for_an_undefined_spread():
-    from well_viewer.features.export.service import bar_metric_row
+    from review.features.export.service import bar_metric_row
 
     row = bar_metric_row(
         mean=590.0, spread=float("nan"), frac=0.028, frac_spread=float("nan"),
@@ -216,7 +216,7 @@ def test_export_writes_a_blank_cell_for_an_undefined_spread():
 
 def test_fold_change_keeps_an_undefined_spread_undefined():
     """Normalising a bar must not turn "not computed" into a measured zero."""
-    from well_viewer.domain.fold_change import scale_bar_value
+    from review.domain.fold_change import scale_bar_value
 
     val, err = scale_bar_value(100.0, float("nan"), control_mean=50.0, op="ratio")
     assert val == pytest.approx(2.0)
@@ -232,8 +232,8 @@ def test_bar_renderer_marks_a_bar_whose_spread_is_undefined():
     pytest.importorskip("PySide6")
     from matplotlib.figure import Figure
 
-    from well_viewer.features.barplot.collect import BarItem
-    from well_viewer.features.barplot.controller import render_bar_items
+    from review.features.barplot.collect import BarItem
+    from review.features.barplot.controller import render_bar_items
 
     fig = Figure()
     ax_mean, ax_frac = fig.subplots(2)

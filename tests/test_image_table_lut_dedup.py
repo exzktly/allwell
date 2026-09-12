@@ -16,14 +16,14 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table.state import (
+from review.features.image_browser.image_table.state import (
     Axis, ChannelSpec, TableSpec,
 )
-from well_viewer.features.image_browser.image_table.builder_view import (
+from review.features.image_browser.image_table.builder_view import (
     _lut_inert_channels,
     _table_channels,
 )
-from well_viewer.features.image_browser.image_table.image_compose import (
+from review.features.image_browser.image_table.image_compose import (
     NUC_SEG_TOKEN,
 )
 

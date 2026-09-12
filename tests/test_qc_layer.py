@@ -13,9 +13,9 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
-from well_viewer.data.data_loading import df_included_mask
-from well_viewer.features.qc.params import QCParams, compute_qc_pass
-from well_viewer.features.qc import controller as qc
+from review.data.data_loading import df_included_mask
+from review.features.qc.params import QCParams, compute_qc_pass
+from review.features.qc import controller as qc
 
 
 def _df(area, solidity=None, included=None):
@@ -113,7 +113,7 @@ def test_df_included_mask_qc_only_when_included_absent():
 
 # ── controller projection ─────────────────────────────────────────────────────
 def _fake_app(cache, pipeline_info=None, params=None):
-    from well_viewer.core.qc_state import QcState
+    from review.core.qc_state import QcState
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
         dataset=SimpleNamespace(cache=cache, pipeline_info=pipeline_info),
@@ -184,11 +184,11 @@ def test_qc_gate_row_exposes_circularity_inputs(qtbot):
     seed from params and refresh on external change."""
     from PySide6.QtWidgets import QWidget
 
-    from well_viewer.features.qc.tab_view import (
+    from review.features.qc.tab_view import (
         build_qc_gate_controls, qc_gate_refresh_widgets,
     )
 
-    from well_viewer.core.qc_state import QcState
+    from review.core.qc_state import QcState
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
         dataset=SimpleNamespace(data_dir=None, cache={}, pipeline_info={}),
@@ -197,7 +197,7 @@ def test_qc_gate_row_exposes_circularity_inputs(qtbot):
     # builder registers its widget handles through ctx.widgets (which also stamp
     # ``app._qc_gate_widgets`` for the legacy reader below), and stamps its
     # refresh callback on ctx.runtime.qc for the Gating reset scope to fire.
-    from well_viewer.core.widget_registry import WidgetRegistry
+    from review.core.widget_registry import WidgetRegistry
     app._ctx = SimpleNamespace(
         state=app._app_state, app=app, widgets=WidgetRegistry(app),
         runtime=SimpleNamespace(qc=SimpleNamespace(refresh_widgets_cb=None)))
@@ -229,9 +229,9 @@ def test_qc_gate_row_gives_each_quantity_its_own_row(qtbot):
     """
     from PySide6.QtWidgets import QGridLayout, QLabel, QWidget
 
-    from well_viewer.core.qc_state import QcState
-    from well_viewer.core.widget_registry import WidgetRegistry
-    from well_viewer.features.qc.tab_view import build_qc_gate_controls
+    from review.core.qc_state import QcState
+    from review.core.widget_registry import WidgetRegistry
+    from review.features.qc.tab_view import build_qc_gate_controls
 
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(

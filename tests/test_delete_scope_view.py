@@ -1,6 +1,6 @@
 """The Segmentation tab's Delete-scope popover.
 
-Builds the real control against a stub ctx — Qt widgets, no ``WellViewerApp`` —
+Builds the real control against a stub ctx — Qt widgets, no ``ReviewApp`` —
 so the seeding, the arming and the button readout are exercised rather than
 reasoned about. The armed scope is the one piece of this feature a user can get
 wrong expensively, so what the button says has to match what the state holds.
@@ -16,8 +16,8 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.features.image_browser.review_image.state import ReviewImageState
-from well_viewer.features.preview.delete_scope_view import (
+from review.features.image_browser.review_image.state import ReviewImageState
+from review.features.preview.delete_scope_view import (
     build_delete_scope_control, describe_delete_scope,
 )
 

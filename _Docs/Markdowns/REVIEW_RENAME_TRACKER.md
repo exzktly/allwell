@@ -1,4 +1,4 @@
-# Tracker — rename `well_viewer/` to `review/`, and lift the shared core out of it
+# Tracker — rename `review/` to `review/`, and lift the shared core out of it
 
 This is a live tracking document, not a write-up. It exists because the work
 below is larger than one session can hold in its head, and because progress
@@ -14,18 +14,18 @@ the body that it is gone.
 
 ## Why
 
-`well_viewer/` is the **Review pane's** package. It reads like the application's
+`review/` is the **Review pane's** package. It reads like the application's
 package only because the application was once nothing but the Review pane. The
-root now builds three peers — `AnalyzeTab`, `DatasetsTab`, `WellViewerApp` — and
+root now builds three peers — `AnalyzeTab`, `DatasetsTab`, `ReviewApp` — and
 of those, two live in a directory that says what it is and one does not.
 
 The import direction settles that these are siblings rather than parent and
-child: `analyze/` imports `well_viewer` eighteen times and `datasets/` sixteen,
-while `well_viewer/` imports **neither, ever**. Review does not know the other
+child: `analyze/` imports `review` eighteen times and `datasets/` sixteen,
+while `review/` imports **neither, ever**. Review does not know the other
 panes exist. So the hierarchy is right and only the name is wrong.
 
 Underneath the name sits the substantive half. Every one of those thirty-four
-cross-pane imports lands in `well_viewer/core/` — never in a feature — because
+cross-pane imports lands in `review/core/` — never in a feature — because
 `core/` is not Review's at all. It is application infrastructure that happens to
 live inside one pane's package: the logged-swallow helpers, the settings
 wrapper, the profile reader, the debug flags, the font registration, the
@@ -71,12 +71,12 @@ the measurement that declined them.
 
 | # | was | lines | external sites | is now | state |
 |---|---|---|---|---|---|
-| 1 | `well_viewer/core/safe.py` | 96 | 13 | `core/safe.py` | done |
-| 2 | `well_viewer/core/app_settings.py` | 42 | 5 | `core/app_settings.py` | done |
-| 3 | `well_viewer/core/profile.py` | 182 | 2 | `core/profile.py` | done |
-| 4 | `well_viewer/core/debug_flags.py` | 99 | 1 | `core/debug_flags.py` | done |
-| 5 | `well_viewer/core/worker_bridge.py` | 249 | 1 | `core/worker_bridge.py` | done |
-| 6 | `well_viewer/core/app_fonts.py` | 127 | 1 | `startup/app_fonts.py` | done |
+| 1 | `review/core/safe.py` | 96 | 13 | `core/safe.py` | done |
+| 2 | `review/core/app_settings.py` | 42 | 5 | `core/app_settings.py` | done |
+| 3 | `review/core/profile.py` | 182 | 2 | `core/profile.py` | done |
+| 4 | `review/core/debug_flags.py` | 99 | 1 | `core/debug_flags.py` | done |
+| 5 | `review/core/worker_bridge.py` | 249 | 1 | `core/worker_bridge.py` | done |
+| 6 | `review/core/app_fonts.py` | 127 | 1 | `startup/app_fonts.py` | done |
 | 7 | `ui_helpers.build_hline_separator` + its vertical twin | 30 | 3 | `widgets/separator.py` | done |
 
 Notes on the two that do not go to `core/`:
@@ -149,17 +149,17 @@ sweep, not after it.
 
 ## Phase 2 — rename the package
 
-**4 rows — 0 done, 4 todo.**
+**4 rows — 4 done, 0 todo.**
 
 | # | what | measured scope | state |
 |---|---|---|---|
-| 8 | `well_viewer/` → `review/` — the directory and every import | 865 files, 5,342 occurrences of the string | todo |
-| 9 | `WellViewerApp` → `ReviewApp` | 98 files, 241 occurrences | todo |
-| 10 | The rosters that name the package by string: `tests/_repo_scan.PACKAGE_ROOTS`, `ROOT_DIRS`, the PyInstaller spec's package loop, `build_all_well.sh`'s `REQUIRED`, `profiles/*.toml` | — | todo |
-| 11 | The guards that name it in a *rule*: pipeline self-sufficiency, the layering test, "nothing imports the app class" | — | todo |
+| 8 | `well_viewer/` → `review/` — the directory and every reference | 866 files, 5,128 rewrites | done |
+| 9 | `WellViewerApp` → `ReviewApp` | 247 rewrites | done |
+| 10 | The rosters naming the package by string: `PACKAGE_ROOTS`, `ROOT_DIRS`, the spec's package walk, `build_all_well.sh`'s `REQUIRED`, `profiles/*.toml` | 5 rosters | done |
+| 11 | The guards naming it in a *rule*, each proven to still bite | 4 guards | done |
 
 Row 9 is part of the same sweep rather than a follow-up. A `review/` package
-whose entry class is still called `WellViewerApp` is the half-swept state that is
+whose entry class is still called `ReviewApp` is the half-swept state that is
 worse than either end, because one directory then holds two spellings of one
 concept and neither looks wrong.
 
@@ -167,6 +167,51 @@ Row 11 is the one that cannot be done by substitution. Those guards do not merel
 *mention* the package — they forbid importing it, so the string is the rule
 itself. A blind rewrite leaves each guard passing while measuring a package name
 that no longer exists, which reports as a greener suite.
+
+
+### How row 11 was proven, since a rewritten rule is the one that fails open
+
+These four guards do not merely *mention* the package — they forbid importing
+it, so the string is the rule itself, and a blind substitution leaves each
+passing while measuring a name that no longer exists. Each was therefore mutated
+on HEAD and watched failing with the violation named:
+
+| guard | mutation | result |
+|---|---|---|
+| `test_services_do_not_import_review` | `services/env.py` imports `review.domain.stats_compute` | fired, naming the file |
+| `test_pipeline_is_self_sufficient` | `pipeline/io.py` imports the same | fired, naming the file |
+| `test_layering` | a throwaway `review/domain/` module imports `review.features.barplot` | fired, naming the module and line |
+| `test_nothing_imports_reviewapp_at_runtime` | a throwaway `review/core/` module imports `ReviewApp` | fired |
+
+The layering mutation took two attempts, and the first one is the more useful
+record: importing a feature from `stats_compute` created a genuine circular
+import that killed `conftest` before collection, so pytest printed an
+`ImportError` and **no verdict at all**. Grepping that output for "failed"
+matched nothing, which is indistinguishable at a glance from a guard that did
+not fire. A mutation that prevents the suite from running has measured nothing;
+the replacement adds a throwaway module in the scanned directory instead, which
+cannot cycle.
+
+### The four spellings a package rename leaves behind
+
+`\bwell_viewer\b` and `\bWellViewerApp\b` between them missed twenty-three
+sites, every one of them a *different casing of the same word*, and none of them
+would have failed anything:
+
+* `WELL_VIEWER` — the module-level constant three guards use to root their walk;
+* `test_..._well_viewer` / `..._wellviewerapp_...` — four test function names;
+* `well_viewer3` — a predecessor project named in four module docstrings
+  ("extracted from well_viewer3 for incremental migration"), which is a
+  changelog note in a docstring and is now simply a description of the module;
+* `WellViewer` in one prose sentence in `allwell.py`.
+
+`scripts/rename_sweep_check.sh well_viewer review well_viewer` reports clean.
+
+`_Docs/Markdowns/README_WellViewer.md` keeps its name deliberately: it is the
+user manual for the whole application rather than for this package, CLAUDE.md
+§5 names it as one of three permanent documents, and `ui/help_topics.py` and two
+tests resolve headings inside it. Renaming it is a separate decision about a
+document, not part of this package rename.
 
 ---
 
@@ -177,6 +222,6 @@ that no longer exists, which reports as a greener suite.
 - The rename is mechanical, which is exactly why it needs the **slow lane**: the
   fast lane never builds an application, so an import that only the real window
   reaches would survive it. `tests/test_app_smoke.py` at minimum.
-- After the rename, `scripts/rename_sweep_check.sh well_viewer review well_viewer`
+- After the rename, `scripts/rename_sweep_check.sh review review review`
   for the prose half — a path substitution leaves the bare basename in directory
   trees and layer diagrams, and leaves sentences that now contradict themselves.

@@ -16,8 +16,8 @@ import math
 
 import pytest
 
-from well_viewer.domain.control_ref import ControlRef
-from well_viewer.features.lineplot.controller import collect_line_series
+from review.domain.control_ref import ControlRef
+from review.features.lineplot.controller import collect_line_series
 
 from tests.conftest import MockApp, make_agg
 
@@ -153,7 +153,7 @@ def test_the_mapping_keys_on_well_tokens_with_no_set_active(ctx):
 # ── the batch runner draws the same figure off-screen ────────────────────────
 
 def _group(ctx):
-    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+    from review.domain.batch_models import BarGroup, ReplicateSet
     return BarGroup(
         name="G",
         members=[ReplicateSet(s["name"], list(s["wells"])) for s in _SETS],
@@ -162,8 +162,8 @@ def _group(ctx):
 
 
 def _batch(ctx, mapping):
-    from well_viewer.domain.fold_change import fold_change_state
-    from well_viewer.features.batch_export._line_series_runner import (
+    from review.domain.fold_change import fold_change_state
+    from review.features.batch_export._line_series_runner import (
         collect_line_series_for_group,
     )
     ctx.state.plot.fc_control_map = dict(mapping)
@@ -205,7 +205,7 @@ def test_the_violin_overlay_uses_the_same_control_as_its_bar(ctx):
     control. Left alone, the bars would normalize per member while the
     distribution drawn on top of them divided by a stale single control — two
     denominators on one axis, looking like one measurement."""
-    from well_viewer.domain.fold_change import build_cell_scaling, fold_change_state
+    from review.domain.fold_change import build_cell_scaling, fold_change_state
 
     ctx.state.plot.fc_control_map = {"DRUG": _SET("CTRL"),
                                      "DRUG2": _SET("CTRL2")}
@@ -222,7 +222,7 @@ def test_the_violin_overlay_uses_the_same_control_as_its_bar(ctx):
 
 
 def test_an_unmapped_members_overlay_is_blank_rather_than_raw(ctx):
-    from well_viewer.domain.fold_change import build_cell_scaling, fold_change_state
+    from review.domain.fold_change import build_cell_scaling, fold_change_state
 
     ctx.state.plot.fc_control_map = {"DRUG": _SET("CTRL")}
     scale_for = build_cell_scaling(

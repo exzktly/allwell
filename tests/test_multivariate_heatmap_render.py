@@ -15,7 +15,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from well_viewer.features.multivariate import renderer as R
+from review.features.multivariate import renderer as R
 
 
 def _annotations(ax):

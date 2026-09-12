@@ -14,7 +14,7 @@ pytest.importorskip("PySide6")
 @pytest.mark.qt
 def test_properties_dock_slides_out_not_in_sidebar(image_table_app):
     from widgets.stepper import Stepper
-    from well_viewer.features.image_browser.image_table import tab_view as TV
+    from review.features.image_browser.image_table import tab_view as TV
 
     ctx = image_table_app._ctx
     dock = ctx.runtime.image_table.props_dock
@@ -39,7 +39,7 @@ def test_set_spacing_rerenders_once_a_table_is_built(image_table_app, monkeypatc
     """A Properties tweak must take effect as soon as a table has been built —
     not only after a first Generate (the old ``last_render`` gate silently
     dropped the first adjustment)."""
-    from well_viewer.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import controller as C
 
     ctx = image_table_app._ctx
     calls = []

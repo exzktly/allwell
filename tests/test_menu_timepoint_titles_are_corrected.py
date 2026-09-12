@@ -33,8 +33,8 @@ import types
 
 import pytest
 
-from well_viewer.features.heatmap import controller as HM
-from well_viewer.features.heatmap.models import HeatmapLayout
+from review.features.heatmap import controller as HM
+from review.features.heatmap.models import HeatmapLayout
 
 _TP = 6.0
 _WELLS = {"A01": 5.0, "A02": 120.0, "B01": 300.0, "B02": 500.0}
@@ -153,7 +153,7 @@ def test_an_uncorrected_title_carries_no_marker(title):
 
 def _distribution_title(*, scale=1.0, offset=0.0, tp=6.0):
     """The Distribution title for one timepoint under a time correction."""
-    from well_viewer.features.distribution.controller import _title_for
+    from review.features.distribution.controller import _title_for
 
     ctx = types.SimpleNamespace(
         state=types.SimpleNamespace(
@@ -163,7 +163,7 @@ def _distribution_title(*, scale=1.0, offset=0.0, tp=6.0):
                 active_metric="mean_intensity", ratio_index={}),
         ),
     )
-    from well_viewer.features.distribution import controller as DC
+    from review.features.distribution import controller as DC
     _saved = DC.active_channel_label
     DC.active_channel_label = lambda _c: "GFP"
     try:
@@ -200,7 +200,7 @@ def test_every_distribution_renderer_draws_the_title_it_builds():
     import ast
     import inspect
 
-    from well_viewer.features.distribution import controller as DC
+    from review.features.distribution import controller as DC
 
     tree = ast.parse(inspect.getsource(DC))
     drawn = 0

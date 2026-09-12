@@ -285,7 +285,7 @@ def test_a_well_with_images_and_no_csv_is_what_incremental_skips_forever(tmp_pat
     incremental run has nothing to do, yet the CSV is absent."""
     from datasets.validate import validate_compute as vc
     from pipeline.incremental_keys import incremental_done_fov_keys
-    from well_viewer.data.image_identity import load_schema
+    from review.data.image_identity import load_schema
 
     _well_with_images_but_no_csv(tmp_path)
     report = vc.build_report(tmp_path)

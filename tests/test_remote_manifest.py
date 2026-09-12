@@ -101,7 +101,7 @@ def test_frozen_bundle_ships_the_remote_manifest():
     from services.remote_runner import _REQUIRED_REMOTE_FILES
 
     spec = (REPO_ROOT / "_Docs" / "_Installation" / "all_well.spec").read_text()
-    bundled_pkgs = ("well_viewer", "widgets", "ui", "services", "pipeline", "util")
+    bundled_pkgs = ("review", "widgets", "ui", "services", "pipeline", "util")
     missing = [
         f for f in _REQUIRED_REMOTE_FILES
         if f.split("/")[0] not in bundled_pkgs          # not in a bundled package

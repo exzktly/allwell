@@ -655,7 +655,7 @@ def _cached_plate(tmp_path):
     """A well whose frame has been parsed once and cached."""
     import csv as _csv
 
-    from well_viewer.data.data_loading import read_well_frame
+    from review.data.data_loading import read_well_frame
 
     path = tmp_path / "measurements_A01.csv"
     with path.open("w", newline="") as fh:
@@ -672,7 +672,7 @@ def test_a_matching_key_reuses_the_cached_frame(tmp_path):
     pass every mutation below while reusing nothing — which is exactly what a
     review of this cache found, one line and the whole lane still green."""
     pytest.importorskip("pyarrow")
-    from well_viewer.data import parquet_cache as pc
+    from review.data import parquet_cache as pc
 
     plate = _cached_plate(tmp_path)
     assert pc.read_cached(plate) is not None
@@ -680,7 +680,7 @@ def test_a_matching_key_reuses_the_cached_frame(tmp_path):
 
 def test_a_changed_size_declines(tmp_path):
     pytest.importorskip("pyarrow")
-    from well_viewer.data import parquet_cache as pc
+    from review.data import parquet_cache as pc
 
     plate = _cached_plate(tmp_path)
     with plate.open("a") as fh:
@@ -691,7 +691,7 @@ def test_a_changed_size_declines(tmp_path):
 def test_a_changed_mtime_at_the_same_size_declines(tmp_path):
     """A re-run that produces the same row count with different values."""
     pytest.importorskip("pyarrow")
-    from well_viewer.data import parquet_cache as pc
+    from review.data import parquet_cache as pc
 
     plate = _cached_plate(tmp_path)
     body = plate.read_text().replace("100.0", "900.0")
@@ -704,7 +704,7 @@ def test_a_changed_mtime_at_the_same_size_declines(tmp_path):
 def test_a_changed_parser_version_declines(tmp_path, monkeypatch):
     """The half no file-stat can see: the same bytes parsing to a new frame."""
     pytest.importorskip("pyarrow")
-    from well_viewer.data import parquet_cache as pc
+    from review.data import parquet_cache as pc
 
     plate = _cached_plate(tmp_path)
     monkeypatch.setattr(pc, "PARSER_VERSION", pc.PARSER_VERSION + 1)

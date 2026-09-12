@@ -32,7 +32,7 @@ def _group_names(groups):
 @pytest.mark.slow
 def test_stats_seeds_all_groups_outside_split(loaded_app):
     app = loaded_app
-    from well_viewer.features.stats.controller import stats_sync_from_app
+    from review.features.stats.controller import stats_sync_from_app
     _two_repsets(app)
     app._notebook.setCurrentByName("Statistics")
     app._ctx.runtime.split.active = False
@@ -43,7 +43,7 @@ def test_stats_seeds_all_groups_outside_split(loaded_app):
 @pytest.mark.slow
 def test_stats_seeds_only_visible_groups_in_split(loaded_app):
     app = loaded_app
-    from well_viewer.features.stats.controller import stats_sync_from_app
+    from review.features.stats.controller import stats_sync_from_app
     _two_repsets(app)
     app._notebook.setCurrentByName("Statistics")
     app._ctx.runtime.split.active = True
@@ -58,7 +58,7 @@ def test_load_from_sample_defs_loads_all_groups_even_in_split(loaded_app):
     # (visible_only_in_split=False), not just the split-visible subset — even
     # with a group hidden in Split View.
     app = loaded_app
-    from well_viewer.features.stats.controller import stats_sync_from_app
+    from review.features.stats.controller import stats_sync_from_app
     _two_repsets(app)
     app._app_state.selection.selections[1]["hidden"] = True
     app._notebook.setCurrentByName("Statistics")
@@ -70,7 +70,7 @@ def test_load_from_sample_defs_loads_all_groups_even_in_split(loaded_app):
 @pytest.mark.slow
 def test_stats_split_falls_back_to_all_when_none_visible(loaded_app):
     app = loaded_app
-    from well_viewer.features.stats.controller import stats_sync_from_app
+    from review.features.stats.controller import stats_sync_from_app
     _two_repsets(app)
     # Hide everything → nothing visible; fall back to all so the tab isn't blank.
     for s in app._app_state.selection.selections:

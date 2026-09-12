@@ -29,7 +29,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import image_compose as IC
+from review.features.image_browser.image_table import image_compose as IC
 
 
 class _Ref:
@@ -51,7 +51,7 @@ def _ctx():
 
 def _patch_scan(monkeypatch, *, raw_keys, tophat_keys):
     """``find_well_images_and_masks`` returning the given raw / top-hat coverage."""
-    import well_viewer.data.image_discovery as idisc
+    import review.data.image_discovery as idisc
 
     raw = {k: _Ref(f"raw{k}") for k in raw_keys}
     tophat = {k: _Ref(f"th{k}") for k in tophat_keys}
@@ -66,7 +66,7 @@ def _patch_decode(monkeypatch, seen):
         seen.append(ref.name)
         return np.zeros((4, 4), dtype=np.float32)
 
-    monkeypatch.setattr("well_viewer.data.image_discovery.open_imgref_as_array", _open)
+    monkeypatch.setattr("review.data.image_discovery.open_imgref_as_array", _open)
 
 
 # ── The regression ──────────────────────────────────────────────────────────

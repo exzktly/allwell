@@ -288,22 +288,22 @@ QT_FREE_VIOLATIONS = {
 
 @pytest.mark.parametrize("shape", sorted(QT_FREE_VIOLATIONS))
 def test_qt_free_guard_catches_qt_in_domain(tmp_path, monkeypatch, shape):
-    _write(tmp_path, "well_viewer/domain/bad_qt.py", QT_FREE_VIOLATIONS[shape])
+    _write(tmp_path, "review/domain/bad_qt.py", QT_FREE_VIOLATIONS[shape])
     module = importlib.import_module("tests.test_qt_free_layers")
     exc = _run_rooted_scan(
         monkeypatch, "tests.test_qt_free_layers", "test_qt_free_layers_import_no_qt",
-        tmp_path, {"QT_FREE_ROOTS": {"well_viewer/domain": module.QT_FREE_ROOTS["well_viewer/domain"]},
+        tmp_path, {"QT_FREE_ROOTS": {"review/domain": module.QT_FREE_ROOTS["review/domain"]},
                    "ALLOWLIST": set()})
     assert exc is not None, f"the {shape} Qt import went uncaught"
     assert "bad_qt.py" in str(exc)
 
 
 def test_qt_free_guard_clears_pure_logic(tmp_path, monkeypatch):
-    _write(tmp_path, "well_viewer/domain/good.py", "import math\n\n\ndef f(x):\n    return math.sqrt(x)\n")
+    _write(tmp_path, "review/domain/good.py", "import math\n\n\ndef f(x):\n    return math.sqrt(x)\n")
     module = importlib.import_module("tests.test_qt_free_layers")
     assert _run_rooted_scan(
         monkeypatch, "tests.test_qt_free_layers", "test_qt_free_layers_import_no_qt",
-        tmp_path, {"QT_FREE_ROOTS": {"well_viewer/domain": module.QT_FREE_ROOTS["well_viewer/domain"]},
+        tmp_path, {"QT_FREE_ROOTS": {"review/domain": module.QT_FREE_ROOTS["review/domain"]},
                    "ALLOWLIST": set()}) is None
 
 
@@ -401,7 +401,7 @@ def test_on_cutoff_guard_catches_a_raw_accessor(tmp_path, monkeypatch, shape):
 
 @pytest.mark.parametrize("shape", [
     "from x import get_thresh_frac_on as fetch_cutoff\nfetch_cutoff(ctx, ch)",
-    '_raw = _lazy("well_viewer.core.channel_state_controller", "get_thresh_frac_on")',
+    '_raw = _lazy("review.core.channel_state_controller", "get_thresh_frac_on")',
     'threshold = getattr(csc, "get_thresh_frac_on")(ctx, ch)',
     'threshold = vars(csc)["get_thresh_count_on"](ctx, ch)',
 ])
@@ -434,7 +434,7 @@ def test_on_cutoff_exemption_is_not_shared_by_bare_name(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "python_sources", lambda **kw: [path])
     monkeypatch.setattr(
         module, "rel",
-        lambda p: "well_viewer/core/channel_state_controller.py")
+        lambda p: "review/core/channel_state_controller.py")
     try:
         module.test_no_path_picks_its_own_on_cutoff()
     except AssertionError as exc:
@@ -740,14 +740,14 @@ _NESTED_CATALOG = (
     '[[feature]]\n'
     'name = "Ratios"\n'
     'parent = "Home"\n'
-    'paths = ["well_viewer/features/home/ratios"]\n'
+    'paths = ["review/features/home/ratios"]\n'
 )
 
 
 def _nested_tree(tmp_path: Path, container_body: str) -> Path:
     (tmp_path / "profiles").mkdir(parents=True, exist_ok=True)
     (tmp_path / "profiles" / "full.toml").write_text(_NESTED_CATALOG)
-    pkg = tmp_path / "well_viewer" / "features" / "home"
+    pkg = tmp_path / "review" / "features" / "home"
     (pkg / "ratios").mkdir(parents=True, exist_ok=True)
     (pkg / "ratios" / "tab_view.py").write_text("PANEL = 1\n")
     (pkg / "controller.py").write_text(container_body)
@@ -758,13 +758,13 @@ def _run_nested_scan(monkeypatch, root: Path, test_name: str, exempt=frozenset()
     """Point the container guard at *root* and run one of its tests.
 
     It derives its scan surface from `tests/_repo_scan.python_sources`, imported
-    into its own namespace, so redirecting that plus `REPO_ROOT` / `WELL_VIEWER`
+    into its own namespace, so redirecting that plus `REPO_ROOT` / `REVIEW`
     aims the whole rule at the synthetic tree.
     """
-    files = [q for q in sorted((root / "well_viewer").rglob("*.py"))]
+    files = [q for q in sorted((root / "review").rglob("*.py"))]
     return _run_rooted_scan(
         monkeypatch, "tests.test_architecture_contracts", test_name, root,
-        extra={"WELL_VIEWER": root / "well_viewer",
+        extra={"REVIEW": root / "review",
                "python_sources": lambda **kw: files,
                "_DISPATCH_EXEMPT": set(exempt)})
 
@@ -777,17 +777,17 @@ _GUARD = "test_a_container_feature_does_not_import_its_own_removable_sub_package
 #: one is the shape that actually shipped a defect on this branch — the guard
 #: used to *clear* it.
 NESTED_VIOLATIONS = {
-    "module_scope": "from well_viewer.features.home.ratios.tab_view import PANEL\n",
+    "module_scope": "from review.features.home.ratios.tab_view import PANEL\n",
     "function_local": ("def build(ctx, frame):\n"
-                       "    from well_viewer.features.home.ratios.tab_view import PANEL\n"
+                       "    from review.features.home.ratios.tab_view import PANEL\n"
                        "    return PANEL\n"),
-    "plain_import": "import well_viewer.features.home.ratios.tab_view as rv\n",
+    "plain_import": "import review.features.home.ratios.tab_view as rv\n",
     "relative": "from .ratios.tab_view import PANEL\n",
     "try_wrapped": ("try:\n"
-                    "    from well_viewer.features.home.ratios.tab_view import PANEL\n"
+                    "    from review.features.home.ratios.tab_view import PANEL\n"
                     "except ImportError:\n"
                     "    PANEL = None\n"),
-    "aliased": "from well_viewer.features.home.ratios.tab_view import PANEL as _p\n",
+    "aliased": "from review.features.home.ratios.tab_view import PANEL as _p\n",
 }
 
 
@@ -814,8 +814,8 @@ def test_nested_guard_clears_a_module_inside_the_sub_package_itself(
     """A sub-package importing its own siblings is not a removability problem —
     the whole directory goes at once."""
     root = _nested_tree(tmp_path, "STUB = 1\n")
-    (root / "well_viewer" / "features" / "home" / "ratios" / "controller.py"
-     ).write_text("from well_viewer.features.home.ratios.tab_view import PANEL\n")
+    (root / "review" / "features" / "home" / "ratios" / "controller.py"
+     ).write_text("from review.features.home.ratios.tab_view import PANEL\n")
     assert _run_nested_scan(monkeypatch, root, _GUARD) is None
 
 
@@ -825,8 +825,8 @@ def test_nested_guard_clears_a_listed_dispatch_site(tmp_path, monkeypatch):
     root = _nested_tree(tmp_path, NESTED_VIOLATIONS["function_local"])
     assert _run_nested_scan(
         monkeypatch, root, _GUARD,
-        exempt={("well_viewer/features/home/controller.py",
-                 "well_viewer.features.home.ratios")}) is None
+        exempt={("review/features/home/controller.py",
+                 "review.features.home.ratios")}) is None
 
 
 def test_nested_exemption_liveness_catches_an_entry_that_no_longer_bites(
@@ -836,8 +836,8 @@ def test_nested_exemption_liveness_catches_an_entry_that_no_longer_bites(
     root = _nested_tree(tmp_path, "STUB = 1\n")
     exc = _run_nested_scan(
         monkeypatch, root, "test_the_dispatch_exemption_still_describes_real_imports",
-        exempt={("well_viewer/features/home/controller.py",
-                 "well_viewer.features.home.ratios")})
+        exempt={("review/features/home/controller.py",
+                 "review.features.home.ratios")})
     assert exc is not None and "no longer describe" in str(exc)
 
 
@@ -854,8 +854,8 @@ _HOME_REGISTRY_SRC = (
 def _run_home_topic_scan(monkeypatch, tmp_path, topics: dict):
     from ui import help_topics
 
-    (tmp_path / "well_viewer" / "features").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "well_viewer" / "features" / "registry.py").write_text(
+    (tmp_path / "review" / "features").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "review" / "features" / "registry.py").write_text(
         _HOME_REGISTRY_SRC)
     monkeypatch.setattr(help_topics, "SECTION_BY_PAGE", topics)
     return _run_rooted_scan(monkeypatch, "tests.test_help_topics",
@@ -959,19 +959,19 @@ def test_log_handler_guard_clears_the_sanctioned_shapes(tmp_path, monkeypatch, s
 
 EVENTS_TOTAL_VIOLATIONS = {
     "from-import": (
-        "from well_viewer.domain.stats_compute import compute_rep_n_above_total\n"
+        "from review.domain.stats_compute import compute_rep_n_above_total\n"
         "def draw(ctx, rset, t):\n"
         "    return compute_rep_n_above_total(ctx, rset, t)\n"
     ),
     # The attribute spelling, which a from-import guard alone would walk past.
     "attribute": (
-        "from well_viewer.domain import stats_compute as sc\n"
+        "from review.domain import stats_compute as sc\n"
         "def draw(ctx, rset, t):\n"
         "    return sc.compute_rep_n_above_total(ctx, rset, t)\n"
     ),
     # Aliased on import — the shape that hides the name from a text search.
     "aliased": (
-        "from well_viewer.domain.stats_compute import (\n"
+        "from review.domain.stats_compute import (\n"
         "    compute_rep_n_above_total as _n,\n"
         ")\n"
         "def draw(ctx, rset, t):\n"
@@ -980,7 +980,7 @@ EVENTS_TOTAL_VIOLATIONS = {
 }
 
 EVENTS_TOTAL_CLEAN = (
-    "from well_viewer.domain.stats_compute import compute_rep_n_above_stats\n"
+    "from review.domain.stats_compute import compute_rep_n_above_stats\n"
     "def draw(ctx, rset, t):\n"
     "    mean, spread = compute_rep_n_above_stats(ctx, rset, t, True)\n"
     "    return mean, spread\n"
@@ -989,7 +989,7 @@ EVENTS_TOTAL_CLEAN = (
 
 @pytest.mark.parametrize("shape", sorted(EVENTS_TOTAL_VIOLATIONS))
 def test_events_total_guard_catches(tmp_path, monkeypatch, shape):
-    f = _write(tmp_path, "well_viewer/features/barplot/renderer.py",
+    f = _write(tmp_path, "review/features/barplot/renderer.py",
                EVENTS_TOTAL_VIOLATIONS[shape])
     exc = _run_scan(monkeypatch, "tests.test_events_total_isolation",
                     "test_the_events_total_stays_out_of_drawing_code", [f])
@@ -997,7 +997,7 @@ def test_events_total_guard_catches(tmp_path, monkeypatch, shape):
 
 
 def test_events_total_guard_clears_the_plotted_statistic(tmp_path, monkeypatch):
-    f = _write(tmp_path, "well_viewer/features/barplot/renderer.py",
+    f = _write(tmp_path, "review/features/barplot/renderer.py",
                EVENTS_TOTAL_CLEAN)
     exc = _run_scan(monkeypatch, "tests.test_events_total_isolation",
                     "test_the_events_total_stays_out_of_drawing_code", [f])
@@ -1014,7 +1014,7 @@ def test_events_total_guard_clears_the_plotted_statistic(tmp_path, monkeypatch):
 FC_UNPACK_VIOLATIONS = {
     # `barplot/renderer._set_frac_ylim`, verbatim.
     "attribute-call": (
-        "from well_viewer.domain import fold_change as _fc\n"
+        "from review.domain import fold_change as _fc\n"
         "def f(ctx):\n"
         "    fc_on, _, fc_t0 = _fc.fold_change_state(ctx)\n"
         "    return fc_on or fc_t0\n"
@@ -1028,7 +1028,7 @@ FC_UNPACK_VIOLATIONS = {
     ),
     # The coercion helper produces the same object from a caller's argument.
     "coerce": (
-        "from well_viewer.domain import fold_change as _fc\n"
+        "from review.domain import fold_change as _fc\n"
         "def f(fc_state):\n"
         "    on, label, t0 = _fc.coerce_fc_state(fc_state)\n"
         "    return on, label, t0\n"
@@ -1042,7 +1042,7 @@ FC_UNPACK_VIOLATIONS = {
 }
 
 FC_UNPACK_CLEAN = (
-    "from well_viewer.domain import fold_change as _fc\n"
+    "from review.domain import fold_change as _fc\n"
     "def f(ctx):\n"
     "    fc = _fc.fold_change_state(ctx)\n"
     "    if fc.per_member:\n"
@@ -1053,7 +1053,7 @@ FC_UNPACK_CLEAN = (
 
 @pytest.mark.parametrize("shape", sorted(FC_UNPACK_VIOLATIONS))
 def test_fc_unpack_guard_catches(tmp_path, monkeypatch, shape):
-    f = _write(tmp_path, "well_viewer/features/barplot/renderer.py",
+    f = _write(tmp_path, "review/features/barplot/renderer.py",
                FC_UNPACK_VIOLATIONS[shape])
     exc = _run_scan(monkeypatch, "tests.test_fc_state_is_not_unpacked",
                     "test_the_fold_change_request_is_read_by_name", [f])
@@ -1061,7 +1061,7 @@ def test_fc_unpack_guard_catches(tmp_path, monkeypatch, shape):
 
 
 def test_fc_unpack_guard_clears_reading_it_by_name(tmp_path, monkeypatch):
-    f = _write(tmp_path, "well_viewer/features/barplot/renderer.py",
+    f = _write(tmp_path, "review/features/barplot/renderer.py",
                FC_UNPACK_CLEAN)
     exc = _run_scan(monkeypatch, "tests.test_fc_state_is_not_unpacked",
                     "test_the_fold_change_request_is_read_by_name", [f])
@@ -1082,7 +1082,7 @@ def test_fc_unpack_guard_sees_the_panels_own_accessor(tmp_path, monkeypatch):
     A guard that only knew the two module-level producers would have been
     blind to exactly the shape it was written for.
     """
-    f = _write(tmp_path, "well_viewer/features/batch_export/bar_panel.py",
+    f = _write(tmp_path, "review/features/batch_export/bar_panel.py",
                FC_UNPACK_METHOD_VIOLATION)
     exc = _run_scan(monkeypatch, "tests.test_fc_state_is_not_unpacked",
                     "test_the_fold_change_request_is_read_by_name", [f])
@@ -1998,7 +1998,7 @@ ATOMIC_JSON_CLEAN = {
         '    os.replace(tmp, p)\n'
     ),
     # The staging write in a nested helper, the rename in its parent — the
-    # shape `well_viewer/persistence/_io.atomic_write_json` uses, because its
+    # shape `review/persistence/_io.atomic_write_json` uses, because its
     # rename is wrapped in a retry. Judging each nested `def` separately splits
     # the pair in half and reports the repo's most careful writer as a defect.
     "nested-write-parent-rename": (
@@ -2043,32 +2043,32 @@ TRANSITIVE_QT_VIOLATIONS = {
     # The shape that shipped: a pure module importing a core module that
     # imports PySide6.
     "plain-hop": (
-        "well_viewer/core/_bite_hop.py",
+        "review/core/_bite_hop.py",
         "from PySide6.QtCore import QTimer\n",
-        "from well_viewer.core._bite_hop import QTimer\n",
+        "from review.core._bite_hop import QTimer\n",
     ),
     # An import inside a module-level ``if`` still runs at import time. A draft
     # that walked only ``tree.body`` never saw it.
     "guarded-by-if": (
-        "well_viewer/core/_bite_hop.py",
+        "review/core/_bite_hop.py",
         "from PySide6.QtCore import QTimer\n",
         'import os\nif os.environ.get("NEVER") != "1":\n'
-        "    from well_viewer.core._bite_hop import QTimer\n",
+        "    from review.core._bite_hop import QTimer\n",
     ),
     # ``try/except ImportError`` around it, likewise.
     "guarded-by-try": (
-        "well_viewer/core/_bite_hop.py",
+        "review/core/_bite_hop.py",
         "from PySide6.QtCore import QTimer\n",
-        "try:\n    from well_viewer.core._bite_hop import QTimer\n"
+        "try:\n    from review.core._bite_hop import QTimer\n"
         "except ImportError:\n    QTimer = None\n",
     ),
     # The endpoint is ``widgets``, not Qt itself — importing a widget pulls Qt
     # transitively, which is why the direct check forbids it too. A draft that
     # terminated only on QT_ROOTS walked straight through this.
     "endpoint-is-widgets": (
-        "well_viewer/core/_bite_hop.py",
+        "review/core/_bite_hop.py",
         "from widgets.rail_nav import RailNav\n",
-        "from well_viewer.core._bite_hop import RailNav\n",
+        "from review.core._bite_hop import RailNav\n",
     ),
 }
 
@@ -2076,15 +2076,15 @@ TRANSITIVE_QT_VIOLATIONS = {
 #: Qt-touching module is the *fix* for this class of defect.
 TRANSITIVE_QT_CLEAN = {
     "function-local-hop": (
-        "well_viewer/core/_bite_hop.py",
+        "review/core/_bite_hop.py",
         "from PySide6.QtCore import QTimer\n",
-        "def f():\n    from well_viewer.core._bite_hop import QTimer\n"
+        "def f():\n    from review.core._bite_hop import QTimer\n"
         "    return QTimer\n",
     ),
     "hop-to-a-pure-module": (
-        "well_viewer/core/_bite_hop.py",
+        "review/core/_bite_hop.py",
         "VALUE = 1\n",
-        "from well_viewer.core._bite_hop import VALUE\n",
+        "from review.core._bite_hop import VALUE\n",
     ),
 }
 
@@ -2093,12 +2093,12 @@ def _qt_chain(tmp_path, monkeypatch, hop_rel, hop_src, pure_src):
     """Point the transitive guard's module resolver at a temp tree."""
     import tests.test_qt_free_layers as guard
 
-    (tmp_path / "well_viewer" / "core").mkdir(parents=True)
-    (tmp_path / "well_viewer" / "domain").mkdir(parents=True)
+    (tmp_path / "review" / "core").mkdir(parents=True)
+    (tmp_path / "review" / "domain").mkdir(parents=True)
     (tmp_path / hop_rel).write_text(hop_src)
-    (tmp_path / "well_viewer" / "domain" / "_bite_pure.py").write_text(pure_src)
+    (tmp_path / "review" / "domain" / "_bite_pure.py").write_text(pure_src)
     monkeypatch.setattr(guard, "REPO_ROOT", tmp_path)
-    return guard._qt_path_from("well_viewer.domain._bite_pure")
+    return guard._qt_path_from("review.domain._bite_pure")
 
 
 @pytest.mark.parametrize("shape", sorted(TRANSITIVE_QT_VIOLATIONS))
@@ -2461,7 +2461,7 @@ TIME_RESCALE_VIOLATIONS = {
 
 TIME_RESCALE_CLEAN = {
     # The funnel, which is what the sweep converted every site to.
-    "rescale-for": 'from well_viewer.domain.time_rescale import rescale_for\n'
+    "rescale-for": 'from review.domain.time_rescale import rescale_for\n'
                    'def draw(ctx, t):\n'
                    '    return fmt(t, rescale_for(ctx.state.plot))\n',
     # A local named for what it holds. The guard is keyed on the *fields*, not
@@ -3029,13 +3029,13 @@ def _door_offenders(tmp_path, name, body):
 
 
 @pytest.mark.parametrize("shape", [
-    "from well_viewer.data.data_loading import load_well_csv\n"
+    "from review.data.data_loading import load_well_csv\n"
     "def f(p):\n    return load_well_csv(p)\n",
 
-    "from well_viewer.data import data_loading as dl\n"
+    "from review.data import data_loading as dl\n"
     "def f(p):\n    return dl.load_well_csv(p)\n",
 
-    "from well_viewer.data.data_loading import load_well_csv as _read\n"
+    "from review.data.data_loading import load_well_csv as _read\n"
     "def f(p):\n    return _read(p)\n",
 ])
 def test_the_door_guard_catches_every_spelling_of_the_bypass(tmp_path, shape):
@@ -3048,7 +3048,7 @@ def test_the_door_guard_catches_every_spelling_of_the_bypass(tmp_path, shape):
 def test_the_door_guard_clears_the_sanctioned_call(tmp_path):
     """Going through the door is what the rule asks for, and an unrelated
     function whose name merely ends the same way is not a violation."""
-    good = ("from well_viewer.data.data_loading import read_well_frame\n"
+    good = ("from review.data.data_loading import read_well_frame\n"
             "def f(p):\n    return read_well_frame(p)\n"
             "def g(p):\n    return maybe_load_well_csv_later(p)\n")
     assert _door_offenders(tmp_path, "good_door.py", good) == []
@@ -3057,7 +3057,7 @@ def test_the_door_guard_clears_the_sanctioned_call(tmp_path):
 def test_the_door_guard_does_not_fire_on_an_unused_alias(tmp_path):
     """An import with no call is a lint problem, not a bypass — and a guard
     that reported it would be reporting something ruff already owns."""
-    body = ("from well_viewer.data.data_loading import load_well_csv as _read\n"
+    body = ("from review.data.data_loading import load_well_csv as _read\n"
             "def f(p):\n    return p\n")
     assert _door_offenders(tmp_path, "unused_alias.py", body) == []
 
@@ -3198,14 +3198,14 @@ def test_the_csv_dialog_guard_clears_a_caller_using_the_helper(
 _SEAM_GUARD = "tests.test_group_by_variable"
 
 _RAW_POOLING = (
-    'from well_viewer.domain.selections_model import active_replicate_sets\n'
+    'from review.domain.selections_model import active_replicate_sets\n'
     'def redraw(ctx):\n'
     '    return active_replicate_sets(ctx.state.selection.selections, {})\n'
 )
 #: The spelling that genuinely shipped: the import is aliased, so a guard
 #: matching the imported name misses the call.
 _ALIASED_POOLING = (
-    'from well_viewer.domain.selections_model import (\n'
+    'from review.domain.selections_model import (\n'
     '    active_replicate_sets as _pool)\n'
     'def redraw(ctx):\n'
     '    return _pool(ctx.state.selection.selections, {})\n'
@@ -3214,18 +3214,18 @@ _ALIASED_POOLING = (
 #: so under a variable grouping the two lists are the same — which is exactly
 #: why a caller reaching for this one keeps pooling by the user's groups.
 _LOADED_POOLING = (
-    'from well_viewer.domain.selections_model import replicate_sets_loaded\n'
+    'from review.domain.selections_model import replicate_sets_loaded\n'
     'def redraw(ctx):\n'
     '    return replicate_sets_loaded(ctx.state.selection.selections, {})\n'
 )
 _THROUGH_THE_SEAM = (
-    'from well_viewer.domain.plot_members import plot_replicate_sets\n'
+    'from review.domain.plot_members import plot_replicate_sets\n'
     'def redraw(ctx):\n'
     '    return plot_replicate_sets(ctx)\n'
 )
 #: The seam's own body, which must be allowed to name what it replaces.
 _THE_SEAM_ITSELF = (
-    'from well_viewer.domain.selections_model import active_replicate_sets\n'
+    'from review.domain.selections_model import active_replicate_sets\n'
     'def plot_replicate_sets(ctx):\n'
     '    return active_replicate_sets(ctx.state.selection.selections, {})\n'
 )
@@ -3390,13 +3390,13 @@ _PURITY_GUARD = "tests.test_sample_variables"
 
 _PURE = 'from dataclasses import replace\ndef fill(vset, lines):\n    return vset\n'
 _IMPORTS_GEOMETRY = (
-    'from well_viewer.domain.plate_layout import wells_in_fill_lines\n'
+    'from review.domain.plate_layout import wells_in_fill_lines\n'
     'def fill(vset, wells):\n'
     '    return wells_in_fill_lines(wells, "row")\n'
 )
 _IMPORTS_QT = 'from PySide6.QtWidgets import QWidget\ndef fill(vset):\n    return None\n'
 _IMPORTS_A_FEATURE = (
-    'from well_viewer.features.home.variables import controller\n'
+    'from review.features.home.variables import controller\n'
     'def fill(vset):\n'
     '    return controller\n'
 )
@@ -3439,7 +3439,7 @@ _DERIVED_GUARD = "tests.test_no_constructor_takes_a_derived_property"
 _PASSES_DERIVED = 'def f(g):\n    return BarGroup(name=g.name, wells=["A01"])\n'
 #: The same, through the aliased import the two shipped sites used.
 _PASSES_DERIVED_ALIASED = (
-    'from well_viewer.domain.batch_models import BarGroup as _BarGroup\n'
+    'from review.domain.batch_models import BarGroup as _BarGroup\n'
     'def f(g):\n    return _BarGroup(name=g.name, wells=["A01"])\n'
 )
 _CORRECT = 'def f(g):\n    return BarGroup(g.name, solo_wells=["A01"])\n'
@@ -3606,8 +3606,8 @@ def _keys_from(monkeypatch, panel_src: str, tab_src: str):
 
     mod = _panel_key_guard()
     trees = [
-        (Path("well_viewer/features/export/style.py"), ast.parse(panel_src)),
-        (Path("well_viewer/features/fake/tab_view.py"), ast.parse(tab_src)),
+        (Path("review/features/export/style.py"), ast.parse(panel_src)),
+        (Path("review/features/fake/tab_view.py"), ast.parse(tab_src)),
     ]
     monkeypatch.setattr(mod, "_trees", lambda: trees)
     return mod

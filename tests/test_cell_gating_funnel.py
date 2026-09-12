@@ -13,7 +13,7 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
-from well_viewer.features.home.cell_gating.gating_compute import (
+from review.features.home.cell_gating.gating_compute import (
     format_inclusion_funnel, inclusion_funnel,
 )
 
@@ -61,7 +61,7 @@ def _line_for(text: str, label: str) -> str:
 
 
 def test_funnel_last_stage_matches_the_composed_inclusion():
-    from well_viewer.data.data_loading import df_included_mask
+    from review.data.data_loading import df_included_mask
 
     df = _frame(
         Included=[1, 1, 1, 0],

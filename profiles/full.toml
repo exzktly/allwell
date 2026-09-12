@@ -14,7 +14,7 @@ name = "full"
 
 [[feature]]
 name = "Statistics"
-paths = ["well_viewer/features/stats"]
+paths = ["review/features/stats"]
 tests = ["tests/test_stats_*.py"]
 # stats_compute's group-stats cache is core (kept), not the Statistics feature.
 keep  = ["tests/test_stats_cache_gate_sig.py"]
@@ -22,9 +22,9 @@ keep  = ["tests/test_stats_cache_gate_sig.py"]
 [[feature]]
 name = "Multivariate"
 paths = [
-  "well_viewer/features/multivariate",
-  "well_viewer/domain/multivariate_compute.py",
-  "well_viewer/persistence/multivariate.py",
+  "review/features/multivariate",
+  "review/domain/multivariate_compute.py",
+  "review/persistence/multivariate.py",
 ]
 tests = ["tests/test_multivariate_*.py"]
 # Heavy third-party deps ONLY this feature pulls in (import names). The
@@ -34,29 +34,29 @@ deps = ["sklearn", "umap", "pynndescent"]
 
 [[feature]]
 name = "Spatial"
-paths = ["well_viewer/features/spatial", "well_viewer/domain/spatial_compute.py"]
+paths = ["review/features/spatial", "review/domain/spatial_compute.py"]
 tests = ["tests/test_spatial_*.py"]
 
 [[feature]]
 name = "smFISH"
-paths = ["well_viewer/features/smfish", "well_viewer/persistence/smfish.py"]
+paths = ["review/features/smfish", "review/persistence/smfish.py"]
 tests = ["tests/test_smfish_*.py"]
 # smFISH _count aggregation lives in data_loading (kept), not the smFISH tab.
 keep  = ["tests/test_smfish_aggregation.py"]
 
 [[feature]]
 name = "Review CSV"
-paths = ["well_viewer/features/review_csv"]
+paths = ["review/features/review_csv"]
 tests = ["tests/test_review_csv_*.py"]
 
 [[feature]]
 name = "Saved Plots"
-paths = ["well_viewer/features/saved_plots"]
+paths = ["review/features/saved_plots"]
 tests = ["tests/test_saved_plot*.py"]
 
 [[feature]]
 name = "Batch Export"
-paths = ["well_viewer/features/batch_export", "well_viewer/persistence/export_groups.py"]
+paths = ["review/features/batch_export", "review/persistence/export_groups.py"]
 tests = ["tests/test_batch_export_*.py", "tests/test_export_groups_*.py"]
 
 [[feature]]
@@ -65,7 +65,7 @@ tests = ["tests/test_batch_export_*.py", "tests/test_export_groups_*.py"]
 # Playground survive its deletion; what stays here is the grid itself.
 name = "Image Table"
 parent = "Image Browser"
-paths = ["well_viewer/features/image_browser/image_table"]
+paths = ["review/features/image_browser/image_table"]
 tests = ["tests/test_image_table_*.py"]
 # The loader tests went with the loader: they are `tests/test_frame_load_*.py`
 # now and cover `data/`, which survives this feature being stripped.
@@ -75,13 +75,13 @@ tests = ["tests/test_image_table_*.py"]
 # Image Table's builder shelf no longer needs this package to exist.
 name = "Cell Browser"
 parent = "Image Browser"
-paths = ["well_viewer/features/image_browser/cell_browser"]
+paths = ["review/features/image_browser/cell_browser"]
 tests = ["tests/test_cell_browser_*.py"]
 
 [[feature]]
 name = "Playground"
 parent = "Image Browser"
-paths = ["well_viewer/features/image_browser/playground"]
+paths = ["review/features/image_browser/playground"]
 tests = ["tests/test_playground*.py"]
 
 [[feature]]
@@ -93,7 +93,7 @@ tests = ["tests/test_playground*.py"]
 # up with `get_or_none` and tolerates its absence.
 name = "Ratios"
 parent = "Home"
-paths = ["well_viewer/features/home/ratios"]
+paths = ["review/features/home/ratios"]
 # Anchored at `test_ratios_`, which sweeps only the editor's own file: the
 # tests for the core model and the read-time computation are named
 # `test_ratio_*` (singular) and stay.
@@ -106,7 +106,7 @@ tests = ["tests/test_ratios_*.py"]
 # build. The Analyze side parses the same file through its own reader.
 name = "Pipeline Info"
 parent = "Home"
-paths = ["well_viewer/features/home/pipeline_info"]
+paths = ["review/features/home/pipeline_info"]
 tests = ["tests/test_pipeline_info_view.py"]
 
 [[feature]]

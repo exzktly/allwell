@@ -22,12 +22,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from well_viewer.features.image_browser.image_table.image_compose import (
+from review.features.image_browser.image_table.image_compose import (
     _base_channel,
     _compose_image_table_rgb,
     is_variant_token,
 )
-from well_viewer.features.image_browser.image_table.state import (
+from review.features.image_browser.image_table.state import (
     Axis,
     ChannelSpec,
     ImageTableState,

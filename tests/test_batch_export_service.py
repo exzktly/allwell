@@ -11,7 +11,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from well_viewer.features.batch_export.service import save_export_figure
+from review.features.batch_export.service import save_export_figure
 
 
 def _fig():

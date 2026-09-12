@@ -84,8 +84,8 @@ def test_the_reported_control_is_covered_by_that(qtbot, qapp):
     """
     from types import SimpleNamespace
 
-    from well_viewer.core.selection_state import SelectionState
-    from well_viewer.features.home.groups.tab_view import (
+    from review.core.selection_state import SelectionState
+    from review.features.home.groups.tab_view import (
         build_replicate_groups_centre,
     )
 

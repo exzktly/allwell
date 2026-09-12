@@ -38,8 +38,8 @@ VARIABLES = {
 
 
 def _with_variables(app):
-    import well_viewer.domain.sample_variables as sv
-    from well_viewer.core.group_by_controller import (
+    import review.domain.sample_variables as sv
+    from review.core.group_by_controller import (
         refresh_decoration_combos, refresh_group_by_combo,
     )
 
@@ -99,8 +99,8 @@ def test_the_decorate_button_is_offered_only_where_it_does_something(viewer_app)
     page-level band, which is shared by every Plotting leaf and is never hidden
     by the per-leaf machinery — so it appeared on all six and did nothing on
     five, against the band's own stated rule."""
-    from well_viewer.core.group_by_controller import DECORATED_TABS
-    from well_viewer.persistence import view_state
+    from review.core.group_by_controller import DECORATED_TABS
+    from review.persistence import view_state
 
     ctx = _with_variables(viewer_app)
     button = ctx.widgets.get_or_none("_plotting_decorate_btn")

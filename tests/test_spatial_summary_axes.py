@@ -17,8 +17,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
-from well_viewer.core.plot_style import apply_export_style_prefs  # noqa: E402
-from well_viewer.features.spatial import renderer as r  # noqa: E402
+from review.core.plot_style import apply_export_style_prefs  # noqa: E402
+from review.features.spatial import renderer as r  # noqa: E402
 
 WELLS = ["A01", "B02"]
 TPS = [0.0, 1.0, 2.0]

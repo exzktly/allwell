@@ -15,13 +15,13 @@ from __future__ import annotations
 import pytest
 
 from ui import theme
-from well_viewer.features.home import collect as hc
-from well_viewer.features.home.plate_panel import (
+from review.features.home import collect as hc
+from review.features.home.plate_panel import (
     NEUTRAL_STATES,
     STATE_COLORS,
     STATE_LABELS,
 )
-from well_viewer.features.home.tab_view import legend_swatch_style
+from review.features.home.tab_view import legend_swatch_style
 
 #: The status tokens the rest of the app paints plate wells with — Validate,
 #: Concatenate, Merge Plates, Import Loose and the run dashboard between them.

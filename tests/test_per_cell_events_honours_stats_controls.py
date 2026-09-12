@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 import pytest  # noqa: E402
 
-from well_viewer.features.barplot import renderer  # noqa: E402
+from review.features.barplot import renderer  # noqa: E402
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def _draw(ctx, monkeypatch):
     pt = (0.0, 0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 10.0, 2.0, 0.0)
     monkeypatch.setattr(renderer, "get_all_fluor_gates", lambda _c: {})
     monkeypatch.setattr(
-        "well_viewer.domain.stats_compute.aggregate_group",
+        "review.domain.stats_compute.aggregate_group",
         lambda *a, **k: [pt],
     )
     fig, ax = plt.subplots()

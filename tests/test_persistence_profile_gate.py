@@ -3,7 +3,7 @@
 ``build_persistence_registry`` used to import ``persistence/export_groups.py``
 (Batch Export) and ``persistence/multivariate.py`` (Multivariate) unconditionally.
 Both are physically stripped from a subset bundle, so a frozen thin build crashed
-in ``WellViewerApp.__init__`` before the window showed. Registration is now gated
+in ``ReviewApp.__init__`` before the window showed. Registration is now gated
 on the active profile; these tests lock that in.
 
 Note: the repo-wide ``test_no_module_scope_imports_of_removable_features`` guard
@@ -16,7 +16,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.persistence.registry import build_persistence_registry
+from review.persistence.registry import build_persistence_registry
 
 
 def test_thin_profile_skips_feature_owned_domains(monkeypatch):

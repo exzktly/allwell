@@ -10,7 +10,7 @@ until the user toggles the channel. This pins the helper that fixes it.
 
 from __future__ import annotations
 
-from well_viewer.core.channel_state import ChannelState
+from review.core.channel_state import ChannelState
 
 
 def test_sync_val_col_re_derives_after_restore_order():

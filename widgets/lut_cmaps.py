@@ -7,8 +7,8 @@ fluorescence look on a black background. matplotlib's built-in single-hue maps r
 those names and fall back to the built-in colormap for everything else (viridis,
 magma, Greys, …).
 
-Qt-free and matplotlib-only, and it lives in ``widgets/`` (not ``well_viewer/``) so
-both the standalone ``widgets/lut_selector.py`` strip and ``well_viewer.core``
+Qt-free and matplotlib-only, and it lives in ``widgets/`` (not ``review/``) so
+both the standalone ``widgets/lut_selector.py`` strip and ``review.core``
 renderers can import it without inverting the package layering.
 """
 

@@ -20,7 +20,7 @@ import pytest
 pytest.importorskip("matplotlib")
 
 from ui import theme
-from well_viewer.features.heatmap.controller import _contrast_ink
+from review.features.heatmap.controller import _contrast_ink
 
 
 def _viridis_image(masked=None):

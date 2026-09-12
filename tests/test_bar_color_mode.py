@@ -26,15 +26,15 @@ from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
 
 from ui import theme
-from well_viewer.core.plot_state import PlotState
-from well_viewer.domain.bar_colors import (
+from review.core.plot_state import PlotState
+from review.domain.bar_colors import (
     BAR_COLOR_MODES,
     apply_bar_color_mode,
     bar_color_mode,
     mono_bar_color,
 )
-from well_viewer.features.barplot.collect import BarItem
-from well_viewer.features.barplot.controller import render_bar_items
+from review.features.barplot.collect import BarItem
+from review.features.barplot.controller import render_bar_items
 
 _PLATE_A, _PLATE_B = "#6AB2FB", "#D406F9"
 _PLACEHOLDER = "#101010"
@@ -233,7 +233,7 @@ def test_the_batch_export_bar_figure_resolves_the_mode_from_the_same_state():
     differently. The batch panel renders with ``ctx=None`` on purpose, so it
     resolves the mode itself — this pins that it resolves it from the same
     field the tab does, through the same helper."""
-    from well_viewer.features.batch_export.bar_panel import _mono_bar_color
+    from review.features.batch_export.bar_panel import _mono_bar_color
 
     plot = PlotState()
     assert _mono_bar_color(plot) is None
@@ -255,7 +255,7 @@ def _persist_ctx(plot):
 
 @pytest.mark.parametrize("mode", BAR_COLOR_MODES)
 def test_the_mode_survives_a_save_and_reload(mode):
-    from well_viewer.persistence import view_state as vs
+    from review.persistence import view_state as vs
 
     plot = PlotState()
     plot.bar_color_mode = mode
@@ -268,7 +268,7 @@ def test_the_mode_survives_a_save_and_reload(mode):
 
 
 def test_a_junk_value_on_disk_does_not_reach_the_state():
-    from well_viewer.persistence import view_state as vs
+    from review.persistence import view_state as vs
 
     plot = PlotState()
     vs._apply_bar(_persist_ctx(plot), {"bar_color_mode": "chartreuse"})

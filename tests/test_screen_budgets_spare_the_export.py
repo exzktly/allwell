@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from well_viewer.features.lineplot.controller import (
+from review.features.lineplot.controller import (
     SCREEN_CDF_POINTS,
     SCREEN_LEGEND_ENTRIES,
     LineAxes,
@@ -179,13 +179,13 @@ def test_the_capture_context_lifts_the_budgets_and_puts_them_back():
     """The flag is raised for the capture and restored afterwards."""
     from types import SimpleNamespace
 
-    from well_viewer.core import plot_card_actions as pca
+    from review.core import plot_card_actions as pca
 
     seen: list[bool] = []
     plot = SimpleNamespace(export_full_fidelity=False)
     ctx = SimpleNamespace(state=SimpleNamespace(plot=plot))
 
-    import well_viewer.core.plot_orchestrator as orch
+    import review.core.plot_orchestrator as orch
     original = orch.redraw_app
     orch.redraw_app = lambda c: seen.append(c.state.plot.export_full_fidelity)
     try:
@@ -207,12 +207,12 @@ def test_the_flag_is_restored_even_when_the_export_raises():
     """A failed save must not leave the tab painting the slow figure forever."""
     from types import SimpleNamespace
 
-    from well_viewer.core import plot_card_actions as pca
+    from review.core import plot_card_actions as pca
 
     plot = SimpleNamespace(export_full_fidelity=False)
     ctx = SimpleNamespace(state=SimpleNamespace(plot=plot))
 
-    import well_viewer.core.plot_orchestrator as orch
+    import review.core.plot_orchestrator as orch
     original = orch.redraw_app
     orch.redraw_app = lambda c: None
     try:
@@ -228,13 +228,13 @@ def test_a_card_with_no_budgets_is_not_repainted():
     """Bar and scatter cards draw everything already; capturing must not churn."""
     from types import SimpleNamespace
 
-    from well_viewer.core import plot_card_actions as pca
+    from review.core import plot_card_actions as pca
 
     calls: list[int] = []
     plot = SimpleNamespace(export_full_fidelity=False)
     ctx = SimpleNamespace(state=SimpleNamespace(plot=plot))
 
-    import well_viewer.core.plot_orchestrator as orch
+    import review.core.plot_orchestrator as orch
     original = orch.redraw_app
     orch.redraw_app = lambda c: calls.append(1)
     try:

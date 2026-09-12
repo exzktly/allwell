@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import types
 
-from well_viewer.domain.stats_compute import _gate_cache_sig
+from review.domain.stats_compute import _gate_cache_sig
 
 _GATE = {
     "x0": 0.0, "y0": 0.0, "x1": 1.0, "y1": 1.0,
@@ -18,7 +18,7 @@ _GATE = {
 def _app(use_thresh, gates, choices=None, *, use_gating=False, gating_choices=None):
     # Epic-cellgating: the scatter-gate on-population config (use-flag, gate
     # geometry, thresh gate selection) is typed state on ``ctx.state.cell_gating``.
-    from well_viewer.core.cell_gating_state import CellGatingState
+    from review.core.cell_gating_state import CellGatingState
     cg = CellGatingState(
         use_scatter_thresh=use_thresh,
         scatter_gates=gates,
@@ -28,7 +28,7 @@ def _app(use_thresh, gates, choices=None, *, use_gating=False, gating_choices=No
     )
     app = types.SimpleNamespace()
     app._app_state = types.SimpleNamespace(cell_gating=cg)
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app._ctx = types.SimpleNamespace(
         app=app, state=app._app_state, runtime=AppRuntime(app))
     return app._ctx

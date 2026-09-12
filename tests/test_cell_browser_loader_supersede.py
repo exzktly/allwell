@@ -11,8 +11,8 @@ from __future__ import annotations
 import time
 import types
 
-from well_viewer.features.image_browser.cell_browser import worker as cb_worker
-from well_viewer.features.image_browser.cell_browser.worker import CellImageLoader
+from review.features.image_browser.cell_browser import worker as cb_worker
+from review.features.image_browser.cell_browser.worker import CellImageLoader
 
 
 def _fake_app():

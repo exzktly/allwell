@@ -17,7 +17,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from well_viewer.features.scatter.gating import (
+from review.features.scatter.gating import (
     refresh_gate_selector,
     set_gate_draw_mode,
 )
@@ -25,7 +25,7 @@ from well_viewer.features.scatter.gating import (
 
 def _mk_ctx(app):
     from types import SimpleNamespace
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     return SimpleNamespace(
         app=app,
         state=getattr(app, "_app_state", None),

@@ -35,8 +35,8 @@ def _ctx(tmp_path):
 
 def test_the_spatial_summary_export_asks_through_the_shared_dialog(
         tmp_path, monkeypatch):
-    from well_viewer.core import csv_export
-    from well_viewer.features.spatial import controller as spc
+    from review.core import csv_export
+    from review.features.spatial import controller as spc
 
     recorder = _Recorder()
     monkeypatch.setattr(csv_export, "ask_save_csv", recorder)
@@ -57,7 +57,7 @@ def test_the_shared_dialog_starts_beside_the_open_dataset(tmp_path, monkeypatch)
     reasonable until you compare them.
     """
     from PySide6.QtWidgets import QFileDialog
-    from well_viewer.core import csv_export
+    from review.core import csv_export
 
     seen = {}
 
@@ -76,6 +76,6 @@ def test_the_all_files_filter_is_not_the_dos_era_spelling():
     """``(*.*)`` is honoured literally on some platforms, where it hides every
     extensionless name from a filter whose own label says it shows everything.
     The export feature's copy used it and this one did not."""
-    from well_viewer.core.csv_export import _CSV_FILTER
+    from review.core.csv_export import _CSV_FILTER
 
     assert "(*.*)" not in _CSV_FILTER

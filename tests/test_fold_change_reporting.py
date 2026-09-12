@@ -13,18 +13,18 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.domain.control_ref import ControlRef
-from well_viewer.domain.fold_change import (
+from review.domain.control_ref import ControlRef
+from review.domain.fold_change import (
     control_axis_phrase,
     fold_change_suffix,
     fold_change_suffix_for,
 )
-from well_viewer.domain.fold_change_pairing import (
+from review.domain.fold_change_pairing import (
     ControlOutcome,
     build_per_member_controls,
     shortfall_from_items,
 )
-from well_viewer.features.barplot.collect import collect_bar_items
+from review.features.barplot.collect import collect_bar_items
 
 from tests.conftest import MockApp, make_agg
 
@@ -53,7 +53,7 @@ def ctx():
 
 
 def _controls(ctx, mapping):
-    from well_viewer.domain.plot_members import member_wells, plotted_member_keys
+    from review.domain.plot_members import member_wells, plotted_member_keys
     return build_per_member_controls(
         ctx, plotted_member_keys(ctx, "bar"), mapping,
         member_wells=member_wells(ctx, "bar"))
@@ -154,7 +154,7 @@ def test_the_control_axis_being_off_says_nothing(ctx):
 # ── the CSV row ──────────────────────────────────────────────────────────────
 
 def test_each_row_carries_its_own_control():
-    from well_viewer.features.export.service import (
+    from review.features.export.service import (
         attach_bar_fold_change_columns,
         bar_fold_change_fieldnames,
     )
@@ -174,7 +174,7 @@ def test_each_row_carries_its_own_control():
 def test_the_outcome_column_tells_the_three_failures_apart():
     """All three leave ``fold_change_mean`` empty. A reader with only that
     column cannot tell a normalization that failed from one never asked for."""
-    from well_viewer.features.export.service import attach_bar_fold_change_columns
+    from review.features.export.service import attach_bar_fold_change_columns
 
     seen = []
     for outcome in (ControlOutcome.UNMAPPED, ControlOutcome.CONTROL_UNRESOLVED,
@@ -192,14 +192,14 @@ def test_the_outcome_column_tells_the_three_failures_apart():
 
 def test_the_control_cell_never_carries_the_combo_suffix():
     """It was part of the stored value once, and it leaked into exactly here."""
-    from well_viewer.features.export.service import _control_cell
+    from review.features.export.service import _control_cell
 
     assert _control_cell(ControlRef.for_well("A01")) == "A01"
     assert _control_cell(None) == ""
 
 
 def test_the_columns_are_blank_when_the_control_axis_is_off():
-    from well_viewer.features.export.service import attach_bar_fold_change_columns
+    from review.features.export.service import attach_bar_fold_change_columns
 
     row: dict = {}
     attach_bar_fold_change_columns(
@@ -212,8 +212,8 @@ def test_the_columns_are_blank_when_the_control_axis_is_off():
 def test_the_batch_row_writer_matches_the_on_tab_one():
     """Two writers answering the same question. Converting one and not the
     other lands the half-sweep in the artifact users analyse."""
-    from well_viewer.features.batch_export.base_panel import _attach_fc_row
-    from well_viewer.features.export.service import attach_bar_fold_change_columns
+    from review.features.batch_export.base_panel import _attach_fc_row
+    from review.features.export.service import attach_bar_fold_change_columns
 
     batch: dict = {}
     _attach_fc_row(batch, (0.0, 2.0, 0.1), "SEM", True, False, "DMSO", "ok")
@@ -229,7 +229,7 @@ def test_the_batch_row_writer_matches_the_on_tab_one():
 # ── the saved-plot summary ───────────────────────────────────────────────────
 
 def test_a_saved_summary_names_one_control():
-    from well_viewer.features.saved_plots.collect import _fc_summary
+    from review.features.saved_plots.collect import _fc_summary
 
     assert _fc_summary({"vs_control_on": True, "control_mode": "per_member",
                         "control_map": {"A": {"kind": "set", "name": "DMSO"},
@@ -240,7 +240,7 @@ def test_a_saved_summary_names_one_control():
 def test_a_saved_summary_counts_rather_than_claiming_a_resolution():
     """It has no ``ctx``, so it cannot know what resolves — and the document
     may have been saved against a dataset this session never loaded."""
-    from well_viewer.features.saved_plots.collect import _fc_summary
+    from review.features.saved_plots.collect import _fc_summary
 
     got = _fc_summary({
         "vs_control_on": True, "control_mode": "per_member", "op_ctrl": "ratio",
@@ -250,14 +250,14 @@ def test_a_saved_summary_counts_rather_than_claiming_a_resolution():
 
 
 def test_a_saved_summary_of_a_single_control_is_unchanged():
-    from well_viewer.features.saved_plots.collect import _fc_summary
+    from review.features.saved_plots.collect import _fc_summary
 
     assert _fc_summary({"vs_control_on": True, "control_label": "DMSO",
                         "op_ctrl": "ratio"}) == "vs DMSO (ratio)"
 
 
 def test_a_saved_summary_of_an_empty_mapping_says_so():
-    from well_viewer.features.saved_plots.collect import _fc_summary
+    from review.features.saved_plots.collect import _fc_summary
 
     assert _fc_summary({"vs_control_on": True, "control_mode": "per_member",
                         "control_map": {}, "op_ctrl": "ratio"}) \

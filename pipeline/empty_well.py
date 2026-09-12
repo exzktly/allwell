@@ -22,7 +22,7 @@ point of naming several: pooling de-noises the estimate.
 
 Extracted from ``process_microscopy`` because that file is against its line
 budget and this is a self-contained cluster with one entry point per question.
-Qt-free and free of ``well_viewer`` / ``widgets``, like every ``pipeline``
+Qt-free and free of ``review`` / ``widgets``, like every ``pipeline``
 module — the remote worker imports it
 (``test_architecture_contracts.py::test_pipeline_is_self_sufficient``,
 and ``services/remote_manifest.py`` ships it).

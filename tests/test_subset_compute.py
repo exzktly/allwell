@@ -144,7 +144,7 @@ def test_marker_survives_cancel(tmp_path):
 
 def test_cell_overrides_filtered_and_restamped(tmp_path):
     """Regression guard: cell_overrides.json stores fov/tp already normalized
-    (CellKey.as_tuple, well_viewer/data/image_identity.py) -- "0h"/"24h"
+    (CellKey.as_tuple, review/data/image_identity.py) -- "0h"/"24h"
     normalize to "0"/"24" -- while the source CSV's raw timepoint column
     stays "0h"/"24h". _copy_one_well used to key its membership-test set off
     the raw CSV values unnormalized, so this exact comparison failed for

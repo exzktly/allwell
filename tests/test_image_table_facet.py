@@ -13,7 +13,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import facet_view as F
+from review.features.image_browser.image_table import facet_view as F
 
 
 def _cell(well, chan, tp, fov="1"):

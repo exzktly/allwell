@@ -15,8 +15,8 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.features.scatter.cells_tab_view import build_scatter_cells_tab
-from well_viewer.features.scatter.agg_tab_view import build_scatter_agg_tab
+from review.features.scatter.cells_tab_view import build_scatter_cells_tab
+from review.features.scatter.agg_tab_view import build_scatter_agg_tab
 from tests.widget_registry_helpers import assert_handles_registered as _check
 
 _CELLS = (

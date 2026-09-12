@@ -34,7 +34,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from well_viewer.features.scatter.collect import collect_scatter_agg_data
+from review.features.scatter.collect import collect_scatter_agg_data
 
 
 def _well_df(counts, *, tp_hours=24.0, channel="w3cy5"):

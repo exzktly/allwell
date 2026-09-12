@@ -26,7 +26,7 @@ from PySide6.QtCore import QObject, Signal
 
 from util.aw_safe import swallowed
 
-_logger = logging.getLogger("well_viewer")
+_logger = logging.getLogger("review")
 
 
 class DatasetToolController(QObject):

@@ -8,7 +8,7 @@ attribute the shipped application does not have, and the test passes.
 
 That is not hypothetical. The recent-datasets feature shipped completely dead:
 both call sites reached for ``ctx.window._qsettings``, which is a method of the
-``AllWellApp`` main window and not of the ``WellViewerApp`` review widget that
+``AllWellApp`` main window and not of the ``ReviewApp`` review widget that
 ``ctx.window`` actually is, with no forwarding between them. Nothing was ever
 written and nothing was ever read. The full-app test that should have caught it
 said::
@@ -42,7 +42,7 @@ from pathlib import Path
 
 from tests._repo_scan import parse_source
 
-#: The fixtures that hand a test a real ``WellViewerApp``. ``conftest.py``
+#: The fixtures that hand a test a real ``ReviewApp``. ``conftest.py``
 #: auto-marks anything using one of these ``slow``; they are the only objects in
 #: the suite whose attribute surface is the shipped application's.
 APP_FIXTURES = frozenset({

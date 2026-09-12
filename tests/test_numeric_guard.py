@@ -25,7 +25,7 @@ pytest.importorskip("numpy")
 
 import numpy as np  # noqa: E402
 
-from well_viewer.domain.numeric import is_number, is_numeric  # noqa: E402
+from review.domain.numeric import is_number, is_numeric  # noqa: E402
 from tests._repo_scan import parse_source
 
 
@@ -68,7 +68,7 @@ def test_a_one_element_array_is_not_a_scalar():
 def test_a_float32_spread_survives_the_fold_change_helper():
     """The measured consequence: this helper is what decides whether a bar
     gets an error bar at all."""
-    from well_viewer.domain.fold_change import _finite_spread
+    from review.domain.fold_change import _finite_spread
 
     assert _finite_spread(np.float32(0.25)) == pytest.approx(0.25)
     assert _finite_spread(float("nan")) == 0.0
@@ -82,11 +82,11 @@ def test_no_data_path_module_still_asks_which_class_produced_the_number():
 
     root = pathlib.Path(__file__).resolve().parents[1]
     swept = [
-        "well_viewer/domain/fold_change.py",
-        "well_viewer/features/export/service.py",
-        "well_viewer/features/lineplot/controller.py",
-        "well_viewer/features/barplot/controller.py",
-        "well_viewer/features/batch_export/base_panel.py",
+        "review/domain/fold_change.py",
+        "review/features/export/service.py",
+        "review/features/lineplot/controller.py",
+        "review/features/barplot/controller.py",
+        "review/features/batch_export/base_panel.py",
     ]
     offenders = []
     for rel in swept:

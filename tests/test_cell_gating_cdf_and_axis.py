@@ -12,7 +12,7 @@ import pandas as pd
 
 
 def test_cell_gating_valid_rows_filters_crop_and_qc_not_fluor_gate():
-    from well_viewer.features.home.cell_gating.gating_compute import _cell_gating_valid_rows
+    from review.features.home.cell_gating.gating_compute import _cell_gating_valid_rows
     df = pd.DataFrame({
         "area_px": [10, 20, 30, 40],
         "Included": [1, 1, 0, 0],   # fluor gate / manual — MUST be ignored
@@ -26,7 +26,7 @@ def test_cell_gating_valid_rows_filters_crop_and_qc_not_fluor_gate():
 
 
 def test_cell_gating_valid_rows_absent_columns_pass_through():
-    from well_viewer.features.home.cell_gating.gating_compute import _cell_gating_valid_rows
+    from review.features.home.cell_gating.gating_compute import _cell_gating_valid_rows
     df = pd.DataFrame({"area_px": [1, 2, 3]})   # no QC_Pass / Crop_Pass
     assert len(_cell_gating_valid_rows(df)) == 3
 
@@ -35,7 +35,7 @@ def test_export_axis_default_targets_first_subplot():
     """The active metric drives the first subplot, so the Export-Style 'Axis #'
     defaults to it (not 'All'); a saved explicit choice is respected."""
     from types import SimpleNamespace
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
     fn = ExportStyleSidebar._default_axis_target
 
     default_self = SimpleNamespace(_prefs={"axis_target": "All"})
@@ -49,7 +49,7 @@ def test_export_click_selects_axis():
     that misses every axis, or one made while the sidebar is hidden, no-ops so
     normal canvas interaction is untouched."""
     from types import SimpleNamespace
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
     fn = ExportStyleSidebar._on_canvas_axis_pick
 
     class FakeCombo:

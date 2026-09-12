@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core.sidebar_view import _wells_for_new_plot_group
+from review.core.sidebar_view import _wells_for_new_plot_group
 
 
 def _ctx(*, selected=(), selections=(), solo=(), loaded=None):

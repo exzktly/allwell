@@ -26,7 +26,7 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QWidget
 
 from ui import theme
-from well_viewer.domain import sample_variables as sv
+from review.domain import sample_variables as sv
 
 
 class _Registry:
@@ -55,8 +55,8 @@ def tab(qtbot, request):
     otherwise, because a fill covers *the wells the dataset holds* and a fixture
     with none would make every fill a no-op that still passed.
     """
-    from well_viewer.core.selection_state import SelectionState
-    from well_viewer.features.home.variables.tab_view import build_variables_subtab
+    from review.core.selection_state import SelectionState
+    from review.features.home.variables.tab_view import build_variables_subtab
 
     marker = request.node.get_closest_marker("wells")
     wells = marker.args[0] if marker else _wells()
@@ -87,7 +87,7 @@ def _delete_row(tab, row: int = 0):
     a test that calls the handler directly would pass against a row whose ×
     was never connected — the failure this tab has shipped before.
     """
-    from well_viewer.features.home.variables.editor_view import row_delete_button
+    from review.features.home.variables.editor_view import row_delete_button
 
     button = row_delete_button(tab.w("_var_list"), row)
     assert button is not None, f"rail row {row} has no delete button"
@@ -106,7 +106,7 @@ def test_the_rail_rows_delete_button_is_not_clipped(tab, qtbot):
     hint it was set from: the hint is what was wrong, so a test reading it back
     would agree with the bug.
     """
-    from well_viewer.features.home.variables.editor_view import row_delete_button
+    from review.features.home.variables.editor_view import row_delete_button
 
     tab.w("_var_add").click()
     listing = tab.w("_var_list")
@@ -129,7 +129,7 @@ def _labels(listing):
     # The **painted** text, from the row widget — ``item.text()`` is blanked so
     # the delegate does not draw it under the widget, and a test reading it
     # would be asserting a string that never reaches the screen.
-    from well_viewer.features.home.variables.editor_view import row_label_text
+    from review.features.home.variables.editor_view import row_label_text
 
     return [row_label_text(listing, i) for i in range(listing.count())]
 
@@ -165,7 +165,7 @@ def test_pressing_add_variable_adds_one_and_shows_the_definition(tab):
 
 def test_the_new_variable_is_selected_and_its_name_is_ready_to_type(tab):
     tab.w("_var_add").click()
-    from well_viewer.features.home.variables.controller import selected_variable_id
+    from review.features.home.variables.controller import selected_variable_id
 
     assert selected_variable_id(tab.ctx) == _vset(tab).variables[0].id
     assert tab.w("_var_name").text() == "Variable"
@@ -346,7 +346,7 @@ def test_the_rail_reads_ids_not_names(tab):
 def test_wiring_twice_does_not_double_every_button(tab):
     """The builder may run again on a rebuild; a second connection would add two
     variables per click and rename twice per edit."""
-    from well_viewer.features.home.variables.controller import wire_variables
+    from review.features.home.variables.controller import wire_variables
 
     wire_variables(tab.ctx)
     tab.w("_var_add").click()
@@ -774,7 +774,7 @@ def test_choosing_nothing_clears_the_glyphs(tab, monkeypatch):
 # ── the tooltip ─────────────────────────────────────────────────────────────
 
 def test_the_tooltip_gives_the_whole_row_for_a_well(tab):
-    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+    from review.core.ui_helpers import well_plate_tooltip_provider
 
     _two_variables(tab)
     tab.ctx.state.dataset.well_labels = {"A01": "shCtrl"}
@@ -787,7 +787,7 @@ def test_the_tooltip_gives_the_whole_row_for_a_well(tab):
 def test_the_tooltip_names_a_variable_the_well_has_no_value_for(tab):
     """Omitting the clause is indistinguishable from a plate where no such
     variable exists — and an unassigned well is a fact the user needs to see."""
-    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+    from review.core.ui_helpers import well_plate_tooltip_provider
 
     _dose_tab(tab)
     tab.ctx.state.dataset.well_labels = {}
@@ -795,7 +795,7 @@ def test_the_tooltip_names_a_variable_the_well_has_no_value_for(tab):
 
 
 def test_a_plate_with_no_variables_keeps_the_tooltip_it_always_had(tab):
-    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+    from review.core.ui_helpers import well_plate_tooltip_provider
 
     tab.ctx.state.dataset.well_labels = {"A01": "shCtrl"}
     assert well_plate_tooltip_provider(tab.ctx)("A01") == "A01 — shCtrl"
@@ -815,7 +815,7 @@ def _group_rows(tab):
     # The **painted** text, from the row widget — ``item.text()`` is blanked so
     # the delegate does not draw it under the widget, and a test reading it
     # would be asserting a string that never reaches the screen.
-    from well_viewer.features.home.variables.editor_view import row_label_text
+    from review.features.home.variables.editor_view import row_label_text
 
     return [row_label_text(listing, i) for i in range(listing.count())]
 
@@ -841,7 +841,7 @@ def test_a_group_whose_wells_disagree_reads_mixed(tab):
     # The row read "Mixed" while the figure bands read "—mixed—", under a
     # comment in variable_series claiming the two say it identically. Comparing
     # against MIXED_LABEL is what makes that claim testable rather than a hope.
-    from well_viewer.domain.variable_series import MIXED_LABEL
+    from review.domain.variable_series import MIXED_LABEL
 
     assert f"{MIXED_LABEL} (2 values across 2 wells)" in _group_rows(tab)[0]
 
@@ -885,7 +885,7 @@ def test_a_group_summary_says_the_same_thing_whatever_order_its_wells_are_in(tab
     """Two sentences for one plate, one of them with a wrong count, was the
     shape this fixed — a group of two doses plus a blank read `Mixed (3 values)`
     when the blank sat last and "1 of 3 unassigned" when it sat first."""
-    from well_viewer.features.home.variables.controller import _group_summary
+    from review.features.home.variables.controller import _group_summary
 
     variable_id = _dose_tab(tab)
     tab.w("_var_plate").selectedWells = ["A01"]
@@ -960,7 +960,7 @@ def test_a_dataset_swap_repaints_rather_than_leaving_the_last_plate(tab,
                                                                     monkeypatch):
     """The state half was right and the screen half was not: a new plate of one
     well kept showing four ringed wells from the plate before."""
-    from well_viewer.features.home.variables.controller import refresh_variables
+    from review.features.home.variables.controller import refresh_variables
 
     _dose_tab(tab)
     tab.w("_var_fill_apply").click()
@@ -983,7 +983,7 @@ def test_the_variables_tab_is_reachable_through_the_feature_service():
     """``core/`` must not import the feature to repaint it, and the load
     controller and the reset scope both need to. A service that is not
     registered makes both of those silent no-ops."""
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
 
     reg = build_feature_registry()
     assert reg.service("variables.refresh") is not None
@@ -1288,7 +1288,7 @@ def test_a_group_row_selects_the_wells_it_is_complaining_about(tab):
     _dose_tab(tab)
     tab.ctx.state.selection.selections = [
         {"name": "Ctrl", "wells": ["A01", "A02", "B04"]}]
-    from well_viewer.features.home.variables.controller import refresh_variables
+    from review.features.home.variables.controller import refresh_variables
     refresh_variables(tab.ctx)
 
     listing = tab.w("_var_groups")
@@ -1421,7 +1421,7 @@ def test_undo_is_one_step_and_says_it_ran(tab):
 def test_a_dataset_swap_drops_the_undo_with_the_variables_it_belonged_to(tab):
     """Carried across, it would sit under a live Undo offering the previous
     plate's doses over the current one's numbers."""
-    from well_viewer.persistence.sample_variables import load_from_data_dir
+    from review.persistence.sample_variables import load_from_data_dir
 
     _dose_tab(tab)
     tab.w("_var_fill_apply").click()
@@ -1553,7 +1553,7 @@ def test_a_value_row_wears_the_ink_its_wells_will_take(tab):
     "the row has an icon" — a row wearing the wrong colour would satisfy the
     weaker version and be worse than a row wearing none.
     """
-    from well_viewer.domain.variable_series import value_colors
+    from review.domain.variable_series import value_colors
 
     _dose_tab(tab, labels="0, 1, 3")
     variable = _vset(tab).variables[0]
@@ -1605,7 +1605,7 @@ def test_the_row_x_deletes_its_own_row_not_the_selected_one(tab):
     passes them all — a reviewer proved it by reverting the binding and
     watching 96 tests stay green. Here they differ on purpose.
     """
-    from well_viewer.features.home.variables.editor_view import row_delete_button
+    from review.features.home.variables.editor_view import row_delete_button
 
     tab.w("_var_add").click()
     tab.w("_var_add").click()
@@ -1641,7 +1641,7 @@ def test_a_chips_ink_is_one_painted_block_and_not_a_border(qtbot):
     sheet, and the ink arrives as an icon — one pixmap blit, with no join to
     mis-paint on any platform.
     """
-    from well_viewer.features.home.variables.plate_view import (
+    from review.features.home.variables.plate_view import (
         SWATCH_H, SWATCH_W, value_chip,
     )
 
@@ -1667,7 +1667,7 @@ def test_a_chip_without_a_value_colour_carries_no_swatch(qtbot):
     """``No value`` is a chip too, and the absence has to be visible as an
     absence rather than as a block of whatever colour a missing entry decays
     to."""
-    from well_viewer.features.home.variables.plate_view import value_chip
+    from review.features.home.variables.plate_view import value_chip
 
     host = QWidget()
     qtbot.addWidget(host)
@@ -1716,7 +1716,7 @@ def test_the_empty_tab_says_what_a_variable_buys(tab):
     regression to the default would silently drop the only explanation on the
     page.
     """
-    from well_viewer.features.home.variables.tab_view import EMPTY_HINT
+    from review.features.home.variables.tab_view import EMPTY_HINT
 
     empty = tab.w("_var_empty")
     assert empty._hint.isHidden() is False, (
@@ -1732,7 +1732,7 @@ def test_the_payoff_is_stated_once(tab):
     vanished the moment somebody defined a variable."""
     from PySide6.QtWidgets import QLabel
 
-    from well_viewer.features.home.variables.tab_view import EMPTY_HINT
+    from review.features.home.variables.tab_view import EMPTY_HINT
 
     saying_it = [w for w in tab.frame.findChildren(QLabel)
                  if w.text() == EMPTY_HINT]

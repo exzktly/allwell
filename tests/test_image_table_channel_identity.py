@@ -35,7 +35,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import (  # noqa: E402
+from review.features.image_browser.image_table import (  # noqa: E402
     controller as C,
     image_compose as IC,
 )
@@ -123,7 +123,7 @@ def test_parse_lut_still_falls_back_to_the_row_when_no_channel_is_named():
 
 _IMAGE_TABLE_DIR = (
     Path(__file__).resolve().parents[1]
-    / "well_viewer" / "features" / "image_browser" / "image_table"
+    / "review" / "features" / "image_browser" / "image_table"
 )
 
 

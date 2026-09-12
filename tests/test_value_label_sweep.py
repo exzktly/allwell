@@ -42,16 +42,16 @@ def _close_figures():
 
 
 from tests._repo_scan import REPO_ROOT, parse_source, python_sources  # noqa: E402
-from well_viewer.features.barplot import renderer  # noqa: E402
+from review.features.barplot import renderer  # noqa: E402
 
 _BAR_CALL_NAMES = {"render_bar_items", "_render_bar_items", "_bar_render_items"}
 _LINE_CALL_NAMES = {"render_line_series", "_render_line_series"}
-_BAR_DEFINITION = "well_viewer/features/barplot/controller.py"
+_BAR_DEFINITION = "review/features/barplot/controller.py"
 #: The line renderer lives in the same module as the tab's own call to it, so
 #: unlike the bar side there is nothing to exclude — ``ast.Call`` never matches
 #: the ``def`` itself.
 _LINE_DEFINITION = ""
-_RENDERER_MODULE = "well_viewer/features/barplot/renderer.py"
+_RENDERER_MODULE = "review/features/barplot/renderer.py"
 
 
 def rel(path) -> str:
@@ -204,10 +204,10 @@ def test_the_guard_can_see_every_known_call_site():
     which is §7.5 #3 — the guard measuring nothing and reporting success."""
     bar = _call_sites(_BAR_CALL_NAMES, _BAR_DEFINITION)
     line = _call_sites(_LINE_CALL_NAMES, _LINE_DEFINITION)
-    assert {"well_viewer/features/barplot/renderer.py",
-            "well_viewer/features/batch_export/bar_panel.py"} <= bar, sorted(bar)
-    assert {"well_viewer/features/batch_export/base_panel.py",
-            "well_viewer/features/lineplot/controller.py"} <= line, sorted(line)
+    assert {"review/features/barplot/renderer.py",
+            "review/features/batch_export/bar_panel.py"} <= bar, sorted(bar)
+    assert {"review/features/batch_export/base_panel.py",
+            "review/features/lineplot/controller.py"} <= line, sorted(line)
 
 
 def test_the_per_cell_events_panel_reads_the_overlay():
@@ -247,7 +247,7 @@ def _draw_percell(ctx, monkeypatch):
     # AggPoint: 0 = timepoint, 4 = total n_above, 7 = per-FOV mean, 8 = spread.
     pt = (0.0, 0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 10.0, 2.0, 0.0)
     monkeypatch.setattr(renderer, "get_all_fluor_gates", lambda _c: {})
-    monkeypatch.setattr("well_viewer.domain.stats_compute.aggregate_group",
+    monkeypatch.setattr("review.domain.stats_compute.aggregate_group",
                         lambda *a, **k: [pt])
     fig, ax = plt.subplots()
     renderer.draw_per_well_n_bars(ctx, ax, ["A01"], ["#888888"], ["A01"], 0.0, 0.0,

@@ -16,8 +16,8 @@ import zipfile
 from datasets.validate.apply import apply_repairs
 from datasets.validate.validate_compute import build_report
 from tests.fixtures.dataset_builder import build_dataset
-from well_viewer.data.data_loading import load_well_csv
-from well_viewer.domain.viewer_state import read_pipeline_info
+from review.data.data_loading import load_well_csv
+from review.domain.viewer_state import read_pipeline_info
 
 
 def test_validate_repair_end_to_end_then_reopen_in_review(tmp_path):

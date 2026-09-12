@@ -5,7 +5,7 @@ Pure-logic where possible: the chrome drawing + placement math + LUT resolution
 live in the Qt-free ``image_compose`` / ``grid_layout`` layers, and the display
 view-state (de)serialization is a plain dict round-trip. A ``SimpleNamespace``
 stands in for the ctx (mirrors ``test_image_table_nested_axes``), so no real
-``WellViewerApp`` is needed.
+``ReviewApp`` is needed.
 """
 from __future__ import annotations
 
@@ -16,10 +16,10 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import controller as C
-from well_viewer.features.image_browser.image_table import image_compose as IC
-from well_viewer.features.image_browser.image_table import view_state_io as V
-from well_viewer.features.image_browser.image_table.state import ImageTableState
+from review.features.image_browser.image_table import controller as C
+from review.features.image_browser.image_table import image_compose as IC
+from review.features.image_browser.image_table import view_state_io as V
+from review.features.image_browser.image_table.state import ImageTableState
 
 
 def _fake_app(*, wells, channels, active_wells=None, active_channels=None,
@@ -37,7 +37,7 @@ def _fake_app(*, wells, channels, active_wells=None, active_channels=None,
             active_channels=set(active_channels or []),
         ),
     )
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app._ctx = SimpleNamespace(app=app, state=app._app_state, runtime=AppRuntime(app))
     return app
 
@@ -390,7 +390,7 @@ def test_clear_caches_drops_pooled_auto_luts():
 # ── Bug fix: Generate flushes the debounced builder apply ───────────────────
 
 def test_builder_flush_pending_applies_active_timer(monkeypatch):
-    from well_viewer.features.image_browser.image_table import builder_view as B
+    from review.features.image_browser.image_table import builder_view as B
 
     app = _fake_app(wells=["A01"], channels=["gfp"])
     calls = []
@@ -415,7 +415,7 @@ def test_builder_flush_pending_applies_active_timer(monkeypatch):
 
 
 def test_builder_flush_pending_noop_without_timer(monkeypatch):
-    from well_viewer.features.image_browser.image_table import builder_view as B
+    from review.features.image_browser.image_table import builder_view as B
 
     app = _fake_app(wells=["A01"], channels=["gfp"])
     calls = []
@@ -432,10 +432,10 @@ def test_generate_with_scale_bar_and_auto_lut_on_mini_dataset(qtbot, mini_datase
     """Build the real app on the mini dataset, enable the scale bar + identity
     labels, and Generate — the chrome plan must resolve a bar on the real grid and
     the Auto-LUT pooling pass must run, and the export figure must build."""
-    from well_viewer.features.image_browser.controller import build_image_browser_subtab
-    from well_viewer.runtime_app import WellViewerApp
+    from review.features.image_browser.controller import build_image_browser_subtab
+    from review.runtime_app import ReviewApp
 
-    app = WellViewerApp()
+    app = ReviewApp()
     qtbot.addWidget(app)
     build_pending = app._ctx.runtime.centre.build_pending
     if build_pending is not None:

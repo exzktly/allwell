@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from well_viewer.core.app_runtime import AppRuntime
+from review.core.app_runtime import AppRuntime
 
 
 def _seed_cg(app):
@@ -23,7 +23,7 @@ def _seed_cg(app):
     kwargs the fake set (Epic-cellgating: these are now typed state on
     ``ctx.state.cell_gating``). The slice is the live object the gating functions
     read/write; tests assert on ``app._app_state.cell_gating.*``."""
-    from well_viewer.core.cell_gating_state import CellGatingState
+    from review.core.cell_gating_state import CellGatingState
     st = getattr(app, "_app_state", None)
     if st is None:
         st = SimpleNamespace()
@@ -47,7 +47,7 @@ def _cg_ctx(app):
     app._ctx = SimpleNamespace(app=app, state=app._app_state, runtime=AppRuntime(app))
     return app._ctx
 
-from well_viewer.features.scatter.gating import (
+from review.features.scatter.gating import (
     _on_gate_drawn,
     compute_gate_inclusion,
 )
@@ -55,7 +55,7 @@ from well_viewer.features.scatter.gating import (
 
 def _mk_ctx(app):
     from types import SimpleNamespace
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     _seed_cg(app)
     return SimpleNamespace(
         app=app,
@@ -123,7 +123,7 @@ def test_on_gate_drawn_assigns_default_name():
 def test_gate_only_shown_on_its_own_axes():
     """A gate is rendered/hittable only when the displayed axes match the ones it
     was drawn on (otherwise its box coords are meaningless)."""
-    from well_viewer.features.scatter.gating import _gate_on_current_axes
+    from review.features.scatter.gating import _gate_on_current_axes
 
     gate = {"x_col": "gfp_mean_intensity", "y_col": "mcherry_mean_intensity"}
     app = SimpleNamespace()
@@ -140,7 +140,7 @@ def test_gate_only_shown_on_its_own_axes():
 
 def test_selected_scatter_gates_honours_choice():
     """Each layer's multi-select picks a set of names independently; None = all."""
-    from well_viewer.features.home.cell_gating.controller import cell_gating_selected_scatter_gates
+    from review.features.home.cell_gating.controller import cell_gating_selected_scatter_gates
     g1 = {"x0": 0, "y0": 0, "x1": 1, "y1": 1, "name": "Gate 1"}
     g2 = {"x0": 2, "y0": 2, "x1": 3, "y1": 3, "name": "Gate 2"}
     g3 = {"x0": 4, "y0": 4, "x1": 5, "y1": 5, "name": "Gate 3"}
@@ -159,7 +159,7 @@ def test_selected_scatter_gates_honours_choice():
 
 
 def test_rename_gate_rejects_blank_and_duplicate_keeps_choice():
-    from well_viewer.features.scatter.gating import rename_gate
+    from review.features.scatter.gating import rename_gate
 
     g1 = {"x0": 0, "y0": 0, "x1": 1, "y1": 1, "name": "Gate 1"}
     g2 = {"x0": 2, "y0": 2, "x1": 3, "y1": 3, "name": "Gate 2"}
@@ -243,7 +243,7 @@ def test_inclusion_no_gates_is_all_false():
 # ── Gate_Pass inclusion layer ─────────────────────────────────────────────────
 
 def test_gate_pass_layer_filters_by_default_but_not_for_scatter():
-    from well_viewer.data.data_loading import df_included_mask
+    from review.data.data_loading import df_included_mask
 
     df = pd.DataFrame({
         "Included":  [1, 1, 1, 1],
@@ -257,7 +257,7 @@ def test_gate_pass_layer_filters_by_default_but_not_for_scatter():
 
 
 def test_gate_pass_absent_is_all_pass():
-    from well_viewer.data.data_loading import df_included_mask
+    from review.data.data_loading import df_included_mask
 
     df = pd.DataFrame({"Included": [1, 1], "QC_Pass": [1, 1]})
     assert df_included_mask(df).tolist() == [True, True]
@@ -266,7 +266,7 @@ def test_gate_pass_absent_is_all_pass():
 def test_toggling_a_layer_enables_its_gates_button(qtbot, monkeypatch):
     """Ticking a mode's checkbox must enable that layer's Gates button live (not
     only after a tab re-entry) — regression for the button staying inactive."""
-    import well_viewer.features.home.cell_gating.controller as cg
+    import review.features.home.cell_gating.controller as cg
     from PySide6.QtWidgets import QCheckBox, QPushButton
 
     monkeypatch.setattr(cg, "cell_gating_start_gating_worker", lambda ctx: None)
@@ -301,7 +301,7 @@ def test_toggling_a_layer_enables_its_gates_button(qtbot, monkeypatch):
 # ── thresholding: fraction-on by gate (on_col) ────────────────────────────────
 
 def test_aggregate_on_col_defines_fraction_on_by_gate():
-    from well_viewer.data.data_loading import aggregate_with_threshold_df
+    from review.data.data_loading import aggregate_with_threshold_df
 
     df = pd.DataFrame({
         "timepoint_hours": [0.0, 0.0, 0.0, 0.0],
@@ -326,7 +326,7 @@ def test_aggregate_on_col_defines_fraction_on_by_gate():
 # ── persistence round-trip ────────────────────────────────────────────────────
 
 def test_gating_block_round_trips_scatter_gates(tmp_path):
-    from well_viewer.domain.gating_state import (
+    from review.domain.gating_state import (
         build_gating_block,
         read_gating_params,
         save_gating_to_pipeline_info,
@@ -348,7 +348,7 @@ def test_gating_block_round_trips_scatter_gates(tmp_path):
 
 
 def test_gating_block_omits_gates_when_mode_off():
-    from well_viewer.domain.gating_state import build_gating_block
+    from review.domain.gating_state import build_gating_block
 
     gates = [{"x0": 1.0, "y0": 2.0, "x1": 3.0, "y1": 4.0,
               "x_col": "a", "y_col": "b"}]

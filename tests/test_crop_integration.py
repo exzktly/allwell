@@ -10,8 +10,8 @@ pytestmark = pytest.mark.qt
 
 pd = pytest.importorskip("pandas")
 
-from well_viewer.data.data_loading import df_included_mask
-from well_viewer.features.crop.controller import (
+from review.data.data_loading import df_included_mask
+from review.features.crop.controller import (
     clear_crop_region, get_crop_region, reset_crop_and_overrides, set_crop_region,
 )
 

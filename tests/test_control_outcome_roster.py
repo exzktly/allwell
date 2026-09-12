@@ -22,14 +22,14 @@ import math
 
 import pytest
 
-from well_viewer.core.fold_change_pairing_view import status_word
-from well_viewer.domain.control_ref import ControlRef
-from well_viewer.domain.fold_change_pairing import (
+from review.core.fold_change_pairing_view import status_word
+from review.domain.control_ref import ControlRef
+from review.domain.fold_change_pairing import (
     ControlOutcome,
     shortfall_from_items,
 )
-from well_viewer.features.barplot.collect import collect_bar_items
-from well_viewer.features.export.service import attach_bar_fold_change_columns
+from review.features.barplot.collect import collect_bar_items
+from review.features.export.service import attach_bar_fold_change_columns
 
 from tests.conftest import MockApp, make_agg
 

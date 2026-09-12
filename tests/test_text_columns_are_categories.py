@@ -31,10 +31,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from well_viewer.data.data_loading import (
+from review.data.data_loading import (
     _STRING_COLS, aggregate_with_threshold_df, load_well_csv,
 )
-from well_viewer.domain.fov_integrity import check_fov_labels
+from review.domain.fov_integrity import check_fov_labels
 
 _TEXT = sorted(_STRING_COLS)
 

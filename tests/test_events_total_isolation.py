@@ -38,9 +38,9 @@ ALLOWED = frozenset({
     # the collectors decide and the writer only formats. That is the shape to
     # keep; a writer that started computing it would need an entry, and would
     # be worth a second look.
-    "well_viewer/features/barplot/collect.py",
-    "well_viewer/features/lineplot/controller.py",
-    "well_viewer/features/batch_export/_line_series_runner.py",
+    "review/features/barplot/collect.py",
+    "review/features/lineplot/controller.py",
+    "review/features/batch_export/_line_series_runner.py",
 })
 
 _TOTAL = "compute_rep_n_above_total"

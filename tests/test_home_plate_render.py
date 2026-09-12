@@ -15,8 +15,8 @@ import pytest
 from PySide6.QtGui import QColor, QImage
 
 from ui import theme
-from well_viewer.features.home import collect as hc
-from well_viewer.features.home.plate_panel import (
+from review.features.home import collect as hc
+from review.features.home.plate_panel import (
     NEUTRAL_STATES,
     STATE_COLORS,
     build_home_plate,

@@ -25,7 +25,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QEventLoop  # noqa: E402
 
-from well_viewer.core import load_controller, ui_helpers  # noqa: E402
+from review.core import load_controller, ui_helpers  # noqa: E402
 from tests._repo_scan import parse_source
 
 

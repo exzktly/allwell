@@ -14,7 +14,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.features.review_csv.tab_view import build_review_csv_tab
+from review.features.review_csv.tab_view import build_review_csv_tab
 from tests.widget_registry_helpers import assert_handles_registered
 
 _HANDLES = (
@@ -39,7 +39,7 @@ def test_refresh_reader_resolves_after_registry_build(viewer_app, qtbot):
     parent = QWidget()
     qtbot.addWidget(parent)      # keep the parent (and its children) alive
     build_review_csv_tab(app._ctx, parent)
-    from well_viewer.features.image_browser.review_image.controller import (
+    from review.features.image_browser.review_image.controller import (
         refresh_review_csv,
     )
     refresh_review_csv(app._ctx)  # no dataset loaded → the "select wells" branch; must not raise

@@ -1,0 +1,1493 @@
+"""Reusable Qt UI helpers (button factories, scroll area, name dialog, etc.)."""
+
+from __future__ import annotations
+
+from review.data.metric_labels import spread_label
+
+from typing import Any
+from collections.abc import Callable
+
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
+from PySide6.QtWidgets import (
+    QApplication, QFrame, QHBoxLayout,
+    QInputDialog, QLabel, QLineEdit, QPushButton,
+    QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+)
+from ui import theme
+from review.core import empty_state_copy
+from core.safe import swallow
+from review.data.image_identity import normalize_tp
+from core.safe import swallowed
+
+
+def well_plate_tooltip_provider(ctx) -> Callable[[str], str]:
+    """Tooltip-provider closure for ``WellPlateSelector.setWellTooltipProvider``.
+
+    Returns ``"<well_id> — <label> · Cell line: HeLa · Dose: 1 µM"`` — the well's
+    own name from Home → Well Labels, then one clause per **sample variable**
+    that annotates it. Falls back to the bare well id when it has neither.
+
+    Every clause is read on each hover rather than baked in when the provider is
+    wired, so a label edit or a value assignment shows up without the host
+    re-registering anything.
+
+    **A variable the well has no value for is named, not omitted.** "Dose: —"
+    says the well was never given one; leaving the clause out is
+    indistinguishable from a plate where no such variable exists, and the whole
+    point of the ring beside it is that an unassigned well is a fact the user
+    needs to see rather than a gap they have to infer.
+
+    Every read is guarded, because this closure runs on a mouse hover: a state
+    shape it did not expect must cost the extra clause, never the tooltip.
+    """
+    def _tooltip(well_id: str) -> str:
+        parts = []
+        try:
+            labels = getattr(ctx.state.dataset, "well_labels", None) or {}
+            name = labels.get(well_id)
+        except Exception:
+            name = None
+        if name and str(name).strip() and str(name).strip() != well_id:
+            parts.append(f"{well_id} — {str(name).strip()}")
+        else:
+            parts.append(well_id)
+        parts.extend(_variable_clauses(ctx, well_id))
+        return " · ".join(parts)
+    return _tooltip
+
+
+def _variable_clauses(ctx, well_id: str) -> list[str]:
+    """``["Cell line: HeLa", "Dose: —"]`` for *well_id*. Empty when none apply."""
+    vset = None
+    variables = ()
+    with swallow("read the sample variables for a well tooltip"):
+        vset = getattr(ctx.state.selection, "variables", None)
+        variables = list(getattr(vset, "variables", ()) or ())
+    out = []
+    for variable in variables:
+        shown = ""
+        with swallow(f"read {variable.name} for {well_id}"):
+            value_id = vset.value_id_for(variable.id, well_id)
+            shown = variable.display_label(value_id) if value_id else ""
+        out.append(f"{variable.name}: {shown or '—'}")
+    return out
+
+def parse_float_edit(edit, fallback=None, *, allow_auto: bool = False):
+    """Parse a ``QLineEdit``'s text as ``float``; return *fallback* on blank,
+    non-numeric, or (when *allow_auto*) the literal ``"auto"``.
+
+    Consolidates the ``try: float(edit.text().strip()) except: fallback`` helper
+    re-implemented across several feature views. A non-widget / ``None`` *edit*
+    also yields *fallback* (so ``getattr(app, attr, None)`` can be passed
+    directly).
+    """
+    try:
+        txt = str(edit.text()).strip()
+    except (AttributeError, TypeError):
+        return fallback
+    if allow_auto and txt.lower() == "auto":
+        return fallback
+    if not txt:
+        return fallback
+    try:
+        return float(txt)
+    except ValueError:
+        return fallback
+
+
+def set_widget_text(host, attr_name: str, text: str) -> None:
+    """Set ``text`` on ``app.<attr_name>`` if that attribute exists and is a
+    text widget — collapses the repeated ``lbl = getattr(...); if lbl: ...``
+    status-setter pattern."""
+    w = getattr(host, attr_name, None)
+    if hasattr(w, "setText"):
+        w.setText(text)
+
+
+def set_combo_values(combo: object, values: list[str]) -> None:
+    """Set combobox values for both Qt and legacy widget shims.
+
+    Preserves the current selection when the new item list contains it, so a
+    tk-style ``currentIndexChanged`` handler that calls back into a refresh
+    function doesn't clobber the user's pick as a side-effect.
+
+    Lives in ui_helpers (not runtime_app) so the channel-state
+    controller can use it without creating a circular import back into
+    the runtime monolith.
+    """
+    vals = [str(v) for v in values]
+    if hasattr(combo, "clear") and hasattr(combo, "addItems"):
+        block = getattr(combo, "blockSignals", None)
+        prev_text = combo.currentText() if hasattr(combo, "currentText") else ""
+        if callable(block):
+            block(True)
+        combo.clear()  # type: ignore[attr-defined]
+        combo.addItems(vals)  # type: ignore[attr-defined]
+        if prev_text and prev_text in vals and hasattr(combo, "setCurrentIndex"):
+            combo.setCurrentIndex(vals.index(prev_text))  # type: ignore[attr-defined]
+        if callable(block):
+            block(False)
+        return
+    combo["values"] = vals  # type: ignore[index]
+
+
+def set_combo_values_sectioned(combo: object, sections: list[tuple[str, list[str]]]) -> None:
+    """Populate *combo* with grouped values under non-selectable section headers.
+
+    ``sections`` is a list of ``(header, values)``. A ``header`` of ``""`` emits
+    its values with no header row (the default/top group). Header rows are
+    inserted as disabled items on the combo's own ``QStandardItemModel`` — the
+    same mechanism :func:`populate_metric_combo` uses to grey out
+    ``smFISH Count`` — so the user cannot select them and ``findText`` /
+    ``currentText`` / ``setCurrentText`` operate on the real values exactly as
+    with :func:`set_combo_values`. The previous selection is preserved when it
+    still exists; otherwise the first selectable value is chosen.
+
+    Empty groups (no values) are skipped, so a header never appears without
+    entries beneath it.
+    """
+    if combo is None or not (hasattr(combo, "clear") and hasattr(combo, "addItem")):
+        return
+    prev_text = combo.currentText() if hasattr(combo, "currentText") else ""
+    block = getattr(combo, "blockSignals", None)
+    if callable(block):
+        block(True)
+    try:
+        combo.clear()
+        selectable: list[str] = []
+        for header, values in sections:
+            vals = [str(v) for v in (values or [])]
+            if not vals:
+                continue
+            if header:
+                combo.addItem(f"— {header} —")
+                model = combo.model() if hasattr(combo, "model") else None
+                item = model.item(combo.count() - 1) if model is not None else None
+                if item is not None:
+                    # Disabled → not selectable / skipped on keyboard navigation.
+                    item.setEnabled(False)
+                    item.setData("header", Qt.UserRole + 1)
+            for v in vals:
+                combo.addItem(v)
+                selectable.append(v)
+        target = prev_text if (prev_text and prev_text in selectable) else (
+            selectable[0] if selectable else "")
+        if target and hasattr(combo, "findText"):
+            idx = combo.findText(target)
+            if idx >= 0 and hasattr(combo, "setCurrentIndex"):
+                combo.setCurrentIndex(idx)
+    finally:
+        if callable(block):
+            block(False)
+
+
+#: The one wording for "no dataset is loaded", shared by every wrapped tab.
+#: Re-exported from :mod:`review.core.empty_state_copy` so the canvas sites
+#: that paint the same sentence onto a figure can reach it without importing Qt.
+NO_DATASET_TITLE = empty_state_copy.NO_DATASET_TITLE
+NO_DATASET_HINT = empty_state_copy.NO_DATASET_HINT
+
+
+class EmptyReason:
+    """Why a wrapped tab has nothing to show: the words and the glyph to say it.
+
+    A tab can be empty for more than one reason, and the reasons are not
+    interchangeable — "no dataset is loaded" and "you have not picked any wells"
+    ask the user for completely different next actions. Naming each one lets a
+    single placeholder widget state which one it is, instead of every page
+    inventing its own answer on its own canvas.
+
+    ``icon=None`` keeps whatever glyph the wrap site chose. That is the usual
+    case: when a page's body is empty its glyph is the only signal left of which
+    page you are on, so a reason overrides it only when it has a better one.
+    """
+
+    __slots__ = ("title", "hint", "icon")
+
+    def __init__(self, title: str, hint: str = "", icon: str | None = None) -> None:
+        self.title = title
+        self.hint = hint
+        self.icon = icon
+
+
+#: The default reason. Every wrapped tab needs a dataset, so this is what a wrap
+#: site gets when it names no reason of its own.
+NO_DATASET = EmptyReason(NO_DATASET_TITLE, NO_DATASET_HINT)
+
+
+def wrap_with_empty_state(
+    win: Any,
+    host: QWidget,
+    *,
+    text: str = NO_DATASET_TITLE,
+    hint: str = NO_DATASET_HINT,
+    icon: str = "line-chart",
+    reason: Callable[[Any], EmptyReason | None] | None = None,
+) -> QStackedWidget:
+    """Wrap *host* (a plot canvas / scroll area / card) in a ``QStackedWidget``
+    so an :class:`EmptyState` placeholder can render in its place whenever the
+    tab has nothing to show.
+
+    Page 0 is the EmptyState; page 1 is *host*. The stack starts on page 0
+    so the user sees the placeholder immediately on win launch (matplotlib's
+    default empty axes are otherwise visible as glaring white blocks).
+
+    *reason* is an optional ``reason(ctx) -> EmptyReason | None`` called on every
+    refresh once a dataset is loaded; ``None`` means "this tab has something to
+    draw, show the host". A site that passes no reason is gated on the dataset
+    alone, which is the behaviour every tab had before reasons existed.
+
+    **"No dataset" always wins.** With no dataset loaded the site reason is not
+    consulted at all and every stack shows the shared wording above — a page
+    cannot sensibly ask for wells to be selected on a plate that is not there.
+
+    The stack registers itself on ``win._plot_empty_stacks``, which stays a plain
+    list of stacks (the reason and its placeholder ride on the stack), and
+    ``refresh_plot_empty_states`` / ``refresh_empty_state_pages`` resolve every
+    registered one together — which is what keeps the wording and the moment of
+    the swap identical across tabs.
+    """
+    from widgets.empty_state import EmptyState  # local — widget module is heavy
+    stack = QStackedWidget()
+    stack.setObjectName("PlotEmptyStateStack")
+    placeholder = EmptyState(text=text, icon=icon, hint=hint)
+    stack.addWidget(placeholder)  # index 0
+    stack.addWidget(host)         # index 1
+    stack.setCurrentIndex(0)
+    # Carried on the stack rather than in a parallel structure: the registry is
+    # indexed directly by existing tests, and a tuple there turns a readable
+    # assertion failure into an AttributeError.
+    stack._empty_placeholder = placeholder
+    stack._empty_reason = reason
+    stack._empty_default_icon = icon
+    if not hasattr(win, "_plot_empty_stacks") or win._plot_empty_stacks is None:
+        win._plot_empty_stacks = []
+    win._plot_empty_stacks.append(stack)
+    return stack
+
+
+def no_selection_reason(
+    title: str = "No wells selected.",
+    hint: str = "Click wells on the plate at the left, or open Saved selections below it.",
+) -> Callable[[Any], EmptyReason | None]:
+    """A ``reason`` for tabs that plot exactly the plate selection.
+
+    The title states the state and the hint carries the action, naming controls
+    by the labels they actually wear on screen — the plate has no visible label
+    of its own, and "Plot Groups" is the rail's own section heading.
+    """
+    empty = EmptyReason(title, hint)
+
+    def _reason(ctx) -> EmptyReason | None:
+        from review.core.selection_controller import has_plottable_selection
+        return None if has_plottable_selection(ctx) else empty
+
+    return _reason
+
+
+def _apply_reason(stack: QStackedWidget, reason: EmptyReason) -> None:
+    """Write *reason* onto *stack*'s placeholder and show it."""
+    placeholder = getattr(stack, "_empty_placeholder", None)
+    if placeholder is not None:
+        placeholder.setText(reason.title)
+        placeholder.setHint(reason.hint)
+        icon = reason.icon or getattr(stack, "_empty_default_icon", None)
+        if icon:
+            placeholder.setIconName(icon)
+    if stack.currentIndex() != 0:
+        stack.setCurrentIndex(0)
+
+
+#: Object names of per-tab control-bar containers that act on the loaded
+#: dataset. They are greyed out until a dataset is present (see
+#: ``refresh_plot_empty_states``) so the empty state isn't a wall of live-looking
+#: controls that do nothing. ``TabCtrl`` is the marker a tab's own control row
+#: uses; ``ControlBand`` is the shared band (``widgets/control_band.py``), so a
+#: tab picks the gating up by adopting it rather than by remembering a name.
+_DATA_GATED_OBJECT_NAMES = ("TabCtrl", "ControlBand")
+
+
+def refresh_empty_state_pages(win: Any) -> None:
+    """Flip every registered stack to the page its current state calls for.
+
+    With no dataset loaded every stack shows the shared "no dataset" wording.
+    Otherwise each stack's own ``reason`` decides: an :class:`EmptyReason` is
+    written onto its placeholder and shown, ``None`` shows the tab body.
+
+    Split out of :func:`refresh_plot_empty_states` because this half is cheap —
+    a reason call and a ``currentIndex()`` comparison per registered stack —
+    while the control-bar gating below it walks the whole widget tree twice.
+    Callers that fire on every selection change want this one; callers reacting
+    to a dataset load want the full refresh.
+    """
+    stacks = getattr(win, "_plot_empty_stacks", None) or []
+    if not stacks:
+        return
+    has_data = bool(win._app_state.dataset.well_paths)
+    ctx = getattr(win, "_ctx", None)
+    for stack in stacks:
+        try:
+            if not has_data:
+                # The site reason is deliberately not consulted: asking the user
+                # to pick wells on a plate that is not loaded is a worse message
+                # than the one it would replace.
+                _apply_reason(stack, NO_DATASET)
+                continue
+            reason_fn = getattr(stack, "_empty_reason", None)
+            # The reason call is guarded on its own. Letting it share the outer
+            # ``except`` meant a raising reason left the stack on whatever page
+            # it was already on — page 0 for a freshly-registered stack, i.e.
+            # "Load a directory." over a loaded dataset, for the session. That is
+            # exactly the bug the lazy-build fix removed, reintroduced by a
+            # feature bug rather than a missing hook.
+            try:
+                reason = reason_fn(ctx) if (reason_fn is not None and ctx is not None) else None
+            except Exception:
+                swallowed()
+                reason = None
+            if reason is None:
+                if stack.currentIndex() != 1:
+                    stack.setCurrentIndex(1)
+            else:
+                _apply_reason(stack, reason)
+        except Exception:
+            swallowed()  # was: pass (silent except)
+
+
+def refresh_plot_empty_states(win: Any) -> None:
+    """Flip every registered plot-empty-state stack based on whether a
+    dataset is currently loaded, and gate the per-tab control bars to match.
+    Safe to call before any stacks have been registered (no-ops)."""
+    refresh_empty_state_pages(win)
+    # Grey out the per-tab control bars until a dataset is loaded. Disabling the
+    # container cascades to its children; re-enabling restores each child's own
+    # enabled state (so tab-local logic like smFISH's combo gating still wins).
+    #
+    # This is the expensive half: two recursive ``findChildren`` walks over a
+    # widget tree of ~1,800 QObjects. It answers a question only a dataset load
+    # can change, so it stays out of ``refresh_empty_state_pages``.
+    if not isinstance(win, QWidget):
+        return
+    has_data = bool(win._app_state.dataset.well_paths)
+    for name in _DATA_GATED_OBJECT_NAMES:
+        for bar in win.findChildren(QWidget, name):
+            try:
+                bar.setEnabled(has_data)
+            except Exception:
+                swallowed()
+
+
+# Gap between a section title and the hint beneath it. Tight enough that the two
+# read as one header block rather than as a heading followed by body text.
+_SECTION_HEADER_SPACING = 2
+
+
+class SectionTitleLabel(QLabel):
+    """A word-wrapped section title that *prefers* one line.
+
+    Reports the single-line width as its preference while inheriting Qt's
+    longest-word ``minimumSizeHint()``. ARCHITECTURE.md § "Section headers" has
+    the mechanism and why both halves are needed.
+
+    Plain text only: the width is measured with font metrics, so rich text would
+    be measured including its markup.
+    """
+
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+
+    def sizeHint(self) -> QSize:
+        margins = self.contentsMargins()
+        width = (self.fontMetrics().horizontalAdvance(self.text())
+                 + margins.left() + margins.right() + 2 * self.margin() + 2)
+        return QSize(width, self.heightForWidth(width))
+
+
+def build_section_header(
+    parent: QWidget,
+    title: str,
+    *,
+    hint: str | None = None,
+    buttons: tuple = (),
+    margins: tuple = (8, 4, 8, 4),
+) -> QWidget:
+    """Return a header block with a section title, and optionally a hint below.
+
+    ``buttons`` is a sequence of already-constructed QWidgets, laid out on the
+    title's own row at its right edge. ``hint`` is an optional muted sentence
+    placed on its own line beneath the title, taking the block's full width —
+    see ARCHITECTURE.md § "Section headers" for why it is not beside it.
+    """
+    hdr = QWidget(parent)
+    hdr.setObjectName("Sidebar")
+    outer = QVBoxLayout(hdr)
+    outer.setContentsMargins(*margins)
+    outer.setSpacing(_SECTION_HEADER_SPACING)
+
+    title_row = QHBoxLayout()
+    title_row.setContentsMargins(0, 0, 0, 0)
+    lbl = SectionTitleLabel(title, hdr)
+    lbl.setProperty("role", "section")
+    # The title takes the stretch so the buttons sit at the right edge; being the
+    # stretchy item, it also absorbs the shrink and wraps only once the row is
+    # genuinely too narrow for one line.
+    title_row.addWidget(lbl, 1)
+    for btn in buttons:
+        title_row.addWidget(btn, 0, Qt.AlignTop)
+    outer.addLayout(title_row)
+
+    if hint:
+        hint_lbl = QLabel(hint, hdr)
+        hint_lbl.setObjectName("Muted")
+        # Word-wrap so a long hint doesn't report its full text width as the
+        # header's minimum — which forced the whole (non-h-scrolling) Cell Gating
+        # pane wider than a narrow window and clipped its controls.
+        hint_lbl.setWordWrap(True)
+        outer.addWidget(hint_lbl)
+    return hdr
+
+
+def wrap_ctrl_row_with_properties(ctrl_row, on_click, *,
+                                  tooltip="Show / hide the figure properties panel"):
+    """Wrap a plot tab's control row so the figure-properties button pins to the
+    right edge of the plot area — aligned with where the export-style dock slides
+    out (``make_plot_with_right_dock``).
+
+    The control rows are ``FlowLayout``s, whose ``addStretch()`` and per-widget
+    alignment are no-ops (widgets/flow_layout.py), so the button cannot be
+    right-aligned inside them. Lift it into an outer ``QHBoxLayout``:
+    ``[ctrl_row (stretch 1)] [properties IconButton, top-right]``. ``AlignTop``
+    keeps the button in the top-right corner when the FlowLayout wraps to
+    multiple lines. ``on_click`` is invoked with no args on click.
+    """
+    from widgets.icon_button import IconButton
+    wrap = QWidget()
+    hl = QHBoxLayout(wrap)
+    hl.setContentsMargins(0, 0, 0, 0)
+    hl.setSpacing(4)
+    hl.addWidget(ctrl_row, 1)
+    btn = IconButton("sliders-horizontal", wrap, tooltip=tooltip)
+    btn.clicked.connect(lambda _=False: on_click())
+    hl.addWidget(btn, 0, Qt.AlignTop | Qt.AlignRight)
+    return wrap
+
+
+def make_properties_button(ctx, parent: QWidget, figure_key: str, *,
+                           tooltip="Show / hide the figure properties panel"):
+    """The Properties toggle, for a tab whose controls are a ``ControlBand``.
+
+    The band right-aligns its action zone itself, so a tab on the band adds this
+    with ``band.add_action(...)`` and needs none of the
+    :func:`wrap_ctrl_row_with_properties` scaffolding that a ``FlowLayout`` row
+    required to get a button to the right edge.
+    """
+    from widgets.icon_button import IconButton
+    btn = IconButton("sliders-horizontal", parent, tooltip=tooltip)
+    btn.clicked.connect(lambda _=False: ctx.figures.open_style_panel(figure_key))
+    return btn
+
+
+#: Registry key of the Plotting page's single control band, built by
+#: ``core/centre_view.py`` before any of the page's leaves.
+PLOTTING_BAND_KEY = "_plotting_band"
+
+#: The Plotting leaves that carry a **Channel and Property of their own**, so
+#: the band's global pair — and the ON-cutoff quick-edit that follows it — does
+#: not drive what they draw and is hidden while they are on screen.
+#:
+#: A tab is here because it *must* own the pair, not because it prefers to: the
+#: Scatter leaves scope a channel per axis, and Response Curves needs a Property
+#: list carrying `Fraction above threshold`, which is not a column and which the
+#: shared combo's consumers would resolve to ``f"{channel}_{metric}"`` and fail
+#: to read. Showing the globals beside a tab-local pair is worse than showing
+#: nothing: two Channel dropdowns on one row, only one of which moves the
+#: figure, and an ON-cutoff box editing the cutoff of whichever channel the
+#: *band* holds rather than the one the tab is measuring — a control that writes
+#: somewhere other than where it appears to.
+#:
+#: A roster rather than the literal tuple of scatter titles this replaced, and
+#: named here beside the band's own key rather than inside the page builder, so
+#: adding a leaf that owns its pair is one line in the place the rule is written.
+#: ``tests/test_band_globals_follow_the_leaf.py`` holds it against the tabs that
+#: actually build their own channel combo.
+OWN_CHANNEL_LEAVES = frozenset({
+    "Scatter Plot", "Scatter Cells", "Scatter Agg", "Response Curves",
+})
+
+
+def plotting_slot_name(title: str, mode: str | None = None) -> str:
+    """The Plotting band's slot name for sub-tab *title* in *mode*.
+
+    Most sub-tabs are one leaf and one slot. Scatter is two leaves behind one
+    sub-tab — a Cells page and a Wells page it switches between — so its slots
+    are named per mode, and the page shows whichever the mode selects.
+    """
+    return f"{title}/{mode}" if mode else title
+
+
+def plotting_band_slot(ctx, title: str, mode: str | None = None):
+    """The Plotting band's :class:`~widgets.control_band.ControlBandSlot` for a leaf.
+
+    The five Plotting sub-tabs share one band. The controls every one of them
+    scopes by — channel, property, threshold — are added to the band when the
+    page is built; each leaf adds its own on top through a slot of its own, and
+    the page shows one leaf's slot at a time. A leaf that built its own band
+    instead put a second strip of chrome under the first.
+
+    Falls back to a free-standing band if the page band is missing, so a leaf
+    built in isolation (a unit test, a one-off harness) still gets a working
+    control row rather than an ``AttributeError``.
+    """
+    from widgets.control_band import ControlBand
+    band = ctx.widgets.get_or_none(PLOTTING_BAND_KEY)
+    if band is None:
+        band = ControlBand()
+    return band.slot(plotting_slot_name(title, mode))
+
+
+def clear_layout(layout) -> None:
+    """Remove every widget and sub-layout from *layout*, freeing them."""
+    if layout is None:
+        return
+    while layout.count():
+        item = layout.takeAt(0)
+        w = item.widget()
+        if w is not None:
+            w.setParent(None)
+            w.deleteLater()
+            continue
+        child = item.layout()
+        if child is not None:
+            clear_layout(child)
+
+
+def _btn(parent: QWidget | None, text: str, command: Callable[[], Any] | None,
+         variant: str, *, icon: str | None = None) -> QPushButton:
+    b = QPushButton(text, parent)
+    b.setProperty("variant", variant)
+    if icon:
+        try:
+            from widgets import icons as _icons
+            dpr = b.devicePixelRatioF() if hasattr(b, "devicePixelRatioF") else 1.0
+            b.setIcon(_icons.make_icon(icon, 14, dpr=dpr or 1.0))
+        except Exception:
+            swallowed()  # was: pass (silent except)
+    if command is not None:
+        b.clicked.connect(lambda _=False: command())
+    return b
+
+
+def btn_primary(parent: QWidget, text: str, command, *, padx: int = 8, pady: int = 2,
+                icon: str | None = None, **_kw) -> QPushButton:
+    return _btn(parent, text, command, "primary", icon=icon)
+
+
+def btn_secondary(parent: QWidget, text: str, command, *, padx: int = 6, pady: int = 2,
+                  icon: str | None = None, **_kw) -> QPushButton:
+    return _btn(parent, text, command, "secondary", icon=icon)
+
+
+def btn_card(parent: QWidget, text: str, command, *, padx: int = 4, **_kw) -> QPushButton:
+    return _btn(parent, text, command, "card")
+
+
+def btn_danger(parent: QWidget, text: str, command, *, padx: int = 4, **_kw) -> QPushButton:
+    return _btn(parent, text, command, "danger")
+
+
+def make_scrollable_canvas(parent: QWidget, **_kw) -> tuple[QScrollArea, QWidget]:
+    """Return (scroll_area, inner_widget). Caller lays widgets inside inner."""
+    sa = QScrollArea(parent)
+    sa.setWidgetResizable(True)
+    sa.setFrameShape(QFrame.NoFrame)
+    inner = QWidget(sa)
+    sa.setWidget(inner)
+    QVBoxLayout(inner)
+    return sa, inner
+
+
+class _PlotDockHost(QWidget):
+    """Container that hosts the plot area + a right-side dock as layout
+    siblings.
+
+    Earlier the dock floated as a child overlay so that opening it never
+    resized matplotlib. That design clipped the dock when the host was
+    narrower than the panel's fixed width — content (incl. the close button)
+    fell off the window's right edge. We now lay the dock as a real layout
+    sibling: opening it does shrink the plot (a one-shot matplotlib redraw),
+    but the panel always renders at its full width with its close button
+    reachable.
+
+    ``set_overlay_dock`` is kept as a compatibility shim so existing callers
+    that pass a width hint still update the dock's fixed width.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._overlay_dock: QWidget | None = None
+
+    def set_overlay_dock(self, dock: QWidget, width: int = 0) -> None:
+        # Written, never read: the host keeps a reference to the dock it is
+        # sizing itself around, so the dock outlives the call that mounted it.
+        self._overlay_dock = dock
+        if width > 0:
+            dock.setFixedWidth(int(width))
+
+
+def make_plot_with_right_dock(parent: QWidget) -> tuple[QWidget, QVBoxLayout, QWidget]:
+    """Build a plot area with a right-side dock as a layout sibling inside
+    ``parent``.
+
+    Returns ``(plot_area, plot_layout, right_dock)`` — callers lay their
+    figure/toolbar into ``plot_layout`` and the export-style sidebar docks
+    into ``right_dock``. ``right_dock`` is a layout sibling of ``plot_area``
+    so toggling it visible does shrink the plot (and re-renders the figure
+    once) — the trade-off accepted to keep the dock's full width on screen.
+    """
+    root = parent.layout()
+    if root is None:
+        root = QVBoxLayout(parent)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+    host = _PlotDockHost(parent)
+    host_layout = QHBoxLayout(host)
+    host_layout.setContentsMargins(0, 0, 0, 0)
+    host_layout.setSpacing(0)
+
+    plot_area = QWidget(host)
+    plot_layout = QVBoxLayout(plot_area)
+    plot_layout.setContentsMargins(0, 0, 0, 0)
+    plot_layout.setSpacing(0)
+    host_layout.addWidget(plot_area, 1)
+
+    right_dock = QWidget(host)
+    right_dock_layout = QVBoxLayout(right_dock)
+    right_dock_layout.setContentsMargins(0, 0, 0, 0)
+    right_dock_layout.setSpacing(0)
+    right_dock.setVisible(False)
+    right_dock._dock_host = host  # type: ignore[attr-defined]
+    host_layout.addWidget(right_dock, 0)
+    host.set_overlay_dock(right_dock, 0)
+
+    root.addWidget(host, 1)
+    return plot_area, plot_layout, right_dock
+
+
+def mount_widget_in_plot_dock(dock: QWidget, widget: QWidget, width: int = 0) -> None:
+    """Show *widget* in a plot tab's right *dock*, hiding any sibling panel
+    already docked there.
+
+    A plot tab's right dock (``make_plot_with_right_dock``) is a shared
+    slide-out: the Export-Style / Properties sidebar and the Scatter cell viewer
+    both live there. This keeps exactly one of them visible at a time, so the
+    two coexist without overlapping — open one and the other slides away.
+    """
+    if dock is None or widget is None:
+        return
+    lay = dock.layout()
+    if lay is None:
+        return
+    if lay.indexOf(widget) < 0:
+        lay.addWidget(widget)
+    for i in range(lay.count()):
+        sibling = lay.itemAt(i).widget()
+        if sibling is not None and sibling is not widget:
+            sibling.hide()
+    widget.show()
+    host = getattr(dock, "_dock_host", None)
+    if host is not None and hasattr(host, "set_overlay_dock"):
+        host.set_overlay_dock(dock, width)
+    dock.setVisible(True)
+
+
+def hide_plot_dock(dock: QWidget) -> None:
+    """Hide a plot tab's right dock (and whatever panel it currently holds)."""
+    if dock is not None:
+        dock.setVisible(False)
+
+
+def _with_caret(text: str) -> str:
+    """Append the drop-down caret unless the caller already wrote one.
+
+    Both menu-button factories hide QToolButton's native menu indicator, on the
+    grounds that the label carries a caret of its own. That was a claim about
+    the call sites rather than something the helpers guaranteed, and six of them
+    passed a bare "Export" — so those buttons dropped a menu with nothing on
+    them to say so. Adding it here makes the comment true by construction.
+    """
+    text = str(text)
+    return text if text.rstrip().endswith("▾") else f"{text} ▾"
+
+
+def make_popover_button(text: str, parent: QWidget):
+    """A compact toolbar button that opens a small panel ("popover") on click.
+
+    Returns ``(button, content_widget, content_layout)`` — add controls to
+    ``content_layout`` and they appear in the popup. Used to collapse rarely-
+    changed plotting controls (e.g. Fold change) off the always-visible control
+    bar (C1), trading one row of vertical space for one click.
+    """
+    from PySide6.QtWidgets import QToolButton, QMenu, QWidgetAction
+
+    btn = QToolButton(parent)
+    btn.setText(_with_caret(text))
+    btn.setPopupMode(QToolButton.InstantPopup)
+    btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    btn.setProperty("variant", "secondary")
+    # The label carries the ▾ caret (added above if the caller left it off), so
+    # hide QToolButton's native menu-indicator — the two would otherwise render
+    # as overlapping double arrows.
+    btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
+    menu = QMenu(btn)
+    content = QWidget(menu)
+    content_layout = QVBoxLayout(content)
+    content_layout.setContentsMargins(10, 8, 10, 8)
+    content_layout.setSpacing(4)
+    wa = QWidgetAction(menu)
+    wa.setDefaultWidget(content)
+    menu.addAction(wa)
+    btn.setMenu(menu)
+    return btn, content, content_layout
+
+
+def make_action_menu_button(text: str, parent: QWidget, tooltip: str = ""):
+    """A compact toolbar button that drops a menu of *actions* on click.
+
+    Returns ``(button, menu)`` — add ``QAction``s (or use ``add_menu_action``)
+    to ``menu``. Unlike :func:`make_popover_button` (which hosts live widgets in
+    a panel), this is for click-and-close commands — Export CSV, Save figure,
+    etc. Used to collapse a cluster of action buttons into one entry so a
+    control row stays reachable when Split View narrows the pane.
+    """
+    from PySide6.QtWidgets import QToolButton, QMenu
+
+    btn = QToolButton(parent)
+    btn.setText(_with_caret(text))
+    btn.setPopupMode(QToolButton.InstantPopup)
+    btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    btn.setProperty("variant", "secondary")
+    if tooltip:
+        btn.setToolTip(tooltip)
+    # The label carries the ▾ caret (added above if the caller left it off), so
+    # hide the native indicator — mirrors make_popover_button.
+    btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
+    menu = QMenu(btn)
+    btn.setMenu(menu)
+    return btn, menu
+
+
+def add_menu_action(menu, label: str, callback, *, tooltip: str = ""):
+    """Add a simple ``QAction`` to *menu* that calls *callback* on trigger."""
+    from PySide6.QtGui import QAction
+
+    action = QAction(label, menu)
+    if tooltip:
+        action.setToolTip(tooltip)
+    action.triggered.connect(lambda _=False: callback())
+    menu.addAction(action)
+    return action
+
+
+#: Label of the raw-cell export entry. Named once so the guard that checks every
+#: plot tab offers it, and the tests that trigger it, agree with the builder.
+SAVE_CELL_DATA_LABEL = "Save cell data…"
+
+
+def build_plot_save_menu(
+    ctx,
+    band,
+    *,
+    card_key: str,
+    data_label: str,
+    data_cb: Callable[[], None],
+    cells_cb: Callable[[], None],
+    data_tooltip: str = "",
+    cells_label: str = SAVE_CELL_DATA_LABEL,
+):
+    """The one ``Save ▾`` menu every plot tab gets, built here rather than by hand.
+
+    Returns ``(button, menu, data_action)``. The caller adds the button to its
+    control band; ``data_action`` is returned because Spatial enables and
+    disables its own data entry as the level changes.
+
+    Each of the eight plot tabs used to assemble this menu itself, with four or
+    five ``add_menu_action`` calls, and they had drifted: six read "Save Figure…"
+    against two "Save figure…", seven "Export CSV…" against one "Export Summary
+    CSV…". A menu assembled per tab also means a menu that can *miss* an entry
+    per tab, which is why ``cells_cb`` is required rather than optional — a tab
+    cannot acquire this menu without offering the cells the plot was drawn from.
+
+    The three figure entries are wired here, from ``core.plot_card_actions``,
+    so a tab supplies only its two data callbacks and its card key. That is what
+    keeps this helper in ``core/``: it names no feature, and the callbacks arrive
+    as plain callables (``tests/test_guardrails.py`` holds the core→feature
+    import budget at zero slack).
+    """
+    from review.core.plot_card_actions import (
+        copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
+    )
+
+    button, menu = make_action_menu_button("Save ▾", band,
+                                           tooltip="Save this plot and its data")
+    data_action = add_menu_action(menu, data_label, data_cb, tooltip=data_tooltip)
+    add_menu_action(menu, cells_label, cells_cb,
+                    tooltip="Every cell this plot was computed from, all columns")
+    menu.addSeparator()
+    add_menu_action(menu, "Save figure…",
+                    lambda: save_active_card_figure(ctx, card_key))
+    add_menu_action(menu, "Copy figure as SVG",
+                    lambda: copy_active_card_as_svg(ctx, card_key))
+    menu.addSeparator()
+    add_menu_action(menu, "Save to Saved Plots",
+                    lambda: save_card_to_gallery(ctx, card_key))
+    return button, menu, data_action
+
+
+def install_canvas_wheel_scroll(canvas, scroll_area) -> None:
+    """Forward wheel events from a matplotlib canvas to ``scroll_area``.
+
+    FigureCanvasQTAgg accepts wheel events for its own toolbar zoom, so a
+    QScrollArea wrapping it never sees them. This installs a wheelEvent
+    override that forwards the vertical wheel delta to the scroll area's
+    vertical scrollbar when no modifier key is held.
+    """
+    orig_wheel = getattr(canvas, "wheelEvent", None)
+
+    def _wheel(event):
+        if event.modifiers() == Qt.NoModifier:
+            vbar = scroll_area.verticalScrollBar()
+            if vbar is not None and (vbar.maximum() - vbar.minimum()) > 0:
+                vbar.setValue(vbar.value() - event.angleDelta().y())
+                event.accept()
+                return
+        if callable(orig_wheel):
+            orig_wheel(event)
+
+    canvas.wheelEvent = _wheel
+
+
+def ask_name_dialog(parent: QWidget, *, title: str, prompt: str, default: str,
+                    width: int = 30, strip: bool = True, **_kw) -> str | None:
+    text, ok = QInputDialog.getText(parent, title, prompt, QLineEdit.Normal, default)
+    if not ok:
+        return None
+    if strip:
+        text = text.strip()
+        return text or None
+    # Caller wants intentional whitespace preserved (e.g. Add Prefix /
+    # Add Suffix on well labels). Still treat an empty box as a cancel.
+    return text if text else None
+
+
+_THEMED_NAV_CLS = None
+
+
+def _themed_nav_toolbar_class():
+    """Return a cached NavigationToolbar2QT subclass that recolors icons from theme tokens.
+
+    The base class decides icon color from the QPalette background value, which
+    QSS does not update — so in Light theme icons came out white on a styled
+    light background. This subclass reads the current theme's ``TXT_PRI`` and
+    repaints the icons directly.
+    """
+    global _THEMED_NAV_CLS
+    if _THEMED_NAV_CLS is not None:
+        return _THEMED_NAV_CLS
+
+    from matplotlib import cbook
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+
+    class _ThemedNavToolbar(NavigationToolbar2QT):
+        def _icon(self, name):
+            path_regular = cbook._get_data_path("images", name)
+            path_large = path_regular.with_name(
+                path_regular.name.replace(".png", "_large.png")
+            )
+            filename = str(path_large if path_large.exists() else path_regular)
+            pm = QPixmap(filename)
+            pm.setDevicePixelRatio(self.devicePixelRatioF() or 1)
+            try:
+                from ui import theme
+                icon_color = QColor(theme.Colors.text_primary)
+            except Exception:
+                icon_color = self.palette().color(self.foregroundRole())
+            mask = pm.createMaskFromColor(QColor("black"), Qt.MaskMode.MaskOutColor)
+            pm.fill(icon_color)
+            pm.setMask(mask)
+            return QIcon(pm)
+
+    _THEMED_NAV_CLS = _ThemedNavToolbar
+    return _ThemedNavToolbar
+
+
+def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidget:
+    """Build the shared "Error Band: SEM/SD" (+ optional "Spread: FOV") toggle
+    widget. The SEM button is wired through ``app._toggle_sem`` and registered in
+    ``app._sem_btns`` so ``_toggle_sem`` can update every instance; the FOV button
+    (``with_fov=True``) goes through ``app._toggle_fov_replicates`` /
+    ``app._fov_btns`` and is auto-disabled whenever replicate groups are active
+    (``_refresh_fov_btn_state``). Used both by :func:`attach_plot_toolbar` (legacy
+    toolbar) and by the v2 ``PlotCard`` controls row.
+
+    A8: fully ctx-native — reads the SEM flag off ``ctx.state.plot``, wires the
+    ctx-native ``core.plot_toggles`` handlers, and registers the buttons on the
+    ``ctx.runtime.sem`` / ``ctx.runtime.fov`` banks (mirrors the batch-export
+    controls row)."""
+    from review.core.plot_toggles import (
+        refresh_fov_btn_state,
+        toggle_fov_replicates,
+        toggle_sem,
+    )
+    w = QWidget(parent)
+    h = QHBoxLayout(w)
+    h.setContentsMargins(0, 0, 0, 0)
+    h.setSpacing(8)
+
+    eb_lbl = QLabel("Error Band", w)
+    eb_lbl.setObjectName("Muted")
+    h.addWidget(eb_lbl)
+    initial = bool(ctx.state.plot.use_sem)
+    sem_btn = QPushButton(spread_label(initial), w)
+    sem_btn.setProperty("variant", "sem" if initial else "sem_warn")
+    sem_btn.clicked.connect(lambda _=False: toggle_sem(ctx))
+    h.addWidget(sem_btn)
+    if ctx.runtime.sem.btns is None:
+        ctx.runtime.sem.btns = []
+    ctx.runtime.sem.btns.append(sem_btn)
+    if not ctx.runtime.sem.btn:
+        ctx.runtime.sem.btn = sem_btn
+
+    if with_fov:
+        sp_lbl = QLabel("Spread", w)
+        sp_lbl.setObjectName("Muted")
+        h.addWidget(sp_lbl)
+        fov_btn = QPushButton("FOV", w)
+        fov_btn.setProperty("variant", "toggle")
+        fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
+        h.addWidget(fov_btn)
+        if ctx.runtime.fov.btns is None:
+            ctx.runtime.fov.btns = []
+        ctx.runtime.fov.btns.append(fov_btn)
+        if not ctx.runtime.fov.btn:
+            ctx.runtime.fov.btn = fov_btn
+        refresh_fov_btn_state(ctx)
+
+    h.addStretch(1)
+    return w
+
+
+def multiselect_button_text(prefix: str, selections: dict) -> str:
+    """Self-describing text for a checkbox-menu multi-select button.
+
+    Folds *prefix* and the selection count into one string
+    ("Timepoints: 2/5 selected") for a band control whose button IS the
+    label — used in place of a button + separate "(2/5 selected)" QLabel
+    pair, the pattern ``LabeledComboBox`` uses for a plain combo.
+    """
+    total = len(selections)
+    count = sum(1 for v in selections.values() if v)
+    if not total:
+        return f"{prefix}: 0 selected"
+    if count == total:
+        return f"{prefix}: All {count} selected"
+    return f"{prefix}: {count}/{total} selected"
+
+
+def apply_plot_card_decorators(ctx, card, tab_name: str) -> None:
+    """Apply every feature-registered plot-card decorator to *card*.
+
+    Decouples plot tabs from feature-specific card add-ons (e.g. Saved Plots'
+    "save to gallery" hover button): a feature declares a ``plot_card_decorator``
+    on its ``FeatureDescriptor`` and this fans it out. A profiled-out feature
+    isn't in the registry, so its decorator never runs — and its module is never
+    imported here, which is what lets a subset binary omit it entirely.
+    """
+    for descriptor in ctx.features.with_hook("plot_card_decorator"):
+        try:
+            descriptor.plot_card_decorator()(ctx, card, tab_name)
+        except Exception:
+            import logging
+            logging.getLogger("review").exception(
+                "plot-card decorator from %r failed", descriptor.name)
+
+
+def attach_plot_toolbar(
+    layout,
+    canvas,
+    parent: QWidget,
+    app: Any = None,
+    *,
+    with_sem: bool = True,
+    with_fov: bool = False,
+) -> Any:
+    """Create a themed matplotlib nav toolbar, append it to *layout* (at bottom),
+    and optionally embed the shared :func:`make_band_controls` widget."""
+    cls = _themed_nav_toolbar_class()
+    toolbar = cls(canvas, parent)
+    toolbar.setObjectName("PlotToolbar")
+    if with_sem and app is not None:
+        toolbar.addSeparator()
+        toolbar.addWidget(make_band_controls(app._ctx, toolbar, with_fov=with_fov))
+    layout.addWidget(toolbar)
+    return toolbar
+
+
+# ── Thumbnail rendering ──────────────────────────────────────────────────────
+
+def apply_log_scale(arr, lo, hi):
+    """Map ``arr`` (and the LUT window ``lo``/``hi``) into log10 space.
+
+    Single source of truth for the Image Table's log-intensity display, shared by
+    the live thumbnail (:func:`make_fluor_thumb`) and the export composer
+    (:func:`lut_colormap_to_rgb`) so the two render paths agree. Non-positive
+    pixels are floored to the smallest positive value present (``1.0`` when there
+    is none) so ``log10`` stays finite; ``lo``/``hi`` are floored the same way.
+    ``None`` bounds pass through as ``None`` so the caller's auto-fit still works
+    (now in log space). Returns ``(arr_log, lo_log, hi_log)``.
+    """
+    import numpy as _np
+
+    a = _np.asarray(arr, dtype=_np.float32)
+    pos = a[a > 0]
+    floor = float(pos.min()) if pos.size else 1.0
+    arr_log = _np.log10(_np.clip(a, floor, None))
+
+    def _b(v) -> float | None:
+        if v is None:
+            return None
+        return float(_np.log10(max(float(v), floor)))
+
+    return arr_log, _b(lo), _b(hi)
+
+
+def make_fluor_thumb(arr, sz_w: int, sz_h: int,
+                     lo: float | None, hi: float | None,
+                     crop=None,
+                     tint: tuple[float, float, float] | None = None,
+                     cmap: str | None = None,
+                     log_scale: bool = False) -> QPixmap | None:
+    """Render a greyscale float32 array as a QPixmap with LUT [lo, hi].
+
+    Rendering selection (in priority order):
+      * If ``cmap`` is a matplotlib colormap name (e.g. ``"viridis"``,
+        ``"Reds"``, ``"Greens"``…), the LUT-clipped intensity is mapped
+        through that colormap across its full gradient — low intensity →
+        cmap(0.0), high intensity → cmap(1.0). This is the canonical
+        multi-colour LUT path the Image Table uses.
+      * Else if ``tint`` is an ``(r, g, b)`` triple, the LUT-clipped
+        intensity is multiplied by the tint (legacy single-colour ramp).
+      * Else the result is grayscale.
+
+    When ``crop`` is a (y0, x0, y1, x1) tuple the array is sliced to that
+    sub-region before LUT application and scaling.
+    """
+    import numpy as _np
+
+    if arr is None:
+        return None
+    arr = _np.asarray(arr, dtype=_np.float32)
+    if crop is not None:
+        y0, x0, y1, x1 = crop
+        ih, iw = arr.shape[:2]
+        y0 = max(0, min(int(y0), ih))
+        y1 = max(y0, min(int(y1), ih))
+        x0 = max(0, min(int(x0), iw))
+        x1 = max(x0, min(int(x1), iw))
+        if y1 > y0 and x1 > x0:
+            arr = arr[y0:y1, x0:x1]
+    if log_scale:
+        arr, lo, hi = apply_log_scale(arr, lo, hi)
+    alo = lo if lo is not None else float(arr.min())
+    ahi = hi if hi is not None else float(arr.max())
+    if ahi <= alo:
+        ahi = alo + 1.0
+    norm = (_np.clip(arr, alo, ahi) - alo) / (ahi - alo)
+    if cmap:
+        try:
+            from widgets.lut_cmaps import lut_cmap
+            mpl_cmap = lut_cmap(cmap)
+        except (KeyError, Exception):
+            mpl_cmap = None
+        if mpl_cmap is not None:
+            mapped = mpl_cmap(norm)[..., :3]  # drop alpha
+            rgb = (mapped * 255).astype(_np.uint8).copy()
+        else:
+            disp = (norm * 255).astype(_np.uint8)
+            rgb = _np.stack([disp, disp, disp], axis=-1).copy()
+    elif tint is not None:
+        disp = (norm * 255).astype(_np.uint8)
+        r, g, b = (max(0.0, min(1.0, float(c))) for c in tint)
+        df = disp.astype(_np.float32)
+        rgb = _np.stack([
+            (df * r).astype(_np.uint8),
+            (df * g).astype(_np.uint8),
+            (df * b).astype(_np.uint8),
+        ], axis=-1).copy()
+    else:
+        disp = (norm * 255).astype(_np.uint8)
+        rgb = _np.stack([disp, disp, disp], axis=-1).copy()
+    h, w, _ = rgb.shape
+    qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+    pm = QPixmap.fromImage(qimg)
+    return pm.scaled(int(sz_w), int(sz_h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+
+def lut_colormap_to_rgb(arr, lo: float | None = None,
+                        hi: float | None = None, cmap_name: str = "",
+                        log_scale: bool = False):
+    """Map a 2-D array to an (H, W, 3) uint8 RGB via a [lo, hi] LUT window and an
+    optional matplotlib colormap. ``lo``/``hi`` default to the array min/max;
+    an empty/None ``cmap_name`` (or an unknown one) falls back to greyscale.
+
+    ``log_scale`` maps the array + window into log10 space first (see
+    :func:`apply_log_scale`) so the LUT spans the data logarithmically.
+
+    Shared by the Image Table cell renderer and the Playground renderer so the
+    LUT + colormap math has a single source of truth.
+    """
+    import numpy as _np
+
+    a = _np.asarray(arr, dtype=_np.float32)
+    if log_scale:
+        a, lo, hi = apply_log_scale(a, lo, hi)
+    alo = lo if lo is not None else float(a.min())
+    ahi = hi if hi is not None else float(a.max())
+    if ahi <= alo:
+        ahi = alo + 1.0
+    norm = _np.clip((a - alo) / (ahi - alo), 0.0, 1.0)
+    if cmap_name:
+        try:
+            from widgets.lut_cmaps import lut_cmap
+            return (lut_cmap(cmap_name)(norm)[..., :3] * 255).astype(_np.uint8).copy()
+        except Exception:
+            swallowed()  # was: pass (silent except)
+    gray = (norm * 255).astype(_np.uint8)
+    return _np.stack([gray, gray, gray], axis=-1)
+
+
+def make_overlay_thumb(arr, sz_w: int, sz_h: int,
+                       lo: float | None = None, hi: float | None = None,
+                       crop=None) -> QPixmap | None:
+    """Render a 2-D or 3-D array as a QPixmap scaled to (sz_w, sz_h).
+
+    If ``lo``/``hi`` are given they override the per-image auto range so the
+    Movie Montage overlay LUT controls can tune brightness/contrast. For 3-D
+    RGB overlays the [lo, hi] window is applied uniformly across channels.
+    When ``crop`` is supplied, the same (y0, x0, y1, x1) sub-region is used
+    so overlay thumbnails align with the cropped fluorescence thumbnails.
+    """
+    import numpy as _np
+
+    if arr is None:
+        return None
+    arr = _np.asarray(arr)
+    if crop is not None:
+        y0, x0, y1, x1 = crop
+        ih, iw = arr.shape[:2]
+        y0 = max(0, min(int(y0), ih))
+        y1 = max(y0, min(int(y1), ih))
+        x0 = max(0, min(int(x0), iw))
+        x1 = max(x0, min(int(x1), iw))
+        if y1 > y0 and x1 > x0:
+            arr = arr[y0:y1, x0:x1]
+    if arr.ndim == 2:
+        arr_f = arr.astype(_np.float32)
+        alo = lo if lo is not None else float(arr_f.min())
+        ahi = hi if hi is not None else float(arr_f.max())
+        if ahi <= alo:
+            ahi = alo + 1.0
+        disp = ((_np.clip(arr_f, alo, ahi) - alo) / (ahi - alo) * 255).astype(_np.uint8)
+        rgb = _np.stack([disp, disp, disp], axis=-1).copy()
+    elif arr.ndim == 3 and arr.shape[2] >= 3:
+        a = arr[:, :, :3].astype(_np.float32)
+        alo = lo if lo is not None else float(a.min())
+        ahi = hi if hi is not None else float(a.max())
+        if ahi <= alo:
+            ahi = alo + 1.0
+        a = _np.clip((a - alo) / (ahi - alo) * 255.0, 0, 255).astype(_np.uint8)
+        rgb = _np.ascontiguousarray(a)
+    else:
+        return None
+    h, w, _ = rgb.shape
+    qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+    pm = QPixmap.fromImage(qimg)
+    return pm.scaled(int(sz_w), int(sz_h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+
+# ── Small value / widget helpers ─────────────────────────────────────────────
+
+def safe_int_or_none(value: object) -> int | None:
+    """Best-effort coercion of ``value`` to int, returning None on failure."""
+    if value is None:
+        return None
+    try:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+def mute_color(hex_color: str, factor: float = 0.5) -> str:
+    """Blend *hex_color* 50% toward ``theme.Colors.text_muted``.
+
+    Used to dim hidden rep-sets on the plate map so they are visually
+    distinct from visible ones while still showing their hue.
+    """
+    mh = theme.Colors.text_muted.lstrip("#")
+    grey = (int(mh[0:2], 16), int(mh[2:4], 16), int(mh[4:6], 16))
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    mr = int(r + (grey[0] - r) * factor)
+    mg = int(g + (grey[1] - g) * factor)
+    mb = int(b + (grey[2] - b) * factor)
+    return f"#{mr:02X}{mg:02X}{mb:02X}"
+
+
+
+def apply_theme(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
+    """Apply the application-wide stylesheet.
+
+    Single source of truth is the repo-root ``theme`` module. Previously
+    this re-applied the legacy ``ui/theme`` per-theme QSS, which clobbered
+    ``theme.qss()`` whenever a ``ReviewApp`` was constructed (including
+    embedded under AllWell).
+    """
+    try:
+        from ui import theme  # type: ignore
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(theme.qss())
+    except Exception:
+        swallowed()  # was: pass (silent except)
+
+
+
+def toast(ctx, msg: str, *, kind: str = "info", msec: int = 3500) -> None:
+    app = ctx.window  # transitional bridge (A3)
+    """Show a transient v2 Toast over the main window.
+
+    ``kind`` matches widgets.toast.Toast: 'info' / 'success' / 'warn' /
+    'danger'. Falls back to _set_status if anything goes wrong so the
+    message is never silently lost.
+    """
+    try:
+        from widgets.toast import Toast
+        Toast.show_message(app, msg, kind=kind, msec=msec)
+    except Exception:
+        swallowed()  # was: pass (silent except)
+    app._set_status(msg)
+
+
+
+def _pump(*, allow_user_input: bool) -> None:
+    """Repaint without letting the caller's own work be re-entered.
+
+    ``processEvents`` dispatches everything queued, user input included, so a
+    progress pump inside a long loop hands control back to whatever the user
+    clicks — including the tab, sidebar and commit handlers that read the very
+    state the loop is halfway through rebuilding. ``load_directory`` is the
+    sharp case: it pumps once per CSV, after ``begin_load`` has already emptied
+    the caches, so a click landing between two files runs against a dataset
+    that is neither the old one nor the new one.
+
+    Long operations that offer a Cancel button need their input dispatched, so
+    this stays the default; the load path opts out.
+    """
+    from PySide6.QtCore import QEventLoop
+
+    if allow_user_input:
+        QApplication.processEvents()
+    else:
+        QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
+
+
+def show_progress(ctx, maximum: int, msg: str = "", *,
+                  allow_user_input: bool = True) -> None:
+    app = ctx.window  # transitional bridge (A3)
+    """Display the progress bar and set its maximum value."""
+    app._progress_bar.setValue(0)
+    app._progress_bar.setMaximum(max(1, maximum))
+    app._progress_bar.setVisible(True)
+    if msg:
+        app._set_status(msg)
+    _pump(allow_user_input=allow_user_input)
+
+
+def step_progress(ctx, value: int, msg: str = "", *,
+                  allow_user_input: bool = True) -> None:
+    app = ctx.window  # transitional bridge (A3)
+    """Advance the progress bar to *value* and repaint immediately."""
+    app._progress_bar.setValue(value)
+    if msg:
+        app._set_status(msg)
+    _pump(allow_user_input=allow_user_input)
+
+
+
+def toggle_log(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
+    app._log_visible = not app._log_visible
+    if app._log_visible:
+        app._log_frame.setVisible(True)
+        app._log_btn.setText("Log ▾")
+    else:
+        app._log_frame.setVisible(False)
+        app._log_btn.setText("Log ▴")
+
+
+
+#: Every registered editor of the project notes, in no particular order. Home's
+#: box beside the plate is the only one — but the roster, and the helpers below
+#: that fan out over it, stay: the save path reads the slice through them rather
+#: than reading a widget by name, which is what made a second editor safe to add
+#: and then safe to remove.
+NOTES_WIDGET_KEYS: tuple[str, ...] = ("_home_notes_edit",)
+
+
+def notes_widgets(ctx):
+    """The notes editors that currently exist, as ``(key, widget)`` pairs.
+
+    Any of them can be absent: the page builds lazily, and a feature profile may
+    drop one entirely.
+    """
+    for key in NOTES_WIDGET_KEYS:
+        widget = ctx.widgets.get_or_none(key)
+        if widget is not None:
+            yield key, widget
+
+
+def commit_focused_notes(ctx) -> None:
+    """Fold an in-progress edit into the state slice, and queue it for saving.
+
+    The editors commit on focus-out, which is deliberate — a freeform notes box
+    should not autosave per keystroke. The cost is that every save path which
+    does *not* move focus first (the explicit Save button, the debounced
+    autosave, window close, a dataset swap) would otherwise persist whatever the
+    slice last held and silently drop what is on screen. That is why the save
+    path used to read the widget directly; with two editors that read has no
+    tiebreak, so the in-progress one is folded in here and the save path reads
+    one thing.
+
+    Which editor is "in progress" is answered twice, because focus alone is not
+    enough. On a window that is closing — or one that never had keyboard focus
+    to begin with — every editor reports ``hasFocus() == False`` while one of
+    them still holds text nobody has committed, which is exactly the save this
+    function exists to protect. So: the focused editor wins if there is one;
+    otherwise the single editor whose text differs from the slice does. Two
+    editors differing at once cannot happen while the mirror is doing its job,
+    and if it ever did, guessing between them would be worse than leaving the
+    slice alone.
+    """
+    divergent = []
+    for _key, widget in notes_widgets(ctx):
+        try:
+            text = widget.toPlainText()
+            if widget.hasFocus():
+                _commit_notes_text(ctx, text)
+                return
+            if text != (ctx.state.selection.notes_text or ""):
+                divergent.append(text)
+        except RuntimeError:
+            # The C++ side is gone (page torn down mid-save); nothing to commit.
+            continue
+    if len(divergent) == 1:
+        _commit_notes_text(ctx, divergent[0])
+
+
+def _commit_notes_text(ctx, text: str) -> None:
+    """Write *text* into the slice and queue a save if it is new.
+
+    Folding the text in is only half the commit. Everything else the user edits
+    reaches disk by way of the persistence queue, and text that has never
+    focused out has never been queued — so a caller that folds the edit in and
+    then drains the queue drains a queue this edit was never in, and the note
+    typed just before the window closed is lost exactly as if nothing had been
+    folded in at all. Queuing here rather than at each call site is what stops
+    the next caller from having to remember: the commit and the queue entry are
+    one act.
+
+    The save is scheduled only when the text actually changed, so the repeated
+    commits on the save paths do not queue a write of what was just written.
+    """
+    if text == (ctx.state.selection.notes_text or ""):
+        return
+    ctx.state.selection.notes_text = text
+    persistence = getattr(ctx, "persistence", None)
+    schedule = getattr(persistence, "schedule_save", None)
+    if callable(schedule):
+        schedule("notes")
+
+
+def mirror_notes(ctx, *, source_key: str) -> None:
+    """Push the committed text into every notes editor other than *source_key*.
+
+    Pass ``source_key=""`` to reach all of them — that is what the hydrator does
+    when the text came from disk rather than from a box on screen. Signals are
+    blocked so mirroring is never itself read as an edit, which is what would
+    otherwise let a stale box write back over a fresh edit.
+    """
+    text = ctx.state.selection.notes_text or ""
+    for key, widget in notes_widgets(ctx):
+        if key == source_key:
+            continue
+        try:
+            if widget.toPlainText() == text:
+                continue
+            blocked = widget.blockSignals(True)
+            try:
+                widget.setPlainText(text)
+            finally:
+                widget.blockSignals(blocked)
+        except RuntimeError:
+            continue
+
+
+def clear_notes_editors(ctx) -> None:
+    """Blank every notes editor, without either of them reading it as an edit.
+
+    Called when a dataset is swapped or the sample definitions are reset. The
+    slice is blanked by the caller; this keeps the boxes from going on showing
+    the previous dataset's text, which a focus-out would then write to the new
+    dataset.
+    """
+    for _key, widget in notes_widgets(ctx):
+        try:
+            blocked = widget.blockSignals(True)
+            try:
+                widget.clear()
+            finally:
+                widget.blockSignals(blocked)
+        except RuntimeError:
+            continue
+
+
+def notes_schedule_save(ctx, *, widget_key: str = "_home_notes_edit") -> None:
+    """Capture one editor's Notes text and queue a debounced save.
+
+    The widget read must stay here (the registry never touches widgets);
+    the debounce + disk write live in the PersistenceRegistry. *widget_key*
+    names the editor that is committing, so the caller's own box wins and any
+    other is mirrored to match rather than competing with it.
+    """
+    edit = ctx.widgets.get_or_none(widget_key)
+    if edit is not None:
+        ctx.state.selection.notes_text = edit.toPlainText()
+    mirror_notes(ctx, source_key=widget_key)
+    ctx.persistence.schedule_save("notes")
+
+
+
+def norm_timepoint(ctx, value: object) -> str:
+    """The ctx-shaped leaf over :func:`data.image_identity.normalize_tp`.
+
+    A ctx signature so features can reach the canonical timepoint key through
+    the context rather than importing the data layer directly; the rule itself
+    lives in one place, because a second copy of it drifted once already (this
+    one kept the truthiness test that turned a numeric ``0`` into ``""`` after
+    the original had been fixed, and had to be fixed a second time to catch
+    up)."""
+    return normalize_tp(value)
+

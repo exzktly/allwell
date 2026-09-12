@@ -15,9 +15,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.core.dataset_state import DatasetState
-from well_viewer.data import image_repository as repo_mod
-from well_viewer.data.image_repository import ImageRepository
+from review.core.dataset_state import DatasetState
+from review.data import image_repository as repo_mod
+from review.data.image_repository import ImageRepository
 
 
 def _ctx(dataset: DatasetState):
@@ -48,7 +48,7 @@ def test_discovery_is_handed_every_dataset_field_it_needs(monkeypatch):
         seen.update(kwargs)
         return ({}, {}, {}, {})
 
-    import well_viewer.data.image_discovery as discovery
+    import review.data.image_discovery as discovery
     monkeypatch.setattr(discovery, "find_well_images_and_masks", _fake_find)
 
     ds = _dataset()
@@ -66,7 +66,7 @@ def test_discovery_is_handed_every_dataset_field_it_needs(monkeypatch):
 def test_array_passes_the_ref_and_the_greyscale_flag(monkeypatch):
     calls = []
 
-    import well_viewer.data.image_discovery as discovery
+    import review.data.image_discovery as discovery
     monkeypatch.setattr(discovery, "open_imgref_as_array",
                         lambda ref, greyscale=False: calls.append((ref, greyscale)) or "arr")
 
@@ -87,8 +87,8 @@ def test_invalidate_drops_both_caches(monkeypatch):
     choosing between a stale picture and a stale archive handle."""
     dropped = []
 
-    import well_viewer.data.image_discovery as discovery
-    import well_viewer.data.zipfile_cache as zipcache
+    import review.data.image_discovery as discovery
+    import review.data.zipfile_cache as zipcache
     monkeypatch.setattr(discovery, "invalidate_decode_cache",
                         lambda: dropped.append("decode"))
     monkeypatch.setattr(zipcache, "invalidate", lambda path=None: dropped.append("zip"))
@@ -101,8 +101,8 @@ def test_invalidate_drops_both_caches(monkeypatch):
 def test_the_repository_is_wired_onto_the_state():
     """Reached as ``ctx.state.images``, attached where ``ctx.state.repo`` is."""
     pytest.importorskip("PySide6")
-    from well_viewer.core.app_state import AppState
-    from well_viewer.viewer_context import ViewerContext
+    from review.core.app_state import AppState
+    from review.viewer_context import ViewerContext
 
     state = AppState()
     ctx = ViewerContext(state=state, bus=None, widgets=None)

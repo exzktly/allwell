@@ -32,13 +32,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from well_viewer.core.app_runtime import AppRuntime
-from well_viewer.core.app_state import AppState
-from well_viewer.core.event_bus import EventBus
-from well_viewer.core.widget_registry import WidgetRegistry
-from well_viewer.domain import stats_compute as sc
-from well_viewer.domain.batch_models import ReplicateSet
-from well_viewer.viewer_context import ViewerContext
+from review.core.app_runtime import AppRuntime
+from review.core.app_state import AppState
+from review.core.event_bus import EventBus
+from review.core.widget_registry import WidgetRegistry
+from review.domain import stats_compute as sc
+from review.domain.batch_models import ReplicateSet
+from review.viewer_context import ViewerContext
 
 WELLS = ["A01", "A02"]
 TAB_CHANNEL = "gfp"
@@ -64,7 +64,7 @@ def _rows() -> pd.DataFrame:
 
 @pytest.fixture
 def ctx(tmp_path):
-    from well_viewer.features.registry import attach_feature_state
+    from review.features.registry import attach_feature_state
 
     state = AppState()
     attach_feature_state(state)
@@ -129,7 +129,7 @@ def test_a_batch_export_of_another_channel_uses_one_cutoff(
     unfixed code, where the producers take no cutoff at all: there, the
     divergence appears without the test having to mention it.
     """
-    from well_viewer.features.lineplot.controller import collect_line_series
+    from review.features.lineplot.controller import collect_line_series
 
     ctx.state.selection.selections = [
         {"name": "G1", "wells": list(WELLS), "color": "#4C72B0", "hidden": False},

@@ -71,7 +71,7 @@ the container**:
   don't hand-roll a `pytest` command.
 - **Full-app tests** (~440 tests): anything using the `viewer_app`
   / `loaded_app` / `loaded_app_shape` / `image_table_app` fixtures, auto-marked
-  `slow` by `conftest.py`. Each builds a real `WellViewerApp` (~1,800 QObjects)
+  `slow` by `conftest.py`. Each builds a real `ReviewApp` (~1,800 QObjects)
   whose Qt↔Python reference web is **never reclaimed in-process** — RSS climbs
   ~40 MB per test, monotonically. It cannot be forced, either: deleting the
   app's widgets from a teardown fixture segfaults the interpreter after the
@@ -237,7 +237,7 @@ services/               Analyze-side services (pipeline/remote runners, config) 
 analyze/                Analyze pane — AnalyzeTab (tab.py) + the mixins it is
                         assembled from (form, input, preflight, progress,
                         suspend, run_spec, …) + the Remotes dialogs
-well_viewer/            Review pane — the bulk of the app
+review/            Review pane — the bulk of the app
   core/                 cross-cutting infra (state, event bus, controllers, shell views)
   data/                 IO + decode (data_loading, image_identity, zipfile_cache, …)
   domain/               Qt-free models + pure math (stats_compute, fold_change, …)
@@ -259,10 +259,10 @@ _Docs/                  everything that is not source — Markdowns/ (the three 
 ```
 
 Where new code goes: pipeline work → `process_microscopy.py` / `pipeline/`; a new
-Review tab → a new `well_viewer/features/<name>/` package registered in
+Review tab → a new `review/features/<name>/` package registered in
 `features/registry.py`; behaviour for an existing feature → that feature's
 `controller.py`; Analyze-form behaviour → the `analyze/` module that owns that
-part of the form; cross-cutting behaviour → `well_viewer/core/`; a reusable widget
+part of the form; cross-cutting behaviour → `review/core/`; a reusable widget
 with no All-Well knowledge → `widgets/`; something every pane shares and none owns
 → `ui/`; something that has to happen before the app exists → `startup/`.
 
@@ -328,10 +328,10 @@ enforces it.
 
 | Rule | Guard |
 |---|---|
-| The pipeline imports **no** `well_viewer` / `widgets` / Qt, at any nesting | `test_architecture_contracts.py::test_pipeline_is_self_sufficient` |
+| The pipeline imports **no** `review` / `widgets` / Qt, at any nesting | `test_architecture_contracts.py::test_pipeline_is_self_sufficient` |
 | Every repo-root module the pipeline imports is in the remote upload manifest | `test_remote_manifest.py`, `test_remote_runner.py` |
 | `services/` stay Qt-free; `widgets/` carry no app coupling | `test_architecture_contracts.py` |
-| Nothing imports `WellViewerApp` (controllers take `app` / `ctx` as an arg) | `test_architecture_contracts.py` |
+| Nothing imports `ReviewApp` (controllers take `app` / `ctx` as an arg) | `test_architecture_contracts.py` |
 | `domain/` and `data/` never import `features/` | `test_layering.py` |
 | Core never imports a feature at module scope — `features/registry.py` is the sole importer | `test_architecture_contracts.py`, `test_guardrails.py` |
 | No `ctx.app`; features reach the shell only via frozen `ViewerContext` accessors | `test_ctx_app_burndown.py` (`CTX_APP_BUDGET = 0`) |
@@ -352,7 +352,7 @@ function, remove its stale allowlist entry (the test fails until you do).
 - **Never swallow exceptions silently.** Use `core.safe.swallow()` /
   `swallowed()` on the GUI side, `util.aw_safe` equivalents on the pipeline /
   `services` side. Two near-identical helpers exist because the pipeline may not
-  import `well_viewer`.
+  import `review`.
 - **Never hardcode colours or pixel sizes.** `ui.theme.Colors.*`, `ui.theme.get_color`,
   or QSS object names.
 - **Never block the UI thread.** Heavy work goes to a worker (`features/smfish/worker.py`,
@@ -1200,7 +1200,7 @@ the answer is "none of the ones I ran", that is the work, not a formality.
 
 ## 7.9 Debugging entry points
 
-- Widget you can't find: `grep -rn '_line_fig\b' well_viewer/ widgets/` — every
+- Widget you can't find: `grep -rn '_line_fig\b' review/ widgets/` — every
   Review widget is stored as `_<noun>`. Rail pages → `core/centre_view.py`;
   title bar → `allwell.py`.
 - Tab body doesn't appear: its lazy builder raised. Check the log drawer or run

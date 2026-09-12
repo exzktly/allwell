@@ -32,7 +32,7 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ui import theme
 from services import run_journal as J
-from well_viewer.core.app_shell_view import RAIL_W
+from review.core.app_shell_view import RAIL_W
 
 #: The share of the strip the offer's own words must get. Deliberately well
 #: below what the stacked layout achieves (295/319 ≈ 0.92 in the real sidebar)

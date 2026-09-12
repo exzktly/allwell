@@ -36,7 +36,7 @@ def _cards(ctx):
 
 
 def _two_groups(ctx):
-    from well_viewer.features.stats.controller import (
+    from review.features.stats.controller import (
         stats_grp_add, stats_refresh_group_list,
     )
     wells = list(ctx.state.dataset.well_paths)
@@ -108,7 +108,7 @@ def test_exactly_one_card_carries_the_selected_property(loaded_app):
 def test_the_results_placeholder_says_what_is_still_owed(loaded_app):
     """Three states, three sentences — asserted as the sentences, because "it
     mentions groups" is true of the fixed text in every one of them."""
-    from well_viewer.features.stats.controller import (
+    from review.features.stats.controller import (
         stats_grp_add, stats_grp_clear_all, stats_refresh_group_list,
     )
 
@@ -142,7 +142,7 @@ def test_the_header_count_reports_the_empty_state_too(loaded_app):
     groups" and one that read "" both change, and only one of them tells a user
     with the editor folded that there is nothing in it.
     """
-    from well_viewer.features.stats.controller import (
+    from review.features.stats.controller import (
         stats_grp_add, stats_grp_clear_all, stats_refresh_group_list,
     )
 
@@ -175,7 +175,7 @@ def test_clearing_the_groups_drops_the_floors_they_justified(loaded_app):
     whether the map fits beside it, so a stale one moves the flip point for a
     list that is no longer there.
     """
-    from well_viewer.features.stats.controller import (
+    from review.features.stats.controller import (
         stats_grp_clear_all, stats_refresh_group_list,
     )
 

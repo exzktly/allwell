@@ -3,7 +3,7 @@
 The Datasets pane sits beside Analyze and Review. Like Review it has a left
 sidebar that lists page "features"; unlike Review it has **no well picker** — the
 sidebar is a plain :class:`~widgets.rail_nav.RailNav` page navigator over a
-:class:`~well_viewer.core.centre_view.NamedPageStack`. It is a peer of
+:class:`~review.core.centre_view.NamedPageStack`. It is a peer of
 ``AnalyzeTab``: a self-contained ``QWidget`` that owns its own ``_left_sidebar``
 (which the shell's ``apply_sidebar_visibility`` shows/hides per mode).
 
@@ -31,8 +31,8 @@ from ui import theme
 from widgets.context_banner import ContextBanner
 from widgets.page_body import build_page_body
 from widgets.rail_nav import RailNav
-from well_viewer.core.app_shell_view import RAIL_W
-from well_viewer.core.centre_view import NamedPageStack
+from review.core.app_shell_view import RAIL_W
+from review.core.centre_view import NamedPageStack
 from datasets.concatenate.controller import ConcatenateController
 from datasets.import_loose.controller import ImportLooseController
 from datasets.job_queue.controller import JobQueueController
@@ -384,7 +384,7 @@ class DatasetsTab(QWidget):
             self._show_page(_FEATURES[0].name)
 
     def _build_sidebar(self) -> QWidget:
-        # Matches Review's own rail (well_viewer/core/app_shell_view.py): the
+        # Matches Review's own rail (review/core/app_shell_view.py): the
         # RailNav sits in a zero-margin layout so its row highlight and left
         # accent bar reach the panel's true edges (RailNav's own QSS already
         # insets the row body by 6px/4px — an outer container margin here

@@ -35,17 +35,17 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 _ACTIONS = {"copy_active_card_as_svg", "save_active_card_figure",
             "save_card_to_gallery"}
 
-_BUILDER = "well_viewer/core/ui_helpers.py"
+_BUILDER = "review/core/ui_helpers.py"
 
 _TAB_VIEWS = [
-    "well_viewer/features/scatter/cells_tab_view.py",
-    "well_viewer/features/scatter/agg_tab_view.py",
-    "well_viewer/features/lineplot/tab_view.py",
-    "well_viewer/features/spatial/tab_view.py",
-    "well_viewer/features/heatmap/tab_view.py",
-    "well_viewer/features/barplot/tab_view.py",
-    "well_viewer/features/multivariate/tab_view.py",
-    "well_viewer/features/distribution/tab_view.py",
+    "review/features/scatter/cells_tab_view.py",
+    "review/features/scatter/agg_tab_view.py",
+    "review/features/lineplot/tab_view.py",
+    "review/features/spatial/tab_view.py",
+    "review/features/heatmap/tab_view.py",
+    "review/features/barplot/tab_view.py",
+    "review/features/multivariate/tab_view.py",
+    "review/features/distribution/tab_view.py",
 ]
 
 
@@ -121,7 +121,7 @@ def test_no_tab_still_wires_a_card_action_by_hand(rel):
 def test_the_global_action_still_falls_back_to_the_visible_card():
     """The no-name path is the one a toolbar button that belongs to no tab
     uses, and it has to keep working."""
-    from well_viewer.core import plot_card_actions
+    from review.core import plot_card_actions
 
     sig = inspect.signature(plot_card_actions.copy_active_card_as_svg)
     assert sig.parameters["card_attr"].default is None

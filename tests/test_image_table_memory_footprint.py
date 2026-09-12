@@ -35,7 +35,7 @@ _app = QApplication.instance() or QApplication([])
 
 
 def test_label_source_shape_prefers_the_shape_and_falls_back_to_an_array():
-    from well_viewer.data.crop_tool import label_source_shape
+    from review.data.crop_tool import label_source_shape
 
     lbl = QLabel()
     assert label_source_shape(lbl) is None
@@ -51,7 +51,7 @@ def test_label_source_shape_prefers_the_shape_and_falls_back_to_an_array():
 
 
 def test_hover_array_fetches_on_demand_and_holds_only_the_current_cell(monkeypatch):
-    from well_viewer.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import controller as C
 
     loads: list = []
 
@@ -79,7 +79,7 @@ def test_hover_array_fetches_on_demand_and_holds_only_the_current_cell(monkeypat
 def test_a_rendered_grid_pins_no_frames(image_table_app, monkeypatch):
     """The decisive one: after a Generate, the only reference to a cell's frame
     is whatever the caches hold — the grid itself keeps none."""
-    from well_viewer.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import controller as C
 
     ctx = image_table_app._ctx
     frames: list = []
@@ -110,7 +110,7 @@ def test_a_rendered_grid_pins_no_frames(image_table_app, monkeypatch):
 def test_rendered_cells_carry_a_shape_not_an_array(image_table_app, monkeypatch):
     from PySide6.QtWidgets import QLabel
 
-    from well_viewer.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import controller as C
 
     ctx = image_table_app._ctx
     monkeypatch.setattr(C, "_load_array",
@@ -138,7 +138,7 @@ def test_rendered_cells_carry_a_shape_not_an_array(image_table_app, monkeypatch)
 
 
 def test_decode_budget_is_bounded_and_ram_aware():
-    from well_viewer.data import image_discovery as idisc
+    from review.data import image_discovery as idisc
 
     budget = idisc._default_max_decode_bytes()
     assert 512 * (1 << 20) <= budget <= 2 * (1 << 30), (

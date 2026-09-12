@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from well_viewer.data import image_discovery as D
+from review.data import image_discovery as D
 
 
 @pytest.fixture

@@ -304,7 +304,7 @@ _fsync_path = fsync_path
 # an honest, actionable diagnostic rather than the raw numpy message — so the FOV
 # is marked failed instead of emitting a truncated image. ``_RETRY_BASE_DELAY_S``
 # is patched to 0 in tests. Mirrors the GUI-side shield in
-# ``well_viewer/persistence/_io.py``.
+# ``review/persistence/_io.py``.
 _WRITE_MAX_ATTEMPTS = 5
 _RETRY_BASE_DELAY_S = 0.5
 

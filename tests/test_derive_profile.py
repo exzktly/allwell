@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("PySide6")  # profile loader lives in the well_viewer package
+pytest.importorskip("PySide6")  # profile loader lives in the review package
 
 from scripts.derive_profile import plan_deletions
 from core.profile import Profile
@@ -28,17 +28,17 @@ def _touch(root: Path, rel: str) -> None:
 
 def _catalog():
     return [
-        {"name": "Statistics", "paths": ["well_viewer/features/stats"],
+        {"name": "Statistics", "paths": ["review/features/stats"],
          "tests": ["tests/test_stats_*.py"],
          "keep": ["tests/test_stats_cache_gate_sig.py"]},
         {"name": "Image Table", "parent": "Image Browser",
-         "paths": ["well_viewer/features/image_browser/image_table"]},
+         "paths": ["review/features/image_browser/image_table"]},
     ]
 
 
 def test_plan_excludes_features_the_profile_rejects(tmp_path):
-    _touch(tmp_path, "well_viewer/features/stats/__init__.py")
-    _touch(tmp_path, "well_viewer/features/image_browser/image_table/__init__.py")
+    _touch(tmp_path, "review/features/stats/__init__.py")
+    _touch(tmp_path, "review/features/image_browser/image_table/__init__.py")
     _touch(tmp_path, "tests/test_stats_state.py")
     _touch(tmp_path, "tests/test_stats_cache_gate_sig.py")  # kept-code test
 
@@ -59,7 +59,7 @@ def test_plan_excludes_features_the_profile_rejects(tmp_path):
 
 
 def test_full_profile_removes_nothing(tmp_path):
-    _touch(tmp_path, "well_viewer/features/stats/__init__.py")
+    _touch(tmp_path, "review/features/stats/__init__.py")
     from core.profile import FULL
     assert plan_deletions(_catalog(), FULL, tmp_path) == []
 

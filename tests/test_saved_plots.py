@@ -5,8 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-from well_viewer.core.app_runtime import AppRuntime
-from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore, get_store
+from review.core.app_runtime import AppRuntime
+from review.features.saved_plots.state import SavedPlot, SavedPlotsStore, get_store
 
 
 def _app(tmp_path: Path):
@@ -38,7 +38,7 @@ def test_store_add_writes_png_and_persists(tmp_path):
     img = tmp_path / "saved_plots" / "20260101-000000-000000.png"
     assert img.exists() and img.read_bytes() == b"\x89PNG-bytes"
     # Metadata landed in the persistence doc section.
-    from well_viewer.persistence import _doc
+    from review.persistence import _doc
     section = _doc.get_section(app._ctx, "saved_plots")
     assert isinstance(section, list) and len(section) == 1
     assert section[0]["tab"] == "Bar Plots"
@@ -101,7 +101,7 @@ def test_add_without_dataset_dir_is_noop(tmp_path):
 
 
 def test_build_summary_lists_key_params():
-    from well_viewer.features.saved_plots.collect import build_summary
+    from review.features.saved_plots.collect import build_summary
     params = {
         "selected_wells": ["A01", "B01"],
         "active_channel": "gfp", "active_metric": "mean_intensity",
@@ -132,5 +132,5 @@ def test_store_rename_updates_title_and_persists(tmp_path):
     store.add(app._ctx, _rec(), b"x")
     store.rename(app._ctx, "20260101-000000-000000", "My figure")
     assert store.get("20260101-000000-000000").title == "My figure"
-    from well_viewer.persistence import _doc
+    from review.persistence import _doc
     assert _doc.get_section(app._ctx, "saved_plots")[0]["title"] == "My figure"

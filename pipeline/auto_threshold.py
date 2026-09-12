@@ -1,15 +1,15 @@
 """Shared auto-threshold helpers used by both the pipeline and the GUI.
 
 The pipeline (`process_microscopy.py`) and the Cell Gating tab
-(`well_viewer/auto_threshold.py`) used to maintain parallel copies of
+(`review/auto_threshold.py`) used to maintain parallel copies of
 the same timepoint parser, endpoint picker, and per-image sampler.
 The copies had already diverged (different sort orders, different
 parser semantics) so the two paths produced different default
 `thresh_frac_on` values on the same dataset.
 
 This module is the single source of truth. It depends only on
-`numpy` and `random` — no Qt, no `well_viewer.*` — so the pipeline
-(which must run on headless hosts where `well_viewer` may not be
+`numpy` and `random` — no Qt, no `review.*` — so the pipeline
+(which must run on headless hosts where `review` may not be
 installed) can import it freely. See ARCHITECTURE.md §6.2 for the
 pipeline-must-be-standalone contract.
 """
@@ -206,7 +206,7 @@ def _index_members(zf, reader: _SchemaReader, channels: set[str]):
         # manager adds after the fact: opening the archive in Finder leaves a
         # ``.DS_Store`` and an ``__MACOSX/`` tree inside it. The repo's shared
         # OS-junk predicate (``datasets._common.member_names.is_os_junk_member``)
-        # cannot be used here — it imports ``well_viewer``, which the pipeline
+        # cannot be used here — it imports ``review``, which the pipeline
         # may not — so this is the local spelling of the same two rules.
         #
         # The extension test was spelled out here as ``tif``/``tiff`` only,

@@ -37,7 +37,7 @@ from services.pipeline_runner import (
 )
 from services.pipeline_service import find_pipeline_script
 from ui import theme
-from well_viewer.core.app_shell_view import RAIL_W
+from review.core.app_shell_view import RAIL_W
 from core.safe import swallowed
 from analyze.bg_map import AnalyzeBackgroundMapMixin
 from analyze.input import AnalyzeInputMixin
@@ -169,7 +169,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         # Left — scrollable form
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        # Fixed, not just a minimum: RAIL_W (well_viewer/core/app_shell_view.py)
+        # Fixed, not just a minimum: RAIL_W (review/core/app_shell_view.py)
         # is the one width shared by Review's rail, Datasets' sidebar, and this
         # panel, so switching modes never visibly resizes the window. It was
         # widened here twice before landing at its current value (280→350→438)

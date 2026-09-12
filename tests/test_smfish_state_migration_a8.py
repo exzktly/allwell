@@ -14,7 +14,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.features.smfish.tab_view import (
+from review.features.smfish.tab_view import (
     _smfish_toggle_overlays,
     build_smfish_tab,
 )

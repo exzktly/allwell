@@ -27,15 +27,15 @@ matplotlib.use("Agg")
 from matplotlib.figure import Figure  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
-from well_viewer.features.saved_plots import _deck  # noqa: E402
-from well_viewer.features.saved_plots._align import (  # noqa: E402
+from review.features.saved_plots import _deck  # noqa: E402
+from review.features.saved_plots._align import (  # noqa: E402
     AnchorBox, axes_rect_points, plan_anchor,
 )
-from well_viewer.features.saved_plots._deck import build_saved_plots_deck  # noqa: E402
-from well_viewer.features.saved_plots._drawingml import (  # noqa: E402
+from review.features.saved_plots._deck import build_saved_plots_deck  # noqa: E402
+from review.features.saved_plots._drawingml import (  # noqa: E402
     EMU_PER_INCH, EMU_PER_POINT, Placement, inches_to_emu,
 )
-from well_viewer.features.saved_plots._svg_shapes import parse_svg  # noqa: E402
+from review.features.saved_plots._svg_shapes import parse_svg  # noqa: E402
 from widgets.fig_clipboard import (  # noqa: E402
     AXES_RECT_MARKER, axes_fraction_from_svg, figure_axes_fraction,
     figure_crop_bbox, render_figure_svg,

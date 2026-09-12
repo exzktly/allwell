@@ -12,8 +12,8 @@ from __future__ import annotations
 import math
 
 
-from well_viewer.features.barplot.controller import FC_STATE_OFF
-from well_viewer.features.lineplot.controller import (
+from review.features.barplot.controller import FC_STATE_OFF
+from review.features.lineplot.controller import (
     LinePoint, collect_line_series,
 )
 
@@ -133,7 +133,7 @@ def test_collect_line_series_includes_n_wells_in_display(mock_app):
 def test_linepoint_as_aggpoint_round_trip():
     """LinePoint → AggPoint tuple → preserves all fields needed by line_metric_row."""
     pt = (1.5, 100.0, 10.0, 0.5, 5, 10, 0.05, 1.0, 0.2)
-    from well_viewer.features.lineplot.controller import _aggpoint_to_linepoint
+    from review.features.lineplot.controller import _aggpoint_to_linepoint
     lp = _aggpoint_to_linepoint(pt)
     out = lp.as_aggpoint()
     assert out[0] == pt[0]
@@ -156,7 +156,7 @@ def test_collect_line_series_fov_spread_populates_frac_spread(mock_app, monkeypa
     set (FOVs are its replicates); a multi-well set is per-well. So this uses a
     single-well active set to exercise the per-FOV path.
     """
-    import well_viewer.features.lineplot.controller as lp
+    import review.features.lineplot.controller as lp
 
     # Single-well active set → replicate_unit == "fov" when FOV mode is on. The
     # collector now reads rep-sets / FOV flag from ``ctx.state`` (A8), so drive

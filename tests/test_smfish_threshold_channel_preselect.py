@@ -6,7 +6,7 @@ instead of the previously-applied value.
 
 Two distinct fixes apply:
 
-1. `well_viewer/features/smfish/tab_view.py::smfish_sync_from_app`
+1. `review/features/smfish/tab_view.py::smfish_sync_from_app`
    used to call `setCurrentIndex(0)` blindly when populating the
    channel combo. If the user had applied a threshold to a channel
    that wasn't first in the combo (e.g. "w3cy5" while the first

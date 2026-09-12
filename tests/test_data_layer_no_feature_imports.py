@@ -1,8 +1,8 @@
 """Guardrail: the data layer must not import ``features/`` — at any nesting.
 
-``well_viewer/data`` is a foundational layer: features build on it, not the
+``review/data`` is a foundational layer: features build on it, not the
 other way round. ``test_layering.py`` already bans *module-scope*
-``well_viewer.features`` imports in ``data`` / ``domain`` / ``persistence``.
+``review.features`` imports in ``data`` / ``domain`` / ``persistence``.
 This guard is stricter for ``data/``: it bans feature imports **at any level**
 (module *or* function-local), because the whole point of the cache-projector
 inversion (roadmap B1) is that ``data/data_loading.get_rows`` no longer reaches
@@ -17,8 +17,8 @@ import ast
 from pathlib import Path
 from tests._repo_scan import parse_source
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "well_viewer" / "data"
-FORBIDDEN_PREFIX = "well_viewer.features"
+DATA_DIR = Path(__file__).resolve().parent.parent / "review" / "data"
+FORBIDDEN_PREFIX = "review.features"
 
 
 def _feature_imports(tree: ast.Module):
@@ -48,7 +48,7 @@ def test_data_layer_has_no_feature_imports():
         for lineno, target in _feature_imports(tree):
             offenders.append(f"{path.relative_to(DATA_DIR.parent.parent)}:{lineno} -> {target}")
     assert not offenders, (
-        "well_viewer/data/ must not import well_viewer.features at ANY level "
+        "review/data/ must not import review.features at ANY level "
         "(the cache-projector inversion, roadmap B1). Register the behaviour "
         "from features/registry instead of importing the "
         "feature here:\n  " + "\n  ".join(offenders)

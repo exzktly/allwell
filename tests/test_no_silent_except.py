@@ -1,4 +1,4 @@
-"""Guardrail: no silent broad-except handlers in well_viewer/.
+"""Guardrail: no silent broad-except handlers in review/.
 
 A broad ``except Exception:`` (or bare ``except:``) whose entire body is a single
 ``pass`` or ``continue`` swallows failures with no trace — indistinguishable
@@ -17,9 +17,9 @@ from pathlib import Path
 from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-WELL_VIEWER = REPO_ROOT / "well_viewer"
+REVIEW = REPO_ROOT / "review"
 
-# The reusable widget library. It may not import ``well_viewer`` (that is the
+# The reusable widget library. It may not import ``review`` (that is the
 # whole point of the package), so it uses ``util.aw_safe`` — the same helper the
 # Qt-free pipeline side uses — rather than ``core.safe``. It was the
 # last un-guarded body of GUI code in the repo, and it is where a swallowed
@@ -80,8 +80,8 @@ def _walk(root):
     return [p for p in sorted(root.rglob("*.py")) if "__pycache__" not in p.parts]
 
 
-def test_no_silent_broad_except_in_well_viewer():
-    offenders = _offenders(_walk(WELL_VIEWER))
+def test_no_silent_broad_except_in_review():
+    offenders = _offenders(_walk(REVIEW))
     assert not offenders, (
         "Silent broad-except handler(s) found. Use "
         "core.safe.swallowed()/swallow() or catch a specific "

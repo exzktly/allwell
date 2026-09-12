@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.features.barplot.controller import collect_bar_items
+from review.features.barplot.controller import collect_bar_items
 
 
 @pytest.fixture

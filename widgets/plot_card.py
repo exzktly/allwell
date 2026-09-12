@@ -220,7 +220,7 @@ if _HAVE_MPL:
             self.figure = _Figure(figsize=figsize,
                                   layout=("constrained" if constrained else None))
             self.figure.set_facecolor(_plot_tokens(self._plot_theme)[0])
-            # Back-reference so plot renderers (e.g. well_viewer.plot_style.apply_ax_style)
+            # Back-reference so plot renderers (e.g. review.plot_style.apply_ax_style)
             # can look up the active card from any axes via ``ax.figure._plot_card``.
             self.figure._plot_card = self  # type: ignore[attr-defined]
             self.canvas = _FigureCanvas(self.figure)

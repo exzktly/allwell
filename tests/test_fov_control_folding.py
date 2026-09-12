@@ -30,9 +30,9 @@ def test_fov_combos_use_labeled_combo_with_no_sibling_label(viewer_app, qtbot):
 
     app = viewer_app
     checks = [
-        ("well_viewer.features.smfish.tab_view", "build_smfish_tab", "_smfish_fov_cb"),
-        ("well_viewer.features.review_csv.tab_view", "build_review_csv_tab", "_review_fov_cb"),
-        ("well_viewer.features.preview.panel_view", "build_review_image_panel", "_review_image_fov_menu"),
+        ("review.features.smfish.tab_view", "build_smfish_tab", "_smfish_fov_cb"),
+        ("review.features.review_csv.tab_view", "build_review_csv_tab", "_review_fov_cb"),
+        ("review.features.preview.panel_view", "build_review_image_panel", "_review_image_fov_menu"),
     ]
     import importlib
     for module_name, fn_name, attr in checks:
@@ -54,7 +54,7 @@ def test_review_csv_fov_combo_has_no_fixed_width(viewer_app, qtbot):
     from before it was self-sizing — that floor would fight
     LabeledComboBox's shrink-to-painted-content sizing the same way the
     Channel/Property/Timepoint combos' old floors did."""
-    from well_viewer.features.review_csv.tab_view import build_review_csv_tab
+    from review.features.review_csv.tab_view import build_review_csv_tab
 
     app = viewer_app
     parent = QWidget()

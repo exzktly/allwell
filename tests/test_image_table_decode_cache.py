@@ -16,7 +16,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import controller as C
+from review.features.image_browser.image_table import controller as C
 
 
 def _cell(well, chan, tp="0", fov="1"):
@@ -39,7 +39,7 @@ def _patch(monkeypatch, loaded):
 
 
 def _make_ctx(app):
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app._ctx = SimpleNamespace(app=app, state=app._app_state,
                                runtime=AppRuntime(app))
     return app._ctx

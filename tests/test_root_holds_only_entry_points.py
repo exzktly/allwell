@@ -99,7 +99,7 @@ ROOT_DIRS = {
     "startup": "package — what runs before the application exists",
     "ui": "package — app-level UI every pane shares",
     "util": "package — Qt-free general helpers",
-    "well_viewer": "package — the Review pane",
+    "review": "package — the Review pane",
     "widgets": "package — reusable Qt widgets",
     "scripts": "dev tooling + `_bootstrap_lib.py`, which ships in the bundle",
     "tests": "the pytest suite",

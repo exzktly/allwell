@@ -23,14 +23,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from well_viewer.data.data_loading import aggregate_with_threshold_df
-from well_viewer.domain.fold_change import (
+from review.data.data_loading import aggregate_with_threshold_df
+from review.domain.fold_change import (
     _rel_err_sq,
     _scale_pt,
     normalize_pts,
     scale_bar_value,
 )
-from well_viewer.domain.stats_compute import _reduce_reps
+from review.domain.stats_compute import _reduce_reps
 from tests._repo_scan import parse_source
 
 # ``_as_finite`` and ``active_fluor_gates`` are imported inside the tests that
@@ -127,7 +127,7 @@ def test_the_zero_baseline_fallback_is_announced(caplog):
 # ── 3. a numpy float is a number ─────────────────────────────────────────────
 
 def test_numpy_floats_are_numbers():
-    from well_viewer.domain.fold_change import _as_finite
+    from review.domain.fold_change import _as_finite
 
     """``isinstance(x, float)`` is False for ``numpy.float32``, so the spelling
     it replaced answered "not a number" — silently, in the most numerically
@@ -153,7 +153,7 @@ def test_float32_and_float_normalize_identically():
 # ── 4. an "off" gate excludes nothing ────────────────────────────────────────
 
 def test_a_zero_gate_is_not_a_filter():
-    from well_viewer.domain.gating_state import active_fluor_gates
+    from review.domain.gating_state import active_fluor_gates
 
     assert active_fluor_gates({"gfp": 0.0, "mcherry": 0.0}) == {}
     assert active_fluor_gates({"gfp": 0.0, "mcherry": 10.0}) == {"mcherry": 10.0}
@@ -200,7 +200,7 @@ def test_a_real_gate_still_filters():
 def _ratio_ctx(metric):
     import types
 
-    from well_viewer.domain.ratio_models import build_ratio_index
+    from review.domain.ratio_models import build_ratio_index
     channel = types.SimpleNamespace(
         active_val_col=metric.key(), ratio_index=build_ratio_index([metric]),
     )
@@ -217,8 +217,8 @@ def test_two_ratios_with_one_name_have_different_cache_signatures():
     that do not exist on ``RatioMetric``, so it returned a constant. A
     signature that signs nothing is worse than none: it reads as covered.
     """
-    from well_viewer.domain.ratio_models import RatioMetric
-    from well_viewer.domain.stats_compute import _ratio_cache_sig
+    from review.domain.ratio_models import RatioMetric
+    from review.domain.stats_compute import _ratio_cache_sig
 
     a = RatioMetric("R", "gfp", "mean_intensity", "mch", "mean_intensity", 0.0)
     b = RatioMetric("R", "rfp", "total_intensity", "dapi", "mean_intensity", 1e-6)
@@ -233,7 +233,7 @@ def test_a_plain_channel_has_no_ratio_signature():
     """A non-ratio session's keys must stay byte-identical."""
     import types
 
-    from well_viewer.domain.stats_compute import _ratio_cache_sig
+    from review.domain.stats_compute import _ratio_cache_sig
     channel = types.SimpleNamespace(active_val_col="gfp_mean_intensity",
                                     ratio_index={})
     ctx = types.SimpleNamespace(state=types.SimpleNamespace(channel=channel))
@@ -308,7 +308,7 @@ def test_bar_baselines_agree_across_panels_in_subtract_mode():
     path's five ``baseline_*_from_points*`` finders were not, so the reported
     symptom — the mean panel normalised against t=0 and the fraction and events
     panels against t=24, under one axis label — survived untouched there."""
-    from well_viewer.domain import fold_change as fc
+    from review.domain import fold_change as fc
 
     mean_tp = fc.baseline_from_points_resolved(
         _BASE_PTS, baseline_tp=0.0, op="subtract")[0]
@@ -320,7 +320,7 @@ def test_bar_baselines_agree_across_panels_in_subtract_mode():
 
 
 def test_bar_baselines_still_refuse_a_zero_divisor():
-    from well_viewer.domain import fold_change as fc
+    from review.domain import fold_change as fc
 
     assert fc.baseline_from_points_resolved(
         _BASE_PTS, baseline_tp=0.0, op="ratio")[0] == 0.0
@@ -369,7 +369,7 @@ def test_no_filter_applies_a_gate_without_asking_whether_it_is_on():
     a half-swept predicate is worse than an unswept one, because one function
     then holds two definitions of the same word and neither looks wrong."""
     repo = pathlib.Path(__file__).resolve().parent.parent
-    offenders = _gate_filter_offenders(repo / "well_viewer")
+    offenders = _gate_filter_offenders(repo / "review")
     assert not offenders, (
         "these filter on a raw gate value, so a gate of 0.0 (which means off) "
         "still excludes cells:\n" + "\n".join(offenders)
@@ -419,7 +419,7 @@ def test_the_bar_collector_passes_the_t0_operation():
     never passes it — and nothing in the suite noticed when all six arguments
     were stripped. This asserts the outbound call, per CLAUDE.md §7.4 #1."""
     src = (pathlib.Path(__file__).resolve().parent.parent
-           / "well_viewer" / "features" / "barplot" / "collect.py").read_text()
+           / "review" / "features" / "barplot" / "collect.py").read_text()
     tree = ast.parse(src)
     finders = {
         "baseline_from_points_resolved",

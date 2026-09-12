@@ -17,7 +17,7 @@ import math
 
 import pytest
 
-from well_viewer.features.response import response_compute as rc
+from review.features.response import response_compute as rc
 
 pytest.importorskip("scipy")
 

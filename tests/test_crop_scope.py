@@ -18,11 +18,11 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
-from well_viewer.core.frame_scope import describe_scope
-from well_viewer.features.crop.region import (
+from review.core.frame_scope import describe_scope
+from review.features.crop.region import (
     FrameScope, compute_crop_pass, rows_in_scope,
 )
-from well_viewer.features.crop import controller as crop
+from review.features.crop import controller as crop
 
 
 def _df(rows, cols, fovs=None, tps=None):
@@ -146,7 +146,7 @@ def test_frame_in_scope_matches_a_scope_holding_raw_tokens():
     """A scope hydrated from a hand-edited persistence.json can hold ``T24``
     where the combos read ``24``. Judging the frame by a second, un-normalised
     comparison drew the outline dashed while cells were being excluded."""
-    from well_viewer.features.crop.region import frame_in_scope
+    from review.features.crop.region import frame_in_scope
     df = _df([1, 50], [1, 50], fovs=["1", "1"], tps=["24", "24"])
     scope = FrameScope(fovs=frozenset({"001"}), tps=frozenset({"T24"}))
     assert frame_in_scope(df, scope, "A01", "1", "24") is True
@@ -157,7 +157,7 @@ def test_frame_with_no_timepoint_column_is_out_of_scope_when_tps_are_armed():
     """The pickers offer a timepoint from ``pipeline_info`` that the rows do not
     carry, so no row can match it and the crop reaches nothing. Saying the frame
     is in scope would state a filter that is not running."""
-    from well_viewer.features.crop.region import frame_in_scope
+    from review.features.crop.region import frame_in_scope
     df = _df([1, 50], [1, 50], fovs=["1", "1"])          # no timepoint column
     scope = FrameScope(tps=frozenset({"0"}))
     assert list(compute_crop_pass(df, (0, 0, 10, 10), scope, "A01")) == [1, 1]
@@ -166,7 +166,7 @@ def test_frame_with_no_timepoint_column_is_out_of_scope_when_tps_are_armed():
 
 def test_frame_in_scope_falls_back_to_tokens_without_rows():
     """A well with images but no CSV rows still shows its crop."""
-    from well_viewer.features.crop.region import frame_in_scope
+    from review.features.crop.region import frame_in_scope
     scope = FrameScope(wells=frozenset({"A01"}), tps=frozenset({"24"}))
     assert frame_in_scope(None, scope, "A01", "1", "24") is True
     assert frame_in_scope(None, scope, "A01", "1", "0") is False
@@ -217,8 +217,8 @@ def test_frame_tokens_are_computed_once_per_frame(monkeypatch):
     """Normalising a well's tokens is the dominant cost of every scope question
     — ~430 ms on a 200k-row well — and both the row verdict and the outline's
     frame test ask it, the latter on every canvas redraw."""
-    from well_viewer.data import image_identity
-    from well_viewer.features.crop import region as region_mod
+    from review.data import image_identity
+    from review.features.crop import region as region_mod
 
     calls: list[int] = []
     real = image_identity.frame_token_series
@@ -236,7 +236,7 @@ def test_frame_tokens_are_computed_once_per_frame(monkeypatch):
 def test_a_copied_frame_does_not_inherit_the_token_memo():
     """``df.attrs`` travels through ``df.copy()``; the key carries the frame's
     identity so a copy recomputes rather than reading another frame's tokens."""
-    from well_viewer.features.crop import region as region_mod
+    from review.features.crop import region as region_mod
 
     df = _df([1, 50], [1, 50], fovs=["1", "1"], tps=["24", "24"])
     region_mod._frame_tokens(df)
@@ -249,8 +249,8 @@ def test_a_copied_frame_does_not_inherit_the_token_memo():
 def test_a_well_only_scope_needs_no_token_pass(monkeypatch):
     """The commonest scoping — a few wells, all FOVs and timepoints — is decided
     by the well alone, and this runs on every canvas redraw."""
-    from well_viewer.data import image_identity
-    from well_viewer.features.crop import region as region_mod
+    from review.data import image_identity
+    from review.features.crop import region as region_mod
 
     monkeypatch.setattr(
         image_identity, "frame_token_series",

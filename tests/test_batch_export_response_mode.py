@@ -32,17 +32,17 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 
-from well_viewer.features.batch_export.response_panel import (  # noqa: E402
+from review.features.batch_export.response_panel import (  # noqa: E402
     ResponseBatchExportPanel,
     _parse_bound,
 )
-from well_viewer.features.response.collect import (  # noqa: E402
+from review.features.response.collect import (  # noqa: E402
     ResponseCurve, ResponseData, ResponsePoint, Y_FRACTION, Y_MEAN,
 )
-from well_viewer.features.response.response_compute import (  # noqa: E402
+from review.features.response.response_compute import (  # noqa: E402
     FIT_4PL, FIT_NONE,
 )
-from well_viewer.domain.batch_models import BarGroup  # noqa: E402
+from review.domain.batch_models import BarGroup  # noqa: E402
 
 
 class _PanelStub:
@@ -179,7 +179,7 @@ def test_a_fit_gets_a_row_in_the_columns_the_points_use(tmp_path):
 
     Dropping it would leave a spreadsheet whose fits are all successful.
     """
-    from well_viewer.features.response.collect import fit_curves
+    from review.features.response.collect import fit_curves
 
     panel = _PanelStub()
     data = _data()
@@ -309,7 +309,7 @@ def test_the_mode_offers_no_fold_change_controls_of_its_own(qapp):
     builder never consults is a decision that was written down and not made.
     """
     from PySide6.QtWidgets import QVBoxLayout, QWidget
-    from well_viewer.features.batch_export.base_panel import BatchExportPanel
+    from review.features.batch_export.base_panel import BatchExportPanel
 
     assert BatchExportPanel._INCLUDES_FOLD_CHANGE is True
     assert ResponseBatchExportPanel._INCLUDES_FOLD_CHANGE is False
@@ -326,7 +326,7 @@ def test_the_other_modes_still_build_their_fold_change_row(qapp):
     """The paired half of the test above — otherwise a builder that dropped the
     row for *every* mode would pass it."""
     from PySide6.QtWidgets import QVBoxLayout, QWidget
-    from well_viewer.features.batch_export.base_panel import BatchExportPanel
+    from review.features.batch_export.base_panel import BatchExportPanel
 
     panel = _channel_row_stub(BatchExportPanel)
     host = QWidget()
@@ -356,7 +356,7 @@ def test_the_property_row_offers_the_fraction_and_resolves_its_key(qapp):
     green when this test read source text instead.
     """
     from PySide6.QtWidgets import QVBoxLayout, QWidget
-    from well_viewer.data.metric_labels import FRACTION_LABEL, FRACTION_METRIC_KEY
+    from review.data.metric_labels import FRACTION_LABEL, FRACTION_METRIC_KEY
 
     panel = _channel_row_stub(ResponseBatchExportPanel)
     host = QWidget()
@@ -387,8 +387,8 @@ def test_the_property_row_offers_the_fraction_and_resolves_its_key(qapp):
 def test_a_row_that_did_not_ask_for_the_fraction_is_not_offered_it(qapp):
     """The flag is read per row, so the line mode's Property list is unchanged."""
     from PySide6.QtWidgets import QVBoxLayout, QWidget
-    from well_viewer.data.metric_labels import FRACTION_LABEL
-    from well_viewer.features.batch_export.base_panel import BatchExportPanel
+    from review.data.metric_labels import FRACTION_LABEL
+    from review.features.batch_export.base_panel import BatchExportPanel
 
     panel = _channel_row_stub(BatchExportPanel)
     host = QWidget()
@@ -409,7 +409,7 @@ def test_the_fraction_survives_a_channel_repopulate(qapp):
     and drop it the first time the channel moved.
     """
     from PySide6.QtWidgets import QVBoxLayout, QWidget
-    from well_viewer.data.metric_labels import FRACTION_LABEL
+    from review.data.metric_labels import FRACTION_LABEL
 
     panel = _channel_row_stub(ResponseBatchExportPanel)
     host = QWidget()
@@ -433,8 +433,8 @@ def test_the_fold_change_control_the_scope_carries_is_the_live_one(qapp):
     to no wells, and every point would drop out of a figure whose y axis still
     said it was normalised.
     """
-    from well_viewer.domain.control_ref import ControlRef, KIND_SET
-    from well_viewer.features.batch_export.base_panel import BatchExportPanel
+    from review.domain.control_ref import ControlRef, KIND_SET
+    from review.features.batch_export.base_panel import BatchExportPanel
 
     later = ControlRef(kind=KIND_SET, name="DMSO")
     panel = _channel_row_stub(ResponseBatchExportPanel)
@@ -454,7 +454,7 @@ def test_the_fold_change_control_the_scope_carries_is_the_live_one(qapp):
 
 
 def test_the_fit_model_offer_matches_the_tab_s():
-    from well_viewer.features.response.controller import fit_model_labels
+    from review.features.response.controller import fit_model_labels
 
     models = [model for _label, model in fit_model_labels()]
     assert models[0] == FIT_NONE, "off by default — a fit is an assertion"

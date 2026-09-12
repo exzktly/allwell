@@ -28,7 +28,7 @@ from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ROOTS = [
-    REPO_ROOT / "well_viewer",
+    REPO_ROOT / "review",
     REPO_ROOT / "widgets",
     REPO_ROOT / "allwell.py",
 ]

@@ -17,10 +17,10 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 
 def test_qc_gate_applies_on_reopen(loaded_app, mini_dataset):
-    from well_viewer.features.qc.controller import set_qc_params, get_qc_params
-    from well_viewer.domain.qc_params import QCParams
-    from well_viewer.data.data_loading import df_included_mask
-    from well_viewer.persistence.qc_params import save_to_data_dir
+    from review.features.qc.controller import set_qc_params, get_qc_params
+    from review.domain.qc_params import QCParams
+    from review.data.data_loading import df_included_mask
+    from review.persistence.qc_params import save_to_data_dir
 
     app = loaded_app
     well = next(iter(app._app_state.dataset.well_paths))
@@ -32,7 +32,7 @@ def test_qc_gate_applies_on_reopen(loaded_app, mini_dataset):
     assert gated < before, "QC gate should exclude small cells"
 
     # Persist to disk, bypassing the debounce. Takes ``ctx``, not the app —
-    # ``ctx.window`` is how it reaches the window, and on a real WellViewerApp
+    # ``ctx.window`` is how it reaches the window, and on a real ReviewApp
     # that attribute is Qt's own ``QWidget.window`` method, so passing the app
     # fails downstream instead of at the boundary.
     save_to_data_dir(app._ctx)

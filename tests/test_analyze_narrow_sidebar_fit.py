@@ -1,4 +1,4 @@
-"""Analyze's form must actually fit inside RAIL_W (well_viewer/core/app_shell_view.py).
+"""Analyze's form must actually fit inside RAIL_W (review/core/app_shell_view.py).
 
 Regression: unifying Review/Datasets/Analyze's left-panel width let Analyze's
 widest content (its per-channel rows, several label+field rows, and two wide
@@ -55,7 +55,7 @@ def _expand_every_collapsible_section(tab) -> None:
 
 def test_analyze_form_fits_rail_w_with_every_section_expanded(qapp):
     from analyze.tab import AnalyzeTab
-    from well_viewer.core.app_shell_view import RAIL_W
+    from review.core.app_shell_view import RAIL_W
 
     # Locks the specific target (438 shrunk 25%), not just "whatever RAIL_W
     # currently is" — a bare `width <= RAIL_W` check would pass trivially
@@ -113,7 +113,7 @@ def test_run_controls_fit_the_rail_with_the_queue_button_shown(qapp):
     its children for show/hide so the row re-wraps when the button appears.
     """
     from analyze.tab import AnalyzeTab
-    from well_viewer.core.app_shell_view import RAIL_W
+    from review.core.app_shell_view import RAIL_W
 
     tab = AnalyzeTab()
     tab.resize(1640, 980)

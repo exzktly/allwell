@@ -13,8 +13,8 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.features.lineplot.tab_view import build_line_graphs_tab
-from well_viewer.features.multivariate.tab_view import build_multivariate_tab
+from review.features.lineplot.tab_view import build_line_graphs_tab
+from review.features.multivariate.tab_view import build_multivariate_tab
 from tests.widget_registry_helpers import assert_handles_registered as _check
 
 _LINE = (

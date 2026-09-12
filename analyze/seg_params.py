@@ -68,7 +68,7 @@ class AnalyzeSegParamsMixin:
         """
         # Per-method parameter panel — swapped by _refresh_segmentation_hints so
         # only the selected routine's controls are shown.
-        from well_viewer.core.centre_view import NamedPageStack
+        from review.core.centre_view import NamedPageStack
         self._seg_param_stack = NamedPageStack(sec)
         # A QStackedWidget's height is the max over *all* pages, so the short
         # default (StarDist, no params) would still reserve the tall Cellpose

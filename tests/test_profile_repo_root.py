@@ -9,7 +9,7 @@ precise failure the function's own comment is written to prevent — and a build
 that ships too much looks, from the outside, exactly like a build that worked.
 
 This is not hypothetical. The count was `parents[2]` while the module lived at
-`well_viewer/core/profile.py`; lifting it to `core/profile.py` left it pointing
+`review/core/profile.py`; lifting it to `core/profile.py` left it pointing
 one directory *above* the checkout until this test was written.
 
 Held on the profiles the repository actually ships rather than on the number

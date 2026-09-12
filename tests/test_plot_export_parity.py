@@ -24,7 +24,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # ── 1. a gate percentage counts against the cloud the gate was drawn over ────
 
 def _gate_stats(scatter_data, gate, tps):
-    from well_viewer.features.scatter.gating import compute_gate_stats
+    from review.features.scatter.gating import compute_gate_stats
     return compute_gate_stats(scatter_data, gate, tps)
 
 
@@ -67,7 +67,7 @@ def test_the_tab_csv_export_applies_the_tab_s_gate_filter():
     the plot showed only the gated cells. Asserted at the call site, because
     the value it produces is only wrong when a gate is active and a fixture
     that builds one is a different test's job (CLAUDE.md §7.4 #1)."""
-    src = (REPO_ROOT / "well_viewer" / "features" / "export" / "service.py").read_text()
+    src = (REPO_ROOT / "review" / "features" / "export" / "service.py").read_text()
     tree = ast.parse(src)
     calls = [
         n for n in ast.walk(tree)
@@ -87,7 +87,7 @@ def test_the_tab_csv_export_applies_the_tab_s_gate_filter():
 
 def _fraction_title_sites():
     """(function name, whether the fraction title carries the FC suffix)."""
-    src = (REPO_ROOT / "well_viewer" / "features" / "barplot" / "renderer.py").read_text()
+    src = (REPO_ROOT / "review" / "features" / "barplot" / "renderer.py").read_text()
     tree = ast.parse(src)
     out = {}
     for fn in ast.walk(tree):
@@ -129,7 +129,7 @@ def test_the_line_fraction_panel_is_not_clamped_under_fold_change():
     """A raw fraction is bounded, so clamping is a good default; a fold change
     is a ratio or a difference, and clamping silently clips the effect the
     normalisation exists to show. The Bar tab already skipped the clamp."""
-    src = (REPO_ROOT / "well_viewer" / "features" / "lineplot" / "controller.py").read_text()
+    src = (REPO_ROOT / "review" / "features" / "lineplot" / "controller.py").read_text()
     tree = ast.parse(src)
     clamps = [
         n for n in ast.walk(tree)
@@ -153,8 +153,8 @@ def test_the_line_fraction_panel_is_not_clamped_under_fold_change():
 @pytest.mark.parametrize(
     "path,marker",
     [
-        ("well_viewer/features/batch_export/bar_panel.py", "rows_csv"),
-        ("well_viewer/features/batch_export/base_panel.py", "rows_out"),
+        ("review/features/batch_export/bar_panel.py", "rows_csv"),
+        ("review/features/batch_export/base_panel.py", "rows_out"),
     ],
 )
 def test_an_empty_batch_group_reports_rather_than_saving_a_blank_figure(path, marker):
@@ -185,7 +185,7 @@ def _drive_runner(job_results):
     to, and that decision is three lines of pure logic. Re-deriving it here
     would prove nothing, so the real predicate is imported.
     """
-    from well_viewer.features.batch_export.base_panel import SkippedJob
+    from review.features.batch_export.base_panel import SkippedJob
 
     errors, skipped = [], []
     for err in job_results:
@@ -211,7 +211,7 @@ def test_an_empty_group_does_not_discard_the_whole_batch():
     run and told the user only "Done with 1 error(s)" — a far worse outcome
     than the blank figure it was meant to prevent.
     """
-    from well_viewer.features.batch_export.base_panel import SkippedJob
+    from review.features.batch_export.base_panel import SkippedJob
 
     staging, errors, skipped = _drive_runner(
         [None, None, SkippedJob("g3: no data"), None])
@@ -229,7 +229,7 @@ def test_a_run_where_every_group_is_empty_writes_nothing():
     """Nothing was written, so committing would replace the previous run's
     manifest with an empty one while that run's files stay on disk — an audit
     record contradicting the directory it describes."""
-    from well_viewer.features.batch_export.base_panel import SkippedJob
+    from review.features.batch_export.base_panel import SkippedJob
 
     staging, _, skipped = _drive_runner(
         [SkippedJob("a: none"), SkippedJob("b: none")])
@@ -244,7 +244,7 @@ def test_every_no_data_return_in_the_batch_panels_is_a_notice():
 
     offenders = []
     for name in ("bar_panel.py", "base_panel.py", "scatter_panel.py"):
-        path = REPO_ROOT / "well_viewer" / "features" / "batch_export" / name
+        path = REPO_ROOT / "review" / "features" / "batch_export" / name
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
             if not _re.search(r"return f?\"", line):
                 continue
@@ -257,7 +257,7 @@ def test_every_no_data_return_in_the_batch_panels_is_a_notice():
 
 
 def test_the_runner_branches_a_notice_away_from_the_error_path():
-    src = (REPO_ROOT / "well_viewer" / "features" / "batch_export"
+    src = (REPO_ROOT / "review" / "features" / "batch_export"
            / "base_panel.py").read_text()
     tree = ast.parse(src)
     fn = next(n for n in ast.walk(tree)
@@ -276,8 +276,8 @@ def test_every_plot_renderer_applies_the_export_style():
     this pass and by nothing else, so a renderer that skips it loses them on
     its next recompute. Multivariate was the one that did."""
     roots = [
-        REPO_ROOT / "well_viewer" / "features" / "multivariate" / "renderer.py",
-        REPO_ROOT / "well_viewer" / "features" / "spatial" / "renderer.py",
+        REPO_ROOT / "review" / "features" / "multivariate" / "renderer.py",
+        REPO_ROOT / "review" / "features" / "spatial" / "renderer.py",
     ]
     for path in roots:
         src = path.read_text()
@@ -296,7 +296,7 @@ def test_the_properties_reset_repaints_the_cached_render_tabs():
     into the constant two call sites share — which says nothing about whether
     the tabs are still repainted.
     """
-    from well_viewer.features.export.sidebar_view import (
+    from review.features.export.sidebar_view import (
         _FEATURES_THAT_REDRAW_THEMSELVES, ExportStyleSidebar,
     )
 
@@ -305,7 +305,7 @@ def test_the_properties_reset_repaints_the_cached_render_tabs():
     assert not missing, (
         f"reset-to-defaults does not repaint these cached-render tabs: {missing}")
     reset_path = ast.unparse(
-        parse_source(REPO_ROOT / "well_viewer" / "features" / "export"
+        parse_source(REPO_ROOT / "review" / "features" / "export"
                      / "sidebar_view.py"))
     assert "_FEATURES_THAT_REDRAW_THEMSELVES" in reset_path, (
         "the roster is no longer what the reset path dispatches through")
@@ -318,7 +318,7 @@ def test_a_heatmap_cell_with_no_point_is_undefined_not_zero():
     """``METRIC_COUNT`` returned 0.0 when no aggregate point matched the
     timepoint, so a well the pipeline never measured coloured as a real,
     empty one. Its two sibling metrics already returned NaN."""
-    src = (REPO_ROOT / "well_viewer" / "features" / "heatmap" / "controller.py").read_text()
+    src = (REPO_ROOT / "review" / "features" / "heatmap" / "controller.py").read_text()
     tree = ast.parse(src)
     # Anchored on the conditional itself rather than on a ``return`` holding
     # one: the cell now answers with its spread beside its value, so the
@@ -335,7 +335,7 @@ def test_a_heatmap_cell_with_no_point_is_undefined_not_zero():
 
 
 def test_a_measured_zero_events_count_draws_a_bar():
-    src = (REPO_ROOT / "well_viewer" / "features" / "barplot" / "controller.py").read_text()
+    src = (REPO_ROOT / "review" / "features" / "barplot" / "controller.py").read_text()
     assert "item.has_mean and item.n_above > 0" not in src, (
         "the Events panel still treats a measured zero as an uncomputed value")
     assert "_n_above_known" in src
@@ -346,7 +346,7 @@ def test_a_measured_zero_events_count_draws_a_bar():
 def test_the_saved_plots_report_follows_gallery_order():
     """The gallery shows newest first and the ▲/▼ buttons curate that order;
     the PDF walked the records as stored, i.e. exactly backwards."""
-    src = (REPO_ROOT / "well_viewer" / "features" / "saved_plots" / "controller.py").read_text()
+    src = (REPO_ROOT / "review" / "features" / "saved_plots" / "controller.py").read_text()
     assert "list(reversed(store.records))" in src, (
         "the report is built in storage order, the reverse of the gallery")
 
@@ -383,7 +383,7 @@ def test_the_bracket_y_limit_still_sees_every_timepoint_s_bars():
     restricting the bar *heights* with them shrank the axis to that timepoint
     and clipped the other timepoints' bars off the figure."""
     body = _reachable_source(
-        REPO_ROOT / "well_viewer" / "features" / "barplot" / "renderer.py",
+        REPO_ROOT / "review" / "features" / "barplot" / "renderer.py",
         "draw_significance_brackets",
     )
     assert "x_by_key = {it.key: x for it, x in tested}" in body
@@ -397,7 +397,7 @@ def test_a_well_with_nothing_in_the_gate_still_counts_in_the_denominator():
     percentage's denominator. Two wells, one with 100 of 1000 inside and one
     with none, read 10.0% instead of 5.0%: the exact number the denominator
     exists to produce."""
-    src = (REPO_ROOT / "well_viewer" / "features" / "scatter" / "collect.py").read_text()
+    src = (REPO_ROOT / "review" / "features" / "scatter" / "collect.py").read_text()
     assert "if not ungated.any():" in src, (
         "the collector still drops a well that has nothing inside the gate")
 
@@ -405,8 +405,8 @@ def test_a_well_with_nothing_in_the_gate_still_counts_in_the_denominator():
 @pytest.mark.parametrize(
     "path",
     [
-        "well_viewer/features/batch_export/bar_panel.py",
-        "well_viewer/features/batch_export/base_panel.py",
+        "review/features/batch_export/bar_panel.py",
+        "review/features/batch_export/base_panel.py",
     ],
 )
 def test_the_batch_twins_do_not_clamp_the_fraction_under_fold_change(path):
@@ -445,7 +445,7 @@ def test_only_the_stale_facet_columns_lose_their_label():
     """The first version asked one all-or-nothing question about the whole
     grid, so a single right-click per-cell override — a supported feature —
     silently removed every column label on an otherwise ordinary grid."""
-    from well_viewer.features.image_browser.image_table import facet_view as fv
+    from review.features.image_browser.image_table import facet_view as fv
 
     # Cells store the timepoint under "tp" (``facet_view._DIM_CB``).
     cells = [
@@ -457,7 +457,7 @@ def test_only_the_stale_facet_columns_lose_their_label():
 
 
 def test_an_ordinary_grid_keeps_every_column_label():
-    from well_viewer.features.image_browser.image_table import facet_view as fv
+    from review.features.image_browser.image_table import facet_view as fv
 
     cells = [[{"tp": "T1"}, {"tp": "T2"}]] * 3
     assert fv._disagreeing_columns(cells, ["timepoint"], [("T1",), ("T2",)]) == set()
@@ -466,14 +466,14 @@ def test_an_ordinary_grid_keeps_every_column_label():
 def test_a_sem_flip_does_not_switch_error_bars_back_on():
     """"None" is a choice about whether to draw error bars at all, not about
     which one; a SEM/SD flip made from a plot card must not override it."""
-    src = (REPO_ROOT / "well_viewer" / "features" / "export" / "sidebar_view.py").read_text()
+    src = (REPO_ROOT / "review" / "features" / "export" / "sidebar_view.py").read_text()
     assert 'if _sc.currentData() == "none":' in src
 
 
 def test_derived_error_columns_cannot_collide():
     """The aggregate exporter derives an ``_error`` column from each axis name,
     so two names that differ can still collide once suffixed."""
-    from well_viewer.features.export.service import _axis_column_names
+    from review.features.export.service import _axis_column_names
 
     assert _axis_column_names("mean", "median") == ("mean", "median")
     assert _axis_column_names("mean", "mean") == ("mean_x", "mean_y")

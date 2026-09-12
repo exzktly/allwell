@@ -23,7 +23,7 @@ So the rule is not "add the fill values to the categories" — the next fill val
 someone writes would not be in the list either, and a category list wider than
 the observed values makes ``groupby`` fabricate a group per unused category.
 The rule is that these columns are normalised in one place,
-``well_viewer/domain/text_columns.py``, whose helpers widen a categorical to
+``review/domain/text_columns.py``, whose helpers widen a categorical to
 ``object`` before touching it.
 
 Decidable from the syntax tree: the column name is a literal at every call site
@@ -114,19 +114,19 @@ def offenders_in(source: str, path: str) -> list[str]:
         out.append(
             f"{path}:{node.lineno} `[{column!r}].fillna(...)` raises on a "
             f"plate whose {column!r} column is stored as categories — read it "
-            f"through well_viewer.domain.text_columns ({_HELPERS})"
+            f"through review.domain.text_columns ({_HELPERS})"
         )
     return out
 
 
 def test_the_column_roster_matches_the_app() -> None:
     """The restated roster above is the loader's own set, not a stale copy."""
-    from well_viewer.data.data_loading import _STRING_COLS
-    from well_viewer.domain.text_columns import TEXT_COLUMNS as APP_COLUMNS
+    from review.data.data_loading import _STRING_COLS
+    from review.domain.text_columns import TEXT_COLUMNS as APP_COLUMNS
 
     assert set(TEXT_COLUMNS) == set(APP_COLUMNS) == set(_STRING_COLS), (
         "this guard's copy of the text-column roster has drifted from "
-        "well_viewer.domain.text_columns.TEXT_COLUMNS"
+        "review.domain.text_columns.TEXT_COLUMNS"
     )
 
 

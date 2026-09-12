@@ -14,7 +14,7 @@ boundary, not on the value a helper returned. The row-fetch is stubbed rather
 than mocked away wholesale, so the renderers run their real geometry, real
 threshold split and real fraction arithmetic — only the dataframe is synthetic.
 
-Fast lane on purpose: no ``viewer_app`` fixture, no ``WellViewerApp``. The
+Fast lane on purpose: no ``viewer_app`` fixture, no ``ReviewApp``. The
 renderers take a ``ctx``, so a small stub is all they need, which is the whole
 reason the collect / renderer split exists.
 """
@@ -30,9 +30,9 @@ from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
 
 from ui import theme
-from well_viewer.core.cell_gating_state import CellGatingState
-from well_viewer.core.channel_state import ChannelState
-from well_viewer.core.plot_state import PlotState
+from review.core.cell_gating_state import CellGatingState
+from review.core.channel_state import ChannelState
+from review.core.plot_state import PlotState
 
 _WELLS = ["A01", "A02"]
 _PLATE = ["#4488CC", "#CC4488"]
@@ -51,9 +51,9 @@ def stub_ctx(monkeypatch):
     this matter: it reaches the rows through ``stats_compute.aggregate_group``
     rather than through the renderer's own fetch.
     """
-    from well_viewer.data import data_loading as dl
-    from well_viewer.domain import stats_compute as sc
-    from well_viewer.features.barplot import renderer as rnd
+    from review.data import data_loading as dl
+    from review.domain import stats_compute as sc
+    from review.features.barplot import renderer as rnd
 
     rng = np.random.default_rng(0)
 
@@ -147,7 +147,7 @@ def _inks(*axes) -> set[str]:
 
 
 def _draw(ctx, name, axm, axf, axn, threshold: float = 10.0):
-    from well_viewer.features.barplot import renderer as rnd
+    from review.features.barplot import renderer as rnd
 
     if name == "violin":
         rnd.draw_violin(ctx, axm, axf, _WELLS, list(_PLATE), list(_WELLS),

@@ -13,7 +13,7 @@ import matplotlib
 matplotlib.use("Agg")
 from matplotlib.figure import Figure
 
-from well_viewer.core import plot_style as PS
+from review.core import plot_style as PS
 
 
 class _Widgets:
@@ -27,7 +27,7 @@ class _Widgets:
 
 
 def _app():
-    from well_viewer.core.export_prefs_state import ExportPrefsState
+    from review.core.export_prefs_state import ExportPrefsState
     app = SimpleNamespace(
         _line_fig=Figure(), _bar_fig=Figure(),
         _app_state=SimpleNamespace(export_prefs=ExportPrefsState()))

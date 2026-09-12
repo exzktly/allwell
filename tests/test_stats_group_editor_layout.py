@@ -81,7 +81,7 @@ def _settle(ms: int = 90) -> None:
 
 
 def _statistics_split(app):
-    from well_viewer.core.split_view import enter_split
+    from review.core.split_view import enter_split
     app.show()
     app._notebook.setCurrentByName("Statistics")
     app._notebook.setCurrentByName("Plotting")
@@ -91,7 +91,7 @@ def _statistics_split(app):
 
 def _two_groups(ctx):
     """Two named groups with wells in them — the state the tab needs to run."""
-    from well_viewer.features.stats.controller import (
+    from review.features.stats.controller import (
         stats_grp_add, stats_refresh_group_list,
     )
     wells = list(ctx.state.dataset.well_paths)
@@ -293,7 +293,7 @@ def test_the_page_never_scrolls_sideways(loaded_app, groups):
         _two_groups(ctx)
     else:
         ctx.state.stats.clear_groups()
-        from well_viewer.features.stats.controller import stats_refresh_group_list
+        from review.features.stats.controller import stats_refresh_group_list
         stats_refresh_group_list(ctx)
     scroll = ctx.widgets.get("_stats_page_scroll")
 

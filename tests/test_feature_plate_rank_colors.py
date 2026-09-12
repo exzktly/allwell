@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.domain.selections_model import color_for_selection, color_for_well
+from review.domain.selections_model import color_for_selection, color_for_well
 
 _WP = {"A01": 1, "A02": 1, "B01": 1, "B12": 1}
 
@@ -47,7 +47,7 @@ class _FakePlate:
 
 
 def test_groups_plate_uses_group_colors():
-    from well_viewer.features.home.groups import controller as gc
+    from review.features.home.groups import controller as gc
 
     # g1: two wells sharing one group ⇒ both take the group's colour
     # (lowest-well rank = A01). g2 carries an explicit recolour ⇒ both its
@@ -82,7 +82,7 @@ def test_groups_plate_uses_group_colors():
 
 
 def test_image_table_picker_uses_rank_colors():
-    from well_viewer.features.image_browser.image_table import controller as itc
+    from review.features.image_browser.image_table import controller as itc
 
     plate = _FakePlate()
     ctx = SimpleNamespace(

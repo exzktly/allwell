@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from well_viewer.features.image_browser.playground import worker as pg_worker
-from well_viewer.features.image_browser.playground.worker import (
+from review.features.image_browser.playground import worker as pg_worker
+from review.features.image_browser.playground.worker import (
     _ReferenceBridge, _SegmentationBridge, request_reference_fields,
     request_stardist_labels,
 )

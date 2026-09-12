@@ -27,7 +27,7 @@ Channel names and timepoint labels come from the OME-XML when present, falling
 back to positional tokens (``c0``, ``t0``) otherwise.
 
 Depends only on numpy + tifffile (like :mod:`pipeline.io`) plus the stdlib and
-the ``util`` helpers — no ``well_viewer`` / ``widgets`` / Qt imports, so it stays
+the ``util`` helpers — no ``review`` / ``widgets`` / Qt imports, so it stays
 inside the pipeline self-sufficiency contract (ARCHITECTURE §6.2).
 """
 

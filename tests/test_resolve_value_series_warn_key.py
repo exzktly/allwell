@@ -12,7 +12,7 @@ import logging
 
 import pandas as pd
 
-from well_viewer.data.data_loading import _missing_col_warned, resolve_value_series
+from review.data.data_loading import _missing_col_warned, resolve_value_series
 
 
 def _missing_warnings(caplog):
@@ -24,7 +24,7 @@ def test_dedup_across_distinct_df_objects_same_schema(caplog):
     df1 = pd.DataFrame({"a": [1, 2]})
     df2 = pd.DataFrame({"a": [3, 4]})   # same columns, different object
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer.data.data_loading"):
+    with caplog.at_level(logging.WARNING, logger="review.data.data_loading"):
         r1 = resolve_value_series(df1, "missing_col")
         r2 = resolve_value_series(df2, "missing_col")
 
@@ -38,7 +38,7 @@ def test_distinct_schemas_each_warn(caplog):
     df1 = pd.DataFrame({"a": [1]})
     df2 = pd.DataFrame({"b": [1]})       # different schema, both missing "z"
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer.data.data_loading"):
+    with caplog.at_level(logging.WARNING, logger="review.data.data_loading"):
         resolve_value_series(df1, "z")
         resolve_value_series(df2, "z")
 

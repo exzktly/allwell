@@ -1,6 +1,6 @@
 """Loading bar groups from a user-picked file: the whole sequence, not the parse.
 
-``well_viewer/persistence/bar_groups.py`` was one of the five modules the
+``review/persistence/bar_groups.py`` was one of the five modules the
 combined-lane zero-coverage inventory named, and it is the one that could not
 have been reached however hard the suite tried: its only route is
 ``runtime_app._bar_load_groups`` → ``load_via_dialog``, and ``conftest.py``'s
@@ -34,8 +34,8 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from well_viewer.core.app_state import AppState  # noqa: E402
-from well_viewer.persistence import bar_groups  # noqa: E402
+from review.core.app_state import AppState  # noqa: E402
+from review.persistence import bar_groups  # noqa: E402
 
 
 @pytest.fixture(scope="module")

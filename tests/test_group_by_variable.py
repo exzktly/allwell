@@ -29,8 +29,8 @@ from types import SimpleNamespace
 
 
 from tests._repo_scan import parse_source, python_sources
-from well_viewer.domain import sample_variables as sv
-from well_viewer.domain.plot_members import (
+from review.domain import sample_variables as sv
+from review.domain.plot_members import (
     plot_replicate_sets,
     variable_replicate_sets,
     wells_without_variable,
@@ -258,7 +258,7 @@ def _band_ctx(qtbot, **kw):
 
 
 def test_the_combo_lists_the_plates_variables(qtbot):
-    from well_viewer.core.group_by_controller import (
+    from review.core.group_by_controller import (
         NO_VARIABLE_LABEL, refresh_group_by_combo,
     )
 
@@ -273,7 +273,7 @@ def test_the_combo_lists_the_plates_variables(qtbot):
 def test_the_control_is_hidden_when_the_plate_declares_no_variables(qtbot):
     """The band's rule is that it only carries controls that do something, and
     a Group by offering nothing but the status quo is not one."""
-    from well_viewer.core.group_by_controller import refresh_group_by_combo
+    from review.core.group_by_controller import refresh_group_by_combo
 
     ctx, _combo, group, _ = _band_ctx(qtbot, wells=["A01"])
     refresh_group_by_combo(ctx)
@@ -283,7 +283,7 @@ def test_the_control_is_hidden_when_the_plate_declares_no_variables(qtbot):
 def test_choosing_a_variable_reaches_the_state_and_asks_for_a_redraw(qtbot):
     """Every tab pools through one seam, so every tab's picture changed —
     redrawing one here would leave the others on the previous grouping."""
-    from well_viewer.core.group_by_controller import (
+    from review.core.group_by_controller import (
         refresh_group_by_combo, set_group_by_variable,
     )
 
@@ -300,7 +300,7 @@ def test_choosing_a_variable_reaches_the_state_and_asks_for_a_redraw(qtbot):
 def test_a_deleted_variable_clears_the_state_as_well_as_the_combo(qtbot):
     """Otherwise the next redraw reads a variable the combo no longer offers,
     and the control and the plot describe different plots."""
-    from well_viewer.core.group_by_controller import refresh_group_by_combo
+    from review.core.group_by_controller import refresh_group_by_combo
 
     ctx, combo, _group, _ = _band_ctx(qtbot, wells=["A01"], group_by="gone")
     refresh_group_by_combo(ctx)
@@ -312,7 +312,7 @@ def test_a_deleted_variable_clears_the_state_as_well_as_the_combo(qtbot):
 def test_the_shortfall_names_the_wells_the_grouping_drops(qtbot):
     """A plate that silently loses eight wells looks exactly like a plate that
     had eighty-eight — the numbers move and nothing accounts for it."""
-    from well_viewer.core.group_by_controller import group_by_shortfall
+    from review.core.group_by_controller import group_by_shortfall
 
     ctx, _c, _g, _e = _band_ctx(
         qtbot, wells=["A01", "A02", "A03"], variables=[_dose("0")],
@@ -324,7 +324,7 @@ def test_the_shortfall_names_the_wells_the_grouping_drops(qtbot):
 
 
 def test_a_fully_assigned_plate_reports_no_shortfall(qtbot):
-    from well_viewer.core.group_by_controller import group_by_shortfall
+    from review.core.group_by_controller import group_by_shortfall
 
     ctx, _c, _g, _e = _band_ctx(
         qtbot, wells=["A01"], variables=[_dose("0")],
@@ -347,7 +347,7 @@ def test_choosing_a_variable_says_what_it_left_out(qtbot):
     The title is cleared by the same redraw that resolves the condition, and it
     travels with a saved figure, which the status line never did.
     """
-    from well_viewer.core.group_by_controller import (
+    from review.core.group_by_controller import (
         group_by_shortfall, set_group_by_variable,
     )
 
@@ -372,7 +372,7 @@ def test_the_real_plot_state_always_carries_the_setting():
     must not be able to hide a *real* context that stopped honouring the
     setting, so the field's presence on the shipped state is pinned here.
     """
-    from well_viewer.core.plot_state import PlotState
+    from review.core.plot_state import PlotState
 
     assert hasattr(PlotState(), "group_by_variable"), (
         "PlotState lost group_by_variable, so plot_replicate_sets now reads "
@@ -387,7 +387,7 @@ def test_a_bare_number_value_keeps_its_label_on_the_axis(qtbot):
     user typed. ``Group by: Dose`` on values entered before a unit was drawing
     x ticks reading ``A01,A03``. §7.1: a domain predicate outside its domain.
     """
-    from well_viewer.domain.selections_model import replicate_display_label
+    from review.domain.selections_model import replicate_display_label
 
     ctx = _ctx(wells=["A01", "A03"],
                variables=[_dose("10")],
@@ -413,8 +413,8 @@ def test_a_bare_number_value_keeps_its_label_on_the_axis(qtbot):
 def test_a_users_own_group_still_gets_the_auto_name_substitution(qtbot):
     """The heuristic is not removed, only kept out of the domain it was not
     written for: a replicate set literally named "1" still reads as its wells."""
-    from well_viewer.domain.batch_models import ReplicateSet
-    from well_viewer.domain.selections_model import replicate_display_label
+    from review.domain.batch_models import ReplicateSet
+    from review.domain.selections_model import replicate_display_label
 
     ctx = _ctx(wells=["A01", "A03"])
     ctx.state.dataset.well_labels = {}

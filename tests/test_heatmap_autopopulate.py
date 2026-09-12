@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import types
 
-from well_viewer.features.heatmap.sidebar_view import _autopopulate_cells
+from review.features.heatmap.sidebar_view import _autopopulate_cells
 
 
 def _ctx(*, selections, selected_wells, well_paths, repset_avg=True,

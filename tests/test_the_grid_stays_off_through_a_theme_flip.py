@@ -32,7 +32,7 @@ pytest.importorskip("matplotlib")
 
 from matplotlib.figure import Figure  # noqa: E402
 
-from well_viewer.core.plot_style import (  # noqa: E402
+from review.core.plot_style import (  # noqa: E402
     DEFAULT_EXPORT_STYLE_PREFS,
     apply_export_style_prefs,
 )

@@ -161,7 +161,7 @@ def test_the_distribution_log_boxes_go_through_the_band(viewer_app, qtbot):
     the only case that pins *these two widgets* to the path that fixes them.
     """
     from PySide6.QtWidgets import QWidget
-    from well_viewer.features.distribution.tab_view import build_distribution_tab
+    from review.features.distribution.tab_view import build_distribution_tab
 
     parent = QWidget()
     qtbot.addWidget(parent)

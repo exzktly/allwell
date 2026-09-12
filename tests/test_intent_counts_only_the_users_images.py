@@ -223,7 +223,7 @@ def test_every_consumer_paints_the_new_state_rather_than_falling_through():
     import inspect
 
     from datasets.validate import dashboard
-    from well_viewer.features.home import collect
+    from review.features.home import collect
     from pipeline.completeness import HEALTH_STATES
 
     assert "csv_only" in HEALTH_STATES

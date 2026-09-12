@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from well_viewer.features.image_browser.review_image.collect import (
+from review.features.image_browser.review_image.collect import (
     review_build_include_map,
     review_build_threshold_map,
     review_resolve_image_refs,

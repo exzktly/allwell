@@ -32,7 +32,7 @@ from pathlib import Path
 
 from util.timepoint import parse_hours, sort_key as tp_sort_key
 from util.well_token import canonical_well_label
-from well_viewer.data.image_identity import PipelineSchema, load_schema
+from review.data.image_identity import PipelineSchema, load_schema
 from datasets._common.dataset_paths import (
     make_dataset_api,
     DatasetPaths,
@@ -170,7 +170,7 @@ def merge_sample_definitions(info1: dict, info2: dict, *, well_map: dict[str, st
     The output is built with :func:`selections_model.to_block`, so the merged
     plate carries the same shape the app writes for any other plate.
     """
-    from well_viewer.domain.selections_model import from_block, to_block
+    from review.domain.selections_model import from_block, to_block
 
     sd1 = info1.get("sample_definitions") or {}
     sd2 = info2.get("sample_definitions") or {}

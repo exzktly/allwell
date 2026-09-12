@@ -21,7 +21,7 @@ import ast
 
 from tests._repo_scan import parse_source, python_sources
 
-_REGISTRY = "well_viewer/features/registry.py"
+_REGISTRY = "review/features/registry.py"
 #: Every hook a plotting leaf needs to stay current, and what goes stale
 #: without it.
 _REQUIRED = {
@@ -77,7 +77,7 @@ def test_the_metric_change_goes_through_the_one_fan_out():
     — naming a tab here again is the regression, not a missing name.
     """
     path = next(p for p in python_sources()
-                if p.as_posix().endswith("well_viewer/core/channel_state_controller.py"))
+                if p.as_posix().endswith("review/core/channel_state_controller.py"))
     for node in ast.walk(parse_source(path)):
         if isinstance(node, ast.FunctionDef) and node.name == "set_active_metric":
             called = {getattr(c.func, "attr", None) or getattr(c.func, "id", None)

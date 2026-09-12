@@ -27,7 +27,7 @@ import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
 
-from well_viewer.features.home.cell_gating.renderer import (  # noqa: E402
+from review.features.home.cell_gating.renderer import (  # noqa: E402
     _effective_thresh_frac_on,
 )
 
@@ -44,7 +44,7 @@ def test_a_stored_cutoff_is_what_gets_drawn():
 
 
 def test_an_unset_channel_falls_back_to_its_default():
-    from well_viewer.domain.gating_state import DEFAULT_THRESH_FRAC_ON
+    from review.domain.gating_state import DEFAULT_THRESH_FRAC_ON
 
     assert _effective_thresh_frac_on(_ctx(), "gfp") == DEFAULT_THRESH_FRAC_ON
 
@@ -65,7 +65,7 @@ def test_the_channel_key_is_matched_case_insensitively():
 
 
 def test_the_renderer_draws_the_cutoff_line():
-    from well_viewer.features.home.cell_gating import renderer
+    from review.features.home.cell_gating import renderer
 
     src = textwrap.dedent(inspect.getsource(renderer._cell_gating_plot_cdf))
     assert "_effective_thresh_frac_on" in src, (
@@ -74,7 +74,7 @@ def test_the_renderer_draws_the_cutoff_line():
 
 
 def test_editing_the_cutoff_redraws_the_cdfs():
-    from well_viewer.features.home.cell_gating import controller
+    from review.features.home.cell_gating import controller
 
     src = textwrap.dedent(inspect.getsource(
         controller.cell_gating_on_threshold_frac_on_change))

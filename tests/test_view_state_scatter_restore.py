@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.persistence import view_state as vs
+from review.persistence import view_state as vs
 
 pytestmark = pytest.mark.qt
 
@@ -15,7 +15,7 @@ def _selectable(cb):
 
 def test_scatter_axes_round_trip(loaded_app):
     app = loaded_app
-    from well_viewer.core.tab_controller import on_tab_change
+    from review.core.tab_controller import on_tab_change
 
     assert app._notebook.setCurrentByName("Plotting")
     assert app._plotting_notebook.setCurrentByName("Scatter Plot")
@@ -47,7 +47,7 @@ def test_scatter_axes_round_trip(loaded_app):
 
 def test_scatter_metric_round_trip(loaded_app):
     app = loaded_app
-    from well_viewer.core.tab_controller import on_tab_change
+    from review.core.tab_controller import on_tab_change
 
     assert app._notebook.setCurrentByName("Plotting")
     assert app._plotting_notebook.setCurrentByName("Scatter Plot")
@@ -78,7 +78,7 @@ def test_scatter_metric_round_trip(loaded_app):
 
 def test_scatter_agg_round_trip(loaded_app):
     app = loaded_app
-    from well_viewer.core.tab_controller import on_tab_change
+    from review.core.tab_controller import on_tab_change
 
     assert app._notebook.setCurrentByName("Plotting")
     assert app._plotting_notebook.setCurrentByName("Scatter Plot")

@@ -31,13 +31,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.domain import sample_variables as sv
-from well_viewer.domain.batch_models import ReplicateSet
-from well_viewer.domain.selections_model import (
+from review.domain import sample_variables as sv
+from review.domain.batch_models import ReplicateSet
+from review.domain.selections_model import (
     active_replicate_sets, from_block, make_selection, replicate_display_label,
     to_block,
 )
-from well_viewer.features.home.groups.controller import (
+from review.features.home.groups.controller import (
     make_replicate_pairs, name_sets_from_variables, rep_quick_pairs,
 )
 
@@ -209,7 +209,7 @@ def _ctx(wells, vset=None, *, size=2, pair_dir="row", iter_order="row"):
     ``test_quick_groups_names_every_set_it_creates`` starts from an empty
     selection list.
     """
-    from well_viewer.core.selection_state import SelectionState
+    from review.core.selection_state import SelectionState
 
     selection = SelectionState()
     if vset is not None:
@@ -343,8 +343,8 @@ def test_a_selection_that_never_claimed_verbatim_carries_no_such_key():
 
 def test_renaming_a_group_hands_the_name_back_to_the_heuristic():
     """A name the user typed is theirs, and ``3`` typed by a user is generic."""
-    from well_viewer.core.plot_state import PlotState
-    from well_viewer.core.selection_controller import sel_rename
+    from review.core.plot_state import PlotState
+    from review.core.selection_controller import sel_rename
 
     ctx = _ctx(["A01", "A02"], _vset(_dose(unit=""), dose={"A01": "d1",
                                                            "A02": "d1"}))
@@ -391,7 +391,7 @@ def _press_create(dlg) -> None:
 
 def _dialog(ctx):
     """Build the real dialog and hand back it, its name box and its plate."""
-    from well_viewer.features.home.groups.controller import build_rep_add_dialog
+    from review.features.home.groups.controller import build_rep_add_dialog
 
     built = build_rep_add_dialog(ctx)
     return built.dialog, built.name_edit, built.plate
@@ -489,7 +489,7 @@ def test_the_hidden_and_loaded_seam_carries_the_flag_too():
     on the batch-exported figure of the same plate — the batch-disagrees-with-
     the-tab failure, from a flag dropped in one of two near-identical lines.
     """
-    from well_viewer.domain.selections_model import replicate_sets_loaded
+    from review.domain.selections_model import replicate_sets_loaded
 
     rsets = replicate_sets_loaded([_flagged_selection()],
                                   {"A01": "A01", "A02": "A02"})
@@ -499,7 +499,7 @@ def test_the_hidden_and_loaded_seam_carries_the_flag_too():
 
 def test_a_hidden_group_keeps_its_flag():
     """The seam's whole reason for existing is that it includes hidden groups."""
-    from well_viewer.domain.selections_model import replicate_sets_loaded
+    from review.domain.selections_model import replicate_sets_loaded
 
     sel = _flagged_selection()
     sel["hidden"] = True
@@ -508,7 +508,7 @@ def test_a_hidden_group_keeps_its_flag():
 
 
 def _import_ctx():
-    from well_viewer.core.plot_state import PlotState
+    from review.core.plot_state import PlotState
 
     ctx = _ctx(["A01", "A02"], sv.VariableSet())
     ctx.state.plot = PlotState()
@@ -524,7 +524,7 @@ def test_importing_a_selection_carries_the_flag_from_the_file():
     left it green, so it measured nothing about the thing the review flagged.
     That is why the loop was split out from its file dialog.
     """
-    from well_viewer.core.selection_controller import merge_imported_selections
+    from review.core.selection_controller import merge_imported_selections
 
     ctx = _import_ctx()
     added = merge_imported_selections(ctx, {"selections": [
@@ -538,7 +538,7 @@ def test_importing_a_selection_carries_the_flag_from_the_file():
 
 def test_importing_a_selection_that_never_claimed_the_flag_does_not_gain_one():
     """The other half — without it, "always true" passes the test above."""
-    from well_viewer.core.selection_controller import merge_imported_selections
+    from review.core.selection_controller import merge_imported_selections
 
     ctx = _import_ctx()
     merge_imported_selections(ctx, [{"name": "Control", "wells": ["A01"]}])
@@ -554,7 +554,7 @@ def test_a_payload_with_no_selections_is_told_apart_from_one_that_added_none():
     and which the first version of this test asserted away because the expected
     value was guessed rather than read off the loop.
     """
-    from well_viewer.core.selection_controller import merge_imported_selections
+    from review.core.selection_controller import merge_imported_selections
 
     assert merge_imported_selections(_import_ctx(), {"selections": []}) is None
     assert merge_imported_selections(_import_ctx(), ["not a selection"]) == 0
@@ -566,7 +566,7 @@ def test_the_statistics_tabs_own_copy_of_the_rule_agrees_with_the_domains():
     Two copies of one rule grow a difference — this is the file that says so
     about itself, in the comment directly above the line.
     """
-    from well_viewer.features.stats.controller import deserialize_stats_groups
+    from review.features.stats.controller import deserialize_stats_groups
 
     ctx = _ctx(["A01", "A02"], sv.VariableSet())
     ctx.state.selection.selections = [_flagged_selection()]
@@ -685,7 +685,7 @@ def test_the_batch_scope_swap_really_passes_the_flag():
     from tests._repo_scan import parse_source
 
     tree = parse_source(
-        REPO_ROOT / "well_viewer/features/batch_export/base_panel.py")
+        REPO_ROOT / "review/features/batch_export/base_panel.py")
     calls = [n for n in ast.walk(tree)
              if isinstance(n, ast.Call)
              and getattr(n.func, "id", "") == "make_selection"]
@@ -742,7 +742,7 @@ def test_rep_add_execs_the_dialog_the_builder_built(monkeypatch):
     Mutating ``rep_add``'s body to ``pass`` left the whole lane green — the
     dialog would simply never open, which no test could see.
     """
-    from well_viewer.features.home.groups import controller as mod
+    from review.features.home.groups import controller as mod
 
     opened = []
 

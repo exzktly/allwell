@@ -26,8 +26,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import image_compose as IC
-from well_viewer.data import frame_load as FL
+from review.features.image_browser.image_table import image_compose as IC
+from review.data import frame_load as FL
 
 
 class _Ref:
@@ -57,7 +57,7 @@ def test_empty_scan_is_not_pinned_and_retries_on_the_next_pass(monkeypatch):
     Caching the empty dict in ``image_cache`` (which survives until the dataset
     is reloaded) is what made a momentary read failure permanent.
     """
-    import well_viewer.data.image_discovery as idisc
+    import review.data.image_discovery as idisc
 
     calls = {"n": 0}
     ref = _Ref("A01_gfp.tif")
@@ -86,7 +86,7 @@ def test_empty_scan_is_not_pinned_and_retries_on_the_next_pass(monkeypatch):
 
 def test_empty_mask_scan_does_not_pin_the_well(monkeypatch):
     """One channel scanning up no masks must not write masks off for the well."""
-    import well_viewer.data.image_discovery as idisc
+    import review.data.image_discovery as idisc
 
     mask_ref = _Ref("A01_labels.tif")
     results = {
@@ -115,7 +115,7 @@ def test_mask_resolves_through_the_same_matcher_as_the_image(monkeypatch):
     """
     mask = np.zeros((4, 4), dtype=np.int32)
     mask[1:3, 1:3] = 5
-    monkeypatch.setattr("well_viewer.data.image_discovery.open_imgref_as_array",
+    monkeypatch.setattr("review.data.image_discovery.open_imgref_as_array",
                         lambda ref, greyscale=False: mask)
 
     images = {("1", "T01"): _Ref("m.tif")}
@@ -130,7 +130,7 @@ def test_mask_refuses_an_ambiguous_empty_fov(monkeypatch):
     """An empty FOV spanning several fields must resolve to no mask, not to an
     arbitrary one — the image lookup already refuses it, and a mismatched mask
     draws one field's outlines over another field's pixels."""
-    monkeypatch.setattr("well_viewer.data.image_discovery.open_imgref_as_array",
+    monkeypatch.setattr("review.data.image_discovery.open_imgref_as_array",
                         lambda ref, greyscale=False: np.ones((4, 4), dtype=np.int32))
 
     images = {("1", "0"): _Ref("f1.tif"), ("2", "0"): _Ref("f2.tif")}
@@ -174,7 +174,7 @@ def test_binary_cell_with_a_mask_still_renders(monkeypatch):
 
 def test_prefetch_marks_only_the_keys_that_decoded(monkeypatch):
     """A failed warm stays unmarked so the next Generate tries it again."""
-    from well_viewer.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import controller as C
 
     monkeypatch.setattr(C, "_row_display_opts", lambda ctx, r, chan=None: (False, False, ""))
     monkeypatch.setattr(C, "_find_ratio_for_channel", lambda ctx, chan: None)
@@ -218,7 +218,7 @@ def _image_labels(grid):
 
 def test_one_failing_cell_does_not_abandon_the_rest_of_the_grid(
         image_table_app, monkeypatch):
-    from well_viewer.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import controller as C
 
     ctx = image_table_app._ctx
 
@@ -243,7 +243,7 @@ def test_one_failing_cell_does_not_abandon_the_rest_of_the_grid(
 def test_a_pre_pass_failure_still_draws_the_table(image_table_app, monkeypatch):
     """The brightness-pooling pass runs before any cell renders — if it raises,
     the table must still draw (the grid has already been cleared by then)."""
-    from well_viewer.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import controller as C
 
     ctx = image_table_app._ctx
     monkeypatch.setattr(C, "_load_array",

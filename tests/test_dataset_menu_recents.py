@@ -25,10 +25,10 @@ from types import SimpleNamespace  # noqa: E402
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from well_viewer.core.app_shell_view import (  # noqa: E402
+from review.core.app_shell_view import (  # noqa: E402
     RECENTS_IN_MENU, _dataset_button, _fill_dataset_menu,
 )
-from well_viewer.core.app_state import AppState  # noqa: E402
+from review.core.app_state import AppState  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -58,7 +58,7 @@ def _win(monkeypatch, paths, *, data_dir=None, opened=None):
     reading and writing nothing.
     """
     from core import app_settings as app_settings_module
-    from well_viewer.core.recent_datasets import record_open
+    from review.core.recent_datasets import record_open
 
     settings = _Settings()
     for i, path in enumerate(paths):
@@ -229,7 +229,7 @@ def test_the_button_fills_its_own_menu_when_it_is_about_to_be_shown(
 
     b = tmp_path / "plate_b"
     b.mkdir()
-    from well_viewer.core.recent_datasets import record_open
+    from review.core.recent_datasets import record_open
     record_open(win._settings, str(b), "plate_b", 99.0)
 
     button.menu().aboutToShow.emit()

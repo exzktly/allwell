@@ -52,7 +52,7 @@ def test_a_folder_that_opened_but_yielded_no_wells_is_not_a_dataset():
     wells. A page testing something else would contradict the placeholder
     covering it — reporting on a dataset the placeholder says is not there.
     """
-    from well_viewer.features.home import collect as hc
+    from review.features.home import collect as hc
 
     ctx, _ = _ctx()
     ctx.state.dataset.data_dir = "/tmp/opened/but/empty"
@@ -61,7 +61,7 @@ def test_a_folder_that_opened_but_yielded_no_wells_is_not_a_dataset():
 
 
 def test_wells_are_what_makes_it_a_dataset():
-    from well_viewer.features.home import collect as hc
+    from review.features.home import collect as hc
 
     ctx, _ = _ctx(wells={"A01": None})
     assert hc.has_dataset(ctx) is True
@@ -73,7 +73,7 @@ def test_wells_are_what_makes_it_a_dataset():
 def test_open_a_dataset_reaches_the_window_s_own_picker():
     """Regression: ``next_step`` has always offered ``action="open"``, and
     ``run_home_action`` had no branch for it — so the button did nothing."""
-    from well_viewer.features.home.controller import run_home_action
+    from review.features.home.controller import run_home_action
 
     ctx, calls = _ctx()
     run_home_action(ctx, "open")
@@ -85,7 +85,7 @@ def test_open_a_dataset_reaches_the_window_s_own_picker():
 
 def test_open_does_nothing_when_the_shell_has_no_picker():
     """A profile or a test harness may mount no such window."""
-    from well_viewer.features.home.controller import run_home_action
+    from review.features.home.controller import run_home_action
 
     ctx, _ = _ctx()
     ctx.window = SimpleNamespace()
@@ -131,7 +131,7 @@ def test_setting_an_action_twice_does_not_fire_the_old_one(qtbot):
 def test_an_action_survives_a_reworded_placeholder(qtbot):
     """The shared refresher rewrites text, hint and icon on every pass. Home
     sets its button once at build time and must keep it."""
-    from well_viewer.core.ui_helpers import NO_DATASET, _apply_reason
+    from review.core.ui_helpers import NO_DATASET, _apply_reason
     from PySide6.QtWidgets import QStackedWidget, QWidget
 
     empty = EmptyState("something else")
@@ -194,7 +194,7 @@ def test_every_shortfall_offers_to_finish_the_run():
     step. Each of these is fixed by running the pipeline over what is missing,
     and rebuilding the run's settings by hand is where the damage happens —
     a mismatched csv_prefix silently reprocesses the whole plate."""
-    from well_viewer.features.home import collect as hc
+    from review.features.home import collect as hc
 
     for wells in (
         {"A01": _well("complete", failed=["F001_0h"])},
@@ -211,7 +211,7 @@ def test_only_the_wells_an_incremental_run_would_skip_are_forced():
     """A partial well is fixed by the incremental diff at a fraction of the cost
     of re-segmenting it. A well with images and no CSV has nothing missing by
     that diff, so it is skipped forever unless named."""
-    from well_viewer.features.home import collect as hc
+    from review.features.home import collect as hc
 
     ctx = _ctx_with({
         "A01": _well("complete"),
@@ -222,7 +222,7 @@ def test_only_the_wells_an_incremental_run_would_skip_are_forced():
 
 
 def test_a_dataset_with_no_record_forces_nothing():
-    from well_viewer.features.home import collect as hc
+    from review.features.home import collect as hc
 
     ctx, _ = _ctx(wells={"A01": None})
     assert hc.wells_needing_force(ctx) == []
@@ -236,7 +236,7 @@ def test_a_datasets_tool_is_given_the_project_folder_not_the_out_dir():
     check and leaves the user re-picking a folder the app already had open."""
     from pathlib import Path
 
-    from well_viewer.features.home.controller import dataset_root
+    from review.features.home.controller import dataset_root
 
     ctx, _ = _ctx(wells={"A01": None})
     ctx.state.dataset.data_dir = Path("/data/plate7/out")
@@ -249,7 +249,7 @@ def test_a_flat_csv_folder_is_handed_over_as_itself():
     parent to prefer."""
     from pathlib import Path
 
-    from well_viewer.features.home.controller import dataset_root
+    from review.features.home.controller import dataset_root
 
     ctx, _ = _ctx(wells={"A01": None})
     ctx.state.dataset.data_dir = Path("/data/loose_csvs")
@@ -289,7 +289,7 @@ def _ctx_with_recents(monkeypatch, paths, *, data_dir=None, loaded=None):
     while writing and reading nothing.
     """
     from core import app_settings as app_settings_module
-    from well_viewer.core.recent_datasets import record_open
+    from review.core.recent_datasets import record_open
 
     settings = _Settings()
     for i, path in enumerate(paths):
@@ -308,7 +308,7 @@ def _ctx_with_recents(monkeypatch, paths, *, data_dir=None, loaded=None):
 
 
 def test_the_placeholder_offers_the_datasets_that_are_there(qtbot, tmp_path, monkeypatch):
-    from well_viewer.core.recent_view import entry_rows
+    from review.core.recent_view import entry_rows
 
     a, b = tmp_path / "plate_a", tmp_path / "plate_b"
     a.mkdir()
@@ -324,7 +324,7 @@ def test_a_dataset_whose_drive_is_gone_is_shown_and_disabled(tmp_path, monkeypat
     """Not hidden. Dropping the row tells the user their history was lost, when
     what happened is that a drive is unplugged — and the row must come back by
     itself when it is plugged in again."""
-    from well_viewer.core.recent_view import entry_rows
+    from review.core.recent_view import entry_rows
 
     here = tmp_path / "mounted"
     here.mkdir()
@@ -344,7 +344,7 @@ def test_the_open_dataset_is_not_offered_back_to_itself(tmp_path, monkeypatch):
     """The card sits inside the dataset it would offer to reopen, and the
     in/out layout is where a naive string comparison misses: the list stores the
     folder Review was pointed at, and ``data_dir`` is the ``out`` inside it."""
-    from well_viewer.core.recent_view import entry_rows
+    from review.core.recent_view import entry_rows
 
     root = tmp_path / "plate_a"
     (root / "out").mkdir(parents=True)
@@ -360,7 +360,7 @@ def test_clicking_a_recent_row_opens_it_by_the_browsed_route(qtbot, tmp_path, mo
     """Asserted at the boundary: what reaches ``_load_path``, not what the row
     computed. A row that renders correctly and calls nothing is the failure this
     guards — §7.6, a control that exists is not a control that works."""
-    from well_viewer.core.recent_view import entry_rows
+    from review.core.recent_view import entry_rows
 
     root = tmp_path / "plate_a"
     root.mkdir()
@@ -380,7 +380,7 @@ def test_clicking_a_recent_row_opens_it_by_the_browsed_route(qtbot, tmp_path, mo
 
 
 def test_a_disabled_row_does_nothing_when_clicked(qtbot, tmp_path, monkeypatch):
-    from well_viewer.core.recent_view import entry_rows
+    from review.core.recent_view import entry_rows
 
     opened = []
     ctx, _ = _ctx_with_recents(monkeypatch, [tmp_path / "gone"], loaded=lambda p: opened.append(p))
@@ -438,7 +438,7 @@ def test_a_settings_backend_that_raises_costs_the_list_and_nothing_else(
     import logging
 
     from core import app_settings as app_settings_module
-    from well_viewer.core.recent_view import recent_datasets
+    from review.core.recent_view import recent_datasets
 
     class _Broken:
         def value(self, key, default=None):
@@ -446,7 +446,7 @@ def test_a_settings_backend_that_raises_costs_the_list_and_nothing_else(
 
     monkeypatch.setattr(app_settings_module, "app_settings", lambda: _Broken())
     ctx, _ = _ctx()
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         assert recent_datasets(ctx) == []
     assert any("recent-datasets" in r.message for r in caplog.records), (
         "an unreadable settings file renders identically to having no "
@@ -471,7 +471,7 @@ def test_the_placeholder_is_actually_painted_with_the_recents(qtbot, tmp_path,
     """
     from PySide6.QtWidgets import QStackedWidget, QWidget
 
-    from well_viewer.features.home.controller import paint_recents_placeholder
+    from review.features.home.controller import paint_recents_placeholder
 
     root = tmp_path / "plate_a"
     root.mkdir()
@@ -506,7 +506,7 @@ def test_refresh_home_paints_the_placeholder():
 
     from tests._repo_scan import parse_source
 
-    tree = parse_source(Path("well_viewer/features/home/controller.py"))
+    tree = parse_source(Path("review/features/home/controller.py"))
     refresh = next(n for n in ast.walk(tree)
                    if isinstance(n, ast.FunctionDef) and n.name == "refresh_home")
     called = {n.func.id for n in ast.walk(refresh)
@@ -529,7 +529,7 @@ def test_an_emptied_card_does_not_keep_the_last_datasets_rows(qtbot, monkeypatch
     """
     from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-    from well_viewer.features.home.controller import _paint_recents
+    from review.features.home.controller import _paint_recents
 
     root = tmp_path / "plate_a"
     root.mkdir()
@@ -607,7 +607,7 @@ def test_clearing_entries_does_not_accumulate_widgets(qtbot, removable):
 
 
 def test_the_rows_carry_a_way_to_forget_them(tmp_path, monkeypatch):
-    from well_viewer.core.recent_view import entry_rows
+    from review.core.recent_view import entry_rows
 
     here = tmp_path / "plate_a"
     here.mkdir()
@@ -622,7 +622,7 @@ def test_an_unreachable_row_can_still_be_forgotten(tmp_path, monkeypatch):
     """The row whose folder is gone is the one a user most wants off the list,
     and its open button is disabled — so the × must not be gated on the same
     flag."""
-    from well_viewer.core.recent_view import entry_rows
+    from review.core.recent_view import entry_rows
 
     ctx, _ = _ctx_with_recents(monkeypatch, [tmp_path / "unmounted"])
     row = entry_rows(ctx, 5, on_removed=lambda: None)[0]
@@ -639,8 +639,8 @@ def test_pressing_the_x_takes_the_dataset_out_of_the_stored_history(
     the session and comes back at the next launch, which is the failure mode
     worth guarding: the list is storage, and the screen is a picture of it.
     """
-    from well_viewer.core.recent_datasets import load
-    from well_viewer.core.recent_view import entry_rows
+    from review.core.recent_datasets import load
+    from review.core.recent_view import entry_rows
 
     a, b = tmp_path / "plate_a", tmp_path / "plate_b"
     a.mkdir()
@@ -674,7 +674,7 @@ def test_the_x_is_hidden_until_the_pointer_is_on_the_row(qtbot, tmp_path,
     from PySide6.QtCore import QEvent
     from PySide6.QtWidgets import QApplication
 
-    from well_viewer.core.recent_view import entry_rows
+    from review.core.recent_view import entry_rows
 
     here = tmp_path / "plate_a"
     here.mkdir()
@@ -710,7 +710,7 @@ def test_forgetting_a_row_repaints_both_of_homes_surfaces(monkeypatch, tmp_path)
     a dataset the history no longer has, which surfaces the moment a dataset is
     opened or closed.
     """
-    import well_viewer.features.home.controller as home
+    import review.features.home.controller as home
 
     here = tmp_path / "plate_a"
     here.mkdir()
@@ -735,8 +735,8 @@ def test_the_cards_own_x_forgets_the_dataset_and_redraws_the_card(
     """
     from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-    from well_viewer.core.recent_datasets import load
-    from well_viewer.features.home.controller import _paint_recents
+    from review.core.recent_datasets import load
+    from review.features.home.controller import _paint_recents
     from widgets.removable_row import row_remove_button
 
     a, b = tmp_path / "plate_a", tmp_path / "plate_b"

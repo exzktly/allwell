@@ -24,8 +24,8 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
-from well_viewer.core import fold_change_controls_view as view
-from well_viewer.domain.control_ref import ControlRef
+from review.core import fold_change_controls_view as view
+from review.domain.control_ref import ControlRef
 
 from tests.conftest import MockApp, make_agg
 
@@ -134,10 +134,10 @@ def test_the_editor_lists_the_plotted_members(installed):
     tests above."""
     ctx, _parent = installed
     ctx.state.plot.fc_control_map = {"DRUG": ControlRef.for_replicate_set("CTRL")}
-    from well_viewer.core.fold_change_pairing_view import open_pairing_editor
+    from review.core.fold_change_pairing_view import open_pairing_editor
 
     open_pairing_editor(ctx, "bar")
-    from well_viewer.core.fold_change_pairing_view import pairing_rows
+    from review.core.fold_change_pairing_view import pairing_rows
 
     rows = pairing_rows(ctx, "bar")
     assert [r["member"] for r in rows] == ["CTRL", "DRUG"]

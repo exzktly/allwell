@@ -52,7 +52,7 @@ def _block(finished_at: str) -> dict:
 @pytest.fixture
 def on_return():
     pytest.importorskip("PySide6")
-    from well_viewer.core.tab_controller import _resync_record_on_return
+    from review.core.tab_controller import _resync_record_on_return
     return _resync_record_on_return
 
 

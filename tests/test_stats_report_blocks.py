@@ -13,8 +13,8 @@ result. Only the reason reads as an absence.
 
 from __future__ import annotations
 
-from well_viewer.domain import stats_tests as st
-from well_viewer.features.stats import _report as rep
+from review.domain import stats_tests as st
+from review.features.stats import _report as rep
 
 
 def _text(lines) -> str:

@@ -102,8 +102,8 @@ def test_heat_map_is_not_gated_on_the_selection(loaded_app):
     to have cells — which the first version of this test did — meant the case it
     is named for never ran.
     """
-    from well_viewer.features.heatmap.controller import active_layout, heatmap_empty_reason
-    from well_viewer.features.heatmap.models import make_plate_layout
+    from review.features.heatmap.controller import active_layout, heatmap_empty_reason
+    from review.features.heatmap.models import make_plate_layout
 
     app = loaded_app
     ctx = app._ctx
@@ -134,8 +134,8 @@ def test_heat_map_placeholder_retracts_when_its_layout_is_filled(loaded_app):
     """
     from PySide6.QtWidgets import QStackedWidget
 
-    from well_viewer.features.heatmap.controller import active_layout
-    from well_viewer.features.heatmap.sidebar_view import _on_autopopulate
+    from review.features.heatmap.controller import active_layout
+    from review.features.heatmap.sidebar_view import _on_autopopulate
     from tests.fixtures.mini_dataset import WELLS
 
     app = loaded_app
@@ -175,8 +175,8 @@ def test_spatial_placeholder_retracts_at_summary_level(loaded_app):
     """
     from PySide6.QtWidgets import QStackedWidget
 
-    from well_viewer.features.spatial import controller as sp
-    from well_viewer.features.spatial import state as sp_state
+    from review.features.spatial import controller as sp
+    from review.features.spatial import state as sp_state
 
     app = loaded_app
     ctx = app._ctx

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from well_viewer.features.batch_export.service import (
+from review.features.batch_export.service import (
     MANIFEST_NAME,
     commit_staged_export,
     discard_staging,

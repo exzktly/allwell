@@ -5,7 +5,7 @@ feature to need them) so every Datasets utility that reads an ``in``/``out``
 dataset folder — Concatenate, Validate, Subset, Import loose, Merge plates —
 shares one implementation instead of five drifting copies.
 
-Qt-free and ``well_viewer``-free: only ``util.aw_safe`` and
+Qt-free and ``review``-free: only ``util.aw_safe`` and
 ``util.well_token``, so this module can be imported from ``services/`` without
 pulling Qt or the Review pane in.
 

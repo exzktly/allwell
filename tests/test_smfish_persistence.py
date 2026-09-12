@@ -1,4 +1,4 @@
-"""Regression tests for ``well_viewer.persistence.smfish``.
+"""Regression tests for ``review.persistence.smfish``.
 
 Pins the per-channel threshold round-trip through pipeline_info.json,
 the in-memory ``_smfish_thresholds_saved`` cache, and the spinbox
@@ -12,8 +12,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-from well_viewer.persistence import smfish as _smfish_persist
-from well_viewer.core.app_runtime import AppRuntime
+from review.persistence import smfish as _smfish_persist
+from review.core.app_runtime import AppRuntime
 
 def _attach_ctx(app):
     app._ctx = SimpleNamespace(app=app, state=getattr(app, '_app_state', None), runtime=AppRuntime(app))

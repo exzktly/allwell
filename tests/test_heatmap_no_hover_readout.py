@@ -20,7 +20,7 @@ import ast
 from pathlib import Path
 from tests._repo_scan import parse_source
 
-_HEATMAP_DIR = Path(__file__).resolve().parents[1] / "well_viewer" / "features" / "heatmap"
+_HEATMAP_DIR = Path(__file__).resolve().parents[1] / "review" / "features" / "heatmap"
 
 
 def _module_ast(name: str) -> ast.Module:

@@ -23,7 +23,7 @@ import json
 import logging
 from pathlib import Path
 
-from well_viewer.persistence.cell_overrides import load_overrides
+from review.persistence.cell_overrides import load_overrides
 
 
 def _write(data_dir: Path, overrides: list[dict], *, version: int = 2) -> None:
@@ -38,7 +38,7 @@ def test_v2_row_without_a_fingerprint_warns(tmp_path, caplog):
          "included": "0", "seg_fp": ""},
     ])
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         loaded = load_overrides(tmp_path)
 
     assert ("C03", "1", "0", "3") in loaded, "the row must still load"
@@ -64,7 +64,7 @@ def test_stored_fingerprint_with_no_zip_on_disk_is_reported(tmp_path, caplog):
          "included": "0", "seg_fp": "999999"},
     ])
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         loaded = load_overrides(tmp_path)
 
     assert ("A01", "1", "0", "7") in loaded
@@ -89,7 +89,7 @@ def test_verified_row_produces_no_unchecked_warning(tmp_path, caplog):
          "included": "0", "seg_fp": fp},
     ])
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         loaded = load_overrides(tmp_path)
 
     assert ("A01", "1", "0", "7") in loaded

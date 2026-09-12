@@ -31,9 +31,9 @@ import types
 
 import pytest
 
-from well_viewer.domain.stats_compute import replicate_mean_and_spread
-from well_viewer.features.heatmap import controller as HM
-from well_viewer.features.heatmap.models import HeatmapLayout
+from review.domain.stats_compute import replicate_mean_and_spread
+from review.features.heatmap import controller as HM
+from review.features.heatmap.models import HeatmapLayout
 
 _VAL = "gfp_mean_intensity"
 _TP = 0.0
@@ -99,7 +99,7 @@ def test_the_sd_sem_choice_is_the_app_wide_one():
 
 def test_the_cell_agrees_with_the_reducer_the_bar_uses():
     """Not a reimplementation of the arithmetic — the same call, same answer."""
-    from well_viewer.domain.stats_compute import group_replicate_stats
+    from review.domain.stats_compute import group_replicate_stats
 
     ctx = _stats_ctx()
     reps = group_replicate_stats(ctx, ["A01", "A02"], _TP, use_fov=False,

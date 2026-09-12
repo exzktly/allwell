@@ -20,8 +20,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_image_table_state_suffixes_match_frame_load():
-    from well_viewer.data import frame_load
-    from well_viewer.features.image_browser.image_table import state
+    from review.data import frame_load
+    from review.features.image_browser.image_table import state
 
     assert state._BINARY_SUFFIX == frame_load.BINARY_SUFFIX
     assert state._MASK_SUFFIX == frame_load.MASK_SUFFIX
@@ -48,7 +48,7 @@ def test_image_table_state_stays_importable_without_numpy_or_qt():
 
     probe = (
         "import sys, importlib\n"
-        "importlib.import_module('well_viewer.features.image_browser.image_table.state')\n"
+        "importlib.import_module('review.features.image_browser.image_table.state')\n"
         "print(','.join(m for m in ('numpy', 'PySide6', 'matplotlib', 'pandas')\n"
         "                if m in sys.modules))\n"
     )

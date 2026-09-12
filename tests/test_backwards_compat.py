@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 import pipeline.shape_features as sfc
-from well_viewer.domain.viewer_state import read_pipeline_info
+from review.domain.viewer_state import read_pipeline_info
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LEGACY = REPO_ROOT / "tests" / "fixtures" / "legacy_dataset"
@@ -107,7 +107,7 @@ def test_shape_features_core_catalog():
 
 def test_detect_shape_features_legacy_vs_new():
     pd = pytest.importorskip("pandas")
-    from well_viewer.data.data_loading import detect_shape_features
+    from review.data.data_loading import detect_shape_features
 
     # Legacy CSV (intensity only) → no shape columns → no dropdown section.
     legacy = pd.DataFrame({

@@ -7,10 +7,10 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.core.app_runtime import AppRuntime
-from well_viewer.core.widget_registry import WidgetRegistry
-from well_viewer.features.saved_plots.state import SavedPlot, get_store
-from well_viewer.features.saved_plots.tab_view import (
+from review.core.app_runtime import AppRuntime
+from review.core.widget_registry import WidgetRegistry
+from review.features.saved_plots.state import SavedPlot, get_store
+from review.features.saved_plots.tab_view import (
     build_saved_plots_tab,
     populate_saved_plots_grid,
 )
@@ -62,7 +62,7 @@ def test_the_gallery_can_be_opened_at_one_particular_card(qapp, tmp_path):
     and an index that were never populated — or populated under a different key
     — would pass every test made against a fixture.
     """
-    from well_viewer.features.saved_plots.tab_view import scroll_to_saved_plot
+    from review.features.saved_plots.tab_view import scroll_to_saved_plot
 
     app = _app(tmp_path)
     parent = QWidget()
@@ -126,7 +126,7 @@ def test_the_gallery_scrolls_to_a_card_even_when_the_page_was_just_shown(
     nothing at all.
     """
     from PySide6.QtWidgets import QStackedWidget
-    from well_viewer.features.saved_plots.tab_view import scroll_to_saved_plot
+    from review.features.saved_plots.tab_view import scroll_to_saved_plot
 
     app = _app(tmp_path)
     parent = QWidget()
@@ -186,7 +186,7 @@ def _real_png() -> bytes:
 
 def _previews(ctx) -> list:
     """Every card's figure preview, in gallery order."""
-    from well_viewer.features.saved_plots.tab_view import _AspectImage
+    from review.features.saved_plots.tab_view import _AspectImage
 
     return [card.findChild(_AspectImage)
             for card in ctx.runtime.saved_plots.cards.values()]
@@ -227,7 +227,7 @@ def _standalone_preview(tmp_path, data: bytes, name: str = "fig.png"):
     overwritten by the next layout pass — a test that sized one in place would
     be asserting against whatever width the layout happened to give it.
     """
-    from well_viewer.features.saved_plots.tab_view import _AspectImage
+    from review.features.saved_plots.tab_view import _AspectImage
 
     path = tmp_path / name
     path.write_bytes(data)
@@ -282,7 +282,7 @@ def test_an_undecodable_figure_says_so_rather_than_going_blank(qapp, tmp_path):
 def test_a_record_whose_file_is_gone_gets_a_placeholder_not_a_preview(qapp, tmp_path):
     """No readable image at all → no preview widget, so the card can draw its
     named placeholder instead of an empty box."""
-    from well_viewer.features.saved_plots.tab_view import _AspectImage
+    from review.features.saved_plots.tab_view import _AspectImage
 
     assert _AspectImage.for_path(tmp_path / "not-there.png") is None
     assert _AspectImage.for_path(None) is None

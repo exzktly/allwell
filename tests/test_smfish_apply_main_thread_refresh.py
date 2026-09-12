@@ -41,7 +41,7 @@ pytestmark = pytest.mark.usefixtures("qtbot")
 def test_worker_bridge_exposes_after_csv_signal():
     """The bridge class must declare an ``after_csv`` signal that
     carries a callable — that's the contract apply-handler relies on."""
-    from well_viewer.features.smfish.tab_view import _WorkerBridge
+    from review.features.smfish.tab_view import _WorkerBridge
 
     # The class attribute is a PySide6 ``Signal`` descriptor; the
     # instance attribute is a bound signal we can connect/emit. Both
@@ -59,7 +59,7 @@ def test_after_csv_signal_runs_callback_on_bridge_thread(qtbot):
     point of the queued connection. Without this, the apply-handler's
     widget-touching refresh runs on the worker daemon thread and
     deadlocks / no-ops."""
-    from well_viewer.features.smfish.tab_view import _WorkerBridge
+    from review.features.smfish.tab_view import _WorkerBridge
 
     bridge = _WorkerBridge(None)
     qtbot.addWidget(bridge) if hasattr(bridge, "show") else None
@@ -105,8 +105,8 @@ def test_apply_global_threshold_after_csv_dispatches_on_gui_thread(qtbot, tmp_pa
     ``after_csv_cb`` and confirm the wrapped callable runs on the GUI
     thread once the worker finishes. Locks the integration the
     production apply-handler uses."""
-    from well_viewer.features.smfish.tab_view import _WorkerBridge
-    from well_viewer.features.smfish.worker import apply_global_threshold_async
+    from review.features.smfish.tab_view import _WorkerBridge
+    from review.features.smfish.worker import apply_global_threshold_async
 
     bridge = _WorkerBridge(None)
     main_thread = threading.current_thread()

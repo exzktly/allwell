@@ -14,9 +14,9 @@ be fixed while the other is left behind — they were written from each other on
 already:
 
 * ``allwell._RingHandler`` — the shell's Application Log drawer. Attached to
-  ``well_viewer`` *and* root, so it is the one that sees ``services.remote_runner``.
-* ``well_viewer.core.status_view._GUILogHandler`` — Review's bottom log strip.
-  Attached to ``well_viewer`` only, at DEBUG, gated on nothing.
+  ``review`` *and* root, so it is the one that sees ``services.remote_runner``.
+* ``review.core.status_view._GUILogHandler`` — Review's bottom log strip.
+  Attached to ``review`` only, at DEBUG, gated on nothing.
 
 The second test asserts on the *outbound call* rather than on the outcome
 (ARCHITECTURE §5): the outcome of getting this wrong is a native abort, which is
@@ -36,7 +36,7 @@ from PySide6.QtCore import QThread, QTimer
 from PySide6.QtWidgets import QApplication, QTextEdit
 
 import allwell
-from well_viewer.core import status_view as SV
+from review.core import status_view as SV
 
 
 @pytest.fixture(scope="module")
@@ -63,7 +63,7 @@ def _make_ring_handler():
     """The shell's drawer handler, over a stub app carrying the drawer's parts.
 
     ``_attach_log_ring_buffer`` builds the handler and attaches it to the real
-    ``well_viewer`` and root loggers; it is pulled straight back off both, since
+    ``review`` and root loggers; it is pulled straight back off both, since
     these tests drive ``handler.handle`` directly and must not leave a handler
     behind on a process-wide logger.
     """
@@ -75,7 +75,7 @@ def _make_ring_handler():
     app._attach_log_ring_buffer()
 
     handler = None
-    for name in ("well_viewer", ""):
+    for name in ("review", ""):
         lg = logging.getLogger(name)
         for h in list(lg.handlers):
             if type(h).__name__ == "_RingHandler":
@@ -101,7 +101,7 @@ def subject(request, qapp):
 
 
 def _record(msg: str) -> logging.LogRecord:
-    return logging.LogRecord("well_viewer.test", logging.INFO,
+    return logging.LogRecord("review.test", logging.INFO,
                              __file__, 1, msg, None, None)
 
 

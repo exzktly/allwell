@@ -40,11 +40,11 @@ def test_data_tabs_build_and_register_notes_widget(loaded_app):
 
 def test_load_applies_block_ctx_native(loaded_app, mini_dataset):
     """The ctx-native loader applies a saved block onto typed state + the widget."""
-    from well_viewer.domain.sample_definitions import (
+    from review.domain.sample_definitions import (
         build_sample_definitions_v2,
         save_to_pipeline_info as _write_block,
     )
-    from well_viewer.persistence.sample_definitions import load_from_pipeline_info
+    from review.persistence.sample_definitions import load_from_pipeline_info
 
     app = loaded_app
     ctx = app._ctx

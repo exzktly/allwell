@@ -23,7 +23,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from well_viewer.features.scatter.collect import (
+from review.features.scatter.collect import (
     collect_scatter_data,
     gate_filter_title_suffix,
     gates_for_axes,
@@ -64,7 +64,7 @@ def _df(*, gate_pass=None):
 
 def _ctx(label_to_df, *, apply_gates=False, scatter_gates=(),
          gate_draw_mode=False, gate_edit=None):
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
         dataset=SimpleNamespace(well_paths=dict.fromkeys(label_to_df),

@@ -34,7 +34,7 @@ def test_analyze_form_fits_narrow_sidebar(qapp):
     sidebar."""
     from PySide6.QtWidgets import QScrollArea
     from analyze.tab import AnalyzeTab
-    from well_viewer.core.app_shell_view import RAIL_W
+    from review.core.app_shell_view import RAIL_W
     from widgets.wrap_checkbox import WrapCheckBox
 
     tab = AnalyzeTab()
@@ -83,7 +83,7 @@ def _set_method(tab, value: str) -> None:
 # ── image_identity: Role.PHASE ───────────────────────────────────────────────
 
 def test_role_phase_catalog():
-    from well_viewer.data.image_identity import Role, ROLE_CATALOG, role_for_kind
+    from review.data.image_identity import Role, ROLE_CATALOG, role_for_kind
     assert Role.PHASE.value == "phase"
     assert Role.PHASE in ROLE_CATALOG
     spec = ROLE_CATALOG[Role.PHASE]

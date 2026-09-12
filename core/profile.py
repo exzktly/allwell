@@ -59,7 +59,7 @@ def _repo_root() -> Path:
     # repository root is therefore one parent up.
     #
     # That count is the module's address, not a constant: it was ``parents[2]``
-    # while this file lived at ``well_viewer/core/profile.py``, and moving the
+    # while this file lived at ``review/core/profile.py``, and moving the
     # module without changing it would have returned the directory *above* the
     # checkout. Nothing raises on that — ``profiles_dir()`` would simply name a
     # directory that does not exist, no profile would resolve, and every build
@@ -185,7 +185,7 @@ def active_profile() -> Profile:
         return FULL
     if not _announced:
         _announced = True
-        logging.getLogger("well_viewer").warning(
+        logging.getLogger("review").warning(
             "Running the %r feature profile, from %s — features outside it are "
             "absent from this build. Unset it for the full app.", name, source)
     return load_profile(name)

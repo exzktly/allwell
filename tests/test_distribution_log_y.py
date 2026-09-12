@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from well_viewer.features.distribution.state import DistributionState
-from well_viewer.persistence import view_state as vs
+from review.features.distribution.state import DistributionState
+from review.persistence import view_state as vs
 
 
 def _fake_app_with_distribution(**overrides):
@@ -37,7 +37,7 @@ def test_distribution_log_y_snapshot_and_restore():
 def test_render_overlay_sets_log_y_scale():
     from matplotlib.figure import Figure
 
-    from well_viewer.features.distribution import controller as C
+    from review.features.distribution import controller as C
 
     # A8 R3: the renderer takes ctx — a minimal ctx over the state it reads.
     ctx = SimpleNamespace(
@@ -82,7 +82,7 @@ def test_render_overlay_histogram_passes_log_y_to_hist():
     not by calling ``set_yscale('log')`` on 0-baseline density bars."""
     from matplotlib.figure import Figure
 
-    from well_viewer.features.distribution import controller as C
+    from review.features.distribution import controller as C
 
     fig = Figure()
     ax = fig.add_subplot(1, 1, 1)
@@ -123,8 +123,8 @@ def _log_pref_ctx():
 def test_log_flag_single_source_of_truth():
     """On-plot checkbox and sidebar toggle share the per-figure ``y_log`` pref,
     so the renderer and the export-style pass can never disagree."""
-    from well_viewer.core.plot_style import figure_prefs
-    from well_viewer.features.distribution import controller as C
+    from review.core.plot_style import figure_prefs
+    from review.features.distribution import controller as C
 
     ctx, fig = _log_pref_ctx()
 

@@ -41,7 +41,7 @@ import pandas as pd  # noqa: E402
 
 @pytest.fixture()
 def loud_data_loading(caplog):
-    from well_viewer.data import data_loading
+    from review.data import data_loading
 
     data_loading._missing_area_warned.clear()
     caplog.set_level(logging.WARNING)
@@ -135,7 +135,7 @@ def _smfish_ctx(text, last=None):
 
 
 def test_an_unparseable_threshold_keeps_the_last_good_one(monkeypatch):
-    from well_viewer.features.smfish import tab_view
+    from review.features.smfish import tab_view
 
     said: list[str] = []
     monkeypatch.setattr(tab_view, "_smfish_set_status",
@@ -178,7 +178,7 @@ def test_the_splom_names_the_features_it_did_not_draw():
     import matplotlib.pyplot as plt
     import numpy as np
 
-    from well_viewer.features.multivariate import renderer
+    from review.features.multivariate import renderer
 
     rng = np.random.default_rng(1)
     labels = [f"f{i}" for i in range(9)]
@@ -202,7 +202,7 @@ def test_a_small_splom_carries_no_footnote():
     import matplotlib.pyplot as plt
     import numpy as np
 
-    from well_viewer.features.multivariate import renderer
+    from review.features.multivariate import renderer
 
     rng = np.random.default_rng(1)
     res = {"data": {"X": rng.normal(size=(50, 3)),

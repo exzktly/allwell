@@ -14,8 +14,8 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.features.image_browser.image_table.tab_view import build_image_table_tab
-from well_viewer.features.image_browser.cell_browser.tab_view import build_cell_browser_tab
+from review.features.image_browser.image_table.tab_view import build_image_table_tab
+from review.features.image_browser.cell_browser.tab_view import build_cell_browser_tab
 from tests.widget_registry_helpers import assert_handles_registered as _check
 
 # The builder shelf owns authoring; the render model is headless plain data, so

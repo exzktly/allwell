@@ -4,7 +4,7 @@ The pipeline (``process_microscopy.py``) applies these at run time; the Review
 viewer recomputes them on demand for the Segmentation tab's "Flat-field only"
 validation view. Lives in the shared ``core`` package — like
 ``pipeline.auto_threshold`` and ``pipeline.shape_features`` — so the pipeline can import
-it without pulling in ``well_viewer`` / Qt, and the viewer can import it without
+it without pulling in ``review`` / Qt, and the viewer can import it without
 pulling in the heavy pipeline ML stack. Dependencies: numpy + scipy only.
 
 A "flat-field" here is a **mean-1 multiplicative illumination field**: dividing

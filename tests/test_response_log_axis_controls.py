@@ -35,14 +35,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.core.cell_gating_state import CellGatingState
-from well_viewer.core.export_prefs_state import ExportPrefsState
-from well_viewer.core.plot_state import PlotState
-from well_viewer.features.response.collect import (
+from review.core.cell_gating_state import CellGatingState
+from review.core.export_prefs_state import ExportPrefsState
+from review.core.plot_state import PlotState
+from review.features.response.collect import (
     ResponseCurve, ResponseData, ResponsePoint,
 )
-from well_viewer.features.response.renderer import draw_response
-from well_viewer.features.scatter.state import ScatterState
+from review.features.response.renderer import draw_response
+from review.features.scatter.state import ScatterState
 
 _DOSES = (0.1, 0.3, 1.0, 3.0, 10.0)
 
@@ -75,7 +75,7 @@ def _figure():
     (None, 10.0),
 ])
 def test_the_base_field_reads_what_the_user_typed(text, expected):
-    from well_viewer.core.plot_style import log_base_value
+    from review.core.plot_style import log_base_value
 
     assert log_base_value(text) == pytest.approx(expected)
 
@@ -86,15 +86,15 @@ def test_the_zero_dose_column_sits_one_step_of_the_chosen_base_below():
     An implementation that ignored the base entirely would answer 0.01 to both
     of these, which is why both are asserted rather than only the base-2 one.
     """
-    from well_viewer.features.response.response_compute import zero_position
+    from review.features.response.response_compute import zero_position
 
     assert zero_position(_DOSES) == pytest.approx(0.01)
     assert zero_position(_DOSES, base=2.0) == pytest.approx(0.05)
 
 
 def test_resolved_log_base_reads_this_figure_s_preference():
-    from well_viewer.core.plot_style import figure_prefs
-    from well_viewer.features.response.controller import resolved_log_base
+    from review.core.plot_style import figure_prefs
+    from review.features.response.controller import resolved_log_base
 
     fig, _ax = _figure()
     ctx = SimpleNamespace(
@@ -114,7 +114,7 @@ def test_the_figure_is_drawn_in_the_base_it_was_given():
     Asserted as the recorded value rather than as "the axis is log", because
     every base makes the axis log and the whole question here is *which*.
     """
-    from well_viewer.core.plot_style import axis_log_base
+    from review.core.plot_style import axis_log_base
 
     fig, ax = _figure()
     draw_response(SimpleNamespace(), ax, _data(), log_x=True, log_base=2.0)
@@ -128,7 +128,7 @@ def test_a_plain_figure_takes_its_base_from_the_properties_pref():
     Ticked at the powers of the base, which is the visible consequence and the
     one an implementation that stored the pref and never used it fails.
     """
-    from well_viewer.core.plot_style import (
+    from review.core.plot_style import (
         DEFAULT_EXPORT_STYLE_PREFS, apply_export_style_prefs,
     )
 
@@ -139,7 +139,7 @@ def test_a_plain_figure_takes_its_base_from_the_properties_pref():
     prefs["x_log"] = True
     prefs["x_log_base"] = "2"
     apply_export_style_prefs(fig, prefs)
-    from well_viewer.core.plot_style import axis_log_base
+    from review.core.plot_style import axis_log_base
 
     assert axis_log_base(ax, "x") == pytest.approx(2.0)
     ticks = [t for t in ax.get_xticks() if 1 <= t <= 16]
@@ -158,7 +158,7 @@ def test_a_restyle_leaves_the_dose_ticks_where_the_tab_put_them():
     the scale — taking the locator with it — even when the scale is unchanged.
     So the doses came back as matplotlib's decades: 0.001, 0.01, … 1000.
     """
-    from well_viewer.core.plot_style import (
+    from review.core.plot_style import (
         DEFAULT_EXPORT_STYLE_PREFS, apply_export_style_prefs,
     )
 
@@ -181,8 +181,8 @@ def _stub_app(fig):
     Response figure and a real feature registry — the registry is how the
     sidebar reaches this tab, so stubbing it out would step over the seam
     under test (§7.8: my stub cannot disagree with me)."""
-    from well_viewer.core.app_runtime import AppRuntime
-    from well_viewer.features.registry import build_feature_registry
+    from review.core.app_runtime import AppRuntime
+    from review.features.registry import build_feature_registry
 
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
@@ -225,14 +225,14 @@ def _stub_app(fig):
 def _sidebar(qtbot, monkeypatch, *, drawn_log: bool = False):
     """A real ``ExportStyleSidebar`` over a real, already-drawn Response figure,
     with this tab's redraw recorded at the module the registry imports it from."""
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
 
     fig, ax = _figure()
     draw_response(SimpleNamespace(), ax, _data(), log_x=drawn_log)
     app = _stub_app(fig)
     calls: list[str] = []
     monkeypatch.setattr(
-        "well_viewer.features.response.controller.redraw_response",
+        "review.features.response.controller.redraw_response",
         lambda _ctx: calls.append("response"))
     sb = ExportStyleSidebar(app, None, fig, None, default_name="response_figure")
     qtbot.addWidget(sb)
@@ -283,7 +283,7 @@ def test_the_log_base_field_redraws_the_response_tab(qtbot, monkeypatch):
     field = _base_field(sb, "X")
     assert field is not None, "no X log base field on the Properties panel"
     assert field.currentText() == "10"
-    from well_viewer.core.plot_style import LOG_BASE_CHOICES
+    from review.core.plot_style import LOG_BASE_CHOICES
 
     assert [field.itemText(i) for i in range(field.count())] == \
         list(LOG_BASE_CHOICES), "the field offers a different list from the roster"

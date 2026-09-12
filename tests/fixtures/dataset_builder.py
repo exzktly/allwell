@@ -11,7 +11,7 @@ exercise a CSV shape that never occurs on disk and would hide a
 ``timepoint_hours``/``filename`` staleness bug.
 
 Not to be confused with ``tests/fixtures/mini_dataset.py``, which fabricates a
-*flat* layout (no ``in``/``out`` split, no zips) for Review/``WellViewerApp``
+*flat* layout (no ``in``/``out`` split, no zips) for Review/``ReviewApp``
 tests — that shape is not a dataset Concatenate/Validate/Subset/Import
 loose/Merge plates can open.
 """

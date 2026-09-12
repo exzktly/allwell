@@ -11,8 +11,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from well_viewer.core.dataset_state import DatasetState
-from well_viewer.persistence import crop_region
+from review.core.dataset_state import DatasetState
+from review.persistence import crop_region
 
 
 def _app(tmp_path):

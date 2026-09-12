@@ -21,7 +21,7 @@ import types
 
 import pytest
 
-from well_viewer.core import load_controller
+from review.core import load_controller
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def ctx_with_gates(monkeypatch):
         # The kick-off reaches Cell Gating through the feature-service lookup,
         # so the stub carries the real registry; the spy below still catches the
         # call because the service factory imports the name when it is invoked.
-        from well_viewer.features.registry import build_feature_registry
+        from review.features.registry import build_feature_registry
         return types.SimpleNamespace(window=app,
                                      features=build_feature_registry())
 
@@ -52,7 +52,7 @@ def ctx_with_gates(monkeypatch):
 def _spy(monkeypatch):
     """Replace both outbound calls, returning the record of what was invoked."""
     calls = []
-    import well_viewer.features.home.cell_gating.controller as gating
+    import review.features.home.cell_gating.controller as gating
     monkeypatch.setattr(gating, "cell_gating_start_gating_worker",
                         lambda ctx: calls.append("worker"))
     monkeypatch.setattr(gating, "cell_gating_refresh_included_count",

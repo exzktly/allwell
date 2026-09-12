@@ -21,8 +21,8 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QComboBox
 
-from well_viewer.core.app_runtime import AppRuntime
-from well_viewer.core.widget_registry import WidgetRegistry
+from review.core.app_runtime import AppRuntime
+from review.core.widget_registry import WidgetRegistry
 
 
 def _ctx(widgets_map):
@@ -51,7 +51,7 @@ def _ctx(widgets_map):
 
 
 def test_refresh_distribution_timepoints_takes_ctx(qtbot):
-    from well_viewer.features.distribution.tab_view import (
+    from review.features.distribution.tab_view import (
         refresh_distribution_timepoints,
     )
 
@@ -64,7 +64,7 @@ def test_refresh_distribution_timepoints_takes_ctx(qtbot):
 
 
 def test_refresh_heatmap_timepoints_takes_ctx(qtbot):
-    from well_viewer.features.heatmap.tab_view import refresh_heatmap_timepoints
+    from review.features.heatmap.tab_view import refresh_heatmap_timepoints
 
     cb = QComboBox()
     ctx = _ctx({"_heatmap_tp_cb": cb})

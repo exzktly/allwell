@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from well_viewer.features.barplot import renderer  # noqa: E402
+from review.features.barplot import renderer  # noqa: E402
 
 _VAL = "Nuclear_Mean"
 

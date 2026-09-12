@@ -195,7 +195,7 @@ def _save_fov_checkpoint(
             # mounts and external volumes on macOS, where it raises OSError
             # "Invalid argument"/"Inappropriate ioctl for device"). The replace
             # below is still atomic without it. Matches the guarded fsync in
-            # pipeline/io.py and well_viewer/persistence/_io.py.
+            # pipeline/io.py and review/persistence/_io.py.
             pass
     tmp.replace(records_file)
     # The marker is the atomicity boundary — present iff records_file

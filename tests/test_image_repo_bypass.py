@@ -26,7 +26,7 @@ from pathlib import Path
 
 from tests._repo_scan import parse_source, python_sources, rel
 
-ROOT = Path(__file__).resolve().parent.parent / "well_viewer"
+ROOT = Path(__file__).resolve().parent.parent / "review"
 
 #: The names that must be reached through the facade rather than imported.
 _FACADE_ONLY = frozenset({
@@ -51,7 +51,7 @@ def _facade_only_imports(tree: ast.AST) -> list[tuple[int, str]]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom):
             continue
-        if not (node.module or "").startswith("well_viewer.data"):
+        if not (node.module or "").startswith("review.data"):
             continue
         for alias in node.names:
             if alias.name in _FACADE_ONLY:
@@ -99,20 +99,20 @@ def test_the_scan_reads_the_shapes_it_claims_to():
     these cases exercise the scan the ratchet actually uses.
     """
     caught = _facade_only_imports(ast.parse(
-        "from well_viewer.data.image_discovery import open_imgref_as_array\n"))
+        "from review.data.image_discovery import open_imgref_as_array\n"))
     assert [name for _, name in caught] == ["open_imgref_as_array"]
 
     # Aliased, and alongside a name that is not facade-only.
     caught = _facade_only_imports(ast.parse(
-        "from well_viewer.data.image_discovery import ImgRef, "
+        "from review.data.image_discovery import ImgRef, "
         "find_well_images_and_masks as f\n"))
     assert [name for _, name in caught] == ["find_well_images_and_masks"]
 
     # The facade itself, and the grid loaders it deliberately does not wrap.
     for source in (
-        "from well_viewer.data.image_repository import ImageRepository\n",
-        "from well_viewer.data.frame_load import load_frame_array\n",
-        "from well_viewer.data.image_discovery import ImgRef\n",
+        "from review.data.image_repository import ImageRepository\n",
+        "from review.data.frame_load import load_frame_array\n",
+        "from review.data.image_discovery import ImgRef\n",
         "from elsewhere import open_imgref_as_array\n",
     ):
         assert _facade_only_imports(ast.parse(source)) == [], source

@@ -26,7 +26,7 @@ def test_smfish_is_top_level_tab(viewer_app):
 def test_segmentation_and_smfish_resolve_as_leaf_tabs(viewer_app):
     app = viewer_app
     # Segmentation resolves as a leaf via the Image Browser sub-tab descent.
-    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    from review.features.image_browser.controller import show_image_browser_subtab
     assert show_image_browser_subtab(app._ctx, "Segmentation")
     assert app._current_centre_tab() == "Segmentation"
     app._notebook.setCurrentByName("smFISH")
@@ -45,8 +45,8 @@ def test_smfish_shows_the_shared_empty_state_before_a_dataset_loads(viewer_app, 
     """
     from PySide6.QtWidgets import QLabel, QStackedWidget, QWidget
 
-    from well_viewer.core.ui_helpers import refresh_plot_empty_states
-    from well_viewer.features.smfish.tab_view import build_smfish_tab
+    from review.core.ui_helpers import refresh_plot_empty_states
+    from review.features.smfish.tab_view import build_smfish_tab
     from widgets.empty_state import EmptyState
 
     app = viewer_app

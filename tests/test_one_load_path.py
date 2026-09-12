@@ -28,11 +28,11 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from well_viewer.core.dataset_state import DatasetState
-from well_viewer.data.curation import apply_curation_to_cache
-from well_viewer.data.data_loading import get_rows
-from well_viewer.data.well_repository import WellRepository
-from well_viewer.features.registry import build_feature_registry
+from review.core.dataset_state import DatasetState
+from review.data.curation import apply_curation_to_cache
+from review.data.data_loading import get_rows
+from review.data.well_repository import WellRepository
+from review.features.registry import build_feature_registry
 
 
 def _write_well(tmp_path, label="A01", rows=3):
@@ -185,7 +185,7 @@ def test_curation_is_a_registered_projector_not_a_caller_s_errand():
     than being remembered at each call site — which is how the loader and the
     lazy path came to disagree.
     """
-    from well_viewer.data.cache_projectors import iter_cache_projectors
+    from review.data.cache_projectors import iter_cache_projectors
 
     build_feature_registry()
     registered = {fn.__name__ for fn in iter_cache_projectors()}

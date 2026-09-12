@@ -63,7 +63,7 @@ APP_VERSION = _ver_ns["__version__"]
 # ---------------------------------------------------------------------------
 # `ALLWELL_PROFILE=<name> scripts/build_executable.sh` builds a binary that ships
 # only the profile's features (profiles/<name>.toml). Unset / "full" = the full
-# app. Excluded features' source dirs are omitted from the bundled `well_viewer`
+# app. Excluded features' source dirs are omitted from the bundled `review`
 # tree, their unique heavy deps are excluded from the module graph, and the
 # chosen profile is baked as `active_profile.txt` so the frozen app's registry
 # filters to match the bundled code (a frozen binary has no env at run time).
@@ -101,7 +101,7 @@ if _profile_active:
     _catalog = load_catalog(_parent / "profiles" / "full.toml")
     _ex = compute_exclusions(_catalog, _prof.get("features"),
                              _prof.get("subtabs") or {})
-    # repo_paths spans well_viewer/ tabs AND non-Qt units (pipeline/cellpose.py);
+    # repo_paths spans review/ tabs AND non-Qt units (pipeline/cellpose.py);
     # the bundling loop filters every first-party package against this list.
     _excluded_features = _ex.features
     # Apply the remote-manifest bundling floor: never exclude a file the remote
@@ -132,7 +132,7 @@ _DISPLAY_NAME = f"All Well {APP_VERSION}" + (f" ({_PROFILE})" if _profile_active
 def _pkg_datas(pkg_root: Path, dest: str, exclude_repo_dirs: list) -> list:
     """Per-file data tuples for *pkg_root* → *dest*, omitting excluded dirs.
 
-    Excludes are repo-relative (e.g. ``well_viewer/features/stats``); any file
+    Excludes are repo-relative (e.g. ``review/features/stats``); any file
     under one is dropped, so a profiled-out feature's source never lands in the
     bundle. __pycache__ is always skipped."""
     out: list = []
@@ -188,7 +188,7 @@ sibling_scripts = [
 # filtered per-file against ``_excluded_repo_dirs`` (excluded feature dirs +
 # non-Qt units like pipeline/cellpose.py dropped); the full build ships them
 # whole.
-for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "util",
+for _pkg in ("review", "widgets", "ui", "services", "pipeline", "util",
              "startup", "core",
              "analyze", "datasets"):
     _pkg_path = _parent / _pkg
@@ -308,7 +308,7 @@ hiddenimports = [
     "numpy.random._generator",
     "numpy.random.mtrand",
 
-    # scipy — stats and ndimage used by well_viewer + process_microscopy
+    # scipy — stats and ndimage used by review + process_microscopy
     "scipy.stats",
     "scipy.stats._stats_py",
     "scipy.stats._continuous_distns",
@@ -366,7 +366,7 @@ hiddenimports = [
 
     # PySide6 — the v2 UI runs on Qt6. PyInstaller picks up the visible
     # widgets via static analysis but the deferred-import paths in
-    # widgets/* and well_viewer/* need explicit hints.
+    # widgets/* and review/* need explicit hints.
     "PySide6",
     "PySide6.QtCore",
     "PySide6.QtGui",
@@ -387,7 +387,7 @@ hiddenimports = [
     "pandas.io.formats",
     "pandas.io.formats.style",
 
-    # pyarrow — the per-well Parquet frame cache (well_viewer/data/parquet_cache.py).
+    # pyarrow — the per-well Parquet frame cache (review/data/parquet_cache.py).
     # Imported lazily inside that module, so PyInstaller's module graph cannot
     # see it and it has to be named here. Absent, the app parses CSVs instead of
     # failing, but a shipped build should carry it: it is a 60x read.

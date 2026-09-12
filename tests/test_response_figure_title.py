@@ -23,14 +23,14 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.data.metric_labels import (
+from review.data.metric_labels import (
     spread_label, threshold_qualifier,
 )
-from well_viewer.domain import sample_variables as sv
-from well_viewer.domain.time_rescale import (
+from review.domain import sample_variables as sv
+from review.domain.time_rescale import (
     TimeRescale, figure_timepoints_label,
 )
-from well_viewer.features.response import controller as rctl
+from review.features.response import controller as rctl
 from tests.test_response_tab import (  # noqa: F401 — the fixture is the point
     _load, _variable, tab,
 )

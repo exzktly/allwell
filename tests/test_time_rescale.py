@@ -12,7 +12,7 @@ import math
 
 import pytest
 
-from well_viewer.domain import time_rescale as tr
+from review.domain import time_rescale as tr
 
 
 # ── the multiplication ──────────────────────────────────────────────────────
@@ -38,7 +38,7 @@ def test_fractional_factors_work_both_directions():
 
 def test_formatting_goes_through_the_canonical_key_form():
     """A rescaled tick must read like every other timepoint in the app."""
-    from well_viewer.data.image_identity import normalize_tp
+    from review.data.image_identity import normalize_tp
     for value, factor in ((1, 4), (2.5, 2), (0, 4), (7, 1 / 12)):
         assert tr.format_scaled(value, factor) == normalize_tp(value * factor)
 

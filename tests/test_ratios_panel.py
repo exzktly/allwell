@@ -3,7 +3,7 @@
 A ratio is a virtual channel computed at read time from two
 ``{channel}_{metric}`` columns, and this panel is the only place a user
 defines one. The tests here drive the widget directly against a ctx-shaped
-fake rather than a full ``WellViewerApp``, so they stay in the fast lane.
+fake rather than a full ``ReviewApp``, so they stay in the fast lane.
 
 Ratios is a removable feature (``profiles/full.toml``), which is the second
 reason this file exists: the manifest deletes ``tests/test_ratios_*.py``
@@ -21,8 +21,8 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QMessageBox, QWidget  # noqa: E402
 
-from well_viewer.domain.ratio_models import RatioMetric  # noqa: E402
-from well_viewer.features.home.ratios.tab_view import (  # noqa: E402
+from review.domain.ratio_models import RatioMetric  # noqa: E402
+from review.features.home.ratios.tab_view import (  # noqa: E402
     RatioMetricsPanel,
     build_ratios_inline_panel,
 )

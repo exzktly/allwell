@@ -1,6 +1,6 @@
 """General-purpose Qt-free utilities shared across the app.
 
-These carry no ``well_viewer`` / ``widgets`` / Qt imports and are not specific
+These carry no ``review`` / ``widgets`` / Qt imports and are not specific
 to the analysis pipeline — they're used by the GUI, the pipeline, and the
 services layer alike:
 

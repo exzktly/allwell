@@ -21,11 +21,11 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from well_viewer.core import plot_toggles
-from well_viewer.core.plot_orchestrator import redraw_every_scope
-from well_viewer.core.app_state import AppState
-from well_viewer.core.scope_registry import redraw_app_scope
-from well_viewer.domain.fold_change_scopes import (
+from review.core import plot_toggles
+from review.core.plot_orchestrator import redraw_every_scope
+from review.core.app_state import AppState
+from review.core.scope_registry import redraw_app_scope
+from review.domain.fold_change_scopes import (
     _REGISTERED_SCOPES, FoldChangeScope, register_fold_change_scope,
 )
 
@@ -81,7 +81,7 @@ def ctx(monkeypatch, scopes):
 
     app = _App()
     calls = app.redraws
-    import well_viewer.core.plot_orchestrator as po
+    import review.core.plot_orchestrator as po
     monkeypatch.setattr(po, "redraw_app",
                         lambda _ctx: calls.append("redraw_app"))
     return SimpleNamespace(window=app, state=app._app_state, redraws=calls)

@@ -26,7 +26,7 @@ from __future__ import annotations
 #   * ``Colors.trace`` / ``CPub.trace`` below — what
 #     ``widgets/plot_card.plot_palette()`` feeds into matplotlib's
 #     ``axes.prop_cycle`` (used for screen + publication modes).
-#   * ``well_viewer.plate_layout.WELL_COLORS`` — a plain ``list()`` copy, read
+#   * ``review.plate_layout.WELL_COLORS`` — a plain ``list()`` copy, read
 #     by the ``_rank_color_well`` / ``_rank_color_rset`` helpers and every
 #     plot renderer that needs a per-well colour by rank.
 #
@@ -1219,9 +1219,9 @@ QTabBar#PlottingSubTabs::tab:selected {{
 /* Used by the picker grids that use ``WellButton`` / ``build_plate_grid``
    (Statistics / Image Table / Segmentation / Home / Bar Plots).
    Driven by ``WellButton.set_state(...)`` via the dynamic ``state`` property;
-   the per-widget overrides in ``WellViewerApp._style_plate_button`` (Stats /
+   the per-widget overrides in ``ReviewApp._style_plate_button`` (Stats /
    bar pickers) take precedence for those grids. Keep the 18px box in sync with
-   ``well_viewer.views.well_button.WELL_SIZE``. */
+   ``review.views.well_button.WELL_SIZE``. */
 QPushButton#WellButton {{
     min-width: 18px; min-height: 18px; max-width: 18px; max-height: 18px;
     padding: 0;

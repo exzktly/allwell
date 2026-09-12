@@ -1,7 +1,7 @@
 """App-level UI concerns that belong to no single pane.
 
 Three panes — Analyze (:mod:`analyze`), Datasets (:mod:`datasets`) and Review
-(:mod:`well_viewer`) — share a look and a reference manual, and what they share
+(:mod:`review`) — share a look and a reference manual, and what they share
 lives here:
 
 * :mod:`ui.theme` is the single source of truth for colour, type, spacing and

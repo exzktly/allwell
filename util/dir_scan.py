@@ -48,7 +48,7 @@ reach the user as an error — so the ``OSError`` from opening the directory
 propagates and each caller keeps the answer it already had.
 
 Lives in ``util/`` because both sides need it: ``services`` must stay Qt-free and
-the pipeline may not import ``well_viewer`` at all, and this module is stdlib
+the pipeline may not import ``review`` at all, and this module is stdlib
 only.
 """
 

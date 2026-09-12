@@ -40,11 +40,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from tests._repo_scan import REPO_ROOT, parse_source, rel  # noqa: E402
-from well_viewer.features.batch_export.base_panel import (  # noqa: E402
+from review.features.batch_export.base_panel import (  # noqa: E402
     BatchExportPanel,
 )
 
-_BATCH_DIR = REPO_ROOT / "well_viewer" / "features" / "batch_export"
+_BATCH_DIR = REPO_ROOT / "review" / "features" / "batch_export"
 
 #: The two figure-writing seams every batch panel goes through. Both must be
 #: told which export group the figure belongs to, because both feed the
@@ -232,12 +232,12 @@ def test_every_batch_panel_declares_where_its_figures_came_from():
     rather than a missing one, and one that only shows up as a gallery record
     whose Restore lands on the wrong tab.
     """
-    from well_viewer.features.batch_export.bar_panel import BarBatchExportPanel
-    from well_viewer.features.batch_export.base_panel import BatchExportPanel
-    from well_viewer.features.batch_export.response_panel import (
+    from review.features.batch_export.bar_panel import BarBatchExportPanel
+    from review.features.batch_export.base_panel import BatchExportPanel
+    from review.features.batch_export.response_panel import (
         ResponseBatchExportPanel,
     )
-    from well_viewer.features.batch_export.scatter_panel import (
+    from review.features.batch_export.scatter_panel import (
         ScatterBatchExportPanel,
     )
 
@@ -254,7 +254,7 @@ def test_every_batch_panel_declares_where_its_figures_came_from():
 
 def test_the_mode_bar_the_dispatch_and_the_panels_agree():
     """One key per mode, spelled the same in all three places it appears."""
-    from well_viewer.features.batch_export import tab_view
+    from review.features.batch_export import tab_view
 
     bar_keys = [key for _label, key, _feature in tab_view._MODES]
     assert len(set(bar_keys)) == len(bar_keys), bar_keys
@@ -275,7 +275,7 @@ def test_response_mode_is_offered_only_where_the_feature_is():
     Left in the bar it would build a panel whose Run button reaches a collector
     that is not in the build — a page that looks complete and raises on use.
     """
-    from well_viewer.features.batch_export import tab_view
+    from review.features.batch_export import tab_view
 
     present = SimpleNamespace(features=SimpleNamespace(get=lambda name: object()))
     absent = SimpleNamespace(features=SimpleNamespace(get=lambda name: None))
@@ -297,7 +297,7 @@ def test_the_capture_callback_runs_after_the_file_and_before_the_close():
     render a second time — and both mistakes leave a green test if the callback
     is only asserted to have *run*.
     """
-    from well_viewer.features.batch_export.service import save_export_figure
+    from review.features.batch_export.service import save_export_figure
 
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
@@ -344,7 +344,7 @@ class _ParamScopeStub:
 
 
 def _group(name, member_name, wells):
-    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+    from review.domain.batch_models import BarGroup, ReplicateSet
 
     return BarGroup(name, [ReplicateSet(member_name, list(wells))])
 
@@ -358,7 +358,7 @@ def test_the_captured_parameters_describe_the_group_not_the_live_tab(monkeypatch
     name. That is not a thin record, it is a wrong one: Restore draws a figure
     that is not the thumbnail beside it.
     """
-    import well_viewer.features.saved_plots.collect as sp_collect
+    import review.features.saved_plots.collect as sp_collect
 
     seen = {}
 
@@ -413,7 +413,7 @@ def test_a_figure_with_no_group_files_no_parameters_rather_than_the_wrong_ones()
 # ── the spool ───────────────────────────────────────────────────────────────
 
 def _spool(tmp_path, **kwargs):
-    from well_viewer.features.batch_export._destinations import DestinationSpool
+    from review.features.batch_export._destinations import DestinationSpool
 
     defaults = dict(to_gallery=True, to_deck=False, tab="Line Graphs",
                     mode_key="line", dataset_name="plate")
@@ -528,7 +528,7 @@ def test_each_mode_writes_its_own_deck(tmp_path):
     A shared name would leave the user with whichever mode they ran second,
     silently overwritten over the first.
     """
-    from well_viewer.features.batch_export._destinations import DestinationSpool
+    from review.features.batch_export._destinations import DestinationSpool
 
     names = {
         DestinationSpool(to_gallery=False, to_deck=True, tab="t",
@@ -571,9 +571,9 @@ def test_the_gallery_is_written_once_for_a_whole_batch(tmp_path, monkeypatch):
     definitions; a record-at-a-time write is a full read/write cycle of it per
     exported group.
     """
-    import well_viewer.features.saved_plots.controller as sp_controller
-    import well_viewer.features.saved_plots.state as sp_state
-    from well_viewer.features.batch_export import _destinations
+    import review.features.saved_plots.controller as sp_controller
+    import review.features.saved_plots.state as sp_state
+    from review.features.batch_export import _destinations
 
     store = _FakeStore(tmp_path / "saved_plots")
     monkeypatch.setattr(sp_state, "get_store", lambda ctx: store)
@@ -609,8 +609,8 @@ def test_a_record_the_gallery_refused_is_not_counted_as_filed(tmp_path,
     method whose docstring promises the opposite. The count comes from the
     store growing instead, which is the fact that matters.
     """
-    import well_viewer.features.saved_plots.controller as sp_controller
-    from well_viewer.features.batch_export import _destinations
+    import review.features.saved_plots.controller as sp_controller
+    from review.features.batch_export import _destinations
 
     class _RefusingStore(_FakeStore):
         def add(self, ctx, rec, png, svg=b"", frames=b"", *, persist=True):
@@ -650,7 +650,7 @@ def test_an_earlier_run_s_deck_is_named_when_this_run_wrote_none(tmp_path):
     stale PNG is not — and it is said even for a run that ticked neither
     destination, which is exactly the run it happens to.
     """
-    from well_viewer.features.batch_export._destinations import DestinationSpool
+    from review.features.batch_export._destinations import DestinationSpool
 
     out = tmp_path / "out"
     out.mkdir()
@@ -684,7 +684,7 @@ def test_save_figure_to_gallery_files_the_params_it_is_handed(tmp_path,
     that captured the live view state here would file ten records carrying the
     plotting tab's parameters under ten different group names.
     """
-    import well_viewer.features.saved_plots.controller as sp_controller
+    import review.features.saved_plots.controller as sp_controller
 
     store = _FakeStore(tmp_path / "saved_plots")
     monkeypatch.setattr(sp_controller, "get_store", lambda ctx: store)
@@ -710,7 +710,7 @@ def test_a_record_id_is_never_reused(tmp_path, monkeypatch):
     cosmetically — the second record's image overwrites the first's and the
     gallery shows one figure twice.
     """
-    import well_viewer.features.saved_plots.controller as sp_controller
+    import review.features.saved_plots.controller as sp_controller
 
     store = _FakeStore(tmp_path / "saved_plots")
     monkeypatch.setattr(sp_controller, "get_store", lambda ctx: store)
@@ -733,7 +733,7 @@ def test_a_record_id_is_never_reused(tmp_path, monkeypatch):
 
 def test_the_summary_says_a_record_came_from_batch_export():
     """And that Restore re-applies the group, not the panel's layout options."""
-    from well_viewer.features.saved_plots.collect import build_summary
+    from review.features.saved_plots.collect import build_summary
 
     plain = build_summary("Bar Plots", {"active_channel": "gfp"}, {})
     assert "Batch Export" not in plain
@@ -831,7 +831,7 @@ def _run(panel, out_dir, jobs, run_job_fn):
 
 def test_a_committed_run_leaves_the_deck_under_the_manifest(tmp_path,
                                                             monkeypatch):
-    from well_viewer.features.batch_export.service import MANIFEST_NAME
+    from review.features.batch_export.service import MANIFEST_NAME
 
     _qapp()
     out = tmp_path / "out"
@@ -862,8 +862,8 @@ def test_a_failed_run_files_nothing_in_the_gallery(tmp_path, monkeypatch):
     The output directory is rolled back as a unit; a gallery holding the first
     K figures of a run that produced no files is half a run presented as a run.
     """
-    import well_viewer.features.saved_plots.controller as sp_controller
-    from well_viewer.features.batch_export import _destinations
+    import review.features.saved_plots.controller as sp_controller
+    from review.features.batch_export import _destinations
 
     store = _FakeStore(tmp_path / "saved_plots")
     monkeypatch.setattr(_destinations, "_get_store", lambda ctx: store)
@@ -889,8 +889,8 @@ def test_a_failed_run_files_nothing_in_the_gallery(tmp_path, monkeypatch):
 
 def test_a_committed_run_files_every_figure_in_the_gallery(tmp_path,
                                                            monkeypatch):
-    import well_viewer.features.saved_plots.controller as sp_controller
-    from well_viewer.features.batch_export import _destinations
+    import review.features.saved_plots.controller as sp_controller
+    from review.features.batch_export import _destinations
 
     store = _FakeStore(tmp_path / "saved_plots")
     monkeypatch.setattr(_destinations, "_get_store", lambda ctx: store)
@@ -926,7 +926,7 @@ def test_a_run_with_no_destinations_stages_nothing_extra(tmp_path):
         return None
 
     _run(panel, out, ["Drug A"], _job)
-    from well_viewer.features.batch_export.service import MANIFEST_NAME
+    from review.features.batch_export.service import MANIFEST_NAME
     assert sorted(p.name for p in out.iterdir()) == ["Drug A.csv", MANIFEST_NAME]
     # The runner appends where the output went; this run wrote image files,
     # so it names the folder it really filled.
@@ -945,10 +945,10 @@ def test_a_gallery_only_run_leaves_no_output_folder_behind(tmp_path,
     "discard instead of commit" that also skipped the filing would satisfy
     the first half of this and quietly produce nothing at all.
     """
-    from well_viewer.features.batch_export.service import MANIFEST_NAME
+    from review.features.batch_export.service import MANIFEST_NAME
 
-    import well_viewer.features.saved_plots.controller as sp_controller
-    from well_viewer.features.batch_export import _destinations
+    import review.features.saved_plots.controller as sp_controller
+    from review.features.batch_export import _destinations
 
     store = _FakeStore(tmp_path / "saved_plots")
     monkeypatch.setattr(_destinations, "_get_store", lambda ctx: store)
@@ -977,7 +977,7 @@ def test_a_deck_only_run_still_commits_because_a_deck_is_a_file(tmp_path,
     """The deck needs the folder; the images do not have to come with it."""
     import json
 
-    from well_viewer.features.batch_export.service import MANIFEST_NAME
+    from review.features.batch_export.service import MANIFEST_NAME
 
     _qapp()
     out = tmp_path / "out"
@@ -1008,8 +1008,8 @@ def test_a_gallery_only_run_names_saved_plots_not_a_folder_it_never_wrote(
     nothing — and where an earlier run had left a deck there, to a real
     directory whose only content belongs to another run.
     """
-    import well_viewer.features.saved_plots.controller as sp_controller
-    from well_viewer.features.batch_export import _destinations
+    import review.features.saved_plots.controller as sp_controller
+    from review.features.batch_export import _destinations
 
     store = _FakeStore(tmp_path / "saved_plots")
     monkeypatch.setattr(_destinations, "_get_store", lambda ctx: store)
@@ -1056,7 +1056,7 @@ def test_unticking_image_files_mid_run_cannot_discard_what_was_written(
     success. Files destroyed, reported green: the exact shape CLAUDE.md §7
     forbids.
     """
-    from well_viewer.features.batch_export.service import MANIFEST_NAME
+    from review.features.batch_export.service import MANIFEST_NAME
 
     _qapp()
     out = tmp_path / "out"

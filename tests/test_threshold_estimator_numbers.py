@@ -424,7 +424,7 @@ def test_every_otsu_estimator_uses_the_one_rounding_rule():
     import ast
     import inspect
 
-    import well_viewer.data.auto_threshold as viewer_at
+    import review.data.auto_threshold as viewer_at
 
     src = inspect.getsource(viewer_at)
     assert "_threshold_otsu" in src and len(src) > 5_000, len(src)
@@ -447,7 +447,7 @@ def test_the_viewers_estimator_keeps_a_sub_one_gate(monkeypatch):
     """Driven through the real function, not asserted from its source."""
     import numpy as np
 
-    import well_viewer.data.auto_threshold as viewer_at
+    import review.data.auto_threshold as viewer_at
 
     rng = np.random.default_rng(3)
     values = np.concatenate([rng.normal(0.15, 0.03, 300),
@@ -481,7 +481,7 @@ def test_the_viewer_and_the_pipeline_choose_the_same_threshold(seed_a, seed_b, k
     grid points 1104 vs 1209 on overlapping populations, 1231 vs 2366 on a
     skewed pair.
     """
-    from well_viewer.features.home.cell_gating.gating_compute import (
+    from review.features.home.cell_gating.gating_compute import (
         scan_fc_fractions,
     )
 
@@ -511,7 +511,7 @@ def test_the_fold_changed_branch_stays_unsmoothed():
     the result exceeds 1 and goes negative — there is no `k` to add one to, and
     smoothing it would be arithmetic on a quantity that is no longer a count.
     """
-    from well_viewer.features.home.cell_gating.gating_compute import (
+    from review.features.home.cell_gating.gating_compute import (
         scan_fc_fractions,
     )
 

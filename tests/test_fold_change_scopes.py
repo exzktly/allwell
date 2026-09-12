@@ -11,19 +11,19 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from well_viewer.domain.fold_change_scopes import (
+from review.domain.fold_change_scopes import (
     FoldChangeScope,
     _REGISTERED_SCOPES,
     current_scope_name, flush_dirty_scopes,
     redraw_scopes_or_defer, register_fold_change_scope,
     registered_scopes,
 )
-from well_viewer.core.app_state import AppState
+from review.core.app_state import AppState
 
 
 @dataclass
 class _TabbedApp:
-    """Mock of just the slice WellViewerApp exposes for tab tracking.
+    """Mock of just the slice ReviewApp exposes for tab tracking.
 
     Records every redraw callable invoked, so tests can assert the
     visible tab fired and the others didn't.
@@ -158,7 +158,7 @@ def test_flush_dirty_scopes_split_drains_both_visible():
 def test_visible_centre_tabs_falls_back_to_single_tab():
     """Without ``_visible_centre_tabs`` the resolver uses the single active tab,
     so non-split fan-out is byte-identical."""
-    from well_viewer.domain.fold_change_scopes import visible_scope_names
+    from review.domain.fold_change_scopes import visible_scope_names
     app = _TabbedApp(current_tab="Bar Plots")
     assert visible_scope_names(app) == {"bar"}
 

@@ -13,7 +13,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.persistence import view_state as vs
+from review.persistence import view_state as vs
 
 
 def test_slice_defaults(viewer_app):

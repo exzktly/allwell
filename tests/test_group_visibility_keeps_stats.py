@@ -17,7 +17,7 @@ gives 312 comparable keys with zero value differences.
 
 from __future__ import annotations
 
-from well_viewer.core.selection_controller import (
+from review.core.selection_controller import (
     _set_groups_hidden,
     invalidate_stats_cache,
     note_group_visibility_changed,
@@ -30,8 +30,8 @@ class _Slice:
 
 class _State:
     def __init__(self):
-        from well_viewer.core.plot_state import PlotState
-        from well_viewer.core.stats_cache_state import StatsCacheState
+        from review.core.plot_state import PlotState
+        from review.core.stats_cache_state import StatsCacheState
         self.stats_cache = StatsCacheState()
         # The real ``PlotState``, not a namespace with the two fields this file
         # reads: ``rebuild_all`` hands the repaint to the scope coalescer, whose
@@ -63,7 +63,7 @@ def _fill(ctx, n=5):
 def test_a_visibility_change_keeps_every_cached_statistic(monkeypatch):
     """The behaviour this change exists to produce."""
     monkeypatch.setattr(
-        "well_viewer.core.plot_toggles.refresh_fov_btn_state", lambda ctx: None)
+        "review.core.plot_toggles.refresh_fov_btn_state", lambda ctx: None)
     ctx = _Ctx()
     before = _fill(ctx)
     note_group_visibility_changed(ctx)
@@ -81,7 +81,7 @@ def test_a_definition_change_still_discards_them(monkeypatch):
     doing so.
     """
     monkeypatch.setattr(
-        "well_viewer.core.plot_toggles.refresh_fov_btn_state", lambda ctx: None)
+        "review.core.plot_toggles.refresh_fov_btn_state", lambda ctx: None)
     ctx = _Ctx()
     _fill(ctx)
     invalidate_stats_cache(ctx)
@@ -94,7 +94,7 @@ def test_the_visibility_path_still_syncs_the_fov_button(monkeypatch):
     """It is the one thing a toggle does still need from the old call."""
     calls = []
     monkeypatch.setattr(
-        "well_viewer.core.plot_toggles.refresh_fov_btn_state",
+        "review.core.plot_toggles.refresh_fov_btn_state",
         lambda ctx: calls.append(ctx))
     ctx = _Ctx()
     note_group_visibility_changed(ctx)
@@ -128,7 +128,7 @@ class _Window:
         self._ctx.state.stats_cache.invalidate()
 
     def _rebuild_all(self, *, invalidate=True):
-        from well_viewer.core.selection_controller import rebuild_all
+        from review.core.selection_controller import rebuild_all
         rebuild_all(self._ctx, invalidate=invalidate)
 
     # Everything rebuild_all fans out to, stubbed to no-ops.
@@ -159,7 +159,7 @@ def test_toggling_a_group_through_the_real_path_keeps_the_statistics(monkeypatch
     what the branch did before this was noticed.
     """
     monkeypatch.setattr(
-        "well_viewer.core.plot_toggles.refresh_fov_btn_state", lambda ctx: None)
+        "review.core.plot_toggles.refresh_fov_btn_state", lambda ctx: None)
     ctx = _CtxWithWindow()
     before = _fill(ctx)
     sels = [{"name": "G1", "wells": ["A01"], "hidden": False}]
@@ -178,7 +178,7 @@ def test_toggling_a_group_through_the_real_path_keeps_the_statistics(monkeypatch
 def test_a_toggle_that_changes_nothing_does_not_refresh_at_all(monkeypatch):
     """``target`` already satisfied: no flip, so no work of any kind."""
     monkeypatch.setattr(
-        "well_viewer.core.plot_toggles.refresh_fov_btn_state", lambda ctx: None)
+        "review.core.plot_toggles.refresh_fov_btn_state", lambda ctx: None)
     ctx = _CtxWithWindow()
     before = _fill(ctx)
     sels = [{"name": "G1", "wells": ["A01"], "hidden": True}]

@@ -70,9 +70,9 @@ def test_all_clean_channel_does_not_warn(tmp_path, caplog):
     assert not any("failed to decode" in m for m in msgs), msgs
 
 
-# ── Viewer-side mirror (well_viewer/data/auto_threshold.py) ───────────────
+# ── Viewer-side mirror (review/data/auto_threshold.py) ───────────────
 def test_viewer_side_decode_failures_warn(tmp_path, monkeypatch, caplog):
-    from well_viewer.data import auto_threshold as vat
+    from review.data import auto_threshold as vat
 
     (tmp_path / "a1_out.zip").write_bytes(b"placeholder")  # so _iter_well_zips finds it
 

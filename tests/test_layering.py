@@ -1,10 +1,10 @@
 """Guardrail: the domain/, data/ and persistence/ layers must not import up into
 features/.
 
-Business logic (``well_viewer.domain``), the data layer (``well_viewer.data``)
-and the (de)serialization layer (``well_viewer.persistence``) are foundational —
+Business logic (``review.domain``), the data layer (``review.data``)
+and the (de)serialization layer (``review.persistence``) are foundational —
 features build on them, not the other way round. A module-level
-``from well_viewer.features... import ...`` inside any of those layers is a
+``from review.features... import ...`` inside any of those layers is a
 layering inversion (it couples core logic / persistence to a UI feature). This
 test scans the AST of those layers and fails on any such import, locking in the
 P3 + T1 cleanups so they can't silently regress.
@@ -17,9 +17,9 @@ import ast
 from pathlib import Path
 from tests._repo_scan import parse_source
 
-ROOT = Path(__file__).resolve().parent.parent / "well_viewer"
+ROOT = Path(__file__).resolve().parent.parent / "review"
 GUARDED_LAYERS = ("domain", "data", "persistence")
-FORBIDDEN_PREFIX = "well_viewer.features"
+FORBIDDEN_PREFIX = "review.features"
 
 
 def _module_level_imports(tree: ast.Module):
@@ -56,8 +56,8 @@ def test_foundational_layers_do_not_import_features():
                     )
                     offenders.append(f"{path.relative_to(ROOT.parent)}:{node.lineno} -> {target}")
     assert not offenders, (
-        "Layering violation: well_viewer/{domain,data,persistence} must not "
-        "import from well_viewer.features at module scope. Move the shared code "
+        "Layering violation: review/{domain,data,persistence} must not "
+        "import from review.features at module scope. Move the shared code "
         "down into domain/ or data/, or use a function-local import for a real "
         "cycle break:\n  " + "\n  ".join(offenders)
     )

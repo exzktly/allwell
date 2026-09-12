@@ -27,8 +27,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.export import service as EX
-from well_viewer.features.heatmap.models import HeatmapLayout
+from review.features.export import service as EX
+from review.features.heatmap.models import HeatmapLayout
 
 #: The spread column for this fixture's value column, which is built from the
 #: channel and the metric the way the export builds it: the name says what the

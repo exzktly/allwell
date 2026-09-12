@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from well_viewer.features.scatter.gating import (
+from review.features.scatter.gating import (
     compute_gate_stats,
     compute_point_density,
 )
-from well_viewer.features.scatter.state import ScatterState
-from well_viewer.core.export_prefs_state import ExportPrefsState
-from well_viewer.core.cell_gating_state import CellGatingState
+from review.features.scatter.state import ScatterState
+from review.core.export_prefs_state import ExportPrefsState
+from review.core.cell_gating_state import CellGatingState
 
 
 def _mk_ctx(app):
@@ -22,7 +22,7 @@ def _mk_ctx(app):
     ``ctx.state.cell_gating.scatter_gates``; ensure the slice exists (seeded from
     a loose ``_scatter_gates`` kwarg for the minimal fakes that set one)."""
     from types import SimpleNamespace
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     st = getattr(app, "_app_state", None)
     if st is None:
         st = SimpleNamespace()
@@ -173,7 +173,7 @@ def _render_app(*, density: bool, gates):
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
 
-    from well_viewer.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
+    from review.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
 
     n = 60
     rng = np.random.default_rng(7)
@@ -218,7 +218,7 @@ def _render_app(*, density: bool, gates):
 def test_redraw_density_creates_density_collection_and_gate():
     from matplotlib.patches import Rectangle
 
-    from well_viewer.features.scatter.controller import redraw_scatter
+    from review.features.scatter.controller import redraw_scatter
 
     gate = {"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}
     app, ax = _render_app(density=True, gates=[gate])
@@ -234,7 +234,7 @@ def test_redraw_density_creates_density_collection_and_gate():
 
 
 def test_redraw_solid_mode_uses_lines_no_density():
-    from well_viewer.features.scatter.controller import redraw_scatter
+    from review.features.scatter.controller import redraw_scatter
 
     app, ax = _render_app(density=False, gates=[])
     redraw_scatter(app._ctx, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
@@ -248,7 +248,7 @@ def test_scatter_legend_uses_sample_definition_label():
     """Per-well scatter legend text comes from the sample-definition label when
     one is defined (``_well_display_label``), not the raw well token. The Line2D
     gid still keys off the raw token identity."""
-    from well_viewer.features.scatter.controller import redraw_scatter
+    from review.features.scatter.controller import redraw_scatter
 
     app, ax = _render_app(density=False, gates=[])
     app._app_state.dataset.well_labels = {"A01": "Treated 5nM"}
@@ -265,7 +265,7 @@ def test_hidden_gates_are_not_drawn():
     without discarding the stored gates."""
     from matplotlib.patches import Rectangle
 
-    from well_viewer.features.scatter.controller import redraw_scatter
+    from review.features.scatter.controller import redraw_scatter
 
     gate = {"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}
     app, ax = _render_app(density=False, gates=[gate])
@@ -284,7 +284,7 @@ def test_drawing_a_gate_notifies_count_callback():
     'N gate(s)' label stays accurate (was only updated at build / on clear)."""
     from types import SimpleNamespace
 
-    from well_viewer.features.scatter.gating import _on_gate_drawn
+    from review.features.scatter.gating import _on_gate_drawn
 
     calls: list[int] = []
     app = SimpleNamespace(
@@ -310,8 +310,8 @@ def test_separate_axes_layout_stacks_one_panel_per_group():
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
 
-    from well_viewer.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
-    from well_viewer.features.scatter.controller import redraw_scatter
+    from review.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
+    from review.features.scatter.controller import redraw_scatter
 
     n = 30
     rng = np.random.default_rng(3)
@@ -380,8 +380,8 @@ def test_gates_appear_on_every_separate_axis():
     from matplotlib.figure import Figure
     from matplotlib.patches import Rectangle
 
-    from well_viewer.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
-    from well_viewer.features.scatter.controller import redraw_scatter
+    from review.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
+    from review.features.scatter.controller import redraw_scatter
 
     n = 30
     rng = np.random.default_rng(5)
@@ -466,7 +466,7 @@ def _sidebar_stub_app(fig):
 def test_sidebar_builds_scatter_density_and_gate_sections(qtbot):
     from matplotlib.figure import Figure
 
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
 
     fig = Figure(figsize=(4, 3))
     fig.add_subplot(1, 1, 1)
@@ -492,7 +492,7 @@ def test_draw_gate_is_one_shot_button(qtbot):
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
 
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
 
     fig = Figure(figsize=(4, 3))
     fig.add_subplot(1, 1, 1)
@@ -551,34 +551,34 @@ def _ev(ax, xdata, ydata, button=1):
 
 
 def test_gate_edge_at_detects_right_edge():
-    from well_viewer.features.scatter.gating import gate_edge_at
+    from review.features.scatter.gating import gate_edge_at
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
     hit = gate_edge_at(app._ctx, _ev(ax, 8, 5))
     assert hit == (0, "r")
 
 
 def test_gate_edge_at_detects_top_right_corner():
-    from well_viewer.features.scatter.gating import gate_edge_at
+    from review.features.scatter.gating import gate_edge_at
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
     hit = gate_edge_at(app._ctx, _ev(ax, 8, 8))
     assert hit == (0, "tr")
 
 
 def test_gate_edge_at_interior_returns_none():
-    from well_viewer.features.scatter.gating import gate_edge_at
+    from review.features.scatter.gating import gate_edge_at
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
     assert gate_edge_at(app._ctx, _ev(ax, 5, 5)) is None
 
 
 def test_gate_edge_at_hidden_returns_none():
-    from well_viewer.features.scatter.gating import gate_edge_at
+    from review.features.scatter.gating import gate_edge_at
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
     app._app_state.scatter.gates_hidden = True
     assert gate_edge_at(app._ctx, _ev(ax, 8, 5)) is None
 
 
 def test_gate_edit_resize_right_edge():
-    from well_viewer.features.scatter.gating import (
+    from review.features.scatter.gating import (
         on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
     )
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
@@ -592,7 +592,7 @@ def test_gate_edit_resize_right_edge():
 
 
 def test_gate_edit_corner_moves_both_axes():
-    from well_viewer.features.scatter.gating import (
+    from review.features.scatter.gating import (
         on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
     )
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
@@ -604,7 +604,7 @@ def test_gate_edit_corner_moves_both_axes():
 
 
 def test_gate_edit_collapse_removes_gate():
-    from well_viewer.features.scatter.gating import (
+    from review.features.scatter.gating import (
         on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
     )
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
@@ -615,7 +615,7 @@ def test_gate_edit_collapse_removes_gate():
 
 
 def test_gate_edit_press_ignored_in_draw_mode():
-    from well_viewer.features.scatter.gating import on_gate_edit_press
+    from review.features.scatter.gating import on_gate_edit_press
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
     app._scatter_gate_draw_mode = True
     on_gate_edit_press(app._ctx, _ev(ax, 8, 5))
@@ -628,8 +628,8 @@ def test_scatter_defaults_to_log_and_survives_restyle():
     """Scatter axes default to the log10(x+1) display transform (matplotlib
     "function" scale) and stay so even when the shared x_log/y_log pref (used by
     other plot types) is False."""
-    from well_viewer.core.plot_style import apply_export_style_to_current
-    from well_viewer.features.scatter.controller import redraw_scatter
+    from review.core.plot_style import apply_export_style_to_current
+    from review.features.scatter.controller import redraw_scatter
 
     app, ax = _render_app(density=False, gates=[])
     # Shared keys are linear (their default) — scatter must ignore them.
@@ -645,7 +645,7 @@ def test_scatter_defaults_to_log_and_survives_restyle():
 
 
 def test_scatter_log_off_via_scatter_pref():
-    from well_viewer.features.scatter.controller import redraw_scatter
+    from review.features.scatter.controller import redraw_scatter
     app, ax = _render_app(density=False, gates=[])
     app._app_state.export_prefs.style_prefs["scatter_x_log"] = False
     redraw_scatter(app._ctx, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
@@ -660,7 +660,7 @@ def test_drawing_a_gate_exits_create_mode():
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
 
-    from well_viewer.features.scatter.gating import _on_gate_drawn
+    from review.features.scatter.gating import _on_gate_drawn
 
     fig = Figure(); ax = fig.add_subplot(1, 1, 1)
     synced = []
@@ -690,9 +690,9 @@ def test_edit_drag_repaints_gate_on_all_separate_panels():
     from matplotlib.figure import Figure
     from matplotlib.patches import Rectangle
 
-    from well_viewer.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
-    from well_viewer.features.scatter.controller import redraw_scatter
-    from well_viewer.features.scatter.gating import redraw_gates_only
+    from review.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
+    from review.features.scatter.controller import redraw_scatter
+    from review.features.scatter.gating import redraw_gates_only
 
     n = 30
     rng = np.random.default_rng(11)
@@ -752,7 +752,7 @@ def test_setup_axes_sets_per_panel_min_height():
 
     from matplotlib.figure import Figure
 
-    from well_viewer.features.scatter._layout import (
+    from review.features.scatter._layout import (
         SCATTER_PANEL_MIN_PX, _setup_scatter_axes,
     )
 
@@ -773,7 +773,7 @@ def test_setup_axes_sets_per_panel_min_height():
 def test_density_respects_open_circle_marker():
     """In density mode the open-circle ('o_open') style must produce hollow
     rings coloured by density — not stay filled (the reported regression)."""
-    from well_viewer.features.scatter.controller import redraw_scatter
+    from review.features.scatter.controller import redraw_scatter
 
     app, ax = _render_app(density=True, gates=[])
     app._app_state.export_prefs.style_prefs["marker_style"] = "o_open"
@@ -788,7 +788,7 @@ def test_density_respects_open_circle_marker():
 
 
 def test_density_filled_keeps_per_point_gradient():
-    from well_viewer.features.scatter.controller import redraw_scatter
+    from review.features.scatter.controller import redraw_scatter
 
     app, ax = _render_app(density=True, gates=[])
     app._app_state.export_prefs.style_prefs["marker_style"] = "o"
@@ -806,7 +806,7 @@ def test_apply_axis_log_scale_plus1_keeps_data_raw():
     # (so gates / clicks / exports are unaffected — "display-only, not saved").
     import numpy as np
     from matplotlib.figure import Figure
-    from well_viewer.core.plot_style import apply_axis_log_scale
+    from review.core.plot_style import apply_axis_log_scale
 
     ax = Figure().add_subplot(1, 1, 1)
     ax._aw_log_plus1 = True

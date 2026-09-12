@@ -3,7 +3,7 @@ its descriptor out of ``FEATURES`` (comment-out) AND by deleting its package
 from disk (deletion). Both must leave the app booting, loading a dataset, and
 operating with no crash.
 
-The registry is pruned by monkeypatching ``well_viewer.runtime_app.build_feature_registry``
+The registry is pruned by monkeypatching ``review.runtime_app.build_feature_registry``
 (runtime_app binds the name at module scope, so patching it covers both the
 registry build and the state attach). Deletion is simulated with a
 ``sys.meta_path`` finder that raises ``ModuleNotFoundError`` for the package, so
@@ -18,9 +18,9 @@ import pytest
 
 
 def _prune_registry(monkeypatch, descriptor_name: str):
-    import well_viewer.runtime_app as rt
-    from well_viewer.core.feature_registry import FeatureRegistry
-    from well_viewer.features.registry import build_feature_registry as _real
+    import review.runtime_app as rt
+    from review.core.feature_registry import FeatureRegistry
+    from review.features.registry import build_feature_registry as _real
 
     monkeypatch.setattr(
         rt, "build_feature_registry",
@@ -39,11 +39,11 @@ def _narrow_profile(monkeypatch, parent: str, dropped: str):
     module eagerly at app construction. Pruning the descriptor alone leaves that
     factory in place and the "deleted" package gets imported anyway.
     """
-    import well_viewer.runtime_app as rt
+    import review.runtime_app as rt
     from core.profile import Profile
-    from well_viewer.features.registry import build_feature_registry as _real
+    from review.features.registry import build_feature_registry as _real
 
-    from well_viewer.features.registry import _features
+    from review.features.registry import _features
 
     # Ask the *descriptor*, not `includes_subtab`. Under the full profile that
     # predicate short-circuits (`features is None`, then no `[subtabs]` entry) and
@@ -90,7 +90,7 @@ def _exercise(app):
             for i in range(sub.count()):
                 sub.setCurrentIndex(i)
     app._invalidate_stats_cache()
-    from well_viewer.core.channel_state_controller import update_channel_selector
+    from review.core.channel_state_controller import update_channel_selector
     update_channel_selector(app._ctx)
 
 
@@ -99,7 +99,7 @@ def _exercise(app):
 @pytest.mark.slow
 def test_app_boots_loads_and_operates_without_image_browser(qtbot, monkeypatch, mini_dataset):
     rt = _prune_registry(monkeypatch, "Image Browser")
-    app = rt.WellViewerApp()
+    app = rt.ReviewApp()
     qtbot.addWidget(app)
     app._load_path(mini_dataset)
     _exercise(app)
@@ -112,7 +112,7 @@ def test_app_boots_loads_and_operates_without_image_browser(qtbot, monkeypatch, 
 @pytest.mark.slow
 def test_app_boots_and_plots_without_statistics(qtbot, monkeypatch, mini_dataset):
     rt = _prune_registry(monkeypatch, "Statistics")
-    app = rt.WellViewerApp()
+    app = rt.ReviewApp()
     qtbot.addWidget(app)
     app._load_path(mini_dataset)
     app._notebook.setCurrentByName("Plotting")   # bar/line redraw → stats_compute
@@ -127,7 +127,7 @@ def test_app_boots_and_plots_without_statistics(qtbot, monkeypatch, mini_dataset
 
 class _ImportBlocker:
     def __init__(self, pkg: str) -> None:
-        self._prefix = f"well_viewer.features.{pkg}"
+        self._prefix = f"review.features.{pkg}"
 
     def find_spec(self, name, path=None, target=None):
         if name == self._prefix or name.startswith(self._prefix + "."):
@@ -151,13 +151,13 @@ def test_app_tolerates_feature_deletion(qtbot, monkeypatch, mini_dataset, pkg, d
     # Purge any already-imported submodules, then block re-import — so the test
     # fails if any boot/load/operate path imports the "deleted" package.
     for m in [n for n in list(sys.modules)
-              if n == f"well_viewer.features.{pkg}"
-              or n.startswith(f"well_viewer.features.{pkg}.")]:
+              if n == f"review.features.{pkg}"
+              or n.startswith(f"review.features.{pkg}.")]:
         monkeypatch.delitem(sys.modules, m, raising=False)
     monkeypatch.setattr(sys, "meta_path", [_ImportBlocker(pkg), *sys.meta_path])
 
     rt = _prune_registry(monkeypatch, descriptor)
-    app = rt.WellViewerApp()
+    app = rt.ReviewApp()
     qtbot.addWidget(app)
     app._load_path(mini_dataset)
     _exercise(app)
@@ -182,13 +182,13 @@ def test_app_tolerates_a_sub_tab_deletion(qtbot, monkeypatch, mini_dataset,
     load and operate.
     """
     for m in [n for n in list(sys.modules)
-              if n == f"well_viewer.features.{pkg}"
-              or n.startswith(f"well_viewer.features.{pkg}.")]:
+              if n == f"review.features.{pkg}"
+              or n.startswith(f"review.features.{pkg}.")]:
         monkeypatch.delitem(sys.modules, m, raising=False)
     monkeypatch.setattr(sys, "meta_path", [_ImportBlocker(pkg), *sys.meta_path])
 
     rt = _narrow_profile(monkeypatch, "Image Browser", subtab)
-    app = rt.WellViewerApp()
+    app = rt.ReviewApp()
     qtbot.addWidget(app)
     app._load_path(mini_dataset)
     _exercise(app)
@@ -215,13 +215,13 @@ def test_the_playground_builds_reference_fields_without_the_image_table():
 
     blocker = _ImportBlocker("image_browser.image_table")
     purged = [n for n in list(sys.modules)
-              if n.startswith("well_viewer.features.image_browser.image_table")]
+              if n.startswith("review.features.image_browser.image_table")]
     saved = {n: sys.modules[n] for n in purged}
     for n in purged:
         del sys.modules[n]
     sys.meta_path.insert(0, blocker)
     try:
-        from well_viewer.features.image_browser.playground import worker
+        from review.features.image_browser.playground import worker
 
         ctx = types.SimpleNamespace(state=types.SimpleNamespace(
             dataset=types.SimpleNamespace(pipeline_info={}, data_dir="",

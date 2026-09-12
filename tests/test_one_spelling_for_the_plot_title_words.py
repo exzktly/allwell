@@ -33,7 +33,7 @@ from tests._repo_scan import parsed_sources
 _MAY_SPELL_IT_OUT: dict[str, str] = {}
 
 #: Where the one spelling lives.
-_HOME = "well_viewer/data/metric_labels.py"
+_HOME = "review/data/metric_labels.py"
 
 
 def _is_the_band_expression(node: ast.AST) -> bool:
@@ -67,7 +67,7 @@ def test_the_band_label_is_spelled_in_exactly_one_place():
 def test_the_one_place_really_does_spell_it():
     """A guard that finds nothing because the helper has been renamed away
     would report a greener tree, not a converted one."""
-    from well_viewer.data.metric_labels import spread_label
+    from review.data.metric_labels import spread_label
 
     assert spread_label(True) == "SEM"
     assert spread_label(False) == "SD"

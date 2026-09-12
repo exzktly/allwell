@@ -25,14 +25,14 @@ def _app(*, rsets, selections, selected, well_paths, bar_order=None):
         _rep_sets_active=lambda: rsets,
         _parse_rc=lambda w: (w[:1], w[1:]),
     )
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app._ctx = SimpleNamespace(app=app, state=app._app_state,
                                runtime=AppRuntime(app))
     return app
 
 
 def test_group_mode_all_hidden_yields_no_bars():
-    from well_viewer.features.barplot.controller import ordered_bar_keys
+    from review.features.barplot.controller import ordered_bar_keys
 
     # Groups defined but none visible (all hidden) → rep_sets_active() == [].
     app = _app(rsets=[], selections=[{"name": "g1", "hidden": True}],
@@ -41,7 +41,7 @@ def test_group_mode_all_hidden_yields_no_bars():
 
 
 def test_visible_groups_drive_keys():
-    from well_viewer.features.barplot.controller import ordered_bar_keys
+    from review.features.barplot.controller import ordered_bar_keys
 
     app = _app(rsets=[SimpleNamespace(name="g1"), SimpleNamespace(name="g2")],
                selections=[{"name": "g1", "wells": ["A1"]}, {"name": "g2", "wells": ["B2"]}],
@@ -50,7 +50,7 @@ def test_visible_groups_drive_keys():
 
 
 def test_no_groups_falls_back_to_selected_wells():
-    from well_viewer.features.barplot.controller import ordered_bar_keys
+    from review.features.barplot.controller import ordered_bar_keys
 
     # No selections defined → plain plate selection drives the bars.
     app = _app(rsets=[], selections=[], selected=["B2", "A1"],

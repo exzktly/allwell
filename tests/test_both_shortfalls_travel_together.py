@@ -29,8 +29,8 @@ from tests._repo_scan import parse_source
 
 #: The package whose functions turn a render pass into an artifact.
 _MODULES = (
-    "well_viewer/features/image_browser/image_table/controller.py",
-    "well_viewer/features/image_browser/image_table/export.py",
+    "review/features/image_browser/image_table/controller.py",
+    "review/features/image_browser/image_table/export.py",
 )
 
 _BAR = "scale_bar_refusal_clause"
@@ -40,17 +40,17 @@ _PARTIAL = "partial_scan_clause"
 #: than counted: a new one added without a clause is then a missing name here,
 #: which a count would not notice.
 _SURFACES = frozenset({
-    "well_viewer/features/image_browser/image_table/controller.py::"
+    "review/features/image_browser/image_table/controller.py::"
     "generate_status_message",
-    "well_viewer/features/image_browser/image_table/export.py::"
+    "review/features/image_browser/image_table/export.py::"
     "image_table_export",
-    "well_viewer/features/image_browser/image_table/export.py::"
+    "review/features/image_browser/image_table/export.py::"
     "image_table_export_pptx",
-    "well_viewer/features/image_browser/image_table/export.py::"
+    "review/features/image_browser/image_table/export.py::"
     "image_table_copy_png",
-    "well_viewer/features/image_browser/image_table/export.py::"
+    "review/features/image_browser/image_table/export.py::"
     "image_table_copy_svg",
-    "well_viewer/features/image_browser/image_table/export.py::"
+    "review/features/image_browser/image_table/export.py::"
     "image_table_save_to_gallery",
 })
 

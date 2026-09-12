@@ -21,7 +21,7 @@ once.
 
 Two handlers had this, with the same wrong comment on the same line: the shell's
 ``_RingHandler`` (``allwell.py``) and Review's ``_GUILogHandler``
-(``well_viewer/core/status_view.py``). One was written from the other, which is
+(``review/core/status_view.py``). One was written from the other, which is
 why this is a guard rather than a fix — the shape is easy to reintroduce and
 statically obvious. The route that works is
 ``core.worker_bridge.GuiLogRelay``: a ``QObject`` built on the GUI

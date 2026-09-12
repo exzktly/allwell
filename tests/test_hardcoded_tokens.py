@@ -59,15 +59,15 @@ EMBEDDED_HEX_ALLOWLIST = {
 # harness that never ships in a window.
 COLOUR_ALLOWLIST = {
     "widgets/lut_selector.py": "colormap stop triples — the literals are the colormap",
-    "well_viewer/features/image_browser/image_table/builder_view.py":
+    "review/features/image_browser/image_table/builder_view.py":
         "cmap swatch colours, keyed by the matplotlib colormap they preview",
-    "well_viewer/domain/selections_model.py":
+    "review/domain/selections_model.py":
         "the rank-assigned selection palette (theme.WELL_COLORS_TUPLE's fallback twin)",
     "widgets/color_picker_popover.py": "__main__ demo block",
     "widgets/color_swatch_row.py": "__main__ demo block",
     "widgets/gradient_strip.py": "__main__ demo block",
     "widgets/saved_selections_list.py":
-        "widgets/ may not import well_viewer; the two fallbacks restate theme's",
+        "widgets/ may not import review; the two fallbacks restate theme's",
     "allwell.py": "the app-icon painter's own art palette (see _ICON_* below it)",
 }
 

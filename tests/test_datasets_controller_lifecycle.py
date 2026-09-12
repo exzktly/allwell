@@ -212,7 +212,7 @@ def test_a_worker_that_outlives_the_deadline_is_named_in_the_log(caplog):
     worker = _StubbornWorker()
     ctrl = _controller_with(worker)
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         ctrl.shutdown()
 
     assert worker.stop_requested, "the worker was never asked to stop"
@@ -229,7 +229,7 @@ def test_a_worker_that_stops_in_time_says_nothing(caplog):
 
     ctrl = _controller_with(_CompliantWorker())
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         ctrl.shutdown()
 
     assert [r.getMessage() for r in caplog.records] == []

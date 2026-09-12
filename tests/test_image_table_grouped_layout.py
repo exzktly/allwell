@@ -11,7 +11,7 @@ import math
 
 import pytest
 
-from well_viewer.features.image_browser.image_table.grid_layout import (
+from review.features.image_browser.image_table.grid_layout import (
     _layout_cell_values,
     banded_indices,
 )
@@ -84,8 +84,8 @@ def _nested_ctx(*, wells, channels, timepoints=None, fovs=None):
     No dataset and no tab build — the Qt grid rebuild is stubbed with plain dict
     cells, which is all ``_build_nested_layout`` writes into."""
     from types import SimpleNamespace
-    from well_viewer.core.app_runtime import AppRuntime
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from review.core.app_runtime import AppRuntime
+    from review.features.image_browser.image_table.state import ImageTableState
 
     info = {"available_timepoints": timepoints or [], "available_fovs": fovs or [],
             "nuclear_token": ""}
@@ -121,14 +121,14 @@ class _GridStub:
 
 @pytest.fixture
 def _stub_grid(monkeypatch):
-    from well_viewer.features.image_browser.image_table import build_layout as BL
+    from review.features.image_browser.image_table import build_layout as BL
     monkeypatch.setattr(BL, "_ctrl", lambda: _GridStub)
     return BL
 
 
 def _reported_spec(wrap):
     """The layout from the report: rows = FOV › Channel, cols = Well."""
-    from well_viewer.features.image_browser.image_table.state import (
+    from review.features.image_browser.image_table.state import (
         Axis, ChannelSpec, TableSpec,
     )
     return TableSpec(
@@ -177,10 +177,10 @@ pytestmark_qt = pytest.mark.qt
 
 @pytest.mark.qt
 def test_build_grouped_layout_and_shared_lut(image_table_app):
-    from well_viewer.features.image_browser.image_table import controller as C
-    from well_viewer.features.image_browser.image_table.grid_layout import _axis_values
-    from well_viewer.features.image_browser.image_table.image_compose import _row_cmap_name
-    from well_viewer.features.image_browser.image_table.export import _build_export_figure
+    from review.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table.grid_layout import _axis_values
+    from review.features.image_browser.image_table.image_compose import _row_cmap_name
+    from review.features.image_browser.image_table.export import _build_export_figure
 
     app = image_table_app
     ctx = app._ctx
@@ -224,7 +224,7 @@ def test_build_grouped_layout_and_shared_lut(image_table_app):
 
     # Generate + export must not raise and the export mirrors the grid shape.
     # The figure also carries the facet label strips, so count only image cells.
-    from well_viewer.features.image_browser.image_table.renderer import FACET_GID
+    from review.features.image_browser.image_table.renderer import FACET_GID
     C.image_table_generate(ctx)
     fig, _ = _build_export_figure(ctx)
     cell_axes = [a for a in fig.axes if a.get_gid() != FACET_GID]
@@ -233,7 +233,7 @@ def test_build_grouped_layout_and_shared_lut(image_table_app):
 
 @pytest.mark.qt
 def test_group_zero_is_flat_layout(image_table_app):
-    from well_viewer.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import controller as C
 
     app = image_table_app
     ctx = app._ctx

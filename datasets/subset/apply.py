@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from util.aw_safe import swallow
-from well_viewer.data.image_identity import normalize_fov, normalize_tp
+from review.data.image_identity import normalize_fov, normalize_tp
 from datasets._common.concurrency import pick_workers
 from datasets._common.containers import (
     FILENAME_COLUMN,
@@ -306,7 +306,7 @@ def execute_plan(
                             )
                         )
                     # cell_overrides.json stores fov/tp already normalized (via
-                    # CellKey.as_tuple, well_viewer/data/image_identity.py), so
+                    # CellKey.as_tuple, review/data/image_identity.py), so
                     # this set must be normalized the same way or a parseable
                     # timepoint label like "24h" never matches its normalized
                     # "24" and _copy_filtered_overrides drops the override.

@@ -1,7 +1,7 @@
 """Regression: the FOV-replicates toggle shim threads ``self._ctx``.
 
 ``toggle_fov_replicates`` moved to ``core.plot_toggles`` and is ctx-native
-(A8 enabler E3), but the ``WellViewerApp._toggle_fov_replicates`` shim kept
+(A8 enabler E3), but the ``ReviewApp._toggle_fov_replicates`` shim kept
 passing the raw app (``toggle_fov_replicates(self)``) — the sibling
 ``_toggle_sem`` shim already passed ``self._ctx``. With the app handle,
 ``toggle_fov_replicates`` hit ``app.state`` (AttributeError) before flipping

@@ -1844,7 +1844,7 @@ def _tp_sort_key(tok: str):
     r"""Chronological sort key for a timepoint token; unparseable tokens last.
 
     Delegates to :func:`util.timepoint.sort_key`. This used to inline its own
-    parser — ``services/`` may not import ``well_viewer`` (ARCHITECTURE §6.2),
+    parser — ``services/`` may not import ``review`` (ARCHITECTURE §6.2),
     so it could not share the viewer's — and the two drifted: a trailing ``\w*``
     in the unit pattern made it read ``"2hpCh"`` as two hours. ``util`` is
     stdlib-only, so it is importable from here and the divergence goes away.

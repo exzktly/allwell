@@ -21,8 +21,8 @@ import math
 
 import pytest
 
-from well_viewer.domain.batch_models import ReplicateSet
-from well_viewer.domain.stats_compute import (
+from review.domain.batch_models import ReplicateSet
+from review.domain.stats_compute import (
     compute_rep_n_above_stats,
     compute_rep_per_fov_stats,
     compute_rep_stats,
@@ -87,8 +87,8 @@ class _FovApp:
 
     def __init__(self, rows_by_well: dict[str, pd.DataFrame]):
         self._rows = rows_by_well
-        from well_viewer.core.app_state import AppState
-        from well_viewer.features.registry import attach_feature_state
+        from review.core.app_state import AppState
+        from review.features.registry import attach_feature_state
         st = AppState()
         attach_feature_state(st)
         st.dataset.well_paths = {w: w for w in rows_by_well}
@@ -105,7 +105,7 @@ class _FovApp:
     @property
     def _ctx(self):
         from types import SimpleNamespace
-        from well_viewer.core.app_runtime import AppRuntime
+        from review.core.app_runtime import AppRuntime
         return SimpleNamespace(app=self, state=self.__app_state,
                                runtime=AppRuntime(self))
 

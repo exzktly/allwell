@@ -13,8 +13,8 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
-from well_viewer.features.crop.region import crop_effect_for_df
-from well_viewer.features.crop import controller as crop
+from review.features.crop.region import crop_effect_for_df
+from review.features.crop import controller as crop
 
 
 def _df(rows, cols, included=None, qc=None):

@@ -43,7 +43,7 @@ pytest.importorskip("PySide6")
 
 
 def _split(app, tab_a, tab_b):
-    from well_viewer.core.split_view import enter_split
+    from review.core.split_view import enter_split
     enter_split(app._ctx, tab_a, tab_b)
     return app._visible_centre_tabs()
 
@@ -51,7 +51,7 @@ def _split(app, tab_a, tab_b):
 def _park_on_segmentation(app):
     """Segmentation is a leaf inside the Image Browser container, and it is the
     leaf that owns ``_sidebar_preview_frame``."""
-    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    from review.features.image_browser.controller import show_image_browser_subtab
     assert show_image_browser_subtab(app._ctx, "Segmentation")
 
 
@@ -111,7 +111,7 @@ def test_leaving_split_puts_the_sidebar_back_to_one_section(loaded_app):
     """The frames are hidden by ``on_tab_change`` and shown per visible pane, so
     exiting has to leave exactly the single-pane sidebar behind — a Segmentation
     section still showing over the Plots tab would be the mirror bug."""
-    from well_viewer.core.split_view import exit_split
+    from review.core.split_view import exit_split
 
     app = loaded_app
     _park_on_segmentation(app)

@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from well_viewer.data.data_loading import (
+from review.data.data_loading import (
     iter_plot_group_wells,
     iter_plot_groups,
     plot_group_well_lists,
@@ -53,7 +53,7 @@ def _ctx(*, wells, selected=(), rsets=(), solo=()):
 
 @pytest.fixture(autouse=True)
 def _rows_from_cache(monkeypatch):
-    monkeypatch.setattr("well_viewer.data.data_loading.get_rows",
+    monkeypatch.setattr("review.data.data_loading.get_rows",
                         lambda ctx, label: ctx.state.dataset.cache[label])
 
 

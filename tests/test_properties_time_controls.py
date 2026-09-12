@@ -24,10 +24,10 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtWidgets import QGridLayout, QLabel
 
-from well_viewer.core.cell_gating_state import CellGatingState
-from well_viewer.core.export_prefs_state import ExportPrefsState
-from well_viewer.core.plot_state import PlotState
-from well_viewer.features.scatter.state import ScatterState
+from review.core.cell_gating_state import CellGatingState
+from review.core.export_prefs_state import ExportPrefsState
+from review.core.plot_state import PlotState
+from review.features.scatter.state import ScatterState
 from widgets.stepper import Stepper
 
 pytestmark = pytest.mark.qt
@@ -36,7 +36,7 @@ pytestmark = pytest.mark.qt
 def _mk_ctx(app):
     """The same shape the other sidebar tests build: state/runtime/widgets all
     resolve through the fake app's own attributes."""
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     return SimpleNamespace(
         app=app,
         state=app._app_state,
@@ -90,7 +90,7 @@ def _build_sidebar(qtbot, monkeypatch, timepoints=None):
     """
     from matplotlib.figure import Figure
 
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
 
     fig = Figure(figsize=(4, 3))
     fig.add_subplot(1, 1, 1)
@@ -172,7 +172,7 @@ def test_what_the_controls_write_is_what_the_renderers_read(qtbot, monkeypatch):
     """The seam that matters: the two fields the sidebar writes are the two
     ``rescale_for`` reads, and the correction that reaches a figure is the one
     the user typed."""
-    from well_viewer.domain.time_rescale import TimeRescale, format_scaled, rescale_for
+    from review.domain.time_rescale import TimeRescale, format_scaled, rescale_for
 
     app, sb, _redraws = _build_sidebar(qtbot, monkeypatch)
     steppers = _time_steppers(sb)
@@ -259,7 +259,7 @@ def test_an_hourly_plate_still_opens_at_one(qtbot, monkeypatch):
 def test_typing_the_interval_already_true_leaves_the_axis_alone(qtbot, monkeypatch):
     """The behaviour the old control got backwards: on a plate already carrying
     real hours, typing 4 multiplied by four and drew 0, 16, 32."""
-    from well_viewer.domain.time_rescale import is_active, rescale_for
+    from review.domain.time_rescale import is_active, rescale_for
 
     app, sb, _r = _build_sidebar(qtbot, monkeypatch, [0, 4, 8, 12])
     stepper = _time_steppers(sb)["Interval per timepoint"]
@@ -277,7 +277,7 @@ def test_typing_the_interval_already_true_leaves_the_axis_alone(qtbot, monkeypat
 def test_typing_an_interval_relabels_the_axis_to_it(qtbot, monkeypatch):
     """What the user types is what a reader gets by subtracting two ticks —
     on both plate shapes, from two different stored multipliers."""
-    from well_viewer.domain.time_rescale import rescale_for, scaled
+    from review.domain.time_rescale import rescale_for, scaled
 
     for timepoints, factor in (([0, 4, 8, 12], 2.0), ([1, 2, 3, 4], 8.0)):
         app, sb, _r = _build_sidebar(qtbot, monkeypatch, timepoints)

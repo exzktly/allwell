@@ -17,11 +17,11 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 @pytest.mark.slow
 def test_fluor_gate_applies_on_cold_open(qtbot, mini_dataset):
-    from well_viewer.runtime_app import WellViewerApp
-    from well_viewer.data.data_loading import df_included_mask
-    import well_viewer.features.home.cell_gating.controller as cg
+    from review.runtime_app import ReviewApp
+    from review.data.data_loading import df_included_mask
+    import review.features.home.cell_gating.controller as cg
 
-    app1 = WellViewerApp()
+    app1 = ReviewApp()
     app1._load_path(mini_dataset)
     app1._notebook.setCurrentByName("Home")
     well = next(iter(app1._app_state.dataset.well_paths))
@@ -37,7 +37,7 @@ def test_fluor_gate_applies_on_cold_open(qtbot, mini_dataset):
 
     # Cold open: a brand-new app loading the same dir applies the saved gate
     # without the user re-toggling.
-    app2 = WellViewerApp()
+    app2 = ReviewApp()
     app2._load_path(mini_dataset)
     if app2._ctx.runtime.cell_gating.worker:
         app2._ctx.runtime.cell_gating.worker.wait()

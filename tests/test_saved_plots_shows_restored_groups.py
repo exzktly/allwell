@@ -26,8 +26,8 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.domain.batch_models import BarGroup
-from well_viewer.features.saved_plots.controller import _restore_stats
+from review.domain.batch_models import BarGroup
+from review.features.saved_plots.controller import _restore_stats
 
 pytestmark = pytest.mark.qt
 
@@ -51,8 +51,8 @@ def _saved_groups():
 
 def _stats_cfg(app, groups):
     """The saved ``stats`` block for *groups*, as ``capture_params`` writes it."""
-    from well_viewer.features.saved_plots.collect import _capture_stats_config
-    from well_viewer.features.stats.controller import compute_pairwise, threshold_for_val_col
+    from review.features.saved_plots.collect import _capture_stats_config
+    from review.features.stats.controller import compute_pairwise, threshold_for_val_col
 
     app._app_state.stats.groups = list(groups)
     app._app_state.stats.pairwise = compute_pairwise(

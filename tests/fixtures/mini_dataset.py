@@ -1,4 +1,4 @@
-"""Deterministic miniature dataset for headless ``WellViewerApp`` tests.
+"""Deterministic miniature dataset for headless ``ReviewApp`` tests.
 
 A real analysis output directory is a folder of per-well measurement CSVs
 plus a ``pipeline_info.json`` sidecar. Rather than commit four near-identical

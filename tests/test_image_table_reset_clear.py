@@ -15,9 +15,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import controller as C
-from well_viewer.features.image_browser.image_table import build_layout as B
-from well_viewer.features.image_browser.image_table.state import ImageTableState
+from review.features.image_browser.image_table import controller as C
+from review.features.image_browser.image_table import build_layout as B
+from review.features.image_browser.image_table.state import ImageTableState
 
 
 def _fake_app(*, wells, channels, timepoints=None, fovs=None):
@@ -32,7 +32,7 @@ def _fake_app(*, wells, channels, timepoints=None, fovs=None):
         image_table=ImageTableState(),
     )
     app._parse_rc = lambda w: (w[0], int(w[1:]))
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     ctx = SimpleNamespace(app=app, state=app._app_state, runtime=AppRuntime(app),
                           _status=[])
     ctx.notify = SimpleNamespace(set_status=lambda msg: ctx._status.append(msg))

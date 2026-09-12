@@ -8,7 +8,7 @@ plot silently drew nothing, because each aggregate path fed the count column the
 channel's *fluorescence* ON cutoff (ThreshFracOn, 50.0 by default) and no spot
 tally clears 50.
 
-So this drives a real ``WellViewerApp`` over a real dataset directory whose CSVs
+So this drives a real ``ReviewApp`` over a real dataset directory whose CSVs
 carry a ``mcherry_smfish_count`` column, and asserts the numbers the plots
 actually collect. The count channel deliberately also has an intensity column,
 because the fix is that one channel now carries *two* independent cutoffs — a
@@ -38,7 +38,7 @@ from tests.fixtures.mini_dataset import SMFISH_CHANNEL
 # this file still *collects* against the pre-fix tree and the first test below
 # fails there with a plain assertion rather than an ImportError at import time —
 # which would look like a proof and measure nothing.
-from well_viewer.core.channel_state_controller import (
+from review.core.channel_state_controller import (
     get_thresh_frac_on,
     set_active_channel,
     set_active_metric,
@@ -60,7 +60,7 @@ def _select(ctx, *wells):
 
 def _agg_x(ctx, wells=("A01",)):
     """The X value the Wells-mode scatter collects, or None when it drew nothing."""
-    from well_viewer.features.scatter.collect import collect_scatter_agg_data
+    from review.features.scatter.collect import collect_scatter_agg_data
     out = collect_scatter_agg_data(
         ctx, COUNT_STAT, COUNT_STAT, [TP], well_colors=["#000000"] * len(wells))
     if not out:
@@ -90,7 +90,7 @@ def test_cells_mode_and_wells_mode_agree_on_the_same_counts(loaded_app_smfish):
     every point. They now describe the same population, so the per-well mean is
     the mean of the per-cell values.
     """
-    from well_viewer.features.scatter.collect import collect_scatter_data
+    from review.features.scatter.collect import collect_scatter_data
     ctx = _select(loaded_app_smfish._ctx, "A01")
     cells = collect_scatter_data(
         ctx, COUNT_COL, COUNT_COL, [TP], well_colors=["#000000"])
@@ -118,7 +118,7 @@ def test_the_count_cutoff_does_cut(loaded_app_smfish):
 
     Above 2 spots, A01 keeps cells carrying 3, 4 and 5 — mean 4.0.
     """
-    from well_viewer.core.channel_state_controller import (
+    from review.core.channel_state_controller import (
         get_thresh_count_on, set_thresh_count_on,
     )
     ctx = _select(loaded_app_smfish._ctx, "A01")
@@ -133,7 +133,7 @@ def test_zero_spot_cells_count_at_the_default(loaded_app_smfish):
     A cutoff of 0 keeps only 1–5 (mean 3.0). The default keeps the zero-spot
     cell too, and the mean drops to 2.5 — the honest number.
     """
-    from well_viewer.core.channel_state_controller import set_thresh_count_on
+    from review.core.channel_state_controller import set_thresh_count_on
     ctx = _select(loaded_app_smfish._ctx, "A01")
     assert _agg_x(ctx) == 2.5
     set_thresh_count_on(ctx, 0.0, SMFISH_CHANNEL)
@@ -148,8 +148,8 @@ def test_bar_plot_collects_the_same_population(loaded_app_smfish):
     At the default every cell is on, so the fraction panel reads 1.00 — correct
     for "no cut", and the visible consequence documented in the manual.
     """
-    from well_viewer.core.channel_state_controller import set_thresh_count_on
-    from well_viewer.features.barplot.collect import collect_bar_items
+    from review.core.channel_state_controller import set_thresh_count_on
+    from review.features.barplot.collect import collect_bar_items
     ctx = _select(loaded_app_smfish._ctx, "A01", "A02")
     _use_groups, items, _band = collect_bar_items(ctx, TP)
     by_well = {it.key: it for it in items}
@@ -166,7 +166,7 @@ def test_bar_plot_collects_the_same_population(loaded_app_smfish):
 
 def test_the_resolver_picks_the_cutoff_from_the_column(loaded_app_smfish):
     """One channel, two metrics, two cutoffs — resolved by what is being measured."""
-    from well_viewer.core.channel_state_controller import (
+    from review.core.channel_state_controller import (
         on_cutoff_for_column, set_thresh_count_on,
     )
     ctx = _select(loaded_app_smfish._ctx, "A01")
@@ -185,7 +185,7 @@ def test_the_quick_edit_writes_the_cutoff_it_is_showing(loaded_app_smfish):
     writing into ThreshFracOn — destroying the intensity cutoff and leaving the
     count one untouched.
     """
-    from well_viewer.core.channel_state_controller import (
+    from review.core.channel_state_controller import (
         get_thresh_count_on, quick_edit_cutoff_is_count, set_on_cutoff,
     )
     ctx = _select(loaded_app_smfish._ctx, "A01")
@@ -221,7 +221,7 @@ def test_the_quick_edit_writes_the_cutoff_it_is_showing(loaded_app_smfish):
 
 def test_only_smfish_channels_get_a_count_field(loaded_app_smfish):
     """A channel with no spot-count column has no count cutoff to edit."""
-    from well_viewer.core.channel_state_controller import quick_edit_cutoff_is_count
+    from review.core.channel_state_controller import quick_edit_cutoff_is_count
     ctx = _select(loaded_app_smfish._ctx, "A01")
     edits = ctx.runtime.cell_gating.thresh_count_edits or {}
     assert SMFISH_CHANNEL in edits
@@ -234,7 +234,7 @@ def test_only_smfish_channels_get_a_count_field(loaded_app_smfish):
 
 def test_the_count_cutoff_persists_and_reloads(loaded_app_smfish, mini_dataset_smfish):
     """Written into the sidecar beside ThreshFracOn, and read back on open."""
-    from well_viewer.core.channel_state_controller import (
+    from review.core.channel_state_controller import (
         get_thresh_count_on, set_thresh_count_on,
     )
     ctx = _select(loaded_app_smfish._ctx, "A01")
@@ -262,11 +262,11 @@ def test_heat_map_fraction_matches_the_bar_plot(loaded_app_smfish):
     the one the bar plot reports for the same well and cutoff — 3 of A01's 6
     cells carry more than 2 spots.
     """
-    from well_viewer.core.channel_state_controller import (
+    from review.core.channel_state_controller import (
         refresh_heatmap_aggregation_options, set_thresh_count_on,
     )
-    from well_viewer.domain.metric_registry import metric_has_own_cutoff
-    from well_viewer.features.heatmap import controller as HM
+    from review.domain.metric_registry import metric_has_own_cutoff
+    from review.features.heatmap import controller as HM
 
     ctx = _select(loaded_app_smfish._ctx, "A01")
     set_thresh_count_on(ctx, 2.0, SMFISH_CHANNEL)
@@ -284,7 +284,7 @@ def test_heat_map_fraction_matches_the_bar_plot(loaded_app_smfish):
         )
 
     # ...and the number behind it is the one the other plots already report.
-    from well_viewer.core.channel_state_controller import (
+    from review.core.channel_state_controller import (
         get_all_fluor_gates, on_cutoff_for_column,
     )
     cutoff = on_cutoff_for_column(ctx, COUNT_COL, channel=SMFISH_CHANNEL)
@@ -325,8 +325,8 @@ def test_the_cut_cells_notice_does_not_outlive_its_plot(loaded_app_smfish):
     ``ctx.notify.set_status``, because the tab's internal flag was right in the
     broken version too.
     """
-    from well_viewer.core.channel_state_controller import set_thresh_count_on
-    from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
+    from review.core.channel_state_controller import set_thresh_count_on
+    from review.features.scatter.controller import redraw_scatter_agg_orchestrate
 
     ctx = _select(loaded_app_smfish._ctx, "A01")
     _agg_axes_on_counts(ctx)
@@ -355,8 +355,8 @@ def test_the_notice_clears_when_no_timepoints_are_ticked(loaded_app_smfish):
     and returns without calling ``redraw_scatter_agg`` at all, so clearing inside
     the redraw would have missed this one.
     """
-    from well_viewer.core.channel_state_controller import set_thresh_count_on
-    from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
+    from review.core.channel_state_controller import set_thresh_count_on
+    from review.features.scatter.controller import redraw_scatter_agg_orchestrate
 
     ctx = _select(loaded_app_smfish._ctx, "A01")
     _agg_axes_on_counts(ctx)

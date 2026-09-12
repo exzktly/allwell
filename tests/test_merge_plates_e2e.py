@@ -17,8 +17,8 @@ from datasets.merge_plates.merge_plates_compute import (
     build_plate_merge_plan,
 )
 from tests.fixtures.dataset_builder import build_dataset
-from well_viewer.data.data_loading import load_well_csv
-from well_viewer.domain.viewer_state import read_pipeline_info
+from review.data.data_loading import load_well_csv
+from review.domain.viewer_state import read_pipeline_info
 
 
 def test_identity_merge_end_to_end_then_reopen_in_review(tmp_path):

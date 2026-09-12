@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.persistence import view_state
+from review.persistence import view_state
 
 
 class _RefusesUseSem:
@@ -56,7 +56,7 @@ def _make_ctx(plot=None):
     # and with none registered that is a no-op rather than a failure. A bare
     # namespace here would make the metric block raise and quietly turn every
     # test below into a test of the wrong gap.
-    from well_viewer.core.widget_registry import WidgetRegistry
+    from review.core.widget_registry import WidgetRegistry
 
     ctx = SimpleNamespace(
         notify=notify,
@@ -129,7 +129,7 @@ def test_the_gap_reaches_the_app_log_too(caplog):
     """The status line is transient; the log drawer is the record."""
     ctx = _make_ctx(plot=_RefusesUseSem())
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         view_state.restore(ctx, {"use_sem": True})
 
     assert any("error-bar mode" in r.getMessage() for r in caplog.records), (

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 
 def test_per_well_tabs_includes_cell_browser():
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
 
     # Cell Browser must allow per-well plate selection even with replicate sets;
     # the per-well behaviour now lives on each feature's descriptor

@@ -8,7 +8,7 @@ its group strips and its inter-group gaps.
 
 Fast + Qt-light: the planner runs on the plain-data render model
 (``{"well","chan","tp","fov"}`` string dicts) and the export builder is driven with a
-fake ctx, so no ``WellViewerApp`` is constructed.
+fake ctx, so no ``ReviewApp`` is constructed.
 """
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ pytest.importorskip("matplotlib")
 
 from matplotlib.figure import Figure
 
-from well_viewer.features.image_browser.image_table import facet_view as F
-from well_viewer.features.image_browser.image_table import renderer as R
+from review.features.image_browser.image_table import facet_view as F
+from review.features.image_browser.image_table import renderer as R
 
 CELL_W = 2.6
 CELL_H = 2.6
@@ -189,7 +189,7 @@ def test_well_label_overrides_the_position_in_the_export():
 # ── the shared export builder ────────────────────────────────────────────────
 
 def _export_ctx(cells, row_dims, col_dims, well_labels=None):
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from review.features.image_browser.image_table.state import ImageTableState
 
     st = ImageTableState()
     st.row_dims, st.col_dims = row_dims, col_dims
@@ -215,7 +215,7 @@ def _blank_export(monkeypatch, **ctx_kw):
     Every export path (file / Copy PNG / Copy SVG / Save to Saved Plots) funnels
     through this one builder, so the labels landing here is the whole contract.
     """
-    from well_viewer.features.image_browser.image_table import export as E
+    from review.features.image_browser.image_table import export as E
 
     cells = _nested_cells()
     monkeypatch.setattr(E, "_load_array", lambda *a, **k: None)
@@ -252,7 +252,7 @@ def test_per_cell_titles_are_off_by_default(monkeypatch):
 
 
 def test_show_titles_opt_in_still_draws_them(monkeypatch):
-    from well_viewer.features.image_browser.image_table import export as E
+    from review.features.image_browser.image_table import export as E
 
     cells = _nested_cells()
     monkeypatch.setattr(E, "_load_array", lambda *a, **k: None)
@@ -269,7 +269,7 @@ def test_progress_callback_fires_once_per_cell_in_order(monkeypatch):
     callback -- it must fire exactly once per cell, with a monotonically
     increasing ``done`` count and a stable ``total``, or the dialog either
     stalls partway or overshoots its own maximum."""
-    from well_viewer.features.image_browser.image_table import export as E
+    from review.features.image_browser.image_table import export as E
 
     cells = _nested_cells()
     monkeypatch.setattr(E, "_load_array", lambda *a, **k: None)
@@ -292,7 +292,7 @@ def test_export_shares_the_persistent_image_cache_not_a_throwaway_copy(monkeypat
     without a prior Generate (or vice versa) never benefited the other path.
     The ``cache`` object every ``_load_array`` call receives must be the same
     object as ``ctx.state.image_table.image_cache``."""
-    from well_viewer.features.image_browser.image_table import export as E
+    from review.features.image_browser.image_table import export as E
 
     cells = _nested_cells()
     seen_cache_ids: set = set()

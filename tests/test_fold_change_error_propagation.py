@@ -6,7 +6,7 @@ fold-change path is the spread propagation — dividing every bar by an uncertai
 control injects the control's relative error into every bar's error bar.
 
 This test drives the full tab-builder / app-loop path on a real
-``WellViewerApp`` + the deterministic mini-dataset (so it uses the ``loaded_app``
+``ReviewApp`` + the deterministic mini-dataset (so it uses the ``loaded_app``
 fixture and runs in the slow/local lane, not the fast CI gate). It reads the raw
 (unscaled) bar values, then the control-normalised ones, and asserts the exact
 quadrature relationship the domain layer implements — including that the
@@ -20,10 +20,10 @@ import math
 import pytest
 
 from tests.fixtures.mini_dataset import WELLS
-from well_viewer.features.barplot.collect import FC_STATE_OFF, collect_bar_items
-from well_viewer.core.channel_state_controller import set_active_channel
-from well_viewer.core.fold_change_controls_view import set_fold_change_state
-from well_viewer.domain.control_ref import ControlRef
+from review.features.barplot.collect import FC_STATE_OFF, collect_bar_items
+from review.core.channel_state_controller import set_active_channel
+from review.core.fold_change_controls_view import set_fold_change_state
+from review.domain.control_ref import ControlRef
 
 pytestmark = pytest.mark.qt
 

@@ -1,7 +1,7 @@
 """Qt-free components of the microscopy analysis pipeline.
 
 These modules were extracted from ``process_microscopy.py`` (the orchestrator +
-CLI, which stays at the repo root). They carry no ``well_viewer`` / ``widgets``
+CLI, which stays at the repo root). They carry no ``review`` / ``widgets``
 / Qt imports so the pipeline runs on headless remote workers and CI — the
 contract enforced by ``tests/test_architecture_contracts.py``. The ML runtimes
 (Torch for Cellpose, TensorFlow for StarDist) are imported lazily inside the

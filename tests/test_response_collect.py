@@ -17,9 +17,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.domain import sample_variables as sv
-from well_viewer.features.response import collect as rc
-from well_viewer.features.response import response_compute as rcompute
+from review.domain import sample_variables as sv
+from review.features.response import collect as rc
+from review.features.response import response_compute as rcompute
 
 
 def _dose(*pairs):
@@ -82,8 +82,8 @@ def stub_stats(monkeypatch):
         value = means.get((rset.name, target_t), 10.0)
         return (None, None, None, None) if value is None else (value, 1.0, 0.5, 0.1)
 
-    import well_viewer.domain.stats_compute as sc
-    import well_viewer.core.channel_state_controller as csc
+    import review.domain.stats_compute as sc
+    import review.core.channel_state_controller as csc
     monkeypatch.setattr(sc, "compute_rep_stats", _stats)
     monkeypatch.setattr(csc, "on_cutoff_for_column", lambda *a, **k: 0.0)
     return means
@@ -307,7 +307,7 @@ def _curve(*xy):
 
 
 def test_the_renderer_runs_against_the_real_style_helper():
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
 
     ax = _axes()
     draw_response(None, ax, _curve((1.0, 5.0), (10.0, 9.0)),
@@ -322,7 +322,7 @@ def test_the_renderer_runs_against_the_real_style_helper():
 def test_a_two_decade_series_opens_logarithmic_with_a_tick_per_dose():
     """matplotlib's log locator ticks the decades, which on 0.1/1/10 labels the
     points it happens to agree with and invents positions no well was given."""
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
 
     ax = _axes()
     draw_response(None, ax, _curve((0.1, 2.0), (1.0, 5.0), (10.0, 9.0)))
@@ -332,7 +332,7 @@ def test_a_two_decade_series_opens_logarithmic_with_a_tick_per_dose():
 
 
 def test_a_zero_dose_is_drawn_off_scale_with_a_tick_reading_zero():
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
 
     ax = _axes()
     draw_response(None, ax, _curve((0.0, 1.0), (0.1, 2.0), (1.0, 5.0),
@@ -344,7 +344,7 @@ def test_a_zero_dose_is_drawn_off_scale_with_a_tick_reading_zero():
 
 
 def test_a_one_decade_series_stays_linear():
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
 
     ax = _axes()
     draw_response(None, ax, _curve((1.0, 5.0), (5.0, 9.0)))
@@ -353,7 +353,7 @@ def test_a_one_decade_series_stays_linear():
 
 def test_the_caption_is_drawn_on_the_axes():
     """Not only on the status line: a saved figure outlives the session."""
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
 
     data = _curve((1.0, 5.0))
     data.omitted = [("Ctrl", rc.NO_VALUE)]
@@ -490,7 +490,7 @@ def test_a_figure_with_points_has_no_empty_state():
 
 def test_the_reason_is_drawn_in_place_of_the_axes():
     """Not beside them: axis furniture around a sentence reads as a failed draw."""
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
 
     data = rc.ResponseData(variable_name="Dose",
                            omitted=[("Ctrl", rc.NO_VALUE)])
@@ -506,7 +506,7 @@ def test_the_reason_is_drawn_in_place_of_the_axes():
 
 def test_the_empty_state_still_lists_which_groups_were_dropped():
     """The reason names the fix; the caption names the members. Both, not one."""
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
 
     data = rc.ResponseData(variable_name="Dose",
                            omitted=[("Ctrl", rc.NO_VALUE)])
@@ -530,7 +530,7 @@ def test_the_stub_plot_state_carries_every_field_the_collector_reads():
     applying on a real plate. So the stub is required to match, and this is
     what notices when the real state grows a field.
     """
-    from well_viewer.core.plot_state import PlotState
+    from review.core.plot_state import PlotState
 
     real = PlotState()
     stub = _ctx(wells=["A01"]).state.plot
@@ -667,7 +667,7 @@ def test_the_caption_names_which_mistake_each_omission_was():
     figure is empty, while this is the sentence that reaches the axes and
     travels with a saved file.
     """
-    from well_viewer.features.response import collect as rc
+    from review.features.response import collect as rc
 
     data = rc.ResponseData(
         variable_name="Dose",
@@ -702,7 +702,7 @@ def test_a_single_replicate_member_is_counted_as_having_no_spread(stub_stats, mo
     def _stats(ctx, rset, target_t, threshold, use_sem, **kw):
         return (10.0, float("nan"), 0.5, 0.1)      # a mean, no spread
 
-    import well_viewer.domain.stats_compute as sc
+    import review.domain.stats_compute as sc
     monkeypatch.setattr(sc, "compute_rep_stats", _stats)
 
     ctx = _ctx(wells=["A01"],
@@ -746,7 +746,7 @@ def test_a_point_normalisation_blanked_is_named_not_dropped(stub_stats, monkeypa
                assignments={"dose": {"A01": "d0", "A02": "d1"}},
                selections=_groups(("lo", ["A01"]), ("hi", ["A02"])))
     ctx.state.plot.fc_vs_control_on = True
-    from well_viewer.domain.control_ref import ControlRef
+    from review.domain.control_ref import ControlRef
 
     ctx.state.plot.fc_control = ControlRef("set", "a-group-that-does-not-exist")
 
@@ -1005,12 +1005,12 @@ def _fov_ctx(monkeypatch, *, well_stats, fov_stats):
     They must disagree, or the test cannot tell which one the collector called
     — a fixture where both return the same spread passes against the bug.
     """
-    import well_viewer.domain.stats_compute as sc
+    import review.domain.stats_compute as sc
     monkeypatch.setattr(sc, "compute_rep_stats",
                         lambda *a, **k: well_stats)
     monkeypatch.setattr(sc, "compute_rep_per_fov_stats",
                         lambda *a, **k: fov_stats)
-    import well_viewer.core.channel_state_controller as csc
+    import review.core.channel_state_controller as csc
     monkeypatch.setattr(csc, "on_cutoff_for_column", lambda *a, **k: 0.0)
     return _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
                 assignments={"dose": {"A01": "d0"}},
@@ -1132,8 +1132,8 @@ def test_a_per_fov_spread_that_is_undefined_blames_the_fov_not_a_control(
     replicate" and the shortfall was blamed on a control — on a plate that has
     no control at all. The raw spread answers it directly in either mode.
     """
-    import well_viewer.domain.stats_compute as sc
-    import well_viewer.core.channel_state_controller as csc
+    import review.domain.stats_compute as sc
+    import review.core.channel_state_controller as csc
     monkeypatch.setattr(csc, "on_cutoff_for_column", lambda *a, **k: 0.0)
     monkeypatch.setattr(sc, "compute_rep_stats",
                         lambda *a, **k: (10.0, 1.0, 0.5, 0.02))
@@ -1244,8 +1244,8 @@ def test_subtracting_a_zero_control_is_not_reported_as_a_problem(
 
 def test_the_tab_local_column_is_what_the_stats_producer_reads(monkeypatch):
     """Captured from the call, not inferred from the state it was built from."""
-    import well_viewer.domain.stats_compute as sc
-    import well_viewer.core.channel_state_controller as csc
+    import review.domain.stats_compute as sc
+    import review.core.channel_state_controller as csc
 
     seen = {}
 
@@ -1266,8 +1266,8 @@ def test_the_tab_local_column_is_what_the_stats_producer_reads(monkeypatch):
 
 def test_the_per_fov_producer_gets_the_same_column(monkeypatch):
     """A seam on one producer and not the other reverts on the FOV toggle."""
-    import well_viewer.domain.stats_compute as sc
-    import well_viewer.core.channel_state_controller as csc
+    import review.domain.stats_compute as sc
+    import review.core.channel_state_controller as csc
 
     seen = {}
     monkeypatch.setattr(sc, "compute_rep_stats",
@@ -1297,8 +1297,8 @@ def test_the_on_cutoff_is_resolved_for_the_tab_s_own_column(monkeypatch):
     the band on GFP, every fraction was "cells above RFP intensity, judged by
     GFP's cutoff". A plausible curve and a wrong number.
     """
-    import well_viewer.domain.stats_compute as sc
-    import well_viewer.core.channel_state_controller as csc
+    import review.domain.stats_compute as sc
+    import review.core.channel_state_controller as csc
 
     seen = {}
 
@@ -1344,7 +1344,7 @@ def _two_factor_plate():
 
 
 def _response_slice(**kwargs):
-    from well_viewer.features.response.state import ResponseState
+    from review.features.response.state import ResponseState
 
     return ResponseState(**kwargs)
 

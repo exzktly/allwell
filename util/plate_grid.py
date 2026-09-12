@@ -12,7 +12,7 @@ This module turns "the user imaged a ``rows`` × ``cols`` block of wells startin
 at ``origin``, snaking by row" into the ordered list of 96-well labels the rest
 of All-Well already understands. It depends only on the stdlib and
 ``util.well_token`` (the single source of truth for the 96-well geometry), so the
-pipeline can import it without breaching the "no ``well_viewer`` / ``widgets`` /
+pipeline can import it without breaching the "no ``review`` / ``widgets`` /
 Qt imports" contract — the same reason ``util.well_token`` and ``util.schema``
 live under ``util/``.
 

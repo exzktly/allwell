@@ -3,12 +3,12 @@
 The figure-export *pipeline* (render to SVG/PDF/PNG and write to the system
 clipboard) lives here so it can be shared by the ``widgets/`` layer — notably
 ``widgets.plot_card.PlotCard`` (per-axis "copy this panel") — without a widget
-reaching sideways into ``well_viewer.features.*`` (architecture guardrail G8:
+reaching sideways into ``review.features.*`` (architecture guardrail G8:
 ``widgets/`` may import only ``theme`` + Qt + matplotlib + other ``widgets/``).
 
 These functions previously lived in
-``well_viewer/features/export/style.py``; that module now re-exports them so
-existing ``from well_viewer.features.export.style import …`` call sites keep
+``review/features/export/style.py``; that module now re-exports them so
+existing ``from review.features.export.style import …`` call sites keep
 working. They depend only on matplotlib + PySide6 (+ optional PIL/AppKit), so
 they are safe to import from anywhere.
 """
@@ -26,7 +26,7 @@ if TYPE_CHECKING:                                # matplotlib is imported lazily
     from matplotlib.backend_bases import RendererBase
     from matplotlib.transforms import BboxBase
 
-_logger = logging.getLogger("well_viewer")
+_logger = logging.getLogger("review")
 
 
 @contextmanager

@@ -23,15 +23,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.features.image_browser.image_table.image_compose import (
+from review.features.image_browser.image_table.image_compose import (
     partial_scan_clause,
     partial_scan_report,
 )
 
 #: The package whose surfaces produce an artifact from a render pass.
 _MODULES = (
-    "well_viewer/features/image_browser/image_table/controller.py",
-    "well_viewer/features/image_browser/image_table/export.py",
+    "review/features/image_browser/image_table/controller.py",
+    "review/features/image_browser/image_table/export.py",
 )
 
 _BAR = "scale_bar_refusal_clause"
@@ -103,7 +103,7 @@ def test_the_reader_and_the_clause_agree():
 # ── the sentence reaches the real status lines ──────────────────────────────
 
 def test_the_generate_line_carries_it():
-    from well_viewer.features.image_browser.image_table.controller import (
+    from review.features.image_browser.image_table.controller import (
         generate_status_message,
     )
 
@@ -129,7 +129,7 @@ def test_each_saved_artifact_surface_appends_it_next_to_the_bar_clause(surface):
     """
     import inspect
 
-    from well_viewer.features.image_browser.image_table import export
+    from review.features.image_browser.image_table import export
 
     source = inspect.getsource(getattr(export, surface))
     assert f"{_PARTIAL}(ctx)" in source, f"{surface} never reports a short list"

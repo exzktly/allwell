@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core.app_runtime import AppRuntime
-from well_viewer.persistence import view_state
+from review.core.app_runtime import AppRuntime
+from review.persistence import view_state
 
 
 class _FakeNotebook:

@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.domain import sample_variables as sv
+from review.domain import sample_variables as sv
 from tests import _cvd
-from well_viewer.domain import variable_series as vs
-from well_viewer.features.barplot._decorate import (
+from review.domain import variable_series as vs
+from review.features.barplot._decorate import (
     bar_legend_entries, decorate_bar_items,
 )
-from well_viewer.features.barplot.collect import (
+from review.features.barplot.collect import (
     clustered_x_positions, cluster_centers, collect_bar_items,
 )
 
@@ -185,7 +185,7 @@ def test_more_values_than_picks_keeps_going_rather_than_repeating_an_ink():
 def test_the_picks_are_a_roster_of_real_palette_entries():
     """A pick past the end of the palette would be dropped silently, shortening
     the measured set to something no test above would notice."""
-    from well_viewer.domain.plate_layout import WELL_COLORS
+    from review.domain.plate_layout import WELL_COLORS
 
     assert len(set(vs.VALUE_PICKS)) == len(vs.VALUE_PICKS), "a pick is repeated"
     assert all(0 <= i < len(WELL_COLORS) for i in vs.VALUE_PICKS)
@@ -241,7 +241,7 @@ def test_the_variables_tab_and_the_plots_ink_a_value_the_same():
     honours the plate's other values — the shape §7.8 calls a fixture in which
     the right and the wrong answer are the same bytes.
     """
-    from well_viewer.features.home.variables import controller as vc
+    from review.features.home.variables import controller as vc
 
     ctx, _cell, dose = _two_variable_ctx()
     vset = ctx.state.selection.variables
@@ -495,7 +495,7 @@ def band(qtbot):
 
     from widgets.labeled_combo import LabeledComboBox
 
-    from well_viewer.core.group_by_controller import (
+    from review.core.group_by_controller import (
         DECORATION_CONTROLS, refresh_decoration_combos, set_decoration_variable,
     )
 
@@ -552,7 +552,7 @@ def test_the_split_combo_is_wired_to_its_own_field(band):
 
 def test_a_deleted_variable_is_cleared_from_both_controls(band):
     """Left set, the next redraw decorates by a variable nothing offers."""
-    from well_viewer.core.group_by_controller import refresh_decoration_combos
+    from review.core.group_by_controller import refresh_decoration_combos
 
     band.ctx.state.plot.colour_by_variable = band.variable.id
     band.ctx.state.plot.split_by_variable = band.variable.id
@@ -565,7 +565,7 @@ def test_a_deleted_variable_is_cleared_from_both_controls(band):
 
 
 def test_an_unknown_field_is_refused_rather_than_set(band):
-    from well_viewer.core.group_by_controller import set_decoration_variable
+    from review.core.group_by_controller import set_decoration_variable
 
     set_decoration_variable(band.ctx, "group_by_variable", band.variable.id)
     assert band.ctx.state.plot.group_by_variable == "", (
@@ -580,7 +580,7 @@ def test_resetting_the_variables_clears_both_decorations():
     Driven through the reset scope rather than by calling the setter, because
     the defect would be a *missing* line there and only the real scope has it.
     """
-    from well_viewer.persistence import reset_scopes
+    from review.persistence import reset_scopes
 
     variable = _line()
     ctx = _ctx(variable=variable, colour_by=variable.id, split_by=variable.id)
@@ -598,7 +598,7 @@ def test_the_reset_reads_the_controllers_roster_rather_than_naming_fields():
     it. The roster is the single list, so it cannot drift."""
     import inspect
 
-    from well_viewer.persistence import reset_scopes
+    from review.persistence import reset_scopes
 
     source = inspect.getsource(reset_scopes._clear_sample_variables)
     assert "DECORATION_CONTROLS" in source
@@ -618,8 +618,8 @@ def test_a_render_with_no_ctx_is_undecorated_rather_than_a_crash():
     controls existed: whole and coherent, not a decorated one with pieces
     missing.
     """
-    from well_viewer.features.barplot._annotations import annotate_decorations
-    from well_viewer.features.barplot._decorate import (
+    from review.features.barplot._annotations import annotate_decorations
+    from review.features.barplot._decorate import (
         bar_legend_entries, decorate_bar_items,
     )
 
@@ -649,7 +649,7 @@ def test_a_ctx_without_a_bar_slice_still_decorates():
 
 def _batch_items(ctx, group, *, pool_replicates=True):
     """One batch group's bars, through the real batch collector."""
-    from well_viewer.features.barplot.collect import (
+    from review.features.barplot.collect import (
         FC_STATE_OFF, collect_bar_items_for_group,
     )
     return collect_bar_items_for_group(
@@ -659,7 +659,7 @@ def _batch_items(ctx, group, *, pool_replicates=True):
 
 
 def _group(name="G", members=(), solo=()):
-    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+    from review.domain.batch_models import BarGroup, ReplicateSet
 
     return BarGroup(name,
                     members=[ReplicateSet(n, list(w)) for n, w in members],
@@ -702,7 +702,7 @@ def test_the_batch_keys_are_the_groups_own_not_the_tabs():
     items against the tab's key space would colour nothing at all — silently,
     since a key that resolves to no member simply keeps the colour it had.
     """
-    from well_viewer.domain.variable_series import member_inks
+    from review.domain.variable_series import member_inks
 
     variable = _line()
     ctx = _ctx(selections=[], variable=variable, colour_by=variable.id,
@@ -710,7 +710,7 @@ def test_the_batch_keys_are_the_groups_own_not_the_tabs():
                             "B01": "C0", "B02": "C0"})
     group = _group(members=[("CTRL", ["A01", "A02"]), ("TREAT", ["B01", "B02"])])
 
-    from well_viewer.domain.variable_series import member_inks
+    from review.domain.variable_series import member_inks
 
     tab_keys = set(member_inks(ctx, "bar", variable.id))
     assert "CTRL" not in tab_keys, (
@@ -785,7 +785,7 @@ def test_grey_bars_get_no_colour_by_legend(monkeypatch):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from well_viewer.features.barplot import _annotations as ann
+    from review.features.barplot import _annotations as ann
 
     drawn: list = []
     monkeypatch.setattr(ann, "bar_legend_entries",
@@ -806,7 +806,7 @@ def test_grey_bars_get_no_colour_by_legend(monkeypatch):
 def _ctx_with_mode(mode):
     from types import SimpleNamespace
 
-    from well_viewer.core.app_state import AppState
+    from review.core.app_state import AppState
 
     state = AppState()
     state.plot.bar_color_mode = mode
@@ -834,8 +834,8 @@ def test_an_exported_figure_gets_a_legend_in_the_groups_own_key_space():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from well_viewer.features.barplot._annotations import annotate_decorations
-    from well_viewer.features.barplot.collect import batch_wells_by_key
+    from review.features.barplot._annotations import annotate_decorations
+    from review.features.barplot.collect import batch_wells_by_key
 
     variable = _line()
     ctx = _ctx(variable=variable, colour_by=variable.id,
@@ -877,7 +877,7 @@ def test_the_export_panel_reaches_the_annotator():
     """
     from pathlib import Path as _P
 
-    import well_viewer.features.batch_export.bar_panel as bp
+    import review.features.batch_export.bar_panel as bp
 
     text = _P(bp.__file__).read_text()
     assert "annotate_decorations(" in text
@@ -898,7 +898,7 @@ def test_a_value_reads_the_same_on_a_legend_as_on_an_axis():
     Asserted against ``display_label`` rather than against the literal, so the
     two cannot drift apart again by editing either one.
     """
-    import well_viewer.domain.sample_variables as sv
+    import review.domain.sample_variables as sv
 
     variable = sv.from_block({
         "schema_version": 1,

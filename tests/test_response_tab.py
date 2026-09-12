@@ -16,9 +16,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.domain import sample_variables as sv
-from well_viewer.features.registry import build_feature_registry
-from well_viewer.features.response import controller as rctl
+from review.domain import sample_variables as sv
+from review.features.registry import build_feature_registry
+from review.features.response import controller as rctl
 
 
 class _Registry:
@@ -44,9 +44,9 @@ def tab(qtbot, monkeypatch):
     """A ctx with a real X combo and a real axes, and stubbed statistics."""
     from matplotlib.figure import Figure
 
-    import well_viewer.core.channel_state_controller as csc
-    import well_viewer.core.plot_style as ps
-    import well_viewer.domain.stats_compute as sc
+    import review.core.channel_state_controller as csc
+    import review.core.plot_style as ps
+    import review.domain.stats_compute as sc
     from widgets.labeled_combo import LabeledComboBox
 
     monkeypatch.setattr(csc, "on_cutoff_for_column", lambda *a, **k: 0.0)
@@ -102,9 +102,9 @@ def tab(qtbot, monkeypatch):
     # The tab's own timepoint selection lives on a feature slice, reached the
     # way core reaches one — a stub must answer ``feature_slice`` or the picker
     # silently has nothing to select.
-    from well_viewer.core.cell_gating_state import CellGatingState
-    from well_viewer.core.export_prefs_state import ExportPrefsState
-    from well_viewer.features.response.state import ResponseState
+    from review.core.cell_gating_state import CellGatingState
+    from review.core.export_prefs_state import ExportPrefsState
+    from review.features.response.state import ResponseState
 
     slices = {"response": ResponseState()}
     statuses = []
@@ -663,13 +663,13 @@ def test_a_timepoint_the_new_dataset_lacks_is_dropped_from_the_selection(tab):
 # ── the log-x toggle ────────────────────────────────────────────────────────
 
 def _prefs(tab):
-    from well_viewer.core.plot_style import figure_prefs
+    from review.core.plot_style import figure_prefs
 
     return figure_prefs(tab.ctx, tab.ax.figure)
 
 
 def _decade_data():
-    from well_viewer.features.response.collect import (
+    from review.features.response.collect import (
         ResponseCurve, ResponseData, ResponsePoint,
     )
 
@@ -679,7 +679,7 @@ def _decade_data():
 
 
 def _one_decade_data():
-    from well_viewer.features.response.collect import (
+    from review.features.response.collect import (
         ResponseCurve, ResponseData, ResponsePoint,
     )
 
@@ -710,7 +710,7 @@ def test_off_is_distinguishable_from_never_touched(tab):
     preference. ``figure_prefs`` reads an unset axis key as its neutral default,
     which is right for drawing and makes the two identical to a caller whose own
     default is not that — so the distinction needs its own accessor."""
-    from well_viewer.core.plot_style import figure_pref_is_set
+    from review.core.plot_style import figure_pref_is_set
 
     fig = tab.ax.figure
     assert figure_pref_is_set(tab.ctx, fig, "x_log") is False
@@ -729,10 +729,10 @@ def test_the_chosen_scale_survives_the_shared_restyle(tab):
     the call that sets the scale either way. So the restyle really runs, and
     the ticks — the thing the pin exists to protect — are what is read back.
     """
-    from well_viewer.core.plot_style import (
+    from review.core.plot_style import (
         DEFAULT_EXPORT_STYLE_PREFS, apply_export_style_prefs,
     )
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
 
     data = _decade_data()
     draw_response(None, tab.ax, data, log_x=True)
@@ -776,10 +776,10 @@ def test_the_dose_ticks_say_what_the_user_typed(tab):
     (``0.1``/``1``/``10``) the fixed and the broken renderer draw the same
     ticks and no assertion of any strength could tell them apart.
     """
-    from well_viewer.features.response.collect import (
+    from review.features.response.collect import (
         ResponseCurve, ResponseData, ResponsePoint,
     )
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
 
     points = tuple(
         ResponsePoint(f"m{i}", x, 5.0, 0.1, 3, text)
@@ -797,10 +797,10 @@ def test_a_dose_two_members_typed_differently_falls_back_to_the_number(tab):
     """One tick cannot say both ``0.3`` and ``0.30``, so it says what is true
     of both. Silently picking one would put a label on the axis that half the
     plate's wells were not given."""
-    from well_viewer.features.response.collect import (
+    from review.features.response.collect import (
         ResponseCurve, ResponseData, ResponsePoint,
     )
-    from well_viewer.features.response.renderer import draw_response
+    from review.features.response.renderer import draw_response
 
     # ``0.30`` is *first*, so the fallback and "keep whichever label arrived
     # first" produce different ticks. With ``0.3`` first they agree, and
@@ -870,7 +870,7 @@ def fit_ui(tab, qtbot):
     """The real Fit popover, wired to the real controller."""
     from widgets.control_band import ControlBand
 
-    from well_viewer.features.response import tab_view as rtv
+    from review.features.response import tab_view as rtv
 
     band = ControlBand()
     qtbot.addWidget(band)
@@ -902,7 +902,7 @@ def _dose_plate(tab, *, ec50=1.0, bottom=5.0, top=95.0, flat=False):
             1 + 10 ** ((math.log10(ec50) - math.log10(dose)) * 1.0))
 
     by_name = {f"{d:g}": _y(d) for d in doses}
-    import well_viewer.domain.stats_compute as sc
+    import review.domain.stats_compute as sc
     tab.monkeypatch.setattr(
         sc, "compute_rep_stats",
         lambda ctx, rset, t, thr, sem, **kw: (by_name[rset.name], 1.0, 0.5, 0.1))
@@ -1097,14 +1097,14 @@ def test_the_fold_change_popover_is_built_and_registers_this_tabs_combos(
     """
     from widgets.control_band import ControlBand
 
-    from well_viewer.features.response import tab_view as rtv
+    from review.features.response import tab_view as rtv
 
     band = ControlBand()
     qtbot.addWidget(band)
     tab.ctx.window = band
     layout = band.layout()
     rtv.build_response_tab  # the popover is built inside it; exercise directly
-    from well_viewer.core.fold_change_controls_view import (
+    from review.core.fold_change_controls_view import (
         install_fold_change_controls,
     )
     from PySide6.QtWidgets import QVBoxLayout, QWidget
@@ -1121,7 +1121,7 @@ def test_the_fold_change_popover_is_built_and_registers_this_tabs_combos(
 def test_the_response_scope_is_the_features_own(tab):
     """Registered through the feature descriptor, so removing the feature drops
     the scope with it — the one-line-removable property the repo enforces."""
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
 
     descriptor = build_feature_registry().get("Response Curves")
     assert descriptor is not None
@@ -1184,7 +1184,7 @@ def test_the_pooling_notice_reaches_the_figure(tab):
 def test_the_snapshot_and_the_restore_are_the_features_own(tab):
     """Reached through the registry hook, so removing the feature drops the
     serialization with it and ``persistence`` never names this tab."""
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
 
     descriptor = build_feature_registry().get("Response Curves")
     assert descriptor.view_state_io is not None
@@ -1193,7 +1193,7 @@ def test_the_snapshot_and_the_restore_are_the_features_own(tab):
 
 
 def test_the_fit_survives_a_save_and_a_restore(tab, fit_ui):
-    from well_viewer.features.response import view_state_io as vsio
+    from review.features.response import view_state_io as vsio
 
     _dose_plate(tab, ec50=2.5)
     fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
@@ -1214,7 +1214,7 @@ def test_the_fit_survives_a_save_and_a_restore(tab, fit_ui):
 def test_the_restore_moves_the_controls_not_only_the_state(tab, fit_ui):
     """The half that shipped broken on the bar tab: the figure drew one thing
     and the control the user would reach for showed another."""
-    from well_viewer.features.response import view_state_io as vsio
+    from review.features.response import view_state_io as vsio
 
     _dose_plate(tab)
     state = {"fit_model": "hill", "fit_bottom": 0.0, "tp_selections": {"24": True}}
@@ -1229,7 +1229,7 @@ def test_an_unpinned_plateau_is_not_stored_as_zero(tab, fit_ui):
     """``None`` and ``0.0`` are different requests — "fit this plateau" and
     "this plateau is zero" — and writing 0.0 for an unset bottom would turn
     every restored 4PL into a Hill."""
-    from well_viewer.features.response import view_state_io as vsio
+    from review.features.response import view_state_io as vsio
 
     _dose_plate(tab)
     fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
@@ -1243,7 +1243,7 @@ def test_the_x_variable_is_stored_by_id_not_by_name(tab, fit_ui):
     """A name is renamed and an index moves when another variable is added;
     either would restore the figure against a different variable while looking
     as though nothing had gone wrong."""
-    from well_viewer.features.response import view_state_io as vsio
+    from review.features.response import view_state_io as vsio
 
     _dose_plate(tab)
     rctl.redraw_response(tab.ctx)
@@ -1254,7 +1254,7 @@ def test_the_x_variable_is_stored_by_id_not_by_name(tab, fit_ui):
 
 
 def test_a_hand_edited_block_frees_the_plateau_rather_than_refusing(tab, fit_ui):
-    from well_viewer.features.response import view_state_io as vsio
+    from review.features.response import view_state_io as vsio
 
     _dose_plate(tab)
     vsio.apply_response(tab.ctx, {"fit_model": "4pl", "fit_top": "not a number"})
@@ -1267,7 +1267,7 @@ def test_a_hand_edited_block_frees_the_plateau_rather_than_refusing(tab, fit_ui)
 def test_the_restore_does_not_redraw_from_half_the_state(tab, fit_ui):
     """Each control emits a redraw, and a figure drawn part-way through a
     restore looks like the restore itself went wrong."""
-    from well_viewer.features.response import view_state_io as vsio
+    from review.features.response import view_state_io as vsio
 
     _dose_plate(tab)
     # The combos have to be *populated and on a different value*, or the
@@ -1306,7 +1306,7 @@ def test_the_tab_redraws_on_activation_and_on_a_selection_change():
     selection, which is a plot of the wrong data that looks like a plot of the
     right data.
     """
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
 
     descriptor = build_feature_registry().get("Response Curves")
     assert descriptor.on_activate is not None, "the tab is not redrawn when shown"
@@ -1317,7 +1317,7 @@ def test_the_tab_redraws_on_activation_and_on_a_selection_change():
 def test_the_selection_hook_actually_repaints(tab, monkeypatch):
     """The hook existing is not the hook working — it is a lazy import by name,
     so a rename would leave it importing nothing and failing silently."""
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
 
     drawn = []
     monkeypatch.setattr(rctl, "redraw_response", lambda ctx: drawn.append(ctx))
@@ -1350,7 +1350,7 @@ def test_a_log_axis_the_tab_chose_says_it_chose_it(tab):
 
 def test_a_log_axis_the_user_asked_for_says_nothing(tab):
     """Their own answer needs no explanation, and the checkbox already agrees."""
-    from well_viewer.core.plot_style import figure_prefs
+    from review.core.plot_style import figure_prefs
 
     _dose_plate(tab, ec50=1.0)
     figure_prefs(tab.ctx, tab.ax.figure)["x_log"] = True
@@ -1385,7 +1385,7 @@ def test_the_activation_hook_actually_repaints(tab, monkeypatch):
     """
     from PySide6.QtWidgets import QWidget
 
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
 
     # The two pieces of chrome the hook touches on its way to the redraw. Given
     # rather than patched over, so the hook runs as written — patching them out
@@ -1439,11 +1439,11 @@ def test_the_ungrouped_csv_names_the_wells_it_drew(tab, tmp_path, monkeypatch):
     was plotted.
     """
     written = {}
-    import well_viewer.core.csv_export as ce
+    import review.core.csv_export as ce
     monkeypatch.setattr(
         ce, "write_csv_rows",
         lambda ctx, name, header, rows: written.update(rows=rows))
-    import well_viewer.features.response.controller as mod
+    import review.features.response.controller as mod
     monkeypatch.setattr(mod, "write_csv_rows", ce.write_csv_rows)
 
     variable = _variable(pairs=(("1", 1.0), ("10", 10.0)))
@@ -1515,7 +1515,7 @@ def test_a_restored_series_reaches_the_figure_without_touching_the_menu(tab):
     Counted in curves rather than asserted as "the state was restored": the
     slice was always restored correctly. What was missing was the figure.
     """
-    from well_viewer.core import tab_controller
+    from review.core import tab_controller
 
     _load_two_series(tab)
     rctl.redraw_response(tab.ctx)
@@ -1524,7 +1524,7 @@ def test_a_restored_series_reaches_the_figure_without_touching_the_menu(tab):
     tab.ctx.runtime.view_state = SimpleNamespace(
         pending={"Response Curves": {"series_variable_ids": ["cl"]}})
     tab.ctx.features = build_feature_registry()
-    from well_viewer.persistence import view_state as _vs
+    from review.persistence import view_state as _vs
     assert _vs.apply_pending_tab_state(tab.ctx, "Response Curves") is True
     assert len(tab.ax.containers) == 1, (
         "the restore repainted on its own — then this test is no longer "
@@ -1627,7 +1627,7 @@ def test_the_series_reaches_the_exported_csv(tab, monkeypatch):
 
 def test_the_series_choice_survives_a_save_and_a_restore(tab):
     """Stored by id, so a rename or a new variable cannot move it."""
-    from well_viewer.features.response import view_state_io as io
+    from review.features.response import view_state_io as io
 
     _load_two_series(tab)
     _pick_series(tab, "cl")
@@ -1648,7 +1648,7 @@ def test_a_plot_saved_with_one_series_restores_it(tab):
     figure from the one that was saved, looking like a complete restore, which
     is the substitution this whole block exists to prevent.
     """
-    from well_viewer.features.response import view_state_io as io
+    from review.features.response import view_state_io as io
 
     _load_two_series(tab)
     rctl.redraw_response(tab.ctx)
@@ -1667,7 +1667,7 @@ def test_choosing_the_fraction_in_the_combo_redraws_with_it(tab):
     nothing — this tab's recurring failure — cannot pass by coincidence.
     """
     tab.monkeypatch.setattr(
-        __import__("well_viewer.domain.stats_compute", fromlist=["x"]),
+        __import__("review.domain.stats_compute", fromlist=["x"]),
         "compute_rep_stats",
         lambda ctx, rset, t, thr, sem, **kw: (10.0, 1.0, 0.42, 0.03))
     variable = _variable(pairs=(("1", 1.0), ("10", 10.0)))
@@ -1688,7 +1688,7 @@ def test_the_axis_label_follows_the_y_metric(tab):
     broken version also changes it — the channel is in both.
     """
     tab.monkeypatch.setattr(
-        __import__("well_viewer.domain.stats_compute", fromlist=["x"]),
+        __import__("review.domain.stats_compute", fromlist=["x"]),
         "compute_rep_stats",
         lambda ctx, rset, t, thr, sem, **kw: (10.0, 1.0, 0.42, 0.03))
     variable = _variable(pairs=(("1", 1.0),))
@@ -1704,7 +1704,7 @@ def test_the_axis_label_follows_the_y_metric(tab):
 
 
 def test_the_y_metric_survives_a_save_and_a_restore(tab):
-    from well_viewer.features.response import view_state_io as io
+    from review.features.response import view_state_io as io
 
     variable = _variable(pairs=(("1", 1.0),))
     _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])])
@@ -1725,7 +1725,7 @@ def test_the_fov_toggle_reaches_the_figure(tab):
     The two producers return different spreads, so a redraw that called the
     well one regardless is distinguishable from one that honoured the toggle.
     """
-    import well_viewer.domain.stats_compute as sc
+    import review.domain.stats_compute as sc
     tab.monkeypatch.setattr(
         sc, "compute_rep_stats",
         lambda ctx, rset, t, thr, sem, **kw: (10.0, float("nan"), 0.5, float("nan")))
@@ -1773,7 +1773,7 @@ def test_the_fraction_reads_the_channels_mean_intensity_column(tab):
     ``gfp_fraction_above_threshold``, which no frame has, and every point would
     come back uncomputed with nothing on the figure to say why.
     """
-    from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
+    from review.data.metric_labels import METRIC_LABEL_TO_KEY
 
     # What makes the mean column the right answer is that this label is not a
     # metric key at all. Pinned, because without it the explicit branch in
@@ -1984,7 +1984,7 @@ def test_the_figure_says_when_a_grouping_could_not_be_crossed(tab):
     # fixture stubs ``apply_ax_style`` to a no-op, so ``ax.get_title()`` is
     # empty here for every figure and would pass this test with the sentence
     # deleted.
-    import well_viewer.core.plot_style as ps
+    import review.core.plot_style as ps
     titles = []
     tab.monkeypatch.setattr(
         ps, "apply_ax_style", lambda _ax, title, _ylabel: titles.append(title))

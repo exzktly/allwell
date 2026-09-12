@@ -26,7 +26,7 @@ pytest.importorskip("pandas")
 
 import pandas as pd  # noqa: E402
 
-from well_viewer.domain.qc_params import QCParams, compute_qc_pass  # noqa: E402
+from review.domain.qc_params import QCParams, compute_qc_pass  # noqa: E402
 
 _CELLS = pd.DataFrame({
     "area_px": [100.0, 200.0, 300.0],
@@ -68,7 +68,7 @@ def test_the_form_builds_its_params_through_with_updates_kwargs():
     import inspect
     import textwrap
 
-    from well_viewer.features.qc import tab_view
+    from review.features.qc import tab_view
 
     src = textwrap.dedent(inspect.getsource(tab_view.build_qc_gate_controls))
     tree = ast.parse(src)

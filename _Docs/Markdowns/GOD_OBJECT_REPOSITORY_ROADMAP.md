@@ -1,4 +1,4 @@
-# Roadmap: God-Object Teardown + Repository Introduction (`well_viewer/`)
+# Roadmap: God-Object Teardown + Repository Introduction (`review/`)
 
 > **Living document.** Keep this updated as phases land — tick items off, lower
 > the seeded ratchet numbers as they ratchet down, and adjust file:line anchors
@@ -22,7 +22,7 @@ the ratchets and boot tests answer it.
    extracted. **Proof:** `tests/test_ctx_service_accessors.py::_ALLOWED == {"window"}`.
 2. Every delegator/function is `ctx`-native. **Proof:** `RAW_SELF_DELEGATOR_BUDGET == 0`
    **and** `APP_FIRST_FUNC_BUDGET == 0` in `tests/test_guardrails.py`.
-3. No layer inversion: `well_viewer/data/**` and `well_viewer/core/**` carry **zero**
+3. No layer inversion: `review/data/**` and `review/core/**` carry **zero**
    `features.*` imports (module-scope *or* function-local) outside `features/registry.py`.
    **Proof:** `tests/test_data_layer_no_feature_imports.py` green at full scope.
 4. All row reads flow through `WellRepository`. **Proof:** `REPO_BYPASS_BUDGET == 0`
@@ -97,18 +97,18 @@ not reinvent what it already gives:
   is the new gold-standard guard idiom — new decoupling work should add/extend a
   subset-profile boot assertion, matching this.
 - **Still coupled (confirmed teardown targets):** `core/load_controller.py` retains
-  many direct `from well_viewer.features…` imports (qc/crop/review_image/home/
+  many direct `from review.features…` imports (qc/crop/review_image/home/
   heatmap) *not* yet on the hook seam;
   `on_selection_changed` hooks + the `stats`/preview builders still name `app`.
 
 ## Context
 
-`well_viewer/` (the Review side of the All-Well PySide6 app) already runs a
+`review/` (the Review side of the All-Well PySide6 app) already runs a
 disciplined, ratchet-guarded architecture-cleanup culture: AST tests that only
 ratchet metrics downward, and documented "burn-down" epics. Two structural
 weaknesses remain from that lineage:
 
-1. **The `WellViewerApp` god-object.** The `ctx.app` reach-through axis is
+1. **The `ReviewApp` god-object.** The `ctx.app` reach-through axis is
    *done* (`CTX_APP_BUDGET = 0`, `tests/test_ctx_app_burndown.py`). But the god
    still has mass the burn-down didn't meter: ~155 delegator methods (44 forward
    to raw `self`), ~131 `app`-first functions, 9 frozen `ViewerContext` service
@@ -238,7 +238,7 @@ reaching `_window`. Ordered trivial → hard:
 
 ### B1 · Invert the `get_rows`→features layer violation via a cache-projector registry ✅ *(foundational, low-risk, unblocks everything)*
 **Landed.** `get_rows` did function-local
-`from well_viewer.features.qc.controller import apply_qc_to_cache` /
+`from review.features.qc.controller import apply_qc_to_cache` /
 `...crop.controller import apply_crop_to_cache`.
 
 **Design note (differs from the original sketch):** QC and Crop are *support libs*
@@ -256,7 +256,7 @@ callback at startup so the lower layer imports no feature" pattern.
 - `get_rows` now runs `for _project in iter_cache_projectors(): _project(ctx, label)`
   — **zero `features/` imports in the data layer.**
 - Guard: `tests/test_data_layer_no_feature_imports.py` — AST assert that no
-  `well_viewer/data/**` module imports `well_viewer.features.*` at **any** nesting.
+  `review/data/**` module imports `review.features.*` at **any** nesting.
   Green. (No subset-profile extension: QC/Crop are always present, not
   profile-gated, so their projectors register regardless of profile.)
 - Verified: `test_qc_integration` / `test_crop_integration` (projection through
@@ -341,7 +341,7 @@ Categories, which are also the mechanisms:
   `features/registry.py` (the sanctioned sole importer) or naming the site in an
   allowlist with its justification and a liveness check.
 
-| # | Module (`well_viewer/core/`) | Function | Imported symbol(s) | Category | Status | Note |
+| # | Module (`review/core/`) | Function | Imported symbol(s) | Category | Status | Note |
 |---|---|---|---|---|---|---|
 | 1 | `channel_state_controller.py` | `refresh_heatmap_aggregation_options` | `heatmap.controller: METRIC_MEAN, METRIC_FRACTION` | const | ☑ | Aggregation labels, not behaviour — move to a neutral module as `WELL_MIME` was. |
 | 2 | `channel_state_controller.py` | `refresh_heatmap_aggregation_options` | `heatmap.controller: METRIC_MEAN_ALL` | const | ☑ | Same constant set, second site in the same function. |
@@ -551,35 +551,35 @@ A5 `window` = terminal state ; B5 (image repo) optional/last
   eager parity, QC/Crop projection, persistence hydration).
 
 ## Critical files
-- `well_viewer/core/feature_registry.py` — `FeatureDescriptor` + `with_hook`. **This
+- `review/core/feature_registry.py` — `FeatureDescriptor` + `with_hook`. **This
   registry is the reuse seam for B1b and any future fan-out hook.** B1 did *not* add a
   `cache_projector` descriptor field: QC and Crop have no `FeatureDescriptor`, so it used
   the standalone projector registry instead (see the B1 section).
-- `well_viewer/features/registry.py` — descriptor hook factories. Every hook is
+- `review/features/registry.py` — descriptor hook factories. Every hook is
   `ctx`-native now, `on_selection_changed` included (A3, landed); a new fan-out for B1b
   would be added here.
-- `well_viewer/data/data_loading.py` — `get_rows`, whose layer inversion is landed (B1):
+- `review/data/data_loading.py` — `get_rows`, whose layer inversion is landed (B1):
   it iterates `iter_cache_projectors()` and imports no feature.
-- `well_viewer/data/cache_projectors.py` + `well_viewer/core/projector_registry.py` — the
+- `review/data/cache_projectors.py` + `review/core/projector_registry.py` — the
   B1 seam itself; `projector_registry` holds 2 of the 31 remaining function-local
   core→feature imports, by design.
-- `well_viewer/core/load_controller.py` — the largest remaining cluster: 7 function-local
+- `review/core/load_controller.py` — the largest remaining cluster: 7 function-local
   feature imports → `on_dataset_loaded` hooks (B1b), and the eager bulk load path
   (`app._load_well_csv`) → `repo.load_well` (B4b).
-- `well_viewer/data/well_repository.py` — read facade today; B4b adds `load_well` to it.
-- `well_viewer/persistence/view_state.py` + `features/*/view_state_io.py` — the inline
+- `review/data/well_repository.py` — read facade today; B4b adds `load_well` to it.
+- `review/persistence/view_state.py` + `features/*/view_state_io.py` — the inline
   Bar/Distribution/Scatter blocks still to move behind the `view_state_io` hook (B4a
   sub-item (a), open). `save/load/reset` already take `ctx`.
-- `well_viewer/viewer_context.py` — A5 is complete: `window` is the only accessor left,
+- `review/viewer_context.py` — A5 is complete: `window` is the only accessor left,
   and the other 8 services are held fields (`persistence`, `features`, `notify`,
   `figures`, `coordinator`). A new accessor here is a regression.
-- `well_viewer/runtime_app.py` — A1/A2/A4 are complete: no raw-`self` delegators, no
+- `review/runtime_app.py` — A1/A2/A4 are complete: no raw-`self` delegators, no
   widget placeholder attrs. Watch the line + attr budgets when touching it.
 - `tests/test_guardrails.py` + `tests/test_ctx_service_accessors.py` — where every new
   ratchet + accessor-freeze edit lands; `tests/test_feature_profile.py` — the
   boot-under-subset-profile guard idiom to extend for B1/B1b
-- Supporting: `well_viewer/core/dataset_state.py` (repo aggregate root, B2),
-  `well_viewer/persistence/registry.py` (app→ctx, B4)
+- Supporting: `review/core/dataset_state.py` (repo aggregate root, B2),
+  `review/persistence/registry.py` (app→ctx, B4)
 
 ---
 
@@ -610,8 +610,8 @@ guard-proven.** Workstream A is complete (`_ALLOWED == {"window"}`,
 `RAW_SELF_DELEGATOR_BUDGET == 0`, `APP_FIRST_FUNC_BUDGET == 0`); the repository
 work is complete through B4 (`REPO_BYPASS_BUDGET == 0`,
 `PERSIST_APP_PARAM_BUDGET == 0`, one load path); and **condition 3 now holds
-too — `CORE_FEATURE_IMPORT_BUDGET == 0`.** `well_viewer/core/` and
-`well_viewer/data/` import no feature at any nesting, module-scope or
+too — `CORE_FEATURE_IMPORT_BUDGET == 0`.** `review/core/` and
+`review/data/` import no feature at any nesting, module-scope or
 function-local, and `features/registry.py` is the sole importer it was always
 declared to be. Condition **6** (full suite green) is decided per-run by CI
 rather than by this document.
@@ -673,7 +673,7 @@ it finished — not to claim work is owed, which nothing below does.
     than three things the loader happens to remember. The move also freed Cell Gating
     from its lazy hop into Image Browser and took the loader's feature import with it:
     `CORE_FEATURE_IMPORT_BUDGET` 31 → **30**.
-  - `well_viewer/data/image_identity.py` gained `cell_key_tuples_for_dataframe`, the one
+  - `review/data/image_identity.py` gained `cell_key_tuples_for_dataframe`, the one
     implementation of the `(fov, tp, nid)` row key both the projector and Review Image's
     own lookups use; `collect.review_row_keys_series` is now the tab-side name for it.
   - `runtime_app._load_well_csv` is deleted — a pass-through with one caller, which was

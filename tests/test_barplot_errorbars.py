@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import math
 
-from well_viewer.domain.batch_models import ReplicateSet
-from well_viewer.domain.stats_compute import compute_rep_n_above_stats
+from review.domain.batch_models import ReplicateSet
+from review.domain.stats_compute import compute_rep_n_above_stats
 
 from tests.conftest import MockApp, make_agg
 
@@ -70,7 +70,7 @@ def test_grouped_collect_emits_spread_on_all_three_panels():
     """End-to-end through the (Qt-free) collector: a replicate set with
     differing per-well mean / fraction / N-above yields a non-zero spread on
     every panel — Events included (previously hard-coded to 0)."""
-    from well_viewer.features.barplot.collect import collect_bar_items
+    from review.features.barplot.collect import collect_bar_items
     app = MockApp(
         per_well_pts={
             "A01": [make_agg(1.0, 100.0, frac=0.2, n_above=4)],

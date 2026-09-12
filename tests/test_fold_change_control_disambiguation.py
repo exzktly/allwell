@@ -20,15 +20,15 @@ import types
 
 import pytest
 
-from well_viewer.core.fold_change_controls_view import (
+from review.core.fold_change_controls_view import (
     _all_member_labels,
     set_fold_change_state,
 )
-from well_viewer.domain import fold_change as _fc
-from well_viewer.domain.control_ref import ControlRef
-from well_viewer.domain.fold_change import resolve_control_wells
-from well_viewer.features.barplot.collect import collect_bar_items
-from well_viewer.features.lineplot.controller import collect_line_series
+from review.domain import fold_change as _fc
+from review.domain.control_ref import ControlRef
+from review.domain.fold_change import resolve_control_wells
+from review.features.barplot.collect import collect_bar_items
+from review.features.lineplot.controller import collect_line_series
 
 from tests.conftest import MockApp, make_agg
 
@@ -240,7 +240,7 @@ def test_a_hidden_set_does_not_capture_a_well_of_the_same_name():
 
 def test_the_combo_hands_back_a_reference_not_a_label():
     """The entries carry their kind, which is what makes the choice binding."""
-    from well_viewer.core.fold_change_controls_view import _all_member_entries
+    from review.core.fold_change_controls_view import _all_member_entries
 
     app = MockApp(
         per_well_pts={"A01": [make_agg(0.0, _WELL_VALUE)],

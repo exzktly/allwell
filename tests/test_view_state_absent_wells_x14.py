@@ -8,7 +8,7 @@ didn't contain. ``restore`` now stashes the absent (out-of-dataset) wells and
 """
 from __future__ import annotations
 
-from well_viewer.persistence import view_state as vs
+from review.persistence import view_state as vs
 
 
 def test_absent_wells_preserved_across_subset_load(loaded_app):

@@ -7,7 +7,7 @@ had a direct test for).
 """
 from __future__ import annotations
 
-from well_viewer.features.stats.controller import (
+from review.features.stats.controller import (
     _build_header_lines,
     _format_group_summary_lines,
     _format_pairwise_lines,

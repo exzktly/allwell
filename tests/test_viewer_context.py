@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.viewer_context import ViewerContext
+from review.viewer_context import ViewerContext
 
 
 def _state():

@@ -18,7 +18,7 @@ import ast
 from pathlib import Path
 from tests._repo_scan import parse_source
 
-ROOT = Path(__file__).resolve().parent.parent / "well_viewer"
+ROOT = Path(__file__).resolve().parent.parent / "review"
 
 # Modules that legitimately own direct dataset.cache access.
 _OWNERS = {

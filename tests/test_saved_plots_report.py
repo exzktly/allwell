@@ -8,7 +8,7 @@ matplotlib.use("Agg")
 import matplotlib.image as mpimg
 import numpy as np
 
-from well_viewer.features.saved_plots._report import build_saved_plots_report
+from review.features.saved_plots._report import build_saved_plots_report
 
 
 def _rec(rid, title, tab, summary):
@@ -44,7 +44,7 @@ def test_report_empty_records_still_writes_cover(tmp_path):
 
 
 def test_downsample_dpi_caps_longest_side():
-    from well_viewer.features.image_browser.image_table.export import _downsample_dpi
+    from review.features.image_browser.image_table.export import _downsample_dpi
 
     # 10in wide at 300dpi would be 3000px → capped to 1600/10 = 160 dpi.
     assert _downsample_dpi(300, 10.0, 4.0, max_px=1600) == 160
@@ -61,7 +61,7 @@ def test_area_pool_rgb_averages_each_block():
     so the pre-shrink here averages too. Peak-preserving pooling dilates sparse
     fluorescence and made the saved image brighter than the table it came from.
     """
-    from well_viewer.features.image_browser.image_table.export import _area_pool_rgb
+    from review.features.image_browser.image_table.export import _area_pool_rgb
 
     # A single bright 2×2 spot on black, pooled 5× → one block of 25 pixels holds
     # the 4 bright ones, so the block averages to 4/25 of full scale.

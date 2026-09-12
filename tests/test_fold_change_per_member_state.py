@@ -17,10 +17,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core.plot_state import PlotState
-from well_viewer.domain.control_ref import ControlRef
-from well_viewer.domain.state_defaults import restore_defaults
-from well_viewer.persistence import view_state as vs
+from review.core.plot_state import PlotState
+from review.domain.control_ref import ControlRef
+from review.domain.state_defaults import restore_defaults
+from review.persistence import view_state as vs
 
 
 def _ctx(plot=None):
@@ -274,7 +274,7 @@ def _rename_ctx(plot, selections, well_paths):
 
 
 def test_renaming_a_group_moves_the_control_that_named_it():
-    from well_viewer.core.selection_controller import sel_rename
+    from review.core.selection_controller import sel_rename
 
     plot = PlotState(
         fc_control=ControlRef.for_replicate_set("DMSO"),
@@ -296,7 +296,7 @@ def test_renaming_a_group_moves_the_control_that_named_it():
 def test_a_legacy_control_is_resolved_before_the_rename_not_after():
     """A legacy reference means "whatever `DMSO` resolves to today", and after
     the rename today's answer is gone. So the upgrade happens first."""
-    from well_viewer.core.selection_controller import sel_rename
+    from review.core.selection_controller import sel_rename
 
     plot = PlotState(fc_control=ControlRef.legacy("DMSO"))
     ctx = _rename_ctx(
@@ -312,7 +312,7 @@ def test_a_legacy_control_naming_a_well_is_not_dragged_by_a_group_rename():
     """A group named ``A01`` and a loaded well ``A01``: the legacy reference
     resolves to whichever the precedence picks, and the rename must move only
     that one."""
-    from well_viewer.core.selection_controller import sel_rename
+    from review.core.selection_controller import sel_rename
 
     plot = PlotState(fc_control=ControlRef.legacy("A01"))
     ctx = _rename_ctx(
@@ -329,7 +329,7 @@ def test_a_legacy_control_naming_a_well_is_not_dragged_by_a_group_rename():
 def test_deleting_a_group_leaves_its_pairings_behind_on_purpose():
     """Retain-don't-drop. A user who deletes a group and rebuilds it gets the
     pairing back; dropping here would make that silently unrecoverable."""
-    from well_viewer.core.selection_controller import sel_delete
+    from review.core.selection_controller import sel_delete
 
     plot = PlotState(fc_control_map={"TREAT": ControlRef.for_replicate_set("DMSO")})
     ctx = _rename_ctx(

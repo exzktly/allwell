@@ -29,7 +29,7 @@ section then collapsed by the height of the picker it was no longer showing, and
 everything below it slid up: the plot-groups drawer moved 333px between the two
 focus states, and reserving the missing picker's space instead put back a
 picker-shaped hole. All three plates live in one slot above the sections now, so
-neither happens — see ``well_viewer/core/rail_plate.py``.
+neither happens — see ``review/core/rail_plate.py``.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ pytest.importorskip("PySide6")
 
 
 def _split(app, tab_a, tab_b):
-    from well_viewer.core.split_view import enter_split
+    from review.core.split_view import enter_split
     enter_split(app._ctx, tab_a, tab_b)
     return app._visible_centre_tabs()
 
@@ -53,7 +53,7 @@ def _split(app, tab_a, tab_b):
 def _park_on_segmentation(app):
     """Segmentation is a leaf inside the Image Browser container, and it is the
     leaf that owns ``_sidebar_preview_frame`` and its picker."""
-    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    from review.features.image_browser.controller import show_image_browser_subtab
     assert show_image_browser_subtab(app._ctx, "Segmentation")
 
 
@@ -176,7 +176,7 @@ def test_a_suppressed_picker_comes_back_on_the_next_tab_change(loaded_app):
     slot is not hidden by its section being hidden — so a section that regains
     the focus brings its picker with it rather than staying blank for the life
     of the session."""
-    from well_viewer.core.split_view import exit_split
+    from review.core.split_view import exit_split
 
     app = loaded_app
     _park_on_segmentation(app)
@@ -258,7 +258,7 @@ def test_nothing_on_the_rail_moves_when_the_focus_does(loaded_app):
     slot above the sections, choosing whose picker shows changes no one's
     height, so this compares the entire rail rather than any one widget.
     """
-    from well_viewer.core.split_view import focus_split
+    from review.core.split_view import focus_split
 
     app = loaded_app
     _split_and_show(app)
@@ -285,7 +285,7 @@ def test_the_rail_returns_to_where_it_started(loaded_app):
     left the slot 336px tall with the picker squeezed to 168 against the 233 it
     has in every other state.
     """
-    from well_viewer.core.split_view import focus_split
+    from review.core.split_view import focus_split
 
     app = loaded_app
     _split_and_show(app)
@@ -308,7 +308,7 @@ def test_the_picker_keeps_its_size_whichever_pane_owns_it(loaded_app):
     """A picker that changes size as you click between panes reads as two
     different controls. It was 152px under one pane and 233px under the other,
     squeezed into what the plate-less section left it."""
-    from well_viewer.core.split_view import focus_split
+    from review.core.split_view import focus_split
 
     app = loaded_app
     _split_and_show(app)

@@ -1,6 +1,6 @@
 """Behaviour of the shared ControlBand and ModeBar widgets.
 
-Single widgets, no ``WellViewerApp``: anything touching the ``viewer_app``
+Single widgets, no ``ReviewApp``: anything touching the ``viewer_app``
 fixture is auto-marked ``slow`` and excluded from the lane CI runs, which would
 make these invisible.
 
@@ -382,7 +382,7 @@ def test_page_tab_bar_is_flush_with_the_band_bottom(styled_app, band_h, point_si
     """
     from PySide6.QtGui import QFont
     from PySide6.QtWidgets import QHBoxLayout, QTabBar, QWidget
-    from well_viewer.core.app_shell_view import (
+    from review.core.app_shell_view import (
         build_page_tabs_host, register_page_tabs, show_page_tabs,
     )
 

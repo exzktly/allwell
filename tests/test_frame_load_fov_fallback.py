@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from well_viewer.data import frame_load as fl
+from review.data import frame_load as fl
 
 
 def test_exact_match_wins():
@@ -55,13 +55,13 @@ def test_no_match_returns_empty_kind():
 
 
 def test_load_array_annotates_non_exact(monkeypatch, caplog):
-    import well_viewer.data.image_discovery as idisc
+    import review.data.image_discovery as idisc
     monkeypatch.setattr(idisc, "open_imgref_as_array", lambda *a, **k: "IMG")
     # Only a T-prefixed key exists; request the plain-numeric form → numeric tier.
     fluor = {("1", "T01"): object()}
     monkeypatch.setattr(fl, "load_well_channel", lambda *a, **k: fluor)
 
-    name = "well_viewer.data.frame_load"
+    name = "review.data.frame_load"
     with caplog.at_level(logging.DEBUG, logger=name):
         out = fl.load_frame_array(None, {}, "A01", "GFP", "1", "1")
     assert out == "IMG"

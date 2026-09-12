@@ -39,7 +39,7 @@ def test_both_thresholds_state_their_range_and_their_default():
 
 
 def test_the_playground_shows_the_pipeline_strings_not_its_own():
-    from well_viewer.features.image_browser.playground import tab_view
+    from review.features.image_browser.playground import tab_view
     assert tab_view.PROB_THRESH_HELP is PROB_THRESH_HELP
     assert tab_view.NMS_THRESH_HELP is NMS_THRESH_HELP
 
@@ -60,7 +60,7 @@ def test_the_playground_row_helper_puts_the_tooltip_on_the_label(qtbot):
     """The actual defect: an explanation that answers only over the entry box is
     one most people never find."""
     from PySide6.QtWidgets import QVBoxLayout, QWidget
-    from well_viewer.features.image_browser.playground.tab_view import _row
+    from review.features.image_browser.playground.tab_view import _row
 
     parent = QWidget()
     QVBoxLayout(parent)
@@ -97,7 +97,7 @@ def test_a_row_without_a_tooltip_gains_none(qtbot, builder):
     QVBoxLayout(parent)
     qtbot.addWidget(parent)
     if builder == "playground":
-        from well_viewer.features.image_browser.playground.tab_view import _row
+        from review.features.image_browser.playground.tab_view import _row
         cell = _row(parent, "Zoom")
     else:
         from analyze.form_chrome import AnalyzeFormChromeMixin

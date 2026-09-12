@@ -13,7 +13,7 @@ import types
 import matplotlib
 import matplotlib.pyplot as plt
 
-from well_viewer.core import plot_orchestrator as po
+from review.core import plot_orchestrator as po
 
 
 def test_save_restores_rcparams_when_savefig_raises(monkeypatch):

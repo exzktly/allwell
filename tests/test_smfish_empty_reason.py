@@ -28,7 +28,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from well_viewer.features.smfish.tab_view import _smfish_empty_reason
+from review.features.smfish.tab_view import _smfish_empty_reason
 
 
 def _ctx(pipeline_info: dict, *, runtime_tokens=(), wells=("A01",)):

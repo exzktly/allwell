@@ -7,7 +7,7 @@ Statistics pane first — a gesture unrelated to the task, on a panel they were
 already looking at.
 
 The cause was a mode on a shared instrument. The rail carries exactly one well
-picker (``well_viewer/core/rail_plate.py``) and it follows the focused pane, so
+picker (``review/core/rail_plate.py``) and it follows the focused pane, so
 the plate on screen was the shared one, which selects wells to plot. The plate
 that paints wells into a comparison group belonged to the Statistics rail
 section and was hidden. Two plates, identical to look at, opposite meanings, and
@@ -38,7 +38,7 @@ pytest.importorskip("PySide6")
 
 def _split_plots_left_statistics_right(app):
     """The reported arrangement: Plots focused, Statistics beside it."""
-    from well_viewer.core.split_view import enter_split
+    from review.core.split_view import enter_split
     app._notebook.setCurrentByName("Statistics")     # build the page
     app._notebook.setCurrentByName("Plotting")
     enter_split(app._ctx, "Plotting", "Statistics")
@@ -56,8 +56,8 @@ def _split_statistics_beside_segmentation(app):
     partner with a section of its own is what separates "the picker went to the
     other pane" from "the picker happened to be the fallback".
     """
-    from well_viewer.core.split_view import enter_split, focus_split
-    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    from review.core.split_view import enter_split, focus_split
+    from review.features.image_browser.controller import show_image_browser_subtab
     assert show_image_browser_subtab(app._ctx, "Segmentation")
     app._notebook.setCurrentByName("Statistics")
     enter_split(app._ctx, "Statistics", "Image Browser")
@@ -117,7 +117,7 @@ def test_painting_a_well_fills_the_group_without_a_focus_change(loaded_app):
     *something* there, and the defect was a group that ignored the wells the
     user had picked.
     """
-    from well_viewer.features.stats.controller import stats_grp_add
+    from review.features.stats.controller import stats_grp_add
 
     app = loaded_app
     ctx = _split_plots_left_statistics_right(app)
@@ -160,7 +160,7 @@ def test_statistics_puts_no_picker_on_the_rail(loaded_app):
     app = loaded_app
     ctx = _split_plots_left_statistics_right(app)
 
-    from well_viewer.core.rail_plate import section_of
+    from review.core.rail_plate import section_of
     stats_frame = ctx.widgets.get_or_none("_sidebar_stats_frame")
     assert stats_frame is None, (
         "Statistics still owns a rail section; its editor is meant to live on "
@@ -178,7 +178,7 @@ def test_focusing_statistics_leaves_the_rail_to_the_other_pane(loaded_app):
     """The other direction. With no section of its own, Statistics taking the
     focus must not blank the rail: the picker belongs to whatever else is on
     screen, and in this split that is the plots."""
-    from well_viewer.core.split_view import focus_split
+    from review.core.split_view import focus_split
 
     app = loaded_app
     ctx = _split_plots_left_statistics_right(app)
@@ -202,7 +202,7 @@ def test_a_sectionless_pane_hands_the_picker_over_rather_than_blanking_it(loaded
     section, its "Click one well to load its images" line, and nothing to click.
     That is this pane's version of the defect the whole change is about.
     """
-    from well_viewer.core.rail_plate import section_of
+    from review.core.rail_plate import section_of
 
     app = loaded_app
     ctx = _split_statistics_beside_segmentation(app)
@@ -273,7 +273,7 @@ def test_it_gives_the_rail_up_again_the_moment_a_split_opens(loaded_app):
     the picker on screen belongs to the *other* pane's section, not merely that
     there is one.
     """
-    from well_viewer.core.rail_plate import section_of
+    from review.core.rail_plate import section_of
 
     app = loaded_app
     ctx = _split_statistics_beside_segmentation(app)

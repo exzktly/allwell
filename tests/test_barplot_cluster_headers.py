@@ -10,7 +10,7 @@ group-key set is the set of headers.
 
 from __future__ import annotations
 
-from well_viewer.features.barplot.collect import (
+from review.features.barplot.collect import (
     BarItem,
     clustered_x_positions,
     drop_redundant_cluster_keys,

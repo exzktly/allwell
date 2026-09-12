@@ -1,4 +1,4 @@
-"""The rail-head "Open dataset" button's label (well_viewer/core/app_shell_view.py).
+"""The rail-head "Open dataset" button's label (review/core/app_shell_view.py).
 
 Regression guard: the standard Analyze-pipeline layout loads
 ``<dataset_root>/out`` as ``dataset.data_dir``, so a naive
@@ -18,8 +18,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
-from well_viewer.core.app_shell_view import refresh_dataset_button  # noqa: E402
-from well_viewer.core.app_state import AppState  # noqa: E402
+from review.core.app_shell_view import refresh_dataset_button  # noqa: E402
+from review.core.app_state import AppState  # noqa: E402
 
 
 @pytest.fixture(scope="module")

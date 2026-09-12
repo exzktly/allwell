@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.core.plot_state import PlotState
+from review.core.plot_state import PlotState
 
 
 def test_threshold_line_off_by_default():
@@ -15,7 +15,7 @@ def test_threshold_line_off_by_default():
 
 @pytest.mark.qt
 def test_show_threshold_line_round_trips_through_view_state(loaded_app):
-    from well_viewer.persistence import view_state as vs
+    from review.persistence import view_state as vs
 
     app = loaded_app
     app._app_state.plot.show_threshold_line = True

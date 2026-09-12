@@ -18,7 +18,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
 
-from well_viewer.core.ui_helpers import build_section_header
+from review.core.ui_helpers import build_section_header
 
 # The real Cell Gating / Statistics strings, so the numbers are the app's own.
 _LONG_TITLE = "Fraction-on — which included cells count as ON"

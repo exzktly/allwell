@@ -36,9 +36,9 @@ import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from well_viewer.core.group_by_controller import group_by_shortfall  # noqa: E402
-from well_viewer.core.plot_style import _NOTICE_TAG, _apply_grouping_notice  # noqa: E402
-from well_viewer.domain import sample_variables as sv  # noqa: E402
+from review.core.group_by_controller import group_by_shortfall  # noqa: E402
+from review.core.plot_style import _NOTICE_TAG, _apply_grouping_notice  # noqa: E402
+from review.domain import sample_variables as sv  # noqa: E402
 
 
 class _Ctx:
@@ -50,7 +50,7 @@ class _Ctx:
     """
 
     def __init__(self, variables, assignments, wells, group_by=""):
-        from well_viewer.core.app_state import AppState
+        from review.core.app_state import AppState
 
         self.state = AppState()
         self.state.dataset.well_paths = {w: f"/tmp/{w}.csv" for w in wells}
@@ -170,8 +170,8 @@ def test_a_real_bar_figure_carries_the_notice(loaded_app):
     The Bar tab specifically, because it is the tab F's own acceptance
     walkthrough names and the one whose title carried nothing before.
     """
-    import well_viewer.domain.sample_variables as _sv
-    from well_viewer.persistence import view_state
+    import review.domain.sample_variables as _sv
+    from review.persistence import view_state
 
     app = loaded_app
     ctx = app._ctx

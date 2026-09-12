@@ -8,7 +8,7 @@ a batch worker calls — so what the Playground shows is what a run would produc
 
 It lives in ``services`` rather than beside the Playground for two reasons. It is
 Qt-free (``tests/test_architecture_contracts.py::test_services_have_no_qt_imports``)
-and free of ``well_viewer`` imports, so it is testable and reusable without a GUI;
+and free of ``review`` imports, so it is testable and reusable without a GUI;
 and keeping it out of a Qt module makes the import discipline below explicit
 rather than incidental.
 

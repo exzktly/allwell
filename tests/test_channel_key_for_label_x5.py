@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core.channel_state import ChannelState
-from well_viewer.core.channel_state_controller import channel_key_for_label
-from well_viewer.domain.ratio_models import RatioMetric
+from review.core.channel_state import ChannelState
+from review.core.channel_state_controller import channel_key_for_label
+from review.domain.ratio_models import RatioMetric
 
 
 def _ratio(name="ng", num="gfp", den="mcherry"):

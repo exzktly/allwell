@@ -57,7 +57,7 @@ _NO_FOLD_CHANGE_SCOPE = {
 
 @pytest.fixture(scope="module")
 def registry():
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
 
     return build_feature_registry()
 
@@ -125,10 +125,10 @@ def test_every_leaf_is_repainted_when_what_it_draws_changes(leaves, hook):
 
 def test_every_leaf_has_a_redraw_scope_or_a_written_reason(leaves):
     """The coalescer reaches a leaf through its scope, or not at all."""
-    from well_viewer.core.scope_registry import register_default_scopes
-    from well_viewer.domain.fold_change_scopes import registered_scopes
+    from review.core.scope_registry import register_default_scopes
+    from review.domain.fold_change_scopes import registered_scopes
 
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
 
     register_default_scopes(features=build_feature_registry())
     covered = {tab for scope in registered_scopes() for tab in scope.tab_names}
@@ -159,8 +159,8 @@ def test_every_leaf_mirrors_the_plate_in_replicate_mode(leaves):
     """
     from types import SimpleNamespace
 
-    from well_viewer.core.selection_controller import _rep_mirror_tabs
-    from well_viewer.features.registry import build_feature_registry
+    from review.core.selection_controller import _rep_mirror_tabs
+    from review.features.registry import build_feature_registry
 
     ctx = SimpleNamespace(features=build_feature_registry())
     mirrored = _rep_mirror_tabs(ctx)
@@ -240,9 +240,9 @@ def test_a_group_edit_repaints_the_visible_plot_scope():
     """
     from dataclasses import dataclass, field
 
-    from well_viewer.core.app_state import AppState
-    from well_viewer.core.scope_registry import redraw_app_scope
-    from well_viewer.domain.fold_change_scopes import (
+    from review.core.app_state import AppState
+    from review.core.scope_registry import redraw_app_scope
+    from review.domain.fold_change_scopes import (
         _REGISTERED_SCOPES, FoldChangeScope, redraw_scopes_or_defer,
         register_fold_change_scope,
     )

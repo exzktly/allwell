@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from well_viewer.features.image_browser.cell_browser.collect import (
+from review.features.image_browser.cell_browser.collect import (
     Criterion,
     collect_cells,
     enumerate_properties,
@@ -47,7 +47,7 @@ class _AnyDf(dict):
 
 def _app(df):
     app = SimpleNamespace()
-    from well_viewer.core.cell_gating_state import CellGatingState
+    from review.core.cell_gating_state import CellGatingState
     app._app_state = SimpleNamespace(
         dataset=SimpleNamespace(well_paths={"A01": None}, cache=_AnyDf(df)),
         selection=SimpleNamespace(selected_wells=["A01"], selections=[],
@@ -55,7 +55,7 @@ def _app(df):
         channel=SimpleNamespace(ratio_index={}),
         cell_gating=CellGatingState(),
     )
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app._ctx = SimpleNamespace(app=app, state=app._app_state,
                                runtime=AppRuntime(app))
     return app
@@ -178,7 +178,7 @@ def test_source_wells_mirror_groups_when_groups_exist():
     # When groups exist the gallery MIRRORS the plotting layer (visible groups +
     # solos) — NOT the individual selection. So even with selected_wells=[A01],
     # a group covering B02 makes the source [B02] (what the Scatter plots).
-    from well_viewer.features.image_browser.cell_browser.collect import (
+    from review.features.image_browser.cell_browser.collect import (
         cell_browser_source_wells,
     )
     app = _app(_df())
@@ -192,7 +192,7 @@ def test_source_wells_mirror_groups_when_groups_exist():
 def test_source_wells_include_active_solo_wells():
     # Solo wells (not in any group) are part of what the plotting layer draws, so
     # the gallery includes them alongside the visible group wells.
-    from well_viewer.features.image_browser.cell_browser.collect import (
+    from review.features.image_browser.cell_browser.collect import (
         cell_browser_source_wells,
     )
     app = _app(_df())
@@ -204,7 +204,7 @@ def test_source_wells_include_active_solo_wells():
 
 
 def test_source_wells_use_selection_when_no_groups():
-    from well_viewer.features.image_browser.cell_browser.collect import (
+    from review.features.image_browser.cell_browser.collect import (
         cell_browser_source_wells,
     )
     app = _app(_df())
@@ -244,7 +244,7 @@ def test_live_sync_relaxes_empty_timepoints_and_fovs():
 def test_channels_prefer_app_list():
     app = _app(_df())
     app._app_state.channel.fluor_channels = ["gfp", "mcherry"]
-    from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
+    from review.features.image_browser.cell_browser.collect import cell_browser_channels
     assert cell_browser_channels(app._ctx) == ["gfp", "mcherry"]
 
 
@@ -253,7 +253,7 @@ def test_channels_fall_back_to_detection_when_app_list_empty():
     # so the chips still appear (regression: blank channel row).
     app = _app(_df())
     app._app_state.channel.fluor_channels = []
-    from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
+    from review.features.image_browser.cell_browser.collect import cell_browser_channels
     assert "gfp" in cell_browser_channels(app._ctx)  # from gfp_mean_intensity column
 
 
@@ -261,7 +261,7 @@ def test_channels_coerced_to_str():
     # Non-string tokens would crash tok.upper() when building chips; coerce them.
     app = _app(_df())
     app._app_state.channel.fluor_channels = [1, "gfp"]
-    from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
+    from review.features.image_browser.cell_browser.collect import cell_browser_channels
     assert cell_browser_channels(app._ctx) == ["1", "gfp"]
 
 

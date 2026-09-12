@@ -12,12 +12,12 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import controller as C
-from well_viewer.features.image_browser.image_table import image_compose as IC
-from well_viewer.features.image_browser.image_table.state import (
+from review.features.image_browser.image_table import controller as C
+from review.features.image_browser.image_table import image_compose as IC
+from review.features.image_browser.image_table.state import (
     TableSpec, Axis, ChannelSpec,
 )
-from well_viewer.features.image_browser.image_table.build_layout import (
+from review.features.image_browser.image_table.build_layout import (
     image_table_apply_spec,
 )
 

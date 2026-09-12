@@ -14,7 +14,7 @@ pytest.importorskip("PySide6")
 
 @pytest.mark.qt
 def test_on_threshold_has_a_channel_dropdown(image_table_app):
-    from well_viewer.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import controller as C
 
     ctx = image_table_app._ctx
     C.image_table_repopulate_dropdowns(ctx)
@@ -33,8 +33,8 @@ def test_on_threshold_stepper_follows_its_own_channel_not_active(image_table_app
     not the app's active channel. Syncing it to the active channel clobbered the
     user's value with the active channel's (often 0), so a set threshold appeared
     to reset to zero."""
-    from well_viewer.features.image_browser.image_table import controller as C
-    from well_viewer.core.channel_state_controller import (
+    from review.features.image_browser.image_table import controller as C
+    from review.core.channel_state_controller import (
         refresh_thresh_frac_quick_edit, set_thresh_frac_on,
     )
 
@@ -120,5 +120,5 @@ def test_the_save_menu_button_says_save(image_table_app):
 
 
 def _controller():
-    from well_viewer.features.image_browser.image_table import controller as C
+    from review.features.image_browser.image_table import controller as C
     return C

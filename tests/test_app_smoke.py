@@ -1,4 +1,4 @@
-"""Headless smoke tests for ``WellViewerApp``.
+"""Headless smoke tests for ``ReviewApp``.
 
 Phase 0 of the ``runtime_app`` teardown: the first tests that exercise the
 real application object. They are deliberately broad and shallow — they prove
@@ -62,7 +62,7 @@ def test_no_tab_builder_raised_while_draining(viewer_app, caplog):
     # neither one covers the other's half.
     build_failed = re.compile(r"build.*failed", re.I)
 
-    with caplog.at_level(logging.ERROR, logger="well_viewer"):
+    with caplog.at_level(logging.ERROR, logger="review"):
         viewer_app._drain_pending_centre_builders()
 
     failures = [r for r in caplog.records if build_failed.search(r.getMessage())]

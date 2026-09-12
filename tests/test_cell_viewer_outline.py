@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from well_viewer.features.scatter.cell_viewer_view import ScatterCellViewer
+from review.features.scatter.cell_viewer_view import ScatterCellViewer
 
 
 def _rgb(h, w):

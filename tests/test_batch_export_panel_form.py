@@ -29,19 +29,19 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from well_viewer.features.batch_export._panels import (  # noqa: E402
+from review.features.batch_export._panels import (  # noqa: E402
     AxesSpec, Panel, PanelAxis,
 )
-from well_viewer.features.batch_export.bar_panel import (  # noqa: E402
+from review.features.batch_export.bar_panel import (  # noqa: E402
     BarBatchExportPanel,
 )
-from well_viewer.features.batch_export.base_panel import (  # noqa: E402
+from review.features.batch_export.base_panel import (  # noqa: E402
     BatchExportPanel,
 )
-from well_viewer.features.batch_export.response_panel import (  # noqa: E402
+from review.features.batch_export.response_panel import (  # noqa: E402
     ResponseBatchExportPanel,
 )
-from well_viewer.features.batch_export.scatter_panel import (  # noqa: E402
+from review.features.batch_export.scatter_panel import (  # noqa: E402
     ScatterBatchExportPanel,
 )
 
@@ -415,7 +415,7 @@ def test_a_run_asking_for_an_impossible_range_is_refused_before_any_job(
     satisfy the first half alone, and a user would press Run and watch nothing
     happen.
     """
-    from well_viewer.features.batch_export import base_panel as mod
+    from review.features.batch_export import base_panel as mod
 
     seen = []
     monkeypatch.setattr(mod.QMessageBox, "warning",
@@ -428,7 +428,7 @@ def test_a_run_asking_for_an_impossible_range_is_refused_before_any_job(
 
 
 def test_a_run_with_a_sound_axes_block_is_not_refused(monkeypatch):
-    from well_viewer.features.batch_export import base_panel as mod
+    from review.features.batch_export import base_panel as mod
 
     seen = []
     monkeypatch.setattr(mod.QMessageBox, "warning",
@@ -444,7 +444,7 @@ def test_an_empty_selection_is_still_refused_by_its_own_message(monkeypatch):
     Folding the limit check in beside the panel check is exactly where one of
     them gets lost.
     """
-    from well_viewer.features.batch_export import base_panel as mod
+    from review.features.batch_export import base_panel as mod
 
     seen = []
     monkeypatch.setattr(mod.QMessageBox, "warning",
@@ -494,7 +494,7 @@ def test_a_run_with_no_destination_is_refused(monkeypatch):
     unticked" and "no destination is ticked" send the user to two different
     rows.
     """
-    from well_viewer.features.batch_export import base_panel as mod
+    from review.features.batch_export import base_panel as mod
 
     seen = []
     monkeypatch.setattr(mod.QMessageBox, "warning",
@@ -506,7 +506,7 @@ def test_a_run_with_no_destination_is_refused(monkeypatch):
 
 def test_one_destination_is_enough_whichever_it_is(monkeypatch):
     """None of the three is privileged, so any one of them clears the check."""
-    from well_viewer.features.batch_export import base_panel as mod
+    from review.features.batch_export import base_panel as mod
 
     seen = []
     monkeypatch.setattr(mod.QMessageBox, "warning",

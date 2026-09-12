@@ -455,7 +455,7 @@ def restamp_overrides(entries: list[dict], out_dir: Path) -> int:
     success. A fingerprint that could not be computed is not a fingerprint, so
     the key is removed instead — an entry with no ``seg_fp`` is the legacy,
     unfingerprinted shape both readers already understand and keep
-    (``well_viewer.persistence.cell_overrides.load_overrides``,
+    (``review.persistence.cell_overrides.load_overrides``,
     ``datasets.validate.apply._prune_stale_overrides``).
 
     The count is returned rather than logged here so each caller can say it in

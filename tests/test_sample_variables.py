@@ -20,7 +20,7 @@ import pathlib
 
 import pytest
 
-from well_viewer.domain import sample_variables as sv
+from review.domain import sample_variables as sv
 
 
 def _dose(*labels):
@@ -220,7 +220,7 @@ def test_this_module_knows_nothing_about_plate_geometry_or_Qt():
             imported.add(node.module)
     forbidden = sorted(m for m in imported
                        if m.startswith("PySide6") or "plate_layout" in m
-                       or m.startswith("well_viewer.features"))
+                       or m.startswith("review.features"))
     assert not forbidden, (
         f"{forbidden} — this module is the Qt-free, geometry-free half of the "
         "feature, and the fill's ordering is the caller's to decide"
@@ -331,7 +331,7 @@ def _ctx_with(vset, data_dir):
 def _ctx(pipeline_info=None, data_dir=None):
     import types
 
-    from well_viewer.core.selection_state import SelectionState
+    from review.core.selection_state import SelectionState
 
     return types.SimpleNamespace(
         state=types.SimpleNamespace(
@@ -351,7 +351,7 @@ def test_a_dataset_with_no_variables_clears_the_previous_plates(plate, tmp_path)
     grouped by `Dose` would keep drawing the old plate's doses over the new
     plate's numbers, under a masthead naming the new dataset.
     """
-    from well_viewer.persistence import sample_variables as ps
+    from review.persistence import sample_variables as ps
 
     ctx = _ctx(pipeline_info={}, data_dir=tmp_path)
     ctx.state.selection.variables = plate          # the previous plate's
@@ -373,7 +373,7 @@ def test_a_dataset_that_has_variables_hydrates_them(plate, tmp_path):
     a dict nothing produces, and stayed green for the whole time the shipped
     app dropped every variable on reopen.
     """
-    from well_viewer.persistence import sample_variables as ps
+    from review.persistence import sample_variables as ps
 
     (tmp_path / "pipeline_info.json").write_text(
         json.dumps({ps.BLOCK_KEY: sv.to_block(plate)}))
@@ -384,7 +384,7 @@ def test_a_dataset_that_has_variables_hydrates_them(plate, tmp_path):
 
 def test_loading_without_a_dataset_leaves_the_state_alone(plate):
     """No data directory is "nothing has been opened", not "it is empty"."""
-    from well_viewer.persistence import sample_variables as ps
+    from review.persistence import sample_variables as ps
 
     ctx = _ctx(data_dir=None)
     ctx.state.selection.variables = plate
@@ -398,7 +398,7 @@ def test_saving_preserves_every_other_key_in_pipeline_info(plate, tmp_path):
     own record of channels and timepoints with it."""
     import json
 
-    from well_viewer.persistence import sample_variables as ps
+    from review.persistence import sample_variables as ps
 
     info = tmp_path / "pipeline_info.json"
     info.write_text(json.dumps({
@@ -419,7 +419,7 @@ def test_saving_preserves_every_other_key_in_pipeline_info(plate, tmp_path):
 
 
 def test_saving_without_a_dataset_is_a_silent_no_op(plate):
-    from well_viewer.persistence import sample_variables as ps
+    from review.persistence import sample_variables as ps
 
     ctx = _ctx(data_dir=None)
     ctx.state.selection.variables = plate
@@ -430,7 +430,7 @@ def test_saving_where_there_is_no_pipeline_info_costs_the_write_and_nothing_else
         plate, tmp_path):
     """A dataset folder the pipeline never wrote to. The variables stay in
     memory; taking the window down over it would be the worse trade."""
-    from well_viewer.persistence import sample_variables as ps
+    from review.persistence import sample_variables as ps
 
     ctx = _ctx(data_dir=tmp_path)
     ctx.state.selection.variables = plate
@@ -448,14 +448,14 @@ def test_the_domain_is_registered_so_a_load_actually_hydrates_it():
     import ast
 
     from tests._repo_scan import parse_source
-    from well_viewer.persistence.registry import build_persistence_registry
+    from review.persistence.registry import build_persistence_registry
 
     registry = build_persistence_registry(_ctx())
     assert "sample_variables" in registry._save
     assert "sample_variables" in registry._load
 
     source = ast.dump(parse_source(
-        pathlib.Path("well_viewer/core/load_controller.py")))
+        pathlib.Path("review/core/load_controller.py")))
     assert "'sample_variables'" in source, (
         "load_controller never asks the registry to load this domain, so the "
         "variable set is empty on every dataset the user opens"
@@ -639,7 +639,7 @@ def test_a_dataset_with_no_sidecar_still_gets_its_variables_written(tmp_path):
     never written at all, with only an INFO line recording it."""
     import json
 
-    from well_viewer.persistence import sample_variables as ps
+    from review.persistence import sample_variables as ps
 
     ctx = _ctx(data_dir=tmp_path)
     vset, vid = sv.new_variable(sv.VariableSet(), "Dose")
@@ -662,8 +662,8 @@ def test_a_failed_variables_save_is_reported_loudly(tmp_path, monkeypatch, caplo
     import logging
     import types
 
-    from well_viewer.persistence import _io
-    from well_viewer.persistence import sample_variables as psv
+    from review.persistence import _io
+    from review.persistence import sample_variables as psv
 
     # Patched where it is defined, not where it is used: ``save_to_data_dir``
     # imports it inside the function, so the module attribute is bound at call
@@ -676,7 +676,7 @@ def test_a_failed_variables_save_is_reported_loudly(tmp_path, monkeypatch, caplo
         ),
     )
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         psv.save_to_data_dir(ctx)
 
     warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
@@ -748,8 +748,8 @@ def _filled_plate():
 
 def _reopen(data_dir):
     """A ctx hydrated the way a relaunched app hydrates one."""
-    from well_viewer.domain.viewer_state import read_pipeline_info
-    from well_viewer.persistence import sample_variables as ps
+    from review.domain.viewer_state import read_pipeline_info
+    from review.persistence import sample_variables as ps
 
     *_rest, info = read_pipeline_info(data_dir)
     ctx = _ctx(pipeline_info=info, data_dir=str(data_dir))
@@ -765,7 +765,7 @@ def test_a_filled_plate_survives_quitting_and_reopening(tmp_path):
     "two variables are back" check and is exactly as lossy for the user, who
     filled the grid one well at a time.
     """
-    from well_viewer.persistence import sample_variables as ps
+    from review.persistence import sample_variables as ps
 
     ps.save_to_data_dir(_ctx_with(_filled_plate(), tmp_path))
 
@@ -783,7 +783,7 @@ def test_the_reopen_works_in_the_analyze_in_out_layout(tmp_path):
     would write the block somewhere the load never looks, which is the same
     loss wearing a path bug rather than a whitelist bug.
     """
-    from well_viewer.persistence import sample_variables as ps
+    from review.persistence import sample_variables as ps
 
     out = tmp_path / "out"
     out.mkdir()
@@ -799,8 +799,8 @@ def test_the_reopen_works_in_the_analyze_in_out_layout(tmp_path):
 
 def test_the_pipeline_s_own_keys_survive_the_variables_write(tmp_path):
     """The sidecar has several writers and the pipeline owns some of its keys."""
-    from well_viewer.domain.viewer_state import read_pipeline_info
-    from well_viewer.persistence import sample_variables as ps
+    from review.domain.viewer_state import read_pipeline_info
+    from review.persistence import sample_variables as ps
 
     (tmp_path / "pipeline_info.json").write_text(json.dumps(
         {"fluor_tokens": ["gfp", "rfp"], "separator": "_", "tp_index": 2,

@@ -40,7 +40,7 @@ from contextlib import contextmanager
 from collections.abc import Iterator
 
 # Single well-known logger so swallowed failures are greppable under one name.
-_LOGGER = logging.getLogger("well_viewer.swallowed")
+_LOGGER = logging.getLogger("review.swallowed")
 
 
 def _caller_location(depth: int) -> str:

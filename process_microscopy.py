@@ -1043,7 +1043,7 @@ def _segment_classical(image: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Auto-threshold estimation (self-contained — runs without well_viewer)
+# Auto-threshold estimation (self-contained — runs without review)
 # ---------------------------------------------------------------------------
 #
 # Walks ``<output_dir>/*_out.zip``, picks the first/middle/last timepoint of
@@ -1224,7 +1224,7 @@ def build_processed_output_path(
 
     (The reader-side ``image_identity.ROLE_CATALOG`` is the canonical suffix
     table. A previous "preferred" catalog-driven branch here imported it from
-    ``well_viewer`` — a violation of the §6.2 pipeline-self-sufficiency contract,
+    ``review`` — a violation of the §6.2 pipeline-self-sufficiency contract,
     and dead anyway since no caller passed ``role=``. If catalog-driven *writing*
     is ever revived, move the catalog to a Qt-free ``*_core`` module first.)
     """
@@ -1605,7 +1605,7 @@ def _quantify_image_group(
     # regionprops pass over the label image. Channel-independent → emitted with
     # a shape_ prefix, merged into each cell record by nucleus id.
     # ``solidity`` is always included (even if unselected) so the post-run QC
-    # debris gate (well_viewer/features/qc) can be edited without re-segmenting;
+    # debris gate (review/features/qc) can be edited without re-segmenting;
     # area is already emitted as the base ``area_px`` column.
     _qc_shape_keys = list(shape_features or [])
     if "solidity" not in _qc_shape_keys:
@@ -1720,7 +1720,7 @@ def process_image_group(
     # pipeline_info.json (qc_options) and applied as a reversible per-cell flag
     # in the Review QC view, where they can be edited without re-segmenting and
     # compose with manual curation. ``shape_solidity`` is emitted unconditionally
-    # below so that gate is editable post-run. See well_viewer/features/qc/.
+    # below so that gate is editable post-run. See review/features/qc/.
     if qc_remove_debris:
         log.info("  debris:      gating deferred to Review QC layer "
                  "(non-destructive; thresholds recorded in pipeline_info)")
@@ -3362,7 +3362,7 @@ def process_well_folders(
 PIPELINE_INFO_FILENAME = "pipeline_info.json"
 # Sidecar schema version. v1 = pre-feature (label-free seg / QC / shape features);
 # v2 = may carry shape_features / qc_options / phase_token. Readers default a
-# missing value to 1 (see well_viewer/domain/viewer_state.read_pipeline_info).
+# missing value to 1 (see review/domain/viewer_state.read_pipeline_info).
 PIPELINE_INFO_SCHEMA_VERSION = 2
 
 
@@ -4003,7 +4003,7 @@ def main() -> None:
     # and sidecar are on disk, so write the default ThreshFracOn cut per channel
     # into ``cell_gating.thresh_frac_on``. See ``run_auto_threshold_pass`` for
     # the three modes. Stays inside the pipeline's own dependency set, so a run
-    # produces thresholds even where ``well_viewer`` is not installed.
+    # produces thresholds even where ``review`` is not installed.
     run_auto_threshold_pass(args, output_dir, fluor_tokens_for_quant, log)
 
     # Completeness: read back what the run wrote and record whether it covers

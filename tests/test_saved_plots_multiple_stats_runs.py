@@ -23,12 +23,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.domain.batch_models import BarGroup
-from well_viewer.features.saved_plots import collect as collect_mod
-from well_viewer.features.saved_plots import controller as controller_mod
-from well_viewer.features.saved_plots.collect import _capture_stats_config
-from well_viewer.features.saved_plots.controller import _restore_stats
-from well_viewer.features.stats.state import StatsState
+from review.domain.batch_models import BarGroup
+from review.features.saved_plots import collect as collect_mod
+from review.features.saved_plots import controller as controller_mod
+from review.features.saved_plots.collect import _capture_stats_config
+from review.features.saved_plots.controller import _restore_stats
+from review.features.stats.state import StatsState
 
 _GFP = "gfp_mean_intensity"
 _CY5 = "cy5_mean_intensity"

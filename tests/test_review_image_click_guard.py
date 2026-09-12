@@ -7,7 +7,7 @@ feed deliberately-broken state so the handler body raises, and assert the guard
 swallows it (returns None) rather than propagating."""
 import logging
 
-from well_viewer.features.image_browser.review_image import controller
+from review.features.image_browser.review_image import controller
 
 
 class _Bad:

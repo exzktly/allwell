@@ -40,8 +40,8 @@ import numpy as np  # noqa: E402
 from matplotlib.colors import to_hex  # noqa: E402
 
 from ui import theme  # noqa: E402
-from well_viewer.core.plot_state import PlotState  # noqa: E402
-from well_viewer.domain.line_colors import (  # noqa: E402
+from review.core.plot_state import PlotState  # noqa: E402
+from review.domain.line_colors import (  # noqa: E402
     LINE_COLOR_MODES,
     LINE_MARKERS,
     LINE_MARKER_SHAPES,
@@ -51,7 +51,7 @@ from well_viewer.domain.line_colors import (  # noqa: E402
     line_color_mode,
     trace_style,
 )
-from well_viewer.features.lineplot.controller import (  # noqa: E402
+from review.features.lineplot.controller import (  # noqa: E402
     LineAxes,
     LinePoint,
     LineSeries,
@@ -104,7 +104,7 @@ def test_grey_style_carries_exactly_the_cues_it_was_asked_for():
     "leave whatever the panel draws" — so an omitted dash cannot overwrite one
     the figure is spending on something else.
     """
-    from well_viewer.domain.line_colors import GREY_CUES, grey_style
+    from review.domain.line_colors import GREY_CUES, grey_style
 
     assert GREY_CUES == ("shade", "marker", "dash")
     for cues, wants_shade, wants_marker, wants_dash in (
@@ -124,7 +124,7 @@ def test_a_requested_cue_is_the_same_value_whichever_set_it_came_in():
     """The cues do not interact: asking for two must not shift the one you
     would have got asking for three, or the same series would be inked
     differently on a figure that gained a timepoint."""
-    from well_viewer.domain.line_colors import grey_style
+    from review.domain.line_colors import grey_style
 
     for index in range(6):
         full = grey_style(index)
@@ -137,7 +137,7 @@ def test_the_line_tab_asks_for_all_three():
     """``grey_trace_style`` is the Line panels' answer, and they have every
     channel free — stated here because it is now a choice rather than the only
     thing the function can do."""
-    from well_viewer.domain.line_colors import grey_style, grey_trace_style
+    from review.domain.line_colors import grey_style, grey_trace_style
 
     for index in range(6):
         assert grey_trace_style(index) == grey_style(index)
@@ -189,7 +189,7 @@ def test_the_style_is_unique_across_the_legend_the_screen_names():
     """Twelve is the number that has to be distinct: it is
     ``SCREEN_LEGEND_ENTRIES``, the point past which the legend stops naming
     traces individually and says how many it left out."""
-    from well_viewer.features.lineplot.controller import SCREEN_LEGEND_ENTRIES
+    from review.features.lineplot.controller import SCREEN_LEGEND_ENTRIES
 
     n = len(LINE_MARKERS)
     seen = {(s.color, s.marker, s.filled, s.linestyle)
@@ -208,7 +208,7 @@ def test_the_two_entry_points_agree(mode):
     ``domain/`` takes one. Two doors into one question is exactly how a junk
     value ends up degrading to plate on one surface and to nothing on the
     other, so the second delegates to the first and this says so."""
-    from well_viewer.domain.line_colors import trace_style_for_mode
+    from review.domain.line_colors import trace_style_for_mode
 
     plot = PlotState()
     plot.line_color_mode = mode
@@ -234,7 +234,7 @@ def test_the_ramp_is_a_theme_token_not_a_literal():
     import re
 
     src = (Path(__file__).resolve().parent.parent
-           / "well_viewer" / "domain" / "line_colors.py").read_text()
+           / "review" / "domain" / "line_colors.py").read_text()
     literals = re.findall(r"#[0-9A-Fa-f]{6}\b", src)
     assert not literals, (
         f"line_colors.py carries colour literal(s) {literals} — the ramp "
@@ -428,7 +428,7 @@ def test_the_markers_survive_the_export_style_pass(pref_marker):
     and the face one is the easy one to forget: without it every open marker
     came back filled, collapsing twelve distinct traces onto six while the
     legend went on advertising twelve."""
-    from well_viewer.core.plot_style import (
+    from review.core.plot_style import (
         DEFAULT_EXPORT_STYLE_PREFS,
         apply_export_style_prefs,
     )
@@ -456,7 +456,7 @@ def test_the_line_width_pref_still_reaches_a_grey_figure():
     """The opt-outs are scoped to the three cues that carry identity. Width
     carries none, so the Properties row must still govern it — a fix for the
     dash that also froze the width would disable a control nobody asked about."""
-    from well_viewer.core.plot_style import (
+    from review.core.plot_style import (
         DEFAULT_EXPORT_STYLE_PREFS,
         apply_export_style_prefs,
     )
@@ -480,7 +480,7 @@ def test_the_pref_still_reaches_a_plate_mode_figure():
     """The opt-outs are scoped to the mode that needs them. In plate mode the
     marker carries nothing, so the Properties pref must still govern it —
     otherwise the fix for one tab silently disables a control on the other."""
-    from well_viewer.core.plot_style import (
+    from review.core.plot_style import (
         DEFAULT_EXPORT_STYLE_PREFS,
         apply_export_style_prefs,
     )
@@ -503,7 +503,7 @@ def test_the_batch_line_figure_resolves_the_mode_from_the_same_state():
 
     from tests._repo_scan import REPO_ROOT, parse_source
 
-    path = (REPO_ROOT / "well_viewer" / "features" / "batch_export"
+    path = (REPO_ROOT / "review" / "features" / "batch_export"
             / "base_panel.py")
     # Through ``_repo_scan`` rather than ``ast.parse(path.read_text())``: the
     # tree is parsed once per process and shared with the sixty-odd other
@@ -539,7 +539,7 @@ def test_the_mode_survives_a_save_and_reload(loaded_app):
     dict literal round-trips through itself, which is the shape of test this
     repository has been burned by: it passes against a key nothing writes.
     """
-    from well_viewer.persistence import view_state as vs
+    from review.persistence import view_state as vs
 
     app = loaded_app
     app._app_state.plot.line_color_mode = "grey"
@@ -556,7 +556,7 @@ def test_a_junk_value_on_disk_does_not_reach_the_state(loaded_app):
     """An edited ``persistence.json`` is dropped, not stored — otherwise the
     resolver's degrade-to-plate becomes the only thing standing between a typo
     and a figure drawn in no mode at all."""
-    from well_viewer.persistence import view_state as vs
+    from review.persistence import view_state as vs
 
     app = loaded_app
     app._app_state.plot.line_color_mode = "grey"

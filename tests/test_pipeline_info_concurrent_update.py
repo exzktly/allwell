@@ -23,9 +23,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.domain.gating_state import save_gating_to_pipeline_info
-from well_viewer.domain.sample_definitions import save_to_pipeline_info
-from well_viewer.persistence import smfish
+from review.domain.gating_state import save_gating_to_pipeline_info
+from review.domain.sample_definitions import save_to_pipeline_info
+from review.persistence import smfish
 
 
 BEFORE_THE_RUN = {

@@ -35,11 +35,11 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QComboBox, QPlainTextEdit  # noqa: E402
 
-from well_viewer.features.stats.controller import (  # noqa: E402
+from review.features.stats.controller import (  # noqa: E402
     stats_on_test_change,
     stats_update_tp_menu,
 )
-from well_viewer.features.stats.state import StatsState  # noqa: E402
+from review.features.stats.state import StatsState  # noqa: E402
 
 pytestmark = pytest.mark.qt
 
@@ -163,7 +163,7 @@ def _tp_menu_ctx(qtbot, monkeypatch, timepoints, *, current=None):
     """A ctx whose Timepoint combo is a real widget over a stubbed dataset."""
     import pandas as pd
 
-    from well_viewer.features.stats import controller as ctrl
+    from review.features.stats import controller as ctrl
 
     cb = QComboBox(); qtbot.addWidget(cb)
     ch_cb = QComboBox(); qtbot.addWidget(ch_cb)
@@ -173,7 +173,7 @@ def _tp_menu_ctx(qtbot, monkeypatch, timepoints, *, current=None):
 
     frame = pd.DataFrame({"timepoint_hours": list(timepoints)})
     monkeypatch.setattr(ctrl, "get_rows", lambda _c, _l: frame, raising=False)
-    import well_viewer.data.data_loading as _dl
+    import review.data.data_loading as _dl
     monkeypatch.setattr(_dl, "get_rows", lambda _c, _l: frame, raising=False)
 
     stats_update_tp_menu(ctx)
@@ -215,8 +215,8 @@ def test_a_timepoint_that_no_longer_exists_falls_back_to_the_first(qtbot, monkey
     assert cb.currentText() == "48"
 
     import pandas as pd
-    import well_viewer.data.data_loading as _dl
-    from well_viewer.features.stats import controller as ctrl
+    import review.data.data_loading as _dl
+    from review.features.stats import controller as ctrl
     frame = pd.DataFrame({"timepoint_hours": [0.0, 12.0]})
     monkeypatch.setattr(ctrl, "get_rows", lambda _c, _l: frame, raising=False)
     monkeypatch.setattr(_dl, "get_rows", lambda _c, _l: frame, raising=False)
@@ -239,9 +239,9 @@ def _built_panel(qtbot, monkeypatch, timepoints=(0.0, 24.0, 48.0)):
     import pandas as pd
     from PySide6.QtWidgets import QWidget
 
-    import well_viewer.data.data_loading as _dl
-    from well_viewer.features.stats import controller as ctrl
-    from well_viewer.features.stats.tab_view import build_stats_results_panel
+    import review.data.data_loading as _dl
+    from review.features.stats import controller as ctrl
+    from review.features.stats.tab_view import build_stats_results_panel
 
     frame = pd.DataFrame({"timepoint_hours": list(timepoints)})
     monkeypatch.setattr(ctrl, "get_rows", lambda _c, _l: frame, raising=False)
@@ -359,7 +359,7 @@ def test_building_the_panel_does_not_invalidate_anything(qtbot, monkeypatch):
     """
     ctx, emitted = _built_panel(qtbot, monkeypatch)
     ctx.state.stats.pairwise = list(RUN)
-    from well_viewer.features.stats.controller import stats_update_tp_menu
+    from review.features.stats.controller import stats_update_tp_menu
     emitted.clear()
     stats_update_tp_menu(ctx)
     assert ctx.state.stats.pairwise == list(RUN)

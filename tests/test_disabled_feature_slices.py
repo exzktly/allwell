@@ -39,7 +39,7 @@ from PySide6.QtWidgets import QApplication
 
 from tests._repo_scan import REPO_ROOT, python_sources, rel
 from tests.conftest import MockApp, make_agg
-from well_viewer.core.app_state import _FEATURE_STATE_OWNERS as OWNERS
+from review.core.app_state import _FEATURE_STATE_OWNERS as OWNERS
 from tests._repo_scan import parse_source
 
 
@@ -63,7 +63,7 @@ def ctx_without_stats(qapp, monkeypatch):
 def test_the_bar_renderer_draws_with_statistics_disabled(ctx_without_stats):
     """The reported crash. The toggle is on, the feature is gone, and the
     significance overlay simply does not draw."""
-    from well_viewer.features.barplot.renderer import draw_significance_brackets
+    from review.features.barplot.renderer import draw_significance_brackets
 
     ctx = ctx_without_stats
     ctx.state.plot.show_significance = True
@@ -78,7 +78,7 @@ def test_the_bar_renderer_draws_with_statistics_disabled(ctx_without_stats):
 def test_the_toggle_being_off_is_still_the_first_gate(ctx_without_stats):
     """Order matters: the cheap check stays in front of the slice lookup, so a
     build *with* Statistics does no extra work when the overlay is off."""
-    from well_viewer.features.barplot.renderer import draw_significance_brackets
+    from review.features.barplot.renderer import draw_significance_brackets
 
     ctx = ctx_without_stats
     ctx.state.plot.show_significance = False
@@ -116,7 +116,7 @@ def test_no_code_outside_a_feature_reaches_its_slice_by_attribute():
     # feature reaching its *own* slice is fine: if it is disabled, its modules
     # do not run at all.
     home: dict = {}
-    reg = parse_source((REPO_ROOT / "well_viewer/features/registry.py"))
+    reg = parse_source((REPO_ROOT / "review/features/registry.py"))
     for node in ast.walk(reg):
         if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
             continue
@@ -129,7 +129,7 @@ def test_no_code_outside_a_feature_reaches_its_slice_by_attribute():
                 and call.args and isinstance(call.args[0], ast.Constant)):
             continue
         slot = target.id[len("_state_"):]
-        module = str(call.args[0].value)          # well_viewer.features.x.state
+        module = str(call.args[0].value)          # review.features.x.state
         home[slot] = module.rsplit(".", 1)[0].replace(".", "/") + "/"
     assert set(home) >= set(OWNERS), (
         f"registry has no _state_ line for {set(OWNERS) - set(home)}")
@@ -146,7 +146,7 @@ def test_no_code_outside_a_feature_reaches_its_slice_by_attribute():
     # only for its own feature — `_activate_statistics` cannot fire without
     # Statistics. Exempted for that reason, with the liveness check §7.5 #10
     # asks for, so it cannot outlive it.
-    exempt = "well_viewer/features/registry.py"
+    exempt = "review/features/registry.py"
 
     offenders: list[str] = []
     exempt_hits = 0
@@ -202,7 +202,7 @@ def test_a_reduced_profile_announces_itself_once(monkeypatch, caplog):
 
     monkeypatch.setattr(profile_mod, "_announced", False)
     monkeypatch.setenv("ALLWELL_PROFILE", "plotting_only")
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         profile_mod.active_profile()
         profile_mod.active_profile()
 
@@ -223,6 +223,6 @@ def test_the_full_app_says_nothing(monkeypatch, caplog):
     monkeypatch.setattr(profile_mod, "_announced", False)
     monkeypatch.delenv("ALLWELL_PROFILE", raising=False)
     monkeypatch.setattr(profile_mod, "_repo_root", lambda: Path(tempfile.mkdtemp()))
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         profile_mod.active_profile()
     assert not [r for r in caplog.records if "feature profile" in r.getMessage()]

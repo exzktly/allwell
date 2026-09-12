@@ -12,7 +12,7 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
-from well_viewer.data.data_loading import detect_shape_features, load_well_csv
+from review.data.data_loading import detect_shape_features, load_well_csv
 
 
 def _write(tmp_path, header, rows):

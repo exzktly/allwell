@@ -164,7 +164,7 @@ REQUIRED=(
     "util/__init__.py"
     "analyze/__init__.py"
     "datasets/__init__.py"
-    "well_viewer/__init__.py"
+    "review/__init__.py"
     "widgets/__init__.py"
     "ui/__init__.py"
     "ui/theme.py"

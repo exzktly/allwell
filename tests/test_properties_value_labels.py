@@ -19,17 +19,17 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtWidgets import QGridLayout, QLabel, QLineEdit
 
-from well_viewer.core.cell_gating_state import CellGatingState
-from well_viewer.core.export_prefs_state import ExportPrefsState
-from well_viewer.core.plot_state import PlotState
-from well_viewer.features.scatter.state import ScatterState
+from review.core.cell_gating_state import CellGatingState
+from review.core.export_prefs_state import ExportPrefsState
+from review.core.plot_state import PlotState
+from review.features.scatter.state import ScatterState
 from widgets.toggle_switch import ToggleSwitch
 
 pytestmark = pytest.mark.qt
 
 
 def _mk_ctx(app):
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     return SimpleNamespace(
         app=app,
         state=app._app_state,
@@ -83,7 +83,7 @@ def _build_sidebar(qtbot, monkeypatch):
     """
     from matplotlib.figure import Figure
 
-    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.sidebar_view import ExportStyleSidebar
 
     fig = Figure(figsize=(4, 3))
     fig.add_subplot(1, 1, 1)

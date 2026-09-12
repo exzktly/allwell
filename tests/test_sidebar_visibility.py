@@ -19,7 +19,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.core.tab_controller import apply_sidebar_visibility
+from review.core.tab_controller import apply_sidebar_visibility
 
 
 def _make(mode: str, collapsed: bool):

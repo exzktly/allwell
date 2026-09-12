@@ -19,7 +19,7 @@ import pytest
 np = pytest.importorskip("numpy")
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.review_image.renderer import (
+from review.features.image_browser.review_image.renderer import (
     _draw_crop_outline,
 )
 

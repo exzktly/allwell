@@ -14,7 +14,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from core.profile import FULL, Profile, active_profile, load_profile
-from well_viewer.features.registry import build_feature_registry
+from review.features.registry import build_feature_registry
 
 
 def test_full_profile_admits_everything():
@@ -91,9 +91,9 @@ def test_app_boots_and_loads_under_subset_profile(qtbot, monkeypatch, mini_datas
     profile's features present — the removability contract holds under filtering,
     not just under hand-deletion."""
     monkeypatch.setenv("ALLWELL_PROFILE", "plotting_only")
-    from well_viewer.runtime_app import WellViewerApp
+    from review.runtime_app import ReviewApp
 
-    app = WellViewerApp()
+    app = ReviewApp()
     qtbot.addWidget(app)
     app._load_path(mini_dataset)
 
@@ -106,7 +106,7 @@ def test_app_boots_and_loads_under_subset_profile(qtbot, monkeypatch, mini_datas
     for name in list(app._notebook.pageNames()):
         app._notebook.setCurrentByName(name)
     app._invalidate_stats_cache()
-    from well_viewer.core.channel_state_controller import update_channel_selector
+    from review.core.channel_state_controller import update_channel_selector
     update_channel_selector(app._ctx)
 
 
@@ -125,9 +125,9 @@ def test_the_thin_build_ships_statistics(qtbot, monkeypatch, mini_dataset):
     would still fail here and nowhere else.
     """
     monkeypatch.setenv("ALLWELL_PROFILE", "thin")
-    from well_viewer.runtime_app import WellViewerApp
+    from review.runtime_app import ReviewApp
 
-    app = WellViewerApp()
+    app = ReviewApp()
     qtbot.addWidget(app)
     app._load_path(mini_dataset)
 
@@ -168,8 +168,8 @@ def test_a_non_removable_subleaf_survives_a_narrowing_subtabs_list():
     # while its tab was never created.
     import types
 
-    from well_viewer.features.home.tab_view import active_subtabs
-    from well_viewer.features.image_browser.tab_view import _active_subtabs
+    from review.features.home.tab_view import active_subtabs
+    from review.features.image_browser.tab_view import _active_subtabs
 
     ctx = types.SimpleNamespace(features=reg)
     home_tabs = active_subtabs(ctx)
@@ -193,7 +193,7 @@ def test_image_browser_subtabs_match_the_registry():
     to the registry and not to the tuple would be silently absent from the app,
     which is issue #14 wearing a different hat.
     """
-    from well_viewer.features.image_browser.tab_view import SUBTABS
+    from review.features.image_browser.tab_view import SUBTABS
 
     reg = build_feature_registry(FULL)
     assert set(SUBTABS) == set(reg.sub_leaves("Image Browser"))
@@ -237,7 +237,7 @@ def test_home_enumerates_its_tabs_from_the_registry():
     table sanctioned — ``[subtabs] "Home" = ["Cell Gating"]``, meaning *keep Cell
     Gating* — silently took four editors with it.
     """
-    from well_viewer.features.home.tab_view import active_subtabs
+    from review.features.home.tab_view import active_subtabs
 
     full = build_feature_registry(FULL)
     ctx = SimpleNamespace(features=full)

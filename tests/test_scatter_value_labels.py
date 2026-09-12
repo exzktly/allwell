@@ -45,14 +45,14 @@ def _close_figures():
 
 
 from tests._repo_scan import REPO_ROOT, parse_source, python_sources, rel  # noqa: E402
-from well_viewer.core.plot_annotations import (  # noqa: E402
+from review.core.plot_annotations import (  # noqa: E402
     LABEL_SPAN_HEADROOM,
     format_point_label,
 )
-from well_viewer.core.plot_state import PlotState  # noqa: E402
-from well_viewer.features.scatter.state import ScatterState  # noqa: E402
-from well_viewer.features.scatter import controller as sc  # noqa: E402
-from well_viewer.features.scatter._annotations import (  # noqa: E402
+from review.core.plot_state import PlotState  # noqa: E402
+from review.features.scatter.state import ScatterState  # noqa: E402
+from review.features.scatter import controller as sc  # noqa: E402
+from review.features.scatter._annotations import (  # noqa: E402
     PER_CELL_NOTE,
     VALUE_LABEL_NOTE_TAG,
     annotate_agg_points,
@@ -148,7 +148,7 @@ def test_the_headroom_on_a_log_axis_is_a_widening_and_stays_positive():
     fig, ax = plt.subplots()
     ax.set_yscale("log")
     ax.set_ylim(1.0, 1000.0)
-    from well_viewer.features.scatter._annotations import pad_axes_for_labels
+    from review.features.scatter._annotations import pad_axes_for_labels
     pad_axes_for_labels(ax)
     lo, hi = ax.get_ylim()
     assert lo > 0 and hi > 1000.0
@@ -158,7 +158,7 @@ def test_the_headroom_on_a_log_axis_is_a_widening_and_stays_positive():
 def test_the_headroom_never_crops_a_panel_holding_negatives():
     fig, ax = plt.subplots()
     ax.set_ylim(-5.0, -1.0)
-    from well_viewer.features.scatter._annotations import pad_axes_for_labels
+    from review.features.scatter._annotations import pad_axes_for_labels
     pad_axes_for_labels(ax)
     lo, hi = ax.get_ylim()
     assert lo <= -5.0 and hi >= -1.0
@@ -275,14 +275,14 @@ def test_the_per_cell_note_is_absent_when_the_overlay_is_off():
 _LABELLED_SITES = (
     # The stacked per-cell layout draws the same one-point-per-cell clouds the
     # overlay path does, so it owes the same note.
-    ("well_viewer/features/scatter/_layout.py", "_render_scatter_faceted",
+    ("review/features/scatter/_layout.py", "_render_scatter_faceted",
      "note_value_labels_unavailable"),
     # Batch Export's aggregate figures are the twins of the tab's aggregate:
     # a plate exported in bulk is labelled like the figure the switch was set
     # on, exactly as the bar and line exports already are.
-    ("well_viewer/features/batch_export/scatter_panel.py",
+    ("review/features/batch_export/scatter_panel.py",
      "_run_scatter_agg_job", "annotate_agg_points"),
-    ("well_viewer/features/batch_export/scatter_panel.py",
+    ("review/features/batch_export/scatter_panel.py",
      "_run_scatter_agg_multi_tp_job", "annotate_agg_points"),
 )
 

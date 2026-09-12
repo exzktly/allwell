@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 
-from well_viewer.persistence._io import update_json_atomic
+from review.persistence._io import update_json_atomic
 
 
 def test_a_plain_update_writes(tmp_path):
@@ -92,7 +92,7 @@ def test_a_file_rewritten_every_time_gives_up_and_says_so(tmp_path, caplog):
         doc["mine"] = True
         return doc
 
-    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+    with caplog.at_level(logging.WARNING, logger="review"):
         assert update_json_atomic(path, _mutate, attempts=3) is False
 
     assert seen["n"] == 3, "it must stop after the attempt budget"

@@ -26,7 +26,7 @@ import ast
 from tests._repo_scan import REPO_ROOT
 from tests._repo_scan import parse_source
 
-_MODULE = (REPO_ROOT / "well_viewer" / "features" / "image_browser"
+_MODULE = (REPO_ROOT / "review" / "features" / "image_browser"
            / "image_table" / "controller.py")
 
 

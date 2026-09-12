@@ -41,7 +41,7 @@ def fonts_dir() -> Path:
     """Locate ``assets/fonts`` both in-repo and inside a PyInstaller bundle.
 
     The parent count is this module's address, not a constant. It was
-    ``parents[2]`` while the module lived at ``well_viewer/core/app_fonts.py``;
+    ``parents[2]`` while the module lived at ``review/core/app_fonts.py``;
     from ``startup/app_fonts.py`` the repository root is one parent up. Getting
     it wrong does not raise — ``_register_qt_group`` finds no file at any of the
     names it looks for, returns an empty family, and the application draws in

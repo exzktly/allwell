@@ -31,8 +31,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from well_viewer.domain import sample_variables as sv
-from well_viewer.domain.selections_model import group_drift, make_selection
+from review.domain import sample_variables as sv
+from review.domain.selections_model import group_drift, make_selection
 
 pytestmark = pytest.mark.qt
 
@@ -47,8 +47,8 @@ def _ctx(tmp_path: Path, *, groups=(("Mine", ["A01", "A02"]),)):
     show that the other two come through a restore untouched, which is half of
     what is being claimed here.
     """
-    from well_viewer.core.dataset_state import DatasetState
-    from well_viewer.core.selection_state import SelectionState
+    from review.core.dataset_state import DatasetState
+    from review.core.selection_state import SelectionState
 
     selections = [make_selection(name=n, wells=list(w)) for n, w in groups]
     info = {
@@ -141,7 +141,7 @@ def test_a_reordered_group_counts_as_changed():
 # ── the button leaves every declaration where it is ─────────────────────────
 
 def test_the_restore_path_touches_no_declaration_in_the_session(tmp_path):
-    from well_viewer.features.saved_plots.controller import _restore_solo_wells
+    from review.features.saved_plots.controller import _restore_solo_wells
 
     ctx, _statuses, calls = _ctx(tmp_path)
     _restore_solo_wells(ctx, ["A02"])
@@ -159,7 +159,7 @@ def test_the_restore_path_queues_no_sample_definitions_write(tmp_path):
     """``rebuild_all`` is where the disk write came from: its tail queues a
     sample-definitions autosave because every *other* caller has just edited a
     definition. A restore has not."""
-    from well_viewer.features.saved_plots.controller import _restore_solo_wells
+    from review.features.saved_plots.controller import _restore_solo_wells
 
     ctx, _statuses, calls = _ctx(tmp_path)
     _restore_solo_wells(ctx, ["A01"])
@@ -171,10 +171,10 @@ def test_the_file_on_disk_is_unchanged_by_a_restore(tmp_path):
     """Even if something did write the block, it must write back what is
     already there. Asserted on the bytes, because the session state agreeing
     with itself was never the thing that failed."""
-    from well_viewer.persistence.sample_definitions import (
+    from review.persistence.sample_definitions import (
         autosave_to_pipeline_info,
     )
-    from well_viewer.features.saved_plots.controller import _restore_solo_wells
+    from review.features.saved_plots.controller import _restore_solo_wells
 
     ctx, _statuses, _calls = _ctx(tmp_path)
     _restore_solo_wells(ctx, ["A02"])
@@ -196,7 +196,7 @@ def _rec(title, sels):
 def test_the_drift_is_named_on_the_status_line(tmp_path):
     """A restore that quietly draws a different figure is indistinguishable
     from one that failed, and the user re-clicks Restore."""
-    from well_viewer.features.saved_plots.controller import _report_group_drift
+    from review.features.saved_plots.controller import _report_group_drift
 
     ctx, statuses, _calls = _ctx(tmp_path)
     _report_group_drift(ctx, _rec("Fig 1", [
@@ -213,7 +213,7 @@ def test_the_drift_is_named_on_the_status_line(tmp_path):
 
 
 def test_nothing_is_said_when_the_groups_still_match(tmp_path):
-    from well_viewer.features.saved_plots.controller import _report_group_drift
+    from review.features.saved_plots.controller import _report_group_drift
 
     ctx, statuses, _calls = _ctx(tmp_path)
     _report_group_drift(ctx, _rec("Fig 1", [
@@ -222,7 +222,7 @@ def test_nothing_is_said_when_the_groups_still_match(tmp_path):
 
 
 def test_a_long_drift_names_three_and_counts_the_rest(tmp_path):
-    from well_viewer.features.saved_plots.controller import _report_group_drift
+    from review.features.saved_plots.controller import _report_group_drift
 
     ctx, statuses, _calls = _ctx(tmp_path)
     _report_group_drift(ctx, _rec("Fig 1", [
@@ -237,7 +237,7 @@ def test_the_export_replay_may_still_adopt_the_records_groups(tmp_path):
     it is the only caller that can: it snapshots the live state and puts it
     back in a ``finally``. Take that hatch away and the deck's regenerated
     slides silently become pictures of today's groups."""
-    from well_viewer.features.saved_plots.controller import _adopt_record_groups
+    from review.features.saved_plots.controller import _adopt_record_groups
 
     ctx, _statuses, calls = _ctx(tmp_path)
     ctx.window._invalidate_stats_cache = lambda: calls.append("invalidate")
@@ -257,7 +257,7 @@ def test_the_button_and_the_replay_disagree_on_purpose(tmp_path):
     calls the two halves directly."""
     import inspect
 
-    from well_viewer.features.saved_plots.controller import restore_saved_plot
+    from review.features.saved_plots.controller import restore_saved_plot
 
     default = inspect.signature(restore_saved_plot).parameters["adopt_groups"].default
     assert default is False
@@ -277,7 +277,7 @@ def test_the_restore_button_itself_leaves_the_groups_alone(tmp_path, monkeypatch
     a ctx this thin reaches the end and the assertions are about what ran, not
     about what happened to be reachable.
     """
-    from well_viewer.features.saved_plots import controller as sp
+    from review.features.saved_plots import controller as sp
 
     ctx, statuses, _calls = _ctx(tmp_path)
     ctx.runtime = SimpleNamespace(
@@ -311,7 +311,7 @@ def test_the_replay_asking_for_them_still_gets_them(tmp_path, monkeypatch):
     """The other half of the same call: without this, "the button leaves them
     alone" is satisfied by a ``restore_saved_plot`` that can never adopt at
     all, and the deck's regenerated slides quietly become today's figures."""
-    from well_viewer.features.saved_plots import controller as sp
+    from review.features.saved_plots import controller as sp
 
     ctx, _statuses, _calls = _ctx(tmp_path)
     ctx.runtime = SimpleNamespace(
@@ -347,8 +347,8 @@ def test_the_gating_block_is_still_re_applied(tmp_path, monkeypatch):
     would draw a different measurement under the saved figure's title. It stays
     a session change: nothing on this path writes ``pipeline_info.json``.
     """
-    from well_viewer.core.cell_gating_state import CellGatingState
-    from well_viewer.features.saved_plots import controller as sp
+    from review.core.cell_gating_state import CellGatingState
+    from review.features.saved_plots import controller as sp
 
     ctx, _statuses, _calls = _ctx(tmp_path)
     ctx.state.cell_gating = CellGatingState()

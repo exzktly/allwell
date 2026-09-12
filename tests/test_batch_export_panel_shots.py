@@ -12,7 +12,7 @@ repository — nothing here writes into the working tree), and they are the
 widgets as the application really lays them out rather than a mock-up of them,
 so a screenshot shown to a reader cannot drift from what ships.
 
-Auto-marked ``slow`` — it builds a full ``WellViewerApp`` per mode — so run it
+Auto-marked ``slow`` — it builds a full ``ReviewApp`` per mode — so run it
 deliberately rather than as part of the lane:
 
     ALLWELL_SHOT_DIR=/tmp/shots python -m pytest \\

@@ -107,7 +107,7 @@ def make_app(load: bool):
         return w, None
 
     from tests.fixtures.mini_dataset import build_mini_dataset, WELLS
-    from well_viewer.core.selection_controller import rebuild_all
+    from review.core.selection_controller import rebuild_all
 
     dataset = build_mini_dataset(Path(tempfile.mkdtemp()) / "mini", with_shape=True)
     rev = w._review
@@ -135,7 +135,7 @@ def goto(app, rev, page: str) -> bool:
     """
     nb = rev._notebook
     if page in _IMAGE_BROWSER_SUBTABS:
-        from well_viewer.features.image_browser.controller import show_image_browser_subtab
+        from review.features.image_browser.controller import show_image_browser_subtab
         ok = show_image_browser_subtab(rev._ctx, page)
     else:
         ok = nb.setCurrentByName(page)
@@ -274,8 +274,8 @@ def _capture_multivariate_modes(app, w, rev) -> None:
     Degrades to one plain grab when the feature is profiled out.
     """
     try:
-        from well_viewer.features.multivariate import controller as mv_ctrl
-        from well_viewer.features.multivariate import state as mv_state
+        from review.features.multivariate import controller as mv_ctrl
+        from review.features.multivariate import state as mv_state
     except ImportError:
         grab(w, "25-multivariate", "Multivariate")
         return

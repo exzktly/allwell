@@ -1,7 +1,7 @@
 """Shared test fixtures.
 
 The All-Well runtime is a PySide6 Qt application, so we don't try to spin
-up a real ``WellViewerApp`` here. Instead, fixtures expose lightweight
+up a real ``ReviewApp`` here. Instead, fixtures expose lightweight
 stand-ins that satisfy the duck-typed contract the fold-change helpers
 need (``_well_paths``, ``_selections``, ``_aggregate_well``,
 ``_aggregate_group``, ``_compute_rep_stats``,
@@ -29,7 +29,7 @@ import threading
 from dataclasses import dataclass, field
 
 import pytest
-from well_viewer.domain.stats_compute import compute_rep_stats
+from review.domain.stats_compute import compute_rep_stats
 
 
 # ── AggPoint helpers ────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ def make_agg(t: float, mean: float, *,
 
 @dataclass
 class MockApp:
-    """Duck-typed stand-in for ``WellViewerApp`` for pure-logic tests.
+    """Duck-typed stand-in for ``ReviewApp`` for pure-logic tests.
 
     Tests construct one with a ``per_well_pts`` dict mapping well token →
     list of AggPoints. The helpers compute aggregations / stats from that
@@ -187,8 +187,8 @@ class MockApp:
         test that mutates a MockApp field after construction (e.g.
         ``fc_vs_control_on``) is reflected the next time a controller reads it.
         """
-        from well_viewer.core.app_state import AppState
-        from well_viewer.features.registry import attach_feature_state
+        from review.core.app_state import AppState
+        from review.features.registry import attach_feature_state
         st = AppState()
         attach_feature_state(st)
         st.channel.active_channel = "gfp"
@@ -213,7 +213,7 @@ class MockApp:
         # document was saved under, which is exactly what these fixtures
         # have always meant. Tests that care about the well-vs-set
         # distinction set ``st.plot.fc_control`` to a concrete ref.
-        from well_viewer.domain.control_ref import ControlRef
+        from review.domain.control_ref import ControlRef
         st.plot.fc_control = ControlRef.legacy(self.fc_control_label)
         st.plot.fc_vs_t0_on = self.fc_vs_t0_on
         st.plot.fc_baseline_tp = self.fc_baseline_tp
@@ -241,7 +241,7 @@ class MockApp:
         ``get_rows(ctx)`` is never reached here.
         """
         from types import SimpleNamespace
-        from well_viewer.core.app_runtime import AppRuntime
+        from review.core.app_runtime import AppRuntime
         # ``notify`` is on the real ``ViewerContext`` unconditionally, and
         # renderers reach it to explain a shortfall — a bar plot that declines
         # to draw its significance brackets says why through
@@ -259,7 +259,7 @@ class MockApp:
         return set(self.per_well_pts)
 
     def _rep_sets_active(self):
-        from well_viewer.domain.batch_models import ReplicateSet
+        from review.domain.batch_models import ReplicateSet
         out = []
         for s in self.selections:
             if s.get("hidden"):
@@ -429,7 +429,7 @@ def _no_modal_dialogs(monkeypatch):
 
 # ── Headless Qt fixtures ─────────────────────────────────────────────────────
 #
-# These construct a real ``WellViewerApp`` on the offscreen Qt platform. They
+# These construct a real ``ReviewApp`` on the offscreen Qt platform. They
 # are the foundation for structural-refactor verification: nothing exercised
 # ``runtime_app.py`` before this harness existed.
 
@@ -442,21 +442,21 @@ def mini_dataset(tmp_path):
 
 @pytest.fixture
 def viewer_app(qtbot):
-    """A freshly-constructed, un-loaded ``WellViewerApp``.
+    """A freshly-constructed, un-loaded ``ReviewApp``.
 
     Lazy centre tabs are NOT drained — callers that need every tab built
     should call ``app._drain_pending_centre_builders()`` (the smoke test
     for the drain itself depends on starting from the un-drained state).
     """
-    from well_viewer.runtime_app import WellViewerApp
-    app = WellViewerApp()
+    from review.runtime_app import ReviewApp
+    app = ReviewApp()
     qtbot.addWidget(app)
     return app
 
 
 @pytest.fixture
 def loaded_app(viewer_app, mini_dataset):
-    """``WellViewerApp`` with the mini dataset loaded (and all tabs drained —
+    """``ReviewApp`` with the mini dataset loaded (and all tabs drained —
     ``_load_path`` drains pending centre builders as part of loading)."""
     viewer_app._load_path(mini_dataset)
     return viewer_app
@@ -473,7 +473,7 @@ def image_table_app(loaded_app):
     shown. Tests that drive the Image Table controller need those widgets, so
     build the sub-tab explicitly here.
     """
-    from well_viewer.features.image_browser.controller import build_image_browser_subtab
+    from review.features.image_browser.controller import build_image_browser_subtab
     app = loaded_app
     # Image Browser is a lazy-only centre tab (built on first user click, not by
     # the background drain), so force its parent build, then the sub-tab.
@@ -498,7 +498,7 @@ def mini_dataset_shape(tmp_path):
 
 @pytest.fixture
 def loaded_app_shape(viewer_app, mini_dataset_shape):
-    """``WellViewerApp`` loaded with the shape-feature mini dataset."""
+    """``ReviewApp`` loaded with the shape-feature mini dataset."""
     viewer_app._load_path(mini_dataset_shape)
     return viewer_app
 
@@ -518,7 +518,7 @@ def mini_dataset_smfish(tmp_path):
 
 @pytest.fixture
 def loaded_app_smfish(viewer_app, mini_dataset_smfish):
-    """``WellViewerApp`` loaded with the smFISH-count mini dataset."""
+    """``ReviewApp`` loaded with the smFISH-count mini dataset."""
     viewer_app._load_path(mini_dataset_smfish)
     return viewer_app
 
@@ -533,7 +533,7 @@ def mini_dataset_multifov(tmp_path):
 
 @pytest.fixture
 def loaded_app_multifov(viewer_app, mini_dataset_multifov):
-    """``WellViewerApp`` loaded with the multi-FOV mini dataset."""
+    """``ReviewApp`` loaded with the multi-FOV mini dataset."""
     viewer_app._load_path(mini_dataset_multifov)
     return viewer_app
 
@@ -722,7 +722,7 @@ def _reap_widgets_the_test_created(request):
     nothing at all.
     """
     if request.node.get_closest_marker("slow") is not None:
-        # Never the full-app tests. Their `WellViewerApp` is the object web
+        # Never the full-app tests. Their `ReviewApp` is the object web
         # §10.4 describes — ~1,800 QObjects wired to each other by
         # signal→bound-method connections, closures holding `app`, and children
         # keeping an `_app` back-reference — and deleting its top-levels out
@@ -762,7 +762,7 @@ def _reap_widgets_the_test_created(request):
 def pytest_collection_modifyitems(config, items):
     """Auto-mark full-app Qt tests ``slow``.
 
-    Constructing the full ``WellViewerApp`` (the ``viewer_app`` fixture and its
+    Constructing the full ``ReviewApp`` (the ``viewer_app`` fixture and its
     ``loaded_app`` / ``loaded_app_shape`` dependents) is slow under the offscreen
     QPA platform, so these integration tests don't belong in the fast CI lane.
     Marking by fixture (rather than by hand on each test) keeps ``-m "not slow"``

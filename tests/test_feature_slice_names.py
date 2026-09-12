@@ -26,7 +26,7 @@ from tests._repo_scan import python_sources, rel
 from tests._repo_scan import parse_source
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-REGISTRY = REPO_ROOT / "well_viewer" / "features" / "registry.py"
+REGISTRY = REPO_ROOT / "review" / "features" / "registry.py"
 
 
 def registered_slice_names() -> set[str]:
@@ -105,7 +105,7 @@ def test_the_owner_map_and_the_registry_agree():
 
     Five of the thirteen slices were missing from the map.
     """
-    from well_viewer.core.app_state import _FEATURE_STATE_OWNERS
+    from review.core.app_state import _FEATURE_STATE_OWNERS
 
     registered = registered_slice_names()
     owned = set(_FEATURE_STATE_OWNERS)

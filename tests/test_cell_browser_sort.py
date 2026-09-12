@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from well_viewer.features.image_browser.cell_browser.collect import (
+from review.features.image_browser.cell_browser.collect import (
     SortKey,
     collect_cells,
     sort_field_options,
@@ -34,7 +34,7 @@ def _multi_app(frames: dict):
         selection=SimpleNamespace(selected_wells=list(frames)),
         channel=SimpleNamespace(ratio_index={}, fluor_channels=["gfp"]),
     )
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app._ctx = SimpleNamespace(app=app, state=app._app_state,
                                runtime=AppRuntime(app))
     return app

@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core.export_prefs_state import ExportPrefsState
-from well_viewer.core.plot_style import (
+from review.core.export_prefs_state import ExportPrefsState
+from review.core.plot_style import (
     AXIS_SCOPED_PREF_KEYS,
     DEFAULT_EXPORT_STYLE_PREFS,
     FIGURE_SCOPED_PREF_KEYS,

@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.domain.state_defaults import restore_defaults
-from well_viewer.persistence import reset_scopes
+from review.domain.state_defaults import restore_defaults
+from review.persistence import reset_scopes
 
 
 # ── the partition guard ───────────────────────────────────────────────────
@@ -35,7 +35,7 @@ def _registry_domain_names() -> set[str]:
     be a second place to update, which is the failure mode under test.
     """
     pytest.importorskip("PySide6")
-    from well_viewer.persistence.registry import PersistenceRegistry
+    from review.persistence.registry import PersistenceRegistry
 
     names: set[str] = set()
 
@@ -44,7 +44,7 @@ def _registry_domain_names() -> set[str]:
             names.add(name)
             super().register(name, save=save, load=load)
 
-    import well_viewer.persistence.registry as registry_mod
+    import review.persistence.registry as registry_mod
     real = registry_mod.PersistenceRegistry
     registry_mod.PersistenceRegistry = _Recorder
     try:
@@ -125,7 +125,7 @@ def test_dialog_lists_exactly_the_implemented_scopes():
     pytest.importorskip("PySide6")
     import inspect
 
-    from well_viewer.core import reset_scopes_view
+    from review.core import reset_scopes_view
 
     source = inspect.getsource(reset_scopes_view.ResetAnalysisDialog)
     assert "for scope in ANALYSIS_SCOPES" in source, (
@@ -250,7 +250,7 @@ def test_clear_curation_widens_the_crop_scope_back_to_every_frame():
     """
     from types import SimpleNamespace
 
-    from well_viewer.core.dataset_state import DatasetState
+    from review.core.dataset_state import DatasetState
 
     dataset = DatasetState()
     dataset.crop_region = (0, 0, 8, 12)

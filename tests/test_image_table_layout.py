@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import controller as C
+from review.features.image_browser.image_table import controller as C
 
 
 def _fake_app(*, wells, channels, active_wells=None, active_channels=None,
@@ -17,7 +17,7 @@ def _fake_app(*, wells, channels, active_wells=None, active_channels=None,
         "available_fovs": fovs or [],
         "nuclear_token": "",
     }
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from review.features.image_browser.image_table.state import ImageTableState
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
         dataset=SimpleNamespace(well_paths={w: w for w in wells}, pipeline_info=info,
@@ -31,7 +31,7 @@ def _fake_app(*, wells, channels, active_wells=None, active_channels=None,
     )
     # parse_rc: sort key "A01" -> (row, col)
     app._parse_rc = lambda w: (w[0], int(w[1:]))
-    from well_viewer.core.app_runtime import AppRuntime
+    from review.core.app_runtime import AppRuntime
     app._ctx = SimpleNamespace(app=app, state=app._app_state,
                                runtime=AppRuntime(app))
     return app
@@ -56,7 +56,7 @@ def test_axis_values_channels_filters_to_ticked():
     assert C._axis_values(app._ctx, "channel") == [chans[0]]
     # none ticked → the real channels only (binary variants are opt-in, so the
     # default axis excludes them even though they're in the option list)
-    from well_viewer.features.image_browser.image_table.image_compose import (
+    from review.features.image_browser.image_table.image_compose import (
         _is_binary_variant,
     )
     app._app_state.image_table.active_channels = set()

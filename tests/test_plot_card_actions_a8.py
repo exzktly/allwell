@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.core import plot_card_actions as pca
-from well_viewer.viewer_context import ViewerContext
+from review.core import plot_card_actions as pca
+from review.viewer_context import ViewerContext
 
 
 class _FakeCard:
@@ -42,7 +42,7 @@ def _ctx(cards, app, figures=None):
     # The real feature registry too: copying a figure reaches the export-style
     # library through the feature-service lookup, so a ctx without one would make
     # the copy return its "not available in this build" default instead.
-    from well_viewer.features.registry import build_feature_registry
+    from review.features.registry import build_feature_registry
     return ViewerContext(_window=app, state=None, bus=None,
                          widgets=_FakeRegistry(cards), figures=figures,
                          features=build_feature_registry())
@@ -80,7 +80,7 @@ def test_save_noop_when_no_visible_card():
 
 def test_copy_sets_publication_theme_and_pushes_status(monkeypatch):
     # Stub the clipboard helper so the test stays Qt-free.
-    import well_viewer.features.export.style as style
+    import review.features.export.style as style
     monkeypatch.setattr(style, "copy_figure_to_clipboard", lambda fig: "Copied ✓")
     statuses = []
     app = SimpleNamespace(_set_status=lambda s: statuses.append(s))

@@ -1,4 +1,4 @@
-"""Unit tests for ``well_viewer.fold_change``.
+"""Unit tests for ``review.fold_change``.
 
 Pure-logic tests — no Qt, no matplotlib. Run with::
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 
 
-from well_viewer.domain.fold_change import (
+from review.domain.fold_change import (
     _match_control_mean, _TP_REL_TOL, _rel_err_sq, _propagate_spread,
     apply_cell_scale, build_cell_scaling,
     control_mean_at_for_bar, control_stats_at_for_bar,
@@ -249,7 +249,7 @@ def test_fold_change_suffix_names_baseline_timepoint():
 
 def test_fold_change_suffix_for_uses_resolved_baseline():
     from types import SimpleNamespace
-    from well_viewer.domain.fold_change import fold_change_suffix_for
+    from review.domain.fold_change import fold_change_suffix_for
 
     def _app(baseline_tp):
         plot = SimpleNamespace(

@@ -2,7 +2,7 @@
 from __future__ import annotations
 import pytest
 pytest.importorskip("PySide6")
-from well_viewer.features.image_browser.controller import show_image_browser_subtab
+from review.features.image_browser.controller import show_image_browser_subtab
 
 
 def test_segmentation_threshold_stepper_edits_thresh_frac(loaded_app):

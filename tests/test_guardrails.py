@@ -21,7 +21,7 @@ from pathlib import Path
 from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-RUNTIME_APP = REPO_ROOT / "well_viewer" / "runtime_app.py"
+RUNTIME_APP = REPO_ROOT / "review" / "runtime_app.py"
 #: The core state modules, named because they are the boundary itself.
 _CORE_STATE = ("app_state.py", "event_bus.py", "dataset_state.py",
                "selection_state.py", "plot_state.py", "channel_state.py")
@@ -36,13 +36,13 @@ def _state_files() -> list:
     the one thing enforcing this boundary enforced nothing. A `rglob` cannot go
     stale on a move, and covers a feature added tomorrow.
     """
-    core = [REPO_ROOT / "well_viewer" / "core" / n for n in _CORE_STATE]
-    feature = sorted((REPO_ROOT / "well_viewer" / "features").rglob("state.py"))
+    core = [REPO_ROOT / "review" / "core" / n for n in _CORE_STATE]
+    feature = sorted((REPO_ROOT / "review" / "features").rglob("state.py"))
     return core + feature
 
 
 STATE_FILES = _state_files()
-FEATURES_DIR = REPO_ROOT / "well_viewer" / "features"
+FEATURES_DIR = REPO_ROOT / "review" / "features"
 
 # Budgets hard-fail (Phase 9 onward).
 _HARD_FAIL = True
@@ -109,8 +109,8 @@ TAB_CTX_APP_UNWRAP_BUDGET = 0           # `app = ctx.app` unwraps in tabs/ (Phas
 # merged via PR #639); they only ratchet down as WS-A migrates the raw-`self`
 # delegators (A2/A4) and the `app`-first free functions (A3). The `_not_slack`
 # twin forces the budget down once a phase legitimately shrinks the count.
-CORE_DIR = REPO_ROOT / "well_viewer" / "core"
-PERSIST_DIR = REPO_ROOT / "well_viewer" / "persistence"
+CORE_DIR = REPO_ROOT / "review" / "core"
+PERSIST_DIR = REPO_ROOT / "review" / "persistence"
 RAW_SELF_DELEGATOR_BUDGET = 0          # `def _m(self,...): return fn(self, ...)` in runtime_app.py — A2/A4 COMPLETE
 RAW_SELF_DELEGATOR_SLACK = 0
 # B4: every PersistenceRegistry-facing entry point takes `ctx`, not the god-object.
@@ -175,13 +175,13 @@ def test_runtime_app_attr_budget():
     count = len(_distinct_self_attrs(RUNTIME_APP))
     _enforce(
         count <= RUNTIME_APP_ATTR_BUDGET,
-        f"WellViewerApp assigns {count} distinct self._* attributes, over the "
+        f"ReviewApp assigns {count} distinct self._* attributes, over the "
         f"{RUNTIME_APP_ATTR_BUDGET} budget. Move state into typed state objects.",
     )
 
 
 def test_state_package_import_contract():
-    """``well_viewer.state.*`` must never import runtime_app / views / tabs.
+    """``review.state.*`` must never import runtime_app / views / tabs.
 
     That acyclic boundary is what lets controllers depend on the state package
     directly — the key unlock of the teardown. Unlike the budgets this is a
@@ -193,7 +193,7 @@ def test_state_package_import_contract():
         f"have measured nothing: {missing}")
 
     forbidden = (
-        "well_viewer.runtime_app",
+        "review.runtime_app",
     )
     offenders: list[str] = []
     for py in sorted(p for p in STATE_FILES if p.exists()):
@@ -212,7 +212,7 @@ def test_state_package_import_contract():
                         f"{py.relative_to(REPO_ROOT)}: imports {module}")
 
     assert not offenders, (
-        "well_viewer/state/ broke its import contract:\n  "
+        "review/state/ broke its import contract:\n  "
         + "\n  ".join(offenders)
     )
 
@@ -242,7 +242,7 @@ def _getattr_hasattr_calls(path: Path) -> int:
 def _persistence_wrapper_methods(path: Path) -> int:
     """Count the save/load persistence wrapper methods in *path*.
 
-    Each merely forwards to a ``well_viewer.persistence.<domain>`` function;
+    Each merely forwards to a ``review.persistence.<domain>`` function;
     Phase 4 folds all of them into one ``PersistenceRegistry``.
     """
     tree = parse_source(path)
@@ -303,7 +303,7 @@ def test_tab_ctx_app_unwrap_budget():
     count = _ctx_app_unwraps(FEATURES_DIR)
     _enforce(
         count <= TAB_CTX_APP_UNWRAP_BUDGET,
-        f"well_viewer/features/ has {count} 'app = ctx.app' unwraps, over the "
+        f"review/features/ has {count} 'app = ctx.app' unwraps, over the "
         f"{TAB_CTX_APP_UNWRAP_BUDGET} budget. DI narrowing (Phases 6-7) removes "
         "one per builder — the ratchet only moves down.",
     )
@@ -382,7 +382,7 @@ def test_app_first_func_budget():
     count = len(_app_first_free_funcs(CORE_DIR, FEATURES_DIR))
     _enforce(
         count <= APP_FIRST_FUNC_BUDGET,
-        f"well_viewer/core+features have {count} `app`-first free functions, over "
+        f"review/core+features have {count} `app`-first free functions, over "
         f"the {APP_FIRST_FUNC_BUDGET} budget. WS-A A3 migrates them to `ctx`-first "
         "cluster by cluster — the ratchet only moves down.",
     )
@@ -399,7 +399,7 @@ def test_app_first_func_budget_not_slack():
 
 
 def _core_feature_imports() -> list[str]:
-    """``<file>:<line>`` for every ``well_viewer.features.*`` import under
+    """``<file>:<line>`` for every ``review.features.*`` import under
     ``core/``. Module-scope ones are already 0 (``test_architecture_contracts``),
     so this is the function-local residual — terminal condition #3's frontier."""
     out: list[str] = []
@@ -410,7 +410,7 @@ def _core_feature_imports() -> list[str]:
                 mod = node.module
             elif isinstance(node, ast.Import):
                 mod = node.names[0].name if node.names else None
-            if mod and mod.startswith("well_viewer.features"):
+            if mod and mod.startswith("review.features"):
                 out.append(f"{py.name}:{node.lineno}")
     return out
 
@@ -419,7 +419,7 @@ def test_core_feature_import_budget():
     count = len(_core_feature_imports())
     _enforce(
         count <= CORE_FEATURE_IMPORT_BUDGET,
-        f"well_viewer/core carries {count} feature imports, over the "
+        f"review/core carries {count} feature imports, over the "
         f"{CORE_FEATURE_IMPORT_BUDGET} budget. Route a new core→feature call "
         "through a FeatureRegistry hook (with_hook) instead of importing the "
         "feature — the ratchet only moves down.",

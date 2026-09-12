@@ -144,7 +144,7 @@ def main(argv=None) -> int:
     if args.apply:
         print("Follow-ups (not automated — keep the guardrails honest):")
         print("  * remove each excluded feature's descriptor from "
-              "well_viewer/features/registry.py")
+              "review/features/registry.py")
         print("  * re-tighten ratchets: test_monolith_budgets, "
               "test_complexity_ratchet, test_deferred_imports")
         print("  * run: pytest tests/test_feature_profile.py "

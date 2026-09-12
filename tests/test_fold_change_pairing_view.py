@@ -23,10 +23,10 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication
 
-from well_viewer.core import fold_change_pairing_view as view
-from well_viewer.domain.control_ref import ControlRef
-from well_viewer.domain.fold_change_pairing import ControlOutcome
-from well_viewer.features.barplot.collect import collect_bar_items
+from review.core import fold_change_pairing_view as view
+from review.domain.control_ref import ControlRef
+from review.domain.fold_change_pairing import ControlOutcome
+from review.features.barplot.collect import collect_bar_items
 
 from tests.conftest import MockApp, make_agg
 
@@ -236,7 +236,7 @@ def test_clearing_a_row_removes_the_entry_rather_than_storing_an_empty_one(qapp,
 def test_the_control_combo_offers_the_per_sample_entry(qapp, ctx):
     from PySide6.QtWidgets import QComboBox
 
-    from well_viewer.core.fold_change_controls_view import (
+    from review.core.fold_change_controls_view import (
         PER_SAMPLE,
         _repopulate_control_combo,
     )
@@ -257,7 +257,7 @@ def test_the_control_combo_offers_the_per_sample_entry(qapp, ctx):
 def test_the_combo_reports_the_resolved_count_while_per_sample_is_on(qapp, ctx):
     from PySide6.QtWidgets import QComboBox
 
-    from well_viewer.core.fold_change_controls_view import (
+    from review.core.fold_change_controls_view import (
         PER_SAMPLE,
         _repopulate_control_combo,
     )
@@ -274,7 +274,7 @@ def test_the_combo_reports_the_resolved_count_while_per_sample_is_on(qapp, ctx):
 def test_the_combo_selects_the_single_control_when_that_is_the_mode(qapp, ctx):
     from PySide6.QtWidgets import QComboBox
 
-    from well_viewer.core.fold_change_controls_view import _repopulate_control_combo
+    from review.core.fold_change_controls_view import _repopulate_control_combo
 
     ctx.state.plot.fc_control_mode = "single"
     ctx.state.plot.fc_control = _SET("CTRL2")

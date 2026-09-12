@@ -14,8 +14,8 @@ document rather than living forever.
 """
 from __future__ import annotations
 
-from well_viewer.core.plot_state import PlotState
-from well_viewer.domain.control_ref import (
+from review.core.plot_state import PlotState
+from review.domain.control_ref import (
     KIND_LEGACY,
     KIND_SET,
     KIND_WELL,

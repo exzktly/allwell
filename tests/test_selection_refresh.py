@@ -5,7 +5,7 @@
 which refreshes the sidebar plate-map and dispatches a per-tab view refresh.
 
 These tests pin that dispatch — one assertion per tab branch — on a real
-loaded ``WellViewerApp``. They exercise the whole bus path: a selection
+loaded ``ReviewApp``. They exercise the whole bus path: a selection
 mutator (``select_all`` / ``select_none`` / ``on_plate_sel_change``) emits the
 signal, the wired coordinator receives it, ``apply_selection_refresh``
 dispatches. This guards the Phase 3b migration from the old direct
@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.core.selection_controller import select_all, select_none
-from well_viewer.core.selection_controller import on_plate_sel_change
+from review.core.selection_controller import select_all, select_none
+from review.core.selection_controller import on_plate_sel_change
 
 pytestmark = pytest.mark.qt
 
@@ -69,7 +69,7 @@ def test_bar_plots_branch_redraws_bars(loaded_app, monkeypatch):
     # selection paths use it now, so reset after the tab switch (as the scatter
     # test below does) to count only the selection-driven redraw.
     calls = {"bars": 0, "redraw": 0}
-    monkeypatch.setattr("well_viewer.features.barplot.renderer.redraw_bars",
+    monkeypatch.setattr("review.features.barplot.renderer.redraw_bars",
                         lambda app: calls.__setitem__("bars", calls["bars"] + 1))
     _show_plotting_tab(loaded_app, "Bar Plots")
     calls["bars"] = 0  # drop the redraw the tab switch itself triggered
@@ -81,7 +81,7 @@ def test_bar_plots_branch_redraws_bars(loaded_app, monkeypatch):
 
 def test_line_graphs_branch_redraws_line(loaded_app, monkeypatch):
     calls = {"bars": 0}
-    monkeypatch.setattr("well_viewer.features.barplot.renderer.redraw_bars",
+    monkeypatch.setattr("review.features.barplot.renderer.redraw_bars",
                         lambda app: calls.__setitem__("bars", calls["bars"] + 1))
     _show_plotting_tab(loaded_app, "Line Graphs")
     # Drop the redraw the navigation itself triggered, exactly as the Bar Plots
@@ -107,7 +107,7 @@ def test_review_csv_branch_refreshes_csv(loaded_app):
 def test_scatter_branch_redraws_scatter(loaded_app, monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "well_viewer.features.scatter.tab_view.scatter_redraw_active",
+        "review.features.scatter.tab_view.scatter_redraw_active",
         lambda app: calls.append(app),
     )
     _show_plotting_tab(loaded_app, "Scatter Plot")
@@ -119,7 +119,7 @@ def test_scatter_branch_redraws_scatter(loaded_app, monkeypatch):
 def test_smfish_branch_syncs(loaded_app, monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "well_viewer.features.smfish.tab_view.smfish_sync_from_app",
+        "review.features.smfish.tab_view.smfish_sync_from_app",
         lambda app: calls.append(app),
     )
     assert loaded_app._notebook.setCurrentByName("smFISH")

@@ -456,7 +456,7 @@ def test_the_viewer_reports_incomplete_wells(monkeypatch):
     pytest.importorskip("PySide6")
     from types import SimpleNamespace
 
-    from well_viewer.core import load_controller as lc
+    from review.core import load_controller as lc
 
     said: list[str] = []
     ctx = SimpleNamespace(
@@ -482,7 +482,7 @@ def test_the_viewer_is_silent_for_a_complete_dataset():
     pytest.importorskip("PySide6")
     from types import SimpleNamespace
 
-    from well_viewer.core import load_controller as lc
+    from review.core import load_controller as lc
 
     said: list[str] = []
     ctx = SimpleNamespace(
@@ -502,7 +502,7 @@ def test_a_dataset_from_before_the_record_existed_is_silent():
     pytest.importorskip("PySide6")
     from types import SimpleNamespace
 
-    from well_viewer.core import load_controller as lc
+    from review.core import load_controller as lc
 
     said: list[str] = []
     ctx = SimpleNamespace(

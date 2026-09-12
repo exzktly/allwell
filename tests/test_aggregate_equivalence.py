@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from well_viewer.data.data_loading import aggregate_with_threshold_df
+from review.data.data_loading import aggregate_with_threshold_df
 
 VAL_COL = "gfp_mean_intensity"
 
@@ -296,7 +296,7 @@ def test_a_complete_numeric_column_never_touches_the_string_columns():
     the thing the benchmark measures: with every included row carrying a finite
     numeric timepoint, neither full-column string pass runs at all.
     """
-    from well_viewer.data import data_loading as dl
+    from review.data import data_loading as dl
 
     df = _frame([
         {"timepoint_hours": 0.0, "timepoint": "0h", VAL_COL: 10.0},
@@ -317,7 +317,7 @@ def test_an_excluded_unresolvable_row_does_not_force_the_slow_path():
     back onto the two full-column passes, because that row cannot reach the
     output either way.
     """
-    from well_viewer.data import data_loading as dl
+    from review.data import data_loading as dl
 
     df = _frame([
         {"timepoint_hours": 0.0, "timepoint": "0h", VAL_COL: 10.0, "Included": 1},
@@ -334,7 +334,7 @@ def test_an_excluded_unresolvable_row_does_not_force_the_slow_path():
 
 def test_an_included_unresolvable_row_does_take_the_slow_path():
     """The fast path must not be entered when the fallback is genuinely needed."""
-    from well_viewer.data import data_loading as dl
+    from review.data import data_loading as dl
 
     df = _frame([
         {"timepoint_hours": 0.0, "timepoint": "0h", VAL_COL: 10.0, "Included": 1},

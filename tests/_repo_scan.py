@@ -35,7 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 #: therefore blind to it. The rest of `scripts/` is genuinely dev tooling and
 #: costs nothing to scan alongside it.
 PACKAGE_ROOTS = (
-    "well_viewer",
+    "review",
     "widgets",
     "datasets",
     "analyze",

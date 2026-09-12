@@ -293,7 +293,7 @@ def test_convert_writes_dataset_folder(tmp_path):
 
 def test_convert_output_is_ready_analyze_input(tmp_path):
     # The per-well zips must be usable by resolve_input_output *directly* — no
-    # WellPlateZipper regrouping pass (that's the point of zip-direct output).
+    # well_plate_zipper regrouping pass (that's the point of zip-direct output).
     from services.input_resolution_service import resolve_input_output
 
     p = _write_packed(tmp_path / "p.ome.tif", n_frames=6)

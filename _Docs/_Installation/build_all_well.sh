@@ -159,7 +159,6 @@ REQUIRED=(
     "allwell.py"
     "all_well_launcher.py"
     "process_microscopy.py"
-    "WellPlateZipper.py"
     "analyze/__init__.py"
     "datasets/__init__.py"
     "well_viewer/__init__.py"
@@ -191,7 +190,7 @@ if [ "$MISSING" -gt 0 ]; then
     echo "Repository root: $REPO_ROOT"
     echo ""
     echo "Ensure you:"
-    echo "  1. Have the entry points at the repository root: allwell.py, all_well_launcher.py, process_microscopy.py, WellPlateZipper.py"
+    echo "  1. Have the entry points at the repository root: allwell.py, all_well_launcher.py, process_microscopy.py"
     echo "  2. Have _Docs/_Installation/hooks/ subdirectory with PyInstaller hooks"
     echo "  3. Have _Docs/requirements.txt with pip dependencies"
     exit 1

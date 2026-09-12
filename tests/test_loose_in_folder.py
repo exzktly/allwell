@@ -3,7 +3,7 @@
 Regression for the reported "20 wells but it says Grouping 0/1, then hangs"
 case: the user put ungrouped TIFs inside an ``in/`` folder, which the app used
 to mistake for already-grouped input (so the grouper never ran). These tests
-drive the real ``resolve_input_output`` (which shells out to WellPlateZipper —
+drive the real ``resolve_input_output`` (which shells out to well_plate_zipper —
 stdlib only, no imaging stack) and the offscreen AnalyzeTab counter/preview.
 """
 from __future__ import annotations

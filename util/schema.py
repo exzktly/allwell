@@ -5,7 +5,7 @@ laid out — ``"experiment:channel:well:fov:timepoint"`` — and both entry poin
 that read raw filenames need to agree on it exactly:
 
 * ``process_microscopy`` — the pipeline, which parses every input filename.
-* ``WellPlateZipper`` — the pre-pass that groups loose TIFs into per-well
+* ``well_plate_zipper`` — the pre-pass that groups loose TIFs into per-well
   folders, which the pipeline and the Analyze pane both shell out to.
 
 They previously kept separate copies. ``parse_schema`` was character-identical;
@@ -63,7 +63,7 @@ def validate_schema(schema: list[str],
     Each name in *required* must appear exactly once; everything else is
     optional or repeatable. The default is what the analysis pipeline needs.
 
-    A tool that reads fewer fields passes fewer: ``WellPlateZipper`` groups
+    A tool that reads fewer fields passes fewer: ``well_plate_zipper`` groups
     files by well and never looks at the channel slot — its own ``--filename_schema``
     help says so — yet it validated against the pipeline's pair, so a perfectly
     good ``well:fov`` was rejected with an error naming a field the tool does

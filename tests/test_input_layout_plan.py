@@ -20,7 +20,7 @@ layout table for every shape and both selections, which is what stops the two
 from drifting apart again.
 
 Kept out of the slow lane: the planner is pure, and the resolver branches
-exercised here are the ones that never shell out to WellPlateZipper.
+exercised here are the ones that never shell out to well_plate_zipper.
 """
 
 from __future__ import annotations
@@ -137,7 +137,7 @@ def test_loose_tifs_at_the_root_still_beat_an_empty_in_folder(tmp_path):
     """The widening must not steal the fresh-drop case.
 
     A prior interrupted run can leave an empty ``in/`` next to the TIFs it
-    never consumed. Those TIFs still have to reach WellPlateZipper, so an
+    never consumed. Those TIFs still have to reach well_plate_zipper, so an
     ``in/`` with nothing in it must not win the layout decision.
     """
     root = tmp_path / "plate"

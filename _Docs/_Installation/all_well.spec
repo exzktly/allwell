@@ -163,7 +163,6 @@ def _pkg_datas(pkg_root: Path, dest: str, exclude_repo_dirs: list) -> list:
 sibling_scripts = [
     (str(_parent / "allwell.py"),               "."),
     (str(_parent / "process_microscopy.py"),    "."),
-    (str(_parent / "WellPlateZipper.py"),       "."),
     (str(_parent / "version.py"),               "."),
     # Remote (SLURM/SSH) execution uploads the files in
     # services.remote_runner._REQUIRED_REMOTE_FILES to the worker; that list

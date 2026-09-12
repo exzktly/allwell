@@ -17,11 +17,18 @@ drift is one-way and why it needs a test rather than a convention.
 
 **The rule.** A `.py` file at the repository root is one of two things:
 
-* an **entry point** — something a person or the application *runs*, as a
-  program: `python allwell.py`, the pipeline CLI, the module the frozen bundle
-  boots, the utility the app spawns as a subprocess. Running it is the reason it
-  is findable at the top, and a path like `tools/cli/run.py` would make the
-  thing you invoke harder to find rather than easier;
+* an **entry point a person is meant to type** — `python allwell.py`, the
+  pipeline CLI, and the module the frozen bundle boots (which is the executable
+  itself). Being the documented way to start the software is the reason it is
+  findable at the top, and burying it at `tools/cli/run.py` would make the thing
+  you invoke harder to find rather than easier.
+
+  "Something gets `exec`'d" is *not* the test, and reading it that way is how
+  `pipeline/well_plate_zipper.py` spent a long time at the root. A helper the
+  application spawns behind the user's back is an implementation detail of
+  whatever spawns it: nobody types it, nobody needs to find it, and it belongs
+  in the package whose work it does. Being spawned by path only means the module
+  has to put the repository root on `sys.path` itself, which is four lines;
 * **repository metadata** — a single declaration that belongs to the repository
   rather than to any package, the way `pyproject.toml` does. `version.py` is the
   only one, and it is read from outside Python entirely: `scripts/preflight.sh`
@@ -61,10 +68,6 @@ ROOT_MODULES = {
         "entry point — the pipeline orchestrator and its CLI, run directly "
         "(`python process_microscopy.py --input_dir … --output_dir …`) and "
         "spawned as a subprocess by the Analyze pane and on a remote worker",
-    "WellPlateZipper.py":
-        "entry point — the loose-TIF grouping utility, spawned as a subprocess "
-        "by `services.input_resolution_service.run_zipper` (which resolves it "
-        "as `ZIPPER_SCRIPT`, by path) and usable from a shell",
     "all_well_launcher.py":
         "entry point — the module PyInstaller boots in the frozen bundle "
         "(`_Docs/_Installation/all_well.spec` names it as the Analysis script), "

@@ -20,7 +20,7 @@ broken link is skipped (loudly) and the remaining wells still group.
 
 import os
 
-import WellPlateZipper as wpz
+from pipeline import well_plate_zipper as wpz
 
 _SCHEMA = ["well", "field", "z", "channel"]
 _SEP = "_"
@@ -113,7 +113,7 @@ def test_main_repairs_stdio_before_emitting_progress(tmp_path, monkeypatch):
     _touch(search / "A01_1_1_DAPI.tif")
     monkeypatch.setattr(
         wpz.sys, "argv",
-        ["WellPlateZipper.py", "--search-dir", str(search),
+        ["pipeline/well_plate_zipper.py", "--search-dir", str(search),
          "--output-dir", str(search),
          "--filename_schema", "well:field:z:channel", "--filename_sep", "_"],
     )

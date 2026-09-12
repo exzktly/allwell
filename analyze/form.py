@@ -37,7 +37,7 @@ import pipeline.shape_features as _sfc
 from pipeline.capacity import ALLOW_LOW_DISK_HELP
 
 # ---------------------------------------------------------------------------
-# Schema vocabulary — shared with process_microscopy and WellPlateZipper via
+# Schema vocabulary — shared with process_microscopy and well_plate_zipper via
 # util.schema, so the Analyze form's field picker offers exactly the tokens the
 # pipeline parses. This module previously kept its own copy "in sync with
 # process_microscopy.py" by hand, which is the arrangement util.schema exists

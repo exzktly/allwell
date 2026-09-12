@@ -140,7 +140,7 @@ def test_zip_loose_folder_reads_its_schema_through_the_picker(qapp):
 def test_zip_loose_folder_refuses_a_schema_the_run_would_reject(qapp, tmp_path):
     """The page used to accept any text. A schema with no "well" scans every
     file and groups none of them, and an in-place run shells out to
-    WellPlateZipper.py, which exits 2 on exactly this."""
+    pipeline/well_plate_zipper.py, which exits 2 on exactly this."""
     from datasets.import_loose.view import ImportLoosePage
 
     src = tmp_path / "loose"

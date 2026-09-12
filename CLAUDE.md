@@ -219,11 +219,11 @@ roster with a written reason, and a loose module there fails the suite. Adding
 one breaks nothing at runtime, which is exactly why it is a test.
 
 ```
-── entry points (the four things that are run) ──
+── entry points (the three commands a person runs) ──
 allwell.py              app entry + title-bar shell (Review / Analyze / Datasets)
 process_microscopy.py   pipeline orchestrator + CLI (Qt-free, self-sufficient)
-WellPlateZipper.py      loose-TIF grouping CLI, spawned as a subprocess
-all_well_launcher.py    the module PyInstaller boots (+ --run-pipeline dispatch)
+all_well_launcher.py    the module PyInstaller boots (+ --run-pipeline / --run-zipper
+                        / --run-bootstrap dispatch)
 
 ── repo config ──
 version.py              SINGLE source of truth for the app version
@@ -266,12 +266,21 @@ part of the form; cross-cutting behaviour → `well_viewer/core/`; a reusable wi
 with no All-Well knowledge → `widgets/`; something every pane shares and none owns
 → `ui/`; something that has to happen before the app exists → `startup/`.
 
-**Never at the root.** The only reason to add a root module is that a person or
-the app *runs* it as a program, and then it goes in
+**Never at the root.** The only reason to add a root module is that it is a
+command *a person is meant to type*, and then it goes in
 `tests/test_root_holds_only_entry_points.py::ROOT_MODULES` with the reason
 written down. The root was five loose library modules deep before this rule
 existed — including the 1,800-line design-token module, which the hierarchy
 pointed at `ui/theme/` for, where a 48-line remnant sat instead.
+
+"Something gets spawned" is **not** the test. A helper the app runs behind the
+user's back is an implementation detail of whatever spawns it: nobody types it,
+nobody needs to find it, and it belongs in the package whose work it does —
+which is how the loose-TIF grouper sat at the root for a long time and is now
+`pipeline/well_plate_zipper.py`. Being spawned *by path* only means the module
+must put the repository root on `sys.path` itself, since Python seeds
+`sys.path[0]` with the script's own directory; that is four lines, and without
+them the subprocess dies on `ModuleNotFoundError` somewhere no test looks.
 
 A new top-level package must be added to `PACKAGE_ROOTS` in
 `tests/_repo_scan.py` in the same commit that creates it. Every AST guard

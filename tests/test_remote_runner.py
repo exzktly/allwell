@@ -1996,7 +1996,7 @@ def test_required_files_list_is_what_we_promised():
         # only, listed because the manifest mirrors every util/ file.
         "util/dir_scan.py",
         # Rebinds sys.stdout / sys.stderr when a frozen windowed build nulls them;
-        # imported by process_microscopy at module load (and by WellPlateZipper).
+        # imported by process_microscopy at module load (and by well_plate_zipper).
         "util/frozen_io.py",
         # The retry-with-backoff shield every pipeline write on the output
         # volume goes through (util.retry_io), imported by pipeline.io.
@@ -2060,6 +2060,10 @@ def test_required_files_list_is_what_we_promised():
         # Packed OME-TIFF de-interleave; client-side, listed for manifest
         # completeness (mirrors every ``pipeline/`` file).
         "pipeline/ome_explode.py",
+        # The loose-TIF grouping pre-pass, spawned as a subprocess; client-side
+        # for the same reason (the remote is sent archives already grouped),
+        # listed for the same manifest completeness.
+        "pipeline/well_plate_zipper.py",
         "pipeline/run_report.py",
         # Where the settings digest is recorded beside each well's output,
         # and the reuse decision that reads it back.

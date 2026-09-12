@@ -4001,3 +4001,174 @@ def test_root_guard_notices_a_build_roster_it_cannot_parse(tmp_path, monkeypatch
     assert phrase in str(exc), (
         f"a {shape!r} roster failed, but not for the reason claimed — expected "
         f"{phrase!r} in: {exc}")
+
+
+# ── frozen-dispatch imports ─────────────────────────────────────────────────
+#
+# `tests/test_zipper_frozen_dispatch.py` checks that every `--run-*` branch in
+# `all_well_launcher._dispatch` imports something that exists. The rule held on
+# the base branch, so `scripts/prove_guard.sh` cannot prove it; these are the
+# cases, driven against a synthetic launcher.
+#
+# The third one is the reason this block exists. The guard's first version
+# decided "submodule or symbol?" by asking whether the submodule file existed,
+# which made a *moved* submodule indistinguishable from a symbol import — so it
+# recorded the parent package, found that the parent exists, and passed. It
+# survived four mutations and fell to the fifth.
+
+_FAKE_LAUNCHER_HEAD = '''import sys
+
+
+def _dispatch() -> None:
+'''
+
+DISPATCH_IMPORT_BAD = {
+    # A submodule that does not exist under a package that does — the shape a
+    # move inside the tree leaves behind.
+    "gone_submodule": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        from pipeline import zipper_that_moved_away
+        zipper_that_moved_away.main()
+        return
+''',
+    # A module that does not exist under a package that does, imported plainly.
+    "gone_dotted_module": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        import pipeline.zipper_that_moved_away
+        pipeline.zipper_that_moved_away.main()
+        return
+''',
+    # A symbol that does not exist inside a module that does.
+    "gone_symbol": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        from pipeline.well_plate_zipper import no_such_entry
+        no_such_entry()
+        return
+''',
+}
+
+DISPATCH_IMPORT_GOOD = {
+    # A real first-party submodule import.
+    "real_submodule": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        from pipeline import well_plate_zipper
+        well_plate_zipper.main()
+        return
+''',
+    # Stdlib, which the check is not entitled to judge — `importlib.util` read as
+    # a missing submodule of the first-party `util` package is what made the
+    # domain of this predicate explicit.
+    "stdlib_lookalike": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        import importlib.util
+        from pipeline import well_plate_zipper
+        well_plate_zipper.main()
+        return
+''',
+    # A symbol (not a submodule) out of a real first-party module.
+    "real_symbol": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        from util.frozen_io import ensure_std_streams
+        from pipeline import well_plate_zipper
+        ensure_std_streams()
+        well_plate_zipper.main()
+        return
+''',
+}
+
+
+def _dispatch_offenders(monkeypatch, tmp_path: Path, body: str) -> dict:
+    """Run the guard's collector over a synthetic launcher and return what fails.
+
+    The synthetic launcher is written into `tmp_path`, but `REPO_ROOT` stays the
+    real one: the rule is "does this import resolve *against this repository*",
+    and pointing it at an empty tree would make every import unresolvable and
+    every case pass for the wrong reason.
+    """
+    import importlib
+
+    module = importlib.import_module("tests.test_zipper_frozen_dispatch")
+    fake = _write(tmp_path, "all_well_launcher.py", _FAKE_LAUNCHER_HEAD + body)
+    real_root = module.REPO_ROOT
+
+    class _Root:
+        """Hands back the synthetic launcher, everything else the real tree."""
+
+        def __truediv__(self, other):
+            return fake if other == "all_well_launcher.py" else real_root / other
+
+        def joinpath(self, *parts):
+            return real_root.joinpath(*parts)
+
+        def iterdir(self):
+            return real_root.iterdir()
+
+        def glob(self, pat):
+            return real_root.glob(pat)
+
+    monkeypatch.setattr(module, "REPO_ROOT", _Root(), raising=False)
+    return {s: sorted(m for m in mods if not module._resolves(m))
+            for s, mods in module._dispatch_imports().items()}
+
+
+@pytest.mark.parametrize("shape", sorted(DISPATCH_IMPORT_BAD))
+def test_dispatch_import_guard_catches_an_import_that_cannot_resolve(
+        tmp_path, monkeypatch, shape):
+    broken = _dispatch_offenders(monkeypatch, tmp_path, DISPATCH_IMPORT_BAD[shape])
+    assert any(v for v in broken.values()), (
+        f"the {shape!r} dispatch import resolved against the tree, so a frozen "
+        f"run would die on ModuleNotFoundError with nothing to have warned: {broken}")
+
+
+@pytest.mark.parametrize("shape", sorted(DISPATCH_IMPORT_GOOD))
+def test_dispatch_import_guard_clears_a_working_dispatch(tmp_path, monkeypatch, shape):
+    broken = _dispatch_offenders(monkeypatch, tmp_path, DISPATCH_IMPORT_GOOD[shape])
+    offenders = {k: v for k, v in broken.items() if v}
+    assert not offenders, f"the {shape!r} dispatch was wrongly flagged: {offenders}"
+
+
+def test_the_zipper_branch_is_pinned_by_name_not_only_by_resolution(
+        tmp_path, monkeypatch):
+    """The resolution check has one blind spot, and a second assertion covers it.
+
+    `import WellPlateZipper` — the exact line the move left stale — cannot be
+    caught by asking whether the import resolves: once the file leaves the root,
+    `WellPlateZipper` is no longer a first-party top-level name, and a vanished
+    first-party name is indistinguishable from a third-party one that simply is
+    not installed here. Widening the check to flag every unknown top-level import
+    would flag `PySide6` and `numpy` too.
+
+    So the `--run-zipper` branch is *also* pinned positively: it must import
+    something named `well_plate_zipper`. That is what actually fires on the stale
+    line, and this is the case proving it does.
+    """
+    import importlib
+
+    module = importlib.import_module("tests.test_zipper_frozen_dispatch")
+    stale = '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        import WellPlateZipper
+        WellPlateZipper.main()
+        return
+'''
+    broken = _dispatch_offenders(monkeypatch, tmp_path, stale)
+    assert not any(v for v in broken.values()), (
+        "the resolution check reported the stale root import — if it can now see "
+        "a vanished top-level name, this case and the docstring above are out of "
+        "date, and the second assertion may no longer be needed")
+
+    # The assertion that does catch it, run over the same synthetic launcher.
+    fake = _write(tmp_path, "all_well_launcher.py", _FAKE_LAUNCHER_HEAD + stale)
+    real_root = module.REPO_ROOT
+
+    class _Root:
+        def __truediv__(self, other):
+            return fake if other == "all_well_launcher.py" else real_root / other
+
+        def joinpath(self, *parts):
+            return real_root.joinpath(*parts)
+
+        def iterdir(self):
+            return real_root.iterdir()
+
+        def glob(self, pat):
+            return real_root.glob(pat)
+
+    monkeypatch.setattr(module, "REPO_ROOT", _Root(), raising=False)
+    named = module._dispatch_imports()["--run-zipper"]
+    assert not any(m.endswith("well_plate_zipper") for m in named), (
+        f"the stale branch imports {named}, which already names the zipper — "
+        "this case is no longer reproducing the shape it was written for")

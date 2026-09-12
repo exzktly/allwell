@@ -238,7 +238,7 @@ def test_group_in_place_through_the_page_zips_and_deletes_sources(qapp, tmp_path
     apply.py's convert_in_place/_zip_well_folders) plus the adjacent bug found
     alongside it: the checkbox label ("delete loose TIFs on success") and the
     confirm dialog both promise deletion, but the controller used to hardcode
-    move_source_tifs=False regardless of in_place — so WellPlateZipper's
+    move_source_tifs=False regardless of in_place — so well_plate_zipper's
     folder_well() always copied (never moved) originals, leaving them behind
     even on a fully successful run. Drives the real page + worker +
     subprocess-backed run_zipper end to end (stdlib-only, no imaging stack)."""
@@ -348,7 +348,7 @@ def test_in_place_success_reports_the_launched_source_not_a_since_changed_field(
 def test_request_stop_terminates_tracked_subprocess(tmp_path):
     """Regression guard: ImportLooseController.stop() used to call only
     QThread.requestInterruption() -- a no-op while run() is blocked inside
-    convert_in_place's WellPlateZipper.py subprocess, since nothing on that
+    convert_in_place's pipeline/well_plate_zipper.py subprocess, since nothing on that
     path ever polls the interruption flag. request_stop() must also reach
     the tracked subprocess directly."""
     import subprocess

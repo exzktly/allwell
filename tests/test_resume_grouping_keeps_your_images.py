@@ -8,7 +8,7 @@ files once the pipeline exits cleanly.
 
 It was the only one of the module's three zipper call sites with no post-check.
 `_group_loose_tifs_in_place` and the `ZIP_ROOT` path both re-check
-`has_well_content` and raise "WellPlateZipper ran but produced no well folders";
+`has_well_content` and raise "The grouping step ran but produced no well folders";
 this one ran the zipper, ignored what it produced, and deleted the sources
 regardless. Two ways that ended:
 

@@ -208,7 +208,7 @@ class AllWellApp(QMainWindow):
 
     def _build_ui(self) -> None:
         from analyze.tab import AnalyzeTab
-        from datasets_tab import DatasetsTab
+        from datasets.tab import DatasetsTab
         from well_viewer import WellViewerApp
 
         root = QWidget(objectName="AppRoot")
@@ -409,7 +409,7 @@ class AllWellApp(QMainWindow):
         # the OME-TIFF converter hands its produced input folder to Analyze via
         # _open_dataset_in_analyze. The already-built AnalyzeTab is injected so
         # the Datasets pane's Job Queue page can queue and start Analyze runs
-        # without datasets_tab.py importing analyze.tab.
+        # without datasets/tab.py importing analyze.tab.
         self._datasets = DatasetsTab(
             parent=None,
             on_open_in_review=self._open_dataset_in_review,

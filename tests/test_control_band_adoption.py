@@ -41,7 +41,7 @@ _BAND_CALLS = ("ControlBand", "build_page_body", "plotting_band_slot")
 
 ADOPTED = (
     "analyze/log_pane.py",                       # Analyze — the output pane
-    "datasets_tab.py",                          # Datasets — the tool pages
+    "datasets/tab.py",                          # Datasets — the tool pages
     "well_viewer/core/centre_view.py",          # Plotting — all five sub-tabs
     "well_viewer/features/barplot/tab_view.py",
     "well_viewer/features/distribution/tab_view.py",

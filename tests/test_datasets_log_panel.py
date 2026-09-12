@@ -32,7 +32,7 @@ def _tool_kinds() -> list[str]:
     about", which is exactly the drift they exist to prevent. A seventh tool
     added to the registry is swept from the moment it exists.
     """
-    from datasets_tab import _FEATURES
+    from datasets.tab import _FEATURES
 
     return [f.kind for f in _FEATURES if f.kind and f.kind != "job_queue"]
 

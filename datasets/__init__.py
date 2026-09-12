@@ -3,7 +3,7 @@
 The Datasets pane is the third top-level mode of the app. Unlike Review it
 carries no well picker; its left sidebar is a plain page navigator, one entry
 per feature. Each feature is a standalone package registered in
-``datasets_tab.py::_FEATURES``: *Convert OME-TIFF* (:mod:`datasets.ome_import`)
+``datasets/tab.py::_FEATURES``: *Convert OME-TIFF* (:mod:`datasets.ome_import`)
 de-interleaves a packed OME-TIFF into a dataset folder; *Concatenate datasets*
 (:mod:`datasets.concatenate`) appends one dataset's timepoints after another's;
 *Validate & Repair* (:mod:`datasets.validate`) reports and fixes a dataset's

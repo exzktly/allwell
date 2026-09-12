@@ -7,7 +7,7 @@ reached across anyway — ``subset_compute`` and ``merge_plates_compute`` both
 imported from ``concatenate_compute`` — so deleting the Concatenate package
 would have broken two features that have nothing to do with it.
 
-The roster comes from ``datasets_tab._FEATURES`` rather than being written out
+The roster comes from ``datasets.tab._FEATURES`` rather than being written out
 here, the same way ``test_datasets_log_panel`` does it: a hardcoded list makes a
 sweep say "all six tools" while meaning "the six I knew about", and a seventh
 tool is covered from the moment it is registered.
@@ -33,7 +33,7 @@ def _tool_packages() -> list[str]:
     with no ``kind`` of its own, so it is named here to keep it inside the rule
     rather than left as the one package allowed to reach anywhere.
     """
-    from datasets_tab import _FEATURES
+    from datasets.tab import _FEATURES
 
     kinds = {f.kind for f in _FEATURES if f.kind}
     return sorted(kinds | {"job_queue"})

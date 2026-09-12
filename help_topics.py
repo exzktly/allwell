@@ -109,7 +109,7 @@ ANALYZE_SECTION_HELP: dict[str, str] = {
     "Scratch Disk": "10. Scratch disk",
 }
 
-#: Datasets rail label (the ``_Feature.name`` values in ``datasets_tab.py``,
+#: Datasets rail label (the ``_Feature.name`` values in ``datasets/tab.py``,
 #: which are also the ``RailNav`` keys) -> manual heading.
 DATASETS_PAGE_HELP: dict[str, str] = {
     "Concatenate Datasets": "Concatenate datasets",

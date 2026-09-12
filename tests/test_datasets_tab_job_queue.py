@@ -3,7 +3,7 @@ six tool controllers plus a fake Analyze registered, and "+ Queue" on a
 tool's page lands a job the Job Queue page can see.
 
 Offscreen, no real pipeline or worker execution — this only checks the
-registration/wiring datasets_tab.py and datasets/job_queue/controller.py do,
+registration/wiring datasets/tab.py and datasets/job_queue/controller.py do,
 not any tool's actual run behaviour (covered by each feature's own tests).
 """
 
@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtCore import QObject, Signal
 
-from datasets_tab import DatasetsTab
+from datasets.tab import DatasetsTab
 
 
 @pytest.fixture(scope="module")
@@ -468,7 +468,7 @@ def test_current_help_page_is_safe_before_the_rail_exists(qapp, tmp_path):
     """Partial construction must not take the drawer down with it."""
     import types
 
-    from datasets_tab import DatasetsTab as _DT
+    from datasets.tab import DatasetsTab as _DT
 
     stub = types.SimpleNamespace()
     assert _DT.current_help_page(stub) == ""

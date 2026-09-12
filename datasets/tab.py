@@ -1,4 +1,4 @@
-"""datasets_tab.py — DatasetsTab widget, the third top-level pane.
+"""datasets/tab.py — DatasetsTab widget, the third top-level pane.
 
 The Datasets pane sits beside Analyze and Review. Like Review it has a left
 sidebar that lists page "features"; unlike Review it has **no well picker** — the

@@ -33,7 +33,7 @@ def test_analyze_left_sidebar_is_fixed_at_rail_w(qapp):
 
 
 def test_datasets_left_sidebar_is_fixed_at_rail_w(qapp, tmp_path):
-    from datasets_tab import DatasetsTab
+    from datasets.tab import DatasetsTab
     from well_viewer.core.app_shell_view import RAIL_W
 
     tab = DatasetsTab(queue_state_dir=tmp_path)
@@ -46,7 +46,7 @@ def test_review_and_datasets_and_analyze_agree_on_one_width(qapp, tmp_path):
     """The actual regression: all three modes' left panel must be the exact
     same width, not merely each internally self-consistent."""
     from analyze.tab import AnalyzeTab
-    from datasets_tab import DatasetsTab
+    from datasets.tab import DatasetsTab
     from well_viewer.core.app_shell_view import RAIL_W
 
     analyze = AnalyzeTab()

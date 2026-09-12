@@ -163,7 +163,6 @@ def _pkg_datas(pkg_root: Path, dest: str, exclude_repo_dirs: list) -> list:
 sibling_scripts = [
     (str(_parent / "allwell.py"),               "."),
     (str(_parent / "boot_diag.py"),             "."),
-    (str(_parent / "datasets_tab.py"),          "."),
     (str(_parent / "help_topics.py"),           "."),
     (str(_parent / "mpl_bootstrap.py"),         "."),
     (str(_parent / "process_microscopy.py"),    "."),

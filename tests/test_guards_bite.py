@@ -547,7 +547,7 @@ class Form:
 def _help_topics_root(tmp_path: Path) -> Path:
     """A synthetic repo root holding the three files the guard reads."""
     _write(tmp_path, "_Docs/Markdowns/README_WellViewer.md", _FAKE_README)
-    _write(tmp_path, "datasets_tab.py", _FAKE_DATASETS_TAB)
+    _write(tmp_path, "datasets/tab.py", _FAKE_DATASETS_TAB)
     _write(tmp_path, "analyze/form.py", _FAKE_ANALYZE_FORM)
     return tmp_path
 

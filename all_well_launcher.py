@@ -202,7 +202,7 @@ def _dispatch() -> None:
         from util.frozen_io import ensure_std_streams
         ensure_std_streams()
         import importlib.util
-        _bpath = _BUNDLE_DIR / "scripts" / "remote_bootstrap.py"
+        _bpath = _BUNDLE_DIR / "services" / "remote_bootstrap.py"
         _spec = importlib.util.spec_from_file_location("remote_bootstrap", _bpath)
         _mod = importlib.util.module_from_spec(_spec)
         # Register before exec_module: the module defines @dataclass classes,

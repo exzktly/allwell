@@ -217,8 +217,7 @@ def test_bootstrap_dialog_streams_subprocess_stdout(qtbot, tmp_path, monkeypatch
     # Point the dialog at our shim by symlinking services/remote_bootstrap.py
     # to it for the duration of the test. (The dialog resolves the path
     # relative to its own __file__.)
-    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
-    target = scripts_dir / "remote_bootstrap.py"
+    target = Path(__file__).resolve().parent.parent / "services" / "remote_bootstrap.py"
     backup = target.with_suffix(".py.bak")
     target.rename(backup)
     try:

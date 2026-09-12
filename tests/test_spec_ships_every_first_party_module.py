@@ -43,7 +43,7 @@ _PKG_EXCUSED = {
     # Dev tooling, except `remote_bootstrap.py`, which the spec ships by name
     # into `scripts/` so its `REPO_ROOT = __file__.parent.parent` lands on the
     # bundle root. Shipping the rest would bundle the test harness.
-    "scripts": "dev tooling; remote_bootstrap.py is shipped by name instead",
+    "scripts": "dev tooling — shell wrappers and build/test scripts, none of it imported by the application",
 }
 
 

@@ -1285,7 +1285,7 @@ class BootstrapLogDialog(QDialog):
         # the bootstrap script's own helpers.
         from services.remote_runner import repo_root
 
-        bootstrap = repo_root() / "scripts" / "remote_bootstrap.py"
+        bootstrap = repo_root() / "services" / "remote_bootstrap.py"
         # Source runs invoke the interpreter on the ``.py`` path, so it must
         # exist; the frozen build re-execs the .app binary via the
         # ``--run-bootstrap`` sentinel and never touches this path.

@@ -14,7 +14,7 @@ from util.fov import sort_key as fov_sort_key
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 
-from well_viewer.core import debug_flags as _debug_flags
+from core import debug_flags as _debug_flags
 from well_viewer.data.data_loading import extract_well_token as _extract_well_token
 # collect.py is the (Qt-free) data half of this feature and never imports the
 # renderer, so these resolve at module scope — no deferred cycle-break needed.

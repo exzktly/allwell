@@ -2,7 +2,7 @@
 
 A broad ``except Exception:`` (or bare ``except:``) whose entire body is a single
 ``pass`` or ``continue`` swallows failures with no trace — indistinguishable
-from "nothing went wrong". Those were migrated to ``well_viewer.core.safe``'s
+from "nothing went wrong". Those were migrated to ``core.safe``'s
 ``swallowed()`` (which logs a DEBUG breadcrumb). This test fails if any new one
 is introduced, nudging authors toward ``swallowed()`` / ``swallow()`` or a
 specific exception type.
@@ -21,7 +21,7 @@ WELL_VIEWER = REPO_ROOT / "well_viewer"
 
 # The reusable widget library. It may not import ``well_viewer`` (that is the
 # whole point of the package), so it uses ``util.aw_safe`` — the same helper the
-# Qt-free pipeline side uses — rather than ``well_viewer.core.safe``. It was the
+# Qt-free pipeline side uses — rather than ``core.safe``. It was the
 # last un-guarded body of GUI code in the repo, and it is where a swallowed
 # exception is hardest to notice: a widget that quietly fails to paint or to
 # recolour just looks like a widget that was never asked to.
@@ -36,7 +36,7 @@ WIDGETS = REPO_ROOT / "widgets"
 DATASETS = REPO_ROOT / "datasets"
 
 # Pipeline / services side (Qt-free; uses aw_safe.swallowed instead of
-# well_viewer.core.safe). Guarded so these don't silently regress either.
+# core.safe). Guarded so these don't silently regress either.
 PIPELINE_DIRS = [REPO_ROOT / "services"]
 PIPELINE_FILES = [
     REPO_ROOT / "process_microscopy.py",
@@ -84,7 +84,7 @@ def test_no_silent_broad_except_in_well_viewer():
     offenders = _offenders(_walk(WELL_VIEWER))
     assert not offenders, (
         "Silent broad-except handler(s) found. Use "
-        "well_viewer.core.safe.swallowed()/swallow() or catch a specific "
+        "core.safe.swallowed()/swallow() or catch a specific "
         "exception type instead of a bare pass/continue:\n  "
         + "\n  ".join(offenders)
     )
@@ -95,7 +95,7 @@ def test_no_silent_broad_except_in_widgets():
     assert not offenders, (
         "Silent broad-except handler(s) found in widgets/. Use "
         "util.aw_safe.swallowed()/swallow() — widgets/ cannot import "
-        "well_viewer.core.safe — or catch a specific exception type instead of "
+        "core.safe — or catch a specific exception type instead of "
         "a bare pass/continue:\n  " + "\n  ".join(offenders)
     )
 
@@ -103,12 +103,12 @@ def test_no_silent_broad_except_in_widgets():
 def test_no_silent_broad_except_in_datasets():
     """The Datasets pane mixes both helpers: its Qt-free halves (`_common/`,
     the `*_compute` planners, `apply.py`, the workers) use `util.aw_safe`,
-    while the controllers and views may use `well_viewer.core.safe`. Either is
+    while the controllers and views may use `core.safe`. Either is
     fine; a bare pass is not."""
     offenders = _offenders(_walk(DATASETS))
     assert not offenders, (
         "Silent broad-except handler(s) found in datasets/. Use "
-        "well_viewer.core.safe.swallowed()/swallow() on the Qt side, "
+        "core.safe.swallowed()/swallow() on the Qt side, "
         "util.aw_safe's equivalents in the Qt-free halves, or catch a specific "
         "exception type instead of a bare pass/continue:\n  " + "\n  ".join(offenders)
     )
@@ -208,7 +208,7 @@ def test_no_silent_broad_except_anywhere():
     ]
     assert not offenders, (
         "Silent broad-except handler(s) found. Use the swallow()/swallowed() "
-        "pair for the area (well_viewer.core.safe on the GUI side, "
+        "pair for the area (core.safe on the GUI side, "
         "util.aw_safe elsewhere), or catch a specific exception type:\n  "
         + "\n  ".join(sorted(offenders))
     )

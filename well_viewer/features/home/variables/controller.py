@@ -27,7 +27,7 @@ import logging
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QPushButton
 
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 from well_viewer.domain import sample_variables as sv
 from well_viewer.domain import variable_series as vseries
 from well_viewer.domain.plate_layout import wells_in_fill_lines

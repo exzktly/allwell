@@ -28,7 +28,7 @@ strip above the plate says which of the two the plate currently means.
 
 from __future__ import annotations
 
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 from well_viewer.features.home.collect import DECLARATION_ROLES, role_for_tab
 from well_viewer.features.home.groups.selections_view import rep_panel_refresh
 from well_viewer.features.home.labels.tab_view import label_grid_refresh

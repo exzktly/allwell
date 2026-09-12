@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
-from well_viewer.core.ui_helpers import build_hline_separator
+from widgets.separator import build_hline_separator
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes

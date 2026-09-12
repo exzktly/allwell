@@ -20,7 +20,8 @@ from PySide6.QtWidgets import (
 from ui import theme
 
 from well_viewer.domain.plate_layout import PLATE_COLS
-from well_viewer.core.ui_helpers import btn_primary, btn_secondary, build_hline_separator
+from well_viewer.core.ui_helpers import btn_primary, btn_secondary
+from widgets.separator import build_hline_separator
 from well_viewer.features.home.groups.controller import (
     rep_add, rep_quick_pairs_from_dropdowns,
 )

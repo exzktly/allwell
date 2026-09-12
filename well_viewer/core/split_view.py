@@ -34,7 +34,7 @@ from PySide6.QtCore import QObject, Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QComboBox, QSplitter, QVBoxLayout, QWidget,
 )
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 from well_viewer.core import tab_controller
 from well_viewer.core.tab_controller import on_tab_change
@@ -77,7 +77,7 @@ def _wrap_pane(ctx, top: str, body: QWidget) -> QWidget:
     same y, and a hairline closes it off the way the band's does.
     """
     from well_viewer.core.app_shell_view import lend_page_tab_bar
-    from well_viewer.core.ui_helpers import build_hline_separator
+    from widgets.separator import build_hline_separator
     from widgets.mode_bar import tab_bar_height
 
     container = QWidget()

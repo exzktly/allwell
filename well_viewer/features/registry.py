@@ -300,7 +300,7 @@ def _activate_review_csv(ctx) -> None:
         )
         refresh_review_csv(ctx)
     except Exception:
-        from well_viewer.core.safe import swallowed
+        from core.safe import swallowed
         swallowed("Review CSV: Image Browser removed; table not hydrated")
 
 
@@ -337,7 +337,7 @@ def _activate_cell_browser(ctx) -> None:
 
 
 def _activate_playground(ctx) -> None:
-    from well_viewer.core.safe import swallowed
+    from core.safe import swallowed
     from well_viewer.features.image_browser.playground.controller import (
         playground_activate,
     )
@@ -353,7 +353,7 @@ def _activate_playground(ctx) -> None:
 
 
 def _activate_saved_plots(ctx) -> None:
-    from well_viewer.core.safe import swallowed
+    from core.safe import swallowed
     # Gallery of previously saved plots — no plate selection needed; just
     # repaint from the (per-dataset) store on each visit.
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
@@ -1166,14 +1166,14 @@ def _features() -> list[FeatureDescriptor]:
 def build_feature_registry(profile=None) -> FeatureRegistry:
     """Assemble the registry, filtered to *profile*.
 
-    ``profile`` is a :class:`well_viewer.core.profile.Profile`; ``None`` resolves
+    ``profile`` is a :class:`core.profile.Profile`; ``None`` resolves
     the active profile from the ``ALLWELL_PROFILE`` env var (default = the full
     feature set). This is the single seam that lets one codebase run as any
     declared subset — the thin build is a profile, not a fork. A descriptor is
     kept when the profile admits it (a sub-leaf follows its ``parent``); the
     removability contract drops everything else for free.
     """
-    from well_viewer.core.profile import active_profile
+    from core.profile import active_profile
     if profile is None:
         profile = active_profile()
 

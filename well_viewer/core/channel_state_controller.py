@@ -22,7 +22,7 @@ import math  # noqa: F401 — keeps parity with the original method bodies
 import numpy as np
 import pandas as pd
 
-from well_viewer.core import debug_flags as _debug_flags
+from core import debug_flags as _debug_flags
 from well_viewer.data.data_loading import (
     _all_fluor_values,
     detect_fluor_channels,
@@ -41,7 +41,7 @@ from well_viewer.domain.metric_registry import channel_supports_smfish
 from well_viewer.domain.ratio_models import (
     RatioMetric, is_ratio_key, ratio_name_from_key)
 from pipeline.shape_features import is_shape_column, label_for as shape_label_for
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from ui import theme
 
 _logger = logging.getLogger("well_viewer")

@@ -51,7 +51,7 @@ clear_gates = _lazy("well_viewer.features.scatter.gating", "clear_gates")
 rename_gate = _lazy("well_viewer.features.scatter.gating", "rename_gate")
 set_gate_draw_mode = _lazy("well_viewer.features.scatter.gating", "set_gate_draw_mode")
 from well_viewer.data.metric_labels import gate_axes_label
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 from well_viewer.domain.time_rescale import (
     displayed_interval as _displayed_interval,
     factor_for_interval as _factor_for_interval,

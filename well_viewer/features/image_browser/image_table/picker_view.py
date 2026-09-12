@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from well_viewer.features.image_browser.image_table.controller import image_table_active_wells
 from well_viewer.features.image_browser.image_table.controller import image_table_clear_active

@@ -25,7 +25,7 @@ from pipeline.stardist import NMS_THRESH_HELP, PROB_THRESH_HELP
 from process_microscopy import BACKGROUND_METHODS, FLATFIELD_MODES
 from widgets.info_icon import info_icon
 from widgets.page_body import build_page_body
-from well_viewer.core.ui_helpers import build_hline_separator
+from widgets.separator import build_hline_separator
 from well_viewer.features.image_browser.playground.controller import (
     correction_controls_enabled, playground_clear_loose_image, playground_on_change,
     playground_open_loose_image, playground_repopulate_dropdowns,

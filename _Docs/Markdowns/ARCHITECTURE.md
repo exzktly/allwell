@@ -9573,7 +9573,7 @@ Every widget under `widgets/` is:
   dynamic-property + repolish helper (see below). It does *not* import
   `well_viewer` and knows nothing about `WellViewerApp` or any tab. That is why
   a widget's suppressed exceptions go through `util.aw_safe.swallowed`, the same
-  helper the pipeline uses, rather than `well_viewer.core.safe`.
+  helper the pipeline uses, rather than `core.safe`.
 - **Token-styled.** Sizes derive from font metrics; colours come from
   `theme.Colors` / QSS object names. No hardcoded device pixels.
 - **DPI-aware.** Geometry is computed from `fontMetrics()`, so the widgets
@@ -11876,7 +11876,7 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
 ## 15. Conventions and gotchas
 
 - **Never silently swallow exceptions.** Don't write `except Exception: pass`.
-  Use `well_viewer.core.safe.swallow(...)` / `swallowed(...)` (GUI side) or
+  Use `core.safe.swallow(...)` / `swallowed(...)` (GUI side) or
   `aw_safe.swallow(...)` / `swallowed(...)` (pipeline / `services` / `widgets`,
   none of which may import `well_viewer`) so a suppressed failure still leaves a
   DEBUG breadcrumb. Enforced by `tests/test_no_silent_except.py`, which names

@@ -38,7 +38,7 @@ from services.pipeline_runner import (
 from services.pipeline_service import find_pipeline_script
 from ui import theme
 from well_viewer.core.app_shell_view import RAIL_W
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from analyze.bg_map import AnalyzeBackgroundMapMixin
 from analyze.input import AnalyzeInputMixin
 from analyze.preflight import AnalyzePreflightMixin

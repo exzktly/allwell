@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from well_viewer.core.ui_helpers import build_plot_save_menu
 from well_viewer.features.export.service import export_cell_data_from
 from well_viewer.features.multivariate.cell_scope_compute import cell_scope
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.features.multivariate import state as mv_state
 from well_viewer.features.multivariate import controller as mv_ctrl
 from well_viewer.features.multivariate.collect import (

@@ -35,7 +35,7 @@ from well_viewer.core.tab_controller import on_tab_change
 from well_viewer.core.group_by_controller import (
     DECORATION_CONTROLS as _DECORATION_CONTROLS,
 )
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 from ui import theme
 from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
 

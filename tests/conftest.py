@@ -385,7 +385,7 @@ def _settings_go_to_a_scratch_file(tmp_path_factory, monkeypatch):
     """
     from PySide6.QtCore import QSettings
 
-    from well_viewer.core import app_settings as app_settings_module
+    from core import app_settings as app_settings_module
 
     scratch = tmp_path_factory.mktemp("qsettings") / "AllWellApp.ini"
     monkeypatch.setattr(

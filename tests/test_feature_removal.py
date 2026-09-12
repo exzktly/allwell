@@ -40,7 +40,7 @@ def _narrow_profile(monkeypatch, parent: str, dropped: str):
     factory in place and the "deleted" package gets imported anyway.
     """
     import well_viewer.runtime_app as rt
-    from well_viewer.core.profile import Profile
+    from core.profile import Profile
     from well_viewer.features.registry import build_feature_registry as _real
 
     from well_viewer.features.registry import _features

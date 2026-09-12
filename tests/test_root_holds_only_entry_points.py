@@ -92,6 +92,7 @@ ROOT_MODULES = {
 #: something outside Python reads them at a fixed path.
 ROOT_DIRS = {
     "analyze": "package — the Analyze pane",
+    "core": "package — cross-cutting app infrastructure no pane owns",
     "datasets": "package — the Datasets pane and its tools",
     "pipeline": "package — the Qt-free analysis pipeline",
     "services": "package — the Analyze-side service layer",

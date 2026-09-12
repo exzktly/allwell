@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 from well_viewer.domain.sample_variables import NAME_JOIN
 
 # Module scope, not function-local: ``response_compute`` imports nothing from

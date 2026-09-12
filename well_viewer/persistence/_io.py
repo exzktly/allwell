@@ -28,7 +28,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 

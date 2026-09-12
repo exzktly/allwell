@@ -18,7 +18,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from well_viewer.core.app_state import AppState
-from well_viewer.core.profile import FULL, load_profile
+from core.profile import FULL, load_profile
 from well_viewer.features.registry import (
     _features,
     attach_feature_state,

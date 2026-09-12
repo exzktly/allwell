@@ -24,7 +24,7 @@ from well_viewer.core.plot_annotations import (
 )
 from well_viewer.features.barplot._decorate import bar_legend_entries
 from well_viewer.features.barplot.collect import cluster_centers
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.domain.numeric import is_number
 
 

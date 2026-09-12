@@ -234,7 +234,7 @@ def build_persistence_registry(ctx) -> PersistenceRegistry:
     # ultimately belongs on each feature's descriptor via the PersistenceSpec
     # machinery scaffolded in core/feature_registry.py, which this function is
     # meant to "fold in"; until that lands, gate here.)
-    from well_viewer.core.profile import active_profile
+    from core.profile import active_profile
     prof = active_profile()
 
     def _admits(feature: str) -> bool:

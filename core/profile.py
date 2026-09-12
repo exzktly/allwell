@@ -53,12 +53,21 @@ def _repo_root() -> Path:
     # ``.app`` splits code from data, so the marker written to the bundle root
     # would be missed and ``active_profile()`` would silently fall back to the
     # full app over a thin (stripped) bundle, crashing at startup. Prefer
-    # ``_MEIPASS`` when frozen (as ``core/app_fonts.py`` and
+    # ``_MEIPASS`` when frozen (as ``startup/app_fonts.py`` and
     # ``all_well_launcher.py`` do); fall back to the source tree in a dev
-    # checkout, where ``well_viewer/core/profile.py`` -> repo root is two
-    # parents up from the package.
+    # checkout, where this module sits at ``core/profile.py`` and the
+    # repository root is therefore one parent up.
+    #
+    # That count is the module's address, not a constant: it was ``parents[2]``
+    # while this file lived at ``well_viewer/core/profile.py``, and moving the
+    # module without changing it would have returned the directory *above* the
+    # checkout. Nothing raises on that — ``profiles_dir()`` would simply name a
+    # directory that does not exist, no profile would resolve, and every build
+    # would quietly fall back to the full application, which is the exact
+    # failure the paragraph above exists to prevent.
+    # ``tests/test_profile_repo_root.py`` pins it.
     base = getattr(sys, "_MEIPASS", None)
-    return Path(base) if base else Path(__file__).resolve().parents[2]
+    return Path(base) if base else Path(__file__).resolve().parents[1]
 
 
 def profiles_dir() -> Path:

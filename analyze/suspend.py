@@ -50,7 +50,7 @@ from services.suspend_record import (
     load_all,
     save,
 )
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 
 
 @dataclass(frozen=True)

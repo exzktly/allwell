@@ -42,7 +42,7 @@ def load_catalog(path) -> list:
 def admits(entry: dict, features, subtabs) -> bool:
     """Whether a *profile* (``features`` set + ``subtabs`` map) admits a catalog
     *entry*. ``features is None`` = the full app (admit everything). Mirrors
-    ``well_viewer.core.profile.Profile.includes`` so the binary, the stripped
+    ``core.profile.Profile.includes`` so the binary, the stripped
     tree, and the runtime subset always agree."""
     if features is None:
         return True

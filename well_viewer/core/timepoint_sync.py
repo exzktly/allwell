@@ -20,7 +20,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 
 def plottable_timepoints(ctx) -> list[float]:

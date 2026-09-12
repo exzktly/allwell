@@ -73,7 +73,7 @@ from well_viewer.core.lazy import lazy as _lazy
 # unless a run ticked one of the extra destinations.
 _capture_params = _lazy("well_viewer.features.saved_plots.collect",
                         "capture_params")
-from well_viewer.core.ui_helpers import build_hline_separator
+from widgets.separator import build_hline_separator
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
     on_cutoff_for_column as _on_cutoff_for_column,

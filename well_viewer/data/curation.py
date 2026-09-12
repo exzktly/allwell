@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.data.data_loading import get_rows
 from well_viewer.data.image_identity import cell_key_tuples_for_dataframe
 

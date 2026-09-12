@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QFrame, QPushButton, QScrollArea, QWidget,
 )
 
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 from well_viewer.core.fold_change_controls_view import (
     install_fold_change_controls,
 )

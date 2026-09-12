@@ -21,7 +21,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 
 class AnalyzePipelineInfoMixin:

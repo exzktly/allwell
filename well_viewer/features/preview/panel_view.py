@@ -30,7 +30,7 @@ from well_viewer.features.crop.controller import (
 from widgets.stepper import Stepper
 from widgets.labeled_combo import LabeledComboBox
 from functools import partial
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.core.lazy import lazy as _lazy
 from ui import theme
 

@@ -24,7 +24,7 @@ from typing import Any
 
 from well_viewer.persistence import _doc
 from well_viewer.core.channel_state_controller import set_active_channel
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 from well_viewer.core.ui_helpers import multiselect_button_text
 
 _logger = logging.getLogger("well_viewer")

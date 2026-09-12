@@ -37,7 +37,7 @@ from typing import Any
 from collections.abc import Callable, Iterable, Sequence
 
 from util.well_token import canonical_well_label
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from ui import theme
 
 _logger = logging.getLogger("well_viewer.domain.selections_model")

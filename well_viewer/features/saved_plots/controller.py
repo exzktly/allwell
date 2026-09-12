@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 
 from well_viewer.core.lazy import lazy, lazy_names
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 from well_viewer.domain.dataset_name import dataset_display_name
 from well_viewer.persistence import view_state
 from well_viewer.features.saved_plots._deck import build_saved_plots_deck

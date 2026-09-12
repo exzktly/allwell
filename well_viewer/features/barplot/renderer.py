@@ -39,7 +39,7 @@ from well_viewer.core.plot_style import (
 )
 from well_viewer.domain.significance import significance_label
 from well_viewer.domain.stats_compute import aggregate_well
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 import numpy as np
 import pandas as pd
@@ -1402,7 +1402,7 @@ def draw_per_cell_bar_mode(
     tp_str: str,
     threshold: float,
 ) -> bool:
-    from well_viewer.core import debug_flags as _debug_flags
+    from core import debug_flags as _debug_flags
     from well_viewer.domain import fold_change as _fc
 
     # The Properties "Show: All points" option also routes here so per-cell

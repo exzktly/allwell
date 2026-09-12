@@ -63,7 +63,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import pandas as pd
 
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 
 _logger = logging.getLogger("well_viewer.parquet_cache")
 

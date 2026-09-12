@@ -37,7 +37,7 @@ from well_viewer.domain.fold_change_scopes import (
     get_scope as _get_scope,
     registered_scopes,
 )
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 from well_viewer.domain.control_ref import KIND_LEGACY
 from ui import theme
 

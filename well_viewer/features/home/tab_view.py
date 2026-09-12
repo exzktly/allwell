@@ -364,7 +364,7 @@ def _build_notes(ctx, page: QWidget, reg) -> QWidget:
     class _HomeNotes(QPlainTextEdit):
         def focusOutEvent(self, event):
             super().focusOutEvent(event)
-            from well_viewer.core.safe import swallowed
+            from core.safe import swallowed
             try:
                 notes_schedule_save(ctx, widget_key=_NOTES_KEY)
             except Exception:

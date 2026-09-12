@@ -25,7 +25,7 @@ from well_viewer.data.metric_labels import spread_label
 
 from well_viewer.core.plot_orchestrator import redraw_every_scope
 from well_viewer.core.selection_controller import invalidate_stats_cache
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.core.lazy import lazy as _lazy
 
 # Feature-specific wiring, bound as a lazy proxy so importing this module never

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 # Sub-tab body/sidebar builders are imported *inside* each branch of
 # ``build_image_browser_subtab`` (not at module scope) so that a build profile

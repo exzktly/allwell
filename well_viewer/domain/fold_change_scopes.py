@@ -83,7 +83,7 @@ def _visible_tab_names(app) -> frozenset[str]:
             if tabs:
                 return frozenset(tabs)
         except Exception:
-            from well_viewer.core.safe import swallowed
+            from core.safe import swallowed
             swallowed("fold_change_scopes: _visible_centre_tabs failed")
     single = getattr(app, "_current_centre_tab", None)
     if callable(single):
@@ -98,7 +98,7 @@ def _visible_tab_names(app) -> frozenset[str]:
             # fold-change redraw never happens. Returning it silently made a
             # failed lookup indistinguishable from a window with no visible
             # tab, which is a legitimate state.
-            from well_viewer.core.safe import swallowed
+            from core.safe import swallowed
             swallowed("fold_change_scopes: _current_centre_tab failed")
     return frozenset()
 
@@ -141,7 +141,7 @@ def _call_redraw(app, scope: FoldChangeScope) -> None:
     let one scope's failure crash the app, but we make sure it's visible.
     """
     import logging
-    from well_viewer.core.safe import swallowed
+    from core.safe import swallowed
     try:
         scope.redraw(app)
     except Exception as exc:

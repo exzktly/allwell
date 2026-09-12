@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from widgets.page_body import build_page_body
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 from well_viewer.core.ui_helpers import clear_layout
 from well_viewer.features.saved_plots import controller as C
 from well_viewer.features.saved_plots.state import get_store

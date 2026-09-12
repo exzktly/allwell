@@ -22,7 +22,7 @@ from widgets.labeled_combo import LabeledComboBox
 from well_viewer.core.ui_helpers import build_plot_save_menu
 from well_viewer.features.export.service import export_cell_data_from
 from well_viewer.features.spatial.cell_scope_compute import cell_scope
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.features.spatial import state as sp_state
 from well_viewer.features.spatial import controller as sp_ctrl
 from well_viewer.features.spatial.collect import available_metric_columns

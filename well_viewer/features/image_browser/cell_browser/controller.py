@@ -18,7 +18,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.features.image_browser.cell_browser.collect import (
     Criterion,
     SortKey,

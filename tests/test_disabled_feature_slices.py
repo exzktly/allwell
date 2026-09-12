@@ -198,7 +198,7 @@ def test_a_reduced_profile_announces_itself_once(monkeypatch, caplog):
     """
     import logging
 
-    from well_viewer.core import profile as profile_mod
+    from core import profile as profile_mod
 
     monkeypatch.setattr(profile_mod, "_announced", False)
     monkeypatch.setenv("ALLWELL_PROFILE", "plotting_only")
@@ -218,7 +218,7 @@ def test_the_full_app_says_nothing(monkeypatch, caplog):
     noise, and noise is what gets a real warning ignored."""
     import logging
 
-    from well_viewer.core import profile as profile_mod
+    from core import profile as profile_mod
 
     monkeypatch.setattr(profile_mod, "_announced", False)
     monkeypatch.delenv("ALLWELL_PROFILE", raising=False)

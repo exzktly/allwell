@@ -14,7 +14,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from well_viewer.domain import multivariate_compute as mvc
 from well_viewer.features.multivariate import state as mv_state

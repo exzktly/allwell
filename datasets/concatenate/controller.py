@@ -13,7 +13,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QObject
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from datasets._common.dataset_paths import shorten_headline
 from datasets.concatenate.concatenate_compute import destination_has_marker
 from datasets.concatenate.view import ConcatenatePage

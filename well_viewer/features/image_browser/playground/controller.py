@@ -474,7 +474,7 @@ def _load_loose_frame(ctx, path: str) -> np.ndarray | None:
         # read" (tifffile's TiffFileError descends straight from Exception, not
         # OSError). Not silent — it is logged here and named in the status line
         # by the caller, so a file that will not open says so.
-        from well_viewer.core.safe import swallowed
+        from core.safe import swallowed
         swallowed(f"playground: could not read loose image {path!r}: {exc}")
         return None
     cache[key] = arr

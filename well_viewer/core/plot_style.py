@@ -16,7 +16,7 @@ import logging
 from collections.abc import MutableMapping
 
 from ui import theme
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 
@@ -35,7 +35,7 @@ def _plot_font_family() -> str:
     if not _PLOT_FONT_REGISTERED:
         _PLOT_FONT_REGISTERED = True
         try:
-            from well_viewer.core.app_fonts import register_mpl_ui_font
+            from startup.app_fonts import register_mpl_ui_font
             register_mpl_ui_font()  # make matplotlib aware of the bundled .ttf
         except Exception:
             swallowed()
@@ -1529,7 +1529,7 @@ def _apply_grouping_notice(ctx, fig) -> None:
     this off the status bar in the first place.
     """
     from well_viewer.core.group_by_controller import group_by_shortfall
-    from well_viewer.core.safe import swallow
+    from core.safe import swallow
 
     with swallow("draw the Group-by notice on a figure"):
         for text in list(getattr(fig, "texts", []) or []):

@@ -36,7 +36,7 @@ counterpart here fails it.
 
 from __future__ import annotations
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 
 def _opts_as_pinfo_keys(opts: dict) -> dict:

@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from ui import theme
 from well_viewer.core.lazy import lazy
 from well_viewer.core.record_sync import resync_run_check
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 from well_viewer.core.selection_controller import (
     groups_centre_refresh, update_active_group_label,
 )

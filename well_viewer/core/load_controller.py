@@ -24,7 +24,7 @@ from well_viewer.core.ui_helpers import (
     show_progress as _show_progress,
     step_progress as _step_progress,
 )
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 from well_viewer.data.curation import apply_curation_to_cache
 from well_viewer.domain.dataset_name import dataset_display_name
 
@@ -180,7 +180,7 @@ def _remember_if_it_loaded(ctx, path: Path) -> None:
     dataset = ctx.state.dataset
     if not dataset.well_paths:
         return
-    from well_viewer.core.app_settings import app_settings
+    from core.app_settings import app_settings
     from well_viewer.core.recent_datasets import record_open
 
     loaded = dataset.data_dir or path

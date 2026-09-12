@@ -15,7 +15,7 @@ empty into the sentence the user reads, on the figure and on the status line.
 
 from __future__ import annotations
 
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 
 
 def agg_empty_message(ctx, cut_sink: dict | None) -> str:

@@ -36,7 +36,7 @@ from well_viewer.domain.stats_compute import (
     group_replicate_stats,
     replicate_mean_and_spread,
 )
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
 from well_viewer.core.plot_state import error_bar_settings, spread_kind_label
 from well_viewer.core.channel_state_controller import (

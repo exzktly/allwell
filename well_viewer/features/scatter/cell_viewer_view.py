@@ -37,7 +37,7 @@ from well_viewer.data.image_resolver import (
     normalize_row_filename,
     resolve_filename_candidates,
 )
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written

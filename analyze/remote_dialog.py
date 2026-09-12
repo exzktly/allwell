@@ -863,7 +863,7 @@ class RemoteFormDialog(QDialog):
     # ── geometry persistence ──────────────────────────────────────────────
 
     def _settings(self) -> QSettings:
-        from well_viewer.core.app_settings import app_settings
+        from core.app_settings import app_settings
         return app_settings()
 
     def _restore_geometry(self) -> None:
@@ -1179,7 +1179,7 @@ class SSHKeyWizardDialog(QDialog):
     # ── geometry persistence ──────────────────────────────────────────────
 
     def _settings(self) -> QSettings:
-        from well_viewer.core.app_settings import app_settings
+        from core.app_settings import app_settings
         return app_settings()
 
     def closeEvent(self, event) -> None:  # Qt override
@@ -1423,7 +1423,7 @@ class BootstrapLogDialog(QDialog):
     # ── geometry persistence ──────────────────────────────────────────────
 
     def _settings(self) -> QSettings:
-        from well_viewer.core.app_settings import app_settings
+        from core.app_settings import app_settings
         return app_settings()
 
     def _restore_geometry(self) -> None:
@@ -1719,7 +1719,7 @@ class ManageRemotesDialog(QDialog):
     # ── geometry persistence ──────────────────────────────────────────────
 
     def _settings(self) -> QSettings:
-        from well_viewer.core.app_settings import app_settings
+        from core.app_settings import app_settings
         return app_settings()
 
     def _restore_geometry(self) -> None:

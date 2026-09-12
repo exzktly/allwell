@@ -19,7 +19,7 @@ from well_viewer.core.selection_controller import rebuild_all
 from well_viewer.core.selection_controller import set_selected_wells
 import logging
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.domain.plot_groups import make_plot_group
 from well_viewer.domain.viewer_state import parse_rc
 from ui import theme

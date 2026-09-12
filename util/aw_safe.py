@@ -1,12 +1,12 @@
 """Observable exception suppression for the Qt-free pipeline / services side.
 
-The mirror of :mod:`well_viewer.core.safe` for code that must NOT import
+The mirror of :mod:`core.safe` for code that must NOT import
 ``well_viewer`` — the headless pipeline (``process_microscopy`` and the
 ``microscopy_*`` modules) and the ``services`` layer, which run on the remote
 worker where ``well_viewer`` / Qt aren't installed. Same contract: replace a
 silent ``except Exception: pass`` with a logged swallow so a hidden failure
 leaves a breadcrumb, without changing runtime behaviour (still suppressed, still
-quiet at DEBUG). The small duplication with ``well_viewer.core.safe`` is
+quiet at DEBUG). The small duplication with ``core.safe`` is
 deliberate — it is the cost of the pipeline's no-``well_viewer`` import contract.
 
 - :func:`swallowed` — call inside an existing ``except`` block.

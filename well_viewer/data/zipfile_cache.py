@@ -32,7 +32,7 @@ from pathlib import Path
 from collections import OrderedDict as TOrderedDict
 from collections.abc import Iterator
 from collections import OrderedDict
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 
 _logger = logging.getLogger("well_viewer.data.zipfile_cache")

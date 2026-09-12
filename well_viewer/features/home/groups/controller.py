@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout,
 )
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.domain.batch_models import ReplicateSet
 from well_viewer.domain.plate_layout import PLATE_COLS, PLATE_ROWS
 from well_viewer.domain.viewer_state import extract_well_token as _extract_well_token

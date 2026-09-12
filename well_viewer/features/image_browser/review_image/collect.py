@@ -22,7 +22,7 @@ from well_viewer.data.image_resolver import normalize_numeric_token
 from well_viewer.data.image_resolver import resolve_ref_by_fov_tp as _resolve_ref_by_fov_tp
 from well_viewer.core.ui_helpers import safe_int_or_none as _safe_int_or_none
 from well_viewer.core.ui_helpers import norm_timepoint
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 # The one background-well parser (ARCHITECTURE §15). This module carried a
 # second copy that split on ';' where the shared one did not; the shared one
 # takes both now. Kept under the private name the controller re-exports.

@@ -109,7 +109,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         # profile that doesn't list "Cellpose" (e.g. the StarDist-only thin build)
         # ships no torch/cellpose, so its methods can't run — drop them from the
         # picker instead of offering a choice that would fail at pipeline start.
-        from well_viewer.core.profile import active_profile
+        from core.profile import active_profile
         _prof = active_profile()
         _cellpose_ok = _prof.features is None or "Cellpose" in _prof.features
         for _value, _label in self._SEG_METHODS:

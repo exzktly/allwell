@@ -56,7 +56,7 @@ from well_viewer.domain.stats_compute import (
     compute_rep_stats,
     replicate_unit,
 )
-from well_viewer.core import debug_flags as debug_flags
+from core import debug_flags as debug_flags
 from well_viewer.domain.tp_match import tp_close
 from well_viewer.domain.gating_state import active_fluor_gates
 

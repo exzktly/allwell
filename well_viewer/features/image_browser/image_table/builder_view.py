@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 from widgets import menu_exec
 from well_viewer.core.ui_helpers import parse_float_edit
 from widgets.stepper import Stepper

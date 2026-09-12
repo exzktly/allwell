@@ -13,7 +13,7 @@ from well_viewer.data.data_loading import (
     is_ratio_key,
     resolve_value_series,
 )
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 from well_viewer.domain.significance import p_phrase, significance_stars
 from well_viewer.features.stats._report import (
     dunnett_lines, effect_size_text, omnibus_lines, paired_lines, two_way_lines,
@@ -853,7 +853,7 @@ from well_viewer.domain.plate_layout import WELL_COLORS
 from well_viewer.domain.batch_models import BarGroup
 from well_viewer.core.ui_helpers import ask_name_dialog as _ask_name_dialog, clear_layout as _clear_layout
 from well_viewer.core.channel_state_controller import on_cutoff_for_column, refresh_stats_property_combo, set_active_metric
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 # A8 teardown: the stats group-editor controllers now take ``ctx`` and derive
 # the loaded / visible rep-sets and their rank colours through the pure DOMAIN
 # enumerators (a lower layer, so no cross-feature module import and no

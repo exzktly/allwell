@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 #: Cards whose on-screen figure is drawn with deliberate shortcuts — a sampled
 #: CDF curve, a legend naming only the first few traces — because a plate-wide

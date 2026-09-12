@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 from well_viewer.features.export.cell_scope_compute import (
     CellScope, plotted_wells, scope_from_ctx,

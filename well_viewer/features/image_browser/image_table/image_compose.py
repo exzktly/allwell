@@ -988,7 +988,7 @@ def _load_chrome_font(px: int) -> Any:
     except Exception:
         return None
     try:
-        from well_viewer.core.app_fonts import fonts_dir
+        from startup.app_fonts import fonts_dir
         d = fonts_dir()
         for fname in ("Inter-SemiBold.ttf", "Inter-Regular.ttf", "Inter.ttf"):
             fp = d / fname

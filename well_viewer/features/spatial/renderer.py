@@ -79,7 +79,7 @@ def render_spatial(ctx) -> None:
         from well_viewer.core.plot_style import apply_export_style_to_current
         apply_export_style_to_current(ctx, fig, canvas)
     except Exception:  # pragma: no cover - defensive
-        from well_viewer.core.safe import swallowed
+        from core.safe import swallowed
         swallowed()
     if canvas is not None:
         canvas.draw_idle()
@@ -114,7 +114,7 @@ def _render_frames_grid(fig, st) -> None:
     try:
         fig.tight_layout()
     except Exception:  # pragma: no cover - defensive
-        from well_viewer.core.safe import swallowed
+        from core.safe import swallowed
         swallowed()
 
 
@@ -297,7 +297,7 @@ def _overlay_hulls(ax, pts, labels) -> None:
         try:
             hull = ConvexHull(block)
         except Exception:
-            from well_viewer.core.safe import swallowed
+            from core.safe import swallowed
             swallowed()
             continue
         verts = block[hull.vertices]

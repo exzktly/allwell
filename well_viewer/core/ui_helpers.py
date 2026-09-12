@@ -16,9 +16,9 @@ from PySide6.QtWidgets import (
 )
 from ui import theme
 from well_viewer.core import empty_state_copy
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 from well_viewer.data.image_identity import normalize_tp
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 
 def well_plate_tooltip_provider(ctx) -> Callable[[str], str]:
@@ -545,36 +545,6 @@ def plotting_band_slot(ctx, title: str, mode: str | None = None):
     if band is None:
         band = ControlBand()
     return band.slot(plotting_slot_name(title, mode))
-
-
-def build_hline_separator(parent: QWidget, *, thickness: int = theme.Metrics.hairline) -> QFrame:
-    """Return the project's standard horizontal separator frame.
-
-    The ``Separator`` object name is what makes it paint: ``theme.qss`` gives
-    that name ``background-color: border_subtle`` and — the load-bearing half —
-    ``border: none``. An ``HLine`` frame without one of the sanctioned names
-    keeps Qt's default etched border instead, which is derived from the widget
-    palette rather than the theme: a 1 px line of near-white (``#e6e9ef``) on
-    this app's dark surfaces, inside a frame that reserves 3 px for it unless
-    the caller pins a height.
-
-    *thickness* exists for the one divider that is deliberately heavier than a
-    hairline (the Image Table's shelf rule); everything else takes the default.
-    """
-    sep = QFrame(parent)
-    sep.setObjectName("Separator")
-    sep.setFrameShape(QFrame.HLine)
-    sep.setFixedHeight(thickness)
-    return sep
-
-
-def build_vline_separator(parent: QWidget, *, thickness: int = theme.Metrics.hairline) -> QFrame:
-    """The vertical twin of :func:`build_hline_separator`."""
-    sep = QFrame(parent)
-    sep.setObjectName("Separator")
-    sep.setFrameShape(QFrame.VLine)
-    sep.setFixedWidth(thickness)
-    return sep
 
 
 def clear_layout(layout) -> None:

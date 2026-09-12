@@ -40,8 +40,8 @@ from ui import theme as theme_v2
 from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
-from well_viewer.core.safe import swallow, swallowed
-from well_viewer.core.ui_helpers import build_hline_separator
+from core.safe import swallow, swallowed
+from widgets.separator import build_hline_separator
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -827,7 +827,7 @@ class AllWellApp(QMainWindow):
             if readme_text:
                 try:
                     from scripts.profile_build import trim_readme_for_profile
-                    from well_viewer.core.profile import active_profile
+                    from core.profile import active_profile
                     _prof = active_profile()
                     readme_text = trim_readme_for_profile(
                         readme_text, _prof.features, _prof.subtabs)
@@ -1320,7 +1320,7 @@ class AllWellApp(QMainWindow):
             return
         import logging as _logging
 
-        from well_viewer.core.worker_bridge import GuiLogRelay
+        from core.worker_bridge import GuiLogRelay
 
         ring = self._log_ring
         # Built on the GUI thread (this method is only reached from the drawer
@@ -1570,7 +1570,7 @@ class AllWellApp(QMainWindow):
         ``ctx.window`` is the review widget and this is the main window that
         contains it.
         """
-        from well_viewer.core.app_settings import app_settings
+        from core.app_settings import app_settings
         return app_settings()
 
     def _restore_window_state(self) -> None:
@@ -1724,7 +1724,7 @@ def main() -> None:
     except Exception:
         swallowed()  # diagnostics-only; never block startup
 
-    from well_viewer.core import debug_flags as _debug_flags
+    from core import debug_flags as _debug_flags
 
     # All ten, not the four that happened to be wired: a flag this file does not
     # set keeps whatever ``debug_flags`` ships, so editing the constant above had
@@ -1766,7 +1766,7 @@ def main() -> None:
     # families when the bundled files are unavailable. The CSS-style generics
     # ``sans-serif`` / ``monospace`` are NOT in Qt's font registry, so leaving
     # them there triggers the alias walk on every widget that uses QSS.
-    from well_viewer.core.app_fonts import register_qt_fonts as _register_qt_fonts
+    from startup.app_fonts import register_qt_fonts as _register_qt_fonts
     _ui_family, _mono_family = _register_qt_fonts()
     try:
         theme_v2.Typography.family = _ui_family or app.font().family()

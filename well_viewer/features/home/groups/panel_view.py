@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.features.home.groups.controller import rep_refresh_map
 from well_viewer.features.home.sample_map.controller import layer_is_showing
 

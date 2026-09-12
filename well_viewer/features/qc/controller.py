@@ -12,7 +12,7 @@ from __future__ import annotations
 
 
 from .params import QCParams, compute_qc_pass
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.data.cache_projectors import project_verdict_column
 
 

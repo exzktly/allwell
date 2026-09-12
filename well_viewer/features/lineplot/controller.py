@@ -43,7 +43,7 @@ from well_viewer.core.channel_state_controller import (
 )
 from well_viewer.data.data_loading import get_rows
 from well_viewer.core.empty_state_copy import NO_DATASET_MESSAGE
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.core.plot_annotations import (
     LABEL_FRAC_CAP,
     LABEL_SPAN_HEADROOM,

@@ -28,7 +28,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from well_viewer.data.crop_tool import CropTool
-from well_viewer.core.ui_helpers import btn_primary, build_hline_separator
+from well_viewer.core.ui_helpers import btn_primary
+from widgets.separator import build_hline_separator
 from widgets.flow_layout import FlowLayout
 from widgets.page_body import build_page_body
 from widgets.stepper import Stepper

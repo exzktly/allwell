@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from well_viewer.core.worker_bridge import WorkerBridge, run_off_thread
+from core.worker_bridge import WorkerBridge, run_off_thread
 
 # Re-exported so this module stays the Playground's single worker entry point.
 _ReferenceBridge = WorkerBridge

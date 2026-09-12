@@ -18,7 +18,7 @@ import logging
 import math
 
 from well_viewer.persistence import _doc
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 

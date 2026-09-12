@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 
 _logger = logging.getLogger("well_viewer")
 

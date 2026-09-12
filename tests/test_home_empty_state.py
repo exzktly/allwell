@@ -282,13 +282,13 @@ class _Settings:
 def _ctx_with_recents(monkeypatch, paths, *, data_dir=None, loaded=None):
     """A context whose settings handle is patched **where the app reads it**.
 
-    ``well_viewer.core.app_settings.app_settings`` and not
+    ``core.app_settings.app_settings`` and not
     ``ctx.window._qsettings``: the shipped ``ctx.window`` is the review widget
     and has no such method, so stubbing one onto a fake window tests a seam the
     application never uses — which is how this whole feature passed a suite
     while writing and reading nothing.
     """
-    from well_viewer.core import app_settings as app_settings_module
+    from core import app_settings as app_settings_module
     from well_viewer.core.recent_datasets import record_open
 
     settings = _Settings()
@@ -437,7 +437,7 @@ def test_a_settings_backend_that_raises_costs_the_list_and_nothing_else(
     """And says so, because an empty history looks exactly the same."""
     import logging
 
-    from well_viewer.core import app_settings as app_settings_module
+    from core import app_settings as app_settings_module
     from well_viewer.core.recent_view import recent_datasets
 
     class _Broken:
@@ -546,7 +546,7 @@ def test_an_emptied_card_does_not_keep_the_last_datasets_rows(qtbot, monkeypatch
     assert host.layout().count() == 1
 
     # The history goes away — a different user profile, a cleared setting.
-    from well_viewer.core import app_settings as app_settings_module
+    from core import app_settings as app_settings_module
     monkeypatch.setattr(app_settings_module, "app_settings", lambda: _Settings())
     _paint_recents(ctx)
 

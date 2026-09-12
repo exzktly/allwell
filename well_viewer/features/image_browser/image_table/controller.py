@@ -30,7 +30,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLabel, QVBoxLayout, QWidget,
 )
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 from well_viewer.core.ui_helpers import set_combo_values
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.core.channel_state_controller import (

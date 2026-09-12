@@ -13,7 +13,7 @@ import logging
 from well_viewer.core.channel_state_controller import col_for_scatter_axis
 from well_viewer.core.csv_export import write_csv_rows
 from well_viewer.domain.numeric import is_number
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 from well_viewer.domain.sample_variables import NAME_JOIN, NUMBER
 from well_viewer.features.response.collect import (
     Y_FRACTION, Y_MEAN, ResponseData, collect_response, empty_reason, fit_curves,

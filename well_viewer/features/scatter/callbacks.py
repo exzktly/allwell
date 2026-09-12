@@ -8,7 +8,7 @@ wires them to the canvas events.
 
 from __future__ import annotations
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.features.scatter.cell_viewer_view import open_scatter_cell_viewer
 from well_viewer.features.scatter.gating import gate_edge_at
 

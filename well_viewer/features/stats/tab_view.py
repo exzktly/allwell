@@ -26,7 +26,7 @@ from well_viewer.features.stats.controller import stats_grp_add
 from well_viewer.features.stats.controller import stats_grp_clear_all
 from well_viewer.features.stats.controller import stats_resync_from_sample_defs
 from well_viewer.core.channel_state_controller import refresh_stats_property_combo
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 
 

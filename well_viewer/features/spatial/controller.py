@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 import logging
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.domain import spatial_compute as spc
 from well_viewer.features.spatial import state as sp_state
 from well_viewer.features.spatial.collect import (

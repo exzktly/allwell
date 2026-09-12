@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from ui import theme
 from well_viewer.core.sidebar_view import build_sidebar
 from well_viewer.core.status_view import build_bottom
-from well_viewer.core.ui_helpers import build_hline_separator
+from widgets.separator import build_hline_separator
 from well_viewer.domain.dataset_name import dataset_display_name
 
 

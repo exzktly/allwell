@@ -271,7 +271,7 @@ def test_teardown_survives_a_build_without_the_feature():
     state the app cannot reach, and it passed before the helper existed.
     """
     from well_viewer.core.app_runtime import AppRuntime
-    from well_viewer.core.worker_bridge import stop_runtime_workers
+    from core.worker_bridge import stop_runtime_workers
 
     runtime = AppRuntime(store={})
     assert runtime.cell_gating is not None, (
@@ -286,7 +286,7 @@ def test_teardown_survives_a_build_without_the_feature():
 def test_teardown_clears_the_thread_reference_it_stopped():
     """A stopped QThread left hanging off the runtime slice is a dead C++
     object for whatever looks at it next."""
-    from well_viewer.core.worker_bridge import stop_runtime_workers
+    from core.worker_bridge import stop_runtime_workers
 
     class _Worker:
         def __init__(self):
@@ -309,7 +309,7 @@ def test_a_failing_cancel_does_not_skip_the_wait():
     ``try`` turned "cancel raised" into "the thread was never joined either",
     which is the case where a live worker emits into a widget tree being
     deleted."""
-    from well_viewer.core.worker_bridge import stop_runtime_workers
+    from core.worker_bridge import stop_runtime_workers
 
     class _Worker:
         def __init__(self):

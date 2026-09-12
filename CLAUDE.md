@@ -349,7 +349,7 @@ function, remove its stale allowlist entry (the test fails until you do).
 
 ## 5. Conventions and gotchas
 
-- **Never swallow exceptions silently.** Use `well_viewer.core.safe.swallow()` /
+- **Never swallow exceptions silently.** Use `core.safe.swallow()` /
   `swallowed()` on the GUI side, `util.aw_safe` equivalents on the pipeline /
   `services` side. Two near-identical helpers exist because the pipeline may not
   import `well_viewer`.

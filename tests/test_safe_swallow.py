@@ -1,4 +1,4 @@
-"""Tests for well_viewer.core.safe — the observable exception-suppression helpers.
+"""Tests for core.safe — the observable exception-suppression helpers.
 
 Records are captured with a handler attached *directly* to the
 ``well_viewer.swallowed`` logger rather than via ``caplog``. caplog listens at
@@ -13,7 +13,7 @@ import logging
 
 import pytest
 
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 
 
 class _Capture:

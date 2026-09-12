@@ -59,7 +59,7 @@ from well_viewer.data.image_identity import (  # after _METRIC_SUFFIXES decl
     parse_timepoint_hours,  # re-export: single source of truth in image_identity
     normalize_fov_series as _normalize_fov_series,
 )
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 
 def normalize_fov_series(fov: pd.Series) -> pd.Series:

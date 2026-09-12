@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 
 
 def resync_run_check(ctx) -> bool:

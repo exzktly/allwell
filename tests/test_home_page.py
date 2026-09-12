@@ -686,7 +686,7 @@ def test_the_recents_card_opens_the_dataset_it_names(loaded_app, tmp_path,
     # being dead: it created a ``_qsettings`` the class does not have and then
     # verified the card against it. ``tests/test_no_invented_app_attributes.py``
     # now fails on that shape.
-    from well_viewer.core import app_settings as app_settings_module
+    from core import app_settings as app_settings_module
     monkeypatch.setattr(app_settings_module, "app_settings", lambda: settings)
 
     opened = []

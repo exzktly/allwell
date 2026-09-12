@@ -27,7 +27,7 @@ from well_viewer.core.frame_scope import (
     ScopeSpec, apply_scope_change, current_frame, read_scope,
     refresh_scope_button, reset_scope, scope_options, write_scope_field,
 )
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.core.ui_helpers import make_popover_button
 from widgets.checkable_dropdown import CheckableDropdown
 

@@ -21,7 +21,7 @@ from .region import (
 from well_viewer.core.frame_scope import (
     ScopeSpec, describe_scope, refresh_scope_button,
 )
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.data.cache_projectors import project_verdict_column
 
 # The three ``DatasetState`` fields the crop scope is spread over, in the order

@@ -34,7 +34,7 @@ from well_viewer.domain.plot_members import plot_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
 import numpy as _np
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 # Pure data/query helpers live in review_image/collect.py (T4). The Qt event
 # handlers below + external callers (load_controller, the tab views) import
@@ -541,7 +541,7 @@ def on_review_image_hover(ctx, event) -> None:
 def on_review_image_channel_selected(ctx, _e=None) -> None:
     """Channel-switch handler that preserves Review Image zoom/pan view."""
     import logging
-    from well_viewer.core import debug_flags as _debug_flags
+    from core import debug_flags as _debug_flags
     logger = logging.getLogger(__name__)
     if _debug_flags.review_image_channel_switch_debug_enabled():
         logger.debug("[RI-CHSW step 1] Review Image channel ComboboxSelected event received")

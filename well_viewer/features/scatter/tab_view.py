@@ -31,7 +31,7 @@ from well_viewer.features.scatter.cells_tab_view import build_scatter_cells_tab
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from well_viewer.features.scatter.controller import update_scatter_menus
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 
 _MODE_CELLS = "cells"

@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QVBoxLayout, QWidget,
 )
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from widgets import menu_exec
 from well_viewer.core.ui_helpers import (
     build_hline_separator,

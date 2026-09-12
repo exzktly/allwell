@@ -10,7 +10,7 @@ faceted renderer clears the interaction cache and never arms the gate selector.
 
 from __future__ import annotations
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.core.plot_annotations import value_label_settings
 from well_viewer.core.plot_style import apply_export_style_to_current
 from well_viewer.features.scatter._annotations import note_value_labels_unavailable

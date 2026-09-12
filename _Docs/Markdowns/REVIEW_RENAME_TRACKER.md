@@ -67,17 +67,17 @@ internals**, so lifting it cannot drag a pane's guts with it. Every candidate wa
 measured rather than judged by name; the entangled ones are declined below with
 the measurement that declined them.
 
-**7 rows — 0 done, 0 declined, 7 todo.**
+**7 rows — 7 done, 0 todo.** (The declined table below is separate, and none of it was reopened.)
 
-| # | module | lines | external sites | destination | state |
+| # | was | lines | external sites | is now | state |
 |---|---|---|---|---|---|
-| 1 | `core/safe.py` | 96 | 13 | `core/safe.py` | todo |
-| 2 | `core/app_settings.py` | 42 | 5 | `core/app_settings.py` | todo |
-| 3 | `core/profile.py` | 182 | 2 | `core/profile.py` | todo |
-| 4 | `core/debug_flags.py` | 99 | 1 | `core/debug_flags.py` | todo |
-| 5 | `core/worker_bridge.py` | 249 | 1 | `core/worker_bridge.py` | todo |
-| 6 | `core/app_fonts.py` | 127 | 1 | `startup/app_fonts.py` | todo |
-| 7 | `core/ui_helpers.build_hline_separator` | 19 | 3 | `widgets/separator.py` | todo |
+| 1 | `well_viewer/core/safe.py` | 96 | 13 | `core/safe.py` | done |
+| 2 | `well_viewer/core/app_settings.py` | 42 | 5 | `core/app_settings.py` | done |
+| 3 | `well_viewer/core/profile.py` | 182 | 2 | `core/profile.py` | done |
+| 4 | `well_viewer/core/debug_flags.py` | 99 | 1 | `core/debug_flags.py` | done |
+| 5 | `well_viewer/core/worker_bridge.py` | 249 | 1 | `core/worker_bridge.py` | done |
+| 6 | `well_viewer/core/app_fonts.py` | 127 | 1 | `startup/app_fonts.py` | done |
+| 7 | `ui_helpers.build_hline_separator` + its vertical twin | 30 | 3 | `widgets/separator.py` | done |
 
 Notes on the two that do not go to `core/`:
 
@@ -110,6 +110,40 @@ The three constants in the first rows (`RAIL_W`, `NamedPageStack`, `PANE_MODES`)
 are worth revisiting separately: a layout constant reads like `ui/theme` material
 and a page stack like `widgets/` material. Both are out of scope here, and
 neither is blocked by this work.
+
+
+### Two silent breakages the lift caused, both found by looking rather than by a test
+
+Each is a module resolving a repository-level path against its own location, and
+each was correct at its old depth and wrong at its new one. Neither raises.
+
+| module | was | is | what the wrong value does |
+|---|---|---|---|
+| `core/profile.py::_repo_root` | `parents[2]` | `parents[1]` | `profiles_dir()` names a directory above the checkout, no profile resolves, and every build silently falls back to the full application — the exact failure the function's own comment is written to prevent |
+| `startup/app_fonts.py::fonts_dir` | `parents[2]` | `parents[1]` | no bundled face registers; the application draws in a system font, which reads as a styling regression rather than a broken path |
+
+Both are pinned now — `tests/test_profile_repo_root.py` and
+`tests/test_app_fonts_dir.py`, anchored on `tests._repo_scan.REPO_ROOT` rather
+than re-derived from the module's own `__file__`, since a test that computes the
+answer the same way the module does accepts whatever the module says. Both were
+mutation-proved on HEAD by restoring the pre-lift count and watching them fail
+with the wrong path named: three of the five tests fail on the first, two on the
+second, so no test in either file is passing vacuously.
+
+This is the third time this exact shape has appeared in this area of the
+repository — `startup/mpl_bootstrap.py` and `ui/theme._icon_path` were the first
+two, in the root reorganisation. **Any module that resolves a repository-level
+path against `__file__` has its address hard-coded**, and moving it is therefore
+never only a move.
+
+### One near-miss worth recording
+
+The sweep that repointed `build_hline_separator`'s importers used a regular
+expression whose `\s*` matched across a newline, so on the two call sites with a
+*combined* import it swallowed the following line and produced syntactically
+invalid code. `ruff` caught it immediately; nothing about the sweep's own output
+did. A mechanical rewrite over 900 files needs a syntax check as part of the
+sweep, not after it.
 
 ---
 

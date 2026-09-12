@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 from pipeline import completeness
 from well_viewer.core.lazy import lazy
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 from well_viewer.domain.dataset_name import dataset_display_name
 
 # Saved Plots is removable, so this is a proxy rather than an import: it resolves

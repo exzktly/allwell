@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QVBoxLayout, QWidget, QWidgetAction, QCheckBox,
 )
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from widgets import menu_exec
 from well_viewer.features.image_browser.cell_browser import controller as ctl
 from well_viewer.features.image_browser.cell_browser.collect import (

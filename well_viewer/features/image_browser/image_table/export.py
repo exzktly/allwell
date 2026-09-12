@@ -23,7 +23,7 @@ from typing import Any
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from well_viewer.core.lazy import lazy
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 from well_viewer.features.image_browser.image_table import facet_view as _facet
 from well_viewer.features.image_browser.image_table import renderer as _renderer

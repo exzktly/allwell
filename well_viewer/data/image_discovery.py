@@ -29,7 +29,7 @@ import threading
 from collections import OrderedDict
 from pathlib import Path
 
-from well_viewer.core import debug_flags as _debug_flags
+from core import debug_flags as _debug_flags
 from well_viewer.data.data_loading import extract_well_token as _extract_well_token
 from well_viewer.data.image_resolver import (
     find_well_subfolder_path as _find_well_subfolder_path,

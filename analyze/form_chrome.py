@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-from well_viewer.core.ui_helpers import build_hline_separator
+from widgets.separator import build_hline_separator
 
 
 class AnalyzeFormChromeMixin:

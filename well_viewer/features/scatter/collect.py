@@ -22,7 +22,7 @@ import matplotlib
 import numpy as np
 import pandas as pd
 
-from well_viewer.core import debug_flags as debug_flags
+from core import debug_flags as debug_flags
 from well_viewer.core.lazy import lazy as _lazy
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series, get_rows
 from well_viewer.domain.stats_compute import group_replicate_stats, _reduce_reps

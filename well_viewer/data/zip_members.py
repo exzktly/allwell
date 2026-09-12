@@ -25,8 +25,8 @@ import zipfile
 from pathlib import Path
 from collections.abc import Callable
 
-from well_viewer.core import debug_flags
-from well_viewer.core.safe import swallowed
+from core import debug_flags
+from core.safe import swallowed
 from well_viewer.data.image_resolver import classify_filename_kind
 
 

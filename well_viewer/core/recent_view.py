@@ -29,7 +29,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QTimer
 
-from well_viewer.core.safe import swallow
+from core.safe import swallow
 
 _logger = logging.getLogger("well_viewer")
 
@@ -49,7 +49,7 @@ def recent_datasets(ctx) -> list:
     seconds. A page build that walked five of those would hang the launch it is
     meant to speed up.
     """
-    from well_viewer.core.app_settings import app_settings
+    from core.app_settings import app_settings
     from well_viewer.core.recent_datasets import load
 
     # A module function, not ``ctx.window._qsettings``: ``ctx.window`` is the
@@ -182,7 +182,7 @@ def forget_recent(ctx, path, *, then=None) -> None:
     A settings write that fails is logged and the repaint still runs, so the
     row comes back rather than vanishing from a list it is still stored in.
     """
-    from well_viewer.core.app_settings import app_settings
+    from core.app_settings import app_settings
     from well_viewer.core.recent_datasets import record_forget
 
     try:

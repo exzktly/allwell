@@ -52,7 +52,7 @@ from pipeline.auto_threshold import (
     sample_cell_and_bg as _sample_cell_and_bg,
 )
 from pipeline.threshold_optimize import round_stored_threshold
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 
 logger = logging.getLogger("well_viewer.data.auto_threshold")

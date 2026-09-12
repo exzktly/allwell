@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from functools import partial
 from well_viewer.core import rail_plate as _rail_plate
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 from well_viewer.core.lazy import lazy as _lazy
 
 _logger = logging.getLogger("well_viewer.runtime_app")

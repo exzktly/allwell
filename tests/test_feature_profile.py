@@ -13,7 +13,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.core.profile import FULL, Profile, active_profile, load_profile
+from core.profile import FULL, Profile, active_profile, load_profile
 from well_viewer.features.registry import build_feature_registry
 
 
@@ -63,7 +63,7 @@ def test_baked_marker_selects_profile_without_env(monkeypatch, tmp_path):
     """The PyInstaller build bakes `active_profile.txt` at the bundle root; with
     no env var, active_profile() must read it (the frozen-binary path)."""
     import shutil
-    import well_viewer.core.profile as prof
+    import core.profile as prof
     monkeypatch.delenv("ALLWELL_PROFILE", raising=False)
     # Mirror a frozen bundle root: the marker + a profiles/ dir under it.
     shutil.copytree(prof.profiles_dir(), tmp_path / "profiles")

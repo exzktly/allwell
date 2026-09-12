@@ -36,7 +36,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from well_viewer.core.safe import swallow as _swallow, swallowed
+from core.safe import swallow as _swallow, swallowed
 from well_viewer.core.ui_helpers import clear_notes_editors as _clear_notes_editors
 
 from well_viewer.domain.sample_variables import VariableSet

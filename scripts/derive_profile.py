@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Derive a physically-stripped tree for a build profile.
 
-The runtime profile filter (``well_viewer.core.profile``) lets one codebase
+The runtime profile filter (``core.profile``) lets one codebase
 *run* as any subset with no deletion — that is the day-to-day mechanism. This
 script is the other half: for a **shippable** thin artifact where you want the
 excluded code actually gone, it diffs the full-app catalog (``profiles/full.toml``)
@@ -118,7 +118,7 @@ def main(argv=None) -> int:
     repo_root = _repo_root()
     # Import the profile loader from the tree being operated on.
     sys.path.insert(0, str(repo_root))
-    from well_viewer.core.profile import load_profile
+    from core.profile import load_profile
 
     catalog_path = Path(args.catalog) if args.catalog else repo_root / "profiles" / "full.toml"
     catalog = load_catalog(catalog_path)

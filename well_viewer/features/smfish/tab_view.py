@@ -48,7 +48,7 @@ from well_viewer.features.smfish.worker import apply_global_threshold_async
 from well_viewer.domain.viewer_state import make_schema_extractor, extract_well_token, parse_rc
 from well_viewer.core.channel_state_controller import recalculate_threshold
 from well_viewer.data.data_loading import read_well_frame
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 logger = logging.getLogger("smfish_tab")
 

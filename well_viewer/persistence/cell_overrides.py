@@ -27,7 +27,7 @@ import logging
 from pathlib import Path
 
 from util.well_token import canonical_well_label
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.data.image_identity import CellKey
 from well_viewer.persistence._io import atomic_write_json
 

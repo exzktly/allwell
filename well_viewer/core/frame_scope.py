@@ -210,5 +210,5 @@ def refresh_scope_button(ctx, spec: ScopeSpec) -> None:
         # (a tab torn down, the window closing). Relabelling is the least
         # important thing a scope change does — it must not be the thing that
         # stops the rest of it from running.
-        from well_viewer.core.safe import swallowed
+        from core.safe import swallowed
         swallowed()

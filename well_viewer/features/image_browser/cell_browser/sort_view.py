@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.features.image_browser.cell_browser.collect import sort_field_options
 from ui import theme
 

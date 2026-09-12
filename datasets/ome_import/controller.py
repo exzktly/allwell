@@ -14,7 +14,7 @@ from dataclasses import asdict
 
 from PySide6.QtCore import QObject
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from datasets.ome_import.ome_import_compute import ConversionParams
 from datasets.ome_import.view import OmeImportPage
 from datasets.ome_import.worker import OmeImportWorker

@@ -18,7 +18,7 @@ re-exported below so existing
 from __future__ import annotations
 
 from PySide6.QtWidgets import QMessageBox, QWidget
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.core.plot_style import (  # noqa: F401  (re-export for compat)
     DEFAULT_EXPORT_STYLE_PREFS,
     _ensure_export_style_prefs,

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import well_viewer.core.profile as prof
+import core.profile as prof
 
 
 def test_repo_root_prefers_meipass_when_frozen(monkeypatch, tmp_path):

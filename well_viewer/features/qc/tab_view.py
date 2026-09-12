@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from .controller import get_qc_params, qc_excluded_count, set_qc_params
 from .params import QCParams
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from ui import theme
 
 # Pixel geometry for this module's controls (ARCHITECTURE §8: named once, never

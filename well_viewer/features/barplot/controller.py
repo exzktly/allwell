@@ -21,7 +21,7 @@ from well_viewer.domain.batch_models import ReplicateSet
 from well_viewer.domain.fold_change_pairing import (
     tick_labels as _tick_labels,
 )
-from well_viewer.core import debug_flags as debug_flags
+from core import debug_flags as debug_flags
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.ui_helpers import multiselect_button_text
 

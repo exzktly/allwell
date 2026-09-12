@@ -36,7 +36,7 @@ import pandas as pd
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QLabel, QLineEdit, QWidget
 
-from well_viewer.core import debug_flags as _debug_flags
+from core import debug_flags as _debug_flags
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
     ratio_label_for,
@@ -44,7 +44,7 @@ from well_viewer.core.channel_state_controller import (
     seg_channel_token_of,
 )
 from well_viewer.core.plot_orchestrator import redraw_app
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.core.selection_controller import invalidate_stats_cache
 from well_viewer.data.curation import apply_curation_to_cache
 from well_viewer.data.data_loading import get_rows

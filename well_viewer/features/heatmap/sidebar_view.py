@@ -43,12 +43,12 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.features.heatmap.models import HeatmapLayout
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 
 SIDEBAR_LAYOUT_NAME = "Sidebar"
 from well_viewer.core.dnd import WELL_MIME  # shared drag/drop token
-from well_viewer.core.ui_helpers import build_hline_separator
+from widgets.separator import build_hline_separator
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes

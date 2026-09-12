@@ -38,8 +38,17 @@ MONO_FONT_FALLBACK = "JetBrainsMono.ttf"
 
 
 def fonts_dir() -> Path:
-    """Locate ``assets/fonts`` both in-repo and inside a PyInstaller bundle."""
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
+    """Locate ``assets/fonts`` both in-repo and inside a PyInstaller bundle.
+
+    The parent count is this module's address, not a constant. It was
+    ``parents[2]`` while the module lived at ``well_viewer/core/app_fonts.py``;
+    from ``startup/app_fonts.py`` the repository root is one parent up. Getting
+    it wrong does not raise — ``_register_qt_group`` finds no file at any of the
+    names it looks for, returns an empty family, and the application draws in
+    whatever font the system supplies. It looks like a styling regression rather
+    than a broken path, which is why ``tests/test_app_fonts_dir.py`` pins it.
+    """
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
     return base / "assets" / "fonts"
 
 
@@ -113,7 +122,7 @@ def register_mpl_ui_font() -> str:
             if not name:
                 name = FontProperties(fname=str(fpath)).get_name()
         except Exception:
-            from well_viewer.core.safe import swallowed
+            from core.safe import swallowed
             swallowed()  # one weight failing shouldn't abort the rest
     if name:
         return name

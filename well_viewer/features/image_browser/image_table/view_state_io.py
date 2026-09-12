@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.features.image_browser.image_table.builder_view import builder_refresh
 # Module scope, like ``builder_refresh`` above: ``controller`` does not import this
 # module, so there is no cycle to work around and no reason to spend one of the

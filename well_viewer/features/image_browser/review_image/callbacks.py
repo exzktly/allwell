@@ -25,7 +25,7 @@ from contextlib import contextmanager
 
 import numpy as _np
 
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.features.crop.region import normalize_region
 from well_viewer.data.curation import apply_curation_to_cache
 from well_viewer.features.image_browser.review_image.collect import (

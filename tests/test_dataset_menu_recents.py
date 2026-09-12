@@ -52,12 +52,12 @@ class _Settings:
 def _win(monkeypatch, paths, *, data_dir=None, opened=None):
     """A stand-in for the main window, with a patched settings backend.
 
-    Patched at ``well_viewer.core.app_settings.app_settings`` — where the code
+    Patched at ``core.app_settings.app_settings`` — where the code
     reads it — rather than by hanging a method on the fake window. A fake seam
     the application never uses is how this list once passed a whole suite while
     reading and writing nothing.
     """
-    from well_viewer.core import app_settings as app_settings_module
+    from core import app_settings as app_settings_module
     from well_viewer.core.recent_datasets import record_open
 
     settings = _Settings()

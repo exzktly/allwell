@@ -1232,28 +1232,28 @@ def test_menu_seam_guard_clears(tmp_path, monkeypatch, shape):
 SAFE_VIOLATIONS = {
     # The shape that shipped.
     "with-swallowed": (
-        "from well_viewer.core.safe import swallowed\n"
+        "from core.safe import swallowed\n"
         "def f(ctx):\n"
         "    with swallowed():\n"
         "        risky(ctx)\n"
     ),
     # Same thing reached through the module, which a name-only check misses.
     "with-swallowed-qualified": (
-        "from well_viewer.core import safe\n"
+        "from core import safe\n"
         "def f(ctx):\n"
         "    with safe.swallowed('note'):\n"
         "        risky(ctx)\n"
     ),
     # The mirror image: the context manager called and dropped.
     "swallow-as-statement": (
-        "from well_viewer.core.safe import swallow\n"
+        "from core.safe import swallow\n"
         "def f(ctx):\n"
         "    swallow('note')\n"
         "    risky(ctx)\n"
     ),
     # A suppression logged where nothing was suppressed.
     "swallowed-outside-except": (
-        "from well_viewer.core.safe import swallowed\n"
+        "from core.safe import swallowed\n"
         "def f(gate):\n"
         "    if gate is None:\n"
         "        swallowed('no gate')\n"
@@ -1262,7 +1262,7 @@ SAFE_VIOLATIONS = {
 
 SAFE_CLEAN = {
     "with-swallow": (
-        "from well_viewer.core.safe import swallow\n"
+        "from core.safe import swallow\n"
         "def f(ctx):\n"
         "    with swallow('note'):\n"
         "        risky(ctx)\n"
@@ -1270,7 +1270,7 @@ SAFE_CLEAN = {
     # The overwhelmingly common correct use, and the one a naive rule would
     # flag: `swallowed()` as a bare statement, inside a handler.
     "swallowed-in-except": (
-        "from well_viewer.core.safe import swallowed\n"
+        "from core.safe import swallowed\n"
         "def f(ctx):\n"
         "    try:\n"
         "        risky(ctx)\n"
@@ -1279,7 +1279,7 @@ SAFE_CLEAN = {
     ),
     # Nested a level down inside the handler — still covered.
     "swallowed-nested-in-except": (
-        "from well_viewer.core.safe import swallowed\n"
+        "from core.safe import swallowed\n"
         "def f(items):\n"
         "    try:\n"
         "        risky(items)\n"

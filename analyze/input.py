@@ -32,7 +32,7 @@ from services.input_resolution_service import (
     select_incremental_scope,
 )
 from util.schema_infer import infer_from_dir
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 
 class AnalyzeInputMixin:

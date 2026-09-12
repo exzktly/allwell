@@ -32,10 +32,10 @@ from well_viewer.features.batch_export.base_panel import BatchExportPanel, Skipp
 from well_viewer.core.plot_annotations import (
     value_label_settings as _value_label_settings,
 )
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from well_viewer.core.lazy import lazy as _lazy
-from well_viewer.core.ui_helpers import build_hline_separator
+from widgets.separator import build_hline_separator
 from well_viewer.core.channel_state_controller import (
     get_fluor_gate as _get_fluor_gate,
     ratio_label_for as _ratio_label_for,

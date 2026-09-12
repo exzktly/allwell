@@ -15,7 +15,7 @@ from well_viewer.core.channel_state_controller import (
     on_cutoff_for_column,
 )
 from well_viewer.core.csv_export import ask_save_csv
-from well_viewer.core.safe import swallow, swallowed
+from core.safe import swallow, swallowed
 from well_viewer.core.lazy import lazy as _lazy
 from well_viewer.features.export import cell_scope_compute as csc
 from well_viewer.features.export.worker import DONE, CellExportWriter
@@ -1253,7 +1253,7 @@ def export_cell_data(ctx, scope) -> None:
 
     from PySide6.QtCore import QTimer
 
-    from well_viewer.core.worker_bridge import run_off_thread
+    from core.worker_bridge import run_off_thread
     from well_viewer.data.data_loading import get_rows
 
     if scope is None:

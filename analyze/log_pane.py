@@ -43,8 +43,8 @@ from PySide6.QtWidgets import (
 
 from pipeline import completeness
 from ui import theme
-from well_viewer.core.safe import swallowed
-from well_viewer.core.ui_helpers import build_hline_separator
+from core.safe import swallowed
+from widgets.separator import build_hline_separator
 from widgets.run_dashboard import RunDashboard
 
 

@@ -4,7 +4,7 @@ model rendered by a ``widgets.SavedSelectionsList``."""
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.features.home.groups.controller import rep_add
 
 

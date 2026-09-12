@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from util.json_write import write_json_atomic
 from PySide6.QtCore import QObject
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 
 # Selection-behaviour fallbacks for registry-less callers (e.g. lightweight test
 # mocks). The real app always resolves these from the feature registry's

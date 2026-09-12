@@ -176,7 +176,7 @@ from well_viewer.core.tab_controller import on_central_pane_changed, build_centr
 from well_viewer.core.ui_helpers import apply_theme, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
 from well_viewer.core.centre_view import drain_pending_centre_builders
 from well_viewer.core.plot_toggles import toggle_sem, toggle_fov_replicates, refresh_fov_btn_state
-from well_viewer.core.worker_bridge import stop_runtime_callable, stop_runtime_workers
+from core.worker_bridge import stop_runtime_callable, stop_runtime_workers
 
 
 def teardown_review_pane(app) -> None:

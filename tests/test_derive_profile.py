@@ -14,7 +14,7 @@ import pytest
 pytest.importorskip("PySide6")  # profile loader lives in the well_viewer package
 
 from scripts.derive_profile import plan_deletions
-from well_viewer.core.profile import Profile
+from core.profile import Profile
 
 
 def _touch(root: Path, rel: str) -> None:
@@ -60,7 +60,7 @@ def test_plan_excludes_features_the_profile_rejects(tmp_path):
 
 def test_full_profile_removes_nothing(tmp_path):
     _touch(tmp_path, "well_viewer/features/stats/__init__.py")
-    from well_viewer.core.profile import FULL
+    from core.profile import FULL
     assert plan_deletions(_catalog(), FULL, tmp_path) == []
 
 

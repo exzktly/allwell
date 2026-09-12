@@ -189,7 +189,7 @@ sibling_scripts = [
 # non-Qt units like pipeline/cellpose.py dropped); the full build ships them
 # whole.
 for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "util",
-             "startup",
+             "startup", "core",
              "analyze", "datasets"):
     _pkg_path = _parent / _pkg
     if not _pkg_path.is_dir():
@@ -239,7 +239,7 @@ if _markdowns_dir.is_dir():
         extra_data.append((str(_markdowns_dir), "Markdowns"))
 
 # Bundled UI fonts (Inter + JetBrains Mono). Loaded at startup by
-# well_viewer.core.app_fonts, which resolves ``_MEIPASS/assets/fonts`` in a
+# startup.app_fonts, which resolves ``_MEIPASS/assets/fonts`` in a
 # frozen build — so without this the app silently falls back to the platform
 # font. Ship them under the same ``assets/fonts`` layout the loader expects.
 _fonts_dir = _parent / "assets" / "fonts"
@@ -253,7 +253,7 @@ if _icons_dir.is_dir():
     extra_data.append((str(_icons_dir), "assets/icons"))
 
 # Build-profile manifests + baked marker. Ship profiles/ so the frozen app's
-# ``well_viewer.core.profile.load_profile`` resolves the active manifest, and
+# ``core.profile.load_profile`` resolves the active manifest, and
 # write ``active_profile.txt`` at the bundle root so ``active_profile()`` picks
 # the profile with no run-time env var. Absent (full build) → the full app.
 _profiles_dir = _parent / "profiles"

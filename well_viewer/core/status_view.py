@@ -11,8 +11,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit,
     QVBoxLayout, QWidget,
 )
-from well_viewer.core.ui_helpers import build_hline_separator
-from well_viewer.core.worker_bridge import GuiLogRelay
+from widgets.separator import build_hline_separator
+from core.worker_bridge import GuiLogRelay
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -30,10 +30,10 @@ class _GUILogHandler(logging.Handler):
     This handler is attached to the ``well_viewer`` logger at DEBUG, and it is
     gated on nothing, so it runs for every record the app produces — including
     the ``well_viewer.swallowed`` breadcrumb that
-    :func:`well_viewer.core.safe.swallowed` writes from inside an ``except``
+    :func:`core.safe.swallowed` writes from inside an ``except``
     block. Plenty of those happen on worker threads, so ``emit`` is entered off
     the GUI thread as a matter of course and must never touch the widget
-    directly. It hands the line to a :class:`~well_viewer.core.worker_bridge.
+    directly. It hands the line to a :class:`~core.worker_bridge.
     GuiLogRelay`, whose queued signal is the app's one way across that boundary.
 
     Detaches itself the moment its widget is gone. A handler outlives the window

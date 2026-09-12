@@ -14,7 +14,7 @@ from collections.abc import Iterable, Sequence
 import numpy as np
 
 from well_viewer.data.data_loading import _all_fluor_values_filtered, iter_plot_groups
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.core.plot_style import (
     apply_export_style_to_current, figure_prefs, style_legend,
 )

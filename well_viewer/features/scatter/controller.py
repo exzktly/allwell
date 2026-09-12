@@ -20,7 +20,7 @@ from well_viewer.core.channel_state_controller import (
 )
 from well_viewer.domain.ratio_models import is_ratio_key
 from pipeline.shape_features import is_shape_column
-from well_viewer.core.safe import swallowed
+from core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current, style_legend
 from well_viewer.features.scatter.collect import (  # re-export
     collect_scatter_agg_data,

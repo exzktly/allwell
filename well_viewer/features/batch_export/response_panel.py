@@ -46,7 +46,7 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.lazy import lazy as _lazy
-from well_viewer.core.ui_helpers import build_hline_separator
+from widgets.separator import build_hline_separator
 from well_viewer.features.batch_export._common import (
     BarGroup,
     _groups_with_loaded_wells,

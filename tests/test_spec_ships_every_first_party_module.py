@@ -26,6 +26,7 @@ spec is not importable outside a PyInstaller build (it calls `Analysis`,
 from __future__ import annotations
 
 import ast
+import sys
 
 from tests._repo_scan import PACKAGE_ROOTS, REPO_ROOT, parse_source
 
@@ -144,3 +145,69 @@ def test_the_spec_names_nothing_that_has_gone():
         "the spec names first-party code that does not exist, so it bundles "
         f"nothing and reports nothing — files: {stale_files or 'none'}; "
         f"packages: {stale_pkgs or 'none'}")
+
+
+#: External top-level packages the spec is allowed to import, with the reason.
+#:
+#: Everything not stdlib and not listed here must resolve to a file in this
+#: repository. That default is deliberately inverted from the obvious one: the
+#: first version of this guard skipped any import whose head was not a known
+#: first-party name, which made it blind to precisely the case it exists for —
+#: a module that has *gone* is no longer a first-party name either, so the stale
+#: `import theme` it was written to catch sailed straight through it. The spec's
+#: universe of legitimate external imports is small and enumerable, so the
+#: allowlist can be the thing that carries a written reason instead.
+_EXTERNAL_OK = {
+    "PyInstaller": "the build tool executing this spec (collect_all, hooks)",
+    "tomli": "the 3.10 build environment's backport of tomllib",
+}
+
+
+def _is_module(dotted: str) -> bool:
+    base = REPO_ROOT.joinpath(*dotted.split("."))
+    return base.with_suffix(".py").is_file() or (base / "__init__.py").is_file()
+
+
+def _spec_repo_imports() -> list[tuple[int, str]]:
+    """Every import the spec makes that must resolve inside this repository.
+
+    `from P import a, b` is recorded as `P` — the spec imports *symbols* out of
+    `scripts.profile_build` and `services.remote_runner`, and the question here is
+    only whether the module it reaches into still exists.
+    """
+    out: list[tuple[int, str]] = []
+    for node in ast.walk(_spec_tree()):
+        if isinstance(node, ast.Import):
+            out += [(node.lineno, a.name) for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            out.append((node.lineno, node.module))
+    return [(ln, m) for ln, m in out
+            if m.split(".")[0] not in sys.stdlib_module_names
+            and m.split(".")[0] not in _EXTERNAL_OK]
+
+
+def test_the_spec_imports_only_modules_that_exist():
+    """The spec's own imports, held against the tree.
+
+    The two roster tests above read what the spec *bundles*. They walk straight
+    past what it *imports*, and the spec imports first-party code at module scope
+    to do its job — `scripts.profile_build` for the profile maths,
+    `services.remote_runner` for the upload manifest, `ui.theme` to validate a
+    baked `ALLWELL_THEME` name.
+
+    A stale one of those is not a missing file in the bundle, it is a build that
+    does not start: PyInstaller executes the spec as Python, so the import raises
+    and the run aborts. The `ALLWELL_THEME` import is the one that proved it — it
+    sits inside `if _BAKED_THEME:`, so only a themed build (`ALLWELL_THEME=grey
+    scripts/build_executable.sh`) reaches it, and the default build stays green
+    while the themed one is broken. Nothing in this suite executes the spec, so
+    without this check the first symptom is a release that will not build.
+    """
+    missing = [(ln, m) for ln, m in _spec_repo_imports() if not _is_module(m)]
+    assert not missing, (
+        "the PyInstaller spec imports first-party modules that no longer exist, "
+        "so PyInstaller aborts while executing it:\n  "
+        + "\n  ".join(f"{SPEC.name}:{ln} — {m}" for ln, m in missing)
+        + "\n\nThe module moved and the spec did not follow. Note that an import "
+        "inside a conditional branch (the ALLWELL_THEME block) breaks only the "
+        "builds that take it.")

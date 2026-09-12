@@ -4172,3 +4172,123 @@ def test_the_zipper_branch_is_pinned_by_name_not_only_by_resolution(
     assert not any(m.endswith("well_plate_zipper") for m in named), (
         f"the stale branch imports {named}, which already names the zipper — "
         "this case is no longer reproducing the shape it was written for")
+
+
+# ── the spec's own imports ──────────────────────────────────────────────────
+#
+# `tests/test_spec_ships_every_first_party_module.py` gained a check over the
+# imports the spec makes, after a stale `import theme` shipped in it: PyInstaller
+# executes the spec as Python, so the import aborts the build — but only for a
+# build that takes the branch it sits in (`ALLWELL_THEME=<name>`), which is why
+# the default build stayed green and nothing said a word.
+#
+# Its first version copied a "skip anything not first-party" filter from the
+# dispatch guard, which made it blind to exactly that line: a module that has
+# *gone* is not a first-party name either. Both mutations passed. The default is
+# now inverted — not stdlib and not on a short allowlist means it must resolve
+# here — and these are the cases.
+
+SPEC_IMPORT_BAD = {
+    # The line that shipped.
+    "gone_root_module": "import theme as _thememod\n",
+    # A first-party package that moved.
+    "gone_package": "from build.profile_build import compute_exclusions\n",
+    # A third-party import nobody declared.
+    "undeclared_third_party": "import numpy\n",
+}
+
+SPEC_IMPORT_GOOD = {
+    "stdlib": "import importlib.util\n",
+    "allowlisted_external": "from PyInstaller.utils.hooks import collect_all\n",
+    "real_first_party_symbol": "from scripts.profile_build import bundle_name\n",
+    "real_first_party_submodule": "from ui import theme as _thememod\n",
+}
+
+
+def _spec_import_offenders(monkeypatch, tmp_path: Path, line: str):
+    """Run the spec guard's import collector over a synthetic spec."""
+    import importlib
+
+    module = importlib.import_module(
+        "tests.test_spec_ships_every_first_party_module")
+    fake = _write(tmp_path, "all_well.spec", line)
+    monkeypatch.setattr(module, "SPEC", fake, raising=False)
+    return [(ln, m) for ln, m in module._spec_repo_imports()
+            if not module._is_module(m)]
+
+
+@pytest.mark.parametrize("shape", sorted(SPEC_IMPORT_BAD))
+def test_spec_import_guard_catches_an_import_that_cannot_resolve(
+        tmp_path, monkeypatch, shape):
+    offenders = _spec_import_offenders(monkeypatch, tmp_path, SPEC_IMPORT_BAD[shape])
+    assert offenders, (
+        f"the {shape!r} spec import resolved, so PyInstaller would abort while "
+        "executing the spec with nothing here to have warned")
+
+
+@pytest.mark.parametrize("shape", sorted(SPEC_IMPORT_GOOD))
+def test_spec_import_guard_clears_a_legitimate_import(tmp_path, monkeypatch, shape):
+    offenders = _spec_import_offenders(monkeypatch, tmp_path, SPEC_IMPORT_GOOD[shape])
+    assert not offenders, f"the {shape!r} spec import was wrongly flagged: {offenders}"
+
+
+# ── the launcher dispatches to the module it imported ───────────────────────
+#
+# Importing the zipper is not dispatching to it. A branch that imports
+# `well_plate_zipper` and then calls `process_microscopy.main()` passed every
+# import-side assertion; a frozen grouping run would start a pipeline run
+# instead, which looks like work happening rather than like a failure.
+
+DISPATCH_CALL_BAD = {
+    "calls_the_wrong_module": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        from pipeline import well_plate_zipper
+        import process_microscopy
+        process_microscopy.main()
+        return
+''',
+    "calls_nothing": '''    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        from pipeline import well_plate_zipper
+        return
+''',
+}
+
+
+def _dispatch_calls(monkeypatch, tmp_path: Path, body: str) -> dict:
+    import importlib
+
+    module = importlib.import_module("tests.test_zipper_frozen_dispatch")
+    fake = _write(tmp_path, "all_well_launcher.py", _FAKE_LAUNCHER_HEAD + body)
+    real_root = module.REPO_ROOT
+
+    class _Root:
+        def __truediv__(self, other):
+            return fake if other == "all_well_launcher.py" else real_root / other
+
+        def joinpath(self, *parts):
+            return real_root.joinpath(*parts)
+
+        def iterdir(self):
+            return real_root.iterdir()
+
+        def glob(self, pat):
+            return real_root.glob(pat)
+
+    monkeypatch.setattr(module, "REPO_ROOT", _Root(), raising=False)
+    return module._dispatch_main_calls()
+
+
+@pytest.mark.parametrize("shape", sorted(DISPATCH_CALL_BAD))
+def test_dispatch_call_guard_catches_a_branch_that_runs_the_wrong_thing(
+        tmp_path, monkeypatch, shape):
+    called = _dispatch_calls(monkeypatch, tmp_path, DISPATCH_CALL_BAD[shape])
+    zipper_calls = [n for n in called.get("--run-zipper", [])
+                    if "well_plate_zipper" in n]
+    assert not zipper_calls, (
+        f"the {shape!r} branch reads as dispatching to the zipper when it does "
+        f"not: {called}")
+
+
+def test_dispatch_call_guard_clears_a_correct_branch(tmp_path, monkeypatch):
+    called = _dispatch_calls(monkeypatch, tmp_path, DISPATCH_IMPORT_GOOD["real_submodule"])
+    assert any("well_plate_zipper" in n for n in called.get("--run-zipper", [])), (
+        f"a correct dispatch was not recognised: {called}")

@@ -271,7 +271,7 @@ if _profile_active:
 # (the build then starts on theme.DEFAULT_THEME). Mirrors the profile marker above.
 _BAKED_THEME = os.environ.get("ALLWELL_THEME", "").strip()
 if _BAKED_THEME:
-    import theme as _thememod  # Qt-free; safe at build time
+    from ui import theme as _thememod  # Qt-free; safe at build time
     if _BAKED_THEME in _thememod.available_themes():
         _theme_marker = Path(_tempfile.mkdtemp()) / "allwell_theme.txt"
         _theme_marker.write_text(_BAKED_THEME, encoding="utf-8")

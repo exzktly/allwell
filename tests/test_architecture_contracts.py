@@ -46,7 +46,6 @@ PIPELINE_ROOTS = ["pipeline", "util"]
 # Entry points that live in no package of their own.
 PIPELINE_FILES = [
     "process_microscopy.py",
-    "pipeline/well_plate_zipper.py",
 ]
 
 

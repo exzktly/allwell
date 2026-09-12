@@ -106,6 +106,39 @@ def _dispatch_imports() -> dict[str, list[str]]:
     return out
 
 
+def _dispatch_main_calls() -> dict[str, list[str]]:
+    """Which module each `--run-*` branch calls `main()` on, per sentinel.
+
+    The imports are half the dispatch; this is the other half, and it was the half
+    nothing looked at. §7.8's question — name the wrong implementation that still
+    passes — had an answer for the import-only check: a branch that imports the
+    zipper and then calls *someone else's* `main()`. A frozen grouping run would
+    start a pipeline run instead, which is the worst outcome available here,
+    because a pipeline run over an ungrouped folder looks like work happening.
+    """
+    tree = parse_source(REPO_ROOT / "all_well_launcher.py")
+    fn = next((n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "_dispatch"), None)
+    assert fn is not None, "no `_dispatch` function in all_well_launcher.py"
+
+    out: dict[str, list[str]] = {}
+    for branch in [n for n in fn.body if isinstance(n, ast.If)]:
+        sentinels = [c.value for c in ast.walk(branch.test)
+                     if isinstance(c, ast.Constant) and isinstance(c.value, str)
+                     and c.value.startswith("--run-")]
+        if not sentinels:
+            continue
+        called: list[str] = []
+        for node in ast.walk(branch):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "main"
+                    and isinstance(node.func.value, ast.Name)):
+                called.append(node.func.value.id)
+        out[sentinels[0]] = called
+    return out
+
+
 #: Top-level names that belong to this repository. A dotted import whose first
 #: segment is not one of these is stdlib or third-party, and whether a file of
 #: that path exists here says nothing about it — `importlib.util` is the one that
@@ -129,6 +162,15 @@ def _defines(module: str, name: str) -> bool:
     Import, assignment, function and class bindings all count — this only has to
     answer "would `from module import name` find something", not what kind of
     thing it is.
+
+    It reads *top-level statements only*, so several real binding forms are
+    invisible to it: a `try: from x import y / except ImportError:` fallback, a
+    `def` inside an `if`, a tuple unpack, a `for` target, a walrus, a name that
+    arrives via `import *`, anything under `if TYPE_CHECKING:`. Every one of those
+    makes :func:`_resolves` answer False, so the guard fails on correct code
+    rather than passing on broken code — the safe direction, but the failure
+    message will say the module "does not exist in the repository", which is not
+    what went wrong. If that happens, widen this function; do not exempt the site.
     """
     path = REPO_ROOT.joinpath(*module.split("."))
     path = path.with_suffix(".py") if path.with_suffix(".py").is_file() else path / "__init__.py"
@@ -197,6 +239,35 @@ def test_the_launcher_routes_run_zipper_into_a_module_that_exists():
         "the repository. The module moved and the launcher did not follow; in a "
         "frozen bundle this raises ModuleNotFoundError inside the subprocess, "
         "where the only symptom is a grouping phase that dies with no output.")
+
+
+def test_the_run_zipper_branch_calls_the_zipper_s_own_main():
+    """Importing the zipper is not dispatching to it.
+
+    The import check next door passes on a branch that imports
+    `well_plate_zipper` and then calls `process_microscopy.main()` — verified by
+    mutation, which is why this exists. `_bootstrap_lib` is loaded by file path
+    rather than imported and calls no `<name>.main()`, so only the two branches
+    that do are asserted.
+    """
+    called = _dispatch_main_calls().get("--run-zipper", [])
+    assert called, (
+        "the `--run-zipper` branch calls no `<module>.main()` — the sentinel is "
+        "matched and then nothing runs the zipper")
+    assert any("well_plate_zipper" in name for name in called), (
+        f"the `--run-zipper` branch calls main() on {called}, not on the zipper. "
+        "A frozen grouping run would dispatch to the wrong module and do that "
+        "module's work instead, which in the pipeline's case looks like a real "
+        "run rather than a failure.")
+
+
+def test_the_run_pipeline_branch_calls_the_pipeline_s_own_main():
+    """The same rule for the other branch that dispatches by import."""
+    called = _dispatch_main_calls().get("--run-pipeline", [])
+    assert called, "the `--run-pipeline` branch calls no `<module>.main()`"
+    assert any("process_microscopy" in name for name in called), (
+        f"the `--run-pipeline` branch calls main() on {called}, not on the "
+        "pipeline orchestrator")
 
 
 def test_every_launcher_sentinel_imports_something_real():

@@ -78,11 +78,64 @@ ROOT_MODULES = {
         "it cannot move into a package without both learning where it went",
 }
 
+#: Directories allowed at the repository root, with what each is.
+#:
+#: The rule above is stated for *three* kinds of thing and only one of them was
+#: guarded: a new loose root directory passed silently while a new loose root
+#: module failed. `design/` — two HTML mockups occupying a root directory until
+#: this rule existed — is exactly the shape that would have drifted back.
+#:
+#: A package is a directory holding application code. The rest are here because
+#: something outside Python reads them at a fixed path.
+ROOT_DIRS = {
+    "analyze": "package — the Analyze pane",
+    "datasets": "package — the Datasets pane and its tools",
+    "pipeline": "package — the Qt-free analysis pipeline",
+    "services": "package — the Analyze-side service layer",
+    "startup": "package — what runs before the application exists",
+    "ui": "package — app-level UI every pane shares",
+    "util": "package — Qt-free general helpers",
+    "well_viewer": "package — the Review pane",
+    "widgets": "package — reusable Qt widgets",
+    "scripts": "dev tooling + `_bootstrap_lib.py`, which ships in the bundle",
+    "tests": "the pytest suite",
+    "assets":
+        "runtime resources read by path — `ui.theme._icon_path` and "
+        "`startup.mpl_bootstrap` resolve `assets/icons` and `assets/fonts` "
+        "against the repository root, and the spec bundles them at that layout",
+    "profiles":
+        "build profiles, read by name from `ALLWELL_PROFILE` at build and run "
+        "time (`scripts/profile_build.py`)",
+    "_Docs":
+        "everything that is not source — the live docs, the installer and its "
+        "spec, the requirements lists, the design mockups, the visual audit. "
+        "`_Docs/requirements-remote.txt` is uploaded to a remote worker by that "
+        "exact string, so this name is load-bearing",
+}
+
+#: Directories that are not content: version control, tooling caches, build
+#: output, and virtualenvs. Matched by name or by leading dot.
+_DIR_IGNORE = {
+    ".git", "__pycache__", "dist", "build", "node_modules", "venv", ".venv",
+}
+
+
 #: The build script's own preflight roster, and where to find it.
 _BUILD_SCRIPT = REPO_ROOT / "_Docs" / "_Installation" / "build_all_well.sh"
 
-#: `    "some/path.py"` inside the `REQUIRED=( … )` array.
-_REQUIRED_ENTRY = re.compile(r'^\s*"([^"]+)"\s*$')
+#: `    "some/path.py"` inside the `REQUIRED=( … )` array, with an optional
+#: trailing comment.
+#:
+#: The comment half is not decoration. `    "analyze_tab.py"   # stale` is valid
+#: bash, is enforced by the build script exactly like a bare entry, and the first
+#: version of this pattern could not see it — so the guard passed while the build
+#: still refused to start. The array on `origin/main` already carried comment
+#: lines, so this is the repository's real formatting, not a hypothetical.
+_REQUIRED_ENTRY = re.compile(r'^\s*"([^"]+)"\s*(?:#.*)?$')
+
+#: A line inside the array that is neither an entry, a comment, nor blank. The
+#: parser skipping such a line silently is the other way this check fails open.
+_REQUIRED_IGNORABLE = re.compile(r"^\s*(?:#.*)?$")
 
 
 def _root_py_files() -> set[str]:
@@ -101,13 +154,19 @@ def _build_script_required() -> list[str]:
             f"no `REQUIRED=(` array in {_BUILD_SCRIPT.name} — the script's "
             "preflight roster moved or was renamed, and this guard is now "
             "measuring nothing") from None
-    out = []
+    out, unparsed = [], []
     for ln in lines[start + 1:]:
         if ln.startswith(")"):
+            assert not unparsed, (
+                f"lines inside {_BUILD_SCRIPT.name}'s `REQUIRED=(` array that this "
+                f"parser does not understand, so it is silently reading fewer "
+                f"requirements than the script enforces: {unparsed}")
             return out
         m = _REQUIRED_ENTRY.match(ln)
         if m:
             out.append(m.group(1))
+        elif not _REQUIRED_IGNORABLE.match(ln):
+            unparsed.append(ln.strip())
     raise AssertionError(
         f"the `REQUIRED=(` array in {_BUILD_SCRIPT.name} is not closed by a "
         "line starting `)` — the parse ran off the end of the file")
@@ -128,6 +187,42 @@ def test_no_loose_module_at_the_repository_root():
         "Nothing breaks either way, which is exactly why this is a test: the "
         "cost of a loose module is paid entirely by the next person looking "
         "for it.")
+
+
+def _root_dirs() -> set[str]:
+    """Every directory at the repository root that is content rather than debris."""
+    return {d.name for d in REPO_ROOT.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+            and d.name not in _DIR_IGNORE}
+
+
+def test_no_loose_directory_at_the_repository_root():
+    """A root directory that is not a package or a named fixed-path resource.
+
+    The half of the rule that had no test. It is the easier half to drift, too:
+    adding a directory feels more deliberate than adding a file and is therefore
+    less likely to be questioned, and a directory holding two files reads as
+    permanent structure the moment it exists.
+    """
+    unlisted = sorted(_root_dirs() - set(ROOT_DIRS))
+    assert not unlisted, (
+        "these directories sit at the repository root without being packages or "
+        "declared fixed-path resources:\n  " + "\n  ".join(unlisted) + "\n\n"
+        "A package of application code belongs in ROOT_DIRS above (and in "
+        "`tests/_repo_scan.PACKAGE_ROOTS`, or every AST guard is blind to it). "
+        "Documentation, mockups, screenshots and one-off material belong under "
+        "`_Docs/`. If it really must sit at the root because something outside "
+        "Python reads it there, add it above with that reason written down.")
+
+
+def test_the_directory_roster_names_nothing_that_has_gone():
+    """The mirror image, for the same reason as the module roster."""
+    stale = sorted(name for name in ROOT_DIRS
+                   if not (REPO_ROOT / name).is_dir())
+    assert not stale, (
+        "ROOT_DIRS names directories that do not exist at the repository root, "
+        f"so these entries permit nothing and describe nothing: {', '.join(stale)}."
+        " Delete each one.")
 
 
 def test_the_roster_names_nothing_that_has_gone():

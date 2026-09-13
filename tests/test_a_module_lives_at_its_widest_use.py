@@ -55,32 +55,6 @@ PANE_ENTRY_POINTS = {
 #: root package that reaches back down into a pane is worse than the misplacement
 #: it was meant to fix.
 ALLOWED: dict[str, str] = {
-    "review/domain/selections_model.py":
-        "DEFERRED, not impossible — and the difference matters, because the "
-        "first version of this reason asserted the wrong one. Datasets' plate "
-        "merge reads and writes the same `sample_definitions` block through "
-        "`from_block` / `to_block` (one import site). This module conflates two "
-        "things: the **on-disk format** of that block — written by the "
-        "pipeline, read by Review, merged by Datasets — and **Review's model of "
-        "what a selection means for plotting**, which no other pane touches. "
-        "The split is real and measured: `from_block` / `to_block` need 21 of "
-        "this module's 36 functions, 463 of its 910 lines, and exactly one "
-        "other Review module (`plot_groups`, 90 lines, one internal import of "
-        "its own). The other five modules this file imports — plate_layout, "
-        "sample_variables, viewer_state, plot_members, batch_models — belong to "
-        "`well_colors`, `figure_names_map`, `groups_relabelled_on_figures` and "
-        "`active_replicate_sets`, none of which crosses a pane boundary. "
-        "Extracting the format half is a genuine piece of work with a seam to "
-        "get right, and it is owed. "
-        "\n\nWhat this row got wrong the first time is worth keeping, because "
-        "the exemption survived a review by being plausible: it counted the "
-        "*module*'s eleven imports of six modules and concluded that lifting it "
-        "meant lifting most of Review's domain layer. Measured, the transitive "
-        "closure is 8 of 37 domain modules and 3,066 of 12,198 lines — a "
-        "quarter, all Qt-free. A per-module count standing in for a "
-        "per-function one (§7.5 #9, in reverse), and a declined row that "
-        "misstates why is worse than no row at all: the next reader trusts it "
-        "instead of re-deriving it.",
     "review/core/tab_controller.py":
         "The title bar asks `current_centre_tab` which Review leaf is showing, "
         "to pick the help topic for it — a question only Review can answer "

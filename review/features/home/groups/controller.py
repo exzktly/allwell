@@ -181,11 +181,12 @@ def rep_quick_pairs(ctx) -> None:
         )
         if resp != QMessageBox.Yes:
             return
-    from review.domain.selections_model import make_selection
+    from domain.selections_format import make_selection
     used_names: set = set()
     used_ids: set = set()
     # A group is one condition; its wells are implicitly its replicate set, so
-    # no explicit ``replicates`` partition is stored (see selections_model).
+    # no explicit ``replicates`` partition is stored (see
+    # ``domain/selections_format.py``'s ``make_selection``).
     sels = [make_selection(name=s.name, wells=list(s.wells),
                            replicates=None,
                            name_is_verbatim=s.name_is_verbatim,

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from review.domain.plot_groups import filter_loaded_wells, validate_repair_plot_groups
+from domain.plot_groups import filter_loaded_wells, validate_repair_plot_groups
 from review.persistence import _doc
 
 _logger = logging.getLogger("review")

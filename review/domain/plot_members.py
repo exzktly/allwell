@@ -30,9 +30,7 @@ from __future__ import annotations
 
 from review.domain.batch_models import ReplicateSet
 from review.domain.plot_order import apply_order
-from review.domain.selections_model import (
-    active_replicate_sets, replicate_sets_loaded,
-)
+from review.domain.selections_model import active_replicate_sets, replicate_sets_loaded
 from review.domain.viewer_state import parse_rc
 
 

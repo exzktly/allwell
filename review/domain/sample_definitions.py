@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Iterable
 
-from review.domain import selections_model as _sel_model
+from domain import selections_format as _sel_model
 from review.domain.viewer_state import resolve_pipeline_info_path
 from review.persistence._io import defer_io, update_json_atomic
 

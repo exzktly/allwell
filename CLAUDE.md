@@ -277,10 +277,13 @@ core/                   cross-cutting APP infrastructure every pane shares and n
                         Nothing here may import a pane; the arrow runs one way and a
                         test says so
 domain/                 Qt-free models + pure logic more than ONE pane needs —
-                        image_identity, text_columns, tp_match. The bottom of the
-                        stack: may not import a pane, the GUI layers, or core/.
-                        Distinguished from core/ by subject — core/ is plumbing
-                        that owns no subject, this is All-Well's own nouns
+                        image_identity, text_columns, tp_match, selections_format
+                        + plot_groups (the on-disk sample_definitions block) and
+                        well_palette (the 96 rank colours baked into it, which
+                        ui/theme.py re-exports). The bottom of the stack: may not
+                        import a pane, the GUI layers, or core/. Distinguished
+                        from core/ by subject — core/ is plumbing that owns no
+                        subject, this is All-Well's own nouns
 widgets/                reusable Qt widgets, zero app coupling — incl. separator.py
 ui/                     app-level UI every pane shares and none owns —
                         theme.py (design tokens + QSS, never hardcode colours),

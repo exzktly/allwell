@@ -3,6 +3,11 @@
 Plot Groups are intentionally separate from Sample Definition selections:
 they are not replicate sets, do not affect stats/group aggregation, and only
 exist to reload a saved subset of wells into the live plate selection.
+
+They live here rather than in Review because they are a block of the on-disk
+``sample_definitions`` format — :func:`domain.selections_format.from_block`
+reads them and :func:`~domain.selections_format.to_block` writes them, so
+Datasets merges them on the same path it merges selections.
 """
 
 from __future__ import annotations
@@ -11,7 +16,7 @@ import uuid
 from typing import Any
 from collections.abc import Iterable
 
-from review.domain.selections_model import _clean_wells
+from domain.selections_format import _clean_wells
 
 
 def _mint_id(used: set[str]) -> str:

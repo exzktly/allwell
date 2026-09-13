@@ -4412,6 +4412,120 @@ def test_import_resolution_guard_clears_a_module_that_serves_names_dynamically(
     assert exc is None, f"a dynamic module was wrongly accused: {exc}"
 
 
+#: The module-object spelling of the same fact: the import resolves (the module
+#: is still there) and only the attribute read off it is gone. Four call sites
+#: in four files shipped this way when `selections_model` was split, past `ruff`,
+#: past the guard family, and past the name-by-name half of the import guard.
+MODULE_ATTR_VIOLATIONS = {
+    "module_scope": "from pkg import mod\nmod.gone()\n",
+    "aliased": "from pkg import mod as _m\n_m.gone()\n",
+    "function_local": "def f():\n    from pkg import mod as _m\n    return _m.gone()\n",
+    "private_name": "from pkg import mod as _m\n_m._gone()\n",
+    # `import pkg.mod as alias` — the spelling the guard's first version did not
+    # scan at all, worth 26 unchecked reads across 8 first-party sites.
+    "import_as": "import pkg.mod as _m\n_m.gone()\n",
+    # The same module imported under the same alias in several functions is this
+    # repository's dominant lazy-import idiom (`services/remote_runner.py` binds
+    # `run_journal` six times). The guard's first version dropped every
+    # multi-bound alias and so walked past exactly this.
+    "consistent_multi_binding": (
+        "def a():\n    from pkg import mod as _m\n    return _m.here()\n"
+        "def b():\n    from pkg import mod as _m\n    return _m.gone()\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(MODULE_ATTR_VIOLATIONS))
+def test_module_attribute_guard_catches_a_departed_symbol(tmp_path, monkeypatch, shape):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "mod.py").write_text("def here():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "user.py").write_text(
+        MODULE_ATTR_VIOLATIONS[shape], encoding="utf-8")
+
+    exc = _run_placement_scan(
+        monkeypatch, tmp_path, "tests.test_first_party_imports_resolve",
+        "test_every_module_attribute_resolves",
+        extra={"_FIRST_PARTY": {"pkg", "user"}})
+    assert exc is not None, f"the {shape} shape was not caught"
+    assert "pkg.mod" in str(exc), str(exc)
+
+
+def test_module_attribute_guard_clears_a_name_that_means_two_modules(
+        tmp_path, monkeypatch):
+    """The fail-closed half, and the one that decides whether the guard is usable.
+
+    `review/features/stats/controller.py` binds `_st` to `scipy.stats` in one
+    function and to `review.domain.stats_tests` in another. The scan has no
+    notion of scope, so a name bound more than once has to be skipped — reading
+    the second module's definitions against the first module's call sites
+    accused four scipy functions of not existing, which is how this case was
+    found.
+    """
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "mod.py").write_text("def here():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "user.py").write_text(
+        "def a():\n"
+        "    import math as _m\n"
+        "    return _m.sqrt(4)\n"
+        "def b():\n"
+        "    from pkg import mod as _m\n"
+        "    return _m.here()\n",
+        encoding="utf-8")
+
+    exc = _run_placement_scan(
+        monkeypatch, tmp_path, "tests.test_first_party_imports_resolve",
+        "test_every_module_attribute_resolves",
+        extra={"_FIRST_PARTY": {"pkg", "user"}})
+    assert exc is None, f"a twice-bound alias was wrongly accused: {exc}"
+
+
+#: Ways a module binds a name at module scope. The seam guard holding
+#: `domain/selections_format.py` apart from `review/domain/selections_model.py`
+#: collected only `def`/`class` in its first version and only
+#: `def`/`class`/`Assign`/`AnnAssign` in its second — a reviewer got the last
+#: three of these past it in one pass, which is CLAUDE.md §7.5 #2 twice over:
+#: a guard hardened against the one case someone named is hardened against one
+#: case. The last entry is what must NOT be collected, since a name bound
+#: inside a `def` is that function's, not the module's.
+MODULE_SCOPE_BINDINGS = {
+    "plain_assign": ("SCHEMA_VERSION = 3\n", True),
+    "annotated_assign": ("SCHEMA_VERSION: int = 3\n", True),
+    "tuple_target": ("SCHEMA_VERSION, _unused = 3, 0\n", True),
+    "starred_target": ("SCHEMA_VERSION, *_rest = (3, 0)\n", True),
+    "for_target": ("for SCHEMA_VERSION in (3,):\n    pass\n", True),
+    "nested_in_if": ("if True:\n    SCHEMA_VERSION = 3\n", True),
+    "nested_def": ("if True:\n    def SCHEMA_VERSION():\n        return 3\n", True),
+    "with_target": ("import contextlib\n"
+                    "with contextlib.suppress(Exception) as SCHEMA_VERSION:\n"
+                    "    pass\n", True),
+    "except_target": ("try:\n    pass\nexcept Exception as SCHEMA_VERSION:\n"
+                      "    pass\n", True),
+    "augmented": ("SCHEMA_VERSION = 1\nSCHEMA_VERSION += 2\n", True),
+    # Not module scope, and collecting it would accuse two modules of sharing a
+    # name because each happens to have a local called `wells`.
+    "function_local": ("def f():\n    SCHEMA_VERSION = 3\n    return SCHEMA_VERSION\n",
+                       False),
+    # Not a definition at all: Review's half *imports* well_rank and
+    # _clean_wells, which is the borrow the seam guard exists to bless.
+    "import_is_not_a_definition": ("from json import dumps as SCHEMA_VERSION\n", False),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(MODULE_SCOPE_BINDINGS))
+def test_the_seam_guard_sees_every_module_scope_binding(tmp_path, monkeypatch, shape):
+    from tests import test_selections_format_is_shared as seam
+
+    source, should_see = MODULE_SCOPE_BINDINGS[shape]
+    (tmp_path / "mod.py").write_text(source, encoding="utf-8")
+    monkeypatch.setattr(seam, "REPO_ROOT", tmp_path)
+
+    seen = "SCHEMA_VERSION" in seam._module_level_names("mod.py")
+    assert seen is should_see, (
+        f"the {shape} shape: the scan "
+        f"{'missed' if should_see else 'wrongly collected'} SCHEMA_VERSION")
+
+
 #: A path assembled from several literals where only the basename followed the
 #: file. The `.txt` case is the one the first version of the guard could not
 #: see at all, because it only inspected chains ending in `.py`.

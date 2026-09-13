@@ -5,7 +5,7 @@ means the well ``A01`` or a replicate set someone named ``A01``. The UI tried
 to carry that distinction in the text itself, appending ``" (well)"`` to the
 well entry, and the resolvers tried the suffixed spelling first. Both halves
 were reasonable and the scheme still cannot work, because replicate-set names
-are unrestricted free text — ``domain.selections_model._unique_name`` strips
+are unrestricted free text — ``domain.selections_format._unique_name`` strips
 whitespace and de-duplicates, and reserves no character at all. A user may name
 a set ``A01 (well)``, and then the combo offers that set under a label the
 resolvers read as "the well ``A01``": picking the set silently normalizes

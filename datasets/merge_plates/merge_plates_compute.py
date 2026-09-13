@@ -157,7 +157,7 @@ def merge_sample_definitions(info1: dict, info2: dict, *, well_map: dict[str, st
     names that collide with dataset 1's are disambiguated with the dataset-2
     folder name rather than overwriting the dataset-1 definition.
 
-    Both inputs go through :func:`selections_model.from_block`, which is the
+    Both inputs go through :func:`domain.selections_format.from_block`, which is the
     only thing in the codebase that knows how to read a saved block: it
     validates a current (v2) one and migrates a legacy (v1) one on the way in.
     Reading the raw ``rep_sets`` / ``groups`` keys directly — as this function
@@ -167,10 +167,10 @@ def merge_sample_definitions(info1: dict, info2: dict, *, well_map: dict[str, st
     group, well label, current selection and note from both datasets gone, and
     the merge reported as a clean success.
 
-    The output is built with :func:`selections_model.to_block`, so the merged
+    The output is built with :func:`domain.selections_format.to_block`, so the merged
     plate carries the same shape the app writes for any other plate.
     """
-    from review.domain.selections_model import from_block, to_block
+    from domain.selections_format import from_block, to_block
 
     sd1 = info1.get("sample_definitions") or {}
     sd2 = info2.get("sample_definitions") or {}

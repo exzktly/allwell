@@ -13,6 +13,16 @@ broken one is invisible until something actually imports the module — which, f
 a GUI built lazily, can be no test at all. Deciding it from the syntax tree costs
 a couple of seconds and needs nothing imported.
 
+The same fact has a second spelling, and it is the one that got away. A module
+imported as an *object* — `from review.domain import selections_model as _sel`,
+then `_sel.from_block(...)` — binds a name the first test resolves perfectly
+well, because the module does still exist; what moved is the attribute read off
+it. Splitting that module left six such attribute reads reaching for functions
+it no longer defined, across four files, and every one of them passed `ruff`,
+the guard family, and the first test in this file. (Six reads, four files — the
+count this guard produces, not the four the first draft of this sentence said.) `test_every_module_attribute_resolves`
+is the half that reads the attribute.
+
 **Every limitation here fails closed**, i.e. skips rather than accuses:
 
 * a module that defines `__getattr__` at module scope can serve any name (the
@@ -104,3 +114,132 @@ def test_every_first_party_import_names_something_that_exists():
         "not resolve imports across modules, so nothing else reports it until "
         "the module is imported at runtime — which, for a tab that builds "
         "lazily, may be no test at all.")
+
+
+def _module_object_aliases(tree: ast.Module) -> dict[str, str]:
+    """``alias -> dotted module`` for every ``from pkg import submodule`` here.
+
+    **A name is dropped when its bindings disagree**, not merely when there are
+    several of them. The scan walks the whole tree with no notion of scope, so a
+    name meaning two things in two functions means nothing it can check:
+    `features/stats/controller.py` binds `_st` to `scipy.stats` inside one
+    function and to `review.domain.stats_tests` inside another, and reading the
+    second module's definitions against the first one's call sites accused four
+    scipy functions of not existing.
+
+    Dropping every *multi*-bound alias was the first version of that rule and it
+    was far too blunt: per-function lazy importing is this repository's dominant
+    idiom, so the same module is routinely imported under the same alias in six
+    or nine different functions of one file — `services/remote_runner.py` binds
+    `run_journal` six times and reads eight attributes off it. Measured, the
+    blunt rule left 8 aliases and 39 attribute reads unchecked, every one of them
+    perfectly consistent, and it would have walked past the very defect this
+    guard was written for had `_sel` been imported in two functions rather than
+    one.
+
+    So the bindings are gathered per name: a name bound only by `from pkg import
+    mod` / `import pkg.mod` statements that all name **one** module is that
+    module; a name bound any other way, or to two different modules, is dropped.
+    Every binding form counts as a disagreeing one — an assignment, a parameter,
+    a `def`, a `class`, a `global`, a `with` or comprehension target, an
+    `except E as X`, a `case X:` — because none of them says which module the
+    name holds. The last two are handled explicitly: both bind a bare identifier
+    rather than an `ast.Name`, so the Store branch cannot see them, and this
+    sentence claimed `except` was covered before either was.
+    """
+    #: name -> the set of modules it is bound to; ``None`` in the set means a
+    #: binding that says nothing about which module (an assignment, a parameter).
+    bound: dict[str, set] = {}
+
+    def bind(name: str, dotted=None) -> None:
+        bound.setdefault(name, set()).add(dotted)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            # ``import pkg.mod`` binds ``pkg``; ``import pkg.mod as m`` binds ``m``
+            # to ``pkg.mod`` — the spelling the first version of this scan could
+            # not see at all, worth 26 unchecked reads across 8 first-party sites.
+            for a in node.names:
+                if a.asname:
+                    bind(a.asname, a.name if _module_path(a.name) else None)
+                else:
+                    bind(a.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for a in node.names:
+                if a.name == "*":
+                    continue
+                name = a.asname or a.name
+                dotted = (f"{node.module}.{a.name}"
+                          if node.module and not node.level else None)
+                bind(name, dotted if dotted and _module_path(dotted) else None)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bind(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bind(node.name)
+        elif isinstance(node, ast.arg):
+            bind(node.arg)
+        elif isinstance(node, ast.Global):
+            for name in node.names:
+                bind(name)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            # `except E as X` binds a bare identifier rather than an ast.Name,
+            # so it is invisible to the Store branch above. Same for `case X:`.
+            bind(node.name)
+        elif isinstance(node, ast.MatchAs) and node.name:
+            bind(node.name)
+
+    return {
+        name: next(iter(mods))
+        for name, mods in bound.items()
+        if len(mods) == 1 and next(iter(mods)) is not None
+        and next(iter(mods)).split(".")[0] in _FIRST_PARTY
+    }
+
+
+def test_every_module_attribute_resolves():
+    """``_sel.from_block`` where ``_sel`` is a module this repository defines.
+
+    The private names are checked like any other: ``_sel.block_is_v2`` is as
+    broken as ``_sel.from_block`` when the module stops defining it, and an
+    underscore is a convention about who *should* call it rather than a claim
+    that nobody does.
+    """
+    offenders: list[str] = []
+    cache: dict[str, set[str] | None] = {}
+
+    for path in python_sources():
+        tree = parse_source(path)
+        aliases = _module_object_aliases(tree)
+        if not aliases:
+            continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Attribute)
+                    and isinstance(node.value, ast.Name)
+                    and isinstance(node.ctx, ast.Load)):
+                continue
+            dotted = aliases.get(node.value.id)
+            if dotted is None:
+                continue
+            if dotted not in cache:
+                target = _module_path(dotted)
+                cache[dotted] = (
+                    _bindings(parse_source(target)) if target is not None else None)
+            bound = cache[dotted]
+            if bound is None:
+                continue                      # dynamic or star-importing: fail closed
+            if _module_path(f"{dotted}.{node.attr}") is not None:
+                continue                      # a submodule, not an attribute
+            if node.attr in bound or node.attr.startswith("__"):
+                continue
+            offenders.append(
+                f"{path.relative_to(REPO_ROOT)}:{node.lineno} reads "
+                f"`{node.value.id}.{node.attr}`, but `{dotted}` does not define "
+                f"`{node.attr}`")
+
+    assert not offenders, (
+        "these attribute reads name something their module does not define — an "
+        "AttributeError waiting for whatever first runs the line:\n  "
+        + "\n  ".join(sorted(set(offenders))) + "\n\n"
+        "A symbol moved and the call site did not follow. This is the form a "
+        "name-by-name sweep walks past: the *import* still resolves, because "
+        "the module is still there, and only the attribute is gone.")

@@ -1158,7 +1158,9 @@ def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, s
     the pooling and the colours are this function's own.
     """
     from review.domain.selections_model import (
-        _DEFAULT_COLOR, color_for_replicate_set, color_for_wells,
+        _DEFAULT_COLOR,
+        color_for_replicate_set,
+        color_for_wells,
     )
 
     selections = ctx.state.selection.selections

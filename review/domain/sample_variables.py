@@ -468,7 +468,7 @@ def names_for_well_sets(vset: VariableSet, well_sets) -> list[str]:
     nothing. Two sets that compose the same name — four replicates of one dose
     split into two groups, or a plate whose only variable is the dose — each get
     their wells appended, because the alternative is the ``_v2`` suffix
-    :func:`selections_model._unique_name` falls back to, and ``1 µM_v2`` says
+    :func:`domain.selections_format._unique_name` falls back to, and ``1 µM_v2`` says
     only that something else was called ``1 µM``. The wells say *which*
     replicates these are, which is the fact that tells two otherwise identical
     conditions apart.

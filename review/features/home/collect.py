@@ -855,7 +855,8 @@ def wells_named_on_figures(ctx) -> int:
     fact the *nudge* needs, and it is derived where the nudge reads it.
     """
     from review.domain.selections_model import (
-        LABEL_FROM_TOKEN, well_display_label_and_source,
+        LABEL_FROM_TOKEN,
+        well_display_label_and_source,
     )
 
     loaded = dict(getattr(getattr(ctx.state, "dataset", None),

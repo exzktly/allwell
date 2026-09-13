@@ -5,11 +5,14 @@ model, and the bookkeeping that keeps a multi-well drag coherent — the
 last-touched well, the previous-selection snapshot used to diff additions
 against removals, and the per-tick commit-coalescing flag.
 
-Composes ``review/selections_model.py``: that module owns the v2 schema,
+Composes ``domain/selections_format.py``: that module owns the v2 schema,
 validation / repair, v1→v2 migration, and colour assignment — ``SelectionState``
-reuses its functions rather than reimplementing them.
+reuses its functions rather than reimplementing them. It is the *shared* half of
+the saved-selections model, because Review writes that block and Datasets
+rewrites it on a plate merge; Review's own half, what a selection means on a
+figure, is ``review/domain/selections_model.py`` and nothing here needs it.
 
-Qt-free: imports only stdlib and ``selections_model``.
+Qt-free: imports only stdlib and ``selections_format``.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from review.domain.sample_variables import VariableSet
-from review.domain.selections_model import validate_repair
+from domain.selections_format import validate_repair
 
 
 @dataclass
@@ -29,7 +32,7 @@ class SelectionState:
     snapshot taken before the current interaction so :meth:`commit_plate_change`
     can diff additions against removals; ``last_sel`` is the most-recently
     touched well that diff resolves. ``selections`` is the saved-selections v2
-    list (schema in ``selections_model``); ``active_solo_wells`` are plotting-tab
+    list (schema in ``selections_format``); ``active_solo_wells`` are plotting-tab
     one-off wells drawn alongside the visible groups.
     """
 
@@ -94,7 +97,7 @@ class SelectionState:
 
     def validate(self) -> None:
         """Repair the saved-selections list in place (re-mint ids, resolve
-        name / colour collisions, default missing keys) via ``selections_model``,
+        name / colour collisions, default missing keys) via ``selections_format``,
         then drop a ``current_selection_id`` that no longer resolves."""
         self.selections = validate_repair(self.selections)
         ids = {s["id"] for s in self.selections}

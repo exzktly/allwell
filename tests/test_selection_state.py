@@ -66,7 +66,7 @@ def test_make_selection_collapses_replicate_partition_to_none():
     """A group is one condition — its wells are its implicit replicate set, so
     any incoming ``replicates`` sub-partition (multiple sub-sets / solo wells)
     is collapsed to ``None`` while the flat ``wells`` are preserved."""
-    from review.domain.selections_model import make_selection
+    from domain.selections_format import make_selection
     s = make_selection(name="G", wells=["A01", "A02", "A03"],
                        replicates=[["A01"], ["A02", "A03"]])
     assert s["replicates"] is None
@@ -76,7 +76,7 @@ def test_make_selection_collapses_replicate_partition_to_none():
 def test_validate_repair_drops_stored_partition():
     """A legacy on-disk block carrying a multi-sublist partition loads with the
     partition dropped (behaviour-inert — nothing downstream reads it)."""
-    from review.domain.selections_model import validate_repair
+    from domain.selections_format import validate_repair
     out = validate_repair([
         {"id": "g1", "name": "G", "wells": ["A01", "B01"],
          "replicates": [["A01"], ["B01"]]},

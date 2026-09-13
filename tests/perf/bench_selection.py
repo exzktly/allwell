@@ -190,7 +190,7 @@ def solo_selection(ctx, wells) -> None:
 
 def grouped_selection(ctx, n_groups: int, per_group: int) -> None:
     """Define *n_groups* replicate sets of *per_group* wells each."""
-    from review.domain.selections_model import validate_repair
+    from domain.selections_format import validate_repair
     sel = ctx.state.selection
     groups = []
     for g in range(n_groups):

@@ -47,7 +47,7 @@ def _reorder_selections_by_line_order(ctx) -> None:
     if not sels:
         return
     try:
-        from review.domain import selections_model as _sel
+        from domain import selections_format as _sel
         new = _sel.reorder_by_line_order(
             sels,
             rset_order=ctx.state.plot.line_order_rsets,

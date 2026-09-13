@@ -106,7 +106,7 @@ V2 = {
 
 # A real v1 block: ``members`` are rep-set *names*, resolved against
 # ``rep_sets``, and a group's wells are its members' wells plus its solo wells.
-# Written from what ``selections_model._resolve_v1`` actually reads rather than
+# Written from what ``domain.selections_format._resolve_v1`` actually reads rather than
 # from what a v1 file looks like in the imagination — an invented shape migrates
 # to an empty group and the test would then pass on nothing.
 V1 = {

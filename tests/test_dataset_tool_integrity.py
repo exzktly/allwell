@@ -33,7 +33,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # ── 1. a merge keeps both plates' sample definitions ────────────────────────
 
 def _v2_block(pairs, notes="", groups=()):
-    from review.domain.selections_model import make_selection, to_block
+    from domain.selections_format import make_selection, to_block
     used_names, used_ids, used_colors = set(), set(), set()
     sels = [
         make_selection(name=n, wells=w, replicates=None, hidden=False, color=None,

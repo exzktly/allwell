@@ -12,7 +12,7 @@ import logging
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from review.domain import selections_model as _sel
+from domain import selections_format as _sel
 
 _logger = logging.getLogger("review")
 

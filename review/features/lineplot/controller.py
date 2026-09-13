@@ -19,7 +19,8 @@ from review.domain.stats_compute import compute_rep_n_above_total
 from review.domain.stats_compute import replicate_unit
 from review.domain.plot_members import plot_replicate_sets
 from review.domain.selections_model import (
-    color_for_replicate_set, color_for_well,
+    color_for_replicate_set,
+    color_for_well,
     well_display_label,
 )
 from review.domain.viewer_state import parse_rc

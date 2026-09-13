@@ -2,8 +2,8 @@
 
 `domain/selections_format.py` owns the on-disk ``sample_definitions`` block and
 `review/domain/selections_model.py` owns what a selection means on a figure.
-The split only holds if two things stay true, and neither is visible to any
-test that exercises one side alone.
+The split only holds if four things stay true, and none of them is visible to
+any test that exercises one side alone.
 
 **One palette, not two.** A selection's ``color`` is baked from the rank of its
 lowest well and then *written to disk*. Review bakes it when someone makes a
@@ -21,6 +21,18 @@ fallback is gone and these tests are what keep a second list from growing back.
 **No name defined on both sides.** A helper that exists in both modules is the
 half-swept state CLAUDE.md §7.5 #5 describes: one concept, two spellings, and
 neither one looks wrong at its own site.
+
+**The logger stays parented under ``review``.** The format module's one warning
+is the only notice a user gets that a v1 migration dropped a group member, and
+the drawer they are watching takes its records from the ``review`` logger with
+``propagate = False``. Naming the logger after the package it now lives in —
+which is the obvious thing to do, and what shipped — routes it nowhere.
+
+**``rank_color`` survives an empty palette.** An exhausted iterator is truthy
+and lists to nothing, so the guard against it cannot be reasoned away as
+unreachable; it was, once, and the branch went back in. No caller in the
+application passes a palette, which is why this needs a test rather than a
+comment.
 """
 
 from __future__ import annotations

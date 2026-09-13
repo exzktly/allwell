@@ -716,9 +716,13 @@ A few rules of thumb so you know where to put something new:
 - **It's a reusable Qt widget with no All-Well-specific knowledge →**
   `widgets/`.
 - **It's a design token / colour / size →** `ui/theme.py` (chrome QSS + tokens,
-  including `CPub` for publication-mode plot colour and `WELL_COLORS_TUPLE`
-  for categorical well/trace identity — the single source of truth for
-  almost everything); never hardcode hex values in code. The two legacy tokens
+  including `CPub` for publication-mode plot colour — the single source of truth
+  for almost everything); never hardcode hex values in code. The exception is
+  the 96 well-rank colours, which live in `domain/well_palette.py` and are
+  re-exported here as `WELL_COLORS_TUPLE`: a selection's colour is baked from
+  its lowest well's rank and *written to disk*, where two panes both compute it,
+  so those are shared subject matter rather than screen chrome. A new colour
+  goes in `theme.py` unless it is going to end up in a data file. The two legacy tokens
   `get_color` reads sit in a marked block at the bottom of that module (see
   §8) — new colours never go there.
 

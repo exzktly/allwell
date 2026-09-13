@@ -141,8 +141,11 @@ def _module_object_aliases(tree: ast.Module) -> dict[str, str]:
     mod` / `import pkg.mod` statements that all name **one** module is that
     module; a name bound any other way, or to two different modules, is dropped.
     Every binding form counts as a disagreeing one — an assignment, a parameter,
-    a `def`, a `class`, a `global`, a `with` or `except` or comprehension target
-    — because none of them says which module the name holds.
+    a `def`, a `class`, a `global`, a `with` or comprehension target, an
+    `except E as X`, a `case X:` — because none of them says which module the
+    name holds. The last two are handled explicitly: both bind a bare identifier
+    rather than an `ast.Name`, so the Store branch cannot see them, and this
+    sentence claimed `except` was covered before either was.
     """
     #: name -> the set of modules it is bound to; ``None`` in the set means a
     #: binding that says nothing about which module (an assignment, a parameter).
@@ -178,6 +181,12 @@ def _module_object_aliases(tree: ast.Module) -> dict[str, str]:
         elif isinstance(node, ast.Global):
             for name in node.names:
                 bind(name)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            # `except E as X` binds a bare identifier rather than an ast.Name,
+            # so it is invisible to the Store branch above. Same for `case X:`.
+            bind(node.name)
+        elif isinstance(node, ast.MatchAs) and node.name:
+            bind(node.name)
 
     return {
         name: next(iter(mods))

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import ast
 import re
-from tests._repo_scan import python_sources, rel as _rel
+from tests._repo_scan import REPO_ROOT, python_sources, rel as _rel
 from tests._repo_scan import parse_source
 
 
@@ -278,6 +278,34 @@ def test_no_inline_pixel_sizes():
         "Review pane and Analyze and Datasets imported it across a package "
         "boundary to stay aligned:\n  " + "\n  ".join(sorted(offenders))
     )
+
+
+def test_the_colour_allowlist_is_live():
+    """An entry that names no file, or a file with no whole-hex literal left in
+    it, is an exemption that has stopped describing anything.
+
+    This list was the one allowlist in the file without such a test, which the
+    expression allowlist's own docstring already noted in passing. The branch
+    that added `domain/well_palette.py` here is what made it matter: it also had
+    to hand-remove a `review/domain/selections_model.py` entry whose palette had
+    been deleted, and nothing would have reported that entry had it been left
+    behind. §7.5 #10 — every allowlist pairs with a liveness test, because a
+    bare path in an exemption list is indistinguishable from one somebody added
+    to make a failure go away.
+    """
+    stale = []
+    for rel_path in sorted(COLOUR_ALLOWLIST):
+        path = REPO_ROOT / rel_path
+        if not path.is_file():
+            stale.append(f"{rel_path} — no such file")
+            continue
+        tree = parse_source(path)
+        if not any(isinstance(node, ast.Constant) and isinstance(node.value, str)
+                   and _HEX.match(node.value) for node in ast.walk(tree)):
+            stale.append(f"{rel_path} — no whole-hex literal left in it")
+    assert not stale, (
+        "These COLOUR_ALLOWLIST entries no longer exempt a real site — delete "
+        "each one:\n  " + "\n  ".join(stale))
 
 
 def test_the_expression_allowlist_is_live():

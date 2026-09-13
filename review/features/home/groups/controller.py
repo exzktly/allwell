@@ -185,7 +185,8 @@ def rep_quick_pairs(ctx) -> None:
     used_names: set = set()
     used_ids: set = set()
     # A group is one condition; its wells are implicitly its replicate set, so
-    # no explicit ``replicates`` partition is stored (see selections_model).
+    # no explicit ``replicates`` partition is stored (see
+    # ``domain/selections_format.py``'s ``make_selection``).
     sels = [make_selection(name=s.name, wells=list(s.wells),
                            replicates=None,
                            name_is_verbatim=s.name_is_verbatim,

@@ -521,6 +521,19 @@ else, or once a run has written there again.
     **Review → Image Browser → [Playground](#playground)**, which segments with
     these same two values and can open any image straight from disk — then type
     what worked into the two fields here.
+  - The Playground's **Threshold curve…** button answers the question this field
+    otherwise leaves you guessing at. It segments the frame on screen at nineteen
+    probability thresholds and plots how many nuclei each one finds, with a
+    dashed line where your current value sits. A value on a long flat stretch
+    means the detection is not sensitive to the exact number, so moving it a
+    little changes nothing; a value on the steep part means small changes move
+    the count a great deal, and is worth looking at the picture for. **It does
+    not suggest a threshold**, deliberately: every rule for picking one off this
+    curve that was tried either recommended detecting nothing or recommended the
+    number the field already starts at, for reasons to do with the shape of the
+    curve rather than with your plate. The sweep takes longer than a single
+    Segment, and **Stop** ends it early — whatever was measured up to that point
+    is still plotted.
 
 ### 5. Quality control — field flatness & background correction
 

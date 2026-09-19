@@ -118,7 +118,7 @@ def centre_crop(arr, size: int):
 
 
 def _resolve_at_thresholds(model, frame, thresholds, nms_thresh, should_stop,
-                           on_progress):
+                           on_progress) -> list[int] | None:
     """Counts via **one** inference plus a cheap resolve per threshold.
 
     StarDist's ``predict`` returns the probability map and the radial-distance

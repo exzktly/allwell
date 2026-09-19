@@ -70,8 +70,9 @@ bad: this module measures, and the Review side scores.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
-from scipy.ndimage import sobel
 
 # The one "merge a named block into the sidecar" writer. Borrowed rather than
 # re-implemented: a second atomic merge would be a second set of rules about
@@ -105,27 +106,197 @@ ACQUISITION_METRICS = ("focus", "sat_frac", "dyn_range")
 BIOLOGICAL_METRICS = ("nuc_count", "nuc_area_median", "bg_level")
 
 
-def focus_score(image) -> float | None:
-    """Normalised Tenengrad: gradient energy over image variance.
+#: Widest ring, in pixels, that the focus estimator reads around an outline.
+#: Swept 1-4 on nuclei of radius 8: separation improves up to 3 and flattens
+#: after.
+EDGE_BAND_PX = 3
 
-    Invariant to gain and to an additive pedestal, and near-flat in cell
-    count — the module docstring carries the measurements. Higher is sharper.
+#: How much of a nucleus's own radius the ring may take. A fixed 3 px band
+#: needs an interior left after eroding by ``w + 2``, so every nucleus under
+#: about 6 px radius returned ``None`` — measured, radius 4 and 6 were
+#: *entirely* unmeasurable while radius 8 and up were fine. That is a whole
+#: class of plate (small nuclei, low magnification, a binned camera) silently
+#: carrying no focus measurement at all, so the ring scales with the object
+#: and only falls back to the widest value where the nucleus can afford it.
+EDGE_BAND_RADIUS_FRAC = 0.34
 
-    ``None`` for a frame with no variance at all (a blank or saturated-flat
-    field), because the ratio is undefined there and zero is a measurement.
+#: Where in the ring the estimator reads. The edge's response is a *peak*, and
+#: a mean over the ring dilutes it with pixels that are not on the transition —
+#: measured, the mean form separates at 1.60x where the 95th percentile
+#: separates at 2.11x on the same fixtures.
+EDGE_PEAK_PCT = 95.0
+
+
+#: The per-cell column name. Prefixed like the other always-on per-cell
+#: quality columns (``qc_region_area``) rather than like a shape feature,
+#: because it is a property of the *imaging* rather than of the cell.
+FOCUS_COLUMN = "qc_edge_focus"
+
+
+def edge_focus(image, mask) -> float | None:
+    """How sharp one nucleus's own outline is. Higher is sharper.
+
+    **This is the per-cell focus measurement, and every part of it was chosen
+    by measurement against the alternatives.** The module docstring's table
+    carries the sweep; the short version:
+
+    ``sqrt(max(0, peak|∇²I|_edge² − peak|∇²I|_background²)) / contrast``
+
+    * **The Laplacian, not the gradient.** At a step edge blurred by a Gaussian
+      of width σ the peak gradient scales as ``1/σ`` while the peak Laplacian
+      scales as ``1/σ²`` — twice as sensitive in log terms. Measured over
+      σ 0→3: the gradient form spans 2.85×, this one 9.63×.
+    * **At the outline, not over the cell or the frame.** Defocus is a property
+      of the *optics*: it sets the width of the intensity transition at an
+      edge, and that width is the same whatever the object's size. This is what
+      removes the confounder that disqualifies every whole-image statistic
+      here — measured on *this* function, a fourfold nucleus-size range
+      (radius 4 to 16 px) spans **1.36×**, against **7.8×** for the
+      frame-level Tenengrad.
+    * **Divided by the cell's own contrast** (median inside minus median in a
+      ring outside), which removes gain and an additive pedestal exactly.
+    * **The background ring's own Laplacian subtracted in quadrature.** Noise
+      adds Laplacian energy, so a dim noisy cell reads as *sharper* than it is —
+      the false-negative direction, and the same defect that disqualified
+      ``var(laplace)/mean²`` at frame scale. The ring is already being read for
+      the contrast denominator, so the floor costs one extra percentile.
+      Without it this inverts above σ≈3, giving two very different focus states
+      one number; with it, monotone through σ≈3 and the drift over a
+      fifteenfold noise range falls from 1.86× to 1.31×.
+
+    **Absolutely comparable between cells, fields, wells and plates**, which is
+    the property the whole layer rests on: a score relative to its own frame
+    cannot see a frame that is uniformly soft, where every cell deviates from
+    its neighbours by nothing.
+
+    Measured on this function rather than on the probe that chose it: over
+    σ 0→3 the per-field median runs 0.3345, 0.2731, 0.1674, 0.1072, 0.0674,
+    0.0452 — monotone, spanning **7.4×**. Sharp fields and σ=2 fields separate
+    **2.71×** with nucleus radius varied from 4 to 16 px, and every nucleus at
+    or above the pipeline's own ``min_nucleus_area_px`` of 50 is measurable.
+
+    **It is not a severity scale past σ≈3.** Beyond that the outline has spread
+    wider than the ring that reads it and the background ring starts picking up
+    neighbours, so the value flattens and can come back a hair — 0.0467 against
+    0.0452 on a 256 px field, though not on a 320 px one. The bound is
+    acceptable because severe defocus is also where segmentation fails, so
+    there is frequently no outline left to read; it is recorded so nobody reads
+    the column as a ranking at the very soft end.
+
+    ``None`` — never ``0.0`` — when the outline cannot be measured: no contrast
+    across it, or too few pixels inside or outside to characterise either. A
+    cell that could not be measured and a cell measured and found soft are
+    different facts (CLAUDE.md §7).
     """
+    from scipy.ndimage import binary_dilation, binary_erosion, laplace
+
     arr = np.asarray(image, dtype=np.float64)
-    if arr.size == 0:
+    m = np.asarray(mask, dtype=bool)
+    if arr.shape != m.shape or not m.any():
         return None
     finite = np.isfinite(arr)
     if not finite.all():
         arr = np.where(finite, arr, 0.0)
-    var = float(np.var(arr))
-    if var <= 0.0:
+
+    w = _edge_band_for(int(m.sum()))
+    grown = binary_dilation(m, iterations=w)
+    band = grown & ~binary_erosion(m, iterations=w)
+    # One pixel clear of the ring on each side, not a fixed two and four: at
+    # the narrowest ring those offsets ate the whole interior of a nucleus at
+    # the smallest area the pipeline accepts (``min_nucleus_area_px`` 50, about
+    # 4 px radius), so it reported ``None`` for every cell on such a plate.
+    deep = binary_erosion(m, iterations=w + 1)
+    far = binary_dilation(m, iterations=w + 3) & ~grown
+    if band.sum() == 0 or deep.sum() < _EDGE_MIN_PX or far.sum() < _EDGE_MIN_PX:
         return None
-    gx = sobel(arr, axis=0)
-    gy = sobel(arr, axis=1)
-    return float(np.mean(gx * gx + gy * gy) / var)
+
+    contrast = float(np.median(arr[deep]) - np.median(arr[far]))
+    if contrast <= 0.0:
+        # A nucleus dimmer than its surroundings is not a focus measurement —
+        # it is a mask that does not describe this image.
+        return None
+
+    lap = np.abs(laplace(arr))
+    edge = float(np.percentile(lap[band], EDGE_PEAK_PCT))
+    floor = float(np.percentile(lap[far], EDGE_PEAK_PCT))
+    signal = edge * edge - floor * floor
+    if signal <= 0.0:
+        # The edge is indistinguishable from the noise in the background. Not
+        # zero sharpness — no measurement.
+        return None
+    return float(np.sqrt(signal) / contrast)
+
+
+#: Fewest interior (or exterior) pixels an outline needs before its contrast
+#: and noise floor mean anything.
+_EDGE_MIN_PX = 10
+
+
+def _edge_band_for(area_px: int) -> int:
+    """Ring half-width for a nucleus of *area_px*, at least 1 and at most
+    :data:`EDGE_BAND_PX`.
+
+    Taken from the equivalent radius rather than from the area directly, so
+    the ring is a fixed fraction of the distance from the outline to the
+    centre however the nucleus is shaped.
+    """
+    if area_px <= 0:
+        return 1
+    radius = math.sqrt(area_px / math.pi)
+    return int(max(1, min(EDGE_BAND_PX, round(radius * EDGE_BAND_RADIUS_FRAC))))
+
+
+def field_focus(cell_values) -> float | None:
+    """One field's focus, as the median of its cells' own outlines.
+
+    **This replaces a whole-frame statistic that could not work.** The first
+    implementation was a normalised Tenengrad over the entire frame, and two
+    measurements retired it:
+
+    * **Nucleus size moved it more than defocus did.** Over a fourfold radius
+      range on sharp frames it spanned **7.8×**, while the whole defocus signal
+      from σ 0 to 3 spanned **3.7×** — a confounder twice the size of the
+      signal, with sharp and blurred frames overlapping completely. A plate
+      with two cell lines, or one where confluence changes nuclear size between
+      conditions, would have read the difference as focus.
+    * **It barely noticed the case the layer is for.** A frame with half of it
+      blurred at σ=2 moved it only 14 % (27.44 → 23.59), against a flag that
+      fires at five MADs from the plate median.
+
+    Aggregating :func:`edge_focus` fixes both, because each cell's outline is a
+    property of the optics rather than of the cell. The median rather than the
+    mean, so a handful of mis-segmented outlines cannot drag a field's number.
+
+    ``None`` when no cell in the field could be measured — which is itself the
+    honest reading of a frame too soft to segment.
+    """
+    vals = [float(v) for v in (cell_values or ()) if v is not None]
+    if not vals:
+        return None
+    return float(np.median(np.asarray(vals, dtype=np.float64)))
+
+
+def cell_focus_by_label(image, labels) -> dict[int, float | None]:
+    """:func:`edge_focus` for every label, as ``{label_id: value | None}``.
+
+    One pass per label over a padded crop rather than over the whole frame:
+    measured at 323 ms for 400 nuclei on a 2048² frame, against seconds for
+    the segmentation of the same frame.
+    """
+    from scipy.ndimage import find_objects
+
+    lab = np.asarray(labels)
+    arr = np.asarray(image)
+    out: dict[int, float | None] = {}
+    if lab.shape != arr.shape or lab.size == 0:
+        return out
+    pad = EDGE_BAND_PX + 6  # the widest ring plus its outer background ring
+    for i, sl in enumerate(find_objects(lab), start=1):
+        if sl is None:
+            continue
+        box = tuple(slice(max(0, s.start - pad), s.stop + pad) for s in sl)
+        out[i] = edge_focus(arr[box], lab[box] == i)
+    return out
 
 
 def saturated_fraction(image, *, dtype_max: float | None) -> float | None:
@@ -187,14 +358,18 @@ def background_level(image, labels=None) -> float | None:
 
 
 def field_metrics(nuclear_image, *, labels=None, dtype_max: float | None = None,
-                  areas=None) -> dict:
+                  areas=None, cell_focus=None) -> dict:
     """Every metric for one field, as a plain dict keyed by :data:`METRIC_KEYS`.
 
-    *nuclear_image* is the frame the focus and spread metrics are read from —
-    the caller decides whether that is pre- or post-correction and records which,
-    because flat-field division rewrites the array in place
-    (``process_microscopy._correct_image_group``) and changes local variance
-    spatially, which is exactly what a focus metric reads.
+    *nuclear_image* is the frame the spread and background metrics are read
+    from — the caller decides whether that is pre- or post-correction and
+    records which, because flat-field division rewrites the array in place
+    (``process_microscopy._correct_image_group``) and rescales it spatially.
+
+    *cell_focus* is the field's per-cell :func:`edge_focus` values; ``focus``
+    is their median. It is not derived from *nuclear_image* at all, because
+    every whole-image focus statistic tried here confounded nucleus size with
+    defocus by more than the defocus signal itself — see :func:`field_focus`.
 
     Every value may be ``None``. That is the point: a metric that could not be
     computed is absent, never zero.
@@ -206,7 +381,7 @@ def field_metrics(nuclear_image, *, labels=None, dtype_max: float | None = None,
     else:
         median_area = None
     return {
-        "focus": focus_score(nuclear_image),
+        "focus": field_focus(cell_focus),
         "sat_frac": saturated_fraction(nuclear_image, dtype_max=dtype_max),
         "dyn_range": dynamic_range(nuclear_image),
         "bg_level": background_level(nuclear_image, lab),
@@ -216,12 +391,16 @@ def field_metrics(nuclear_image, *, labels=None, dtype_max: float | None = None,
 
 
 def group_record(*, acquisition: dict, labels, corrected_image, areas,
-                 fov: str = "", timepoint: str = "") -> dict:
+                 cell_focus=None, fov: str = "", timepoint: str = "") -> dict:
     """One FOV-group's quality record: the pre-correction half plus the rest.
 
     *acquisition* is what the loader measured **before** anything rewrote the
-    array — focus, saturation and dynamic range, in that state for the reasons
-    :func:`saturated_fraction` and the module docstring give. The three
+    array — saturation and dynamic range, in that state for the reasons
+    :func:`saturated_fraction` and the module docstring give. Focus is **not**
+    among them: it is the median of *cell_focus*, each read at a nucleus's own
+    outline after segmentation, because every whole-image focus statistic
+    confounded nucleus size with defocus by more than the signal
+    (:func:`field_focus`). The three
     biological metrics are measured here because they need the segmentation:
     the nucleus count and the median nuclear area come from *labels*, and the
     background level is the median of the pixels **outside** them on
@@ -247,6 +426,10 @@ def group_record(*, acquisition: dict, labels, corrected_image, areas,
         "nuc_area_median": (float(np.median(np.asarray(vals, dtype=np.float64)))
                             if vals else None),
         "bg_level": background_level(corrected_image, lab),
+        # Not measured from the image: the median of what each nucleus's own
+        # outline reported. See ``field_focus`` for the two measurements that
+        # retired the whole-frame statistic this replaces.
+        "focus": field_focus(cell_focus),
     }
     record.update(acquisition)
     return record

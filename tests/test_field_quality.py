@@ -20,7 +20,7 @@ from scipy.ndimage import gaussian_filter, laplace
 
 from pipeline.field_quality import (
     ACQUISITION_METRICS, BIOLOGICAL_METRICS, METRIC_KEYS,
-    background_level, dynamic_range, field_metrics, focus_score,
+    background_level, dynamic_range, field_metrics,
     saturated_fraction,
 )
 
@@ -50,89 +50,207 @@ def _laplacian_over_mean_squared(image):
     return float(np.var(laplace(arr)) / np.mean(arr) ** 2)
 
 
-# ── focus: the three things it must ignore, and the one it must not ─────────
+# ── focus, measured at each nucleus's own outline ───────────────────────────
+#
+# The first implementation was a normalised Tenengrad over the whole frame,
+# and two measurements retired it. Nucleus size moved it 7.8x over a fourfold
+# radius range against a defocus signal of 3.7x -- a confounder twice the
+# size of the signal, with sharp and blurred frames overlapping completely.
+# And a frame with half of it blurred at sigma 2 moved it only 14%, against a
+# flag that fires at five MADs from the plate median: it missed the case the
+# whole layer is for.
+#
+# ``edge_focus`` measures at the nucleus outline instead, because defocus is a
+# property of the OPTICS -- it sets the width of the intensity transition at
+# an edge, and that width is the same whatever the object's size. Every test
+# below is built so a right and a wrong statistic give different answers.
 
-def test_focus_is_invariant_to_exposure():
-    """Excludes ``var(laplace)/mean**2``, which spans 30x over this range.
 
-    Shot-noise variance scales with the gain, not with its square, and the
-    Laplacian amplifies it — so the "normalisation" does not normalise.
+def _discs(n_cells=14, radius=8.0, defocus=0.0, gain=1.0, pedestal=100.0,
+           noise=25.0, seed=0, size_px=256):
+    """A labelled field of discs -- an edge the estimator can actually read."""
+    r = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:size_px, 0:size_px]
+    lab = np.zeros((size_px, size_px), np.int32)
+    img = np.zeros((size_px, size_px), float)
+    placed, k = [], 0
+    for _ in range(n_cells * 12):
+        if len(placed) >= n_cells:
+            break
+        y, x = r.integers(int(radius) + 12, size_px - int(radius) - 12, 2)
+        if any((y - py) ** 2 + (x - px) ** 2 < (3.0 * radius) ** 2
+               for py, px in placed):
+            continue
+        placed.append((y, x))
+        k += 1
+        d = np.sqrt((yy - y) ** 2 + (xx - x) ** 2)
+        lab[d <= radius] = k
+        img += 3000.0 * (d <= radius)
+    img = gaussian_filter(img, 0.8)          # the objective's own PSF, always
+    if defocus:
+        img = gaussian_filter(img, defocus)
+    img = img * gain + pedestal + r.normal(0, noise * gain, img.shape)
+    return img, lab
+
+
+def _field(**kw):
+    """The field's focus: the median of its cells' outlines."""
+    from pipeline.field_quality import cell_focus_by_label, field_focus
+    img, lab = _discs(**kw)
+    return field_focus(cell_focus_by_label(img, lab).values())
+
+
+def test_focus_is_invariant_to_exposure_and_to_a_sensor_pedestal():
+    """Excludes any statistic whose normalisation does not normalise.
+
+    ``var(laplace)/mean**2`` -- the first thing specified -- spans 30x on gain
+    and ~700x on pedestal, because shot-noise variance scales with the gain
+    rather than its square and the Laplacian amplifies it. Dividing by the
+    cell's own inside-minus-outside contrast removes both exactly.
     """
-    values = [focus_score(_frame(gain=g)) for g in (0.25, 0.5, 1.0, 2.0, 4.0)]
-    assert max(values) / min(values) < 1.10
+    vals = [_field(gain=g) for g in (0.25, 0.5, 1.0, 2.0, 4.0)]
+    assert max(vals) / min(vals) < 1.10
+    vals = [_field(pedestal=p) for p in (0, 50, 100, 400, 1000)]
+    assert max(vals) / min(vals) < 1.10
 
-    rejected = [_laplacian_over_mean_squared(_frame(gain=g))
+    rejected = [_laplacian_over_mean_squared(_discs(gain=g)[0])
                 for g in (0.25, 4.0)]
     assert max(rejected) / min(rejected) > 5, (
         "the fixture must be wide enough that a confounded metric cannot hide")
 
 
-def test_focus_is_invariant_to_an_additive_sensor_pedestal():
-    """Excludes the same statistic, which spans ~700x over this range.
-
-    Every sCMOS has an offset; the rejected metric's denominator absorbs it
-    while its numerator does not.
-    """
-    values = [focus_score(_frame(pedestal=p)) for p in (0, 50, 100, 400, 1000)]
-    assert max(values) / min(values) < 1.10
-
-    rejected = [_laplacian_over_mean_squared(_frame(pedestal=p))
-                for p in (0, 1000)]
-    assert max(rejected) / min(rejected) > 50
-
-
 def test_focus_does_not_track_how_many_cells_are_in_the_field():
-    """The finding that decided the statistic, and the reason this layer can
-    be trusted near a cytotoxic compound.
+    """A metric that moves with cell count reports the wells where a cytotoxic
+    compound worked as out of focus."""
+    vals = [_field(n_cells=n) for n in (6, 14, 24)]
+    assert max(vals) / min(vals) < 1.15
 
-    A metric that moves with cell count reports the wells where the treatment
-    worked as out of focus.
+
+def test_focus_does_not_track_how_BIG_the_nuclei_are():
+    """The measurement that retired the whole-frame statistic.
+
+    Over a fourfold radius range the frame-level Tenengrad spans 7.8x while
+    the entire defocus signal spans 3.7x — so on a plate with two cell lines,
+    or where confluence changes nuclear size between conditions, it reads the
+    difference as focus. Measuring at the outline is what fixes it, and the
+    bar here is set below the defocus response asserted two tests down.
     """
-    values = [focus_score(_frame(n_cells=n)) for n in (20, 60, 120, 300)]
-    assert max(values) / min(values) < 1.10
+    vals = [_field(radius=r, n_cells=10) for r in (4.0, 6.0, 8.0, 12.0, 16.0)]
+    assert max(vals) / min(vals) < 1.5
 
-    rejected = [_laplacian_over_mean_squared(_frame(n_cells=n))
-                for n in (20, 300)]
-    # 2.9x on this 256px fixture; 6.7x on the 512px frames the module
-    # docstring's table was measured on. The bar is set to what *this* fixture
-    # produces rather than to the better number, so the test says something
-    # true about the frames it actually builds.
-    assert max(rejected) / min(rejected) > 2.5
-
-
-def test_focus_falls_monotonically_with_defocus():
-    values = [focus_score(_frame(defocus=d)) for d in (0.0, 1.0, 2.0, 4.0)]
-    assert values == sorted(values, reverse=True)
-    assert values[0] / values[-1] > 4, "and by enough to be a signal"
+    # And the fixture really does span a size range a confounded metric could
+    # not survive, or the assertion above says nothing (§7.8 rule 2).
+    blind = [float(np.var(laplace(_discs(radius=r, n_cells=10)[0])))
+             for r in (4.0, 16.0)]
+    # 2.2x on this 256px fixture. The bar is what *this* fixture produces, not
+    # the better number the module docstring's 512px table reports, so the
+    # test says something true about the frames it actually builds.
+    assert max(blind) / min(blind) > 2
 
 
-def test_sharp_and_defocused_fields_do_not_overlap_across_cell_counts():
+def test_focus_falls_monotonically_with_defocus_and_by_enough_to_matter():
+    """Monotone to σ=3; beyond that it flattens rather than continuing down.
+
+    Stated as what it is rather than as what would read better. On this 256 px
+    fixture σ=4 comes back a hair *above* σ=3 (0.0467 against 0.0452); on a
+    320 px one with the same discs it stays below. The cause is the same in
+    both: past σ≈3 the outline has spread beyond the ring that reads it and
+    the background ring is picking up the neighbouring cells, so the estimator
+    is measuring less and less of an edge.
+
+    That bound is acceptable and it is bounded: severe defocus is also where
+    segmentation fails, so there is often no outline to read at all, and the
+    ranking that matters — in focus against out of it — is intact with a
+    factor of seven between them. It is asserted here so nobody reads the
+    column as a severity scale past σ=3.
+    """
+    vals = [_field(defocus=d) for d in (0.0, 0.5, 1.0, 1.5, 2.0, 3.0)]
+    assert vals == sorted(vals, reverse=True), vals
+    assert vals[0] / vals[-1] > 5, "and by enough to be a signal"
+
+    # And past the monotone range it must still not climb back toward sharp.
+    beyond = _field(defocus=4.0)
+    assert beyond < vals[vals.index(max(vals))] / 5
+
+
+def test_sharp_and_defocused_fields_do_not_overlap_across_size_and_count():
     """The discriminative claim, stated as the separation it actually is.
 
-    Excludes the metric that merely *responds* to defocus: what matters is
-    whether the response is bigger than the spread caused by everything the
-    metric is supposed to ignore.
+    What matters is not that the metric responds to defocus but that the
+    response is bigger than the spread caused by everything it must ignore --
+    which is exactly where the frame-level statistic failed.
     """
-    sharp = [focus_score(_frame(n_cells=n, seed=s))
-             for n in (20, 120, 300) for s in range(2)]
-    blurred = [focus_score(_frame(n_cells=n, defocus=2.0, seed=s))
-               for n in (20, 120, 300) for s in range(2)]
-    assert min(sharp) > max(blurred)
+    sharp = [_field(radius=r, n_cells=n, seed=s)
+             for r in (4.0, 8.0, 16.0) for n in (8, 20) for s in (0, 1)]
+    soft = [_field(radius=r, n_cells=n, seed=s, defocus=2.0)
+            for r in (4.0, 8.0, 16.0) for n in (8, 20) for s in (0, 1)]
+    assert min(sharp) > max(soft)
+    assert min(sharp) / max(soft) > 2.0, "and with room to put a cut between"
 
 
-def test_a_frame_with_no_variance_has_no_focus_rather_than_zero():
-    """Undefined is not zero (CLAUDE.md §7 #3). A blank field and a field whose
-    focus was not measured must not read alike."""
-    assert focus_score(np.zeros((16, 16), np.float32)) is None
-    assert focus_score(np.full((16, 16), 7.0, np.float32)) is None
-    assert focus_score(np.zeros((0, 0))) is None
+def test_a_noisy_dim_cell_does_not_read_as_sharper_than_it_is():
+    """Excludes the raw boundary Laplacian, without its noise floor removed.
+
+    Noise adds Laplacian energy, so without subtracting the background ring's
+    own contribution a dim noisy cell reads as *sharper* — the false-negative
+    direction, and the same defect that disqualified ``var(laplace)/mean**2``
+    at frame scale. Measured, the drift over this range is 1.86x uncorrected
+    and 1.31x corrected.
+    """
+    vals = [_field(noise=q) for q in (10.0, 25.0, 75.0, 150.0)]
+    assert max(vals) / min(vals) < 1.4
+
+    # The defect, reproduced: skip the floor subtraction and the same range
+    # moves further. Without this the bar above could be met by a metric that
+    # ignores noise because it ignores the image.
+    from scipy.ndimage import binary_dilation, binary_erosion
+    raw = []
+    for q in (10.0, 150.0):
+        img, lab = _discs(noise=q)
+        m = lab == 1
+        band = binary_dilation(m, iterations=3) & ~binary_erosion(m, iterations=3)
+        far = binary_dilation(m, iterations=6) & ~binary_dilation(m, iterations=3)
+        deep = binary_erosion(m, iterations=4)
+        c = float(np.median(img[deep]) - np.median(img[far]))
+        raw.append(float(np.percentile(np.abs(laplace(img))[band], 95)) / c)
+    assert max(raw) / min(raw) > 1.5
 
 
-def test_focus_survives_a_frame_carrying_nan_or_inf():
-    arr = _frame()
-    arr[3, 3] = np.nan
-    arr[4, 4] = np.inf
-    assert focus_score(arr) is not None
+def test_an_outline_that_cannot_be_measured_reports_nothing_rather_than_zero():
+    """Undefined is not zero (§7 #3): a cell nobody could measure and a cell
+    measured and found soft must not read alike."""
+    from pipeline.field_quality import edge_focus, field_focus
+
+    flat = np.full((40, 40), 7.0, np.float32)
+    disc = np.zeros((40, 40), bool)
+    yy, xx = np.mgrid[0:40, 0:40]
+    disc[np.sqrt((yy - 20) ** 2 + (xx - 20) ** 2) <= 8] = True
+    assert edge_focus(flat, disc) is None, "no contrast is no measurement"
+    # A mask darker than its surroundings does not describe this image.
+    assert edge_focus(-flat, disc) is None
+    assert edge_focus(np.zeros((4, 4)), np.ones((4, 4), bool)) is None
+    assert field_focus([]) is None
+    assert field_focus([None, None]) is None
+    assert field_focus([None, 0.3, 0.5]) == 0.4
+
+
+def test_every_nucleus_the_pipeline_keeps_is_measurable():
+    """Excludes the ring that leaves the smallest nuclei with no interior.
+
+    A fixed 3 px ring needs an interior after eroding by ``w + 1``, and at the
+    pipeline's own ``min_nucleus_area_px`` of 50 (about 4 px radius) there is
+    none — so a plate of small nuclei, a low magnification or a binned camera
+    carried no focus measurement at all, silently. The ring scales with the
+    nucleus now.
+    """
+    from pipeline.field_quality import cell_focus_by_label
+
+    for radius in (4.0, 5.0, 6.0, 8.0, 16.0):
+        img, lab = _discs(radius=radius, n_cells=8)
+        got = cell_focus_by_label(img, lab)
+        measured = [v for v in got.values() if v is not None]
+        assert got and len(measured) == len(got), (
+            f"radius {radius}: {len(measured)}/{len(got)} measurable")
 
 
 # ── saturation: computable only where the dtype still exists ────────────────

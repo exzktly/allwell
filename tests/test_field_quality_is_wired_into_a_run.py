@@ -68,9 +68,14 @@ def stubbed_segmenter(monkeypatch):
     monkeypatch.setattr(
         pm, "_segment_image_group", lambda **k: (labels, None, None, None))
     monkeypatch.setattr(pm, "_write_processed_images", lambda **k: None)
+    # The records carry the per-cell focus column the real quantifier emits,
+    # because the field's ``focus`` is now the median of exactly these values
+    # rather than anything measured from the frame.
+    from pipeline.field_quality import FOCUS_COLUMN
     monkeypatch.setattr(
         pm, "_quantify_image_group",
-        lambda **k: [{"nucleus_id": i, "area": 100.0 * i} for i in (1, 2, 3)])
+        lambda **k: [{"nucleus_id": i, "area": 100.0 * i,
+                      FOCUS_COLUMN: 0.30 + 0.01 * i} for i in (1, 2, 3)])
     return labels
 
 
@@ -136,37 +141,86 @@ def test_saturation_is_measured_rather_than_defeated_by_the_float_cast(
     assert quality["sat_frac"] == pytest.approx(10 / 96, abs=1e-6)
 
 
-def test_focus_is_measured_before_the_correction_reshapes_the_variance(
-        tmp_path, stubbed_segmenter, monkeypatch):
-    """Excludes the focus number that describes the flat-field division.
+def test_the_fields_focus_is_the_median_of_its_cells_own_outlines(
+        tmp_path, stubbed_segmenter):
+    """Excludes the whole-frame focus statistic this replaced.
 
-    The correction divides by an illumination field and subtracts a
-    background; both change local variance, which is the whole of what a focus
-    metric reads. Measured afterwards the number would be partly about the
-    correction. This replaces the correction with one that blurs the array
-    beyond recognition and asserts the focus reported is the one the raw frame
-    has — a wrong implementation measuring post-correction cannot produce it.
+    The first implementation measured a normalised Tenengrad over the entire
+    frame, and two measurements retired it: nucleus size moved it 7.8× over a
+    fourfold radius range against a defocus signal of 3.7×, and a frame with
+    half of it blurred at σ=2 moved it only 14 %. The field's number is now
+    the median of what each nucleus's own outline reported, and each of those
+    is a property of the optics rather than of the cell.
+
+    The wrong implementation that would still pass "focus is a number" is any
+    function of the image, so this asserts the **exact median of the stubbed
+    per-cell values** — which no image statistic can produce by chance.
     """
-    from scipy.ndimage import gaussian_filter
-    from pipeline.field_quality import focus_score
-    from pipeline.io import load_2d_gray
-
     nuc, flu = _write_group(tmp_path)
     out = tmp_path / "out"
     out.mkdir()
-    raw_focus = focus_score(load_2d_gray(nuc))
+    records, quality = _run_group(nuc, flu, out)
 
-    def _wrecking_correction(nir_raw, fluor_raws, **kwargs):
-        wrecked = gaussian_filter(np.asarray(nir_raw, float), 6.0)
-        return wrecked, fluor_raws, wrecked, list(fluor_raws), list(fluor_raws)
+    from pipeline.field_quality import FOCUS_COLUMN
+    cells = sorted(r[FOCUS_COLUMN] for r in records)
+    assert quality["focus"] == pytest.approx(cells[len(cells) // 2])
+    assert quality["focus"] == pytest.approx(0.32)
 
-    monkeypatch.setattr(pm, "_correct_image_group", _wrecking_correction)
+
+def test_the_focus_column_is_absent_rather_than_zero_where_unmeasurable(
+        tmp_path, stubbed_segmenter, monkeypatch):
+    """A cell nobody could measure and a cell measured and found soft are
+    different facts (§7 #3), and so are a field of each."""
+    from pipeline.field_quality import FOCUS_COLUMN
+
+    monkeypatch.setattr(
+        pm, "_quantify_image_group",
+        lambda **k: [{"nucleus_id": i, "area": 100.0, FOCUS_COLUMN: None}
+                     for i in (1, 2, 3)])
+    nuc, flu = _write_group(tmp_path)
+    out = tmp_path / "out"
+    out.mkdir()
     _records, quality = _run_group(nuc, flu, out)
+    assert quality["focus"] is None, "no cell measurable is not focus zero"
 
-    assert quality["focus"] == pytest.approx(raw_focus, rel=1e-9)
-    # And the blur really would have moved it, or the assertion above is
-    # satisfied by a correction that changed nothing (§7.8 rule 2).
-    assert focus_score(gaussian_filter(load_2d_gray(nuc), 6.0)) < raw_focus / 2
+
+def test_the_real_quantifier_emits_a_focus_value_per_cell(tmp_path):
+    """Excludes the column that is declared and never written.
+
+    Drives the real ``_quantify_image_group`` — no stub — against a frame with
+    three discs, and asserts every cell got a number. The wrong implementation
+    this excludes is the one where the per-cell measurement lives in
+    ``field_quality`` and nothing in the pipeline calls it.
+    """
+    from scipy.ndimage import gaussian_filter
+    from pipeline.field_quality import FOCUS_COLUMN
+
+    n = 96
+    yy, xx = np.mgrid[0:n, 0:n]
+    labels = np.zeros((n, n), np.int32)
+    img = np.full((n, n), 300.0)
+    for k, (cy, cx) in enumerate(((24, 24), (24, 70), (70, 48)), start=1):
+        d = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+        labels[d <= 9] = k
+        img += 2500.0 * (d <= 9)
+    img = gaussian_filter(img, 0.8)
+
+    records = pm._quantify_image_group(
+        labels=labels, fluor_tophat=[img], fluor_tokens=["GFP"],
+        nir_corr=img, nuclear_path=Path("exp_DAPI_A01_f1_t0.tif"),
+        schema=SCHEMA, sep="_", shape_features=[])
+    assert len(records) == 3
+    got = [r.get(FOCUS_COLUMN) for r in records]
+    assert all(v is not None and v > 0 for v in got), got
+
+    # And a blurred copy of the same frame reports lower, which is the whole
+    # point — a column that is present but constant would pass the line above.
+    soft = pm._quantify_image_group(
+        labels=labels, fluor_tophat=[img], fluor_tokens=["GFP"],
+        nir_corr=gaussian_filter(img, 2.5),
+        nuclear_path=Path("exp_DAPI_A01_f1_t0.tif"),
+        schema=SCHEMA, sep="_", shape_features=[])
+    assert max(r[FOCUS_COLUMN] for r in soft) < min(got)
 
 
 # ── the well, and the gap a resume must not hide ────────────────────────────

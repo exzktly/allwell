@@ -124,6 +124,7 @@ def __getattr__(name: str):  # PEP 562: only fires for names not in globals()
 # is injected by ``_worker_init`` via ``set_model``). Re-exported so the
 # segmentation dispatch resolves them under this module too.
 import pipeline.field_quality as _field_quality
+from pipeline.field_quality import FOCUS_COLUMN  # noqa: F401 (re-exported)
 import pipeline.stardist as _stardist
 import pipeline.suspend as _suspend
 from pipeline.stardist import (
@@ -1146,7 +1147,6 @@ def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
 
     _t = time.perf_counter()
     acquisition = {
-        "focus": _field_quality.focus_score(nir_raw),
         "sat_frac": _field_quality.saturated_fraction(nir_raw,
                                                       dtype_max=_ceiling),
         "dyn_range": _field_quality.dynamic_range(nir_raw),
@@ -1514,6 +1514,16 @@ def _quantify_image_group(
     # on this region area catches the blob that per-cell size misses.
     region_by_id = compute_region_areas(nir_corr, labels)
 
+    # Per-cell focus (always emitted), measured at each nucleus's own outline.
+    # It is the one focus number that is comparable between cells, fields,
+    # wells and plates — see ``pipeline.field_quality.edge_focus`` for why a
+    # score relative to its own frame cannot see a frame that is uniformly
+    # soft, and why every whole-image statistic confounds nucleus size with
+    # defocus. Measured on ``nir_corr``, the frame the labels were computed
+    # from, so the outline the estimator reads is the outline that was
+    # segmented.
+    focus_by_id = _field_quality.cell_focus_by_label(nir_corr, labels)
+
     for i, nid in enumerate(nuc_ids):
         rec: dict = {
             **meta,
@@ -1528,6 +1538,12 @@ def _quantify_image_group(
             rec[f"{pfx}_std_intensity"]   = float(stdv[i])
         rec.update(shape_by_id.get(int(nid), {}))
         rec["qc_region_area"] = float(region_by_id.get(int(nid), 0.0))
+        # Absent rather than 0.0 where the outline could not be measured: a
+        # cell nobody could measure and a cell measured and found soft are
+        # different facts, and pandas reads the empty CSV field as NaN, which
+        # every reader already treats as "no verdict".
+        _focus = focus_by_id.get(int(nid))
+        rec[FOCUS_COLUMN] = None if _focus is None else float(_focus)
         records.append(rec)
     log.info("  quantify:    %.1f s  (%d nuclei)", time.perf_counter() - _t, len(records))
 
@@ -1653,6 +1669,7 @@ def process_image_group(
         labels=labels,
         corrected_image=nir_corr,
         areas=[r["area"] for r in records if r.get("area") is not None],
+        cell_focus=[r.get(FOCUS_COLUMN) for r in records],
         fov=parsed.get("fov", ""),
         timepoint=parsed.get("timepoint", ""),
     )

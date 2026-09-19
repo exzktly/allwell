@@ -406,6 +406,81 @@ def finalize_field_quality(output_dir, info_path, *, atomic_writer, log) -> None
         log.warning("Could not record field quality: %s", exc)
 
 
+# ── Remote fetch: the sidecar is overwritten, the block must not be ─────────
+
+def read_field_quality_block(info_path) -> dict | None:
+    """The ``field_quality`` block currently in *info_path*, or ``None``."""
+    path = Path(info_path)
+    if not path.exists():
+        return None
+    try:
+        info = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    block = info.get(FIELD_QUALITY_BLOCK) if isinstance(info, dict) else None
+    return block if isinstance(block, dict) else None
+
+
+def merge_fetched_field_quality(info_path, prior_block: dict | None) -> bool:
+    """Fold *prior_block* back into the sidecar a remote fetch just overwrote.
+
+    The same defect :func:`pipeline.run_report.merge_fetched_run_report`
+    exists for, one block over, and worse here. A remote output directory
+    starts empty, so the sidecar a remote run writes covers only the wells
+    that run processed — on an incremental run, only the ones the upload split
+    sent. Pulling that file over the local one replaces a whole plate's
+    measurements with a handful.
+
+    For coverage records that loses history. For field quality it produces a
+    **wrong number**: the acquisition metrics are scored as robust z against
+    the plate, so a block silently reduced to the eight wells a remote
+    incremental run touched gives every one of those wells a z computed
+    against its own eight-well median. Nothing in the artifact would say so,
+    and the shortfall accounting cannot catch it either — each of those wells
+    is individually complete, so ``partial_wells`` stays empty and the scorer
+    proceeds.
+
+    Fetched records win per well (they are this run's, and newer); prior
+    records survive for every well the fetched block does not mention. The
+    derived fields are recomputed from the merged map rather than merged
+    themselves, so they cannot disagree with the wells they summarise.
+    Returns True iff the file was rewritten.
+    """
+    if not prior_block:
+        return False
+    path = Path(info_path)
+    try:
+        info = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(info, dict):
+        return False
+    fetched = info.get(FIELD_QUALITY_BLOCK)
+    fetched_wells = fetched.get("wells") if isinstance(fetched, dict) else None
+    prior_wells = prior_block.get("wells")
+    if not isinstance(prior_wells, dict):
+        return False
+    merged = dict(prior_wells)
+    if isinstance(fetched_wells, dict):
+        merged.update(fetched_wells)
+    if merged == fetched_wells:
+        return False
+    info[FIELD_QUALITY_BLOCK] = {
+        "wells": merged,
+        "partial_wells": sorted(w for w, r in merged.items()
+                                if well_is_partial(r)),
+        "measured": sum(int((r or {}).get("measured", 0))
+                        for r in merged.values()),
+        "measured_of": sum(int((r or {}).get("measured_of") or 0)
+                           for r in merged.values()) or None,
+    }
+    try:
+        path.write_text(json.dumps(info, indent=2))
+    except OSError:
+        return False
+    return True
+
+
 def records_for_scoring(block: dict | None) -> list[dict]:
     """Flatten a collected block into the rows the Review-side scorer takes.
 

@@ -137,7 +137,10 @@ def field_quality_status_text(ctx) -> tuple[str, bool]:
       filter looks exactly like a well that passed it.
     * **nothing flagged** — said plainly, because it is a real result.
 
-    Returns the text plus whether it should be styled as a problem. A pure
+    Returns the text plus whether it should be styled as a problem. Only the
+    middle two are problems: a **finding** is a result, not a failure, and
+    dressing "1 of 18 field(s) flagged" in the same amber as "this plate
+    cannot be scored" collapses the distinction the registers exist for. A pure
     function of ``ctx``, in the data layer, so the panel formats it and does
     not re-derive it (a second derivation is a second chance to describe
     something that did not happen).
@@ -176,7 +179,13 @@ def field_quality_status_text(ctx) -> tuple[str, bool]:
         return (f"{base} {len(untrusted)} well(s) cannot be filtered because "
                 f"their FOV labels do not identify their fields ({shown}) — "
                 f"every row there is kept whatever this is set to.", True)
-    return (base, bool(flagged))
+    # A finding is NOT a problem. The three registers exist so a reader can
+    # tell a refusal from a result at a glance; returning True here made "1 of
+    # 18 field(s) flagged" wear the same amber band as "this plate cannot be
+    # scored", which is the conflation the registers are for. Amber is
+    # reserved for the two states where the software could not do the thing
+    # asked of it: a plate it may not score, and wells it may not filter.
+    return (base, False)
 
 
 def flagged_by_well(ctx) -> dict[str, str]:

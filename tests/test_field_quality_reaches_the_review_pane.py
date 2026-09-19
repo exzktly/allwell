@@ -194,11 +194,27 @@ def test_a_dataset_with_no_block_filters_nothing_and_says_which():
 # ── what the panel says ─────────────────────────────────────────────────────
 
 def test_the_panel_names_what_was_flagged_and_how_many():
+    """And a finding is not styled as a problem.
+
+    The three registers exist so a reader can tell a refusal from a result at
+    a glance. Returning ``True`` here put "1 of 18 field(s) flagged" in the
+    same amber band as "this plate cannot be scored" — the exact conflation
+    the registers are for, and visible the moment the panel was rendered.
+    """
     ctx = _ctx(_block(bad_well="A02"))
     text, problem = fq.field_quality_status_text(ctx)
     assert "1 of 18 field(s) flagged" in text
     assert "focus" in text
-    assert problem is True
+    assert problem is False, "a finding is a result, not a failure"
+
+    # The two states that ARE problems, for contrast — an assertion that only
+    # says "False" is satisfied by a function that always returns False.
+    _, partial = fq.field_quality_status_text(_ctx(_block(partial=True)))
+    assert partial is True
+    _, untrusted = fq.field_quality_status_text(_ctx(
+        _block(), integrity={"B01": FovIntegrity(trusted=False, n_labels=1,
+                                                 n_images=3, reason="x")}))
+    assert untrusted is True
 
 
 def test_an_untrusted_well_is_named_even_when_nothing_was_flagged():
@@ -435,6 +451,42 @@ def test_a_reload_refills_the_control_from_the_params(qtbot):
     assert w["exclude_flagged_fields"].isChecked() is False
 
 
+def test_a_load_refreshes_the_sentence_not_just_the_controls(qtbot):
+    """Excludes the panel that keeps the previous dataset's answer.
+
+    The sentence is a fact about the **dataset**, not about the params, so it
+    is the one thing on this panel that a load changes without any control
+    moving. ``qc_gate_refresh_widgets`` refilled the widget *values* and left
+    it alone — caught by rendering the panel with a block injected and reading
+    "This dataset was analysed before field quality was recorded" over a plate
+    whose block was right there.
+
+    The wrong implementation that passes every other test in this file is
+    exactly that one, because every other test reads the sentence on a panel
+    that was built with its block already in place.
+    """
+    from PySide6.QtWidgets import QWidget
+
+    from review.features.qc.tab_view import (
+        build_qc_gate_controls, qc_gate_refresh_widgets,
+    )
+
+    app = _panel_ctx(None)                      # built with no block at all
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    qtbot.addWidget(build_qc_gate_controls(app._ctx, parent))
+    w = app._qc_gate_widgets
+    assert "before field quality was recorded" in w["field_quality_status"].text()
+    assert w["exclude_flagged_fields"].isEnabled() is False
+
+    # A dataset load puts a block in place and re-fills the panel.
+    app._app_state.dataset.pipeline_info[FIELD_QUALITY_BLOCK] = _block(
+        bad_well="A02")
+    qc_gate_refresh_widgets(app)
+    assert "1 of 18 field(s) flagged" in w["field_quality_status"].text()
+    assert w["exclude_flagged_fields"].isEnabled() is True
+
+
 def test_the_toggle_survives_a_save_and_load(tmp_path):
     """It rides the QC params' existing persistence, so a plate reopened
     filters the way it was left."""
@@ -467,3 +519,51 @@ def test_a_metric_with_no_spread_reports_nothing_rather_than_zero():
     # satisfied by a function that always returns None.
     zs, _ = robust_z([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 40.0])
     assert zs[-1] is not None and abs(zs[-1]) > 3
+
+
+def test_the_marker_gets_a_legend_row_when_the_plate_carries_one():
+    """Excludes the glyph nobody can look up.
+
+    The plate's own invariant is that no well is left without a row to explain
+    it — that is why every state keeps its legend entry even at a count of
+    zero. A marker with no entry breaks it exactly as two states sharing a
+    colour would, and the render is where it showed: an ``!`` on A02 and eight
+    legend rows, none of them about markers.
+
+    Asserted on what reached the layout, not on the branch being present.
+    """
+    from PySide6.QtWidgets import QGridLayout, QLabel, QWidget
+
+    from review.features.home import controller as hcon
+    from review.features.home.plate_panel import FLAGGED_FIELD_GLYPH
+
+    def _legend_texts(block):
+        host = QWidget()
+        QGridLayout(host)
+        ctx = _ctx(block)
+        plate = SimpleNamespace(
+            setEnabledWells=lambda *_a: None,
+            clearWellColors=lambda: None, clearWellFractions=lambda: None,
+            clearWellMarkers=lambda: None,
+            setWellState=lambda *_a: None, setWellFraction=lambda *_a: None,
+            setWellMarker=lambda *_a: None,
+            setWellTooltipProvider=lambda *_a: None)
+        widgets = {"_home_plate": plate, "_home_legend": host,
+                   "_home_plate_summary": QLabel()}
+        orig_widget, orig_clear = hcon._widget, hcon._clear
+        try:
+            hcon._widget = lambda _c, name: widgets.get(name)
+            hcon._clear = lambda _h: None
+            hcon._paint_plate(ctx)
+        finally:
+            hcon._widget, hcon._clear = orig_widget, orig_clear
+        return [c.text() for c in host.findChildren(QLabel)]
+
+    with_flag = _legend_texts(_block(bad_well="A02"))
+    assert FLAGGED_FIELD_GLYPH in with_flag
+    assert "Field flagged on image quality" in with_flag
+
+    # And no row when there is nothing to explain — a legend entry for a mark
+    # the plate does not carry is its own kind of noise.
+    clean = _legend_texts(_block())
+    assert "Field flagged on image quality" not in clean

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ui import theme
@@ -24,7 +24,9 @@ from review.core.selection_controller import (
 
 from . import collect as hc
 from review.data.field_quality_cache import flagged_by_well
-from .plate_panel import paint_field_quality, paint_plate, well_tooltip
+from .plate_panel import (
+    FLAGGED_FIELD_GLYPH, paint_field_quality, paint_plate, well_tooltip,
+)
 # The Sample Map tab's layer: which one is showing, and the entry rules for it.
 # Module scope, because nothing under ``home/sample_map`` imports this module
 # back — there is no cycle here to work around, and the deferred-feature-import
@@ -456,6 +458,20 @@ def _paint_plate(ctx) -> None:
         value = QLabel(str(count), host)
         value.setObjectName("Muted" if not count else "")
         layout.addWidget(value, index, 2)
+    # The marker gets a legend row of its own, and only when the plate carries
+    # one. The plate's own invariant is that no well can be left without a row
+    # to explain it; a glyph nobody can look up breaks that just as surely as
+    # two states sharing a colour would. It is listed last and with the glyph
+    # in place of a swatch, because it is a different channel rather than a
+    # ninth colour — see ``plate_panel.FLAGGED_FIELD_GLYPH``.
+    if quality:
+        row = len(hc.plate_legend(ctx))
+        mark = QLabel(FLAGGED_FIELD_GLYPH, host)
+        mark.setFixedSize(theme.Spacing.md, theme.Spacing.md)
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(mark, row, 0)
+        layout.addWidget(QLabel("Field flagged on image quality", host), row, 1)
+        layout.addWidget(QLabel(str(len(quality)), host), row, 2)
 
     totals = ((ctx.state.dataset.pipeline_info or {}).get("run_check") or {}
               ).get("totals") or {}

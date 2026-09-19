@@ -33,6 +33,14 @@ from ui import theme
 # written inline at a call site).
 _GRID_INDENT = 18
 _QUANTITY_LBL_W = 92
+#: How wide the field-quality sentence is allowed to run.
+#:
+#: Unconstrained it fills the panel — about 1,200 px on a normal window —
+#: while every control above it stops around 700, so a note attached to the
+#: checkbox above read as a page-wide alert. ``QLabel#Notice`` paints a wash
+#: and a left rule, which makes the difference obvious; the render is where it
+#: showed. Sized to the controls it sits under rather than to the panel.
+_FQ_TEXT_W = 700
 
 
 def _fmt(v: float | None) -> str:
@@ -183,6 +191,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     fq_layout.addWidget(fq_head)
     fq_status = QLabel("", fq)
     fq_status.setWordWrap(True)
+    fq_status.setMaximumWidth(_FQ_TEXT_W)
     fq_layout.addWidget(fq_status)
     outer.addWidget(fq)
 
@@ -239,19 +248,9 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
             status.setText(f"flagged {n_excl:,} / {n_tot:,}")
 
     def _update_field_quality_status() -> None:
-        text, problem = field_quality_status_text(ctx)
-        fq_status.setText(text)
-        # Three registers, because the three states are genuinely different and
-        # a reader who cannot tell them apart is the failure this subsystem is
-        # for: a refusal (amber, it says what it could not do), a finding
-        # (the app's normal text — something was flagged), and "nothing to say"
-        # (muted). The checkbox is disabled where there is nothing to apply, so
-        # a control that would do nothing does not look live.
-        fq_status.setObjectName("Notice" if problem
-                                else ("" if text else "Muted"))
-        fq_status.style().unpolish(fq_status)
-        fq_status.style().polish(fq_status)
-        fq_cb.setEnabled(bool(field_quality_block(ctx)))
+        _refresh_field_quality_status(
+            ctx, {"field_quality_status": fq_status,
+                  "exclude_flagged_fields": fq_cb})
 
     def _apply() -> None:
         _sync_enabled()
@@ -293,6 +292,32 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     return row
 
 
+def _refresh_field_quality_status(ctx, w) -> None:
+    """Re-read the dataset's field-quality block into the panel's sentence.
+
+    Shared by the builder's own handler and by
+    :func:`qc_gate_refresh_widgets`, so the panel cannot say one thing when it
+    is built and another when it is refilled.
+
+    Three registers, because the three states are genuinely different and a
+    reader who cannot tell them apart is the failure this subsystem exists to
+    prevent: a refusal (amber, it says what it could not do), a finding (the
+    app's normal text), and nothing to say (muted). The checkbox is disabled
+    where there is nothing to apply, so a control that would do nothing does
+    not look live.
+    """
+    label = w.get("field_quality_status")
+    box = w.get("exclude_flagged_fields")
+    if label is None or box is None:
+        return
+    text, problem = field_quality_status_text(ctx)
+    label.setText(text)
+    label.setObjectName("Notice" if problem else ("" if text else "Muted"))
+    label.style().unpolish(label)
+    label.style().polish(label)
+    box.setEnabled(bool(field_quality_block(ctx)))
+
+
 def qc_gate_refresh_widgets(win) -> None:
     """Re-fill the embedded gate row from the current params (after a load /
     external change). No-op when the Cell Gating tab hasn't been built.
@@ -330,3 +355,9 @@ def qc_gate_refresh_widgets(win) -> None:
     on = bool(p.enabled)
     for k in edit_keys:
         w[k].setEnabled(on)
+    # And the field-quality sentence, which is a fact about the **dataset**
+    # rather than about the params — so it is the one thing on this panel that
+    # a load changes without any control moving. Refilling only the widget
+    # *values* left it reading "analysed before field quality was recorded"
+    # over a plate whose block was right there, which the render caught.
+    _refresh_field_quality_status(win._ctx, w)

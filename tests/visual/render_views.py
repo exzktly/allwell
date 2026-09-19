@@ -15,6 +15,7 @@ empty / placeholder state — that is intentional audit coverage of empty states
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import tempfile
@@ -240,7 +241,15 @@ def capture_review(app) -> None:
     print("[threshold curve]")
     _capture_threshold_curve(app, w)
 
-    # 14) Help drawer dialog.
+    # 14) Field quality, on the two surfaces that carry it: the Cell Gating
+    # panel's control and sentence, and the Home plate's marker. Rendered with
+    # a block on screen rather than in the resting state — the whole feature
+    # IS the readout, and an empty-state grab shows nothing a grab taken
+    # before it existed would not.
+    print("[field quality]")
+    _capture_field_quality(app, w, rev)
+
+    # 15) Help drawer dialog.
     print("[dialogs]")
     try:
         w._toggle_help_drawer()
@@ -250,6 +259,97 @@ def capture_review(app) -> None:
         print(f"  help drawer skipped: {exc}")
 
     w.close()
+
+
+def _capture_field_quality(app, w, rev) -> None:
+    """Grab the Cell Gating panel and the Home plate with flags present.
+
+    The block is injected into ``dataset.pipeline_info`` rather than produced
+    by a run, for the same reason the threshold curve's counts are synthetic:
+    this session installs no TensorFlow, and it is the **drawing** a reviewer
+    has to see. The numbers are the shape a real plate produces — six wells,
+    three fields each, one field badly out of focus.
+    """
+    from pipeline.field_quality import FIELD_QUALITY_BLOCK
+
+    wells = ("A01", "A02", "A03", "B01", "B02", "B03")
+    block_wells = {}
+    for idx, well in enumerate(wells):
+        fields = []
+        for fov in range(3):
+            focus = 27.0 + idx * 0.05 + fov * 0.01
+            if well == "A02" and fov == 1:
+                focus = 2.0
+            fields.append({"fov": str(fov + 1), "timepoint": "0",
+                           "focus": focus, "sat_frac": 0.0,
+                           "dyn_range": 900.0 + fov, "nuc_count": 300 + fov,
+                           "nuc_area_median": 150.0 + fov,
+                           "bg_level": 100.0 + fov})
+        block_wells[well] = {"well": well, "fields": fields,
+                             "measured": 3, "measured_of": 3}
+    block = {"wells": block_wells, "partial_wells": [],
+             "measured": 18, "measured_of": 18}
+
+    info = rev._app_state.dataset.pipeline_info
+    prior = info.get(FIELD_QUALITY_BLOCK)
+    info[FIELD_QUALITY_BLOCK] = block
+    try:
+        # Cell Gating is a sub-tab of Home, not a rail page of its own, so
+        # ``goto`` cannot reach it — it returned False and this grab was
+        # silently skipped on the first run, which is the failure this whole
+        # section is about wearing a harness costume. Say so rather than
+        # producing a shorter manifest nobody counts.
+        if not goto(app, rev, "Home"):
+            print("  field quality skipped: Home page not reachable")
+            return
+        tab = _inner_tab(rev, "Cell Gating")
+        if tab is None:
+            print("  field quality gate skipped: no Cell Gating sub-tab")
+        else:
+            rev._drain_pending_centre_builders()
+            # The panel was already built by the Home sub-tab sweep above,
+            # before this block was injected, so selecting the tab is not
+            # enough — the sentence is a fact about the dataset and only the
+            # refresh re-reads it.
+            # ``rev``, not ``w``. The widget registry stamps its handles on
+            # the ReviewApp; ``w`` is the top-level window, has no
+            # ``_qc_gate_widgets``, and ``qc_gate_refresh_widgets`` returns
+            # silently for a host that has none — so passing it produced a
+            # byte-identical screenshot and a refresh that never ran. Not
+            # suppressed either: a refusal to refresh is the one thing this
+            # grab exists to show, and swallowing the reason is how the first
+            # version of it went unnoticed.
+            from review.features.qc.tab_view import qc_gate_refresh_widgets
+            qc_gate_refresh_widgets(rev)
+            settle(app, 350)
+            grab(w, "72-field-quality-gate",
+                 "Cell Gating — the run's own field-quality verdicts, "
+                 "reported and not yet applied")
+        if _inner_tab(rev, "Overview") is not None:
+            from review.features.home.controller import refresh_home
+            with contextlib.suppress(Exception):
+                refresh_home(rev._ctx)
+            settle(app, 350)
+            grab(w, "73-field-quality-plate",
+                 "Home plate — a flagged well marked on the glyph channel, "
+                 "leaving the closed colour vocabulary alone")
+    finally:
+        if prior is None:
+            info.pop(FIELD_QUALITY_BLOCK, None)
+        else:
+            info[FIELD_QUALITY_BLOCK] = prior
+
+
+def _inner_tab(rev, title: str):
+    """Select the inner ``QTabWidget`` tab named *title*; ``None`` if absent."""
+    for tw in rev.findChildren(QTabWidget):
+        if not tw.isVisible():
+            continue
+        for i in range(tw.count()):
+            if tw.tabText(i).strip() == title:
+                tw.setCurrentIndex(i)
+                return tw
+    return None
 
 
 def _capture_threshold_curve(app, w) -> None:

@@ -1014,13 +1014,19 @@ def _thr_text(value) -> str:
     return "model" if value is None else f"{float(value):g}"
 
 
-def _seg_key(ctx) -> tuple:
+def _seg_key(ctx, *, with_prob_thresh: bool = True) -> tuple:
     """Identity of what a set of live labels describes.
 
     Everything that decides the pixels StarDist is fed (the frame, the display
     stage, the correction and its parameters) plus the two thresholds. Derived
     from state alone — no array ``id()`` — so it stays comparable across the
     worker-thread round trip that computes the labels.
+
+    *with_prob_thresh* is False for the threshold **sweep**, which varies that
+    one value by design and would otherwise mark its own curve stale the
+    moment the user typed the number the curve was drawn to help them choose.
+    Everything else in the key still applies to a sweep, and applies harder:
+    a sweep runs for minutes with every control live.
     """
     st = _st(ctx)
     loose = bool(str(st.loose_image_path or "").strip())
@@ -1040,7 +1046,8 @@ def _seg_key(ctx) -> tuple:
     return (getattr(ctx.runtime.playground, "frame_key", None),
             ff_mode, bg_method, st.radius, st.fft_small, st.mesh_ratio,
             st.mesh_sigma, None if loose else st.background_well,
-            st.seg_prob_thresh, st.seg_nms_thresh)
+            st.seg_prob_thresh if with_prob_thresh else None,
+            st.seg_nms_thresh)
 
 
 def _seg_is_stale(ctx) -> bool:
@@ -1082,12 +1089,12 @@ def _describe_segmentation(ctx) -> list[str]:
 def _describe_sweep(ctx) -> list[str]:
     """The threshold sweep's own state, as read-out lines.
 
-    Here rather than only at the call sites because ``_status_text`` is the one
-    writer of this label and every repaint goes through it. The sweep used to
-    write its sentence with :func:`_set_status` and then call
+    Contributed to the read-out by :func:`_set_frame_status`, which is the one
+    writer every exit from ``playground_on_change`` goes through — including
+    the three early returns that never reach ``_status_text`` at all. The
+    sweep used to write its sentence with :func:`_set_status` and then call
     ``playground_on_change`` to redraw the frame, which rebuilt the whole
-    read-out from ``_status_text`` — a function that had never heard of the
-    sweep — and overwrote it. So the result sentence, the "Stopped after N of
+    read-out and overwrote it. So the result sentence, the "Stopped after N of
     M … so far" form of it, the stage-mismatch note appended to it, and
     "Threshold curve failed: …" were all written and then lost within the same
     turn of the event loop, leaving the user with a dialog full of curve and a
@@ -1101,16 +1108,26 @@ def _describe_sweep(ctx) -> list[str]:
     if not st.sweep_status:
         return []
     curve = st.sweep_curve
-    subject = getattr(curve, "subject", "") if curve is not None else ""
-    if subject and subject != _sweep_subject(ctx):
-        # The counterpart of ``_seg_is_stale``, and needed for the same reason
-        # now that this sentence survives a repaint: a curve measured on one
-        # frame, left under a read-out describing another, is a measurement
-        # presented as belonging to pixels it never saw. The dialog is still
-        # open showing it, so the honest move is to say whose frame it is
-        # rather than to drop the sentence and leave the picture unexplained.
-        return [f"⚠ Threshold curve describes {subject}, not the frame on "
-                f"screen — sweep again for this one.",
+    if st.sweep_key is not None and st.sweep_key != _sweep_key(ctx):
+        # The counterpart of ``_seg_is_stale``, and keyed the same way for the
+        # same reason, now that this sentence survives a repaint: a curve
+        # measured on one set of pixels, left under a read-out describing
+        # another, is a measurement presented as belonging to pixels it never
+        # saw. Keyed on the frame ALONE this missed every settings change —
+        # switch the background method, move the mesh ratio, or edit the NMS
+        # threshold (which moves every count on the curve) and the read-out
+        # went on asserting the old numbers with no warning at all.
+        #
+        # The dialog is still open showing that curve, so the honest move is
+        # to name what it describes rather than to drop the sentence and leave
+        # the picture unexplained. The subject is the human-readable half of
+        # the key; where nothing about the frame's address changed it is the
+        # settings that moved, and the sentence says so.
+        subject = getattr(curve, "subject", "") if curve is not None else ""
+        what = (f"describes {subject}" if subject and subject != _sweep_subject(ctx)
+                else "was measured with different settings")
+        return [f"⚠ Threshold curve {what}, not what is on screen — sweep "
+                f"again for this one.",
                 st.sweep_status]
     return [st.sweep_status]
 
@@ -1174,6 +1191,13 @@ def playground_segment_now(ctx) -> None:
     st = _st(ctx)
     win = ctx.window
     if st.seg_running:
+        return
+    if st.sweep_running:
+        # Belt as well as the greyed-out button: both reach the session's one
+        # model, and this is the path a keyboard shortcut or a future caller
+        # would take past the button.
+        _set_status(win, "A threshold curve is running — press Stop first, or "
+                         "wait for it to finish.")
         return
     # Re-render first, so the pixels handed to StarDist are the ones the current
     # widget values produce. Without it a control edited since the last render
@@ -1250,6 +1274,22 @@ def _sweep_subject(ctx) -> str:
     return " · ".join(str(p) for p in parts if p)
 
 
+def _sweep_key(ctx) -> tuple:
+    """Identity of the pixels a threshold curve describes.
+
+    Two halves, and each covers the other's blind spot. ``_seg_key`` carries
+    the correction, its parameters, the background well and the NMS threshold
+    — everything that changes the pixels without changing which frame they
+    came from — minus the probability threshold, which the sweep varies by
+    design. ``_sweep_subject`` carries the address, read straight off the
+    selectors: ``_seg_key``'s own frame identity is
+    ``ctx.runtime.playground.frame_key``, which only the render fan-out
+    refreshes, so a key built from it alone is stale in exactly the window
+    where a selector has moved and nothing has repainted yet.
+    """
+    return (_sweep_subject(ctx), _seg_key(ctx, with_prob_thresh=False))
+
+
 def _set_sweep_buttons(win, *, running: bool) -> None:
     """Offer Stop while a sweep runs, and not the sweep button twice.
 
@@ -1262,6 +1302,13 @@ def _set_sweep_buttons(win, *, running: bool) -> None:
     """
     btn = getattr(win, "_playground_sweep_btn", None)
     stop = getattr(win, "_playground_sweep_stop_btn", None)
+    seg = getattr(win, "_playground_segment_btn", None)
+    if seg is not None:
+        # Segment and the sweep share the session's one model — see
+        # ``services.frame_preview._MODEL_LOCK`` for what a second thread in
+        # there costs, and why waiting for it is not an acceptable answer for
+        # a button press.
+        seg.setEnabled(not running)
     if btn is not None:
         btn.setEnabled(not running)
     if stop is not None:
@@ -1281,10 +1328,16 @@ def playground_sweep_now(ctx) -> None:
     :mod:`review.domain.threshold_sweep` for the measurement behind that.
     """
     from services.frame_preview import model_prob_threshold
-    from review.domain.threshold_sweep import curve_from_counts, sweep_grid
+    from review.domain.threshold_sweep import (
+        NOT_SWEPT_FLAT, curve_from_counts, sweep_grid,
+    )
     st = _st(ctx)
     win = ctx.window
     if st.sweep_running:
+        return
+    if st.seg_running:
+        _set_status(win, "A segmentation is still running — wait for it to "
+                         "finish before sweeping.")
         return
     # Same re-render as the Segment path, and for the same reason: the pixels
     # swept must be the ones the current widget values produce.
@@ -1296,6 +1349,23 @@ def playground_sweep_now(ctx) -> None:
         return
 
     grid = sweep_grid()
+    # Captured HERE, at dispatch, not when the sweep finishes. The tab stays
+    # fully interactive for the minutes a sweep takes — nothing disables the
+    # frame selectors or the threshold boxes — so a subject read in the
+    # completion callback names whatever the user has clicked on since, the
+    # figure is titled with a frame it never saw, and the staleness check
+    # compares that title against itself and finds nothing. Same for the
+    # user's own threshold: read late, the dashed line marks a value that was
+    # never the one in force.
+    subject = _sweep_subject(ctx)
+    current = st.seg_prob_thresh
+    # The whole identity, not just the address. A sweep is only valid for the
+    # pixels it ran on, and the correction, its parameters, the background
+    # well and the NMS threshold all decide those — NMS most sharply, since it
+    # moves every count on the curve and sits three rows above the button. The
+    # probability threshold is the one component left out, because the sweep
+    # varies it by design.
+    st.sweep_key = _sweep_key(ctx)
     st.sweep_running = True
     st.sweep_stop = False
     st.sweep_status = f"Threshold curve: 0 of {len(grid)}…"
@@ -1312,14 +1382,20 @@ def playground_sweep_now(ctx) -> None:
         _hide_progress(ctx)
         st.sweep_running = False
         _set_sweep_buttons(win, running=False)
+        # ``None`` means the frame was refused rather than swept — it has no
+        # dynamic range, so the network was never run on it. Nineteen zeros
+        # would say the network ran everywhere and found nothing, which is a
+        # different statement and the one the user would act on.
+        not_swept = NOT_SWEPT_FLAT if counts is None else ""
+        counts = list(counts or ())
         curve = curve_from_counts(
-            grid[:len(counts)], counts,
-            current=st.seg_prob_thresh,
+            grid[:len(counts)], counts, not_swept=not_swept,
+            current=current,
             # Read off the model that was just loaded to run the sweep, not
             # written down: a literal here would be a fourth copy of a number
             # that lives in the weights' own thresholds.json.
             model_default=model_prob_threshold(),
-            subject=_sweep_subject(ctx),
+            subject=subject,
             requested=len(grid), requested_span=(grid[0], grid[-1]))
         st.sweep_curve = curve
         # A sweep the user stopped is still evidence, and saying how far it got
@@ -1331,8 +1407,8 @@ def playground_sweep_now(ctx) -> None:
         if note:
             st.sweep_status = f"{st.sweep_status} — {note}"
         _sweep_view.show_threshold_curve(ctx, curve)
-        # ``playground_on_change`` rebuilds the whole read-out through
-        # ``_status_text``, which reads ``sweep_status`` via
+        # ``playground_on_change`` rebuilds the whole read-out, and every one
+        # of its exits goes through ``_set_frame_status``, which appends
         # ``_describe_sweep``. Writing the line here as well would be written
         # and then overwritten by the same value — and was, for a while, the
         # other way round.

@@ -275,10 +275,18 @@ def _percentile_normalize(arr, pmin: float = 1.0, pmax: float = 99.8):
     try:
         from csbdeep.utils import normalize
     except ImportError:
-        lo = np.percentile(arr, pmin)
-        hi = np.percentile(arr, pmax)
-        out = (arr.astype(np.float32) - lo) / (hi - lo + 1e-20)
-        return np.clip(out, 0.0, 1.0)
+        # ``np.percentile`` returns a float64 scalar. Under numpy 1.x's
+        # value-based casting that still leaves a float32 array; under NEP 50
+        # (numpy 2) it would promote the whole expression to float64 and this
+        # fallback would silently start returning a different dtype from
+        # csbdeep's ``normalize``, which casts its own bounds to the target
+        # dtype first. The app pins numpy 1.24, so this is latent — and it is
+        # exactly the kind of divergence a dependency bump introduces without
+        # touching a line of this file, so the casts are explicit.
+        lo = np.float32(np.percentile(arr, pmin))
+        hi = np.float32(np.percentile(arr, pmax))
+        out = (arr.astype(np.float32) - lo) / (hi - lo + np.float32(1e-20))
+        return np.clip(out, 0.0, 1.0).astype(np.float32)
     return normalize(arr, pmin, pmax, clip=True)
 
 

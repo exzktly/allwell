@@ -108,6 +108,13 @@ class PlaygroundState:
     # held as ``object`` for the same reason ``seg_labels`` is, so this module
     # stays free of anything it would otherwise have to import.
     sweep_curve: object = None
+    # What the curve on screen describes, captured when the sweep was
+    # DISPATCHED. ``_seg_key``'s tuple minus the probability threshold, which
+    # the sweep varies by design. Held rather than re-derived because the tab
+    # stays fully interactive for the minutes a sweep takes: a key read when
+    # the sweep finishes is the key of whatever the user has clicked on since,
+    # and comparing that against itself can never find anything stale.
+    sweep_key: tuple | None = None
     sweep_running: bool = False
     # Set by the Stop button and polled inside the sweep loop, which is the
     # only long-running thing this tab starts: M segmentations rather than one.
@@ -161,6 +168,7 @@ class PlaygroundState:
         self.loose_image_path = None
         self.seg_labels = None
         self.sweep_curve = None
+        self.sweep_key = None
         self.sweep_running = False
         self.sweep_stop = False
         self.sweep_status = ""

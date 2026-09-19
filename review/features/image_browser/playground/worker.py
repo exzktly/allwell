@@ -154,8 +154,7 @@ def request_stardist_labels(arr, *, prob_thresh=None, nms_thresh=None,
 # ── threshold sweep ──────────────────────────────────────────────────────────
 
 def threshold_sweep_for_frame(arr, thresholds, *, nms_thresh=None,
-                              tile_px: int = 0, on_progress=None,
-                              should_stop=None):
+                              on_progress=None, should_stop=None):
     """Nucleus count at each threshold — a delegate to
     :func:`services.frame_preview.sweep_frame`, which holds the session's model.
 
@@ -165,12 +164,10 @@ def threshold_sweep_for_frame(arr, thresholds, *, nms_thresh=None,
     """
     from services.frame_preview import sweep_frame
     return sweep_frame(arr, thresholds, nms_thresh=nms_thresh,
-                       tile_px=tile_px, on_progress=on_progress,
-                       should_stop=should_stop)
+                       on_progress=on_progress, should_stop=should_stop)
 
 
-def request_threshold_sweep(arr, thresholds, *, nms_thresh=None,
-                            tile_px: int = 0, on_done,
+def request_threshold_sweep(arr, thresholds, *, nms_thresh=None, on_done,
                             on_failed=None, on_progress=None,
                             should_stop=None):
     """Sweep *arr* on a daemon thread; call ``on_done(counts)`` on the GUI
@@ -187,7 +184,7 @@ def request_threshold_sweep(arr, thresholds, *, nms_thresh=None,
     # ``request_stardist_labels`` above.
     def _compute(reporter=None):
         return threshold_sweep_for_frame(
-            arr, thresholds, nms_thresh=nms_thresh, tile_px=tile_px,
+            arr, thresholds, nms_thresh=nms_thresh,
             on_progress=None if reporter is None else reporter.progress,
             should_stop=should_stop)
 

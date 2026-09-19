@@ -786,6 +786,69 @@ self-reporting rather than silent (no cells → nothing measured → the
 field-level metric is what covers that case), and it is why the two layers stay
 complementary.
 
+### D.2-1b The optimal per-cell estimator, chosen by sweep
+
+Per cell we know where the edge is and what the cell's own contrast is, so the
+estimator can be built around the quantity defocus actually is: the width of
+the intensity transition at the boundary. Four candidates were swept across
+reducer (mean / p75 / p90 / p95), band half-width (1–4) and operator, each
+scored on four axes at once.
+
+| estimator | monotone | defocus span σ 0→3 | nucleus size, 4× range | noise, 15× range | sharp-vs-σ2 gap |
+|---|---|---|---|---|---|
+| mean \|∇I\| ÷ C, band 1 | yes | 2.13× | 1.05× | 1.01× | 1.60× |
+| p95 \|∇I\| ÷ C, band 4 | yes | 2.85× | **1.01×** | **1.00×** | 2.11× |
+| p95 \|∇²I\| ÷ C, band 3 | **inverts above σ≈3** | 3.60× | 1.08× | 1.86× | 3.10× |
+| **p95 \|∇²I\| ÷ C, band 3, noise floor removed** | **yes, to σ=4** | **9.63×** | 1.08× | 1.26× | **4.77×** |
+
+**The Laplacian is the right operator and the reason is dimensional.** At a
+step edge blurred by a Gaussian of width σ the peak gradient scales as 1/σ
+while the peak Laplacian scales as 1/σ² — twice as sensitive in log terms.
+Measured, that is 3.60× against 2.85× raw, and 9.63× once its one weakness is
+removed.
+
+**That weakness is a noise floor, and the background ring already measures
+it.** Noise contributes additive Laplacian energy, so a dim noisy cell reads
+as *sharper* than it is — the false-negative direction, and the same defect
+that disqualified `var(laplace)/mean²` at frame scale (A2). Subtracting the
+floor in quadrature from the ring already computed for the contrast
+denominator costs one extra percentile and fixes both symptoms: the inversion
+above σ≈3 (which would make two very different focus states give one number)
+and most of the drift, 1.86× → 1.26×.
+
+So the estimator is:
+
+```
+floor = p95(|∇²I| on the background ring)
+edge  = p95(|∇²I| on the boundary band)
+focus = sqrt(max(0, edge² − floor²)) / (median_inside − median_outside)
+```
+
+Each piece earns its place:
+
+* **Laplacian, not gradient** — 1/σ² against 1/σ (the table above).
+* **At the boundary** — defocus is a property of the *optics*, so the
+  transition width is the same whatever the object's size. This is what kills
+  the confounder: **1.08× over a 4× nucleus-size range**, against **7.8×** for
+  the blind frame-level statistic. Confounder ÷ signal is **0.11**, against
+  **2.08** for what ships today — nearly twenty-fold better.
+* **Normalised by the cell's own contrast** — removes gain and pedestal
+  exactly.
+* **p95, not the mean** — the peak is where the transition is; the mean
+  dilutes it with band pixels that are not on the edge.
+* **Noise floor removed** — as above.
+
+It is **absolutely comparable**, so nothing anywhere in the decision path is
+normalised against the frame. That was the whole objection, and this is what
+answers it.
+
+**Two artefacts caught while measuring, both recorded because each fooled me
+once.** A 1.85× "noise drift" attributed to the p95 reducer was neighbouring
+discs contaminating the background ring; it vanished at 3.0× spacing. The
+Laplacian's inversion was then re-checked on that same clean fixture in case
+it had the same cause — it did not, and is real at every band width, which is
+what sent the search to the noise floor.
+
 ### D.2-2 What this says about the metric already built
 
 Section A's `focus_score` is the frame-level single-scale Tenengrad, so it
@@ -888,7 +951,7 @@ the plate marker and the persistence are unchanged.
 | D1 | `focus_map(image, tiles)` — the self-normalised tiled statistic, undefined where a tile holds no signal | `todo` | `pipeline/field_quality.py` | the D.1 table, re-measured against the shipped function rather than against the probe |
 | D2 | **The density confound must not come back.** A guard that a uniformly sharp frame's map is flat across a thirty-fold range of cell count | `todo` | `tests/` | mutation: normalise by the frame variance and the guard fails at 0.02 |
 | D3 | An undefined tile is `None`, never 0.0, and the region proposal skips it rather than treating it as soft | `todo` | `pipeline/field_quality.py` | §7 #3 |
-| D3a | **One per-cell `focus` column** — the **boundary** statistic of §D.2-1, not the self-normalised Tenengrad. Absolutely comparable, so nothing is normalised at write time and a uniformly soft frame stays visible | `todo` | `pipeline/shape_features.py` + `process_microscopy._quantify_image_group` | the §D.2-1 tables re-measured against the shipped function; a uniformly blurred fixture must move the column, which is the case every earlier candidate failed |
+| D3a | **One per-cell `focus` column** — the noise-corrected boundary **Laplacian** of §D.2-1b, not the gradient and not the self-normalised Tenengrad. Absolutely comparable, so nothing is normalised at write time and a uniformly soft frame stays visible | `todo` | `pipeline/shape_features.py` + `process_microscopy._quantify_image_group` | the §D.2-1b table re-measured against the shipped function. Three properties must each be pinned by a mutation: drop the Laplacian for the gradient and the span falls 9.63× → 2.85×; drop the noise-floor subtraction and the column inverts above σ≈3; drop the contrast normalisation and gain moves it |
 | D3b | The metric is **undefined** where the boundary cannot be measured — no contrast, too few interior or exterior pixels, a mask that failed — never 0.0 | `todo` | `pipeline/field_quality.py` | §7 #3. Severe defocus degrades the segmentation, so this is undefined exactly where defocus is worst; the field-level metric is what covers that case |
 | D3c | **No frame-relative normalisation anywhere in the decision path.** A guard that the verdict reads the absolute value | `todo` | `review/` | mutation: normalise per field and a uniformly blurred plate stops being flagged — measured, relative median is 1.000 at σ 0, 1.5 and 3.0 |
 | D3d | Pooling still applies for **noise**, not for the confounder: a single cell's number is noisy even when unbiased | `todo` | `review/` | to be measured on the boundary statistic; the 0.619/0.604 overlap in §D.2b was the Tenengrad's, and does not transfer |

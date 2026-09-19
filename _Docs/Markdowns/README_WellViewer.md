@@ -758,9 +758,9 @@ and that the assay worked.
 **If the Cell Gating tab opens with no thresholds, read the end of the run log.**
 Under the control method the reason is per channel and is on the line for that
 channel — most often `no threshold separates these two populations at the 95%
-level`, or `no usable values in <well>` when a control well's CSV is missing the
-channel. Under the Otsu fallback the reasons are per well, and the table below
-is that fallback's.
+level`, or a `no usable values in` line naming the control well when that well's
+CSV is missing the channel. Under the Otsu fallback the reasons are per well,
+and the table below is that fallback's.
 
 The Otsu pass takes its samples from the per-well output archives, pairing each
 channel's corrected image with the segmentation mask of the same field and

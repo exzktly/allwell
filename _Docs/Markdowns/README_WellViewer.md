@@ -557,7 +557,18 @@ else, or once a run has written there again.
 The **Quality Control** section bundles optional, pre-measurement clean-up that
 runs **per channel at quantification time** (so it changes the pixel values that
 get measured and can only be changed by re-running the pipeline). There are two
-independent correction stages plus a debris filter:
+independent correction stages, a debris filter, and one measurement:
+
+**Measure per-cell focus** is on by default and adds one column to every well's
+CSV: how sharp each nucleus's own boundary is. It costs a few percent of the
+run, and it is the only evidence a later reader has that part of a field was
+soft — a dataset without it cannot be asked the question afterwards without
+being re-run over the images. **Out of focus below** beside it is the cut for
+that number, and it is **recorded with the dataset rather than applied by the
+run**: nothing is dropped here, and Review's Cell Gating tab is where the
+exclusion actually happens, so a threshold chosen wrongly costs a tick rather
+than a re-run. Leave the box blank unless you have measured a value; see
+[Cell Gating](#cell-gating) for where that number comes from.
 
 1. **Flat-field (illumination) correction** — *multiplicative*. Models the slow
    illumination profile (vignetting / uneven excitation) as a smooth field `F`,
@@ -1499,10 +1510,54 @@ buttons — you pick one or the other, because choosing the scatter option
     a per-field verdict cannot be attached to such a well at all, so every row
     there is kept whatever the box is set to, and the line names the wells.
 
-  On the **Home** tab's plate map, a well holding a flagged field carries a `!`
-  and a legend row, and hovering it says how many fields and what drove the
-  worst one. The end-of-run log and the Analyze tab's pre-flight line report
-  the same measurement for the folder as a whole.
+  **Exclude out-of-focus cells** sits beneath it and does the other half of the
+  job: it removes individual *cells* whose own outlines read soft, rather than
+  whole fields. That is what a focus gradient across one field looks like, or a
+  tilted coverslip — a field whose overall focus is perfectly acceptable can
+  still have a soft third, and no whole-field verdict can say so. The two
+  controls are independent and neither replaces the other.
+
+  It works off a number the run records for every cell: how sharp the boundary
+  of that nucleus is, measured at the outline itself and divided by the cell's
+  own contrast. Measuring at the outline is what makes the number mean the same
+  thing everywhere — defocus sets the width of the intensity transition at an
+  edge, and that width does not depend on how big the nucleus is or how many
+  are in the field. So the value is comparable between cells, fields, wells and
+  plates, and the cut you type is an **absolute** one rather than a comparison
+  with the field's own average. That matters: a score relative to its own frame
+  cannot see a frame that is uniformly soft, because every cell in it deviates
+  from its neighbours by nothing.
+
+  The threshold box beside the checkbox starts blank, or holds whatever the run
+  recorded. **Nothing can fill it in for you**, and that is a measured
+  conclusion rather than caution: the obvious automatic rule returns a number
+  for a plate with nothing wrong with it and throws away two fifths of its good
+  cells, and on a plate that is uniformly out of focus it does almost nothing
+  at all. Where the number comes from instead is
+  **Image Browser ▸ Playground ▸ Focus distribution…**, which plots every cell
+  on the frame in front of you, marks your current cut, and says live how many
+  cells it keeps and how many it drops. Find a value once for your microscope
+  and magnification; it will be the same for every plate taken the same way.
+  Type it into **Analyze ▸ Quality Control ▸ Out of focus below** so future
+  runs record it and this box opens ready.
+
+  Cells whose outlines could not be measured at all are **kept**, and the line
+  under the checkbox says how many. An outline needs contrast across it and
+  enough pixels either side, so a nucleus too small or too faint has no value —
+  and so does a cell in a badly defocused field, where segmentation itself
+  starts to fail. Those are not the same as a cell measured and found soft, and
+  the app never treats them alike.
+
+  If a dataset was analysed before this existed it carries no focus column and
+  says so. Re-run it with **Analyze ▸ Quality Control ▸ Measure per-cell focus**
+  ticked — it is on by default — to get one.
+
+  On the **Home** tab's plate map, a well that needs a look carries a `!` and a
+  legend row. Three things put it there, and hovering the well says which: the
+  run flagged one of its fields; the well's median focus is below your cut, so
+  the whole well is soft rather than part of it; or too much of the well could
+  not be measured at all. The end-of-run log and the Analyze tab's pre-flight
+  line report the field-level measurement for the folder as a whole.
 
   **Area and Region area are not the same measurement**, and the difference is
   the reason both exist. **Area** is the size of the one cell — how many pixels

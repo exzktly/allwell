@@ -492,8 +492,16 @@ def _paint_plate(ctx) -> None:
         # noun on a well number in a column that otherwise sums to the plate —
         # and on a real plate the two surfaces would then print different
         # numbers for what the reader takes to be one quantity.
+        #
+        # And no longer "with a flagged field", which the render caught: the
+        # glyph is driven by a composite now, and one of its three reasons is
+        # a share of *cells* whose own outlines read soft — a well marked for
+        # that has no flagged field at all, so the old row named a cause that
+        # is not there. "Needing a look" is the one thing true of every well
+        # under the mark; what is actually wrong with each is in its tooltip,
+        # which is the surface that can afford to say three different things.
         layout.addWidget(
-            QLabel("Wells with a flagged field", host), row, 1)
+            QLabel("Wells needing a look", host), row, 1)
         layout.addWidget(QLabel(str(len(quality)), host), row, 2)
 
     totals = ((ctx.state.dataset.pipeline_info or {}).get("run_check") or {}

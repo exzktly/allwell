@@ -255,10 +255,12 @@ def focus_status(ctx) -> tuple[str, str]:
     if not total:
         return ("", REGISTER_MUTED)
     if params is None or params.focus_min is None:
+        # One line at the panel's width. The first version ran to two dense
+        # lines of muted text under a control, which is where the reader's eye
+        # is least willing to go; the control's own tooltip carries the rest.
         base = (f"Focus measured for {_cells(total - unmeasurable)}. No "
-                f"threshold set — the Image Playground draws the distribution "
-                f"and a cut's live effect, which is where the number comes "
-                f"from.")
+                f"threshold set — the Image Playground draws the "
+                f"distribution.")
         register = REGISTER_PLAIN
     elif not soft:
         base = (f"All {_cells(total - unmeasurable)} measured are at or above "

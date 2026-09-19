@@ -540,6 +540,20 @@ def _capture_analyze_focus(app, w, rev) -> None:
     # Index 1 is the Analyze pane, as the mode grab above establishes.
     rev._central_pane_stack.setCurrentIndex(1)
     settle(app, 400)
+    # The form is one tall scroll area and it opens at the top, so a grab
+    # taken here shows the Filename Schema section and none of this. The
+    # first version of this capture did exactly that: 93-analyze-focus-on
+    # came out **byte-identical** to an unrelated Analyze grab, which is a
+    # screenshot of a control the reviewer was told they were looking at.
+    from PySide6.QtWidgets import QScrollArea
+    for area in rev.findChildren(QScrollArea):
+        if area.isVisible() and area.isAncestorOf(analyze._focus_metric_cb):
+            area.ensureWidgetVisible(analyze._focus_metric_cb, 0, 160)
+            break
+    else:
+        print("  analyze focus controls: no scroll area found — "
+              "the grab may not show them")
+    settle(app, 300)
     was_on = analyze._focus_metric_cb.isChecked()
     was_cut = analyze._focus_min_edit.text()
     try:

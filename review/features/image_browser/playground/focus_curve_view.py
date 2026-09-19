@@ -18,9 +18,18 @@ the user currently is, with a live count of what that keeps and drops.
 
 from __future__ import annotations
 
+import textwrap
+
 from PySide6.QtWidgets import QDialog, QVBoxLayout
 
 from ui import theme
+
+#: Characters per line for the figure's two blocks of prose, measured on the
+#: rendered 820x460 window rather than estimated: the title at fontsize 11 and
+#: the footnote at 8.5. Named here because they are the one pair of numbers in
+#: this module that a change of figure size would invalidate.
+_TITLE_WRAP = 92
+_NOTE_WRAP = 118
 
 
 def show_focus_distribution(ctx, dist) -> None:
@@ -119,7 +128,13 @@ def draw_focus_distribution(fig, dist) -> None:
 
     ax.set_xlabel("Per-cell focus (boundary sharpness)", color=txt_pri)
     ax.set_ylabel("Share of measured cells (%)", color=txt_pri)
-    title = dist.describe()
+    # Wrapped explicitly rather than left to matplotlib. ``set_title`` does not
+    # wrap at all, and the sentence runs to about 150 characters once the
+    # unmeasurable clause and the cut's effect are both in it -- measured on
+    # the render, both ends were clipped off the figure, which is a title a
+    # reader cannot even tell is incomplete. ~92 characters is what fits at
+    # this width and font size.
+    title = "\n".join(textwrap.wrap(dist.describe(), _TITLE_WRAP))
     if dist.subject:
         title = f"{dist.subject}\n{title}"
     ax.set_title(title, color=txt_pri, fontsize=11)
@@ -129,8 +144,13 @@ def draw_focus_distribution(fig, dist) -> None:
     # measured will read it as an omission.
     from review.domain.focus_distribution import NO_RECOMMENDATION
 
-    ax.text(0.5, -0.16, NO_RECOMMENDATION, transform=ax.transAxes,
-            ha="center", va="top", fontsize=8.5, color=txt_mut, wrap=True)
+    # Wrapped here too, and for a worse reason than the title's: matplotlib's
+    # ``wrap=True`` wraps to the **figure** width, not to the axes, so a
+    # centred string overflowed both edges of the panel -- the first words of
+    # two of its three lines were off the picture entirely.
+    ax.text(0.5, -0.16, "\n".join(textwrap.wrap(NO_RECOMMENDATION, _NOTE_WRAP)),
+            transform=ax.transAxes, ha="center", va="top", fontsize=8.5,
+            color=txt_mut)
     leg = ax.legend(loc="best", framealpha=0.85,
                     facecolor=theme.Colors.panel, edgecolor=txt_mut,
                     fontsize=9)

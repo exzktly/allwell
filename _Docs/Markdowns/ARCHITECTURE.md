@@ -237,6 +237,9 @@ allwell/
 │   │   ├── input.py            ← run-dir resolver, OME-TIFF redirect, channel rows,
 │   │   │                          browse-time folder scan
 │   │   └── job_edit.py         ← the inverse of collect_spec, for the queue's edit flow
+│   ├── qc_section.py           ← the Quality Control section: the pixel
+│   │                              corrections, the debris gate, and the
+│   │                              per-cell focus measurement and its cut
 │   ├── schema_section.py       ← the Filename Schema section: picker, detection,
 │   │                            readout, and the preview that refreshes them
 │   ├── seg_params.py           ← per-method segmentation params + StarDist thresholds
@@ -296,8 +299,11 @@ allwell/
 │   │                              and where a well's output files live
 │   ├── suspend.py              ← suspend / resume a run in flight
 │   ├── run_report.py           ← the end-of-run summary the log and Review both read
-│   ├── field_quality.py        ← per-field image-quality metrics + the per-well
-│   │                              record they are collected through (§6.8)
+│   ├── field_quality.py        ← per-cell + per-field image-quality metrics (§6.7)
+│   ├── field_quality_record.py ← the per-well record those are collected
+│   │                              through, and the CSV column's name.
+│   │                              Stdlib-only: the remote client merges this
+│   │                              block without the imaging stack behind it
 │   ├── stardist_cache.py       ← the pretrained-weights cache dir and the
 │   │                              cross-process download lock
 │   ├── auto_threshold_pass.py  ← the post-run pass: which estimator this run's
@@ -308,6 +314,7 @@ allwell/
 │   │                              (cell_gating / sample_definitions / ratios /
 │   │                              notes), preserved across any wholesale rewrite
 │   └── io.py                   ← atomic output writers (images / CSVs / overlay)
+│                                  + a well's own archive, read and written
 │                                 + the scratch base & staging-dir lifecycle (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
 │   ├── dir_scan.py             ← "what is directly inside this directory?", answered out
@@ -504,6 +511,8 @@ review/
 │   │   zipfile_cache.py, zip_members.py, auto_threshold.py, crop_tool.py,
 │   │   metric_labels.py, cache_projectors.py, curation.py, well_repository.py,
 │   │   image_repository.py
+│   ├── field_quality_cache.py, focus_gate.py   ← the run's own image-quality
+│   │   verdicts, per field and per cell, onto the row cache (§6.7)
 │   ├── frame_load.py, dataset_dims.py   ← the layer under every image grid:
 │   │   an address → its pixels, and what a dataset offers per dimension
 ├── domain/                        ← Qt-free models + pure logic
@@ -9798,28 +9807,74 @@ collapsed to a number, because a stored `0.0` where nothing was measured is a
 measurement the plate-wide comparison then believes.
 
 **Where each metric can be read, and why it is read there.**
-`pipeline/field_quality.py` holds all six. `focus` is a **normalised
-Tenengrad** — gradient energy over image variance — chosen by measurement
-rather than by reputation: across a thirty-fold range of cell count, in
-perfect focus throughout, the obvious alternative (variance of the Laplacian
-over mean squared) spans 6.7×, and a focus metric that moves with cell density
-reports the wells where a cytotoxic compound worked as out of focus. The
-normalised form moves 1.4 % over the same range, is flat under gain (27.34 /
-27.47 / 27.48 at ×0.25 / ×1 / ×4) and under an additive pedestal, and separates
-a σ=2 defocus from a sharp field with no overlap across three seeds at five
-cell counts.
+`pipeline/field_quality.py` holds all six.
 
-Two of the six can only be read at particular moments. `sat_frac` needs the
-camera's integer ceiling, which `pipeline.io.load_2d_gray` destroys with its
-unconditional `float32` cast — "at the dtype maximum" would then mean "at
-3.4e38", identically zero for every field of every plate, for ever — so
-`load_2d_gray_with_ceiling` hands that number back alongside an identical
-array, and the old function is a wrapper over the new one so the two cannot
-drift. `focus` and `dyn_range` are measured **before correction**, in
+`focus` is measured **at each nucleus's own outline** (`edge_focus`), and every
+part of it was chosen by measurement against the alternatives:
+
+    sqrt(max(0, peak|∇²I|_edge² − peak|∇²I|_background²)) / contrast
+
+* **The Laplacian, not the gradient.** At a step edge blurred by a Gaussian of
+  width σ the peak gradient scales as 1/σ and the peak Laplacian as 1/σ² —
+  twice as sensitive in log terms. Over σ 0→3 the gradient form spans 2.85×,
+  this one 9.63×.
+* **At the outline, not over the frame.** Defocus is a property of the optics:
+  it sets the width of the intensity transition at an edge, and that width is
+  the same whatever the object's size. That is what removes the confounder
+  disqualifying every whole-image statistic — measured on the shipped
+  function, a fourfold nucleus-size range spans **1.36×**, against **7.8×** for
+  a frame-level Tenengrad, whose defocus signal over the same fixtures is only
+  3.7×. A metric that moves with nuclear size reports a cell line with large
+  nuclei, or the wells where a cytotoxic compound worked, as out of focus.
+* **Divided by the cell's own contrast** — median inside minus median in a ring
+  outside — which removes gain and an additive pedestal exactly.
+* **With the background ring's own Laplacian subtracted in quadrature.** Noise
+  adds Laplacian energy, so a dim noisy cell reads as *sharper* than it is,
+  which is the false-negative direction. Without the correction the value
+  inverts above σ≈3; with it, monotone through σ≈3 and the drift over a
+  fifteenfold noise range falls from 1.86× to 1.31×.
+
+The ring scales with the nucleus (`EDGE_BAND_RADIUS_FRAC`) rather than being a
+fixed three pixels, because a fixed band left every nucleus under about six
+pixels of radius entirely unmeasurable — a whole class of plate silently
+carrying no focus measurement at all. Radius 4, the pipeline's own
+`min_nucleus_area_px` of 50, is measurable.
+
+**It is absolutely comparable between cells, fields, wells and plates**, which
+is the property the whole layer rests on: a score relative to its own frame
+cannot see a frame that is uniformly soft, because every cell in it deviates
+from its neighbours by nothing — measured, the relative median is exactly
+1.000 at three very different focus states. It is **not** a severity scale past
+σ≈3: beyond that the outline has spread wider than the ring reading it and the
+value flattens, which is acceptable because severe defocus is also where
+segmentation fails and there is frequently no outline left to read.
+
+The value is written per cell as the `qc_edge_focus` column (named in
+`pipeline/field_quality_record.py`, which is stdlib-only, so Review's data
+layer and the argument parser can have the name without pulling numpy and
+scipy in behind it). A field's `focus` is the **median of its own cells'
+values** (`field_focus`), so the field-level and cell-level numbers are two
+poolings of one measurement rather than two statistics that can disagree. It
+is measured on the corrected frame the labels were computed from, so the
+outline the estimator reads is the outline that was segmented.
+
+Measuring is on by default and is switched off with `--no_focus_metric`, which
+leaves the column **out of the record entirely** rather than filling it: a run
+that did not measure focus and a run that measured it and found nothing must
+not produce the same CSV. That flag is in the reuse key (`util/settings_digest`)
+because it decides whether the column exists; `--focus_min` is deliberately
+not, because the run records that number and never acts on it.
+
+Two of the remaining metrics can only be read at particular moments.
+`sat_frac` needs the camera's integer ceiling, which `pipeline.io.load_2d_gray`
+destroys with its unconditional `float32` cast — "at the dtype maximum" would
+then mean "at 3.4e38", identically zero for every field of every plate, for
+ever — so `load_2d_gray_with_ceiling` hands that number back alongside an
+identical array, and the old function is a wrapper over the new one so the two
+cannot drift. `dyn_range` is measured **before correction**, in
 `_load_image_group`, because the flat-field division and the background
-subtraction both reshape local variance, which is the whole of what a focus
-metric reads. The remaining three need the segmentation and are measured after
-it, in `field_quality.group_record`.
+subtraction both reshape the frame's spread. The remaining three need the
+segmentation and are measured after it, in `field_quality.group_record`.
 
 **The scoring is split in two, and the split is the feature.**
 `review/domain/field_quality_scores.py` scores the *acquisition* metrics
@@ -9860,15 +9915,51 @@ measured as completely as one that ran straight through.
 `review/data/field_quality_cache.py` projects the verdicts onto the row cache
 as a `Field_Pass` column — the fourth in the same family as `Included`,
 `QC_Pass` and `Crop_Pass`, ANDed at the same chokepoint, registered as a cache
-projector like the other three. Most of that module is about when **not** to
-write it, and every refusal has one shape: a filter applied on evidence it does
-not have is worse than no filter, because the rows it drops are chosen by
-something nobody can account for.
+projector like the other three. `review/data/focus_gate.py` is the fifth,
+`Focus_Pass`, and the two are **not alternatives**: the field verdict removes a
+whole field or none of it, while the per-cell cut removes the soft *part* of a
+field — a focus gradient, a coverslip tilt — which is not a whole-field fact
+and is not a rectangle either, so it is a column rather than a crop. A field
+whose median is fine can still have a soft third. Most of both modules is about
+when **not** to write their column, and every refusal has one shape: a filter
+applied on evidence it does not have is worse than no filter, because the rows
+it drops are chosen by something nobody can account for.
 
-* **The toggle is off by default** (`QCParams.exclude_flagged_fields`, on the
-  Cell Gating panel, persisted in the same section as the debris gate). Turning
-  it on changes every number in the app, so it is chosen after reading what was
-  flagged rather than discovered afterwards. The flags are reported either way.
+**A verdict layer that can be switched off must be re-projected *and*
+removable.** The cache projectors run at load; `qc.controller.recompute_qc_all`
+is the pass that runs when a control on the Cell Gating panel moves, and it
+re-runs **every registered projector** rather than naming the layers. It
+projected `QC_Pass` alone for as long as that panel held one switchable layer,
+which was correct then and silently wrong the moment it grew a second: measured
+on a plate with one field genuinely flagged, ticking the exclusion wrote no
+column at all, the chokepoint had nothing to AND, and the exclusion did not
+happen until the dataset was reopened — while the panel reported the flag
+correctly the whole time. Going through the registry means a layer added later
+is re-projected by having been registered. The mirror image is
+`cache_projectors.drop_verdict_column`: a projector whose switch is off
+**removes** its column rather than returning early, because returning early
+leaves the previous setting's verdict on the frame and unticking the box left
+its rows excluded while the panel said they were kept.
+
+* **Both toggles are off by default** (`QCParams.exclude_flagged_fields` and
+  `exclude_soft_cells`, on the Cell Gating panel, persisted in the same section
+  as the debris gate). Turning either on changes every number in the app, so it
+  is chosen after reading what was found rather than discovered afterwards. The
+  findings are reported either way.
+* **The focus cut needs both a switch and a number** (`focus_gate_is_active`).
+  A cut with the switch off is a number the user has recorded; the switch on
+  with no cut is a request nothing here can honour. `focus_min` is seeded from
+  the run's own sidecar — the value depends on the microscope rather than on
+  the plate — and is **not** seeded on, because a recorded threshold is the
+  user saying "this is my instrument's number", not "drop those cells from
+  every plot without telling me".
+* **A cell with no focus value passes.** Undefined is not soft. Severe defocus
+  degrades segmentation, so the column is missing exactly where defocus is
+  worst — but so is a nucleus too small to carry a measurable ring, and
+  treating the two alike would quietly delete the smallest nuclei on every
+  plate. The count of them is named on the panel, as **kept**, because a
+  reader who believed the gate removed everything soft would be wrong about
+  exactly those rows.
 * **A well whose FOV labels are untrusted is refused, not joined onto.**
   `review/domain/fov_integrity.py` exists because a well whose filenames do not
   match the schema arrives with *every* row labelled field 1, indistinguishable
@@ -9907,6 +9998,58 @@ well's height in an ink chosen by measuring the fill's relative luminance
 colour — that proxy put a dark mark on the `text_muted` fill at a contrast
 ratio of 3.88:1, and a 1 px stem picked up subpixel fringing that reads as a
 rendering fault.
+
+**The plate's marker is a composite, not the field verdict alone.**
+`review/domain/well_composite.py` scores each well over three independent
+reasons and `review/data/focus_gate.wells_needing_review` is the adapter that
+feeds it the numbers already on disk — no image decode, no output archive
+opened. The case the field verdict alone misses is the one the per-cell column
+exists for: a well whose fields all look ordinary while a third of its cells
+are soft. Every reason is named in the tooltip, because a composite that shows
+only a total is a number nobody can act on.
+
+Each bound is accounted for. A flagged field is the pipeline's own robust
+comparison and needs no bound of ours. A well whose **median** focus is below
+the cut uses the pooled statistic the measurements support — at a pooling of
+thirty cells the in-focus fifth percentile clears the one-pixel-defocus
+ninety-fifth outright, where the per-cell distributions at that defocus overlap
+heavily. `SOFT_FRACTION` is twice the five per cent a well-placed cut removes
+from a perfectly in-focus population by construction, which is the smallest
+round number that cannot be the cut's own false-positive rate.
+`UNMEASURABLE_FRACTION` is the one bound with no measurement under it and is
+much looser, because it states that the *evidence* is missing rather than that
+the well is bad, and a plate of genuinely small nuclei carries a standing share
+of unreadable outlines.
+
+**Where the threshold comes from, and who applies it.** The number is a
+property of the **microscope** — the point-spread function, the pixel size, the
+nuclear contrast — so it is stable across every plate taken on one instrument
+at one magnification, and it is stated in the Analyze form
+(`analyze/qc_section.py`: `Measure per-cell focus`, on by default, and
+`Out of focus below`, blank by default). The run **records** it in
+`pipeline_info.json` and never acts on it: a threshold is what a user gets
+wrong the first time, and a pipeline that dropped the cells would make
+revisiting it cost a re-run over the images, while a recorded value seeds
+Review's gate where the same cut is one tick to change and one tick to undo.
+
+**Nothing suggests a value for it**, and that is measured rather than cautious.
+Otsu's method on the per-cell values — the natural choice, since the population
+is multiplicative — returns a cut for a plate with nothing wrong with it and
+discards **39.5 %** of its good cells; on a uniformly defocused plate it splits
+the bad population against itself and keeps **76 %** of the cells it exists to
+catch. Its own separability spans 0.516–0.671 across both degenerate cases and
+five useful ones, with the clean plate scoring higher than three genuinely
+mixed ones, so there is no statistic to gate a recommendation on. The
+Playground draws the distribution instead
+(`review/domain/focus_distribution.py`, `playground/focus_curve_view.py`): a
+cumulative curve, because a histogram's shape is an artifact of its bin width
+while "at this cut, how much of my frame goes" is read off a cumulative curve
+directly — with the user's own cut marked, its consequence annotated on the
+figure, and the refusal stated on the figure too, since the plot is savable and
+a reader who does not know the absence was measured will read it as an
+omission. It is the same answer `review/domain/threshold_sweep.py` reached for
+StarDist's probability threshold, by a different route, and the two windows are
+deliberately built alike.
 
 `pipeline.field_quality.summarize` is the single composition of "what did field
 quality find". The end-of-run log prints it and the Analyze tab's pre-flight

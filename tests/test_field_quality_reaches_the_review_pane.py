@@ -575,12 +575,17 @@ def test_the_marker_gets_a_legend_row_when_the_plate_carries_one():
 
     with_flag = _legend_texts(_block(bad_well="A02"))
     assert FLAGGED_FIELD_GLYPH in with_flag
-    assert "Wells with a flagged field" in with_flag
+    # Not "with a flagged field": the glyph is driven by a composite, and one
+    # of its three reasons is a share of soft *cells* on a well with no
+    # flagged field at all. A render caught the old wording naming a cause
+    # that need not be there.
+    assert "Wells needing a look" in with_flag
+    assert not [t for t in with_flag if "flagged field" in t]
 
     # And no row when there is nothing to explain — a legend entry for a mark
     # the plate does not carry is its own kind of noise.
     clean = _legend_texts(_block())
-    assert "Wells with a flagged field" not in clean
+    assert "Wells needing a look" not in clean
 
 
 # ── the control must not be live when it would do nothing ───────────────────

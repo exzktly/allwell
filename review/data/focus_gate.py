@@ -162,18 +162,29 @@ def plate_focus_counts(ctx) -> tuple[int, int, int]:
     return (soft, unmeasurable, total)
 
 
-def dataset_has_focus_column(ctx) -> bool:
-    """Whether any cached well carries the column at all.
+def dataset_has_focus_column(ctx) -> bool | None:
+    """Whether the dataset carries the column — ``None`` when it cannot be told.
 
-    The distinction the panel needs between "this dataset was analysed before
-    focus was measured" and "it was measured and nothing is soft". Those must
-    never read alike.
+    Three answers, not two, and the third is the one that was missing. Every
+    predicate here reads the **row cache**, and the cache is emptied on
+    purpose by the Gating and Curation resets so frames reload their original
+    verdicts. Between the clear and the next lazy load there are no wells to
+    look at — which is not the same as looking and finding no column, and the
+    panel said the second: "This dataset was analysed before per-cell focus
+    was measured", about a dataset that had been, naming a remedy (re-run the
+    plate) that was not needed.
+
+    So an empty cache answers ``None``: *unknown*. The caller says nothing
+    rather than saying something false, which is this module's whole contract
+    applied to its own state rather than to the data.
     """
     from pipeline.field_quality_record import FOCUS_COLUMN
 
     cache = getattr(ctx.state.dataset, "cache", None) or {}
-    return any(df is not None and FOCUS_COLUMN in getattr(df, "columns", ())
-               for df in cache.values())
+    frames = [df for df in cache.values() if df is not None and len(df)]
+    if not frames:
+        return None
+    return any(FOCUS_COLUMN in getattr(df, "columns", ()) for df in frames)
 
 
 def apply_focus_gate_to_cache(ctx, label: str | None = None) -> list[str]:
@@ -251,7 +262,13 @@ def focus_status(ctx) -> tuple[str, str]:
       and still carry soft cells nobody could see.
     """
     params = focus_params(ctx)
-    if not dataset_has_focus_column(ctx):
+    has_column = dataset_has_focus_column(ctx)
+    if has_column is None:
+        # No wells loaded to look at -- after a reset emptied the cache, or
+        # before the first load. Saying nothing is the honest answer; the
+        # sentence returns of its own accord once a frame is read.
+        return ("", REGISTER_MUTED)
+    if not has_column:
         return ("This dataset was analysed before per-cell focus was measured, "
                 "so there is nothing to exclude. Re-running it with "
                 "Analyze ▸ Quality Control ▸ Measure per-cell focus records "

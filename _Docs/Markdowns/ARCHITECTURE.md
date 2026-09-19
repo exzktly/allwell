@@ -296,6 +296,12 @@ allwell/
 │   │                              and where a well's output files live
 │   ├── suspend.py              ← suspend / resume a run in flight
 │   ├── run_report.py           ← the end-of-run summary the log and Review both read
+│   ├── field_quality.py        ← per-field image-quality metrics + the per-well
+│   │                              record they are collected through (§6.8)
+│   ├── stardist_cache.py       ← the pretrained-weights cache dir and the
+│   │                              cross-process download lock
+│   ├── auto_threshold_pass.py  ← the post-run pass: which estimator this run's
+│   │                              arguments call for, and the sidecar merge
 │   ├── capacity.py             ← disk-space accounting: what a run needs on the
 │   │                              scratch and output volumes, what is left there
 │   ├── sidecar.py              ← the pipeline_info.json blocks the user owns
@@ -6624,7 +6630,16 @@ capture/restore pair around the fetch; `process_microscopy.write_pipeline_info`
 preserves the same list when a re-run rewrites the sidecar in place, so the two
 paths share one definition of whose data it is. `run_report` keeps its own
 merge (`pipeline/run_report.py`) because its records merge per well rather than
-being restored wholesale.
+being restored wholesale, and `field_quality` keeps a matching one
+(`merge_fetched_field_quality`) for the same reason and a sharper consequence:
+losing coverage records loses history, but losing quality records produces a
+**wrong number**, because the acquisition metrics are scored as a robust z
+against the plate. A block silently reduced to the wells one remote
+incremental run touched gives each of them a z against its own tiny median,
+and the shortfall accounting cannot catch it — every one of those wells is
+individually complete, so nothing is marked partial and the scorer proceeds.
+The capture is read **before** the rsync and merged after, which is the half a
+guard in `tests/test_remote_incremental.py` pins.
 
 Inputs / outputs / contract:
 
@@ -7777,7 +7792,7 @@ A remote run needs exactly one thing installed on the host: a conda environment
 holding the pipeline's dependencies. Two pieces of code care whether it is
 there — `remote_runner`'s pre-launch guard, and `services/remote_bootstrap.py`,
 which creates it — and they answer with the same shell,
-`remote_runner.CONDA_ENV_SHELL_HELPERS` (`aw_env_prefix` / `aw_env_is_valid` /
+`remote_conda.CONDA_ENV_SHELL_HELPERS` (`aw_env_prefix` / `aw_env_is_valid` /
 `aw_env_stale_dir`). That sharing is the point of the module-level constant:
 when the two disagreed, the disagreement had no way out.
 
@@ -9772,6 +9787,118 @@ the rail and inserts the banner; `_end_session` takes it down and returns to
 the queue page.
 
 ---
+
+### 6.7 Field quality: what the run measured about its own pictures
+
+Every FOV-group the pipeline processes is measured on six numbers, and the
+whole subsystem is built around one distinction: **a metric that could not be
+computed is absent, never zero.** `None` travels from the measurement through
+the record, the checkpoint, the sidecar and the scorer without ever being
+collapsed to a number, because a stored `0.0` where nothing was measured is a
+measurement the plate-wide comparison then believes.
+
+**Where each metric can be read, and why it is read there.**
+`pipeline/field_quality.py` holds all six. `focus` is a **normalised
+Tenengrad** — gradient energy over image variance — chosen by measurement
+rather than by reputation: across a thirty-fold range of cell count, in
+perfect focus throughout, the obvious alternative (variance of the Laplacian
+over mean squared) spans 6.7×, and a focus metric that moves with cell density
+reports the wells where a cytotoxic compound worked as out of focus. The
+normalised form moves 1.4 % over the same range, is flat under gain (27.34 /
+27.47 / 27.48 at ×0.25 / ×1 / ×4) and under an additive pedestal, and separates
+a σ=2 defocus from a sharp field with no overlap across three seeds at five
+cell counts.
+
+Two of the six can only be read at particular moments. `sat_frac` needs the
+camera's integer ceiling, which `pipeline.io.load_2d_gray` destroys with its
+unconditional `float32` cast — "at the dtype maximum" would then mean "at
+3.4e38", identically zero for every field of every plate, for ever — so
+`load_2d_gray_with_ceiling` hands that number back alongside an identical
+array, and the old function is a wrapper over the new one so the two cannot
+drift. `focus` and `dyn_range` are measured **before correction**, in
+`_load_image_group`, because the flat-field division and the background
+subtraction both reshape local variance, which is the whole of what a focus
+metric reads. The remaining three need the segmentation and are measured after
+it, in `field_quality.group_record`.
+
+**The scoring is split in two, and the split is the feature.**
+`review/domain/field_quality_scores.py` scores the *acquisition* metrics
+(`focus`, `sat_frac`, `dyn_range`) as a robust z **within a timepoint, across
+the plate**, because those are properties a plate should hold constant by
+design. The *biological* ones (`nuc_count`, `nuc_area_median`, `bg_level`) are
+scored **within a well, across its own fields**, where the fields are technical
+replicates of one biology and disagreement really is a technical fault. Scored
+plate-wide they would flag the biology: a cytotoxic compound drops the nucleus
+count ten- to twenty-fold, which is `|z| ≫ 5`, so an exclusion built on it
+would delete the wells with the largest treatment effect and bias every
+dose-response toward null. Timepoints are a grouping axis for the same reason —
+pooling t=0 with t=72h makes each mutually anomalous in a time course.
+
+There is deliberately **no combined score**. A max of `|z|` over a varying
+number of metrics is not comparable between fields: one scored on three
+metrics has a larger maximum than one scored on one, for no reason to do with
+the pictures. Zero-inflated metrics take an absolute bound instead of a
+relative one, because `sat_frac` is 0 for most fields on a good plate, which
+makes the MAD zero and switches the metric off exactly when one saturated
+field is the thing worth finding. Where the MAD is zero for any other metric
+the answer is `None` and a stated reason — not `0.0`, which would claim every
+field sits exactly at the median and could never flag anything.
+
+**The record, and the gap it must not hide.** Each well drops one JSON into a
+hidden `.aw_field_quality/` as it finishes, collected into the sidecar's
+`field_quality` block at the end of the run and then removed — the same
+mechanism `run_report` uses, deliberately kept separate because coverage
+accounting and quality measurement answer different questions. A well's record
+states `measured_of` as the number of FOV-groups the well **has**, not the
+number that produced a measurement, so a well that failed or aborted part way
+is visibly partial in the artifact. The per-FOV checkpoint carries a group's
+quality in the same file as its records (`_FOV_CHECKPOINT_SCHEMA` 2; a
+version-1 checkpoint is refused rather than misread), so a resumed well is
+measured as completely as one that ran straight through.
+
+**On the Review side the subsystem reports, and only filters when asked.**
+`review/data/field_quality_cache.py` projects the verdicts onto the row cache
+as a `Field_Pass` column — the fourth in the same family as `Included`,
+`QC_Pass` and `Crop_Pass`, ANDed at the same chokepoint, registered as a cache
+projector like the other three. Most of that module is about when **not** to
+write it, and every refusal has one shape: a filter applied on evidence it does
+not have is worse than no filter, because the rows it drops are chosen by
+something nobody can account for.
+
+* **The toggle is off by default** (`QCParams.exclude_flagged_fields`, on the
+  Cell Gating panel, persisted in the same section as the debris gate). Turning
+  it on changes every number in the app, so it is chosen after reading what was
+  flagged rather than discovered afterwards. The flags are reported either way.
+* **A well whose FOV labels are untrusted is refused, not joined onto.**
+  `review/domain/fov_integrity.py` exists because a well whose filenames do not
+  match the schema arrives with *every* row labelled field 1, indistinguishable
+  from a well that genuinely has one field. A per-field verdict joined onto
+  that either spreads one field's verdict across all of them or matches
+  nothing, and the second is indistinguishable from a well measured and found
+  clean. The refusal is named on screen: a well silently exempt from a filter
+  and a well that passed it look identical in a plot.
+* **A partly measured plate filters nothing**, and the panel quotes the
+  scorer's own refusal rather than paraphrasing it.
+
+**Two surfaces, and the register each uses.** The Cell Gating panel carries the
+control and one sentence with four states — no block, a refusal, a finding,
+nothing flagged. Only the two where the software could not do what was asked
+wear the amber `QLabel#Notice` band; a finding is ordinary text, because a
+result is not a failure and dressing them alike collapses the distinction the
+states exist for. The Home plate marks a flagged well with a **glyph**, not a
+ninth colour: that palette is closed under a written invariant (no state
+carries a colour another state carries), `accent2` is reserved and forbidden
+for anomaly use, and `threshold` was measured indistinguishable from `warn` by
+the plate's own render guard. The glyph is also the right channel on its own
+terms — field quality is orthogonal to coverage, and a well can be complete and
+out of focus. It carries a legend row of its own whenever the plate shows one,
+because that plate's invariant is that no well is left without a row to explain
+it, and the same mapping feeds the tooltip so a mark cannot appear without its
+reason.
+
+`pipeline.field_quality.summarize` is the single composition of "what did field
+quality find". The end-of-run log prints it and the Analyze tab's pre-flight
+strip **quotes** it, so the two cannot describe one folder differently.
 
 ## 7. The widget library (`widgets/`)
 

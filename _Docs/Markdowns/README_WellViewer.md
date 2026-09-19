@@ -1471,6 +1471,39 @@ buttons — you pick one or the other, because choosing the scatter option
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
   drawn a gate there, the scatter option is greyed out and says so.
 
+  **Exclude fields the run flagged** sits under the debris gate and works on
+  whole fields of view rather than on single cells. While a run processes a
+  plate it measures six things about every field it looks at — how sharply
+  focused it is, how much of it is clipped at the sensor's maximum, how much
+  contrast it has, how many nuclei it found, how large they are, and how bright
+  the background is — and afterwards compares each field with the rest of the
+  plate. The first three are compared plate-wide, within a timepoint, because a
+  well-run plate should be uniform in them. The last three are compared only
+  *within a well, across its own fields*: a compound that kills cells
+  legitimately drops the nucleus count, and a plate-wide comparison would flag
+  the wells where the experiment worked.
+
+  The line under the checkbox says what the run found whether or not the box is
+  ticked — the flags are reported by default and applied only if you ask. Tick
+  it and every cell from a flagged field drops out of every plot, statistic and
+  export, exactly like a cell the debris gate removed. Three things stop it:
+
+  - a dataset analysed before this existed, which says so rather than reporting
+    that nothing was flagged;
+  - a plate only **partly** measured — a resumed or incremental run measures
+    only the fields it re-processed, so a comparison against the plate would be
+    drawn from a biased sample. Nothing is excluded, and the line says which
+    wells are short. Re-run those wells with **Force** to complete it;
+  - a well whose FOV labels do not identify its fields. The app can tell when a
+    well's filenames did not decompose and every row arrived labelled field 1;
+    a per-field verdict cannot be attached to such a well at all, so every row
+    there is kept whatever the box is set to, and the line names the wells.
+
+  On the **Home** tab's plate map, a well holding a flagged field carries a `!`
+  and a legend row, and hovering it says how many fields and what drove the
+  worst one. The end-of-run log and the Analyze tab's pre-flight line report
+  the same measurement for the folder as a whole.
+
   **Area and Region area are not the same measurement**, and the difference is
   the reason both exist. **Area** is the size of the one cell — how many pixels
   that cell's own outline encloses. **Region area** is the size of the connected

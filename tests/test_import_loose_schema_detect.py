@@ -4,12 +4,25 @@ The page parses the very filenames Analyze goes on to read, and shares the
 schema control with it, but never called the inference — so the user typed by
 hand, on this page, what the other pane fills in for them.
 
-What is *not* shared is the verdict, and that is the point of the file: Analyze
-applies a guess only when it found a well **and** a channel, because it has to
-name the channels it will quantify. This page only groups files by well. A
-single-channel plate carries a constant channel token, so no channel slot can be
-placed — and refusing such a guess here would decline a layout that groups
-perfectly well, for a reason belonging to a different page.
+The verdict looked like it should differ from Analyze's, and the first version
+of this file asserted that it did: Analyze applies a guess only when it found a
+well **and** a channel, because it has to name the channels it quantifies, while
+this page only groups files by well — so a single-channel plate, whose constant
+channel token means no channel slot can be placed, seemed like a layout this
+page should accept and Analyze should decline.
+
+It is not. ``ImportLoosePage._can_run`` blocks on ``SchemaPicker.errors()``,
+which validates against ``util.schema.PIPELINE_REQUIRED_FIELDS`` — ``("channel",
+"well")`` — and the comment beside that check already said why: *"a schema with
+no 'channel' produces archives Analyze cannot then read, which is the only
+reason to build them."* Applying a channel-less guess turned a working page into
+a dead one on a single press, with Run and Queue dark and the explanation filed
+under success.
+
+Two tests here asserted that broken state and called it correct. They are
+rewritten around the report, per CLAUDE.md §6 — a failing test may be asserting
+the bug — and the file now checks the button's effect on ``_can_run``, not only
+on the schema string.
 """
 
 from __future__ import annotations
@@ -67,22 +80,29 @@ def test_a_guess_with_no_well_slot_is_refused_for_grouping():
     assert "No well position was identified" in verdict.message
 
 
-def test_a_single_channel_plate_is_applied_here_although_analyze_would_refuse_it():
-    """Excludes the rule copied from Analyze — the defect this split exists for.
+def test_a_single_channel_plate_is_refused_because_the_page_cannot_run_it():
+    """Excludes the rule that reasons from what grouping needs in principle.
 
-    ``confident`` means a well *and* a channel. These names have a constant
-    channel token, so no channel slot is placed and ``confident`` is False,
-    yet the well slot is right there and grouping needs nothing else.
+    The fixture is the shape it claims to model, which the first version was
+    not: a real single-channel plate is ``exp_GFP_A01_f0_t0`` — five positions
+    with a *constant* channel token — not a four-position name with no channel
+    token at all. The first version used the latter, so it never exercised the
+    layout it was written about.
+
+    Either shape yields a schema with no ``channel``, and
+    ``SchemaPicker.errors()`` rejects that, so applying it would leave Run and
+    Queue dark with the reason filed under success.
     """
-    guess = infer_schema([f"exp_{w}_{f}_t0" for w in ("A01", "A02", "B01")
+    guess = infer_schema([f"exp_GFP_{w}_{f}_t0" for w in ("A01", "A02", "B01")
                           for f in ("f0", "f1")])
     assert guess.confident is False, "the premise: Analyze would decline this"
-    assert "well" in guess.fields
+    assert "well" in guess.fields and "channel" not in guess.fields
 
     verdict = detection_for_grouping(guess)
-    assert verdict.apply is True
-    assert verdict.problem is False
+    assert verdict.apply is False
+    assert verdict.problem is True
     assert "No channel position was identified" in verdict.message
+    assert "unchanged" in verdict.message
 
 
 def test_nothing_detected_is_a_refusal_that_says_the_schema_is_unchanged():
@@ -108,15 +128,35 @@ def test_pressing_detect_fills_the_picker_from_the_folder(qapp, tmp_path):
     assert f"All {total} filenames sampled matched" in page._schema_picker.detectionText()
 
 
-def test_pressing_detect_on_a_single_channel_folder_applies_it_here(qapp, tmp_path):
-    """The page-level half of the rule above, through the real control."""
-    _write(tmp_path / "loose", channels=())
+def test_pressing_detect_never_leaves_the_page_unable_to_run(qapp, tmp_path):
+    """Excludes the button that writes a correct-looking schema and stops the page.
+
+    §7.6 #1: asserting a control is *offered* is not asserting it *works*, and
+    here the button worked and the page died. The first version of this test
+    asserted the resulting schema string and a sentence, and never looked at
+    ``errors()`` or ``_can_run`` — so it passed against the shipped defect.
+    """
+    _write(tmp_path / "loose", channels=("GFP",))   # a real single-channel plate
+    page = _page()
+    page._src_field.set_path(str(tmp_path / "loose"))
+    before = page._schema_picker.schema()
+
+    page._schema_picker.detectButton().click()
+
+    assert page._schema_picker.errors() == []
+    assert page._schema_picker.schema() == before, "left as the user set it"
+    assert "No channel position was identified" in page._schema_picker.detectionNoteText()
+
+
+def test_pressing_detect_on_a_good_folder_leaves_the_page_runnable(qapp, tmp_path):
+    """The other side of the same assertion — the guard must not be vacuous."""
+    _write(tmp_path / "loose")
     page = _page()
     page._src_field.set_path(str(tmp_path / "loose"))
     page._schema_picker.detectButton().click()
 
-    assert page._schema_picker.schema() == "experiment:well:fov:timepoint"
-    assert "No channel position was identified" in page._schema_picker.detectionText()
+    assert page._schema_picker.errors() == []
+    assert page._schema_picker.schema() == "experiment:channel:well:fov:timepoint"
 
 
 def test_an_empty_source_field_is_answered_rather_than_scanned(qapp):

@@ -15,6 +15,7 @@ from util.dir_scan import files_and_subdirs, files_in
 from util.image_exts import is_run_input_member
 from util.well_token import blank_wells_for_run, canonical_well_label
 from util.retry_io import retry_io
+from util.schema import parse_schema
 from util.zip_write import (
     atomic_zip, replace_folder_with_archive)
 
@@ -438,11 +439,28 @@ def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool,
                 f"✓ Will fold {folded} loose TIF(s) into the existing well "
                 f"zips in {root.name}/",
             )
-        return InputPlan(
-            GROUP_LOOSE, root, output_dir, loose,
-            f"✓ Will group {loose} loose TIF(s) into per-well folders "
-            f"in {root.name}/",
-        )
+        # The same count, for the same reason, as the zip-root branch below
+        # and the fold branch above: a glob counts every file with a TIF
+        # suffix, while grouping rejects a name whose well token will not
+        # parse. Converting one of the three and leaving this one is how a
+        # single function comes to hold two definitions of the same word
+        # (CLAUDE.md §7.5 #5), and this branch is the one a folder *named*
+        # ``in`` takes — the common layout.
+        group_schema, group_sep = schema
+        groupable = groupable_tif_count(loose_files, group_schema, group_sep)
+        if groupable is None or groupable == loose:
+            group_msg = (f"✓ Will group {loose} loose TIF(s) into per-well "
+                         f"folders in {root.name}/")
+        elif groupable == 0:
+            group_msg = (f"None of the {loose} loose TIF(s) carry a well in "
+                         f"the filename schema — nothing would be grouped.")
+        else:
+            short = loose - groupable
+            verb = "does" if short == 1 else "do"
+            group_msg = (f"✓ Will group {groupable} of {loose} loose TIF(s) "
+                         f"into per-well folders in {root.name}/ "
+                         f"({short} {verb} not match the schema)")
+        return InputPlan(GROUP_LOOSE, root, output_dir, loose, group_msg)
     if _has_well_content_in(entries, subdirs):
         return InputPlan(
             GROUPED, root, output_dir, 0,
@@ -476,14 +494,27 @@ def groupable_tif_count(files, filename_schema: str, filename_sep: str) -> int |
     on the token there. The same rule ``datasets.import_loose.import_loose_compute``
     mirrors, and for the same reason — the preview and the thing that does the
     work must not disagree about what counts as a match.
+
+    The schema goes through :func:`util.schema.parse_schema`, the parser the
+    pipeline itself uses, rather than a ``strip().lower()`` of its own. A third
+    spelling of "which position holds the well" is a third answer waiting to
+    disagree with the other two, and this one did: it read ``WELL`` and
+    ``" well"`` as the well position where the zipper reads neither, so the
+    preview would have promised a count the run could not deliver — the exact
+    defect this function was added to remove.
+
+    An empty separator returns ``None`` rather than substituting ``"_"``. The
+    zipper raises ``ValueError`` on one, so there is no answer to give, and a
+    guessed answer here would be a measurement the caller could not tell from a
+    real one (§7 #3).
     """
-    if not filename_schema:
+    if not filename_schema or not filename_sep:
         return None
-    fields = [f.strip().lower() for f in filename_schema.split(":") if f.strip()]
+    fields = parse_schema(filename_schema)
     if "well" not in fields:
         return None
     at = fields.index("well")
-    sep = filename_sep or "_"
+    sep = filename_sep
     n = 0
     for f in files:
         parts = Path(f).stem.split(sep)

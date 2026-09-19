@@ -31,13 +31,13 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
-from widgets._support import set_variant
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
     QWidget,
 )
 
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP, SCHEMA_FIELDS, parse_schema, validate_schema
+from widgets._support import set_variant
 
 #: Human-readable label per schema field, positionally paired with
 #: ``util.schema.SCHEMA_FIELDS``. ``strict=`` on the zips below turns a dropped

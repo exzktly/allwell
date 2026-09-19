@@ -75,6 +75,12 @@ class InferredSchema:
     #: the reason, so a user reading the readout can see what the guess trips
     #: over rather than only how often.
     misses: tuple[tuple[str, str], ...] = ()
+    #: How many of the unmatched names failed on the **well** position
+    #: specifically. Tracked apart from the rest because it is the only
+    #: mismatch with a consequence the software can state: grouping places a
+    #: file by its well token, so a name whose well does not parse lands in no
+    #: archive. See :meth:`shortfall`.
+    well_misses: int = 0
 
     @property
     def schema_str(self) -> str:
@@ -109,28 +115,50 @@ class InferredSchema:
         return f"{head} Matched {self.matched:,} of {self.sampled:,} sampled."
 
     def shortfall(self) -> str:
-        """The files this guess would leave behind, or ``""`` when there are none.
+        """The sampled names this guess does not fit, or ``""`` when there are none.
 
-        Separate from :meth:`summary` because the two carry different weight and
-        must not be styled alike. The summary is a neutral statement of what was
-        chosen; this is a statement about the user's *data* — files that will not
-        be analysed — and it was the thing most worth reading while it was set in
-        the same grey as the example-filename boilerplate beneath it.
+        Two things this sentence used to claim and could not support.
 
-        Phrased as a consequence ("will be skipped") rather than as a mechanism
-        ("did not parse"), because the consequence is what the reader has to make
-        a decision about.
+        It said the files **"will be skipped"**. That is true of a name whose
+        *well* position does not parse — grouping places a file by its well
+        token, so such a name lands in no archive — and false of everything
+        else. The pipeline applies no predicate to the timepoint or FOV slots
+        at all: ``process_microscopy._collect_available_schema_values`` reads
+        those tokens **positionally, unvalidated**, and the only per-file test
+        ``_is_nuclear_filename`` makes is on the channel slot. A plate whose
+        fields were written ``fov01`` instead of ``f01`` processes in full while
+        this sentence announced eight files lost, which would send someone off
+        to rename files that are fine.
+
+        And it said **"N files"** where ``N`` counts a *sample*: the scan reads
+        at most :data:`_SAMPLE_LIMIT` names, drawn by stride. On a 2,304-image
+        plate with one row mis-named, the honest 288 came out as 4. The
+        qualifier :meth:`summary` already carries belongs here too, and more so,
+        because this is the register styled so the reader cannot skim it.
+
+        So the headline states the mismatch, which is measured, and the
+        consequence is named only for the slot that has one.
         """
         missing = self.sampled - self.matched
         if missing <= 0:
             return ""
-        head = (f"{missing:,} file{'' if missing == 1 else 's'} will be skipped")
-        if not self.misses:
-            return f"{head}."
-        shown = "; ".join(f"{stem} — {why}" for stem, why in self.misses)
-        more = missing - len(self.misses)
-        tail = f", and {more:,} more" if more > 0 else ""
-        return f"{head}: {shown}{tail}."
+        verb = "does" if missing == 1 else "do"
+        head = (f"{missing:,} of the {self.sampled:,} filenames sampled {verb} "
+                f"not fit this layout")
+        if self.misses:
+            shown = "; ".join(f"{stem} — {why}" for stem, why in self.misses)
+            more = missing - len(self.misses)
+            tail = f", and {more:,} more" if more > 0 else ""
+            body = f"{head}: {shown}{tail}."
+        else:
+            body = f"{head}."
+        if self.well_misses:
+            # Says "is not a valid well" rather than "does not parse" for the
+            # same reason the headline says "matched" rather than "parsed":
+            # one vocabulary, and not the programmer's one.
+            body += (" A name whose well position is not a valid well is not "
+                     "grouped into any archive, so it is not analysed.")
+        return body
 
 
 # ── token classifiers ───────────────────────────────────────────────────────
@@ -398,7 +426,8 @@ _ROLE_WORD = {"well": "a well", "timepoint": "a timepoint", "fov": "an FOV"}
 
 
 def _match_report(stems: list[str], sep: str, k: int, fields: list[str],
-                  checks: dict) -> tuple[int, tuple[tuple[str, str], ...]]:
+                  checks: dict,
+                  ) -> tuple[int, tuple[tuple[str, str], ...], int]:
     """How many of *stems* parse under this guess, and why the rest do not.
 
     A name parses when it splits into *k* tokens under *sep* **and** every slot
@@ -414,6 +443,7 @@ def _match_report(stems: list[str], sep: str, k: int, fields: list[str],
     name, so each slot is asked the question that claimed it.
     """
     matched = 0
+    well_misses = 0
     misses: list[tuple[str, str]] = []
     for stem in stems:
         parts = stem.split(sep)
@@ -425,17 +455,22 @@ def _match_report(stems: list[str], sep: str, k: int, fields: list[str],
                            f"not {k}"))
             continue
         why = ""
+        bad_field = ""
         for i, fld in enumerate(fields):
             pred = checks.get(i)
             if pred is not None and not pred(parts[i]):
                 why = (f"position {i + 1} is {parts[i]!r}, not "
                        f"{_ROLE_WORD.get(fld, fld)}")
+                bad_field = fld
                 break
         if not why:
             matched += 1
-        elif len(misses) < _MISS_EXAMPLES:
+            continue
+        if bad_field == "well":
+            well_misses += 1
+        if len(misses) < _MISS_EXAMPLES:
             misses.append((stem, why))
-    return matched, tuple(misses)
+    return matched, tuple(misses), well_misses
 
 
 def infer_schema(stems, *, default_sep: str = DEFAULT_SEP) -> InferredSchema | None:
@@ -476,7 +511,8 @@ def infer_schema(stems, *, default_sep: str = DEFAULT_SEP) -> InferredSchema | N
     # about the schema already being proposed.
     if best is not None and best_ctx is not None:
         sep, k, fields, checks = best_ctx
-        best.matched, best.misses = _match_report(stems, sep, k, fields, checks)
+        best.matched, best.misses, best.well_misses = _match_report(
+            stems, sep, k, fields, checks)
     return best
 
 

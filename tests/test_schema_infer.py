@@ -283,12 +283,78 @@ def test_summary_states_the_schema_the_separator_and_both_counts():
     # to the neutral summary, which is styled to be skimmed.
     assert "ZZ9" not in guess.summary()
     assert "ZZ9" in guess.shortfall()
-    assert "will be skipped" in guess.shortfall()
+    assert f"of the {len(stems)} filenames sampled" in guess.shortfall()
+    assert "not fit this layout" in guess.shortfall()
+    assert "will be skipped" not in guess.shortfall(), (
+        "a consequence the pipeline does not produce")
 
 
 def test_summary_on_a_clean_corpus_says_all_of_them_and_has_no_shortfall():
     guess = infer_schema(_default_stems())
     assert f"All {len(_default_stems())} filenames sampled matched" in guess.summary()
+    assert guess.shortfall() == ""
+
+
+def test_the_shortfall_claims_a_consequence_only_for_the_well_position():
+    """Excludes the sentence that announces files lost when none are.
+
+    The pipeline validates the **channel** slot and nothing else
+    (``process_microscopy._is_nuclear_filename``); the timepoint and FOV tokens
+    are read positionally, unvalidated
+    (``_collect_available_schema_values``). So a plate whose fields were
+    written ``fov01`` instead of ``f01`` processes in full, and a readout
+    saying those files "will be skipped" sends someone off to rename files
+    that are fine. Only the well position has a consequence this code can
+    state: grouping places a file by its well token.
+    """
+    by_well = infer_schema(
+        _default_stems() + ["exp_GFP_ZZ9_f0_t0"])
+    assert by_well.well_misses == 1
+    assert "not grouped into any archive" in by_well.shortfall()
+
+    by_fov = infer_schema(
+        [f"exp_GFP_{w}_{f}_t0" for w in ("A01", "A02", "B01", "B02")
+         for f in ("f0", "f1")] + ["exp_GFP_A01_fov9_t0"])
+    assert by_fov.fields[3] == "fov"
+    assert by_fov.matched == by_fov.sampled - 1
+    assert by_fov.well_misses == 0
+    assert "not grouped" not in by_fov.shortfall()
+    assert "not analysed" not in by_fov.shortfall()
+
+
+def test_the_shortfall_says_the_count_is_of_the_sample(monkeypatch):
+    """Excludes the sentence that reports a sample as an absolute count.
+
+    The scan reads at most ``_SAMPLE_LIMIT`` names, by stride. Without the
+    qualifier, a 96-well plate with one row mis-named reports the four misses
+    that happened to fall in the sample as though they were the whole loss.
+    """
+    import util.schema_infer as si
+
+    monkeypatch.setattr(si, "_SAMPLE_LIMIT", 40)
+    good = [f"exp_GFP_{r}{c:02d}_f0_t0" for r in "ABCDEFGH" for c in range(1, 13)]
+    bad = [f"exp_GFP_ZZ{c}_f0_t0" for c in range(1, 13)]
+    guess = si.infer_schema(si._spread(good + bad, si._SAMPLE_LIMIT))
+    assert guess.sampled == 40, "the sample, not the plate"
+    assert f"of the {guess.sampled:,} filenames sampled" in guess.shortfall()
+
+
+def test_a_double_extension_does_not_silently_cost_the_last_position():
+    """``.ome.tif`` leaves ``…_t1.ome`` in the stem, so the timepoint slot is
+    never claimed and the guess quietly becomes ``…:ignore``.
+
+    Pinned as the behaviour it is, not as the behaviour wanted: what must not
+    happen is the readout calling that degraded guess a clean match without
+    saying the last position went unidentified.
+    """
+    stems = [f"exp_{c}_{w}_f0_t1.ome" for w in ("A01", "A02", "B01")
+             for c in ("DAPI", "GFP")]
+    guess = infer_schema(stems)
+    assert guess is not None
+    assert guess.fields[4] == "ignore", "the timepoint is lost to the .ome"
+    # The honest part: nothing claims those names failed, because under the
+    # schema it settled on they did not.
+    assert guess.matched == guess.sampled
     assert guess.shortfall() == ""
 
 

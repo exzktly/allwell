@@ -75,7 +75,7 @@ def test_the_readout_names_the_files_the_guess_does_not_parse(qapp, tmp_path):
     # The shortfall is the sentence about the user's data, so it lands in the
     # note register rather than in the neutral summary that is styled to skim.
     note = tab._schema_picker.detectionNoteText()
-    assert "1 file will be skipped" in note
+    assert "1 of the" in note and "does not fit this layout" in note
     assert "ZZ9" in note
 
 

@@ -92,13 +92,74 @@ def test_the_count_is_none_rather_than_zero_when_it_cannot_be_asked():
     assert groupable_tif_count(files, SCHEMA, "_") == 1
 
 
-@pytest.mark.parametrize("stem,counted", [
-    ("exp_DAPI_A01_f0_t0", True),
-    ("exp_DAPI_a1_f0_t0", True),       # the canonical form accepts either spelling
-    ("exp_DAPI_ZZ9_f0_t0", False),     # splits right, well token is not a well
-    ("scan0", False),                  # too few positions to reach the well slot
+@pytest.mark.parametrize("name", [
+    "exp_DAPI_A01_f0_t0.tif",
+    "exp_DAPI_a1_f0_t0.tif",          # the canonical form accepts either spelling
+    "exp_DAPI_A01_f0_t0.TIF",
+    "exp_DAPI_A01_f0_t0.tiff",
+    "exp_DAPI_A01_f0_t1.ome.tif",     # double extension: the stem keeps ".ome"
+    "exp_DAPI_ZZ9_f0_t0.tif",         # splits right, well token is not a well
+    "exp_DAPI__f0_t0.tif",            # empty token where the well should be
+    "scan0.tif",                      # too few positions to reach the well slot
+    "exp_DAPI_A01.tif",               # schema longer than the name
 ])
-def test_the_predicate_agrees_with_what_grouping_will_do(stem, counted):
-    """Excludes the count built on token agreement alone — ``ZZ9`` splits into
-    exactly the five positions the schema wants."""
-    assert groupable_tif_count([f"{stem}.tif"], SCHEMA, "_") == int(counted)
+@pytest.mark.parametrize("schema", [
+    SCHEMA,
+    "experiment:channel:fov:timepoint",   # no well field at all
+    "well:channel",                       # well first
+])
+def test_the_count_is_a_differential_against_the_zipper_itself(name, schema):
+    """Excludes any count with a schema normalisation of its own.
+
+    The docstring claims this mirrors
+    ``pipeline.well_plate_zipper._extract_well_from_filename``. A test that
+    checks the mirror against hand-written expectations checks the author's
+    reading of the zipper, not the zipper — and the first version did exactly
+    that, while the implementation disagreed with the real function on an
+    uppercase ``WELL`` token and a space-padded one. So ask both.
+    """
+    from pipeline.well_plate_zipper import _extract_well_from_filename
+    from util.schema import parse_schema
+
+    fields = parse_schema(schema)
+    expected = int(_extract_well_from_filename(name, fields, "_") is not None)
+    assert groupable_tif_count([name], schema, "_") in (expected, None)
+    if "well" in fields:
+        assert groupable_tif_count([name], schema, "_") == expected
+
+
+def test_an_unaskable_question_is_refused_rather_than_normalised():
+    """Excludes the version that invents a schema spelling or a separator.
+
+    A third spelling of "which position holds the well" is a third answer
+    waiting to disagree with ``parse_schema`` and with the zipper. ``WELL`` and
+    ``" well"`` are not the well field to either of them, and an empty
+    separator makes the zipper raise rather than return an answer.
+    """
+    name = ["exp_DAPI_A01_f0_t0.tif"]
+    assert groupable_tif_count(name, "experiment:channel:WELL:fov:timepoint", "_") is None
+    assert groupable_tif_count(name, "experiment:channel: well:fov:timepoint", "_") is None
+    assert groupable_tif_count(name, SCHEMA, "") is None
+
+
+def test_the_named_in_folder_branch_counts_the_same_way(tmp_path):
+    """Excludes the half-swept sweep (CLAUDE.md §7.5 #5).
+
+    A folder *named* ``in`` takes the GROUP_LOOSE branch, not the zip-root one
+    — the common layout — and it kept the glob after its sibling was converted,
+    so one function held two definitions of the same word.
+    """
+    folder = _write(tmp_path / "in", [f"scan{i}" for i in range(8)])
+    plan = plan_input_layout(folder, filename_schema=SCHEMA, filename_sep="_")
+
+    assert "✓" not in plan.message
+    assert "None of the 8" in plan.message
+
+
+def test_the_named_in_folder_branch_states_a_partial_count(tmp_path):
+    stems = _plate() + ["exp_GFP_ZZ9_f0_t0"]
+    folder = _write(tmp_path / "in", stems)
+    plan = plan_input_layout(folder, filename_schema=SCHEMA, filename_sep="_")
+
+    assert f"{len(stems) - 1} of {len(stems)}" in plan.message
+    assert "1 does not match the schema" in plan.message

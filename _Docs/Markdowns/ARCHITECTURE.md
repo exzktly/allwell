@@ -5446,18 +5446,33 @@ call browsing makes, so the two cannot give different answers about one folder,
 and it stays synchronous for the same reason the scan is bounded at
 `_SAMPLE_LIMIT` names rather than walking. The Datasets pane's **Zip Loose
 Folder** page shares the control and reaches its own verdict through
-`datasets.import_loose.import_loose_compute.detection_for_grouping`: Analyze
-applies a guess only when it is `confident` — a well slot **and** a channel slot
-— because it must name the channels it quantifies, while that page only ever
-groups by well. A single-channel plate carries a constant channel token, so no
-channel slot can be placed, and copying Analyze's rule there would decline a
-layout that groups perfectly well.
+`datasets.import_loose.import_loose_compute.detection_for_grouping`, which tests
+the pair that page's own `_can_run` requires — `util.schema.PIPELINE_REQUIRED_FIELDS`,
+`("channel", "well")`. It reads as though it should be looser, since grouping
+only ever places a file by its well, and the first version of it was: it accepted
+a channel-less guess on the reasoning that grouping needs nothing else. That
+turned a working page into a dead one on a single press, because
+`SchemaPicker.errors()` rejects such a schema and `_can_run` blocks on it — and
+the comment beside that check already said why, six lines from the contradiction:
+*"a schema with no 'channel' produces archives Analyze cannot then read, which is
+the only reason to build them."* The verdict differs from Analyze's only in what
+it says, not in what it accepts.
 
 **The readout has two registers, because its two halves carry different weight.**
 `InferredSchema.summary()` is the neutral statement — what was detected, the
 separator, and how many of the sampled names matched. `InferredSchema.shortfall()`
-is the statement about the user's *data*: which files will be skipped and why,
-phrased as a consequence rather than as a mechanism. The picker shows the first
+is the statement about the user's *data*: which sampled names do not fit the
+layout, and why. It claims a **consequence** only for the well position, which is
+the only one that has one — grouping places a file by its well token, so a name
+whose well is not a well lands in no archive. The pipeline applies no predicate
+to the timepoint or FOV slots at all (`_collect_available_schema_values` reads
+them positionally, unvalidated; the only per-file test `_is_nuclear_filename`
+makes is on the channel slot), so announcing those names as lost would send
+someone off to rename files that process fine. The count carries the *sampled*
+qualifier for the same reason `summary()` does: the scan reads at most
+`_SAMPLE_LIMIT` names by stride, so on any plate larger than that an unqualified
+count is wrong by the sampling ratio, in the register styled so it cannot be
+skimmed. The picker shows the first
 as muted body text and the second as a `QLabel#Notice` panel (§8), so the two
 differ in outline rather than only in hue. A name counts as matched when it
 splits into the right number of positions **and** every slot the guess claimed

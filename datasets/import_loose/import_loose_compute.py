@@ -314,18 +314,27 @@ class SchemaDetection:
 
 
 def detection_for_grouping(guess) -> SchemaDetection:
-    """Judge an inferred schema *for this page's purpose*, which is not Analyze's.
+    """Judge an inferred schema against what **this page** requires to run.
 
-    Analyze applies a guess only when it is ``confident`` — a well slot **and** a
-    channel slot — because it has to name the channels it will quantify, and a
-    schema with ``ignore`` where the channel belongs fails its own validator.
-    This page only ever groups files by well. A single-channel plate carries a
-    constant channel token, so no channel slot can be placed and the guess comes
-    back not confident; refusing it here would decline a layout that groups
-    perfectly well, for a reason belonging to a different page.
+    The first version of this function reasoned from what grouping needs in
+    principle — a well position and nothing else — and concluded that a
+    single-channel plate, whose constant channel token means no channel slot
+    can be placed, should be accepted here even though Analyze declines it.
 
-    So the test here is the well slot alone, and a guess that reaches it without
-    a channel is applied with the difference stated rather than hidden.
+    That was wrong, and wrong in the way :file:`CLAUDE.md` §7.3 #6 describes:
+    it contradicted a comment six lines from the check that refutes it.
+    :meth:`~datasets.import_loose.view.ImportLoosePage._can_run` blocks on
+    ``SchemaPicker.errors()``, which validates against
+    ``util.schema.PIPELINE_REQUIRED_FIELDS`` — ``("channel", "well")`` — and
+    that comment already says why: *"a schema with no 'channel' produces
+    archives Analyze cannot then read, which is the only reason to build
+    them."* Applying a channel-less guess therefore turned a working page into
+    a dead one on a single press, with Run and Queue dark and the explanation
+    filed under success.
+
+    So the test is both fields, the same pair the run requires — and the
+    refusal says what is missing and what it costs, rather than declining
+    silently.
     """
     if guess is None:
         return SchemaDetection(
@@ -334,18 +343,28 @@ def detection_for_grouping(guess) -> SchemaDetection:
             "below is unchanged.",
             True,
         )
-    if "well" not in getattr(guess, "fields", []):
+    fields = getattr(guess, "fields", [])
+    missing = [f for f in ("well", "channel") if f not in fields]
+    if not missing:
+        return SchemaDetection(True, guess.summary(), False)
+    if missing == ["channel"]:
+        # Named separately because it is the case a reader will think should
+        # have worked: the well is right there, and grouping by well is all
+        # this page does. The archives are the part that cannot work.
         return SchemaDetection(
             False,
-            f"{guess.summary()} No well position was identified, so these files "
-            f"cannot be grouped by well and the schema below is unchanged.",
+            f"{guess.summary()} No channel position was identified — every "
+            f"sampled filename carries the same one, or none. The archives "
+            f"this page writes are read by Analyze, which needs a channel, so "
+            f"the schema below is unchanged: set the channel position by hand "
+            f"if these files carry one.",
             True,
         )
-    if "channel" in guess.fields:
-        return SchemaDetection(True, guess.summary(), False)
+    names = " or ".join(missing)
     return SchemaDetection(
-        True,
-        f"{guess.summary()} No channel position was identified, which grouping "
-        f"by well does not need — but Analyze will ask for one.",
         False,
+        f"{guess.summary()} No {names} position was identified, so these files "
+        f"cannot be grouped into archives Analyze can read and the schema "
+        f"below is unchanged.",
+        True,
     )

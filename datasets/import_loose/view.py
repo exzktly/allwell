@@ -466,7 +466,11 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             self._schema_picker.setSeparator(guess.separator)
             self._schema_picker.setSchema(guess.schema_str)
         self._schema_picker.setDetection(verdict.message, problem=verdict.problem)
-        self._on_readout_input_changed()
+        # No explicit re-scan: `setSchema` above emits `changed`, which is
+        # already connected to `_on_readout_input_changed`. Calling it again
+        # walked the folder a second time on every press — irrelevant on a test
+        # fixture, a second pass over 10^5 files on the UI thread in the field.
+        # A press that applies nothing changes no input, so nothing is owed.
 
     def _on_source_changed(self) -> None:
         set_variant(self._run_btn, "primary")

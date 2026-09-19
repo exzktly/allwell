@@ -103,6 +103,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # --flatfield/--background empty_well. The remote genuinely runs these:
     # a batched run reads its blank out of --background_dir on the worker.
     "pipeline/empty_well.py",
+    # Per-field image-quality metrics, computed inside the quantification
+    # pass, so the remote worker genuinely needs it.
+    "pipeline/field_quality.py",
     "pipeline/flatfield.py",
     # Per-FOV resume checkpoints, keyed on the output directory and the run's
     # settings so one plate cannot resume another's intermediates.

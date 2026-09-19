@@ -126,14 +126,49 @@ def compute_focus_pass(df, params) -> "pd.Series":
     return passed.where(~soft, 0)
 
 
+def candidate_rows(df):
+    """The rows this gate's numbers are **about**: what the analysis would
+    otherwise keep.
+
+    Every count here used to walk every row of the frame, consulting none of
+    the sibling verdicts. That is wrong in both directions and the second one
+    matters more. ``edge_focus`` returns nothing for an outline it cannot
+    read, and the fragments it cannot read are largely the same population
+    ``qc_region_area`` exists to remove — debris StarDist shattered into many
+    small cells. So a debris-heavy plate marked **every** well "needs review —
+    N of M cells carry no focus value", about cells the user had already
+    filtered out, and the marker meant least on exactly the plates that need
+    it most. In the other direction, "currently excluding N cells" counted
+    rows the focus layer marks rather than rows it removes from the analysis,
+    overstating the effect by however much the other gates had already taken.
+
+    Composed from the chokepoint itself
+    (:func:`review.data.data_loading.df_included_mask`) minus ``Focus_Pass``,
+    rather than from a second list of layers here: a surface that filtered its
+    own evidence by its own verdict would report nothing to exclude the moment
+    the gate was switched on.
+    """
+    from review.data.data_loading import df_included_mask
+
+    if df is None or len(df) == 0:
+        return df
+    return df.loc[df_included_mask(df, except_layer=FOCUS_PASS_COLUMN)]
+
+
 def focus_counts(df, params) -> tuple[int, int, int]:
     """``(soft, unmeasurable, total)`` for one frame.
+
+    Counted over :func:`candidate_rows` — the cells the analysis would keep if
+    this gate were off — not over every row in the frame.
 
     ``unmeasurable`` is counted and returned rather than folded into either
     other number, because the panel has to be able to say it out loud: a cell
     nobody could measure is being **kept**, and a reader who believes the gate
     removed everything soft would be wrong about exactly those rows.
     """
+    if df is None or len(df) == 0:
+        return (0, 0, 0)
+    df = candidate_rows(df)
     if df is None or len(df) == 0:
         return (0, 0, 0)
     vals = focus_values(df)
@@ -346,6 +381,12 @@ def focus_effect_text(ctx) -> str:
     the gate is on, which would otherwise leave the panel with no statement of
     effect at all — a user ticks a control that says it will drop rows, and
     every word on screen stays the same.
+
+    **"across the plate" is said out loud.** The count is plate-wide while
+    every plot the user is looking at is scoped to their selection, so the
+    number here and the number of rows any one figure loses are different
+    quantities. Naming the scope is cheaper than making them agree and more
+    honest than letting the reader assume.
     """
     params = focus_params(ctx)
     if params is None or params.focus_min is None:
@@ -354,8 +395,8 @@ def focus_effect_text(ctx) -> str:
     if not total or not soft:
         return ""
     if not params.exclude_soft_cells:
-        return f"Currently kept — {_cells(soft)} would be excluded."
-    return f"Currently excluding {_cells(soft)}."
+        return f"Currently kept — {_cells(soft)} across the plate would be excluded."
+    return f"Currently excluding {_cells(soft)} across the plate."
 
 
 def focus_gate_can_apply(ctx) -> bool:
@@ -386,7 +427,10 @@ def per_well_focus(ctx) -> dict[str, list]:
     cache = getattr(ctx.state.dataset, "cache", None) or {}
     out: dict[str, list] = {}
     for label, df in cache.items():
-        vals = focus_values(df)
+        # The composite's shares are shares **of the cells being analysed**;
+        # see :func:`candidate_rows` for why counting every row marked every
+        # well of a debris-heavy plate.
+        vals = focus_values(candidate_rows(df))
         if vals is None:
             out[label] = []
             continue
@@ -428,7 +472,10 @@ def well_focus_distribution(ctx, well: str):
     Cells with no value are **counted, not dropped**, so the readout can say
     how much of the well could not be judged at all. The cut comes from the
     same ``QCParams`` the gate applies, so the line on this plot and the rows
-    the gate removes cannot be different numbers.
+    the gate removes cannot be different numbers — and the curve is drawn over
+    :func:`candidate_rows` for the same reason, so a user choosing a cut off
+    this plot sees the population the cut will actually meet rather than one
+    padded with debris the QC gate has already taken.
     """
     from review.domain.focus_distribution import distribution_from_values
 
@@ -444,7 +491,7 @@ def well_focus_distribution(ctx, well: str):
             (), cut=cut, subject=str(well),
             declined=f"No measurements are loaded for {well}, so there is "
                      f"nothing to draw. Select a well that this dataset holds.")
-    vals = focus_values(df)
+    vals = focus_values(candidate_rows(df))
     if vals is None:
         # Measured-and-empty and never-measured are different facts; this is
         # the second, and it gets the sentence that names the remedy.

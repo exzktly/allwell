@@ -351,7 +351,20 @@ def _warn_no_area_column(where: str) -> None:
     )
 
 
-def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Series:
+#: The verdict columns composed with ``Included``, in the order they are
+#: ANDed. Written once so a surface that needs the composition *minus one
+#: layer* subtracts from this rather than restating it -- the focus panel
+#: counts over the cells that would otherwise be analysed, which is neither
+#: every row in the frame nor the rows its own cut has already judged.
+#:
+#: ``Included`` is not in it: it is the only one whose absence means all-pass
+#: for a different reason (no curation has happened) and whose blanks mean
+#: dropped rather than kept.
+VERDICT_LAYERS = ("QC_Pass", "Crop_Pass", "Gate_Pass", "Field_Pass", "Focus_Pass")
+
+
+def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
+                     except_layer: str | None = None) -> pd.Series:
     """Rows that count toward analysis: ``Included == 1`` composed with the QC,
     crop, scatter-gate and field-quality layers.
 
@@ -385,31 +398,30 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Serie
     where the gates are drawn — passes it by default, so it keeps showing the
     full cloud with the gates over it rather than filtering itself by its own
     gates; its "Apply gates" toggle opts back in.
+
+    ``except_layer`` drops one named verdict column, for a surface that is
+    **about** that layer and must not filter its own evidence by it: the focus
+    panel counting how many cells a cut would remove has to count over the
+    cells that would otherwise be in the analysis — neither over the debris the
+    QC gate already dropped, nor over the ones its own cut is about to.
     """
     if "Included" not in df.columns:
         mask = pd.Series(True, index=df.index)
     else:
         incl = pd.to_numeric(df["Included"], errors="coerce").fillna(0)
         mask = incl.eq(1)
-    if "QC_Pass" in df.columns:
-        qc = pd.to_numeric(df["QC_Pass"], errors="coerce").fillna(1)
-        mask = mask & qc.eq(1)
-    if "Crop_Pass" in df.columns:
-        crop = pd.to_numeric(df["Crop_Pass"], errors="coerce").fillna(1)
-        mask = mask & crop.eq(1)
-    if include_gate and "Gate_Pass" in df.columns:
-        gate = pd.to_numeric(df["Gate_Pass"], errors="coerce").fillna(1)
-        mask = mask & gate.eq(1)
-    if "Field_Pass" in df.columns:
-        fq = pd.to_numeric(df["Field_Pass"], errors="coerce").fillna(1)
-        mask = mask & fq.eq(1)
-    if "Focus_Pass" in df.columns:
-        # ``fillna(1)`` for the same reason as its four siblings: an
-        # unreadable verdict keeps the row. A cell nobody could measure and a
-        # cell measured and found soft are different facts, and only the
-        # second is a reason to drop anything.
-        foc = pd.to_numeric(df["Focus_Pass"], errors="coerce").fillna(1)
-        mask = mask & foc.eq(1)
+    for column in VERDICT_LAYERS:
+        if column == except_layer:
+            continue
+        if column == "Gate_Pass" and not include_gate:
+            continue
+        if column not in df.columns:
+            continue
+        # ``fillna(1)`` throughout: an unreadable verdict keeps the row. A cell
+        # nobody could measure and a cell measured and found wanting are
+        # different facts, and only the second is a reason to drop anything.
+        verdict = pd.to_numeric(df[column], errors="coerce").fillna(1)
+        mask = mask & verdict.eq(1)
     return mask
 
 

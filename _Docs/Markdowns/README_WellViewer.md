@@ -1551,7 +1551,11 @@ buttons — you pick one or the other, because choosing the scatter option
   magnification and it will carry between plates taken the same way, exposure
   permitting.
   Type it into **Analyze ▸ Quality Control ▸ Out of focus below** so future
-  runs record it and this box opens ready.
+  runs record it and this box opens ready. That field remembers what you last
+  typed between sessions — it is the one setting on the Analyze form that does,
+  because it describes your microscope rather than the plate in front of you.
+  Opening a dataset that recorded its own cut still shows you that dataset's
+  number, not your remembered one.
 
   The box tracks what the run recorded. If you re-process the plate with a
   different threshold, this box picks the new one up — it only keeps a number
@@ -1560,6 +1564,16 @@ buttons — you pick one or the other, because choosing the scatter option
   knowing. The plate on **Home ▸ Overview** repaints its quality markers as
   soon as the cut changes, so the two halves of that page cannot show you
   answers from different thresholds.
+
+  The counts under the checkbox are about the cells that would otherwise be in
+  your analysis — a cell the debris gate, the crop, your gates or your own
+  deletion has already removed is not counted here, in either direction. That
+  matters most on a plate with a lot of debris: the fragments the debris gate
+  removes are largely the same ones whose outlines cannot be measured, so
+  without this every well on such a plate would be marked for review about
+  cells you had already filtered out. The count is across the whole plate,
+  which the sentence says, while the plots you are looking at are scoped to
+  your selection.
 
   Cells whose outlines could not be measured at all are **kept**, and the line
   under the checkbox says how many. An outline needs contrast across it and

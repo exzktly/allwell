@@ -344,9 +344,70 @@ class AnalyzeQCSectionMixin:
         # below" label, which lives in the cell's parent.
         self._focus_rows = (rf.parentWidget(), focus_hint)
 
+        # Visible in the state where the rows above are NOT: the metric is off
+        # and a cut has been typed anyway. Without it that number is collected
+        # by the form, skipped by the validator (its gate is falsy), dropped by
+        # the service, and never mentioned -- a value the user entered and
+        # watched disappear with the row it sat in.
+        self._focus_dropped_hint = QLabel(
+            "The threshold you typed is not being recorded, because the "
+            "measurement above is switched off. Tick it to keep the number "
+            "with the dataset.", sec)
+        self._focus_dropped_hint.setObjectName("Notice")
+        self._focus_dropped_hint.setWordWrap(True)
+        self._focus_dropped_hint.setVisible(False)
+        sec.layout().addWidget(self._focus_dropped_hint)
+
         def _sync_focus(_=None) -> None:
             on = self._focus_metric_cb.isChecked()
             for row in self._focus_rows:
                 row.setVisible(on)
+            self._focus_dropped_hint.setVisible(
+                not on and bool(self._focus_min_edit.text().strip()))
         self._focus_metric_cb.toggled.connect(_sync_focus)
+        self._focus_min_edit.textChanged.connect(_sync_focus)
+
+        # **Remembered between sessions**, alone among this form's fields, and
+        # for the reason its own tooltip gives: the cut is a property of the
+        # microscope rather than of the plate, so a user typing it afresh on
+        # every run is being asked to re-derive a number the application just
+        # told them carries between plates. Written on commit and seeded at
+        # build; a dataset restore (``analyze.pinfo._apply_focus_settings``)
+        # runs after the build and therefore still wins, which is the right
+        # precedence -- what THIS dataset recorded beats what this user last
+        # typed.
+        self._focus_min_edit.editingFinished.connect(self._remember_focus_min)
+        self._seed_focus_min_from_settings()
         _sync_focus()
+
+    # ── the remembered cut ──────────────────────────────────────────────────
+
+    #: Where the cut is kept between sessions. Namespaced under ``analyze/``
+    #: so a second remembered field later is an obvious sibling rather than a
+    #: bare key at the top level of everyone's settings file.
+    FOCUS_MIN_SETTING = "analyze/focus_min"
+
+    def _remember_focus_min(self) -> None:
+        from core.app_settings import app_settings
+        from core.safe import swallow
+
+        text = self._focus_min_edit.text().strip()
+        with swallow("remembering the focus cut"):
+            settings = app_settings()
+            if text:
+                settings.setValue(self.FOCUS_MIN_SETTING, text)
+            else:
+                # A cleared box is a decision too, and leaving the old value in
+                # the file would put it back on the next launch.
+                settings.remove(self.FOCUS_MIN_SETTING)
+
+    def _seed_focus_min_from_settings(self) -> None:
+        from core.app_settings import app_settings
+        from core.safe import swallow
+
+        if self._focus_min_edit.text().strip():
+            return
+        with swallow("reading the remembered focus cut"):
+            value = app_settings().value(self.FOCUS_MIN_SETTING, "")
+            if value:
+                self._focus_min_edit.setText(str(value))

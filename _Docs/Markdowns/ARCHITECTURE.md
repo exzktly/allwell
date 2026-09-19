@@ -9999,6 +9999,26 @@ its rows excluded while the panel said they were kept.
   as the debris gate). Turning either on changes every number in the app, so it
   is chosen after reading what was found rather than discovered afterwards. The
   findings are reported either way.
+* **A ticked box stays live** (`tab_view._arm_state`). Both boxes are disabled
+  where ticking them would exclude nothing, which is the right rule for an
+  *unticked* one — but disabling does not untick, and a box that is checked and
+  disabled is armed, persisted as on, and unreachable. Lowering the cut until
+  nothing was soft was enough to get there, and raising it later fired the gate
+  without the user re-arming anything. Disabling exists to stop someone arming
+  a control that would do nothing; a control already armed must stay
+  disarmable, and its tooltip says why it currently drops nothing.
+* **The counts are over the cells the analysis would otherwise keep**
+  (`focus_gate.candidate_rows`), composed from `df_included_mask` minus
+  `Focus_Pass` rather than from a second list of layers. Counting every row
+  instead made a debris-heavy plate mark every well "needs review — N cells
+  carry no focus value", about the shattered fragments `qc_region_area` exists
+  to remove and whose outlines `edge_focus` therefore cannot read; and it made
+  "currently excluding N cells" count rows the layer *marks* rather than rows
+  it *removes*. Subtracting `Focus_Pass` specifically is the other half: the
+  full chokepoint would make the panel report nothing to exclude the moment the
+  gate was switched on. The count is plate-wide while the plots are
+  selection-scoped, and the sentence says "across the plate" rather than
+  leaving the reader to assume.
 * **The focus cut needs both a switch and a number** (`focus_gate_is_active`).
   A cut with the switch off is a number the user has recorded; the switch on
   with no cut is a request nothing here can honour. `focus_min` is seeded from
@@ -10006,6 +10026,19 @@ its rows excluded while the panel said they were kept.
   than on the plate, clipping aside — and is **not** seeded on, because a
   recorded threshold is the user saying "this is my instrument's number", not
   "drop those cells from every plot without telling me".
+* **Analyze remembers the cut between sessions**, alone among that form's
+  fields (`qc_section.FOCUS_MIN_SETTING`, through `core.app_settings`). The
+  asymmetry is the control's own argument: every other field on the form
+  describes the plate being processed, while this one describes the microscope
+  and is documented as carrying between plates, so retyping it each run
+  contradicts the sentence beside it. A dataset restore runs after the build
+  and therefore still wins — what *this* dataset recorded beats what this user
+  last typed, which is the same precedence Review's side of the cut takes. A
+  cleared box removes the key rather than leaving the old value to reappear.
+  And a cut typed with the measurement unticked says it is being discarded:
+  the form collects it, the validator skips it (its gate is falsy) and the
+  service drops it, so without the notice a typed number vanished with the row
+  it sat in.
 * **The cut is persisted only when it differs from the run's**
   (`persistence/qc_params.save_to_data_dir`). Every other threshold on the
   panel becomes the user's the moment they touch anything; this one also has

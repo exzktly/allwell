@@ -258,3 +258,66 @@ def test_nothing_is_said_when_the_cut_in_force_is_the_run_s(loaded_app):
     _set_recorded_cut(app, 0.08)
     set_qc_params(app._ctx, QCParams(focus_min=0.08))
     assert recorded_cut_note(app._ctx) == ""
+
+
+# ── finding 8: the real control, pressed ───────────────────────────────────
+
+def _gate_widgets(app):
+    w = app._ctx.widgets.get_or_none("_qc_gate_widgets")
+    assert w, "the Cell Gating gate row was never built"
+    return w
+
+
+def test_typing_something_unparseable_leaves_the_box_agreeing_with_the_state(loaded_app):
+    """**The defect.** Typing "abc" into the cut left the box reading "abc"
+    while ``params.focus_min`` was ``None`` and the sentence beneath said "No
+    threshold set" — the control and the state disagreeing on screen, with
+    nothing to correct it.
+
+    Driven through ``editingFinished`` on the real ``QLineEdit``, because that
+    is the seam the user reaches and the one the fix hangs off; a test of the
+    parser would pass against every version of this, including the broken one
+    (CLAUDE.md §7.6 #2).
+    """
+    app = loaded_app
+    _give_the_plate_focus(app)
+    edit = _gate_widgets(app)["focus_min"]
+
+    edit.setText("0.10")
+    edit.editingFinished.emit()
+    assert app._app_state.qc.params.focus_min == 0.10
+    assert edit.text() == "0.10"
+
+    edit.setText("abc")
+    edit.editingFinished.emit()
+    assert app._app_state.qc.params.focus_min is None, (
+        "an unparseable cut must mean no cut")
+    assert edit.text() == "", (
+        f"the box still reads {edit.text()!r} while no cut is in force")
+
+
+def test_a_ticked_focus_box_can_still_be_unticked_on_the_real_panel(loaded_app):
+    """The same defect as the unit test above, through the panel that refreshes
+    it: the refresh is what disabled the box, so a fix applied only to the
+    helper would leave the control unreachable anyway."""
+    from review.features.qc.tab_view import _refresh_focus_status
+
+    app = loaded_app
+    _give_the_plate_focus(app)
+    w = _gate_widgets(app)
+    box, edit = w["exclude_soft_cells"], w["focus_min"]
+
+    edit.setText("0.10")
+    edit.editingFinished.emit()
+    box.setChecked(True)
+    _refresh_focus_status(app._ctx, w)
+    assert box.isEnabled(), "the box is not live at a cut that excludes cells"
+
+    # Drop the cut until nothing is soft. The box must stay reachable.
+    edit.setText("0.0001")
+    edit.editingFinished.emit()
+    _refresh_focus_status(app._ctx, w)
+    assert box.isChecked(), "the fixture no longer reproduces the armed state"
+    assert box.isEnabled(), (
+        "the box is ticked, armed, persisted as on, and the user cannot "
+        "reach it to turn it off")

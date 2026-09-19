@@ -302,8 +302,12 @@ def test_the_effect_line_is_the_only_thing_that_moves_with_the_switch():
     off = _Ctx(cache, _params(exclude_soft_cells=False, focus_min=0.10))
     on = _Ctx(cache, _params(**ON))
     assert focus_status(off)[0] == focus_status(on)[0]
-    assert focus_effect_text(off) == "Currently kept — 1 cell would be excluded."
-    assert focus_effect_text(on) == "Currently excluding 1 cell."
+    # "across the plate" is load-bearing: the count is plate-wide while every
+    # plot is scoped to the user's selection, so the two are different
+    # quantities and the sentence has to say which one it is.
+    assert focus_effect_text(off) == (
+        "Currently kept — 1 cell across the plate would be excluded.")
+    assert focus_effect_text(on) == "Currently excluding 1 cell across the plate."
 
 
 def test_the_box_is_dead_when_ticking_it_would_do_nothing():
@@ -742,3 +746,132 @@ def test_the_plot_marks_the_cut_where_the_user_put_it():
                     if str(ln.get_label()).startswith("your cut")]
         assert len(cut_line) == 1, values
         assert cut_line[0].get_xdata()[0] == pytest.approx(0.10), values
+
+
+# ── the numbers are about the cells being analysed ──────────────────────────
+#
+# An adversarial review found every count here walking every row of the frame
+# and consulting none of the sibling verdicts. The fixtures below are built so
+# the right and the wrong answer differ (§7.8 rule 2): the frames carry rows
+# the other gates have already dropped, and those rows are the unmeasurable
+# and the soft ones, which is what a real debris-heavy plate looks like —
+# `edge_focus` cannot read a fragment's outline, and a shattered fragment is
+# exactly what `qc_region_area` exists to remove.
+
+
+def _frame_with_debris(kept, debris):
+    """*kept* survives the debris gate; *debris* does not. Same column."""
+    df = _frame(list(kept) + list(debris))
+    df["QC_Pass"] = [1] * len(kept) + [0] * len(debris)
+    return df
+
+
+def test_debris_the_qc_gate_already_dropped_is_not_counted_unmeasurable():
+    """**The defect.** `UNMEASURABLE_FRACTION` fired on wells whose unreadable
+    outlines were precisely the fragments the debris gate exists to remove, so
+    a debris-heavy plate marked every well "needs review" about cells the user
+    had already filtered out."""
+    df = _frame_with_debris(kept=[0.30, 0.31, 0.29], debris=[None, None, None])
+    soft, unmeasurable, total = focus_counts(df, _params(focus_min=0.10))
+    assert (soft, unmeasurable, total) == (0, 0, 3), (soft, unmeasurable, total)
+
+
+def test_soft_rows_already_out_are_not_counted_as_this_gates_effect():
+    """"Currently excluding N cells" counted rows the focus layer marks, not
+    rows it removes from the analysis — so with 80 % of them already out via
+    the debris gate the sentence overstated the effect fivefold."""
+    df = _frame_with_debris(kept=[0.30, 0.02], debris=[0.01, 0.01, 0.01, 0.01])
+    soft, _unmeasurable, total = focus_counts(df, _params(focus_min=0.10))
+    assert (soft, total) == (1, 2), (soft, total)
+
+
+def test_every_sibling_layer_is_honoured_not_just_the_debris_one():
+    """Composed from the chokepoint rather than from a second list here, so a
+    layer added later is honoured by having been added there."""
+    from review.data.data_loading import VERDICT_LAYERS
+
+    for column in VERDICT_LAYERS:
+        if column == FOCUS_PASS_COLUMN:
+            continue
+        df = _frame([0.02, 0.02, 0.30])
+        df[column] = [0, 0, 1]
+        soft, _u, total = focus_counts(df, _params(focus_min=0.10))
+        assert (soft, total) == (0, 1), f"{column} was ignored: {(soft, total)}"
+
+
+def test_manual_deletion_takes_a_cell_out_of_the_count_too():
+    df = _frame([0.02, 0.30])
+    df["Included"] = [0, 1]
+    soft, _u, total = focus_counts(df, _params(focus_min=0.10))
+    assert (soft, total) == (0, 1)
+
+
+def test_the_gate_does_not_filter_its_own_evidence_by_its_own_verdict():
+    """The one layer that must NOT be subtracted.
+
+    Name the wrong implementation: composing the full chokepoint here — the
+    obvious way to write this — makes the panel report nothing to exclude the
+    moment the gate is switched on, because `Focus_Pass` has by then removed
+    exactly the rows the sentence is counting.
+    """
+    df = _frame([0.02, 0.30])
+    df[FOCUS_PASS_COLUMN] = [0, 1]          # the gate is on and has judged
+    soft, _u, total = focus_counts(df, _params(focus_min=0.10))
+    assert (soft, total) == (1, 2), (soft, total)
+
+
+def test_the_well_curve_is_drawn_over_the_analysed_cells():
+    """A user choosing a cut off this plot must see the population the cut
+    will actually meet, not one padded with debris."""
+    from types import SimpleNamespace
+
+    from review.data.focus_gate import well_focus_distribution
+
+    df = _frame_with_debris(kept=[0.30, 0.31], debris=[0.01, 0.01, 0.01])
+    ctx = SimpleNamespace(state=SimpleNamespace(
+        dataset=SimpleNamespace(cache={"A01": df}, pipeline_info={}),
+        qc=SimpleNamespace(params=_params(focus_min=0.10))))
+    dist = well_focus_distribution(ctx, "A01")
+    assert dist.values == (0.30, 0.31), dist.values
+
+
+# ── the box must stay disarmable ────────────────────────────────────────────
+
+def test_a_ticked_box_stays_live_even_when_it_would_drop_nothing():
+    """**The defect.** ``setEnabled(can_apply)`` disabled a box without
+    unticking it, so the gate stayed armed, ``_fields_params`` read
+    ``isChecked()`` and persisted it as on, and the user could not reach the
+    control to turn it off. Lowering the cut until nothing was soft was enough
+    to get there; raising it again later fired the gate immediately, on a
+    control they were last able to touch in a different state.
+
+    Disabling exists to stop someone **arming** a control that would do
+    nothing. A control that is already armed must stay disarmable.
+    """
+    from review.features.qc.tab_view import _arm_state
+
+    class _Box:
+        def __init__(self, checked):
+            self._checked, self.enabled = checked, None
+
+        def isChecked(self):
+            return self._checked
+
+        def setEnabled(self, v):
+            self.enabled = v
+
+    armed = _Box(checked=True)
+    _arm_state(armed, can_apply=False)
+    assert armed.enabled is True, (
+        "a ticked box was disabled, so the gate is armed and the user cannot "
+        "untick it")
+
+    idle = _Box(checked=False)
+    _arm_state(idle, can_apply=False)
+    assert idle.enabled is False, (
+        "an unticked box that would do nothing must not look live -- that is "
+        "the weaker predicate this application has shipped before")
+
+    live = _Box(checked=False)
+    _arm_state(live, can_apply=True)
+    assert live.enabled is True

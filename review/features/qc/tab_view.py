@@ -31,6 +31,7 @@ from review.data.focus_gate import (
 )
 from .controller import get_qc_params, qc_excluded_count, set_qc_params
 from .params import QCParams
+from review.domain.qc_params import _pos
 from core.safe import swallowed
 from ui import theme
 
@@ -421,7 +422,45 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # The cut gets the same live-while-typing treatment as the debris bounds,
     # including the ``hasFocus`` guard that keeps the programmatic refill in
     # ``qc_gate_refresh_widgets`` from firing it.
-    foc_edit.editingFinished.connect(_apply)
+    def _finish_cut() -> None:
+        """Apply, then make the box show the number that is actually in force.
+
+        Typing an unparseable value left the box reading "abc" while
+        ``params.focus_min`` was ``None`` and the sentence beneath said "No
+        threshold set" — the control and the state disagreeing on screen, with
+        nothing to correct it. ``_pos`` already treats a blank, unparseable,
+        zero or negative box as *no cut*, which is the right rule; what was
+        missing is saying so.
+
+        Only on ``editingFinished`` — focus-out or Enter — never on the
+        debounced typing path, where "0." and "." are transiently unparseable
+        and rewriting the box under the cursor would fight the user.
+        """
+        _apply()
+        params = get_qc_params(ctx)
+        cut = None if params is None else params.focus_min
+        # Compared as **values**, not as strings: "0.10" and "0.1" are the same
+        # cut, and rewriting one to the other on every commit is churn the user
+        # did not ask for. Only a box that does not mean what is in force gets
+        # corrected.
+        #
+        # The second clause is the one this fix was FOR and the first draft of
+        # it missed: "abc" parses to ``None`` and so does an absent cut, so a
+        # value comparison alone calls them equal and leaves the box reading
+        # "abc" beside a sentence saying no threshold is set -- which is the
+        # exact disagreement being repaired. Text that says something and means
+        # nothing is corrected; an empty box already agrees with ``None``.
+        typed = foc_edit.text().strip()
+        parsed = _pos(typed)
+        if parsed != cut or (typed and parsed is None):
+            shown = _fmt(cut)
+            blocked = foc_edit.blockSignals(True)
+            try:
+                foc_edit.setText(shown)
+            finally:
+                foc_edit.blockSignals(blocked)
+
+    foc_edit.editingFinished.connect(_finish_cut)
     foc_edit.textChanged.connect(
         lambda _t=None: _debounce.start() if foc_edit.hasFocus() else None)
     for w in _edits:
@@ -438,6 +477,27 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     _update_status()
     _update_field_quality_status()
     return row
+
+
+def _arm_state(box, can_apply: bool) -> None:
+    """Disable a box that would do nothing — **unless it is already ticked**.
+
+    Disabling does not untick, and the pair of facts "checked" and "disabled"
+    is a trap: the gate is armed, ``_fields_params`` reads ``isChecked()`` and
+    persists it as on, and the user cannot reach the control to turn it off.
+    Lowering the cut until nothing is soft was enough to get there. Raising it
+    again later then fired the gate immediately, without the user re-arming
+    anything, on a control they were last able to touch in a different state.
+
+    Disabling exists to stop someone **arming** a control that would do
+    nothing. A control that is already armed must stay disarmable, so a
+    ticked box stays live and its tooltip says why it currently drops
+    nothing.
+    """
+    if box.isChecked():
+        box.setEnabled(True)
+        return
+    box.setEnabled(bool(can_apply))
 
 
 def _refresh_field_quality_status(ctx, w) -> None:
@@ -479,10 +539,15 @@ def _refresh_field_quality_status(ctx, w) -> None:
     # ``exclusion_can_apply``. Gating on "is there a block" left the box live
     # on a plate the scorer refuses, where a tick stays ticked and drops
     # nothing.
-    box.setEnabled(exclusion_can_apply(ctx))
-    box.setToolTip(_FQ_TOOLTIP if box.isEnabled() else
+    can_apply = exclusion_can_apply(ctx)
+    _arm_state(box, can_apply)
+    # Keyed on ``can_apply`` rather than on ``isEnabled()``: a ticked box stays
+    # enabled so it can be unticked, and asking the widget would then give it
+    # the tooltip for a control that IS doing something.
+    box.setToolTip(_FQ_TOOLTIP if can_apply else
                    "Nothing to exclude on this dataset — the line below says "
-                   "why.")
+                   "why. Untick it if you do not want it to start excluding "
+                   "again when the dataset or the gate changes.")
 
 
 def _selected_well(ctx) -> str:
@@ -554,10 +619,12 @@ def _refresh_focus_status(ctx, w) -> None:
     # is the weaker predicate that leaves the box live on a dataset with no
     # threshold, where the tick stays ticked and drops nothing -- and every
     # number is then read by someone who believes a focus filter is on.
-    box.setEnabled(focus_gate_can_apply(ctx))
-    box.setToolTip(_FOCUS_TOOLTIP if box.isEnabled() else
+    can_apply = focus_gate_can_apply(ctx)
+    _arm_state(box, can_apply)
+    box.setToolTip(_FOCUS_TOOLTIP if can_apply else
                    "Nothing to exclude at this threshold — the line below "
-                   "says why.")
+                   "says why. Untick it if you do not want it to start "
+                   "excluding again when the cut moves.")
 
 
 def qc_gate_refresh_widgets(win) -> None:

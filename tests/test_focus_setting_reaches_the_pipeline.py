@@ -308,3 +308,93 @@ def test_a_dataset_analysed_before_the_column_existed_restores_the_default(tab):
     answer for a dataset about to be reprocessed."""
     tab._apply_pipeline_info({"qc_options": {"remove_debris": False}})
     assert tab._focus_metric_cb.isChecked() is True
+
+
+# ── two things the control owed the user, found by an adversarial review ────
+
+def test_a_cut_typed_with_the_measurement_off_is_not_silently_discarded(tab):
+    """**The defect.** Unticking `Measure per-cell focus` hides the threshold
+    row but leaves its text. The form still collects it (`form.py`), the
+    validator skips it (its gate is falsy), and the service emits
+    `--no_focus_metric` and drops the number — so a value the user typed is
+    thrown away with the row it sat in and nothing says so.
+
+    Asserted on the widget's own hidden flag rather than `isVisible()`, which
+    is False for every child of an unshown parent under the offscreen platform
+    and would make this pass against a hint that never appears.
+    """
+    sec = tab._focus_dropped_hint
+    tab._focus_metric_cb.setChecked(True)
+    tab._focus_min_edit.setText("0.25")
+    assert sec.isHidden(), "nothing is being discarded while the metric is on"
+
+    tab._focus_metric_cb.setChecked(False)
+    assert not sec.isHidden(), (
+        "the typed cut is being dropped and the form does not say so")
+
+    # And it goes away again when there is nothing to lose, rather than
+    # becoming a permanent notice the reader learns to ignore.
+    tab._focus_min_edit.setText("")
+    assert sec.isHidden()
+
+
+def test_the_cut_is_remembered_between_sessions(qapp):
+    """**The defect.** No field on this form is persisted, and this is the one
+    whose own tooltip calls it a property of the microscope that carries
+    between plates — so the user was asked to re-derive it on every run.
+
+    Name the wrong implementation: a tab that remembers within its own
+    lifetime passes any single-instance test. This builds a **second** tab,
+    which is what a new session is.
+    """
+    from analyze.tab import AnalyzeTab
+
+    first = AnalyzeTab()
+    first._focus_min_edit.setText("0.27")
+    first._focus_min_edit.editingFinished.emit()
+
+    second = AnalyzeTab()
+    assert second._focus_min_edit.text() == "0.27", (
+        "a new form did not pick up the cut the last one recorded")
+
+
+def test_clearing_the_cut_forgets_it(qapp):
+    """A cleared box is a decision too. Leaving the old value in the settings
+    file would put it back on the next launch, which is the one behaviour
+    worse than not remembering at all."""
+    from analyze.tab import AnalyzeTab
+
+    first = AnalyzeTab()
+    first._focus_min_edit.setText("0.27")
+    first._focus_min_edit.editingFinished.emit()
+    first._focus_min_edit.setText("")
+    first._focus_min_edit.editingFinished.emit()
+
+    assert AnalyzeTab()._focus_min_edit.text() == ""
+
+
+def test_what_the_dataset_recorded_beats_what_the_user_last_typed(qapp):
+    """The precedence that makes remembering safe.
+
+    A restored job or dataset states *this plate's* cut, and that has to win
+    over a remembered default — otherwise reopening a dataset silently
+    re-labels it with someone's last-typed number, which is the divergence
+    Review's own side of this was just fixed for.
+    """
+    from analyze.tab import AnalyzeTab
+
+    first = AnalyzeTab()
+    first._focus_min_edit.setText("0.27")
+    first._focus_min_edit.editingFinished.emit()
+
+    restored = AnalyzeTab()
+    assert restored._focus_min_edit.text() == "0.27"
+
+    def _chk(attr, value):
+        if value is not None:
+            getattr(restored, attr).setChecked(bool(value))
+
+    restored._apply_focus_settings(
+        {"measure_focus": True, "focus_min": 0.09}, _chk)
+    assert restored._focus_min_edit.text() == "0.09", (
+        "the remembered default survived a dataset restore")

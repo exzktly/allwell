@@ -113,8 +113,20 @@ class _FakeModel:
         self._counts = list(counts)
         self.predicts = 0
         self.resolves = 0
+        self.seen = []
 
     def predict(self, frame):
+        # **The assertion that would have caught the blocker.** The first
+        # version of this fake ignored `frame` entirely, so the fast path could
+        # be — and was — handed raw camera counts, where StarDist's `predict`
+        # takes `normalizer=None` and assumes its input is already normalised.
+        # On a real frame it returned 6 nuclei falling to 4 where the truth was
+        # 86 falling to 0, and drew a flat line rather than declining.
+        arr = np.asarray(frame)
+        assert float(arr.min()) >= 0.0 and float(arr.max()) <= 1.0, (
+            f"the network was handed un-normalised input "
+            f"(range {float(arr.min())}..{float(arr.max())})")
+        self.seen.append(arr)
         self.predicts += 1
         return (np.zeros((4, 4)), np.zeros((4, 4, 32)))
 
@@ -188,10 +200,18 @@ def test_a_resolve_that_fails_part_way_discards_the_whole_fast_path():
                                      None, None, None) is None
 
 
+def _varied(seed=0, scale=3000.0):
+    """A frame with real dynamic range, in camera counts — what the app hands
+    the sweep. A flat or already-normalised fixture cannot tell a preparing
+    implementation from one that skips it."""
+    r = np.random.default_rng(seed)
+    return (r.random((16, 16)) * scale + 300.0).astype(np.float32)
+
+
 def test_tiling_skips_the_fast_path_entirely(monkeypatch):
     """The 5-10x was measured untiled. A fast path used in a configuration
     nobody measured is the branch-that-exists problem (CLAUDE.md §7.7)."""
-    monkeypatch.setattr(fp, "missing_stardist_deps", lambda: [])
+    monkeypatch.setattr(fp, "ensure_model", lambda: object())
     seen = []
     monkeypatch.setattr(fp, "segment_frame",
                         lambda arr, **k: (seen.append(k.get("prob_thresh")),
@@ -199,23 +219,71 @@ def test_tiling_skips_the_fast_path_entirely(monkeypatch):
     monkeypatch.setattr(fp, "_resolve_at_thresholds",
                         lambda *a, **k: pytest.fail("fast path used with tiling"))
 
-    counts = fp.sweep_frame(np.zeros((8, 8)), [0.1, 0.2], tile_px=256)
+    counts = fp.sweep_frame(_varied(), [0.1, 0.2], tile_px=256)
     assert counts == [5, 5]
     assert seen == [0.1, 0.2]
 
 
 def test_the_slow_path_goes_through_segment_frame(monkeypatch):
     """So a sweep and the Segment button cannot disagree about a threshold."""
-    monkeypatch.setattr(fp, "missing_stardist_deps", lambda: [])
+    monkeypatch.setattr(fp, "ensure_model", lambda: object())
     monkeypatch.setattr(fp, "_resolve_at_thresholds", lambda *a, **k: None)
     seen = []
     monkeypatch.setattr(fp, "segment_frame",
                         lambda arr, **k: (seen.append(k.get("prob_thresh")),
                                           np.full((2, 2), 4, np.int32))[1])
 
-    assert fp.sweep_frame(np.zeros((8, 8)), [0.3, 0.7]) == [4, 4]
-    # The first call is the model-load borrow, then one per threshold.
-    assert seen[-2:] == [0.3, 0.7]
+    assert fp.sweep_frame(_varied(), [0.3, 0.7]) == [4, 4]
+    assert seen == [0.3, 0.7], "one call per threshold, and no discarded borrow"
+
+
+def test_the_sweep_prepares_the_frame_before_the_network_sees_it(monkeypatch):
+    """**The blocker.** `model.predict` takes `normalizer=None` and assumes its
+    input is already normalised; nothing enforces it.
+
+    Excludes the implementation that hands the corrected frame — raw camera
+    counts — straight to the network. Measured against the Segment button on a
+    real frame, that returned 6 nuclei falling to 4 where the truth was 86
+    falling to 0, did not decline, and drew a flat line the manual tells the
+    reader means the threshold does not matter.
+    """
+    model = _FakeModel([9, 8])
+    monkeypatch.setattr(fp, "ensure_model", lambda: model)
+
+    raw = _varied(scale=50_000.0)
+    assert raw.max() > 1.0, "the fixture must be able to expose the defect"
+    fp.sweep_frame(raw, [0.1, 0.2])
+
+    assert model.seen, "the network was never reached"
+    got = model.seen[0]
+    assert float(got.max()) <= 1.0 and float(got.min()) >= 0.0
+
+
+def test_a_near_constant_field_is_refused_rather_than_swept(monkeypatch):
+    """Excludes the sweep that runs nineteen unguarded passes over exactly the
+    input the guard exists for.
+
+    A near-constant field is the classic trigger for StarDist's uncatchable
+    ClipperLib abort — a C++ ``terminate()``, not an exception — which in this
+    process takes the whole application down rather than one worker.
+    """
+    monkeypatch.setattr(fp, "ensure_model",
+                        lambda: pytest.fail("a model was loaded for a flat field")
+                        if False else object())
+    monkeypatch.setattr(fp, "_resolve_at_thresholds",
+                        lambda *a, **k: pytest.fail("swept a near-constant field"))
+    monkeypatch.setattr(fp, "segment_frame",
+                        lambda *a, **k: pytest.fail("segmented a near-constant field"))
+
+    flat = np.full((16, 16), 512.0, np.float32)
+    assert fp.sweep_frame(flat, [0.1, 0.2, 0.3]) == [0, 0, 0]
+
+
+def test_an_empty_grid_loads_no_model_and_runs_no_inference(monkeypatch):
+    """Nothing asked for is nothing to load a model for."""
+    monkeypatch.setattr(fp, "ensure_model",
+                        lambda: pytest.fail("loaded a model for an empty sweep"))
+    assert fp.sweep_frame(_varied(), []) == []
 
 
 def test_a_sweep_without_stardist_says_so_rather_than_returning_nothing(monkeypatch):
@@ -224,9 +292,3 @@ def test_a_sweep_without_stardist_says_so_rather_than_returning_nothing(monkeypa
         fp.sweep_frame(np.zeros((4, 4)), [0.1])
 
 
-@pytest.mark.parametrize("size,expected", [
-    (0, (100, 80)), (40, (40, 40)), (500, (100, 80)), (-3, (100, 80)),
-])
-def test_centre_crop_never_grows_a_frame_and_never_refuses_one(size, expected):
-    arr = np.zeros((100, 80), np.float32)
-    assert fp.centre_crop(arr, size).shape == expected

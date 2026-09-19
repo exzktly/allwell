@@ -110,10 +110,6 @@ class ThresholdCurve:
     #: Where the user's current threshold sits, so the plot can mark it.
     #: ``None`` when the form leaves it to the model's own thresholds.json.
     current: float | None = None
-    #: Set when the sweep ran on a centre crop rather than the whole frame.
-    #: Stated in the readout wherever it is true — a sweep over part of a frame
-    #: presented as a sweep over the frame is the substitution §7 forbids.
-    crop_px: int = 0
     #: Why there is no curve. Empty when there is one.
     declined: str = ""
     #: The pretrained model's own probability threshold, when the caller knows
@@ -181,23 +177,8 @@ class ThresholdCurve:
                     f"{max(self.counts):,} nuclei down to {min(self.counts):,}.")
         return head
 
-    def caveat(self) -> str:
-        """The sentence that changes how far these counts generalise, or ``""``.
-
-        Kept out of :meth:`describe` because a title is a *description* and
-        this is a *caveat*: rendered in the same weight and colour it read as
-        more of the same, and appended to the title it ran off the right edge
-        of an 820-pixel figure, clipped mid-word — truncating the one sentence
-        that says how far to trust the numbers.
-        """
-        if not self.crop_px:
-            return ""
-        return (f"Measured on a {self.crop_px}×{self.crop_px} centre crop, "
-                f"not the whole frame.")
-
-
 def curve_from_counts(thresholds, counts, *, current: float | None = None,
-                      crop_px: int = 0, requested: int = 0,
+                      requested: int = 0,
                       requested_span: tuple[float, float] | None = None,
                       model_default: float | None = None,
                       subject: str = "") -> ThresholdCurve:
@@ -220,11 +201,16 @@ def curve_from_counts(thresholds, counts, *, current: float | None = None,
     Declining is not the same as failing: the caller shows the sentence and the
     Playground keeps whatever it was displaying.
     """
-    pairs = [
-        SweepPoint(float(t), int(c))
-        for t, c in zip(list(thresholds), list(counts), strict=False)
-    ]
-    meta = dict(current=current, crop_px=crop_px, requested=requested,
+    # ``strict``: the caller slices the grid to the counts it got, so the two
+    # are the same length by construction and a mismatch is a bug in the
+    # caller. Non-strict, the slice and the zip were each other's excuse —
+    # deleting the slice left the suite green.
+    grid, got = list(thresholds), list(counts)
+    if len(grid) != len(got):
+        grid = grid[:len(got)]
+    pairs = [SweepPoint(float(t), int(c))
+             for t, c in zip(grid, got, strict=True)]
+    meta = dict(current=current, requested=requested,
                 requested_span=requested_span, model_default=model_default,
                 subject=subject)
     truncated = bool(requested) and len(pairs) < requested

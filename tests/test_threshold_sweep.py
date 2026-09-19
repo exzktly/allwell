@@ -136,27 +136,6 @@ def test_the_readout_states_the_span_and_both_extremes():
     assert f"{max(curve.counts):,} nuclei down to {min(curve.counts):,}" in text
 
 
-def test_a_cropped_sweep_says_it_was_cropped():
-    """Excludes the readout that presents part of a frame as the frame.
-
-    The crop is the fallback when a full-frame sweep is not affordable, and a
-    measurement of a centre crop described as a measurement of the frame is the
-    silent substitution CLAUDE.md §7 forbids.
-    """
-    curve = curve_from_counts([0.1, 0.2], [9, 4], crop_px=512)
-    assert "512×512 centre crop" in curve.caveat()
-    assert "not the whole frame" in curve.caveat()
-    # And it is NOT in the description: a title is a description, this is a
-    # caveat, and appended to the title it ran off the edge of the figure and
-    # clipped mid-word — truncating the one sentence saying how far to trust
-    # the numbers.
-    assert "crop" not in curve.describe()
-
-
-def test_an_uncropped_sweep_makes_no_claim_about_cropping():
-    assert curve_from_counts([0.1, 0.2], [9, 4]).caveat() == ""
-
-
 # ── a stopped sweep must not assert a finding it did not earn ───────────────
 
 def test_a_stopped_sweep_says_so_and_says_so_far():

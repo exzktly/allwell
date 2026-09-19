@@ -122,13 +122,6 @@ def draw_threshold_curve(fig, curve) -> None:
     if curve.subject:
         title = f"{curve.subject}\n{title}"
     ax.set_title(title, color=txt_pri, fontsize=11)
-    caveat = curve.caveat()
-    if caveat:
-        # Inside the axes, in the app's "read this" tone, because it is a
-        # caveat and not a description -- and because appended to the title it
-        # ran off the right edge of the figure, clipped mid-word.
-        ax.text(0.015, 0.97, caveat, transform=ax.transAxes, va="top",
-                ha="left", fontsize=9, color=theme.Colors.warn)
     # A flat run means the detections are insensitive to the cut, not that they
     # are correct: a frame the model confidently segments as 350 nuclei plus 50
     # pieces of debris draws the same plateau, and a user who came to validate

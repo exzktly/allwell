@@ -21,6 +21,8 @@ never presses Segment.
 
 from __future__ import annotations
 
+from util.aw_safe import swallowed
+
 # The loaded model, at most once per GUI session. Module-level rather than held
 # on any state object: it survives a dataset swap, must never be pickled, and
 # reloading it would cost the user another 10-30 s.
@@ -96,6 +98,30 @@ def segment_frame(arr, *, prob_thresh=None, nms_thresh=None, tile_px: int = 0,
                               tile_px=int(tile_px or 0)))
 
 
+def ensure_model():
+    """Load the session's StarDist model if it is not loaded, and return it.
+
+    Split out of :func:`segment_frame` because the sweep needed the model and
+    not a segmentation, and borrowing one by running the other cost **more than
+    the whole optimisation it was there to enable**: measured on a noisy
+    512x512 frame, the discarded ``segment_frame`` at the lowest threshold took
+    0.42 s against 0.30 s for all nineteen resolves. The lowest threshold is
+    also the most expensive one, since that is where NMS has the most
+    candidates to consider.
+    """
+    global _GUI_STARDIST_MODEL
+    missing = missing_stardist_deps()
+    if missing:
+        raise RuntimeError(_MISSING_DEPS_MSG.format(missing=", ".join(missing)))
+    if _GUI_STARDIST_MODEL is None:
+        import process_microscopy as pm
+        pm._ensure_pkg_resources_shim()
+        from stardist.models import StarDist2D
+        _GUI_STARDIST_MODEL = pm._load_stardist_pretrained(
+            StarDist2D, "2D_versatile_fluo")
+    return _GUI_STARDIST_MODEL
+
+
 def model_prob_threshold() -> float | None:
     """The pretrained model's own probability threshold, or ``None``.
 
@@ -117,27 +143,6 @@ def model_prob_threshold() -> float | None:
         return None
 
 
-def centre_crop(arr, size: int):
-    """The central ``size × size`` square of *arr*, or *arr* when it is smaller.
-
-    The sweep's affordability fallback. Kept here rather than in the caller so
-    the crop the readout names and the crop the sweep measured are the same
-    number by construction.
-    """
-    import numpy as np
-
-    a = np.asarray(arr)
-    size = int(size)
-    if size <= 0 or a.ndim < 2:
-        return a
-    h, w = a.shape[0], a.shape[1]
-    if h <= size and w <= size:
-        return a
-    top = max(0, (h - size) // 2)
-    left = max(0, (w - size) // 2)
-    return a[top:top + min(size, h), left:left + min(size, w)]
-
-
 def _resolve_at_thresholds(model, frame, thresholds, nms_thresh, should_stop,
                            on_progress) -> list[int] | None:
     """Counts via **one** inference plus a cheap resolve per threshold.
@@ -147,19 +152,20 @@ def _resolve_at_thresholds(model, frame, thresholds, nms_thresh, should_stop,
     whichever thresholds you ask for. So a sweep costs one network pass and *M*
     polygon resolutions rather than *M* network passes.
 
-    Measured on 512x512 synthetic frames, 19 thresholds from 0.05 to 0.95,
-    ``2D_versatile_fluo`` on CPU, against the same nineteen full
-    ``predict_instances`` calls:
+    Measured **through the shipped** :func:`sweep_frame`, not through this
+    function in isolation, because the first version of that number described
+    the loop and not the thing the app calls: ``sweep_frame`` used to run a
+    whole discarded ``segment_frame`` to borrow the model load, at the *lowest*
+    threshold, which is the most expensive one. That borrow cost 0.42 s against
+    0.30 s for all nineteen resolves -- more than the optimisation it enabled --
+    and turned a 10x loop into a 4.4x function.
 
-    * 120 nuclei -- 3.05 s full, 0.30 s split: **10.1x**
-    * 90 nuclei  -- 2.55 s full, 0.50 s split: **5.1x**
-
-    The count vectors were **identical at every threshold** in both runs, which
-    is the claim that matters; the ratio is the one that varies, and both
-    numbers are recorded rather than the better one. Those frames are clean
-    synthetic signal, so the resolve cost is a floor: a noisy real frame emits
-    more candidate polygons at the low-threshold end, where NMS does the most
-    work. Expect less than 5x there, not more than 10x.
+    With the loader split out, on a 512x512 synthetic frame carrying 120
+    nuclei, 19 thresholds from 0.05 to 0.95, ``2D_versatile_fluo`` on CPU:
+    **0.31 s against 2.73 s for nineteen ``segment_nuclei`` calls -- 8.8x, with
+    identical counts at every threshold.** The identity is the claim that
+    matters; the ratio varies with the frame, and a noisy one emits more
+    candidate polygons at the low-threshold end where NMS does the most work.
 
     Returns ``None`` rather than raising when the split API is not available in
     this StarDist build -- ``_instances_from_prediction`` is private, so a
@@ -175,6 +181,10 @@ def _resolve_at_thresholds(model, frame, thresholds, nms_thresh, should_stop,
         pred = model.predict(frame)
         prob, dist = pred[0], pred[1]
     except Exception:
+        # Logged, not silent (CLAUDE.md §5). Without a breadcrumb a StarDist
+        # version bump that moves this private API makes every sweep five times
+        # slower for ever and says nothing.
+        swallowed()
         return None
 
     counts: list[int] = []
@@ -189,6 +199,7 @@ def _resolve_at_thresholds(model, frame, thresholds, nms_thresh, should_stop,
             # Part way through is still a failure of the whole fast path: a
             # curve half of whose points came from one code path and half from
             # another is not one measurement.
+            swallowed()
             return None
         counts.append(int(labels.max()) if getattr(labels, "size", 0) else 0)
         if on_progress is not None:
@@ -197,45 +208,59 @@ def _resolve_at_thresholds(model, frame, thresholds, nms_thresh, should_stop,
 
 
 def sweep_frame(arr, thresholds, *, nms_thresh=None, tile_px: int = 0,
-                crop_px: int = 0, on_progress=None, should_stop=None):
+                on_progress=None, should_stop=None):
     """Nucleus count at each of *thresholds*, low to high. Returns a list.
 
-    Takes the fast path in :func:`_resolve_at_thresholds` where it can -- one
-    inference, *M* resolves, measured at 5-10x on clean frames -- and falls
-    back to one full :func:`segment_frame` per threshold otherwise, which is
-    what runs when tiling is asked for or when the private resolve API is not
-    where this build expects it.
+    **The frame is prepared exactly as ``segment_nuclei`` prepares it**, through
+    the shared ``pipeline.stardist.prepare_stardist_input``, before anything is
+    handed to the network. That is not a detail. The first version of this
+    function passed the corrected frame — raw camera counts — straight to
+    ``model.predict``, which takes ``normalizer=None`` and assumes its input is
+    already normalised. Measured against the Segment button on the same frame
+    and the same grid, it returned 6 nuclei falling to 4 across the whole range
+    where the truth was 86 falling to 0, **did not decline**, and drew a flat
+    line the manual tells the reader means the threshold does not matter. The
+    only evidence offered for that fast path had been gathered on an already
+    normalised array, so the fixture had done the work the code did not.
 
-    The slow path goes through ``segment_frame``, so a sweep and the Segment
-    button cannot disagree about what a threshold produces; the fast path was
-    measured against that same call and returned identical counts at every
-    threshold.
+    A near-constant field is refused rather than swept, through the same
+    ``is_near_constant`` the pipeline uses. It is the classic trigger for
+    StarDist's uncatchable ClipperLib abort, which in this process takes the
+    whole application down — and a sweep is nineteen NMS passes per press, so
+    nineteen times the exposure of one Segment press.
 
-    ``crop_px`` runs the sweep on a centre crop, which is what makes a large
-    frame bearable on the slow path. The caller passes the same number to
-    :func:`review.domain.threshold_sweep.curve_from_counts`, so the readout
-    states the crop it was actually measured on.
+    Takes the fast path in :func:`_resolve_at_thresholds` where it can and falls
+    back to one :func:`segment_frame` per threshold otherwise, which is what
+    runs when tiling is asked for or when the private resolve API is not where
+    this build expects it. Both paths now see the same prepared array, and on
+    real frames the fast path's counts match the slow path's exactly.
 
-    ``should_stop()`` is polled between thresholds and stops the sweep where it
-    is; the counts gathered so far are returned rather than discarded, because
-    a partial curve the user asked to stop is still evidence. ``on_progress(i,
-    n)`` is called after each point.
+    ``should_stop()`` is polled
+    between thresholds and stops the sweep where it is; the counts gathered so
+    far are returned rather than discarded, because a partial curve the user
+    asked to stop is still evidence. ``on_progress(i, n)`` is called after each
+    point.
     """
-    missing = missing_stardist_deps()
-    if missing:
-        raise RuntimeError(_MISSING_DEPS_MSG.format(missing=", ".join(missing)))
+    from pipeline.stardist import is_near_constant, prepare_stardist_input
 
-    frame = centre_crop(arr, crop_px) if crop_px else arr
     grid = list(thresholds)
+    if not grid:
+        # Nothing asked for is nothing to load a model for. Without this the
+        # borrow below ran a full inference to return an empty list.
+        return []
+
+    model = ensure_model()
+    prepared = prepare_stardist_input(arr)
+    if is_near_constant(prepared):
+        # Refused, not swept. ``segment_nuclei`` returns zero labels here for
+        # the same reason, and a curve of nineteen zeros would be declined by
+        # ``curve_from_counts`` anyway — but only after nineteen unguarded
+        # passes over exactly the input the guard exists for.
+        return [0] * len(grid)
 
     if not tile_px:
-        # Loading the model is what ``segment_frame`` does on its first call;
-        # borrow it rather than duplicating the loader, then use the model
-        # directly for the split API.
-        segment_frame(frame, prob_thresh=grid[0] if grid else None,
-                      nms_thresh=nms_thresh)
-        fast = _resolve_at_thresholds(_GUI_STARDIST_MODEL, frame, grid,
-                                      nms_thresh, should_stop, on_progress)
+        fast = _resolve_at_thresholds(model, prepared, grid, nms_thresh,
+                                      should_stop, on_progress)
         if fast is not None:
             return fast
 
@@ -243,7 +268,7 @@ def sweep_frame(arr, thresholds, *, nms_thresh=None, tile_px: int = 0,
     for i, thresh in enumerate(grid):
         if should_stop is not None and should_stop():
             break
-        labels = segment_frame(frame, prob_thresh=float(thresh),
+        labels = segment_frame(arr, prob_thresh=float(thresh),
                                nms_thresh=nms_thresh, tile_px=tile_px)
         counts.append(int(labels.max()) if getattr(labels, "size", 0) else 0)
         if on_progress is not None:

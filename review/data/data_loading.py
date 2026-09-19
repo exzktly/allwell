@@ -361,13 +361,25 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Serie
     inclusion mode owns ``Gate_Pass`` (1 = inside the drawn scatter gates). The
     effective inclusion is the AND of the four — ``manual-keep AND passes-QC AND
     inside-crop AND inside-gate`` — so each layer re-gating never clobbers the
-    others. A fifth, ``Field_Pass`` (1 = the run did not flag this row's field
-    for image quality), is written only when the user has turned that exclusion
-    on and only for wells whose FOV labels can be trusted — see
-    :mod:`review.data.field_quality_cache`, which explains why an untrusted
-    well is refused rather than joined onto. ``QC_Pass`` / ``Crop_Pass`` /
-    ``Gate_Pass`` / ``Field_Pass`` are optional: when absent (no such layer /
-    older data / the exclusion switched off) each is treated as all-pass.
+    others. Two more join them, both off by default and both about image
+    quality rather than about the cells:
+
+    * ``Field_Pass`` (1 = the run did not flag this row's field) is written
+      only when the user has turned that exclusion on and only for wells whose
+      FOV labels can be trusted — see :mod:`review.data.field_quality_cache`,
+      which explains why an untrusted well is refused rather than joined onto.
+    * ``Focus_Pass`` (1 = this cell's own outline was not soft) is an absolute
+      cut on the per-cell focus column — see :mod:`review.data.focus_gate`.
+      It is the one layer here that can remove *part* of a field, which is
+      what a focus gradient or a coverslip tilt actually looks like.
+
+    Neither subsumes the other: a field whose median is fine can still have a
+    soft third, and a uniformly soft field is invisible to any per-cell cut
+    relative to its own frame, which is why the per-cell one is absolute.
+
+    ``QC_Pass`` / ``Crop_Pass`` / ``Gate_Pass`` / ``Field_Pass`` /
+    ``Focus_Pass`` are optional: when absent (no such layer / older data / the
+    exclusion switched off) each is treated as all-pass.
 
     ``include_gate=False`` drops the ``Gate_Pass`` layer. The per-cell scatter —
     where the gates are drawn — passes it by default, so it keeps showing the
@@ -391,6 +403,13 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Serie
     if "Field_Pass" in df.columns:
         fq = pd.to_numeric(df["Field_Pass"], errors="coerce").fillna(1)
         mask = mask & fq.eq(1)
+    if "Focus_Pass" in df.columns:
+        # ``fillna(1)`` for the same reason as its four siblings: an
+        # unreadable verdict keeps the row. A cell nobody could measure and a
+        # cell measured and found soft are different facts, and only the
+        # second is a reason to drop anything.
+        foc = pd.to_numeric(df["Focus_Pass"], errors="coerce").fillna(1)
+        mask = mask & foc.eq(1)
     return mask
 
 

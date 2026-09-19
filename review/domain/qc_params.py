@@ -75,6 +75,31 @@ class QCParams:
     #: thing as the debris gate, edited on the same panel, persisted in the
     #: same section, and ANDed at the same chokepoint.
     exclude_flagged_fields: bool = False
+    #: Whether cells whose own outline read as soft are excluded.
+    #:
+    #: **Off by default for the same reason as the field verdict above**, and a
+    #: separate switch from it because the two answer different questions and
+    #: neither subsumes the other. The field verdict is the run's six-metric
+    #: judgement about a *whole* field — it sees a field that is clipped or
+    #: unlike the rest of the plate, and it removes all of it or none of it.
+    #: This one is an absolute cut on each cell's own boundary sharpness, so it
+    #: removes the soft *part* of a field: a focus gradient across one FOV, or
+    #: a coverslip tilt, neither of which is a whole-field fact and neither of
+    #: which is a rectangle.
+    exclude_soft_cells: bool = False
+    #: The per-cell focus value below which a cell counts as out of focus.
+    #:
+    #: **Absolute, never relative to the frame.** A score relative to its own
+    #: field cannot see a field that is uniformly soft, because every cell in
+    #: it deviates from its neighbours by nothing — measured, the relative
+    #: median is exactly 1.000 at three very different focus states. The
+    #: estimator behind the column is built to be comparable between cells,
+    #: fields, wells and plates precisely so this number can be one number.
+    #:
+    #: Seeded from the run's own sidecar when it stated one, because the value
+    #: depends on the microscope rather than on the plate. ``None`` means no
+    #: cut, which is what a dataset whose run stated none carries.
+    focus_min: float | None = None
     min_area: float | None = None
     max_area: float | None = None
     min_solidity: float | None = None
@@ -87,6 +112,8 @@ class QCParams:
         return {
             "enabled": bool(self.enabled),
             "exclude_flagged_fields": bool(self.exclude_flagged_fields),
+            "exclude_soft_cells": bool(self.exclude_soft_cells),
+            "focus_min": self.focus_min,
             "min_area": self.min_area,
             "max_area": self.max_area,
             "min_solidity": self.min_solidity,
@@ -101,6 +128,8 @@ class QCParams:
         return cls(
             enabled=bool(d.get("enabled", False)),
             exclude_flagged_fields=bool(d.get("exclude_flagged_fields", False)),
+            exclude_soft_cells=bool(d.get("exclude_soft_cells", False)),
+            focus_min=_pos(d.get("focus_min")),
             min_area=_pos(d.get("min_area")),
             max_area=_pos(d.get("max_area")),
             min_solidity=_pos(d.get("min_solidity")),
@@ -128,6 +157,12 @@ class QCParams:
             enabled = True
         return cls(
             enabled=enabled,
+            # The run states the cut and never applies it, so this is where it
+            # first does anything. ``exclude_soft_cells`` is deliberately NOT
+            # seeded on with it: a recorded threshold is the user saying "this
+            # is my microscope's number", not "drop those cells from every
+            # plot without telling me".
+            focus_min=_pos(qc.get("focus_min")),
             min_area=min_area,
             max_area=_pos(qc.get("max_area")),
             min_solidity=_pos(qc.get("min_solidity")),
@@ -139,12 +174,23 @@ class QCParams:
     def with_updates(self, **changes: Any) -> QCParams:
         # normalize numeric bounds through _pos so 0/"" become None
         for k in ("min_area", "max_area", "min_solidity", "max_region_area",
-                  "min_circularity", "max_circularity"):
+                  "min_circularity", "max_circularity", "focus_min"):
             if k in changes:
                 changes[k] = _pos(changes[k])
         if "enabled" in changes:
             changes["enabled"] = bool(changes["enabled"])
         return replace(self, **changes)
+
+    @property
+    def focus_gate_is_active(self) -> bool:
+        """True when the focus cut would actually exclude anything.
+
+        Both halves are required, and the asymmetry is the point: a cut with
+        the switch off is a number the user has recorded, and the switch on
+        with no cut is a request this app cannot honour — §D.2d measured why
+        nothing may supply a default here. Either alone must filter nothing.
+        """
+        return bool(self.exclude_soft_cells) and self.focus_min is not None
 
     @property
     def is_active(self) -> bool:

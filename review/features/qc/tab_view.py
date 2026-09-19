@@ -25,6 +25,9 @@ from review.data.field_quality_cache import (
     REGISTER_PROBLEM, exclusion_can_apply, exclusion_effect_text,
     field_quality_status,
 )
+from review.data.focus_gate import (
+    focus_effect_text, focus_gate_can_apply, focus_status,
+)
 from .controller import get_qc_params, qc_excluded_count, set_qc_params
 from .params import QCParams
 from core.safe import swallowed
@@ -38,6 +41,17 @@ _FQ_TOOLTIP = (
     "like the rest of the well.\n"
     "Off by default: the flags are reported either way, and turning this on "
     "changes every number in the app.")
+
+_FOCUS_TOOLTIP = (
+    "Drop the individual cells whose own outline read as soft, rather than "
+    "whole fields.\n"
+    "This is what removes a focus gradient across one field or a coverslip "
+    "tilt — a field whose overall focus is fine can still have a soft third, "
+    "and no whole-field verdict can say so.\n"
+    "The cut is absolute, not relative to the field: a score relative to its "
+    "own frame cannot see a frame that is uniformly soft, because every cell "
+    "in it deviates from its neighbours by nothing.\n"
+    "Off by default — turning it on changes every number in the app.")
 
 _GRID_INDENT = 18
 _QUANTITY_LBL_W = 92
@@ -59,6 +73,13 @@ _FQ_TEXT_W = 700
 #: the brightest, left-most non-heading line in the block, directly above
 #: "Then include cells by (choose one):". It read as that group's heading.
 _FQ_TEXT_INDENT = 27
+
+#: The focus cut's box. Narrower than the debris bounds' 80 px because it holds
+#: a value under 2 with two or three decimals -- "0.083" -- where an area bound
+#: holds five digits. Sized to its content rather than to its neighbours, since
+#: it sits on a checkbox's row and a box wider than its text reads as an empty
+#: field somebody forgot.
+_FOCUS_EDIT_W = 64
 
 
 def _fmt(v: float | None) -> str:
@@ -224,6 +245,66 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         _lbl.setIndent(_FQ_TEXT_INDENT)
     outer.addWidget(fq)
 
+    # ── the same question one pooling down: which CELLS are soft ────────────
+    #
+    # A third gate, and the reason it is not folded into the one above is that
+    # they answer different questions and neither subsumes the other. That one
+    # is the run's verdict about a whole FIELD — it removes all of a field or
+    # none of it, and it is the only thing that can see a field that is
+    # clipped, low-contrast, or unlike the rest of the plate. This one is an
+    # absolute cut on each cell's own boundary sharpness, so it removes the
+    # soft PART of a field: a focus gradient, a coverslip tilt. Neither is a
+    # whole-field fact and neither is a rectangle, which is why this is a
+    # column rather than a crop.
+    #
+    # Off by default for the same reason as its neighbour, and with its cut in
+    # a field rather than a default, because no threshold can be guessed --
+    # the Playground is where a user finds theirs.
+    foc = QWidget(row)
+    foc_layout = QVBoxLayout(foc)
+    foc_layout.setContentsMargins(0, 6, 0, 0)
+    foc_layout.setSpacing(2)
+    foc_head = QWidget(foc)
+    foc_head_layout = QHBoxLayout(foc_head)
+    foc_head_layout.setContentsMargins(0, 0, 0, 0)
+    foc_cb = QCheckBox("Exclude out-of-focus cells", foc_head)
+    foc_cb.setChecked(bool(params.exclude_soft_cells))
+    foc_cb.setToolTip(_FOCUS_TOOLTIP)
+    foc_head_layout.addWidget(foc_cb)
+    foc_head_layout.addSpacing(8)
+    foc_below = QLabel("below", foc_head)
+    foc_below.setObjectName("Muted")
+    foc_head_layout.addWidget(foc_below)
+    # The cut sits ON the checkbox's own row rather than under it: it is the
+    # checkbox's operand, and every other number on this panel that qualifies
+    # a rule sits beside the rule. A row of its own read as a fifth debris
+    # bound, which is a rule about cells rather than about the imaging.
+    foc_edit = QLineEdit(_fmt(params.focus_min), foc_head)
+    foc_edit.setFixedWidth(_FOCUS_EDIT_W)
+    foc_edit.setPlaceholderText("none")
+    foc_edit.setToolTip(
+        "The per-cell focus value below which a cell counts as out of focus. "
+        "Seeded from this dataset's own run when it recorded one.\n"
+        "Blank means no cut, and nothing here can supply a default: the "
+        "number depends on the microscope rather than on the plate. Review ▸ "
+        "Image Browser ▸ Playground draws the distribution of these values "
+        "with a live count of what a cut would keep and drop.")
+    foc_head_layout.addWidget(foc_edit)
+    foc_head_layout.addStretch(1)
+    foc_layout.addWidget(foc_head)
+    foc_status = QLabel("", foc)
+    foc_status.setWordWrap(True)
+    foc_status.setMaximumWidth(_FQ_TEXT_W)
+    foc_layout.addWidget(foc_status)
+    foc_effect = QLabel("", foc)
+    foc_effect.setObjectName("Muted")
+    foc_effect.setWordWrap(True)
+    foc_effect.setMaximumWidth(_FQ_TEXT_W)
+    foc_layout.addWidget(foc_effect)
+    for _lbl in (foc_status, foc_effect):
+        _lbl.setIndent(_FQ_TEXT_INDENT)
+    outer.addWidget(foc)
+
     # stash refs so persistence / external recomputes can refresh the row.
     # ``ctx.widgets.register`` also stamps ``app._qc_gate_widgets`` so the legacy
     # ``qc_gate_refresh_widgets`` reader resolves it unchanged.
@@ -235,6 +316,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         "status": status,
         "exclude_flagged_fields": fq_cb, "field_quality_status": fq_status,
         "field_quality_effect": fq_effect,
+        "exclude_soft_cells": foc_cb, "focus_min": foc_edit,
+        "focus_status": foc_status, "focus_effect": foc_effect,
     })
 
     def _fields_params() -> QCParams:
@@ -255,7 +338,9 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         return QCParams(
             enabled=enable_cb.isChecked(),
             exclude_flagged_fields=fq_cb.isChecked(),
+            exclude_soft_cells=foc_cb.isChecked(),
         ).with_updates(
+            focus_min=foc_edit.text(),
             min_area=min_area_edit.text(),
             max_area=max_area_edit.text(),
             min_solidity=min_sol_edit.text(),
@@ -282,6 +367,9 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
             ctx, {"field_quality_status": fq_status,
                   "field_quality_effect": fq_effect,
                   "exclude_flagged_fields": fq_cb})
+        _refresh_focus_status(
+            ctx, {"focus_status": foc_status, "focus_effect": foc_effect,
+                  "exclude_soft_cells": foc_cb})
 
     def _apply() -> None:
         _sync_enabled()
@@ -307,6 +395,13 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
 
     enable_cb.toggled.connect(lambda _=None: _apply())
     fq_cb.toggled.connect(lambda _=None: _apply())
+    foc_cb.toggled.connect(lambda _=None: _apply())
+    # The cut gets the same live-while-typing treatment as the debris bounds,
+    # including the ``hasFocus`` guard that keeps the programmatic refill in
+    # ``qc_gate_refresh_widgets`` from firing it.
+    foc_edit.editingFinished.connect(_apply)
+    foc_edit.textChanged.connect(
+        lambda _t=None: _debounce.start() if foc_edit.hasFocus() else None)
     for w in _edits:
         w.editingFinished.connect(_apply)
         w.textChanged.connect(
@@ -368,6 +463,36 @@ def _refresh_field_quality_status(ctx, w) -> None:
                    "why.")
 
 
+def _refresh_focus_status(ctx, w) -> None:
+    """Re-read the dataset's focus column into the panel's third row.
+
+    Shared by the builder's own handler and by
+    :func:`qc_gate_refresh_widgets`, for the same reason its field-quality
+    sibling is: the panel must not say one thing when it is built and another
+    when it is refilled.
+    """
+    label = w.get("focus_status")
+    box = w.get("exclude_soft_cells")
+    if label is None or box is None:
+        return
+    text, register = focus_status(ctx)
+    label.setText(text)
+    label.setObjectName("Notice" if register == REGISTER_PROBLEM else "Muted")
+    label.style().unpolish(label)
+    label.style().polish(label)
+    effect = w.get("focus_effect")
+    if effect is not None:
+        effect.setText(focus_effect_text(ctx))
+    # Live only when ticking it would exclude something. "Is there a column"
+    # is the weaker predicate that leaves the box live on a dataset with no
+    # threshold, where the tick stays ticked and drops nothing -- and every
+    # number is then read by someone who believes a focus filter is on.
+    box.setEnabled(focus_gate_can_apply(ctx))
+    box.setToolTip(_FOCUS_TOOLTIP if box.isEnabled() else
+                   "Nothing to exclude at this threshold — the line below "
+                   "says why.")
+
+
 def qc_gate_refresh_widgets(win) -> None:
     """Re-fill the embedded gate row from the current params (after a load /
     external change). No-op when the Cell Gating tab hasn't been built.
@@ -385,12 +510,15 @@ def qc_gate_refresh_widgets(win) -> None:
     p = get_qc_params(win._ctx)
     edit_keys = ("min_area", "max_area", "min_solidity", "max_region_area",
                  "min_circularity", "max_circularity")
-    fields = [w["enable"], w["exclude_flagged_fields"]] + [
+    fields = [w["enable"], w["exclude_flagged_fields"],
+              w["exclude_soft_cells"], w["focus_min"]] + [
         w[k] for k in edit_keys]
     blocked = [f.blockSignals(True) for f in fields]
     try:
         w["enable"].setChecked(bool(p.enabled))
         w["exclude_flagged_fields"].setChecked(bool(p.exclude_flagged_fields))
+        w["exclude_soft_cells"].setChecked(bool(p.exclude_soft_cells))
+        w["focus_min"].setText(_fmt(p.focus_min))
         w["min_area"].setText(_fmt(p.min_area))
         w["max_area"].setText(_fmt(p.max_area))
         w["min_solidity"].setText(_fmt(p.min_solidity))
@@ -411,3 +539,5 @@ def qc_gate_refresh_widgets(win) -> None:
     # *values* left it reading "analysed before field quality was recorded"
     # over a plate whose block was right there, which the render caught.
     _refresh_field_quality_status(win._ctx, w)
+    # And the focus row, which is a fact about the dataset in the same way.
+    _refresh_focus_status(win._ctx, w)

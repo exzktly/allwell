@@ -1074,6 +1074,47 @@ That gives three places and one number:
    wrong the first time. The recorded value seeds Review.
 3. **Review / Cell Gating** applies it, reversibly, and says what it did.
 
+### D.4a A control that exists is not a control that works, again
+
+Building the third gate found the second one broken, and it had already
+shipped.
+
+The cache projectors run at **load**. The pass that runs when a control on the
+Cell Gating panel moves — `qc.controller.recompute_qc_all` — re-projected
+`QC_Pass` and nothing else, which was correct for as long as that panel held
+only the debris gate and silently wrong from the moment it grew a second
+switchable layer. Measured, on a plate with one field genuinely flagged:
+ticking **Exclude fields the run flagged** wrote no `Field_Pass` column at all,
+the chokepoint had nothing to AND, and the row stayed included until the
+dataset was reopened. The panel reported the flag correctly the whole time, so
+the control looked like it had worked.
+
+Its mirror image was there too. A projector whose switch is off returned early
+and wrote nothing — right for a frame that never carried the column, wrong for
+one that does, because the previous setting's verdict stays on the frame.
+Unticking left the rows excluded while the panel said "currently kept" over
+them.
+
+Both are fixed, and the fix is structural rather than a third call added by
+name: `recompute_qc_all` now re-runs **every registered projector**, so a
+verdict layer added later is re-projected by having been registered, and a
+switched-off layer **removes** its column rather than merely not writing it.
+
+Two things about how it was found are worth keeping, because neither was the
+test suite:
+
+* **The first probe measured nothing and said so confidently.** It used a
+  `SimpleNamespace` ctx whose projector registry was empty, so *no* layer
+  projected and the "before" and "after" agreed — which reads exactly like a
+  working feature. It took a real `AppState`, a real `AppRuntime` and a real
+  `build_feature_registry()` before the numbers meant anything. §7.3 #1: a
+  harness that fails open will happily confirm anything.
+* **Nothing in the fast lane could see it.** Every test of the field-quality
+  layer asserted the verdict, the sentence, or the column given to a
+  projector called directly. Not one ticked the box and asked the chokepoint,
+  which is §7.6 #1 exactly: asserting a control is *offered* is not asserting
+  it *works*.
+
 ### D.5 Rows
 
 | # | Row | State | Place | Evidence |
@@ -1088,12 +1129,12 @@ That gives three places and one number:
 | D4 | The field's `focus` is the **median of its own cells' boundary values**, so the two poolings cannot disagree | `done` | `pipeline/field_quality.field_focus` | `tests/test_field_quality_is_wired_into_a_run.py::test_the_fields_focus_is_the_median_of_its_cells_own_outlines` |
 | D5 | `focus_score` — the frame-level Tenengrad — is **deleted**, not kept beside its replacement | `done` | `pipeline/field_quality.py` | §D.2-2. Two statistics answering one question is how they come to disagree |
 | D6 | A per-field crop region, needing a crop cardinality this app does not have | `declined` | — | Retired by D3a before it was written. With a per-cell column the exclusion is per cell, which is what "remove only the soft sections" means and needs no rectangle at all — a focus gradient or a coverslip tilt is not a box. The crop tool keeps its single region for the manual case it already serves |
-| D7 | Whole-field exclusion stays, off and secondary, beside the per-cell gate rather than replaced by it | `todo` | `review/features/qc/tab_view.py` | §D.3: neither layer subsumes the other, and a field whose median is fine can still have a soft third |
-| D8 | **Where the gate reads from.** The CSV column the run already wrote — no image decode, no `_out.zip` open | `todo` | `review/data/` | the one real cost of the column is that a dataset gets it only by being re-run, which the panel must say rather than reading as "nothing was flagged" |
+| D7 | Whole-field exclusion stays, off and secondary, beside the per-cell gate rather than replaced by it | `done` | `review/features/qc/tab_view.py` | §D.3: neither layer subsumes the other, and a field whose median is fine can still have a soft third |
+| D8 | **Where the gate reads from.** The CSV column the run already wrote — no image decode, no `_out.zip` open | `done` | `review/data/focus_gate.py` | the one real cost of the column is that a dataset gets it only by being re-run, which the panel must say rather than reading as "nothing was flagged" |
 | **D10** | **Analyze / QC: `Measure per-cell focus`, on by default and toggleable, plus the threshold field** | `done` | `analyze/qc_section.py` (extracted — `analyze/form.py` is at 935 of its 936-line budget) + `fields.py` / `pinfo.py` / `cli_args.py` / `pipeline_service.py` / `settings_digest.py` | §D.4, and `tests/test_focus_setting_reaches_the_pipeline.py`, which drives the real form through the whole seven-file chain the debris gate already takes — a setting that reaches six of the seven is a control that does nothing. Seven mutations, one per link, each caught by the test named for it; the restore was genuinely broken when the test was written, because a v2+ sidecar carries the parser's **negative** `no_focus_metric` while the older block carries the positive `measure_focus`, and reading one spelling restores nothing for half the datasets in existence |
 | **D11** | The run **records** the threshold and does not apply it | `done` | `process_microscopy.py` | §0.3 and §D.4 #2. Mutation: have the pipeline drop the cells and the decision becomes irreversible without a re-run |
-| **D12** | `Focus_Pass` — the per-cell 0/1, ANDed at the same chokepoint as its four siblings | `todo` | `review/data/focus_gate.py` | §D.3. Fail-open on a cell with no value: unmeasurable is not soft (§7 #3), and the count of them is reported rather than absorbed |
-| **D13** | Review / Cell Gating: the third gate, its threshold seeded from the run, with a live keep/drop readout | `todo` | `review/features/qc/tab_view.py` | §D.2c — the gate keeps a real tail (23.2 % of σ_def=2 cells at a cut set to the in-focus p5), so the surface reports what it keeps as well as what it drops |
+| **D12** | `Focus_Pass` — the per-cell 0/1, ANDed at the same chokepoint as its four siblings | `done` | `review/data/focus_gate.py` | §D.3, and `tests/test_focus_gate.py`. Five mutations, each caught by the test named for it: drop the re-projection, leave a switched-off layer's column behind, stop the chokepoint ANDing it, treat an unmeasurable cell as soft, or never register the projector |
+| **D13** | Review / Cell Gating: the third gate, its threshold seeded from the run, with a live keep/drop readout | `done` | `review/features/qc/tab_view.py` | §D.2c — the gate keeps a real tail (23.2 % of σ_def=2 cells at a cut set to the in-focus p5), so the panel names the unmeasurable separately and says they are **kept**. Driven through the real control (§7.6): building the row and asserting the checkbox exists is what let the sibling defect below ship |
 | **D14** | **The well composite**: one per-well verdict over the soft fraction, the unmeasurable fraction and the field flags, marking wells that need a human | `todo` | `review/domain/well_composite.py` + Home's plate map | §D.2c's pooled table — a well is where n is large enough for the median to be decisive. Each contributing reason is named in the tooltip; a composite that shows only a total is a number nobody can act on |
 | **D15** | **Playground: the per-cell focus distribution**, the current cut drawn on it, and **no recommendation** | `todo` | `review/domain/focus_distribution.py` + `review/features/image_browser/playground/` | §D.2d. Mutation: offer Otsu's cut and a clean plate loses 39.5 % of its good cells while a uniformly defocused one keeps 76 % of its bad ones |
 | D16 | Renders, UX review, scientific review, docs, version bump, PR | `todo` | — | |

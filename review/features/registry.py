@@ -1311,6 +1311,12 @@ def _register_cache_projectors() -> None:
     # that sometimes writes nothing reads better at the end of the list.
     register_cache_projector(_lazy_projector(
         "review.data.field_quality_cache", "apply_field_quality_to_cache"))
+    # The per-cell focus cut, beside the per-field verdict above because they
+    # are two poolings of one measurement rather than two subsystems. Both are
+    # off by default and neither subsumes the other: the field verdict removes
+    # a whole field or none of it, this one removes the soft part of a field.
+    register_cache_projector(_lazy_projector(
+        "review.data.focus_gate", "apply_focus_gate_to_cache"))
 
 
 def attach_feature_state(state, registry: FeatureRegistry | None = None) -> None:

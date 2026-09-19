@@ -43,7 +43,9 @@ from __future__ import annotations
 
 import logging
 
-from review.data.cache_projectors import project_verdict_column
+from review.data.cache_projectors import (
+    drop_verdict_column, project_verdict_column,
+)
 
 _logger = logging.getLogger("review")
 
@@ -350,14 +352,21 @@ def apply_field_quality_to_cache(ctx, label: str | None = None) -> list[str]:
       docstring.
     """
     if not exclusion_is_on(ctx):
-        # The user has not asked for it. Nothing is written, so the chokepoint
-        # sees no ``Field_Pass`` at all and every row counts — which is the
-        # point: this subsystem reports by default and filters only on
-        # request. The Cell Gating panel still shows what was flagged, because
-        # it reads the verdicts rather than the column.
+        # The user has not asked for it, so the chokepoint must see no
+        # ``Field_Pass`` at all and every row must count — this subsystem
+        # reports by default and filters only on request. The Cell Gating
+        # panel still shows what was flagged, because it reads the verdicts
+        # rather than the column.
+        #
+        # **Removed, not merely unwritten.** Returning early leaves the
+        # previous setting's verdict on any frame that already carried one, so
+        # unticking the box left its rows excluded while the panel said
+        # "currently kept" over them.
+        drop_verdict_column(ctx, label, column=FIELD_PASS_COLUMN)
         return []
     flagged, refusal = flagged_fields(ctx)
     if refusal or not flagged:
+        drop_verdict_column(ctx, label, column=FIELD_PASS_COLUMN)
         # Nothing to write. Deliberately not an all-pass column: an explicit
         # 1 everywhere would say the plate was measured and found clean, which
         # is exactly what a refusal or an absent block does not say. Leaving

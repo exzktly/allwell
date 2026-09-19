@@ -303,6 +303,15 @@ class SchemaDetection:
     message: str
     problem: bool
 
+    #: Deliberately absent as a field. The Analyze host puts the guess's
+    #: shortfall — which files will be skipped and why — in a second, louder
+    #: register beneath the summary. This page must not: its own readout
+    #: already ends with "N of M file(s) didn't match the schema and would be
+    #: left alone (e.g. …)", two lines below, in the same size and colour. Two
+    #: vocabularies for one count, stacked, is redundancy rather than emphasis
+    #: — and the page's own line is the better written of the two, because it
+    #: states the consequence rather than the mechanism.
+
 
 def detection_for_grouping(guess) -> SchemaDetection:
     """Judge an inferred schema *for this page's purpose*, which is not Analyze's.

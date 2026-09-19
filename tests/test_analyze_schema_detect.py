@@ -57,7 +57,7 @@ def test_the_button_exists_and_is_connected_to_something_that_runs(qapp, tmp_pat
 
     assert tab._schema_picker.schema() == "experiment:channel:well:fov:timepoint"
     assert tab._schema_picker.separator() == "_"
-    assert f"all {total} sampled filenames parse" in tab._schema_picker.detectionText()
+    assert f"All {total} filenames sampled matched" in tab._schema_picker.detectionText()
 
 
 def test_the_readout_names_the_files_the_guess_does_not_parse(qapp, tmp_path):
@@ -71,9 +71,12 @@ def test_the_readout_names_the_files_the_guess_does_not_parse(qapp, tmp_path):
     tab._input_edit.setText(str(tmp_path / "ds"))
     tab._schema_picker.detectButton().click()
 
-    text = tab._schema_picker.detectionText()
-    assert f"{total - 1} of {total}" in text
-    assert "ZZ9" in text
+    assert f"Matched {total - 1} of {total}" in tab._schema_picker.detectionText()
+    # The shortfall is the sentence about the user's data, so it lands in the
+    # note register rather than in the neutral summary that is styled to skim.
+    note = tab._schema_picker.detectionNoteText()
+    assert "1 file will be skipped" in note
+    assert "ZZ9" in note
 
 
 def test_an_empty_input_field_is_answered_rather_than_scanned(qapp):
@@ -82,7 +85,7 @@ def test_an_empty_input_field_is_answered_rather_than_scanned(qapp):
     tab._input_edit.setText("")
     tab._schema_picker.detectButton().click()
 
-    assert "Choose an input folder first" in tab._schema_picker.detectionText()
+    assert "Choose an input folder first" in tab._schema_picker.detectionNoteText()
     assert tab._schema_picker.schema() == "experiment:channel:well:fov:timepoint"
 
 
@@ -102,7 +105,7 @@ def test_a_folder_with_no_detectable_layout_says_so_and_changes_nothing(qapp, tm
     tab._input_edit.setText(str(tmp_path / "ds"))
     tab._schema_picker.detectButton().click()
 
-    assert "No filename layout could be detected" in tab._schema_picker.detectionText()
+    assert "Couldn't read a layout" in tab._schema_picker.detectionNoteText()
     assert tab._schema_picker.schema() == "channel:well:fov", "left as the user set it"
 
 
@@ -133,3 +136,30 @@ def test_the_browse_path_writes_the_same_readout_as_the_button(qapp, tmp_path):
 
     assert by_browse._schema_picker.detectionText() != ""
     assert by_browse._schema_picker.detectionText() == by_button._schema_picker.detectionText()
+
+
+def test_the_control_says_what_it_is_for_before_it_is_pressed(qapp):
+    """Excludes the button that is live from launch with nothing to say.
+
+    It can only produce a refusal until a folder is chosen, which teaches the
+    user in their first ten seconds that the feature does not work.
+    """
+    tab = _tab()
+    assert "Pick an input folder" in tab._schema_picker.detectionText()
+    assert tab._schema_picker.detectionNoteText() == "", "a hint is not a problem"
+
+
+def test_a_shortfall_reaches_the_run_dashboard_too(qapp, tmp_path):
+    """Excludes the dashboard that asserts a clean scan the sidebar qualifies.
+
+    A reader who takes the top line and skips the sidebar would otherwise start
+    a run believing every file is in play.
+    """
+    _plate(tmp_path / "ds" / "in", extra=("exp_GFP_ZZ9_f0_t0",))
+    tab = _tab()
+    tab._input_edit.setText(str(tmp_path / "ds"))
+    seen = []
+    tab._report_scan_guess = lambda tokens, **kw: seen.append(kw)
+    tab._schema_picker.detectButton().click()
+
+    assert seen and seen[-1].get("shortfall") == 1

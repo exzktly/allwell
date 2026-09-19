@@ -105,7 +105,7 @@ def test_pressing_detect_fills_the_picker_from_the_folder(qapp, tmp_path):
 
     assert page._schema_picker.schema() == "experiment:channel:well:fov:timepoint"
     assert page._schema_picker.separator() == "_"
-    assert f"all {total} sampled filenames parse" in page._schema_picker.detectionText()
+    assert f"All {total} filenames sampled matched" in page._schema_picker.detectionText()
 
 
 def test_pressing_detect_on_a_single_channel_folder_applies_it_here(qapp, tmp_path):
@@ -136,5 +136,24 @@ def test_a_refused_detection_leaves_the_schema_the_user_set(qapp, tmp_path):
 
     page._schema_picker.detectButton().click()
 
-    assert "No filename layout could be detected" in page._schema_picker.detectionText()
+    assert "No filename layout could be detected" in page._schema_picker.detectionNoteText()
     assert page._schema_picker.schema() == "well:channel:ignore:ignore:ignore"
+
+
+def test_the_page_states_the_shortfall_once_not_twice(qapp, tmp_path):
+    """Excludes the host that copies Analyze's second register onto this page.
+
+    The page's own readout already ends with "N of M file(s) didn't match the
+    schema and would be left alone (e.g. …)". Repeating it directly above, in
+    the same size and colour and a different vocabulary, is redundancy rather
+    than emphasis.
+    """
+    src = tmp_path / "loose"
+    _write(src)
+    (src / "exp_GFP_ZZ9_f0_t0.tif").write_bytes(b"img")
+    page = _page()
+    page._src_field.set_path(str(src))
+    page._schema_picker.detectButton().click()
+
+    assert page._schema_picker.detectionNoteText() == ""
+    assert "ZZ9" not in page._schema_picker.detectionText()

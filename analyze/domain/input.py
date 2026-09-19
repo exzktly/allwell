@@ -183,8 +183,8 @@ class AnalyzeInputMixin:
             # and saying so is the difference between a scan that declined and
             # a scan that silently rewrote nothing.
             self._set_schema_detection(
-                "No filename layout could be detected in that folder — the "
-                "schema below is unchanged.", problem=True)
+                "Couldn't read a layout from these filenames — your settings "
+                "above are unchanged.", problem=True)
             # The dashboard has to be told too. Both refusals used to return
             # before this, so a scan that found nothing left the previous
             # scan's line standing — and once the picker gained a readout of
@@ -225,15 +225,18 @@ class AnalyzeInputMixin:
         # Beside the fields it just wrote, not only on the dashboard: the
         # dashboard line scrolls away and these two fields keep values that look
         # hand-entered for as long as the form is open.
-        self._set_schema_detection(
-            guess.summary() if guess.confident
-            else (f"{guess.summary()} No well and channel pair was identified, "
-                  f"so the schema below is unchanged."),
-            problem=not guess.confident)
+        if guess.confident:
+            self._set_schema_detection(guess.summary(), note=guess.shortfall())
+        else:
+            self._set_schema_detection(
+                f"{guess.summary()} No well and channel pair was identified, "
+                f"so your settings above are unchanged.", problem=True)
         self._report_scan_guess(
-            tokens, schema=guess.schema_str if guess.confident else "")
+            tokens, schema=guess.schema_str if guess.confident else "",
+            shortfall=guess.sampled - guess.matched)
 
-    def _report_scan_guess(self, tokens, *, schema: str = "") -> None:
+    def _report_scan_guess(self, tokens, *, schema: str = "",
+                           shortfall: int = 0) -> None:
         """State what the folder scan filled in, on the run dashboard.
 
         *schema* is the schema the scan actually applied, or ``""`` when it
@@ -256,6 +259,11 @@ class AnalyzeInputMixin:
             if tokens.phase_token:
                 part += f"; phase {tokens.phase_token}"
             parts.append(part)
+        # The dashboard asserted a clean scan while the picker's readout
+        # qualified it, so a reader who took the top line and skipped the
+        # sidebar started a run believing every file was in play.
+        if shortfall > 0:
+            parts.append(f"{shortfall} file(s) will not match")
         msg = "Scanned folder: " + "; ".join(parts)
         if tokens is not None:
             msg += " — check before running"

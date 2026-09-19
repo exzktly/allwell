@@ -156,6 +156,7 @@ class SchemaPicker(QWidget):
         # offer and will answer `detectRequested`.
         self._detect_btn: QPushButton | None = None
         self._detect_lbl: QLabel | None = None
+        self._detect_note_lbl: QLabel | None = None
         if detect_label:
             cell = self._row(self, "")
             self._detect_btn = QPushButton(detect_label, cell)
@@ -164,10 +165,22 @@ class SchemaPicker(QWidget):
             cell.layout().addWidget(self._detect_btn)
             cell.layout().addStretch(1)
 
+            # Two registers, because the two halves carry different weight.
+            # The summary is a neutral statement of what was chosen; the note
+            # is a statement about the user's *data* — files that will not be
+            # analysed, or a scan that declined — and while both were set in
+            # the same muted grey the one worth reading was styled exactly like
+            # the example-filename boilerplate beneath it.
             self._detect_lbl = QLabel("", self)
             self._detect_lbl.setObjectName("Muted")
             self._detect_lbl.setWordWrap(True)
             outer.addWidget(self._detect_lbl)
+
+            self._detect_note_lbl = QLabel("", self)
+            self._detect_note_lbl.setObjectName("Notice")
+            self._detect_note_lbl.setWordWrap(True)
+            self._detect_note_lbl.setVisible(False)
+            outer.addWidget(self._detect_note_lbl)
 
     # ── layout ───────────────────────────────────────────────────────────────
     def _plain_row(self, parent: QWidget, label: str) -> QWidget:
@@ -270,30 +283,47 @@ class SchemaPicker(QWidget):
     def combos(self) -> list[QComboBox]:
         return list(self._combos)
 
-    def setDetection(self, text: str, *, problem: bool = False) -> None:  # Qt naming
-        """Show *text* beneath the control as the result of a detection.
+    def setDetection(self, text: str, *, note: str = "",
+                     problem: bool = False) -> None:  # Qt naming
+        """Show the result of a detection beneath the control.
 
-        The widget does not compose this sentence and does not know what it
-        means — it is handed one and shows it. *problem* picks the styled
-        object name, so a refusal reads as a refusal rather than as a quieter
-        success; the two must not look alike, which is the one thing this
-        readout exists for.
+        *text* is the neutral summary and *note* is what the reader must not
+        skim past — a shortfall, or the reason nothing was detected. The widget
+        composes neither and knows what neither means; it is handed sentences
+        and shows them.
+
+        *problem* moves *text* into the note register instead of the neutral
+        one, for a refusal that has no neutral half to report. It does not pick
+        a different colour for the same shape: the note is a tinted panel with
+        a left rule, so a state the user must not miss differs from a quiet one
+        in outline and not only in hue.
 
         A no-op when the host did not ask for the detect control, so a caller
         cannot push a result into a picker that never offered to find one.
         """
-        if self._detect_lbl is None:
+        if self._detect_lbl is None or self._detect_note_lbl is None:
             return
-        self._detect_lbl.setObjectName("Error" if problem else "Muted")
-        # An object name changed after the sheet was applied does not restyle on
-        # its own; Qt re-polishes only when told to.
-        self._detect_lbl.style().unpolish(self._detect_lbl)
-        self._detect_lbl.style().polish(self._detect_lbl)
-        self._detect_lbl.setText(text or "")
+        body, notice = ("", text) if problem else (text, note)
+        self._detect_lbl.setText(body or "")
+        self._detect_lbl.setVisible(bool(body))
+        self._detect_note_lbl.setText(notice or "")
+        self._detect_note_lbl.setVisible(bool(notice))
 
     def detectionText(self) -> str:  # Qt naming
-        """What :meth:`setDetection` last displayed, or ``""``."""
-        return self._detect_lbl.text() if self._detect_lbl is not None else ""
+        """Everything :meth:`setDetection` last displayed, both registers.
+
+        Joined rather than only the neutral half, so a caller asking "what does
+        this say" cannot be told a refusal said nothing.
+        """
+        if self._detect_lbl is None or self._detect_note_lbl is None:
+            return ""
+        return " ".join(p for p in (self._detect_lbl.text(),
+                                    self._detect_note_lbl.text()) if p)
+
+    def detectionNoteText(self) -> str:  # Qt naming
+        """Just the note register — the shortfall or the refusal."""
+        return (self._detect_note_lbl.text()
+                if self._detect_note_lbl is not None else "")
 
     def detectButton(self) -> QPushButton | None:
         """The detect button, or ``None`` when the host did not ask for one."""

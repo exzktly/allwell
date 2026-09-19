@@ -59,6 +59,14 @@ class AnalyzeSchemaSectionMixin:
         sec.layout().addWidget(self._schema_picker)
         self._schema_picker.changed.connect(self._refresh_schema_preview)
         self._schema_picker.detectRequested.connect(self._detect_schema_from_input)
+        # A standing line, so the control says what it is for before it is
+        # pressed. Without it the button is live from launch, can only produce
+        # a refusal until a folder is chosen, and teaches the user in their
+        # first ten seconds that the feature does not work. The Zip Loose
+        # Folder page has always carried the equivalent line.
+        self._schema_picker.setDetection(
+            "Pick an input folder below, then detect its layout from the "
+            "filenames.")
 
         self._schema_err_lbl = QLabel("", sec)
         self._schema_err_lbl.setObjectName("Error")
@@ -157,7 +165,8 @@ class AnalyzeSchemaSectionMixin:
             return
         self._autofill_from_input_scan(folder)
 
-    def _set_schema_detection(self, text: str, *, problem: bool = False) -> None:
+    def _set_schema_detection(self, text: str, *, note: str = "",
+                              problem: bool = False) -> None:
         """Put *text* under the picker as the result of the last detection.
 
         Guarded, because the scan runs from ``_browse_input`` as well as from
@@ -166,4 +175,4 @@ class AnalyzeSchemaSectionMixin:
         """
         picker = getattr(self, "_schema_picker", None)
         if picker is not None:
-            picker.setDetection(text, problem=problem)
+            picker.setDetection(text, note=note, problem=problem)

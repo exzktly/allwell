@@ -463,6 +463,35 @@ def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool,
     )
 
 
+def groupable_tif_count(files, filename_schema: str, filename_sep: str) -> int | None:
+    """How many of *files* carry a well token under this schema.
+
+    ``None`` when the question cannot be asked — no schema given, or a schema
+    with no ``well`` field — because a count of zero and a count that was never
+    computed are different answers and only one of them is safe to put next to
+    a tick.
+
+    Mirrors ``pipeline.well_plate_zipper._extract_well_from_filename``: the
+    well's position in the schema, then :func:`util.well_token.canonical_well_label`
+    on the token there. The same rule ``datasets.import_loose.import_loose_compute``
+    mirrors, and for the same reason — the preview and the thing that does the
+    work must not disagree about what counts as a match.
+    """
+    if not filename_schema:
+        return None
+    fields = [f.strip().lower() for f in filename_schema.split(":") if f.strip()]
+    if "well" not in fields:
+        return None
+    at = fields.index("well")
+    sep = filename_sep or "_"
+    n = 0
+    for f in files:
+        parts = Path(f).stem.split(sep)
+        if len(parts) > at and canonical_well_label(parts[at]) is not None:
+            n += 1
+    return n
+
+
 def plan_input_layout(raw: Path, *, filename_schema: str = "",
                      filename_sep: str = "_") -> InputPlan:
     """Decide how *raw* — the folder the user selected — becomes pipeline input.
@@ -513,14 +542,31 @@ def plan_input_layout(raw: Path, *, filename_schema: str = "",
         nested = None
 
     try:
-        tifs = len(tif_files_in(raw))
+        loose = tif_files_in(raw)
     except OSError as exc:
         return _unreadable_plan(raw, exc)
+    tifs = len(loose)
     if tifs > 3:
-        return InputPlan(
-            ZIP_ROOT, in_sub, out_dir, tifs,
-            f"✓ Will group {tifs} loose TIF file(s) by well → in/",
-        )
+        # The count has to be the one the grouping will actually reach, for the
+        # reason this function's docstring already gives about the fold-loose
+        # branch: a glob counts every file with a TIF suffix, while grouping
+        # rejects a name whose well token will not parse. That was fixed there
+        # and missed here, and the gap is visible the moment anything else on
+        # screen reports the same folder honestly — a schema detection that
+        # refuses sat directly above a tick promising to group eight files it
+        # could not have grouped.
+        groupable = groupable_tif_count(loose, filename_schema, filename_sep)
+        if groupable is None or groupable == tifs:
+            message = f"✓ Will group {tifs} loose TIF file(s) by well → in/"
+        elif groupable == 0:
+            message = (f"None of the {tifs} loose TIF file(s) carry a well in "
+                       f"the filename schema — nothing would be grouped.")
+        else:
+            short = tifs - groupable
+            verb = "does" if short == 1 else "do"
+            message = (f"✓ Will group {groupable} of {tifs} loose TIF file(s) "
+                       f"by well → in/ ({short} {verb} not match the schema)")
+        return InputPlan(ZIP_ROOT, in_sub, out_dir, tifs, message)
     if nested is not None:
         return nested
     return InputPlan(

@@ -223,7 +223,8 @@ def test_a_name_that_splits_right_but_fails_a_slot_is_not_counted_as_parsed():
     assert guess is not None
     assert guess.fields[2] == "well"
     assert guess.matched == len(stems) - 1
-    assert guess.misses == (("exp_GFP_ZZ9_f0_t0", "well slot reads 'ZZ9'"),)
+    assert guess.misses == (
+        ("exp_GFP_ZZ9_f0_t0", "position 3 is 'ZZ9', not a well"),)
 
 
 def test_a_bare_number_fov_slot_is_checked_with_the_rule_that_claimed_it():
@@ -253,7 +254,7 @@ def test_misses_are_capped_and_the_remainder_is_counted_not_dropped():
     assert guess is not None
     assert len(guess.misses) == 3
     assert guess.sampled - guess.matched == 10
-    assert "7 more" in guess.summary()
+    assert "7 more" in guess.shortfall()
 
 
 def test_a_corpus_whose_majority_does_not_split_is_refused_outright():
@@ -274,17 +275,33 @@ def test_a_corpus_whose_majority_does_not_split_is_refused_outright():
 def test_summary_states_the_schema_the_separator_and_both_counts():
     """Excludes the summary that reads well and says nothing checkable."""
     stems = _default_stems() + ["exp_GFP_ZZ9_f0_t0"]
-    text = infer_schema(stems).summary()
-    assert "experiment:channel:well:fov:timepoint" in text
-    assert "'_'" in text
-    assert f"{len(stems) - 1} of {len(stems)}" in text
-    assert "ZZ9" in text
+    guess = infer_schema(stems)
+    assert "experiment:channel:well:fov:timepoint" in guess.summary()
+    assert "'_'" in guess.summary()
+    assert f"{len(stems) - 1} of {len(stems)}" in guess.summary()
+    # The filename belongs to the shortfall, which is styled to be read — not
+    # to the neutral summary, which is styled to be skimmed.
+    assert "ZZ9" not in guess.summary()
+    assert "ZZ9" in guess.shortfall()
+    assert "will be skipped" in guess.shortfall()
 
 
-def test_summary_on_a_clean_corpus_says_all_of_them():
-    text = infer_schema(_default_stems()).summary()
-    assert f"all {len(_default_stems())} sampled filenames parse" in text
-    assert "Not parsed" not in text
+def test_summary_on_a_clean_corpus_says_all_of_them_and_has_no_shortfall():
+    guess = infer_schema(_default_stems())
+    assert f"All {len(_default_stems())} filenames sampled matched" in guess.summary()
+    assert guess.shortfall() == ""
+
+
+def test_the_readout_says_matched_rather_than_parsed():
+    """One word per concept. The Zip Loose Folder page has always said the
+    files that don't fit "didn't match the schema"; "parse" was a second
+    vocabulary for the same event, and a programmer's one at that."""
+    guess = infer_schema(_default_stems() + ["exp_GFP_ZZ9_f0_t0"])
+    text = guess.summary() + " " + guess.shortfall()
+    assert "parse" not in text.lower()
+    assert "slot" not in text.lower(), "the control's own word is 'position'"
+    assert "Matched" in guess.summary()
+    assert "position 3" in guess.shortfall()
 
 
 def test_the_count_survives_the_round_trip_from_a_real_folder(tmp_path):

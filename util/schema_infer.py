@@ -80,35 +80,57 @@ class InferredSchema:
     def schema_str(self) -> str:
         return ":".join(self.fields)
 
+    def channel_tokens(self) -> ChannelTokens:
+        """The channel role assignment seeded from the guessed channel tokens."""
+        roles = default_channel_roles(self.channels)
+        return channel_tokens_from_roles([(c, roles[c]) for c in self.channels])
+
     def summary(self) -> str:
-        """One sentence naming the guess and how much of the sample it parses.
+        """One neutral sentence: what was detected, and how much of the sample
+        it matched.
 
         The whole reason this exists: the guess is applied to two form fields
         "whose new values look no different from hand-entered ones"
         (``analyze/domain/input.py``), so without a sentence saying what it was
         derived from and how well it fits, a wrong guess is invisible until it
-        turns up in a sidecar after a run. A count is what makes it visible.
+        turns up in a sidecar after a run.
+
+        Says *matched* rather than *parsed*. "Parse" is programmer vocabulary,
+        and the app already has a word for this — the Zip Loose Folder page has
+        always said "didn't match the schema". One word per concept.
         """
-        head = f"{self.schema_str}, separator {self.separator!r}"
+        head = f"Detected {self.schema_str}, separator {self.separator!r}."
         if not self.sampled:
-            return f"{head} — no filenames were sampled."
+            return f"{head} No filenames were sampled."
         if self.matched == self.sampled:
             n = self.sampled
-            return (f"{head} — all {n:,} sampled filename{'' if n == 1 else 's'} "
-                    f"parse.")
-        body = (f"{head} — {self.matched:,} of {self.sampled:,} sampled "
-                f"filenames parse.")
-        if self.misses:
-            shown = "; ".join(f"{stem} ({why})" for stem, why in self.misses)
-            more = self.sampled - self.matched - len(self.misses)
-            tail = f", and {more:,} more" if more > 0 else ""
-            body += f" Not parsed: {shown}{tail}."
-        return body
+            return (f"{head} All {n:,} filename{'' if n == 1 else 's'} sampled "
+                    f"matched.")
+        return f"{head} Matched {self.matched:,} of {self.sampled:,} sampled."
 
-    def channel_tokens(self) -> ChannelTokens:
-        """The channel role assignment seeded from the guessed channel tokens."""
-        roles = default_channel_roles(self.channels)
-        return channel_tokens_from_roles([(c, roles[c]) for c in self.channels])
+    def shortfall(self) -> str:
+        """The files this guess would leave behind, or ``""`` when there are none.
+
+        Separate from :meth:`summary` because the two carry different weight and
+        must not be styled alike. The summary is a neutral statement of what was
+        chosen; this is a statement about the user's *data* — files that will not
+        be analysed — and it was the thing most worth reading while it was set in
+        the same grey as the example-filename boilerplate beneath it.
+
+        Phrased as a consequence ("will be skipped") rather than as a mechanism
+        ("did not parse"), because the consequence is what the reader has to make
+        a decision about.
+        """
+        missing = self.sampled - self.matched
+        if missing <= 0:
+            return ""
+        head = (f"{missing:,} file{'' if missing == 1 else 's'} will be skipped")
+        if not self.misses:
+            return f"{head}."
+        shown = "; ".join(f"{stem} — {why}" for stem, why in self.misses)
+        more = missing - len(self.misses)
+        tail = f", and {more:,} more" if more > 0 else ""
+        return f"{head}: {shown}{tail}."
 
 
 # ── token classifiers ───────────────────────────────────────────────────────
@@ -367,8 +389,12 @@ def _channels_in_order(rows: list[list[str]], chan_i: int) -> list[str]:
     return list(dict.fromkeys(r[chan_i] for r in rows))
 
 
-#: Human wording per slot role, for the reason attached to an unparsed name.
-_ROLE_WORD = {"well": "well", "timepoint": "timepoint", "fov": "FOV"}
+#: Human wording per slot role, for the reason attached to an unmatched name.
+#: The reason names the **position number** as well, because that is the word
+#: the control itself uses — the picker's dropdowns are labelled "Position 1"
+#: through "Position 5", so a message inventing "slot" for the same thing asks
+#: the reader to translate a term they are looking at.
+_ROLE_WORD = {"well": "a well", "timepoint": "a timepoint", "fov": "an FOV"}
 
 
 def _match_report(stems: list[str], sep: str, k: int, fields: list[str],
@@ -393,13 +419,17 @@ def _match_report(stems: list[str], sep: str, k: int, fields: list[str],
         parts = stem.split(sep)
         if len(parts) != k:
             if len(misses) < _MISS_EXAMPLES:
-                misses.append((stem, f"splits into {len(parts)}, not {k}"))
+                n_pos = len(parts)
+                misses.append(
+                    (stem, f"has {n_pos} position{'' if n_pos == 1 else 's'}, "
+                           f"not {k}"))
             continue
         why = ""
         for i, fld in enumerate(fields):
             pred = checks.get(i)
             if pred is not None and not pred(parts[i]):
-                why = f"{_ROLE_WORD.get(fld, fld)} slot reads {parts[i]!r}"
+                why = (f"position {i + 1} is {parts[i]!r}, not "
+                       f"{_ROLE_WORD.get(fld, fld)}")
                 break
         if not why:
             matched += 1

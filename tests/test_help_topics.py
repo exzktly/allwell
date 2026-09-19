@@ -42,24 +42,35 @@ def _headings() -> list[str]:
 
 
 def _analyze_section_titles() -> list[str]:
-    """The ``self._section(parent, "<title>", …)`` titles, in build order.
+    """The ``self._section(parent, "<title>", …)`` titles across the whole pane.
 
     Read from the source rather than by constructing the form: the titles are
     the map's keys, and a new section added without a topic has to fail here.
+
+    Every ``analyze/`` module, not ``analyze/form.py`` alone. The form is
+    assembled from mixins — ``seg_params``, ``schema_section``,
+    ``form_chrome`` — and a section builder that moves into one of them
+    vanishes from a scan pinned to the one file, taking its title with it. That
+    is not a quiet loss in either direction: the forward test stops checking a
+    section that still exists, and the reverse test reports its perfectly live
+    help key as naming a section that no longer exists. Extracting the Filename
+    Schema section did exactly that, and the reverse test is what noticed.
     """
-    src = (REPO_ROOT / "analyze/form.py").read_text(encoding="utf-8")
     titles: list[str] = []
-    for node in ast.walk(ast.parse(src)):
-        if not isinstance(node, ast.Call):
+    for path in sorted((REPO_ROOT / "analyze").rglob("*.py")):
+        if "__pycache__" in path.parts:
             continue
-        func = node.func
-        if not (isinstance(func, ast.Attribute) and func.attr == "_section"):
-            continue
-        # _section(parent, title, …) — the title is the second positional arg.
-        if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
-            value = node.args[1].value
-            if isinstance(value, str):
-                titles.append(value)
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and func.attr == "_section"):
+                continue
+            # _section(parent, title, …) — the title is the second positional arg.
+            if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
+                value = node.args[1].value
+                if isinstance(value, str):
+                    titles.append(value)
     return titles
 
 
@@ -132,7 +143,7 @@ def test_every_datasets_tool_has_a_topic():
 
 def test_every_analyze_section_has_a_topic():
     titles = _analyze_section_titles()
-    assert titles, "found no _section() calls in analyze/form.py — parser drifted"
+    assert titles, "found no _section() calls under analyze/ — parser drifted"
     missing = [t for t in titles if t not in help_topics.ANALYZE_SECTION_HELP]
     assert not missing, (
         "Analyze form sections with no entry in help_topics.ANALYZE_SECTION_HELP; "

@@ -128,8 +128,8 @@ PROCESS_MICROSCOPY_BUDGET = 3804
 # module, and this budget caps the file it lived in — so a required entry could
 # fail the budget, and the budget could only be met by not adding it. A data
 # declaration with no behaviour was the right thing to move.
-# 7326 -> 7141: merging the field-quality block across a remote fetch cost
-# fifteen lines here, and the conda-environment cluster moved out to pay for
+# 7326 -> 7145: merging the field-quality block across a remote fetch cost
+# nineteen lines here, and the conda-environment cluster moved out to pay for
 # them -- `services/remote_conda.py`. One job, asked in four places (the
 # single-run launch, the batched driver, the scheduler handoff and the
 # pre-flight probe) and needing the identical answer in all four: given a
@@ -137,7 +137,7 @@ PROCESS_MICROSCOPY_BUDGET = 3804
 # it named or an absolute prefix, what `conda run` argv is that, and what
 # shell guard proves it exists before anything launches into it. Every name is
 # re-exported, so no call site and no test moved with it.
-REMOTE_RUNNER_BUDGET = 7141
+REMOTE_RUNNER_BUDGET = 7145
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis

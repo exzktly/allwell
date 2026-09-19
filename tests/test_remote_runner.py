@@ -2056,6 +2056,10 @@ def test_required_files_list_is_what_we_promised():
         # so unlike the client-side entries below, the remote worker really
         # does import this one.
         "pipeline/field_quality.py",
+        # Its stdlib-only half — the per-well record, the collected block and
+        # the merge the fetch performs. Imported by the remote CLIENT, which
+        # may not reach numpy or scipy.
+        "pipeline/field_quality_record.py",
         # The pretrained-weights cache directory and the cross-process
         # download lock that stops N workers fetching the same model at once.
         # ``process_microscopy`` re-exports these, and the remote worker loads

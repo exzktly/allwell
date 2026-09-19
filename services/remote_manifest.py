@@ -111,6 +111,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # Per-field image-quality metrics, computed inside the quantification
     # pass, so the remote worker genuinely needs it.
     "pipeline/field_quality.py",
+    # Its stdlib-only half: the per-well record, the collected block and
+    # the merge the remote fetch performs. Imported by the remote client
+    # itself, which is why it may not reach the imaging stack.
+    "pipeline/field_quality_record.py",
     # The pretrained-weights cache and its cross-process download lock.
     # process_microscopy re-exports these; the remote worker loads the
     # model through them on every run.

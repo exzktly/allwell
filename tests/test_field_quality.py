@@ -302,12 +302,16 @@ def test_a_record_that_cannot_be_written_does_not_fail_the_run(tmp_path,
     the write succeeds — a test that passes because the failure never happened
     proves nothing about the handler.
     """
+    # Patched on the module that OWNS the writer, not on the one that
+    # re-exports it: a re-export is a binding, so patching ``tempfile``
+    # through ``field_quality`` reaches a name the writer no longer resolves.
     import pipeline.field_quality as fq
+    import pipeline.field_quality_record as fqr
 
     def _boom(*a, **k):
         raise OSError("disk full")
 
-    monkeypatch.setattr(fq.tempfile, "mkstemp", _boom)
+    monkeypatch.setattr(fqr.tempfile, "mkstemp", _boom)
     assert fq.write_well_field_quality(tmp_path, "A01", fields=[],
                                        measured_of=1) is None
 

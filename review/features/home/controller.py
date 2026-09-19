@@ -25,7 +25,8 @@ from review.core.selection_controller import (
 from . import collect as hc
 from review.data.field_quality_cache import flagged_by_well
 from .plate_panel import (
-    FLAGGED_FIELD_GLYPH, paint_field_quality, paint_plate, well_tooltip,
+    FLAGGED_FIELD_GLYPH, legend_marker_style, paint_field_quality, paint_plate,
+    well_tooltip,
 )
 # The Sample Map tab's layer: which one is showing, and the entry rules for it.
 # Module scope, because nothing under ``home/sample_map`` imports this module
@@ -465,12 +466,28 @@ def _paint_plate(ctx) -> None:
     # in place of a swatch, because it is a different channel rather than a
     # ninth colour — see ``plate_panel.FLAGGED_FIELD_GLYPH``.
     if quality:
-        row = len(hc.plate_legend(ctx))
+        # A blank row first. The column above partitions the plate — its
+        # counts sum to the wells, because the states are mutually exclusive —
+        # and this one is an overlay whose well is already counted somewhere
+        # above it. Appended flush it reads as state 9 of 9 and a reader
+        # totalling the column gets more wells than the plate holds; separated,
+        # it reads as the annotation layer it is.
+        spacer = QLabel("", host)
+        spacer.setFixedHeight(theme.Spacing.xs)
+        layout.addWidget(spacer, len(hc.plate_legend(ctx)), 0)
+        row = len(hc.plate_legend(ctx)) + 1
         mark = QLabel(FLAGGED_FIELD_GLYPH, host)
         mark.setFixedSize(theme.Spacing.md, theme.Spacing.md)
         mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark.setStyleSheet(legend_marker_style())
         layout.addWidget(mark, row, 0)
-        layout.addWidget(QLabel("Field flagged on image quality", host), row, 1)
+        # "Wells", because the count IS a well count and the column above it
+        # partitions the plate by state. Labelling it "Field" put a field
+        # noun on a well number in a column that otherwise sums to the plate —
+        # and on a real plate the two surfaces would then print different
+        # numbers for what the reader takes to be one quantity.
+        layout.addWidget(
+            QLabel("Wells with a flagged field", host), row, 1)
         layout.addWidget(QLabel(str(len(quality)), host), row, 2)
 
     totals = ((ctx.state.dataset.pipeline_info or {}).get("run_check") or {}

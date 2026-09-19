@@ -80,7 +80,11 @@ from services.remote_conda import (  # noqa: F401
     _conda_run_prefix,
     _conda_run_prefix_for,
 )
-from pipeline.field_quality import (
+# The record half of field quality, which is stdlib-only. Importing
+# ``pipeline.field_quality`` here would pull numpy and scipy into the remote
+# client — a guard walks this module's import graph and says so, because the
+# client is sent to hosts where the pipeline's dependencies are not installed.
+from pipeline.field_quality_record import (
     merge_fetched_field_quality,
     read_field_quality_block,
 )

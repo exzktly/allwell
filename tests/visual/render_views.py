@@ -290,6 +290,17 @@ def _capture_field_quality(app, w, rev) -> None:
     block = {"wells": block_wells, "partial_wells": [],
              "measured": 18, "measured_of": 18}
 
+    # The refusal states, which the first pass never rendered — and the two
+    # the whole design rests on. A finding wearing the wrong register and a
+    # checkbox live on a plate that refuses to be scored were both defects
+    # living in states nobody had looked at.
+    import copy
+    partial = copy.deepcopy(block)
+    partial["partial_wells"] = ["A01"]
+    partial["wells"]["A01"]["measured_of"] = 5
+    partial["measured_of"] = 20
+    none_at_all = None
+
     info = rev._app_state.dataset.pipeline_info
     prior = info.get(FIELD_QUALITY_BLOCK)
     info[FIELD_QUALITY_BLOCK] = block
@@ -325,6 +336,25 @@ def _capture_field_quality(app, w, rev) -> None:
             grab(w, "72-field-quality-gate",
                  "Cell Gating — the run's own field-quality verdicts, "
                  "reported and not yet applied")
+        # The other two registers, on the same panel.
+        for slug, payload, desc in (
+                ("declined", partial,
+                 "refused — the plate was only partly measured, so a "
+                 "plate-wide comparison would be drawn from a biased sample"),
+                ("none", none_at_all,
+                 "a dataset analysed before field quality was recorded — "
+                 "muted, because it is not making a statement about itself")):
+            if payload is None:
+                info.pop(FIELD_QUALITY_BLOCK, None)
+            else:
+                info[FIELD_QUALITY_BLOCK] = payload
+            if _inner_tab(rev, "Cell Gating") is not None:
+                qc_gate_refresh_widgets(rev)
+                settle(app, 300)
+                grab(w, f"72-field-quality-gate-{slug}",
+                     f"Cell Gating — {desc}")
+        info[FIELD_QUALITY_BLOCK] = block
+
         if _inner_tab(rev, "Overview") is not None:
             from review.features.home.controller import refresh_home
             with contextlib.suppress(Exception):

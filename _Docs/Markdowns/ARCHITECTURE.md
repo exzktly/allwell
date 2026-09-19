@@ -9894,7 +9894,19 @@ terms — field quality is orthogonal to coverage, and a well can be complete an
 out of focus. It carries a legend row of its own whenever the plate shows one,
 because that plate's invariant is that no well is left without a row to explain
 it, and the same mapping feeds the tooltip so a mark cannot appear without its
-reason.
+reason. That row is separated from the ones above it and counts *wells*: the
+column above partitions the plate, its counts sum to the wells, and an overlay
+appended flush to it double-counts a well that is already in one of those rows.
+
+**The glyph vocabulary is now two marks and should not become three without a
+reason written down.** The Analyze run dashboard paints `✕` on a well that
+errored; this plate paints `!` on a well holding a field the run flagged. Both
+go through `WellPlateSelector.setWellMarker`, which draws bold at 0.78 of the
+well's height in an ink chosen by measuring the fill's relative luminance
+(`marker_ink`) rather than by asking whether the well happens to carry a group
+colour — that proxy put a dark mark on the `text_muted` fill at a contrast
+ratio of 3.88:1, and a 1 px stem picked up subpixel fringing that reads as a
+rendering fault.
 
 `pipeline.field_quality.summarize` is the single composition of "what did field
 quality find". The end-of-run log prints it and the Analyze tab's pre-flight

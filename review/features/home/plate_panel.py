@@ -159,6 +159,24 @@ def paint_plate(plate: WellPlateSelector, cells: dict, fractions: dict) -> None:
 FLAGGED_FIELD_GLYPH = "!"
 
 
+def legend_marker_style() -> str:
+    """The legend key for the marker: the glyph inside an outlined box.
+
+    A bare glyph beside the colour rows was measured at about 2x9 px of ink
+    against a 12x12 solid swatch — roughly 15% of the area — so the last row
+    looked as if it had no key at all. The plate's own neutral state already
+    establishes the vocabulary for a key that is not a solid fill (an outlined
+    box, ``legend_swatch_style`` for a state the plate leaves uncoloured), so
+    this borrows it rather than inventing a third shape. The glyph goes
+    inside, bold, which keeps the row's visual mass while still reading as a
+    different channel from the fills above it.
+    """
+    return (f"background:transparent; "
+            f"border:1px solid {theme.Colors.border_strong}; "
+            f"border-radius:{theme.Radii.xs}px; "
+            f"font-weight:700; color:{theme.Colors.text_primary};")
+
+
 def paint_field_quality(plate: WellPlateSelector, flagged_wells) -> None:
     """Mark the wells holding at least one flagged field. Clears first.
 

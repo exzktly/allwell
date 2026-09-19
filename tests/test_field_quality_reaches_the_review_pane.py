@@ -182,11 +182,11 @@ def test_a_dataset_with_no_block_filters_nothing_and_says_which():
     read alike."""
     ctx = _ctx(None)
     assert fq.apply_field_quality_to_cache(ctx) == []
-    text, problem = fq.field_quality_status_text(ctx)
+    text, register = fq.field_quality_status(ctx)
     assert "before field quality was recorded" in text
-    assert problem is False
+    assert register == fq.REGISTER_MUTED
 
-    clean, _ = fq.field_quality_status_text(_ctx(_block()))
+    clean, _ = fq.field_quality_status(_ctx(_block()))
     assert "look like the rest of the plate" in clean
     assert clean != text
 
@@ -202,19 +202,28 @@ def test_the_panel_names_what_was_flagged_and_how_many():
     the registers are for, and visible the moment the panel was rendered.
     """
     ctx = _ctx(_block(bad_well="A02"))
-    text, problem = fq.field_quality_status_text(ctx)
-    assert "1 of 18 field(s) flagged" in text
-    assert "focus" in text
-    assert problem is False, "a finding is a result, not a failure"
+    text, register = fq.field_quality_status(ctx)
+    assert "1 of 18 fields flagged" in text
+    assert "all out of focus" in text, "named the way a reader would say it"
+    assert "focus (1)" not in text, (
+        "the pipeline's variable name beside a count put 1 in the sentence "
+        "twice with two meanings")
+    # And the well, because the only other surface that shows this is a plate
+    # map on a different tab.
+    assert "in A02" in text
+    assert register == fq.REGISTER_PLAIN, "a finding is a result, not a failure"
 
-    # The two states that ARE problems, for contrast — an assertion that only
-    # says "False" is satisfied by a function that always returns False.
-    _, partial = fq.field_quality_status_text(_ctx(_block(partial=True)))
-    assert partial is True
-    _, untrusted = fq.field_quality_status_text(_ctx(
+    # The other two registers, for contrast — an assertion that only says
+    # PLAIN is satisfied by a function that always returns PLAIN.
+    _, partial = fq.field_quality_status(_ctx(_block(partial=True)))
+    assert partial == fq.REGISTER_PROBLEM
+    _, none_at_all = fq.field_quality_status(_ctx(None))
+    assert none_at_all == fq.REGISTER_MUTED, (
+        "a dataset that predates the feature is not making a statement")
+    _, untrusted = fq.field_quality_status(_ctx(
         _block(), integrity={"B01": FovIntegrity(trusted=False, n_labels=1,
                                                  n_images=3, reason="x")}))
-    assert untrusted is True
+    assert untrusted == fq.REGISTER_PROBLEM
 
 
 def test_an_untrusted_well_is_named_even_when_nothing_was_flagged():
@@ -227,10 +236,10 @@ def test_an_untrusted_well_is_named_even_when_nothing_was_flagged():
     ctx = _ctx(_block(),                      # nothing flagged anywhere
                integrity={"B01": FovIntegrity(trusted=False, n_labels=1,
                                               n_images=3, reason="x")})
-    text, problem = fq.field_quality_status_text(ctx)
+    text, register = fq.field_quality_status(ctx)
     assert "look like the rest of the plate" in text
     assert "cannot be filtered" in text and "B01" in text
-    assert problem is True
+    assert register == fq.REGISTER_PROBLEM
 
 
 def test_the_partial_refusal_is_quoted_rather_than_paraphrased():
@@ -239,8 +248,8 @@ def test_the_partial_refusal_is_quoted_rather_than_paraphrased():
     from review.domain.field_quality_scores import summarise
 
     block = _block(partial=True)
-    text, problem = fq.field_quality_status_text(_ctx(block))
-    assert problem is True
+    text, register = fq.field_quality_status(_ctx(block))
+    assert register == fq.REGISTER_PROBLEM
     assert text == summarise(records_for_scoring(block)).declined
 
 
@@ -284,11 +293,16 @@ def test_a_marked_well_explains_itself_in_its_tooltip():
     """A glyph with no explanation is a puzzle rather than a finding."""
     from review.features.home.plate_panel import well_tooltip
 
-    ctx = _ctx(_block(bad_well="A02"))
+    ctx = _ctx(_block(bad_well="A02", bad_fov="2"))
     quality = fq.flagged_by_well(ctx)
     tip = well_tooltip("A02", {"A02": "complete"}, {}, quality)
-    assert "1 field(s) flagged" in tip
+    assert "1 field flagged" in tip
     assert "focus" in tip
+    # **The address.** Without the field id neither this tooltip nor the Cell
+    # Gating sentence yields the (well, field) pair the Image Browser needs,
+    # and a flagged well is a dead end: the reader is told a field is bad and
+    # cannot get to the picture.
+    assert "field 2" in tip
     # And a clean well says nothing extra.
     assert well_tooltip("A01", {"A01": "complete"}, {}, quality) == (
         "A01 · complete")
@@ -403,7 +417,7 @@ def test_the_panel_offers_the_control_and_pressing_it_filters(qtbot, monkeypatch
     w = app._qc_gate_widgets
     box = w["exclude_flagged_fields"]
     assert box.isChecked() is False, "off by default, on the real control"
-    assert "1 of 18 field(s) flagged" in w["field_quality_status"].text()
+    assert "1 of 18 fields flagged" in w["field_quality_status"].text()
     for df in app._app_state.dataset.cache.values():
         assert "Field_Pass" not in df.columns
 
@@ -483,7 +497,7 @@ def test_a_load_refreshes_the_sentence_not_just_the_controls(qtbot):
     app._app_state.dataset.pipeline_info[FIELD_QUALITY_BLOCK] = _block(
         bad_well="A02")
     qc_gate_refresh_widgets(app)
-    assert "1 of 18 field(s) flagged" in w["field_quality_status"].text()
+    assert "1 of 18 fields flagged" in w["field_quality_status"].text()
     assert w["exclude_flagged_fields"].isEnabled() is True
 
 
@@ -561,9 +575,161 @@ def test_the_marker_gets_a_legend_row_when_the_plate_carries_one():
 
     with_flag = _legend_texts(_block(bad_well="A02"))
     assert FLAGGED_FIELD_GLYPH in with_flag
-    assert "Field flagged on image quality" in with_flag
+    assert "Wells with a flagged field" in with_flag
 
     # And no row when there is nothing to explain — a legend entry for a mark
     # the plate does not carry is its own kind of noise.
     clean = _legend_texts(_block())
-    assert "Field flagged on image quality" not in clean
+    assert "Wells with a flagged field" not in clean
+
+
+# ── the control must not be live when it would do nothing ───────────────────
+
+def test_the_box_is_dead_on_a_plate_the_scorer_refuses(qtbot):
+    """Excludes the checkbox that ticks and excludes nothing.
+
+    Gating on "is there a block" is strictly weaker than gating on "would
+    this exclude anything": a plate only partly measured HAS a block and is
+    refused, so the box stayed live, the user ticked it, it stayed ticked, and
+    every number in the app was then read by someone who believed a quality
+    filter was on. Degraded output indistinguishable from good output,
+    arriving through the control rather than through the data.
+    """
+    from PySide6.QtWidgets import QWidget
+
+    from review.features.qc.tab_view import build_qc_gate_controls
+
+    for block, live in ((None, False),
+                        (_block(partial=True), False),
+                        (_block(), False),                 # nothing flagged
+                        (_block(bad_well="A02"), True)):
+        app = _panel_ctx(block)
+        parent = QWidget()
+        qtbot.addWidget(parent)
+        qtbot.addWidget(build_qc_gate_controls(app._ctx, parent))
+        box = app._qc_gate_widgets["exclude_flagged_fields"]
+        assert box.isEnabled() is live, (
+            f"enabled={box.isEnabled()} for a block that "
+            f"{'can' if live else 'cannot'} be applied")
+        if not live:
+            assert "Nothing to exclude" in box.toolTip()
+
+    assert fq.exclusion_can_apply(_ctx(_block(partial=True))) is False
+    assert fq.exclusion_can_apply(_ctx(_block(bad_well="A02"))) is True
+
+
+def test_the_panel_says_what_ticking_the_box_is_doing(qtbot):
+    """Excludes the control whose effect is invisible.
+
+    The finding sentence deliberately does not change when the box is ticked —
+    the flags are reported either way — which left the panel with no statement
+    of effect at all. The wrong implementation that passes every earlier test
+    in this file is exactly that one.
+    """
+    from PySide6.QtWidgets import QWidget
+
+    from review.features.qc.tab_view import (
+        build_qc_gate_controls, qc_gate_refresh_widgets,
+    )
+
+    app = _panel_ctx(_block(bad_well="A02"))
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    qtbot.addWidget(build_qc_gate_controls(app._ctx, parent))
+    w = app._qc_gate_widgets
+    before = w["field_quality_status"].text()
+    assert "Currently kept" in w["field_quality_effect"].text()
+    assert "1 field would be excluded" in w["field_quality_effect"].text()
+
+    app._app_state.qc.params = QCParams(exclude_flagged_fields=True)
+    qc_gate_refresh_widgets(app)
+    assert "Currently excluding 1 field" in w["field_quality_effect"].text()
+    assert w["field_quality_status"].text() == before, (
+        "the finding is reported either way and must not move with the box")
+
+    # Nothing to say where nothing would be excluded.
+    clean = _panel_ctx(_block())
+    p2 = QWidget()
+    qtbot.addWidget(p2)
+    qtbot.addWidget(build_qc_gate_controls(clean._ctx, p2))
+    assert clean._qc_gate_widgets["field_quality_effect"].text() == ""
+
+
+# ── the plate marker, at the size it is actually drawn ──────────────────────
+
+def test_the_marker_is_drawn_heavily_enough_to_find():
+    """Excludes the 2 px hairline.
+
+    Measured off the render: the first version was one bright column and one
+    half-lit one, with a 2 px gap between stem and dot, on a 17 px well. At
+    1x it read as a tick or a smear rather than as an exclamation mark, and
+    it picked up heavy subpixel fringing because the stem was 1 px wide. The
+    plate is the surface where this has to be **found**, not merely present.
+    """
+    from widgets.well_plate_selector import _MARKER_BOLD, _MARKER_HEIGHT_FRAC
+
+    assert _MARKER_BOLD is True
+    assert _MARKER_HEIGHT_FRAC >= 0.75, (
+        "0.62 of a 17 px well is a ~10 px glyph with a 1 px stem")
+
+
+def test_the_marker_ink_is_chosen_by_the_fill_it_sits_on():
+    """Excludes the polarity proxy that fails on one of the six state fills.
+
+    The pen was ``ink_dark if group_color is not None else text_primary`` — a
+    proxy for "the fill is bright", and wrong for ``text_muted`` (#5F6B7C),
+    where black gives a contrast ratio of 3.88:1: below AA for normal text and
+    hopeless for a thin stroke. Measured against every colour the plate can
+    actually paint.
+    """
+    from ui import theme
+    from widgets.well_plate_selector import marker_ink
+
+    def _ratio(a: str, b: str) -> float:
+        def lum(hexcol):
+            c = [int(hexcol[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            c = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+                 for v in c]
+            return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+        la, lb = sorted((lum(a), lum(b)))
+        return (lb + 0.05) / (la + 0.05)
+
+    fills = (theme.Colors.success, theme.Colors.warn, theme.Colors.danger,
+             theme.Colors.accent, theme.Colors.stale, theme.Colors.text_muted)
+    dark, light = theme.Colors.ink_dark, theme.Colors.text_primary
+    for fill in fills:
+        got = marker_ink(fill)
+        # The rule, not a number: whichever of the two inks the theme has is
+        # more legible on this fill. That is what the proxy got wrong, and it
+        # holds however the palette moves.
+        assert _ratio(got, fill) == max(_ratio(dark, fill),
+                                        _ratio(light, fill)), (
+            f"marker ink on {fill} is not the better of the two")
+        # The glyph is drawn bold, where WCAG's threshold is 3.0 rather than
+        # 4.5. Measured, ``text_muted`` (#5F6B7C) is the one fill in the
+        # palette where no available ink reaches 4.5 at all — the best is
+        # 4.45 — so holding every fill to 4.5 would be asserting something
+        # this palette cannot satisfy, which is worse than asserting nothing.
+        assert _ratio(got, fill) >= 3.0, f"marker ink on {fill} fails even AA-large"
+    assert sum(_ratio(marker_ink(f), f) >= 4.5 for f in fills) == 5
+
+    # And the defect this exists for, named: the old proxy chose a dark ink on
+    # the muted fill, which is the worst of the two.
+    assert _ratio(dark, theme.Colors.text_muted) < _ratio(
+        light, theme.Colors.text_muted)
+    assert marker_ink(theme.Colors.text_muted) == light
+
+
+def test_the_legend_key_carries_the_weight_of_a_swatch():
+    """Excludes the key that is visually absent beside twelve-pixel blocks.
+
+    Measured: the colour swatches are 12x12 solid; a bare glyph was 2x9 of
+    ink, about 15% of that area, so the last legend row looked as if it had no
+    key at all. The plate's own "Not checked" row already establishes the
+    vocabulary for a key that is not a solid fill — an outlined box.
+    """
+    from review.features.home.plate_panel import legend_marker_style
+
+    style = legend_marker_style()
+    assert "border" in style, "an outlined box, like the neutral state's key"
+    assert "border-radius" in style

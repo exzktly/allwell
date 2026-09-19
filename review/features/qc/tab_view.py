@@ -22,7 +22,8 @@ from PySide6.QtWidgets import (
 )
 
 from review.data.field_quality_cache import (
-    field_quality_block, field_quality_status_text,
+    REGISTER_PROBLEM, exclusion_can_apply, exclusion_effect_text,
+    field_quality_status,
 )
 from .controller import get_qc_params, qc_excluded_count, set_qc_params
 from .params import QCParams
@@ -31,16 +32,33 @@ from ui import theme
 
 # Pixel geometry for this module's controls (ARCHITECTURE §8: named once, never
 # written inline at a call site).
+_FQ_TOOLTIP = (
+    "Drop every cell from a field this dataset's own run flagged on image "
+    "quality — focus, saturation, contrast, or measurements that do not look "
+    "like the rest of the well.\n"
+    "Off by default: the flags are reported either way, and turning this on "
+    "changes every number in the app.")
+
 _GRID_INDENT = 18
 _QUANTITY_LBL_W = 92
 #: How wide the field-quality sentence is allowed to run.
 #:
 #: Unconstrained it fills the panel — about 1,200 px on a normal window —
-#: while every control above it stops around 700, so a note attached to the
-#: checkbox above read as a page-wide alert. ``QLabel#Notice`` paints a wash
-#: and a left rule, which makes the difference obvious; the render is where it
-#: showed. Sized to the controls it sits under rather than to the panel.
+#: while the controls above it stop at 612 (the debris grid's last field) and
+#: 691 (the scatter hint). A note attached to the checkbox then read as a
+#: page-wide alert, which ``QLabel#Notice``'s wash and left rule make
+#: unmissable. Measured off the render rather than guessed at.
 _FQ_TEXT_W = 700
+
+#: Where a sentence that belongs to a checkbox starts.
+#:
+#: The panel already has this idiom and the first version of this row did not
+#: use it: "No gates drawn yet — draw one on the Scatter Plot tab." sits at
+#: its control's *label* column and is muted, while this sentence sat 26 px
+#: further left, at the checkbox's *indicator* column, in full primary ink —
+#: the brightest, left-most non-heading line in the block, directly above
+#: "Then include cells by (choose one):". It read as that group's heading.
+_FQ_TEXT_INDENT = 27
 
 
 def _fmt(v: float | None) -> str:
@@ -180,12 +198,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     fq_head_layout.setContentsMargins(0, 0, 0, 0)
     fq_cb = QCheckBox("Exclude fields the run flagged", fq_head)
     fq_cb.setChecked(bool(params.exclude_flagged_fields))
-    fq_cb.setToolTip(
-        "Drop every cell from a field this dataset's own run flagged on image "
-        "quality — focus, saturation, dynamic range, or a count that does not "
-        "look like the rest of its well.\n"
-        "Off by default: the flags are reported either way, and turning this "
-        "on changes every number in the app.")
+    fq_cb.setToolTip(_FQ_TOOLTIP)
     fq_head_layout.addWidget(fq_cb)
     fq_head_layout.addStretch(1)
     fq_layout.addWidget(fq_head)
@@ -193,6 +206,22 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     fq_status.setWordWrap(True)
     fq_status.setMaximumWidth(_FQ_TEXT_W)
     fq_layout.addWidget(fq_status)
+    # The one line that depends on the checkbox. The finding above it stays
+    # the same whether or not the box is ticked — the flags are reported
+    # either way — which left the panel saying nothing at all about what
+    # ticking it did.
+    fq_effect = QLabel("", fq)
+    fq_effect.setObjectName("Muted")
+    fq_effect.setWordWrap(True)
+    fq_effect.setMaximumWidth(_FQ_TEXT_W)
+    fq_layout.addWidget(fq_effect)
+    # Indented on the labels rather than on the container: the checkbox must
+    # stay in the debris gate's own column, so it reads as a sibling gate
+    # rather than as a fifth debris row, and only the sentences move. A
+    # negative margin on the head does not do it — Qt clamps those to zero,
+    # and the render showed the whole row shifted right.
+    for _lbl in (fq_status, fq_effect):
+        _lbl.setIndent(_FQ_TEXT_INDENT)
     outer.addWidget(fq)
 
     # stash refs so persistence / external recomputes can refresh the row.
@@ -205,6 +234,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         "min_circularity": min_circ_edit, "max_circularity": max_circ_edit,
         "status": status,
         "exclude_flagged_fields": fq_cb, "field_quality_status": fq_status,
+        "field_quality_effect": fq_effect,
     })
 
     def _fields_params() -> QCParams:
@@ -250,6 +280,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     def _update_field_quality_status() -> None:
         _refresh_field_quality_status(
             ctx, {"field_quality_status": fq_status,
+                  "field_quality_effect": fq_effect,
                   "exclude_flagged_fields": fq_cb})
 
     def _apply() -> None:
@@ -310,12 +341,31 @@ def _refresh_field_quality_status(ctx, w) -> None:
     box = w.get("exclude_flagged_fields")
     if label is None or box is None:
         return
-    text, problem = field_quality_status_text(ctx)
+    text, register = field_quality_status(ctx)
     label.setText(text)
-    label.setObjectName("Notice" if problem else ("" if text else "Muted"))
+    # Amber for a refusal, the panel's sub-status ink for everything else.
+    # A finding and a dataset with nothing to say are two different sentences
+    # and they share one style **today**, deliberately: the sibling idiom on
+    # this panel ("No gates drawn yet — draw one on the Scatter Plot tab.")
+    # is muted, and a finding rendered at full primary ink was measured to be
+    # the brightest, left-most non-heading line in the block, reading as the
+    # heading of the radio group beneath it. The registers stay three because
+    # they are three statements; the styling is a separate decision and this
+    # is the one the render supports.
+    label.setObjectName("Notice" if register == REGISTER_PROBLEM else "Muted")
     label.style().unpolish(label)
     label.style().polish(label)
-    box.setEnabled(bool(field_quality_block(ctx)))
+    effect = w.get("field_quality_effect")
+    if effect is not None:
+        effect.setText(exclusion_effect_text(ctx))
+    # Enabled only when ticking it would actually exclude something — see
+    # ``exclusion_can_apply``. Gating on "is there a block" left the box live
+    # on a plate the scorer refuses, where a tick stays ticked and drops
+    # nothing.
+    box.setEnabled(exclusion_can_apply(ctx))
+    box.setToolTip(_FQ_TOOLTIP if box.isEnabled() else
+                   "Nothing to exclude on this dataset — the line below says "
+                   "why.")
 
 
 def qc_gate_refresh_widgets(win) -> None:

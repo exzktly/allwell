@@ -353,7 +353,7 @@ def _warn_no_area_column(where: str) -> None:
 
 def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Series:
     """Rows that count toward analysis: ``Included == 1`` composed with the QC,
-    crop, and scatter-gate layers.
+    crop, scatter-gate and field-quality layers.
 
     Manual curation / cell-gating own the ``Included`` column; the QC layer owns
     a separate ``QC_Pass`` column (1 = passes debris gating); the crop layer owns
@@ -361,8 +361,13 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Serie
     inclusion mode owns ``Gate_Pass`` (1 = inside the drawn scatter gates). The
     effective inclusion is the AND of the four — ``manual-keep AND passes-QC AND
     inside-crop AND inside-gate`` — so each layer re-gating never clobbers the
-    others. ``QC_Pass`` / ``Crop_Pass`` / ``Gate_Pass`` are optional: when absent
-    (no such layer / older data) each is treated as all-pass.
+    others. A fifth, ``Field_Pass`` (1 = the run did not flag this row's field
+    for image quality), is written only when the user has turned that exclusion
+    on and only for wells whose FOV labels can be trusted — see
+    :mod:`review.data.field_quality_cache`, which explains why an untrusted
+    well is refused rather than joined onto. ``QC_Pass`` / ``Crop_Pass`` /
+    ``Gate_Pass`` / ``Field_Pass`` are optional: when absent (no such layer /
+    older data / the exclusion switched off) each is treated as all-pass.
 
     ``include_gate=False`` drops the ``Gate_Pass`` layer. The per-cell scatter —
     where the gates are drawn — passes it by default, so it keeps showing the
@@ -383,6 +388,9 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Serie
     if include_gate and "Gate_Pass" in df.columns:
         gate = pd.to_numeric(df["Gate_Pass"], errors="coerce").fillna(1)
         mask = mask & gate.eq(1)
+    if "Field_Pass" in df.columns:
+        fq = pd.to_numeric(df["Field_Pass"], errors="coerce").fillna(1)
+        mask = mask & fq.eq(1)
     return mask
 
 

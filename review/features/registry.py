@@ -1261,7 +1261,7 @@ def _lazy_projector(module: str, name: str, **fixed):
 
 
 def _register_cache_projectors() -> None:
-    """Register the curation, QC and crop row-cache projectors.
+    """Register the curation, QC, crop and field-quality row-cache projectors.
 
     The projection of the inclusion-verdict columns onto a freshly loaded frame
     is wired here, with the rest of the feature wiring, because this module is
@@ -1270,8 +1270,16 @@ def _register_cache_projectors() -> None:
     naming a feature.
 
     Order matches the dataset loader's own sequence — curation, then QC, then
-    crop — though nothing depends on it: the three write different columns, and
-    QC and crop never touch the ``Included`` that curation owns.
+    crop, then field quality — though nothing depends on it: the four write
+    different columns, and none of the other three touches the ``Included``
+    that curation owns.
+
+    Field quality is registered here like the rest even though it lives under
+    ``data/`` rather than under a feature. It is registered rather than called
+    directly for the same reason the other three are: ``load_and_project`` runs
+    the list without naming anything, so a profile that strips a feature strips
+    its projector with it, and this stays the one place that knows what the
+    list contains.
 
     **The curation projector is bound with ``note_change=False``.** It is
     writing onto a frame ``load_and_project`` created a moment ago, which
@@ -1296,6 +1304,13 @@ def _register_cache_projectors() -> None:
         "review.features.qc.controller", "apply_qc_to_cache"))
     register_cache_projector(_lazy_projector(
         "review.features.crop.controller", "apply_crop_to_cache"))
+    # Field quality last, because it is the only one that can decline to write
+    # its column at all — no block, a plate only partly measured, or a well
+    # whose FOV labels the app already knows are untrustworthy. Ordering does
+    # not matter to the result (the four write different columns), but the one
+    # that sometimes writes nothing reads better at the end of the list.
+    register_cache_projector(_lazy_projector(
+        "review.data.field_quality_cache", "apply_field_quality_to_cache"))
 
 
 def attach_feature_state(state, registry: FeatureRegistry | None = None) -> None:

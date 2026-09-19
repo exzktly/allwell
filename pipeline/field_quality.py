@@ -367,6 +367,44 @@ def clear_field_quality(output_dir) -> None:
         pass
 
 
+def summarize(block: dict | None) -> str:
+    """One human line about a collected block, or ``""`` when there is none.
+
+    The single composition of "what did field quality find", so the end-of-run
+    log and the Analyze tab's pre-flight strip cannot say different things
+    about the same folder — the pre-flight **quotes** this rather than
+    deriving its own sentence from the same numbers (CLAUDE.md §0.3: report,
+    do not decide; and a second derivation is a second chance to describe
+    something that did not happen).
+
+    Empty for an absent block, because a plate nobody measured and a plate
+    measured and found clean must not read alike and a blank line is how the
+    caller says nothing rather than the wrong thing.
+
+    Qt-free and ``review``-free: it counts what the block records and does not
+    score anything. Scoring is :mod:`review.domain.field_quality_scores`'
+    job, needs the whole plate, and is the Review side's to run.
+    """
+    if not isinstance(block, dict) or not block.get("wells"):
+        return ""
+    wells = block["wells"]
+    partial = list(block.get("partial_wells") or ())
+    measured = int(block.get("measured", 0))
+    total = block.get("measured_of")
+    if partial:
+        shown = ", ".join(partial[:8]) + ("…" if len(partial) > 8 else "")
+        return (
+            f"FIELD QUALITY PARTIAL: {measured:,} of "
+            f"{int(total or 0):,} field(s) measured across {len(wells):,} "
+            f"well(s); {len(partial)} well(s) only partly measured ({shown}). "
+            f"A plate-wide comparison over this block would be drawn from a "
+            f"biased sample, so Review will decline to score it — re-run "
+            f"those wells with --force to complete it."
+        )
+    return (f"Field quality: {measured:,} field(s) measured across "
+            f"{len(wells):,} well(s).")
+
+
 def finalize_field_quality(output_dir, info_path, *, atomic_writer, log) -> None:
     """Fold the per-well quality files into ``pipeline_info.json``.
 
@@ -389,18 +427,11 @@ def finalize_field_quality(output_dir, info_path, *, atomic_writer, log) -> None
             merge_into_pipeline_info(
                 info_path, {FIELD_QUALITY_BLOCK: block},
                 atomic_writer=atomic_writer)
-            partial = block.get("partial_wells") or []
-            if partial:
-                shown = ", ".join(partial[:8]) + ("…" if len(partial) > 8 else "")
-                log.warning(
-                    "Field quality: %d of %d well(s) were only PARTLY measured "
-                    "(%s). A plate-wide comparison over this block would be "
-                    "drawn from a biased sample, so Review will decline to "
-                    "score it; re-run those wells with --force to complete it.",
-                    len(partial), len(block["wells"]), shown)
+            message = summarize(block)
+            if block.get("partial_wells"):
+                log.warning("%s", message)
             else:
-                log.info("Field quality: %d field(s) measured across %d well(s).",
-                         block.get("measured", 0), len(block["wells"]))
+                log.info("%s", message)
         clear_field_quality(output_dir)
     except Exception as exc:
         log.warning("Could not record field quality: %s", exc)

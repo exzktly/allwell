@@ -63,6 +63,18 @@ class QCParams:
     *Remove debris* toggle; the bounds are ``None`` when unset (no gate)."""
 
     enabled: bool = False
+    #: Whether the run's own per-field quality verdicts exclude rows.
+    #:
+    #: **Off by default, and deliberately.** The field-quality subsystem
+    #: reports; it does not decide. Turning it on filters out every row whose
+    #: field the run flagged, which changes every number in the app — so it is
+    #: a thing the user chooses after reading what was flagged, not a default
+    #: they discover by finding their counts have moved.
+    #:
+    #: It is here rather than in its own block because it is the same kind of
+    #: thing as the debris gate, edited on the same panel, persisted in the
+    #: same section, and ANDed at the same chokepoint.
+    exclude_flagged_fields: bool = False
     min_area: float | None = None
     max_area: float | None = None
     min_solidity: float | None = None
@@ -74,6 +86,7 @@ class QCParams:
     def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": bool(self.enabled),
+            "exclude_flagged_fields": bool(self.exclude_flagged_fields),
             "min_area": self.min_area,
             "max_area": self.max_area,
             "min_solidity": self.min_solidity,
@@ -87,6 +100,7 @@ class QCParams:
         d = d or {}
         return cls(
             enabled=bool(d.get("enabled", False)),
+            exclude_flagged_fields=bool(d.get("exclude_flagged_fields", False)),
             min_area=_pos(d.get("min_area")),
             max_area=_pos(d.get("max_area")),
             min_solidity=_pos(d.get("min_solidity")),

@@ -23,7 +23,8 @@ from review.core.selection_controller import (
 )
 
 from . import collect as hc
-from .plate_panel import paint_plate, well_tooltip
+from review.data.field_quality_cache import flagged_by_well
+from .plate_panel import paint_field_quality, paint_plate, well_tooltip
 # The Sample Map tab's layer: which one is showing, and the entry rules for it.
 # Module scope, because nothing under ``home/sample_map`` imports this module
 # back — there is no cycle here to work around, and the deferred-feature-import
@@ -433,8 +434,15 @@ def _paint_plate(ctx) -> None:
     if cells:
         plate.setEnabledWells(sorted(cells))
     paint_plate(plate, cells, hc.plate_fractions(ctx))
+    # Image quality, on the marker channel rather than as a ninth colour —
+    # see ``plate_panel.FLAGGED_FIELD_GLYPH`` for why the colour vocabulary is
+    # closed, and why field quality would not belong in it even if it were
+    # not. The same mapping feeds the tooltip, so a glyph cannot appear
+    # without the sentence that explains it.
+    quality = flagged_by_well(ctx)
+    paint_field_quality(plate, quality)
     plate.setWellTooltipProvider(
-        lambda well: well_tooltip(well, cells, record_wells))
+        lambda well: well_tooltip(well, cells, record_wells, quality))
 
     host = _widget(ctx, "_home_legend")
     _clear(host)

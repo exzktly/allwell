@@ -21,6 +21,9 @@ from PySide6.QtWidgets import (
     QCheckBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget,
 )
 
+from review.data.field_quality_cache import (
+    field_quality_block, field_quality_status_text,
+)
 from .controller import get_qc_params, qc_excluded_count, set_qc_params
 from .params import QCParams
 from core.safe import swallowed
@@ -147,6 +150,42 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     _edits = (min_area_edit, max_area_edit, min_sol_edit, max_region_edit,
               min_circ_edit, max_circ_edit)
 
+    # ── image quality, as reported by the run that produced this dataset ─────
+    #
+    # A second, independent gate on the same panel, and deliberately worded so
+    # it cannot be mistaken for the first. The debris gate is a rule the user
+    # writes about cells; this is a verdict the *pipeline* already reached
+    # about whole fields — out of focus, clipped, or nothing like the rest of
+    # the plate. It is reported whether or not it is applied, because a plate
+    # with six defocused fields is worth knowing about even from a user who
+    # would rather keep them.
+    #
+    # Off by default. Turning it on drops every row from a flagged field, which
+    # moves every number in the app, so it is a thing chosen after reading what
+    # was flagged rather than discovered afterwards.
+    fq = QWidget(row)
+    fq_layout = QVBoxLayout(fq)
+    fq_layout.setContentsMargins(0, 6, 0, 0)
+    fq_layout.setSpacing(2)
+    fq_head = QWidget(fq)
+    fq_head_layout = QHBoxLayout(fq_head)
+    fq_head_layout.setContentsMargins(0, 0, 0, 0)
+    fq_cb = QCheckBox("Exclude fields the run flagged", fq_head)
+    fq_cb.setChecked(bool(params.exclude_flagged_fields))
+    fq_cb.setToolTip(
+        "Drop every cell from a field this dataset's own run flagged on image "
+        "quality — focus, saturation, dynamic range, or a count that does not "
+        "look like the rest of its well.\n"
+        "Off by default: the flags are reported either way, and turning this "
+        "on changes every number in the app.")
+    fq_head_layout.addWidget(fq_cb)
+    fq_head_layout.addStretch(1)
+    fq_layout.addWidget(fq_head)
+    fq_status = QLabel("", fq)
+    fq_status.setWordWrap(True)
+    fq_layout.addWidget(fq_status)
+    outer.addWidget(fq)
+
     # stash refs so persistence / external recomputes can refresh the row.
     # ``ctx.widgets.register`` also stamps ``app._qc_gate_widgets`` so the legacy
     # ``qc_gate_refresh_widgets`` reader resolves it unchanged.
@@ -156,6 +195,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         "max_region_area": max_region_edit,
         "min_circularity": min_circ_edit, "max_circularity": max_circ_edit,
         "status": status,
+        "exclude_flagged_fields": fq_cb, "field_quality_status": fq_status,
     })
 
     def _fields_params() -> QCParams:
@@ -173,7 +213,10 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         constructor, which left a typed ``0`` in ``max_area`` intact and blanked
         every plot.
         """
-        return QCParams(enabled=enable_cb.isChecked()).with_updates(
+        return QCParams(
+            enabled=enable_cb.isChecked(),
+            exclude_flagged_fields=fq_cb.isChecked(),
+        ).with_updates(
             min_area=min_area_edit.text(),
             max_area=max_area_edit.text(),
             min_solidity=min_sol_edit.text(),
@@ -195,6 +238,21 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         if n_tot:
             status.setText(f"flagged {n_excl:,} / {n_tot:,}")
 
+    def _update_field_quality_status() -> None:
+        text, problem = field_quality_status_text(ctx)
+        fq_status.setText(text)
+        # Three registers, because the three states are genuinely different and
+        # a reader who cannot tell them apart is the failure this subsystem is
+        # for: a refusal (amber, it says what it could not do), a finding
+        # (the app's normal text — something was flagged), and "nothing to say"
+        # (muted). The checkbox is disabled where there is nothing to apply, so
+        # a control that would do nothing does not look live.
+        fq_status.setObjectName("Notice" if problem
+                                else ("" if text else "Muted"))
+        fq_status.style().unpolish(fq_status)
+        fq_status.style().polish(fq_status)
+        fq_cb.setEnabled(bool(field_quality_block(ctx)))
+
     def _apply() -> None:
         _sync_enabled()
         set_qc_params(ctx, _fields_params())  # recompute + persist + redraw
@@ -204,6 +262,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         except Exception:
             swallowed()  # was: pass (silent except)
         _update_status()
+        _update_field_quality_status()
 
     # Apply live while typing (debounced) as well as on focus-out / Enter, so a
     # populated bound takes effect without the user having to tab out of the
@@ -217,6 +276,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     _debounce.timeout.connect(_apply)
 
     enable_cb.toggled.connect(lambda _=None: _apply())
+    fq_cb.toggled.connect(lambda _=None: _apply())
     for w in _edits:
         w.editingFinished.connect(_apply)
         w.textChanged.connect(
@@ -229,6 +289,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
 
     _sync_enabled()
     _update_status()
+    _update_field_quality_status()
     return row
 
 
@@ -249,10 +310,12 @@ def qc_gate_refresh_widgets(win) -> None:
     p = get_qc_params(win._ctx)
     edit_keys = ("min_area", "max_area", "min_solidity", "max_region_area",
                  "min_circularity", "max_circularity")
-    fields = [w["enable"]] + [w[k] for k in edit_keys]
+    fields = [w["enable"], w["exclude_flagged_fields"]] + [
+        w[k] for k in edit_keys]
     blocked = [f.blockSignals(True) for f in fields]
     try:
         w["enable"].setChecked(bool(p.enabled))
+        w["exclude_flagged_fields"].setChecked(bool(p.exclude_flagged_fields))
         w["min_area"].setText(_fmt(p.min_area))
         w["max_area"].setText(_fmt(p.max_area))
         w["min_solidity"].setText(_fmt(p.min_solidity))

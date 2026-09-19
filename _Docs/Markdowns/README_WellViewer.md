@@ -1503,11 +1503,48 @@ Two helpers sit beside the fraction-on section:
 - **Auto-threshold all channels** — an Otsu pass over per-cell + matched
   background pixels, to derive sensible ON cutoffs for every channel at once.
 - **Optimize ON cutoff…** — opens the optimizer in its own window (which you can
-  leave open while you read the CDFs behind it). Pick two wells, a timepoint and
-  a Min / Max / # Points range, and it applies the threshold that maximises the
-  *relative* fraction-on gap `|fa − fb| / max(fa, fb)`, opening a validation
-  graph so you can sanity-check the pick. Independent Control / Baseline pickers
-  let you optimize on a fold-change-adjusted fraction-on.
+  leave open while you read the CDFs behind it). Pick two wells and a timepoint,
+  and it applies the cutoff that best separates them, opening a validation graph
+  so you can sanity-check the pick.
+
+  **Well A is the positive arm.** The cutoff it looks for is the one that turns
+  the most of Well A on while turning the least of Well B on, and those two are
+  not interchangeable: if you pick them the other way round the window says so
+  and applies nothing, rather than optimising backwards.
+
+  **It will not buy a clean-looking result with a handful of cells.** The score
+  behind each candidate cutoff is not the gap between the two wells but the gap
+  that *survives its own error bars* at 95 % confidence. A cutoff far out in the
+  tail, where 30 cells of Well A are on and none of Well B are, looks perfect and
+  is measured on 30 cells, so it scores near nothing; a cutoff at the crossing,
+  with 60,000 on against 5,000, scores highly. The status line reports both wells
+  as counts over their totals for exactly this reason — `A01 3,084/5,000 ON
+  (61.7%)` tells you what the number rests on in a way `61.7%` does not.
+
+  **If no cutoff separates the two wells, it says so** instead of applying one.
+  Two wells drawn from the same population have no threshold between them, and a
+  confident-looking number there is worse than a refusal — check the wells are
+  the ones you meant and that the assay worked.
+
+  The remaining fields:
+
+  - **Min / Max** bound the search. They autofill to the data's range when you
+    change channel or well.
+  - **Spec. weight** is what a cell counted ON in Well B costs relative to a cell
+    missed in Well A. `1`, the default, weighs the two alike — the textbook
+    choice. Raise it when Well B is a negative control and background-on in it
+    would contaminate every other well's readout: on a badly overlapping pair,
+    `1` left 5.0 % of Well B above the cutoff, `3` left 2.3 % and `10` left 0.5 %,
+    each costing a few points of Well A.
+  - **Max points** is a ceiling, not a resolution. The scan already tries every
+    cutoff the data can tell apart — one between each pair of neighbouring cell
+    values — and this only caps that list on very large wells. You will rarely
+    touch it.
+
+  Independent Control / Baseline pickers let you optimize on a
+  fold-change-adjusted fraction-on instead. Those adjusted fractions are no
+  longer plain counts, so that mode keeps the older relative-gap score; the
+  status line names which score produced the number.
 
 Below the table is the readout:
 

@@ -6420,42 +6420,101 @@ tail of `main()`, with three modes:
 |---|---|
 | `--no_auto_threshold` | nothing |
 | no control wells | Otsu on a pooled per-cell / background-pixel distribution, per channel (`pipeline.auto_threshold.estimate_thresholds_from_outputs`) |
-| `--pos_control_well` **and** `--neg_control_well` | per channel, the threshold maximising the support-weighted relative fraction-on gap between those two wells (`pipeline.threshold_optimize.estimate_thresholds_from_controls`) |
+| `--pos_control_well` **and** `--neg_control_well` | per channel, the threshold whose separation between those two wells best survives its own 95 % confidence interval (`pipeline.threshold_optimize.estimate_thresholds_from_controls`) |
 
-**The control-well objective is Laplace-smoothed, and reports its plateau.**
-`relative_gap` divides `|fa - fb|` by `max(|fa|, |fb|)`, which is exactly 1.0 at
-every threshold where the negative control is empty however few positive cells
-sit above the cut — so the objective could not tell "97 % of positives on
-against 0 %" from "one cell on against none". Given the two population sizes,
-both fractions are smoothed to `(k + 1) / (n + 2)` before the ratio is taken,
-which costs nothing where the counts are real and collapses the score where they
-are not. The counts are a keyword rather than a requirement because the viewer's
-fold-change scan (`gating_compute.scan_fc_fractions`) adjusts each fraction
-before the gap is taken, so its values are no longer `k / n` — they exceed 1 and
-go negative — and there is no `k` to add one to; that path keeps the unsmoothed
-objective.
+**The control-well objective scores a cut by the separation it can support.**
+A threshold between two control wells is a classifier, and the two controls are
+its labelled examples: cells above it are called ON, so the cut's quality is its
+true-positive rate in the positive control against its false-positive rate in
+the negative one. The standard summary of that pair is Youden's
+`J = TPR - w·FPR` — the height of the ROC curve above the diagonal, and
+equivalently the Kolmogorov-Smirnov distance between the two intensity
+distributions. `w` is `DEFAULT_SPECIFICITY_WEIGHT`, 1.0 for the pipeline and a
+field in the Cell Gating optimizer, because what a false positive in the
+negative control costs relative to a missed responder is a property of the assay:
+background-on in the negative control contaminates every other well's
+fraction-on readout, so an assay read against a near-zero baseline wants more
+than symmetric cost.
 
-Smoothing shortens the tied run without moving the answer, and the distinction
-matters because only the second half is what a user feels. `np.argmax` returns
-the *first* tied index, and the tied run's lower edge is set by where the
-negative control's fraction-on reaches zero — which smoothing does not touch.
-Measured on two well-separated 400-cell control populations, smoothing cuts the
-grid points at the maximum from 485 of 512 to 354, every one of them off the top
-of the run; the reported threshold is identical, and moving a single
-negative-control cell out to 1500 still shifts the gate by 1252 intensity units
-either way. So the instability the audit found is still present, and what ships
-against it is visibility rather than a cure. `best_from_curves` records how many
-grid points scored the identical best objective, how wide a threshold range they
-cover, and whether those points are adjacent on the grid (`tie_count`,
-`tie_span`, `tie_contiguous` on `ThreshFracOptimizationResult`), and the pipeline
-logs all three: fraction-on is a step function, so the best score is usually
-shared by a run of grid points and the reported threshold is merely the lowest of
-them. Contiguity is part of the report because `tie_span` is `max - min` of the
-tied thresholds, which for a bimodal objective covers ground that scored lower —
-describing that as a span would state that every threshold between the two
-maxima had scored the best. Which point of a genuine plateau *ought* to be
-reported is a question about the assay, and is deliberately left open rather than
-answered with a silently different default.
+`J` alone is a point estimate from two binomial samples, and a point estimate has
+no N in it. So the score `supported_separation` returns is a **lower confidence
+bound** on `J`, by Newcombe's hybrid-score method over Wilson intervals:
+
+```
+score = (p1 - w·p2) - sqrt( (p1 - l1)² + (w·(u2 - p2))² )
+```
+
+where `(l1, ·)` bounds the positive arm and `(·, u2)` the negative one. Wilson
+rather than the textbook `p ± z·sqrt(p(1-p)/n)` because the objective lives at
+`k = 0` and `k = n`, where a Wald standard error is exactly zero: it would report
+a cut that let no negative-control cell through as carrying no uncertainty at
+all. Where the counts are large the bound sits just under the estimate; where a
+cut has thinned one arm to a handful of cells the interval swallows the estimate
+and the score collapses. The uncertainty in the measurement is the penalty —
+there is no separate term and no tuning constant.
+
+Three properties follow, and each one closes a hole the previous objective had.
+
+*The bound is signed, so an inseparable pair is refused.* `max(score) <= 0` is a
+statement about the data — no candidate threshold separates these two wells at
+this confidence level — and `optimize_between_populations` raises rather than
+returning the argmax of noise. Measured -0.0011 for two samples drawn from one
+distribution against +0.54 to +0.67 for every separable pair tested. The
+objective is also asymmetric, `TPR(a) - w·FPR(b)`, so a swapped pair of control
+wells is refused outright instead of optimised backwards and then queried in a
+warning.
+
+*The candidate grid is the data's own.* `candidate_thresholds` returns one point
+between each pair of consecutive distinct pooled values, counted with
+`searchsorted`. Fraction-on is a step function of the threshold, so that grid
+evaluates every distinguishable cut and nothing else: there is no resolution to
+choose, no step size to get wrong, and no percentile clip needed to keep the
+search out of the tail. Two wells of 100,000 cells scan in about 0.05 s;
+`DEFAULT_MAX_CANDIDATES` subsamples evenly above 20,001 candidates.
+
+*Indistinguishable cuts collapse, and what remains is reported from its middle.*
+Because each candidate sits between two neighbouring pooled values, crossing one
+always changes a count, so genuine ties are rare — the empty valley of a clean
+assay becomes a single candidate rather than a run of nine hundred. Where ties do
+survive (a subsampled grid, or two count pairs that score alike) `plateau_pick`
+reports the midpoint of the contiguous run containing the argmax rather than
+`np.argmax`'s first index. That is not an arbitrary choice among equals: the
+bottom edge of such a run is the cut set by the brightest cell in the negative
+control, the single least stable number in the data. `tie_count`, `tie_span` and
+`tie_contiguous` still ride on `ThreshFracOptimizationResult` and the pipeline
+still logs all three, with contiguity stated because `tie_span` is `max - min` of
+the tied thresholds and for a bimodal objective covers ground that scored lower.
+
+**What this replaced, and why the replacement was not optional.** The objective
+was `|fa - fb| / max(|fa|, |fb|)` with both fractions Laplace-smoothed to
+`(k + 1) / (n + 2)`, which is algebraically "maximise the count ratio
+`(k_a+1)/(k_b+1)`". That is scale-free in N by construction: a cut retaining ten
+positive-control cells and zero negative-control cells outranks one retaining
+sixty thousand and five thousand, and the `+1` that held it back at small N is
+noise at plate scale. Measured on synthetic lognormal controls where the correct
+gate is known: two 100,000-cell wells with overlapping tails put the cut at 1958,
+leaving 9.9 % of the positive control ON against a 60 % truth; with 1 % bright
+debris in the negative control, 1053 and 44.4 %. On the same cases the bounded
+score lands at 59.8 % and 59.7 %, does not move at all when one negative-control
+cell is relocated (the old objective moved 640 to 900), and cuts the bootstrap
+spread of the resulting fraction-on from sd 4.22 to sd 0.38.
+
+**The viewer's fold-change scan keeps the old objective, floored.**
+`gating_compute.scan_fc_fractions` adjusts each fraction through
+`scale_bar_value` before the gap is taken, so its values are no longer `k / n` —
+they exceed 1 and go negative — and no confidence bound is defined on them. That
+branch therefore keeps `relative_gap`, and gains the coarse version of the same
+idea: `floor_unsupported` blanks any candidate leaving neither well
+`support_floor` cells, which is `DEFAULT_MIN_SUPPORT` except on populations too
+small to spare it, and `0` (reported on the result) when the floor would exclude
+every candidate. Measured, so the floor is not credited with more than it does:
+on that branch the tail is mostly kept out of reach by `best_from_curves`'
+first-index tie-break rather than by the floor, since the relative gap ties
+across a long run and the lowest tied threshold is structurally not a tail cut.
+The floor is the backstop for the case that tie-break does not cover. Every
+result carries `objective`, `OBJECTIVE_SUPPORTED` or `OBJECTIVE_RELATIVE_GAP`,
+because the two scores are not on one scale and a caller printing one without
+naming it is printing a number nobody can interpret.
 
 **A stored threshold is rounded, never rounded away.** All three estimators
 wrote `float(round(x))`, which is right for camera counts — a cut of 547.7 reads

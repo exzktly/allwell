@@ -157,27 +157,34 @@ def test_the_fold_change_branch_keeps_the_relative_gap_and_says_so():
     assert raw.k_a is not None
 
 
-def test_the_fold_change_branch_will_not_score_a_cut_nothing_supports():
-    """The coarse stand-in for the bound, on the branch that cannot have one.
+def test_the_fold_change_branch_reports_the_floor_it_applied():
+    """Which rule produced the number has to be readable off the result.
 
-    Well A holds ten bright cells in a thousand; Well B holds none that bright.
-    The relative gap is at its maximum out there and has no N term to stop it,
-    which is the reported defect. ``floor_unsupported`` blanks every candidate
-    that leaves neither well ten cells, so the scan cannot land on it.
+    This branch is protected from the tail by two things, and only one of them
+    is the floor. The stronger one is ``best_from_curves``' first-index
+    tie-break: the relative gap ties across a long run on real data and the
+    lowest tied threshold wins, which structurally cannot be a tail cut. The
+    floor is the backstop for the case that tie-break does not cover — a tail
+    that is the *unique* maximum — and it is measured directly, on
+    ``floor_unsupported``, in the two tests below.
+
+    What this asserts is the part that is decidable here: the branch applies the
+    floor and says on the result which one, so a reader holding a
+    ``relative-gap`` result can tell what was excluded from the scan behind it.
     """
     values_a = [200.0] * 990 + [5000.0] * 10
     values_b = [200.0] * 800 + [900.0] * 200
-    a, b = _df(values_a), _df(values_b)
     ctrl = np.array([200.0] * 900 + [900.0] * 100)
-    base = dict(channel_key="gfp", min_threshold=0, max_threshold=6000,
-                steps=2001, ctrl_values=ctrl, op_ctrl="subtract")
 
-    result = _optimize_thresh_frac_on_between_wells(a, b, **base)
+    result = _optimize_thresh_frac_on_between_wells(
+        _df(values_a), _df(values_b), channel_key="gfp",
+        min_threshold=0, max_threshold=6000, steps=2001,
+        ctrl_values=ctrl, op_ctrl="subtract")
 
+    assert result.objective == "relative-gap"
     assert result.support_floor == 10
-    # The ten-cell tail is out of reach; the cut lands where a population still
-    # stands behind it.
-    assert result.threshold < 5000.0
+    # And the cut it landed on does clear that floor, which is the floor's whole
+    # claim about the answer.
     assert max((np.asarray(values_a) > result.threshold).sum(),
                (np.asarray(values_b) > result.threshold).sum()) >= 10
 

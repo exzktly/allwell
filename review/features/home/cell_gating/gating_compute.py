@@ -493,9 +493,18 @@ def _optimize_thresh_frac_on_between_wells(
     relative-gap objective ``|fa-fb| / max(|fa|, |fb|)``. That objective is the
     one with no N term, so :func:`~pipeline.threshold_optimize.floor_unsupported`
     excludes any candidate cut that leaves neither well enough cells to judge it
-    on. The floor is coarser than a confidence bound and is the most that can be
-    done on a metric that is no longer a proportion; the result says which
+    on. A count floor is coarser than a confidence bound and is the most that can
+    be done on a metric that is no longer a proportion; the result says which
     objective produced it.
+
+    Measured, so that the floor is not credited with more than it does: on this
+    branch the tail is mostly kept out of reach by ``best_from_curves``' tie-break
+    rather than by the floor. The relative gap ties across a long run on real
+    data and the first tied index wins, which is the lowest threshold attaining
+    the maximum and so structurally not a tail cut. Several fixtures built to
+    make the floor change the chosen threshold did not — it changed only which
+    candidates were scored. The floor is the backstop for the case the tie-break
+    does not cover, a tail that is the unique maximum.
 
     ``timepoint`` is an optional ``(kind, value)`` token (see
     :func:`_distinct_timepoints`); when given, only rows at that timepoint

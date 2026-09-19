@@ -539,9 +539,18 @@ else, or once a run has written there again.
     horizontal range you asked for rather than rescaled to the part it reached,
     with a hollow marker where it stopped and a sentence saying how many of the
     nineteen thresholds it got through. Both the plot's title and the read-out
-    under the image name the frame the curve was measured on, and if you move
-    to another frame the read-out says so rather than leaving the old counts
-    sitting under a new picture.
+    under the image name the frame the curve was measured on — the one it was
+    measured on, not whatever is selected when it finishes — and if you move
+    to another frame, or change the correction, the background well or the
+    Overlap threshold, the read-out says the curve no longer describes what is
+    on screen rather than leaving the old counts sitting under a new picture.
+    Changing the Probability value does **not** stale it: that is the number
+    the curve exists to help you choose.
+  - **Segment** and **Threshold curve…** cannot run at the same time — they
+    share one loaded detector — so each greys the other out while it works.
+  - A frame with no contrast at all is not swept, and says so in those words
+    rather than reporting that no nuclei were found: nothing was measured, and
+    that is a different statement from measuring zero.
 
 ### 5. Quality control — field flatness & background correction
 

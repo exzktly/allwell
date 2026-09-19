@@ -15,6 +15,7 @@ import math
 import pytest
 
 from review.domain.threshold_sweep import (
+    NOT_SWEPT_FLAT,
     DEFAULT_HI, DEFAULT_LO, DEFAULT_STEPS, MAX_STEPS, MIN_STEPS,
     ThresholdCurve, curve_from_counts, sweep_grid,
 )
@@ -90,9 +91,51 @@ def test_a_real_decay_becomes_a_curve_with_no_recommendation():
 
 
 def test_a_sweep_that_never_ran_says_so_rather_than_drawing_nothing():
-    curve = curve_from_counts([], [])
-    assert curve.points == ()
-    assert "did not run" in curve.declined
+    """And says which of the two ways it got here.
+
+    "The sweep did not run" covered both, and was wrong for one of them: a
+    user who pressed Stop before the first threshold came back — likely,
+    since the first sweep of a session also loads TensorFlow — had waited
+    through one full network pass and was told nothing happened.
+    """
+    nothing_asked = curve_from_counts([], [])
+    assert nothing_asked.points == ()
+    assert "No thresholds were asked for" in nothing_asked.declined
+
+    stopped_at_once = curve_from_counts([], [], requested=19,
+                                        requested_span=(0.05, 0.95))
+    assert stopped_at_once.points == ()
+    assert "No threshold finished before the sweep ended" in (
+        stopped_at_once.declined)
+
+
+def test_a_frame_with_no_range_is_not_reported_as_a_frame_with_no_nuclei():
+    """Excludes the refusal that turns "not measured" into "measured zero".
+
+    ``sweep_frame`` returns ``None`` for a frame with no dynamic range: the
+    network was never run on it, because a flat field is the classic trigger
+    for StarDist's uncatchable ClipperLib abort. Turned into nineteen zeros,
+    that became "No nuclei were detected at any threshold in the sweep. Check
+    the segmentation channel and the frame" — advice that happens to be
+    reasonable, about a measurement never taken, and indistinguishable from a
+    genuinely empty well the network really did scan.
+    """
+    grid = sweep_grid()
+    not_swept = curve_from_counts([], [], not_swept=NOT_SWEPT_FLAT,
+                                  requested=len(grid))
+    assert "no dynamic range" in not_swept.declined
+    assert "nothing was measured" in not_swept.declined.lower()
+    assert "detected" not in not_swept.declined
+
+    # The genuinely-empty well, which IS a statement about detection.
+    empty = curve_from_counts(grid, [0] * len(grid))
+    assert "No nuclei were detected" in empty.declined
+    assert empty.declined != not_swept.declined
+
+    # And the caller's refusal wins over the counts, so a frame that was not
+    # swept cannot be described by a rule about counts it does not have.
+    both = curve_from_counts(grid, [0] * len(grid), not_swept=NOT_SWEPT_FLAT)
+    assert both.declined == NOT_SWEPT_FLAT
 
 
 def test_a_frame_with_no_nuclei_anywhere_is_declined_not_drawn_along_zero():

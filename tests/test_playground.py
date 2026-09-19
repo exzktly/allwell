@@ -538,7 +538,15 @@ def test_the_threshold_curve_button_is_built_and_connected(playground_app):
     stop = getattr(app, "_playground_sweep_stop_btn", None)
     assert btn is not None and stop is not None
     assert "curve" in btn.text().lower()
-    assert stop.isVisible() is False, "Stop is offered only while a sweep runs"
+    # ``isHidden``, not ``isVisible``. The fixture builds the tab into a
+    # QWidget that is never shown, and a child of an unshown parent answers
+    # ``isVisible() == False`` whatever its own flag says (measured: default
+    # -> visible=False hidden=False; after setVisible(False) -> visible=False
+    # hidden=True). So the ``isVisible() is False`` these three sites carried
+    # was true however the code behaved, and deleting
+    # ``sweep_stop_btn.setVisible(False)`` from tab_view left Stop offered
+    # permanently with every assertion green.
+    assert stop.isHidden(), "Stop is offered only while a sweep runs"
 
     import review.features.image_browser.playground.controller as pc
     orig_frame = pc._segmentation_frame
@@ -656,9 +664,69 @@ def test_a_failed_sweep_says_so_on_the_read_out_and_restores_the_buttons(
 
     assert "StarDist is not installed" in app._playground_status.text()
     assert app._playground_sweep_btn.isEnabled() is True
-    assert app._playground_sweep_stop_btn.isVisible() is False
+    assert app._playground_sweep_stop_btn.isHidden()
     assert pc._st(app._ctx).sweep_running is False
     assert pc._st(app._ctx).sweep_curve is None
+
+
+def test_the_curve_is_attributed_to_the_frame_it_was_dispatched_on(
+        playground_app):
+    """Excludes the title read after the sweep, which can never be wrong.
+
+    Nothing disables the frame selectors while a sweep runs, and a sweep is
+    the longest thing this tab can start — nineteen segmentations, plus a
+    10-30 s TensorFlow load on the first press of a session. That is exactly
+    the window in which a user clicks elsewhere. Reading the subject in the
+    completion callback names whatever they clicked on, so the figure is
+    titled with a frame it never saw, the window has a Save button, and the
+    staleness check compares that title against itself and finds nothing.
+
+    The wrong implementation that passes an assertion on ``_describe_sweep``
+    alone is exactly that one, which is why this presses the real button and
+    moves the selection from inside the sweep.
+    """
+    import numpy as _np
+    import review.features.image_browser.playground.controller as pc
+    import review.features.image_browser.playground.worker as pw
+    import review.features.image_browser.playground.sweep_curve_view as scv
+
+    app = playground_app
+    st = pc._st(app._ctx)
+    st.well, st.channel, st.fov, st.timepoint = "B03", "GFP", "1", "24h"
+    orig_frame, orig_req, orig_show = (pc._segmentation_frame,
+                                       pw.request_threshold_sweep,
+                                       scv.show_threshold_curve)
+
+    def _fake_request(arr, thresholds, **kw):
+        # The user clicks another well while the sweep is in flight.
+        st.well = "C04"
+        st.seg_prob_thresh = 0.77
+        kw["on_done"]([len(thresholds) - i for i in range(len(thresholds))])
+        return object()
+
+    try:
+        pc._segmentation_frame = lambda ctx: (
+            _np.zeros((32, 32), _np.float32), "")
+        pw.request_threshold_sweep = _fake_request
+        scv.show_threshold_curve = lambda ctx, curve: None
+        app._playground_sweep_btn.click()
+    finally:
+        pc._segmentation_frame = orig_frame
+        pw.request_threshold_sweep = orig_req
+        scv.show_threshold_curve = orig_show
+
+    curve = st.sweep_curve
+    assert curve is not None
+    assert "B03" in curve.subject, (
+        f"the curve is attributed to {curve.subject!r}, which is not the "
+        f"frame it was dispatched on")
+    assert "C04" not in curve.subject
+    # The user's own threshold is marked at the value that was in force, not
+    # at whatever they typed while waiting.
+    assert curve.current != 0.77
+    # And the move is now visible in the read-out rather than hidden by a
+    # subject that agrees with itself.
+    assert "not what is on screen" in app._playground_status.text()
 
 
 def test_pressing_stop_marks_the_sweep_to_stop(playground_app):
@@ -690,5 +758,5 @@ def test_a_sweep_with_no_frame_declines_and_leaves_the_buttons_usable(playground
 
     assert started == [], "a sweep was started with no frame to sweep"
     assert app._playground_sweep_btn.isEnabled() is True
-    assert app._playground_sweep_stop_btn.isVisible() is False
+    assert app._playground_sweep_stop_btn.isHidden()
     assert pc._st(app._ctx).sweep_running is False

@@ -158,41 +158,39 @@ def test_setting_the_buttons_survives_a_window_that_has_neither():
     pc._set_sweep_buttons(SimpleNamespace(), running=True)
 
 
-def test_a_stopped_sweep_keeps_the_points_it_measured():
-    """Excludes the worker that discards a partial result.
+def test_the_worker_hands_the_sweep_its_stop_flag_and_returns_what_it_got():
+    """Excludes the delegate that drops ``should_stop`` on the floor.
 
-    The counts are what the user waited for; a curve over the first eight of
-    nineteen thresholds is evidence, and the readout says how far it got.
+    This is about the **seam**, and it says only that, because it replaces
+    ``sweep_frame`` with a fake that implements the stop loop itself: the
+    wrong implementation it cannot exclude is a ``sweep_frame`` that ignores
+    the flag, since the real one is never called. That behaviour is pinned
+    where it lives, against the real loop, by
+    ``test_frame_preview_service.py::test_a_stop_reaches_inside_the_fast_loop_and_keeps_what_it_had``.
     """
     from review.features.image_browser.playground import worker as pw
 
     grid = sweep_grid()
-    stop = {"n": 0}
+    passed = {}
 
     def _fake_sweep(arr, thresholds, **kw):
-        out = []
-        for t in thresholds:
-            if kw["should_stop"]():
-                break
-            out.append(len(out) + 1)
-        return out
-
-    def _should_stop():
-        stop["n"] += 1
-        return stop["n"] > 8
+        passed.update(kw)
+        return [1, 2, 3]
 
     import services.frame_preview as fp
     orig = fp.sweep_frame
+    sentinel = object()
     try:
         fp.sweep_frame = _fake_sweep
         counts = pw.threshold_sweep_for_frame(np.zeros((4, 4)), grid,
-                                              should_stop=_should_stop)
+                                              should_stop=sentinel,
+                                              nms_thresh=0.42)
     finally:
         fp.sweep_frame = orig
 
-    assert len(counts) == 8
-    curve = curve_from_counts(grid[:len(counts)], counts)
-    assert len(curve.points) == 8
+    assert passed["should_stop"] is sentinel, "the flag never reached the sweep"
+    assert passed["nms_thresh"] == 0.42
+    assert counts == [1, 2, 3], "the delegate returned something of its own"
 
 
 # ── the comparison the feature exists for ───────────────────────────────────
@@ -398,34 +396,57 @@ def test_the_curve_is_asked_for_the_models_own_default_not_a_literal():
     assert "thresholds" in inspect.getsource(fp.model_prob_threshold)
 
 
-def test_a_curve_measured_on_another_frame_says_so_rather_than_sitting_there():
+def test_a_curve_measured_on_other_pixels_says_so_rather_than_sitting_there():
     """Excludes the sentence that describes one frame under a picture of
-    another.
+    another — and the version keyed on the frame's address alone.
 
     The result now survives a repaint, which is what makes this reachable:
     sweep B03, then click to C04, and without this the read-out goes on
-    reporting B03's counts beside C04's pixels. The dialog is still open
-    showing that curve, so the honest move is to name whose frame it is — not
-    to drop the sentence and leave the picture unexplained.
+    reporting B03's counts beside C04's pixels. Keyed on the address alone it
+    still did, for every settings change: the background method, the mesh
+    ratio, the background well, and the NMS threshold, which moves every count
+    on the curve and sits three rows above the button. So the key is
+    ``_seg_key`` minus the probability threshold, and both cases are asserted
+    here because a check that catches one of them looks identical in code.
+
+    The dialog is still open showing that curve, so the counts stay on screen
+    under the warning rather than being dropped.
     """
     from review.features.image_browser.playground import controller as pc
     from review.features.image_browser.playground.state import PlaygroundState
 
     grid = sweep_grid()
     st = PlaygroundState(well="B03", channel="GFP", fov="1", timepoint="24h")
-    curve = curve_from_counts(grid, _decay(grid), subject="GFP · B03 · FOV 1 · 24h")
+    curve = curve_from_counts(grid, _decay(grid),
+                              subject="GFP · B03 · FOV 1 · 24h")
     st.sweep_curve = curve
     st.sweep_status = curve.describe()
     ctx = _ctx_with(st)
+    st.sweep_key = pc._sweep_key(ctx)
 
-    assert pc._describe_sweep(ctx) == [st.sweep_status], "same frame, no hedge"
+    assert pc._describe_sweep(ctx) == [st.sweep_status], "same pixels, no hedge"
 
+    # Typing the number the curve exists to help them choose must NOT stale it.
+    st.seg_prob_thresh = 0.63
+    assert pc._describe_sweep(ctx) == [st.sweep_status], (
+        "the sweep varies the probability threshold by design")
+
+    # A different frame: named.
     st.well = "C04"
     lines = pc._describe_sweep(ctx)
     assert len(lines) == 2
-    assert "not the frame on screen" in lines[0]
     assert "GFP · B03 · FOV 1 · 24h" in lines[0]
+    assert "not what is on screen" in lines[0]
     assert lines[1] == st.sweep_status, "the counts are still shown, not dropped"
+
+    # Same frame, different pixels: also named, and differently, because
+    # naming the frame would be no warning at all when the frame is right.
+    st.well = "B03"
+    st.seg_nms_thresh = 0.1
+    lines = pc._describe_sweep(ctx)
+    assert len(lines) == 2
+    assert "different settings" in lines[0]
+    assert "GFP · B03" not in lines[0]
 
 
 def test_a_running_sweep_never_leaves_the_readout_silent():
@@ -456,3 +477,70 @@ def test_loading_another_dataset_drops_the_previous_plates_sweep():
     st.clear_caches()
     assert st.sweep_status == ""
     assert st.sweep_curve is None
+
+
+# ── the two presses that reach one model ────────────────────────────────────
+
+def test_a_running_sweep_greys_out_segment_as_well_as_the_sweep_button():
+    """Excludes the gate that leaves the other door open.
+
+    Segment and the sweep both reach the session's single StarDist model.
+    Pressing Segment during a sweep started a second daemon thread into it,
+    and on the first load of a session that means both threads calling the
+    pretrained loader, whose cross-process advisory lock is keyed on the
+    holder's pid and cannot recognise itself — so the second waits out the
+    full timeout. The wrong implementation that passes an assertion on the
+    sweep button alone is the one that shipped.
+    """
+    from review.features.image_browser.playground import controller as pc
+
+    win = SimpleNamespace(_playground_sweep_btn=_Btn(),
+                          _playground_sweep_stop_btn=_Btn(),
+                          _playground_segment_btn=_Btn())
+    pc._set_sweep_buttons(win, running=True)
+    assert win._playground_segment_btn.enabled is False
+    pc._set_sweep_buttons(win, running=False)
+    assert win._playground_segment_btn.enabled is True
+
+
+def test_neither_press_starts_while_the_other_is_running():
+    """The half a greyed-out button cannot cover — a shortcut, or any future
+    caller that reaches the controller rather than the widget."""
+    import numpy as np
+    from review.features.image_browser.playground import controller as pc
+    from review.features.image_browser.playground import worker as pw
+    from review.features.image_browser.playground.state import PlaygroundState
+
+    started: list[str] = []
+    st = PlaygroundState()
+    ctx = _ctx_with(st)
+    ctx.window._playground_sweep_btn = _Btn()
+    ctx.window._playground_sweep_stop_btn = _Btn()
+    ctx.window._playground_segment_btn = _Btn()
+
+    orig_change = pc.playground_on_change
+    orig_frame = pc._segmentation_frame
+    orig_sweep, orig_seg = (pw.request_threshold_sweep,
+                            pw.request_stardist_labels)
+    try:
+        pc.playground_on_change = lambda _c: None
+        pc._segmentation_frame = lambda _c: (np.zeros((4, 4), np.float32), "")
+        pw.request_threshold_sweep = lambda *a, **k: started.append("sweep")
+        pw.request_stardist_labels = lambda *a, **k: started.append("segment")
+
+        st.sweep_running = True
+        pc.playground_segment_now(ctx)
+        assert started == [], "Segment started while a sweep was running"
+        assert "threshold curve is running" in ctx.window._playground_status.text()
+
+        st.sweep_running = False
+        st.seg_running = True
+        pc.playground_sweep_now(ctx)
+        assert started == [], "a sweep started while a segmentation was running"
+        assert "segmentation is still running" in (
+            ctx.window._playground_status.text())
+    finally:
+        pc.playground_on_change = orig_change
+        pc._segmentation_frame = orig_frame
+        pw.request_threshold_sweep = orig_sweep
+        pw.request_stardist_labels = orig_seg

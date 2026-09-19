@@ -17,6 +17,19 @@ import pytest
 import services.frame_preview as FP
 
 
+@pytest.fixture
+def stardist_present(monkeypatch):
+    """Report the dependencies as installed, without installing them.
+
+    ``sweep_frame`` names a missing install ahead of every other check —
+    including the flat-frame refusal — because it is the reason nothing works
+    rather than a property of the picture. That is right for the app and it
+    means a test about the sweep's own logic has to say which of the two
+    conditions it is exercising.
+    """
+    monkeypatch.setattr(FP, "missing_stardist_deps", lambda: [])
+
+
 def test_a_missing_install_is_named(monkeypatch):
     import importlib.util
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
@@ -128,10 +141,27 @@ class _FakeModel:
             f"(range {float(arr.min())}..{float(arr.max())})")
         self.seen.append(arr)
         self.predicts += 1
-        return (np.zeros((4, 4)), np.zeros((4, 4, 32)))
+        # Deliberately NOT ``arr.shape``: StarDist's grid subsamples the
+        # probability map, so the two really are different sizes in
+        # production, and a fake whose prob matched the frame would make the
+        # shape assertion below satisfiable by passing either one (§7.8
+        # rule 2 — build the fixture so right and wrong differ).
+        h, w = arr.shape[0] // 2, arr.shape[1] // 2
+        return (np.zeros((h, w)), np.zeros((h, w, 32)))
 
     def _instances_from_prediction(self, shape, prob, dist, *, prob_thresh,
                                    nms_thresh=None):
+        # **The shape is the canvas the polygons are rasterised onto**, and a
+        # wrong one is not an error: ``polygons_to_label`` calls
+        # ``skimage.draw.polygon(*c, shape)``, which *clips* an out-of-bounds
+        # polygon to nothing. Hand it the grid-subsampled ``prob.shape``
+        # instead of the frame's and every nucleus whose centre falls outside
+        # the halved canvas is silently dropped — a smaller count, no
+        # exception, no marker. Ignoring the argument here, as this fake first
+        # did, made that substitution invisible to every test in the file.
+        assert shape == np.asarray(self.seen[-1]).shape, (
+            f"resolved onto {shape}, not the frame's own "
+            f"{np.asarray(self.seen[-1]).shape}")
         n = self._counts[self.resolves]
         self.resolves += 1
         return np.full((3, 3), n, dtype=np.int32), None
@@ -208,23 +238,7 @@ def _varied(seed=0, scale=3000.0):
     return (r.random((16, 16)) * scale + 300.0).astype(np.float32)
 
 
-def test_tiling_skips_the_fast_path_entirely(monkeypatch):
-    """The 5-10x was measured untiled. A fast path used in a configuration
-    nobody measured is the branch-that-exists problem (CLAUDE.md §7.7)."""
-    monkeypatch.setattr(fp, "ensure_model", lambda: object())
-    seen = []
-    monkeypatch.setattr(fp, "segment_frame",
-                        lambda arr, **k: (seen.append(k.get("prob_thresh")),
-                                          np.full((2, 2), 5, np.int32))[1])
-    monkeypatch.setattr(fp, "_resolve_at_thresholds",
-                        lambda *a, **k: pytest.fail("fast path used with tiling"))
-
-    counts = fp.sweep_frame(_varied(), [0.1, 0.2], tile_px=256)
-    assert counts == [5, 5]
-    assert seen == [0.1, 0.2]
-
-
-def test_the_slow_path_goes_through_segment_frame(monkeypatch):
+def test_the_slow_path_goes_through_segment_frame(monkeypatch, stardist_present):
     """So a sweep and the Segment button cannot disagree about a threshold."""
     monkeypatch.setattr(fp, "ensure_model", lambda: object())
     monkeypatch.setattr(fp, "_resolve_at_thresholds", lambda *a, **k: None)
@@ -237,7 +251,7 @@ def test_the_slow_path_goes_through_segment_frame(monkeypatch):
     assert seen == [0.3, 0.7], "one call per threshold, and no discarded borrow"
 
 
-def test_the_sweep_prepares_the_frame_before_the_network_sees_it(monkeypatch):
+def test_the_sweep_prepares_the_frame_before_the_network_sees_it(monkeypatch, stardist_present):
     """**The blocker.** `model.predict` takes `normalizer=None` and assumes its
     input is already normalised; nothing enforces it.
 
@@ -259,7 +273,7 @@ def test_the_sweep_prepares_the_frame_before_the_network_sees_it(monkeypatch):
     assert float(got.max()) <= 1.0 and float(got.min()) >= 0.0
 
 
-def test_a_near_constant_field_is_refused_rather_than_swept(monkeypatch):
+def test_a_near_constant_field_is_refused_rather_than_swept(monkeypatch, stardist_present):
     """Excludes the sweep that runs nineteen unguarded passes over exactly the
     input the guard exists for.
 
@@ -267,19 +281,32 @@ def test_a_near_constant_field_is_refused_rather_than_swept(monkeypatch):
     ClipperLib abort — a C++ ``terminate()``, not an exception — which in this
     process takes the whole application down rather than one worker.
     """
-    monkeypatch.setattr(fp, "ensure_model",
-                        lambda: pytest.fail("a model was loaded for a flat field")
-                        if False else object())
+    monkeypatch.setattr(
+        fp, "ensure_model",
+        lambda: pytest.fail("loaded a model for a frame it then refused"))
     monkeypatch.setattr(fp, "_resolve_at_thresholds",
                         lambda *a, **k: pytest.fail("swept a near-constant field"))
     monkeypatch.setattr(fp, "segment_frame",
                         lambda *a, **k: pytest.fail("segmented a near-constant field"))
 
     flat = np.full((16, 16), 512.0, np.float32)
-    assert fp.sweep_frame(flat, [0.1, 0.2, 0.3]) == [0, 0, 0]
+    # ``None``, not nineteen zeros. Zeros say the network ran at every
+    # threshold and found nothing, which is a statement about detection; this
+    # frame has no dynamic range and the network never ran. The wrong
+    # implementation that passes "it declined" is the one that returned
+    # ``[0] * len(grid)`` and had the user told "No nuclei were detected at
+    # any threshold in the sweep" about a measurement never taken.
+    assert fp.sweep_frame(flat, [0.1, 0.2, 0.3]) is None
+
+    # And the refusal comes BEFORE the model load, which is the difference
+    # between declining in a moment and declining after a 10-30 s TensorFlow
+    # import — the ``ensure_model`` stub above fails the test if it is
+    # reached, which the previous version of this assertion could not do: it
+    # was written ``pytest.fail(...) if False else object()``, a branch that
+    # can never run, so it passed against the shipped order.
 
 
-def test_an_empty_grid_loads_no_model_and_runs_no_inference(monkeypatch):
+def test_an_empty_grid_loads_no_model_and_runs_no_inference(monkeypatch, stardist_present):
     """Nothing asked for is nothing to load a model for."""
     monkeypatch.setattr(fp, "ensure_model",
                         lambda: pytest.fail("loaded a model for an empty sweep"))

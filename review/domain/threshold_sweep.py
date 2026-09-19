@@ -177,15 +177,32 @@ class ThresholdCurve:
                     f"{max(self.counts):,} nuclei down to {min(self.counts):,}.")
         return head
 
+#: The refusal for a frame the network was never run on, because it has no
+#: dynamic range. Named here rather than composed at the call site so the
+#: sentence and the other three refusals are read together — and because it
+#: is the one refusal whose subject is the *frame*, not the detections.
+NOT_SWEPT_FLAT = (
+    "This frame has no dynamic range — every pixel is effectively the same "
+    "value — so it was not swept at all. That is a statement about the "
+    "picture, not about detection: nothing was measured here."
+)
+
+
 def curve_from_counts(thresholds, counts, *, current: float | None = None,
                       requested: int = 0,
                       requested_span: tuple[float, float] | None = None,
                       model_default: float | None = None,
-                      subject: str = "") -> ThresholdCurve:
+                      subject: str = "",
+                      not_swept: str = "") -> ThresholdCurve:
     """Build a :class:`ThresholdCurve`, or decline with the reason.
 
-    Three refusals, each of which would otherwise be drawn as a flat or empty
-    plot that looks like a measurement:
+    *not_swept* is the caller's own refusal — set when the sweep declined to
+    run at all, and taken in preference to everything below, because the
+    refusals below are all statements about counts and there are no counts.
+    :data:`NOT_SWEPT_FLAT` is the one the Playground passes.
+
+    Three further refusals, each of which would otherwise be drawn as a flat
+    or empty plot that looks like a measurement:
 
     * **nothing ran** — no thresholds, or the sweep was stopped before its
       first point;
@@ -214,9 +231,21 @@ def curve_from_counts(thresholds, counts, *, current: float | None = None,
                 requested_span=requested_span, model_default=model_default,
                 subject=subject)
     truncated = bool(requested) and len(pairs) < requested
+    if not_swept:
+        return ThresholdCurve(declined=str(not_swept), **meta)
     if not pairs:
+        # Two ways to get here and the sentence has to fit both: nothing was
+        # asked for, or the user pressed Stop before the first threshold came
+        # back. "The sweep did not run" was wrong for the second — it ran one
+        # full network pass and they stopped it — and a reader who had just
+        # waited through a TensorFlow load would have been told nothing
+        # happened.
         return ThresholdCurve(
-            declined="The sweep did not run, so there is nothing to plot.",
+            declined=("No threshold finished before the sweep ended, so there "
+                      "is nothing to plot."
+                      if requested else
+                      "No thresholds were asked for, so there is nothing to "
+                      "plot."),
             **meta)
     counts_only = [p.count for p in pairs]
     if max(counts_only) <= 0:

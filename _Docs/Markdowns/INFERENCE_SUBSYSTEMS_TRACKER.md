@@ -636,6 +636,108 @@ Four things, all of them §0.5 — making a silent success visible:
 
 ---
 
+## Section D — Which *part* of a field is out of focus
+
+### D.0 Why this section exists, and the measurement that forced it
+
+Section A measures focus once per field and offers one action: exclude the
+whole field. Two things are wrong with that, and the second was found by
+measuring rather than by argument.
+
+**A field is not uniformly focused.** A single FOV can hold a gradient — one
+edge sharp, the other soft — and excluding the whole frame throws away the
+cells that were fine. Rarely is a whole frame genuinely unusable.
+
+**And the whole-frame statistic barely notices.** Measured on a 512² synthetic
+field of 400 nuclei, half of it blurred at σ=2:
+
+| frame | whole-frame normalised Tenengrad |
+|---|---|
+| fully sharp | 27.44 |
+| **half defocused at σ=2** | **23.59** |
+| fully defocused at σ=2 | ~10.4 (A2's table) |
+
+A **14 %** move. Section A flags a field at `|z| ≥ 5` against the plate, and a
+14 % shift will not reach that on any plate with normal field-to-field spread.
+**So the feature as built misses exactly the case this section is for.** That
+is not an argument for a lower threshold — it is an argument for measuring
+where in the frame the softness is.
+
+### D.1 The statistic, measured twice
+
+The obvious tiled form — each tile's gradient energy over the **frame's**
+variance — localises beautifully and is unusable:
+
+| frame | tiles |
+|---|---|
+| half sharp / half soft | sharp half 43.2, soft half 5.0 — **8.7×** |
+| uniformly sharp, 200 cells | min/median **0.02** |
+
+The second row is the whole problem. A tile holding no cells has almost no
+gradient energy, so it scores like a badly blurred one — the cell-density
+confound A2 rejected `var(laplace)/mean²` for, reintroduced at tile scale, and
+worse. An empty corner of a perfectly good frame would be excluded.
+
+Normalising each tile by **its own** variance fixes it, and the fix is
+measured rather than assumed:
+
+| check | frame-variance | self-normalised |
+|---|---|---|
+| uniformly sharp, 40 / 200 / 800 cells (min ÷ median) | 0.26 / 0.02 / 0.26 | **0.86 / 0.87 / 0.87** |
+| gain ×0.25…×4, pedestal 0…1000 | exact | **exact** (max rel-diff 0.0000) |
+| half sharp / half soft, ratio between halves | 8.7× | 2.49× |
+| smooth gradient 0→2.5 across the frame | 40.2 → 2.9 | 27.7 → 9.1, monotone |
+
+Self-normalising costs separation (8.7× → 2.49×) and buys density invariance,
+which is the trade A2 already made once at frame scale. A tile whose variance
+is a small fraction of the frame's is reported **undefined**, not zero —
+three of sixty-four tiles at 200 cells — because "nothing to measure here" is
+not "measured and found soft".
+
+### D.2 No automatic cut, and this is measured too
+
+Across four seeds × three cell densities, the **worst** tile of a sharp frame
+sits at 0.73–0.91 of its own frame's median. Defocused tiles sit at
+0.41–0.57 — except one at **0.804**, which is the tile straddling the focus
+boundary and is genuinely intermediate.
+
+So the populations nearly separate and do not cleanly separate, on synthetic
+data, with the boundary tile overlapping. A fixed ratio would misclassify, and
+one synthetic fixture is not a calibration (§0.10). The subsystem's existing
+rule applies unchanged: **report the map, propose the region, let the user
+confirm.** Nothing is excluded that the user has not seen.
+
+### D.3 What it hangs off
+
+The machinery already exists and it is the machinery the user named.
+`crop/region.compute_crop_pass` decides per cell by centroid against a
+rectangle, takes a `FrameScope` naming which wells / FOVs / timepoints it
+applies to, and is ANDed at the same chokepoint. Segmentation's drag-delete
+removes cells inside a dragged box by pixel overlap. Neither needs inventing;
+what is missing is that the crop is a **single** rectangle for the whole
+dataset, and that nothing routes a flagged field to either tool.
+
+`Field_Pass` narrows rather than a new layer being added: the column already
+means "this row's field is usable", and a per-tile verdict makes it mean "this
+row's part of its field is usable". The projector, the chokepoint, the toggle,
+the plate marker and the persistence are unchanged.
+
+### D.4 Rows
+
+| # | Row | State | Place | Evidence |
+|---|---|---|---|---|
+| D1 | `focus_map(image, tiles)` — the self-normalised tiled statistic, undefined where a tile holds no signal | `todo` | `pipeline/field_quality.py` | the D.1 table, re-measured against the shipped function rather than against the probe |
+| D2 | **The density confound must not come back.** A guard that a uniformly sharp frame's map is flat across a thirty-fold range of cell count | `todo` | `tests/` | mutation: normalise by the frame variance and the guard fails at 0.02 |
+| D3 | An undefined tile is `None`, never 0.0, and the region proposal skips it rather than treating it as soft | `todo` | `pipeline/field_quality.py` | §7 #3 |
+| D4 | Per-cell verdict from a tile map + the cell's centroid, replacing the per-field one where a map exists | `todo` | `review/data/field_quality_cache.py` | the existing `Field_Pass` tests must still pass — this narrows the rule, it does not add a layer |
+| D5 | The proposal surface: the flagged field on Segmentation with its soft tiles outlined and the numbers shown | `todo` | `review/features/image_browser/` | driven through the real control (§7.6) |
+| D6 | Confirming writes a **per-field** region. Today there is one crop rectangle for the whole dataset (`ctx.state.dataset.crop_region`) | `todo` | `review/features/crop/` | the scope mechanism already exists (`FrameScope`); the cardinality does not |
+| D7 | Whole-field exclusion stays, off and secondary — a frame with no usable tiles at all falls out of the per-tile rule anyway | `todo` | `review/features/qc/tab_view.py` | |
+| D8 | **Where the map is computed.** Review, on demand, so every existing dataset benefits with no re-run — costs one decode per field inspected | `todo` | `review/` | the alternative (store it in the sidecar) needs a re-run of every plate and grows the block ~64× per field |
+| D9 | Renders, UX review, scientific review, docs, version bump, PR | `todo` | — | |
+
+---
+
 ## Sequencing
 
 **C, then B's curve, then A** — and the three are *not* independent, contrary to

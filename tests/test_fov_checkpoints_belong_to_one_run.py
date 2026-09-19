@@ -95,7 +95,7 @@ def test_a_checkpoint_states_the_run_it_belongs_to(tmp_path):
     d.mkdir()
     _save_fov_checkpoint(d, FOV, RECORDS, RUN_A)
 
-    assert _load_fov_checkpoint(d, FOV, RUN_A) == RECORDS
+    assert _load_fov_checkpoint(d, FOV, RUN_A)[0] == RECORDS
     assert _load_fov_checkpoint(d, FOV, RUN_B) is None, (
         "a checkpoint written under one configuration was handed to another")
 
@@ -110,7 +110,7 @@ def test_a_checkpoint_written_before_this_existed_is_still_accepted(tmp_path):
 
     payload = json.loads((d / f".fov_{FOV}.records.json").read_text())
     assert payload.get("settings") == "", payload
-    assert _load_fov_checkpoint(d, FOV, RUN_A) == RECORDS, (
+    assert _load_fov_checkpoint(d, FOV, RUN_A)[0] == RECORDS, (
         "a checkpoint from before this record existed was discarded, which "
         "would throw away a resumed run's work for no integrity gain")
 
@@ -172,7 +172,7 @@ def test_the_prune_leaves_this_runs_own_staging_alone(tmp_path, monkeypatch):
     _save_fov_checkpoint(mine, FOV, RECORDS, RUN_A)
 
     assert prune_superseded_staging(out, RUN_A) == 0
-    assert _load_fov_checkpoint(mine, FOV, RUN_A) == RECORDS
+    assert _load_fov_checkpoint(mine, FOV, RUN_A)[0] == RECORDS
 
 
 def test_the_prune_never_touches_another_plate(tmp_path, monkeypatch):
@@ -194,7 +194,7 @@ def test_the_prune_never_touches_another_plate(tmp_path, monkeypatch):
     _save_fov_checkpoint(other, FOV, RECORDS, RUN_A)
 
     assert prune_superseded_staging(mine, RUN_B) == 0
-    assert _load_fov_checkpoint(other, FOV, RUN_A) == RECORDS, (
+    assert _load_fov_checkpoint(other, FOV, RUN_A)[0] == RECORDS, (
         "another plate's resumable staging was deleted")
 
 

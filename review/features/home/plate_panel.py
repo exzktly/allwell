@@ -141,19 +141,76 @@ def paint_plate(plate: WellPlateSelector, cells: dict, fractions: dict) -> None:
         plate.setWellFraction(well, fraction)
 
 
-def well_tooltip(well: str, cells: dict, record_wells: dict) -> str:
+#: The glyph a well carries when the run flagged one or more of its fields on
+#: image quality.
+#:
+#: A **marker**, not a ninth colour, and that is a constraint rather than a
+#: preference. ``STATE_COLORS`` above is closed under a written invariant —
+#: no state carries a colour another state also carries — and the two
+#: candidates a ninth state would reach for are both spoken for: ``accent2``
+#: is reserved for "the other of two normal groups" and forbidden for anomaly
+#: use, and ``threshold`` was *proven* indistinguishable from ``warn`` once
+#: painted, by this plate's own render guard.
+#:
+#: It is also the right channel on its own terms. Field quality is orthogonal
+#: to coverage: a well can be complete and out of focus, or partial and
+#: perfectly exposed, and those are two facts about one well rather than two
+#: values of one fact. A colour can only say one thing at a time.
+FLAGGED_FIELD_GLYPH = "!"
+
+
+def legend_marker_style() -> str:
+    """The legend key for the marker: the glyph inside an outlined box.
+
+    A bare glyph beside the colour rows was measured at about 2x9 px of ink
+    against a 12x12 solid swatch — roughly 15% of the area — so the last row
+    looked as if it had no key at all. The plate's own neutral state already
+    establishes the vocabulary for a key that is not a solid fill (an outlined
+    box, ``legend_swatch_style`` for a state the plate leaves uncoloured), so
+    this borrows it rather than inventing a third shape. The glyph goes
+    inside, bold, which keeps the row's visual mass while still reading as a
+    different channel from the fills above it.
+    """
+    return (f"background:transparent; "
+            f"border:1px solid {theme.Colors.border_strong}; "
+            f"border-radius:{theme.Radii.xs}px; "
+            f"font-weight:700; color:{theme.Colors.text_primary};")
+
+
+def paint_field_quality(plate: WellPlateSelector, flagged_wells) -> None:
+    """Mark the wells holding at least one flagged field. Clears first.
+
+    Clearing is not housekeeping: this runs again on every repaint, and a
+    marker left from the previous dataset — or from before the user changed
+    something — would be an assertion about a well nobody had measured.
+    """
+    plate.clearWellMarkers()
+    for well in sorted(flagged_wells or ()):
+        plate.setWellMarker(well, FLAGGED_FIELD_GLYPH)
+
+
+def well_tooltip(well: str, cells: dict, record_wells: dict,
+                 field_quality: dict | None = None) -> str:
     """What a well says when the pointer rests on it.
 
     Reads the numbers the record already holds rather than deriving anything —
     the tooltip and the colour must never be able to disagree.
+
+    *field_quality* maps well → the sentence describing what was flagged
+    there, built once by the caller from the same verdicts that decided the
+    marker. A glyph with no explanation is a puzzle rather than a finding, and
+    deriving the sentence here would be a second derivation of something the
+    marker already asserts.
     """
     state = (cells or {}).get(well)
     if state is None:
         return f"{well} · not in this dataset"
     label = STATE_LABELS.get(state, state)
+    quality = (field_quality or {}).get(well, "")
     rec = (record_wells or {}).get(well)
     if not isinstance(rec, dict):
-        return f"{well} · {label.lower()}"
+        base = f"{well} · {label.lower()}"
+        return f"{base} · {quality}" if quality else base
     intent = int(rec.get("intent") or 0)
     covered = int(rec.get("covered_any") or 0)
     bits = [f"{well} · {label.lower()}"]
@@ -163,4 +220,6 @@ def well_tooltip(well: str, cells: dict, record_wells: dict) -> str:
         bits.append(f"{int(rec.get('covered_csv') or 0)} in the measurements CSV")
     if rec.get("failed"):
         bits.append(f"{len(rec['failed'])} failed group(s)")
+    if quality:
+        bits.append(quality)
     return " · ".join(bits)

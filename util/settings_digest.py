@@ -22,8 +22,14 @@ below is that roster, with the reason each entry is in it, and
 ``tests/test_reuse_is_keyed_completely.py`` mutates every one of them
 individually and requires the reuse to decline.
 
-**What is deliberately outside it.** The input and output paths (the well's own
-identity already carries those), ``--force`` and ``--incremental`` (re-processing
+**What is deliberately outside it.** ``--focus_min`` is the interesting one,
+because it looks like it belongs here and does not: the run *records* that
+number in the sidecar and never acts on it, so two runs differing only in it
+produce byte-identical CSVs. Keying on it would make changing a threshold cost
+a full re-segmentation of the plate, which is the opposite of the reason it is
+recorded rather than applied. ``--no_focus_metric`` **is** keyed, because it
+decides whether the column exists at all. Also outside: the input and output
+paths (the well's own identity already carries those), ``--force`` and ``--incremental`` (re-processing
 knobs, not a change of configuration — that is what lets a forced re-run land in
 the same place and overwrite it), worker counts and other execution knobs that
 change only how long the run takes, and anything about the machine: this digest
@@ -71,6 +77,7 @@ KEYED_ON: dict[str, str] = {
     "fluor_tokens":                "the channels quantified into the CSV columns",
     "smfish_tokens":               "which channels get spot counts rather than means",
     "shape_features":              "adds or removes whole CSV columns",
+    "no_focus_metric":             "drops the per-cell focus column from every row",
     # ── which cells are kept ────────────────────────────────────────────────
     "qc_remove_debris":            "turns the debris gate on and off",
     "qc_min_area":                 "the gate's lower area bound",
@@ -129,6 +136,13 @@ NOT_KEYED_ON: dict[str, str] = {
     "cpu_only":              "which device runs the segmenter",
     "allow_low_disk":        "a pre-flight refusal, not a computation",
     "no_run_check":          "skips the end-of-run audit; computes nothing",
+    # Recorded rather than applied. The run writes this number into the sidecar
+    # as the dataset's stated cut and never acts on it, so two runs differing
+    # only here produce byte-identical CSVs -- and keying on it would make
+    # changing a threshold cost a full re-segmentation, which is the opposite
+    # of the reason it is recorded rather than applied. ``no_focus_metric``,
+    # which decides whether the column exists at all, IS keyed.
+    "focus_min":             "recorded in the sidecar; the run never acts on it",
 }
 
 

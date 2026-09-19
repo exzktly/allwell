@@ -351,3 +351,91 @@ def test_merging_a_run_report_is_a_no_op_when_there_is_nothing_to_restore(tmp_pa
     # Prior block identical to the fetched one — no rewrite.
     assert merge_fetched_run_report(info, read_run_report_block(info)) is False
     assert read_run_report_block(tmp_path / "absent.json") is None
+
+
+def _quality_sidecar(path, wells: dict) -> None:
+    path.write_text(json.dumps({
+        "schema": "experiment:channel:well:fov:timepoint",
+        "field_quality": {"wells": wells, "partial_wells": []},
+    }))
+
+
+def _well(label, *, measured, of, focus):
+    return {"well": label, "measured": measured, "measured_of": of,
+            "fields": [{"fov": str(i), "focus": focus, "sat_frac": 0.0}
+                       for i in range(measured)]}
+
+
+def test_fetched_field_quality_does_not_erase_earlier_wells(tmp_path):
+    """The same defect as the run report, one block over, with a worse result.
+
+    Losing coverage records loses history. Losing field-quality records
+    produces a **wrong number**: the acquisition metrics are scored as robust
+    z against the plate, so a block silently reduced to the wells one remote
+    incremental run touched gives every one of them a z computed against its
+    own tiny median. The shortfall accounting cannot catch it either — each of
+    those wells is individually complete, so nothing is marked partial and the
+    scorer proceeds.
+    """
+    from pipeline.field_quality import (
+        merge_fetched_field_quality, read_field_quality_block,
+    )
+
+    info = tmp_path / "pipeline_info.json"
+    _quality_sidecar(info, {
+        "A01": _well("A01", measured=4, of=4, focus=27.4),
+        "C08": _well("C08", measured=4, of=4, focus=11.0),
+    })
+    prior = read_field_quality_block(info)
+    assert set(prior["wells"]) == {"A01", "C08"}
+
+    # The fetch overwrites it with this run's much smaller block, in which
+    # C08 was only partly re-measured.
+    _quality_sidecar(info, {"C08": _well("C08", measured=2, of=4, focus=26.9)})
+    assert merge_fetched_field_quality(info, prior) is True
+
+    merged = json.loads(info.read_text())["field_quality"]
+    assert set(merged["wells"]) == {"A01", "C08"}            # A01 survived
+    assert merged["wells"]["C08"]["measured"] == 2           # this run's wins
+    assert merged["wells"]["C08"]["fields"][0]["focus"] == 26.9
+    # Derived fields recomputed from the merged map, never merged themselves,
+    # so they cannot disagree with the wells they summarise — and the partial
+    # well the fetch introduced is named rather than lost.
+    assert merged["partial_wells"] == ["C08"]
+    assert merged["measured"] == 6
+    assert merged["measured_of"] == 8
+
+
+def test_merging_field_quality_is_a_no_op_when_there_is_nothing_to_restore(tmp_path):
+    from pipeline.field_quality import (
+        merge_fetched_field_quality, read_field_quality_block,
+    )
+
+    info = tmp_path / "pipeline_info.json"
+    _quality_sidecar(info, {"A01": _well("A01", measured=1, of=1, focus=27.0)})
+    # No prior block (first run into this folder) — nothing to fold back.
+    assert merge_fetched_field_quality(info, None) is False
+    # Prior block identical to the fetched one — no rewrite.
+    assert merge_fetched_field_quality(info, read_field_quality_block(info)) is False
+    assert read_field_quality_block(tmp_path / "absent.json") is None
+
+
+def test_the_fetch_captures_the_field_quality_block_before_it_is_overwritten():
+    """Excludes the merge that is written and never called.
+
+    Both halves have to be at the fetch site and in the right order: read the
+    local block BEFORE the rsync that overwrites the sidecar, merge AFTER it.
+    A merge function nothing calls, or one called with a block captured after
+    the overwrite, is the branch-that-exists defect (CLAUDE.md §7.7) — and it
+    would look exactly like this one working.
+    """
+    import inspect
+    from services import remote_runner as rr
+
+    src = inspect.getsource(rr.RemoteRunner.verify_and_cleanup)
+    read_at = src.index("read_field_quality_block")
+    rsync_at = src.index("_rsync_optional")
+    merge_at = src.index("merge_fetched_field_quality")
+    assert read_at < rsync_at < merge_at, (
+        "the local field-quality block must be captured before the sidecar is "
+        "pulled over it, and merged back after")

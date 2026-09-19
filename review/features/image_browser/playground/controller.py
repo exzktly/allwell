@@ -45,6 +45,7 @@ from review.features.image_browser.playground.renderer import (
 # ``show_threshold_curve``, TensorFlow inside the service the worker calls), so
 # deferring them would be a cycle-workaround spelling for no cycle.
 from review.features.image_browser.playground import (
+    focus_curve_view as _focus_view,
     sweep_curve_view as _sweep_view,
     worker as _worker,
 )
@@ -1524,3 +1525,149 @@ def playground_hover(ctx, event) -> None:
     from PySide6.QtGui import QCursor
     from PySide6.QtWidgets import QToolTip
     QToolTip.showText(QCursor.pos(), f"({px}, {py})  =  {float(a[py, px]):.1f}")
+
+
+# ── the other threshold this tab helps choose ───────────────────────────────
+
+
+def _correction_subject(ctx) -> str:
+    """The correction the measured pixels went through, for the figure's title.
+
+    The subject already named the channel, well, FOV, timepoint and mask
+    provenance — and **not** the corrections, which change the value. Measured
+    against the raw frame, five of the seven correction methods move
+    ``edge_focus`` by 2.6 % or less, but ``fft_bandpass`` moves it **1.27x**.
+    So a saved figure could not be told from one measured on a
+    differently-corrected frame, in the one case where that matters most.
+    """
+    st = _st(ctx)
+    flat = str(st.flatfield_mode or "none")
+    back = str(st.background_method or "none")
+    return f"flat-field {flat} · background {back}"
+
+
+def _nuclear_token(ctx) -> str:
+    """The channel the pipeline measured focus on, lowercased, or ``""``."""
+    info = getattr(ctx.state.dataset, "pipeline_info", None) or {}
+    return str(info.get("nuclear_token") or "").strip().lower()
+
+
+def _focus_caveats(ctx) -> tuple[str, ...]:
+    """What is true of this curve and would mislead a reader who did not know.
+
+    **The channel.** This tab measures whatever channel is selected here, with
+    this tab's own Correction dropdowns — which is the tab's whole purpose,
+    tuning a channel's corrections and seeing the result. The ``qc_edge_focus``
+    column that Cell Gating's cut applies to is always the **nuclear** channel
+    with the run's settings. Measured on identical optics, geometry and mask,
+    a dim textured reporter reads 1.78x the nuclear channel's median with an
+    eightfold p5-p95 spread, so a cut read off the wrong channel's curve and
+    typed into Cell Gating can exclude every cell in the nuclear population.
+    Nothing on the figure said so; the channel appeared in the title, where it
+    reads as provenance rather than as a warning.
+
+    **The column.** This measurement comes from pixels, not from the CSV, so
+    the curve draws perfectly well for a dataset that carries no focus column
+    at all — cut marked, counts live — and the number a user takes from it
+    cannot be applied to anything without re-running the plate. Cell Gating
+    says that; this did not, which is the "a number with no way to act on it"
+    the user asked about.
+
+    Neither is a refusal. Both curves are real measurements, and the tab is
+    entitled to draw them; what is qualified is what may be concluded.
+    """
+    from pipeline.field_quality_record import FOCUS_COLUMN
+
+    st = _st(ctx)
+    out: list[str] = []
+
+    nuclear = _nuclear_token(ctx)
+    shown = str(st.channel or "").strip().lower()
+    if nuclear and shown and shown != nuclear:
+        out.append(
+            f"Measured on {shown.upper()}. The cut in Cell Gating applies to "
+            f"the {nuclear.upper()} channel the run measured, whose values "
+            f"differ — do not carry this number across without checking it "
+            f"against {nuclear.upper()}.")
+
+    # Read off any cached well: the column is written for every row or for
+    # none, so one frame answers it. ``None`` (nothing cached yet) says
+    # nothing rather than guessing, the same three-answer rule the Cell
+    # Gating panel follows.
+    cache = getattr(ctx.state.dataset, "cache", None) or {}
+    frames = [df for df in cache.values() if df is not None and len(df)]
+    if frames and not any(FOCUS_COLUMN in getattr(df, "columns", ())
+                          for df in frames):
+        out.append(
+            "This dataset carries no per-cell focus column, so a cut chosen "
+            "here cannot be applied to it. Re-run with Analyze ▸ Quality "
+            "Control ▸ Measure per-cell focus to record one.")
+    return tuple(out)
+
+
+def playground_focus_now(ctx) -> None:
+    """Draw the per-cell focus distribution for the frame on screen.
+
+    The sibling of :func:`playground_sweep_now` for the *other* number this
+    application asks a user to pick, and deliberately much cheaper: the sweep
+    is M segmentations, while this is one measurement per outline over a mask
+    that already exists. It runs on the GUI thread for that reason — measured,
+    a few hundred nuclei on a 2048² frame is well inside a repaint — and a
+    worker would buy nothing but a second staleness problem.
+
+    It measures **the mask the overlay is currently showing**, through
+    :func:`_mask_source`, so the outlines a user can see and the values they
+    are about to threshold on are the same objects. A pipeline mask is as
+    valid a subject as a live segmentation here — this is a question about
+    focus, not about detection — but which one was used goes into the figure's
+    title, because a mask that cannot respond to the Correction controls and
+    one that can are different evidence.
+
+    Like the threshold curve, it recommends nothing. See
+    :mod:`review.domain.focus_distribution` for the measurement that refused
+    to, which is sharper than the sweep's: the obvious automatic rule discards
+    two fifths of a clean plate's good cells and keeps three quarters of a
+    uniformly defocused one's bad ones, with nothing able to tell the two
+    apart.
+    """
+    from review.domain.focus_distribution import (
+        NO_CELLS, distribution_from_values,
+    )
+
+    st = _st(ctx)
+    win = ctx.window
+    # Same re-render as the sweep and Segment paths: the pixels measured must
+    # be the ones the current widget values produce.
+    playground_on_change(ctx)
+    arr, note = _segmentation_frame(ctx)
+    mask, provenance = _mask_source(ctx)
+    if arr is None:
+        _set_status(win, note)
+        return
+    if mask is None:
+        # Not an error and not an empty plot: the user pressed a button and is
+        # owed the reason, and "there is no mask on screen" is a different
+        # statement from "no outline could be measured".
+        dist = distribution_from_values((), subject=_sweep_subject(ctx),
+                                        declined=NO_CELLS)
+        _focus_view.show_focus_distribution(ctx, dist)
+        return
+
+    from pipeline.field_quality import cell_focus_by_label
+
+    values = list(cell_focus_by_label(arr, mask).values())
+    params = getattr(getattr(ctx.state, "qc", None), "params", None)
+    # The user's OWN cut, from the gate that will actually apply it, rather
+    # than a number this tab keeps of its own. Two copies of a threshold is
+    # how the plot comes to mark a line the filter is not using.
+    cut = None if params is None else params.focus_min
+    subject = _sweep_subject(ctx)
+    # Which mask, in the title: a pipeline mask and a live segmentation are
+    # different evidence and the plot is savable.
+    subject = f"{subject} · {provenance}" if subject else provenance
+    subject = f"{subject} · {_correction_subject(ctx)}"
+    dist = distribution_from_values(values, cut=cut, subject=subject,
+                                    caveats=_focus_caveats(ctx))
+    st.focus_distribution = dist
+    _focus_view.show_focus_distribution(ctx, dist)
+    _set_status(win, dist.describe())

@@ -73,6 +73,7 @@ OTHER = {
     "fluor_tokens": ["GFP", "RFP"],
     "smfish_tokens": ["GFP"],
     "shape_features": ["area", "circularity"],
+    "no_focus_metric": True,
     "qc_remove_debris": True,
     "qc_min_area": 50.0,
     "qc_max_area": 5000.0,

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ui import theme
@@ -23,7 +23,11 @@ from review.core.selection_controller import (
 )
 
 from . import collect as hc
-from .plate_panel import paint_plate, well_tooltip
+from review.data.focus_gate import wells_needing_review
+from .plate_panel import (
+    FLAGGED_FIELD_GLYPH, legend_marker_style, paint_field_quality, paint_plate,
+    well_tooltip,
+)
 # The Sample Map tab's layer: which one is showing, and the entry rules for it.
 # Module scope, because nothing under ``home/sample_map`` imports this module
 # back — there is no cycle here to work around, and the deferred-feature-import
@@ -433,8 +437,21 @@ def _paint_plate(ctx) -> None:
     if cells:
         plate.setEnabledWells(sorted(cells))
     paint_plate(plate, cells, hc.plate_fractions(ctx))
+    # Image quality, on the marker channel rather than as a ninth colour —
+    # see ``plate_panel.FLAGGED_FIELD_GLYPH`` for why the colour vocabulary is
+    # closed, and why field quality would not belong in it even if it were
+    # not. The same mapping feeds the tooltip, so a glyph cannot appear
+    # without the sentence that explains it.
+    #
+    # The composite, not the field verdict alone: a well whose fields all look
+    # ordinary while a third of its cells are soft is exactly the well this
+    # marker exists for, and no whole-field verdict can see it. See
+    # ``review.domain.well_composite`` for the three reasons and where each
+    # of their bounds comes from.
+    quality = wells_needing_review(ctx)
+    paint_field_quality(plate, quality)
     plate.setWellTooltipProvider(
-        lambda well: well_tooltip(well, cells, record_wells))
+        lambda well: well_tooltip(well, cells, record_wells, quality))
 
     host = _widget(ctx, "_home_legend")
     _clear(host)
@@ -448,6 +465,44 @@ def _paint_plate(ctx) -> None:
         value = QLabel(str(count), host)
         value.setObjectName("Muted" if not count else "")
         layout.addWidget(value, index, 2)
+    # The marker gets a legend row of its own, and only when the plate carries
+    # one. The plate's own invariant is that no well can be left without a row
+    # to explain it; a glyph nobody can look up breaks that just as surely as
+    # two states sharing a colour would. It is listed last and with the glyph
+    # in place of a swatch, because it is a different channel rather than a
+    # ninth colour — see ``plate_panel.FLAGGED_FIELD_GLYPH``.
+    if quality:
+        # A blank row first. The column above partitions the plate — its
+        # counts sum to the wells, because the states are mutually exclusive —
+        # and this one is an overlay whose well is already counted somewhere
+        # above it. Appended flush it reads as state 9 of 9 and a reader
+        # totalling the column gets more wells than the plate holds; separated,
+        # it reads as the annotation layer it is.
+        spacer = QLabel("", host)
+        spacer.setFixedHeight(theme.Spacing.xs)
+        layout.addWidget(spacer, len(hc.plate_legend(ctx)), 0)
+        row = len(hc.plate_legend(ctx)) + 1
+        mark = QLabel(FLAGGED_FIELD_GLYPH, host)
+        mark.setFixedSize(theme.Spacing.md, theme.Spacing.md)
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark.setStyleSheet(legend_marker_style())
+        layout.addWidget(mark, row, 0)
+        # "Wells", because the count IS a well count and the column above it
+        # partitions the plate by state. Labelling it "Field" put a field
+        # noun on a well number in a column that otherwise sums to the plate —
+        # and on a real plate the two surfaces would then print different
+        # numbers for what the reader takes to be one quantity.
+        #
+        # And no longer "with a flagged field", which the render caught: the
+        # glyph is driven by a composite now, and one of its three reasons is
+        # a share of *cells* whose own outlines read soft — a well marked for
+        # that has no flagged field at all, so the old row named a cause that
+        # is not there. "Needing a look" is the one thing true of every well
+        # under the mark; what is actually wrong with each is in its tooltip,
+        # which is the surface that can afford to say three different things.
+        layout.addWidget(
+            QLabel("Wells needing a look", host), row, 1)
+        layout.addWidget(QLabel(str(len(quality)), host), row, 2)
 
     totals = ((ctx.state.dataset.pipeline_info or {}).get("run_check") or {}
               ).get("totals") or {}

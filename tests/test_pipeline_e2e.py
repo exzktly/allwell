@@ -47,7 +47,7 @@ def _run(out_root):
     out = out_root / "out"
     out.mkdir()
     schema = "experiment:channel:well:fov:timepoint".split(":")
-    records = pm.process_image_group(
+    records, quality = pm.process_image_group(
         nuclear_path=nuclear_path,
         fluor_paths=[fluor_path],
         fluor_tokens=["GFP"],
@@ -64,18 +64,18 @@ def _run(out_root):
         flatfield_mode="none",
         min_nucleus_area_px=20,
     )
-    return records, out
+    return records, out, quality
 
 
 def test_pipeline_detects_all_synthetic_nuclei(tmp_path, stardist_worker):
-    records, _ = _run(tmp_path)
+    records, _, _ = _run(tmp_path)
     # 9 synthetic nuclei -> StarDist should recover them all (deterministic on CPU).
     assert len(records) >= len(DEFAULT_CENTERS) - 1
     assert len({r["nucleus_id"] for r in records}) == len(records)
 
 
 def test_pipeline_record_schema_and_geometry(tmp_path, stardist_worker):
-    records, _ = _run(tmp_path)
+    records, _, _ = _run(tmp_path)
     assert records
     r = records[0]
     # Filename-parsed metadata.
@@ -96,7 +96,7 @@ def test_pipeline_record_schema_and_geometry(tmp_path, stardist_worker):
 
 
 def test_pipeline_quantifies_fluor_signal(tmp_path, stardist_worker):
-    records, _ = _run(tmp_path)
+    records, _, _ = _run(tmp_path)
     # Fluor is bright (≈800) inside nuclei, dim (≈200) outside; per-cell means
     # must sit well above the background floor.
     means = [r["gfp_mean_intensity"] for r in records]
@@ -104,8 +104,36 @@ def test_pipeline_quantifies_fluor_signal(tmp_path, stardist_worker):
     assert all(t > 0.0 for t in (r["gfp_total_intensity"] for r in records))
 
 
+def test_the_group_reports_its_own_field_quality(tmp_path, stardist_worker):
+    """Excludes the wiring that returns an empty mapping and looks fine.
+
+    Every metric here is measured against a real StarDist segmentation of a
+    real frame, which is the only place the acquisition half and the
+    biological half can be seen to come from the same FOV-group. The wrong
+    implementation that passes "a dict came back" is one that returns ``{}``
+    or one whose values are all ``None``, so each key is asserted to be a
+    number and ``nuc_count`` is asserted against the synthetic truth.
+    """
+    records, _, quality = _run(tmp_path)
+    from pipeline.field_quality import METRIC_KEYS
+
+    assert set(METRIC_KEYS) <= set(quality)
+    for key in METRIC_KEYS:
+        assert quality[key] is not None, f"{key} was not measured"
+    assert quality["nuc_count"] == len(records)
+    # The address, so a field in the block joins a row in the CSV.
+    assert quality["fov"] == "1"
+    assert str(quality["timepoint"]) == "0"
+    # The synthetic frame is written as uint16 and is nowhere near clipping,
+    # so saturation is measured AND is zero — which is a different statement
+    # from "could not be measured", and the one the ceiling exists to make.
+    assert quality["sat_frac"] == 0.0
+    assert quality["focus"] > 0.0
+    assert quality["dyn_range"] > 0.0
+
+
 def test_pipeline_writes_output_images(tmp_path, stardist_worker):
-    _, out = _run(tmp_path)
+    _, out, _ = _run(tmp_path)
     written = {p.name for p in out.iterdir()}
     # Label image + per-channel top-hat outputs + overlay.
     assert any(n.endswith("_labels.tif") for n in written)

@@ -323,9 +323,19 @@ def _build_plate_and_notes(ctx, page: QWidget, reg) -> QHBoxLayout:
     plate_row = QHBoxLayout()
     plate_row.setSpacing(theme.Spacing.lg)
     plate = reg.register("_home_plate", build_home_plate(plate_card))
-    from .controller import on_home_plate_selection
+    from .controller import _paint_plate, on_home_plate_selection
     plate.selectionChanged.connect(
         lambda wells: on_home_plate_selection(ctx, wells))
+    # The plate's quality markers are a function of the focus cut, and the cut
+    # lives on the Cell Gating sub-tab of this same page. Until this callback
+    # existed the markers were reachable only through ``refresh_home``, which
+    # runs on page activation and on load -- so changing the cut and switching
+    # to Overview left the plate marking wells against the PREVIOUS number,
+    # with tooltips quoting it verbatim. Two surfaces on one page, one cut,
+    # two answers. Registered here rather than derived by the QC controller
+    # because the arrow runs one way: QC calls a callback Home installed, and
+    # neither feature imports the other.
+    ctx.runtime.home.quality_refresh_cb = lambda: _paint_plate(ctx)
     plate_row.addWidget(plate, 0, Qt.AlignHCenter | Qt.AlignTop)
     plate_row.addWidget(reg.register("_home_legend", _legend(plate_card)), 0,
                         Qt.AlignTop)

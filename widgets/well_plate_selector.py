@@ -104,6 +104,49 @@ def _to_qcolor(value) -> QColor | None:
     return c if c.isValid() else None
 
 
+#: How a marker glyph is drawn on a well.
+#:
+#: Measured off a render rather than chosen: at 0.62 of a 17 px well the glyph
+#: came out ~10 px with a **1 px stem**, one bright column and one half-lit
+#: one, with a 2 px half-filled gap between stem and dot. At 1x it read as a
+#: tick or a smear rather than as the character it is, and a 1 px stroke picks
+#: up heavy red/cyan subpixel fringing that looks like a rendering fault. The
+#: plate is the surface where a mark has to be *found*, on one of ninety-six
+#: wells, so it is drawn heavily.
+_MARKER_HEIGHT_FRAC = 0.78
+_MARKER_MIN_PX = 9
+_MARKER_BOLD = True
+
+
+def marker_ink(fill: str | None) -> str:
+    """The ink a marker takes on a well filled with *fill*.
+
+    The previous rule was ``ink_dark if group_color is not None else
+    text_primary`` — a *proxy* for "the fill is bright", and wrong for one of
+    the six colours this plate can paint. Against ``text_muted`` (#5F6B7C, the
+    "staged, never processed" state) a dark ink gives a contrast ratio of
+    3.88:1: below AA for normal text and hopeless for a stroke this thin.
+
+    So the fill is measured instead of guessed at. Relative luminance by the
+    WCAG definition, which is the same arithmetic the theme's own contrast
+    notes use; ``None`` means an unfilled well, where the panel background is
+    dark and the light ink is right.
+    """
+    if not fill:
+        return theme.Colors.text_primary
+    try:
+        col = QColor(fill)
+        parts = [c / 255.0 for c in (col.red(), col.green(), col.blue())]
+    except Exception:
+        return theme.Colors.text_primary
+    lin = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+           for v in parts]
+    lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    # 0.1791 is the luminance at which black and white are equally legible
+    # ((1.05/x) == ((x+0.05)/0.05)); above it black wins, below it white does.
+    return theme.Colors.ink_dark if lum > 0.1791 else theme.Colors.text_primary
+
+
 class _PlateGrid(QWidget):
     """The painted grid + headers. Decoration / interaction state lives here."""
 
@@ -1201,10 +1244,13 @@ class _PlateGrid(QWidget):
             self._paint_visit_number(p, wr, str(path_seq[key]))
         elif glyph:
             f = QFont(self.font())
-            f.setPixelSize(max(7, int(wr.height() * 0.62)))
+            f.setPixelSize(max(_MARKER_MIN_PX, int(wr.height() * _MARKER_HEIGHT_FRAC)))
+            f.setBold(_MARKER_BOLD)
             p.setFont(f)
-            # contrast against the well fill (coloured wells are bright)
-            p.setPen(QColor(c.ink_dark if group_color is not None else c.text_primary))
+            # Ink chosen from the fill it will sit on, not from whether the
+            # well happens to carry a group colour — see ``marker_ink``.
+            p.setPen(QColor(marker_ink(
+                group_color.name() if group_color is not None else None)))
             p.drawText(wr, int(Qt.AlignCenter), glyph)
             p.setFont(self.font())
 

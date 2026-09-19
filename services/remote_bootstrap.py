@@ -637,7 +637,7 @@ def force_clean_script() -> str:
     corrupt"). The prefix is resolved through conda and removed too, and
     anything that is not the env's own directory is refused.
     """
-    from services.remote_runner import CONDA_ENV_SHELL_HELPERS
+    from services.remote_conda import CONDA_ENV_SHELL_HELPERS
 
     return (
         "ENV_NAME=allwell\n"
@@ -677,7 +677,7 @@ def env_setup_script() -> str:
     # if_missing is correctly skipped for the system-conda case but the
     # next step here used to fail with "source: no such file or
     # directory" on $HOME/miniforge3/etc/profile.d/conda.sh.
-    from services.remote_runner import CONDA_ENV_SHELL_HELPERS
+    from services.remote_conda import CONDA_ENV_SHELL_HELPERS
 
     return (
         "set -euo pipefail\nENV_NAME=allwell\n"

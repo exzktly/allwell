@@ -108,6 +108,11 @@ class PlaygroundState:
     # held as ``object`` for the same reason ``seg_labels`` is, so this module
     # stays free of anything it would otherwise have to import.
     sweep_curve: object = None
+    # The last focus distribution drawn, held as ``object`` for the same
+    # reason ``sweep_curve`` is: this module is a dataclass and importing the
+    # domain type for an annotation alone would give it a dependency it does
+    # not otherwise have.
+    focus_distribution: object = None
     # What the curve on screen describes, captured when the sweep was
     # DISPATCHED. ``_seg_key``'s tuple minus the probability threshold, which
     # the sweep varies by design. Held rather than re-derived because the tab
@@ -168,6 +173,7 @@ class PlaygroundState:
         self.loose_image_path = None
         self.seg_labels = None
         self.sweep_curve = None
+        self.focus_distribution = None
         self.sweep_key = None
         self.sweep_running = False
         self.sweep_stop = False

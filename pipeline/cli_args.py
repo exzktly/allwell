@@ -20,6 +20,8 @@ test keeps importing it from where it always did.
 
 from __future__ import annotations
 
+from pipeline.field_quality_record import FOCUS_COLUMN as _FOCUS_COLUMN
+
 import argparse
 from pathlib import Path
 
@@ -262,6 +264,24 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Debris removal: maximum region area in px (0 = no upper bound).")
     p.add_argument("--qc_min_solidity", type=float, default=0.0,
                    help="Debris removal: minimum region solidity 0-1 (0 = no bound).")
+
+    # Per-cell focus. On by default, hence a --no_ flag: the column costs a few
+    # percent of quantification and is the only evidence a later reader has that
+    # part of a field was soft, so a run without it cannot be asked the question
+    # afterwards without being re-run.
+    p.add_argument("--no_focus_metric", action="store_true",
+                   help="Do not measure per-cell focus (the boundary-sharpness "
+                        f"column {_FOCUS_COLUMN}). Measured by default.")
+    # Recorded, NOT applied. See process_microscopy's sidecar note and
+    # _Docs/Markdowns/INFERENCE_SUBSYSTEMS_TRACKER.md §D.4: the cut is the
+    # number a user gets wrong first time, and a pipeline that dropped the
+    # cells would make it cost a re-run to revisit.
+    p.add_argument("--focus_min", type=float, default=0.0,
+                   help="The per-cell focus value below which a cell is out of "
+                        "focus, recorded in pipeline_info.json as this "
+                        "dataset's own cut (0 = none stated). The run RECORDS "
+                        "it and does not apply it; Review's Cell Gating tab "
+                        "applies it, reversibly.")
 
     p.add_argument("--no_save_tophat",   action="store_true",
                    help="Do not save top-hat/smFISH intermediate TIFFs")

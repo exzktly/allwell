@@ -186,3 +186,37 @@ def test_the_funnel_label_reports_real_numbers_after_a_build(loaded_app, qtbot):
     text = ctx.widgets.get("_cell_gating_funnel_label").text()
     assert "segmented cells" in text
     assert "QC debris gate" in text
+
+
+def test_a_section_lead_in_never_outdents_past_its_own_heading():
+    """Excludes the lead-in that reads as outranking the section it belongs to.
+
+    ``build_section_header`` lays its title out inside a block with a left
+    margin; a lead-in added straight to the section's layout starts at 0. So
+    "Always applied:" and "Then include cells by (choose one):" sat measurably
+    **left of the "Cell inclusion" heading that owns them** — 364 and 365
+    against the title's 373, measured off the rendered panel.
+
+    Asserted against the header's own margin rather than against a number, so
+    the two cannot drift apart again: the wrong implementation this excludes
+    is a second copy of "8" written down here.
+    """
+    from review.core.ui_helpers import SECTION_HEADER_MARGINS
+    from review.features.home.cell_gating.tab_view import _LEAD_IN_INDENT
+
+    assert _LEAD_IN_INDENT == SECTION_HEADER_MARGINS[0]
+
+
+def test_the_lead_in_carries_that_indent_onto_the_widget(qtbot):
+    """And it reaches the label, not just a constant. Asserted at the boundary
+    (CLAUDE.md §7.4 #1): a named indent nothing applies is a number in a file.
+    """
+    from PySide6.QtWidgets import QWidget
+
+    from review.core.ui_helpers import SECTION_HEADER_MARGINS
+    from review.features.home.cell_gating.tab_view import _lead_in
+
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    lbl = _lead_in(parent, "Always applied:")
+    assert lbl.contentsMargins().left() == SECTION_HEADER_MARGINS[0]

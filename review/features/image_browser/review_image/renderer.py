@@ -7,6 +7,7 @@ decoding, boundary computation, or pixmap composition. Each function takes
 
 from __future__ import annotations
 
+import html as _html
 import logging
 
 from ui import theme
@@ -19,7 +20,9 @@ from review.data.data_loading import extract_well_token as _extract_well_token
 # collect.py is the (Qt-free) data half of this feature and never imports the
 # renderer, so these resolve at module scope — no deferred cycle-break needed.
 from review.features.image_browser.review_image.collect import (
+    EXCLUSION_LAYERS,
     flatfield_field_for,
+    review_build_exclusion_reasons,
     review_build_include_map,
     review_build_mfi_map,
     review_build_threshold_map,
@@ -376,6 +379,23 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
             state.review_image.include_cache.clear()
         state.review_image.include_cache[ic_key] = include_by_nid
 
+    # Which layer removed each excluded cell, for the "Why removed" overlay
+    # and the hover readout. Built only when the overlay asks for it, since it
+    # reads the well's rows; the include map above is derived from the same
+    # function, so the two cannot disagree about who is out.
+    reasons_by_nid = None
+    if getattr(state.review_image, "show_exclusion_layers", False):
+        reasons_by_nid = review_build_exclusion_reasons(ctx, center, well, fov, tp)
+    # Published for the hover readout. An outline can only be one colour, so
+    # the picture can name one layer per cell and no more -- and three
+    # docstrings and the button's own tooltip promised a readout that "names
+    # every layer that dropped it" while no such readout existed anywhere: the
+    # hover emitted position, channel value, cell id and MFI and nothing about
+    # exclusion, so a cell failing three layers was a dead end. The tuple
+    # ``collect`` goes to the trouble of building was discarded except for
+    # ``layers[0]``.
+    state.review_image.exclusion_reasons_by_nid = reasons_by_nid
+
     # Per-cell MFI for the hover tooltip — the displayed channel's
     # {chan}_mean_intensity keyed by nucleus id. Rebuilt each refresh so it
     # tracks the active channel / FOV / timepoint; empty for non-fluor overlays.
@@ -408,7 +428,7 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
         ctx,
         fluor_arr, center, include_by_nid,
         fit_lut=False, preserve_view=preserve_view, boundary=boundary,
-        above_by_nid=above_by_nid,
+        above_by_nid=above_by_nid, exclusion_reasons=reasons_by_nid,
     )
 
 
@@ -464,6 +484,7 @@ def draw_review_image(
     preserve_view: bool = False,
     boundary=None,
     above_by_nid: dict[int, bool] | None = None,
+    exclusion_reasons: dict[int, tuple] | None = None,
 ) -> None:
     # A8 D4: ctx-native pixmap compositor. Typed view/colour state lives on
     # ``ctx.state.review_image`` / ``ctx.state.image_view``; the QLabel host +
@@ -541,10 +562,6 @@ def draw_review_image(
             above_arr = _np.fromiter(above_ids, dtype=center.dtype, count=len(above_ids))
             above_mask = _np.isin(center, above_arr)
             rgb[above_mask] = _np.array([255, 255, 255], dtype=_np.uint8)
-        if sel_nid is not None:
-            sel_color = _np.asarray(state.review_image.selected_color, dtype=_np.uint8)
-            sel_boundary = boundary & (center == int(sel_nid))
-            rgb[sel_boundary] = sel_color
     else:
         tint = state.review_image.tint_color
         tr, tg, tb = (max(0, min(255, int(c))) for c in tint)
@@ -570,14 +587,31 @@ def draw_review_image(
             draw_boundary = boundary & include_mask
             boundary_color = _np.asarray(state.review_image.boundary_color, dtype=_np.uint8)
             rgb[draw_boundary] = boundary_color
-            if sel_nid is not None:
-                sel_color = _np.asarray(state.review_image.selected_color, dtype=_np.uint8)
-                sel_boundary = boundary & (center == int(sel_nid))
-                rgb[sel_boundary] = sel_color
-        elif sel_nid is not None:
-            sel_color = _np.asarray(state.review_image.selected_color, dtype=_np.uint8)
-            sel_boundary = boundary & (center == int(sel_nid))
-            rgb[sel_boundary] = sel_color
+        # Excluded cells get an outline too, in the ink of the layer that
+        # removed them -- the only place in the app that says WHICH one did.
+        # Drawn whether or not the kept cells' outline is on, because the
+        # question "why is this one gone" is asked of a picture where the
+        # answer is invisible by construction.
+    # **Both modes, once, outside the branch.** The overlay used to be drawn
+    # inside the ``else`` above, so turning it on in Binary mode computed every
+    # reason -- a full row fetch and verdict walk per refresh -- and then threw
+    # them away, while the button went on reading "Why removed: On". A toggle
+    # that is on and does nothing is §7.6 exactly, and Binary is the mode where
+    # the question is asked most, because a binary mask is already a picture of
+    # which cells counted. Hoisting it here is what makes that unrepeatable:
+    # there is no longer a branch that can forget to call it, which is a
+    # stronger guarantee than a test per branch. The structure is pinned by
+    # ``test_exclusion_layers_overlay``, so a later re-branch has to argue with
+    # a guard rather than pass quietly.
+    _paint_exclusion_outlines(
+        rgb, boundary, center, exclusion_reasons,
+        on=bool(getattr(state.review_image, "show_exclusion_layers", False)))
+    # Last, so the cell being inspected is never hidden under a layer ink --
+    # in either mode, which the branched version also had to get right twice.
+    if sel_nid is not None:
+        sel_color = _np.asarray(state.review_image.selected_color, dtype=_np.uint8)
+        sel_boundary = boundary & (center == int(sel_nid))
+        rgb[sel_boundary] = sel_color
 
     _draw_crop_outline(ctx, rgb)
     ctx.runtime.review_image.base_rgb = _np.ascontiguousarray(rgb)
@@ -613,7 +647,17 @@ def draw_review_image(
             text = (
                 f"Showing channel {state.channel.active_image_channel.upper()} with included cell boundaries.{suffix}"
             )
-        status.setText(f"{text}{_scan_shortfall_suffix(ctx)}")
+        text = f"{text}{_scan_shortfall_suffix(ctx)}"
+        legend = _exclusion_legend_html(
+            ctx, exclusion_reasons,
+            on=bool(getattr(state.review_image, "show_exclusion_layers", False)))
+        if legend:
+            # Rich text only when there is a legend to draw, and the plain part
+            # is escaped because Qt switches the whole label to HTML the moment
+            # one tag appears in it.
+            status.setText(f"{_html.escape(text)}<br>{legend}")
+        else:
+            status.setText(text)
     if _debug_flags.review_image_channel_switch_debug_enabled():
         _logger.debug(
             "[RI-CHSW step 7] draw_review_image complete status_channel=%r zoom=%.3f pan=(%.1f, %.1f)",
@@ -1065,6 +1109,144 @@ def toggle_review_image_binary_mask(ctx) -> None:
     ctx.state.review_image.preserve_view_on_refresh = True
     refresh_review_image_ctx(ctx)
 
+
+
+#: Ink for each exclusion layer, keyed by the label
+#: ``collect.EXCLUSION_LAYERS`` gives it. Design tokens, never literals
+#: (ARCHITECTURE §8).
+#:
+#: **Six answers need six colours, and the first draft had five.** "Outside the
+#: crop" and "outside the scatter gates" were both ``text_muted`` — the same
+#: pixel value, CIE76 ΔE of exactly 0 — so the overlay could not distinguish
+#: the two layers its own button promises to distinguish. ``text_muted`` is
+#: also the darkest ink in the set (relative luminance 0.144), painted as a
+#: one-pixel stroke on a dark fluorescence frame, so the two layers that shared
+#: a colour were also the two hardest to see.
+#:
+#: These six were chosen by measuring rather than by eye: every pairwise CIE76
+#: ΔE is at least **31**, and every relative luminance at least **0.28**, which
+#: is what a single-pixel outline needs against this app's plot surface. The
+#: numbers are asserted by ``tests/test_exclusion_overlay.py`` so a later
+#: palette edit cannot quietly collapse two answers back into one.
+#:
+#: Two tokens are deliberately absent. ``accent2`` is reserved by the plate's
+#: colour vocabulary and forbidden for anomaly use, and this overlay borrows
+#: that rule rather than inventing a second one. ``success`` is the app's own
+#: "good" token, and every cell this overlay marks has been *removed* — green
+#: for a failure state reads as the opposite of what happened, and on a
+#: green-tinted channel it is close to invisible besides.
+#:
+#: ``text_secondary`` and ``heatmap_selection`` are borrowed from elsewhere in
+#: the palette, which is stated here so the borrowing is visible: the first is
+#: a neutral grey for the one verdict neither the user nor a threshold on this
+#: panel made, and the second is the most separated remaining hue.
+def _layer_inks():
+    from ui import theme
+    return {
+        "deleted here": theme.Colors.danger,
+        "debris gate": theme.Colors.warn,
+        "outside the crop": theme.Colors.stale,
+        "outside the scatter gates": theme.Colors.accent,
+        "field flagged by the run": theme.Colors.text_secondary,
+        "out of focus": theme.Colors.heatmap_selection,
+    }
+
+
+def _exclusion_legend_html(ctx, exclusion_reasons, *, on: bool) -> str:
+    """The colour key for the overlay, or what it found when there is none.
+
+    **The overlay shipped with no legend anywhere.** The button's tooltip named
+    the six layers in prose and never said which colour was which, so the
+    picture used six inks the user had no way to read. The Home plate, one
+    feature over, refuses to draw its marker without a legend row for exactly
+    this reason; this borrows that invariant rather than inventing a second.
+
+    Only the layers **present in this field** are listed, so the key is short
+    and every entry answers a cell the user can actually see. And when the
+    overlay is on with nothing excluded, that is said out loud: the picture is
+    simply unchanged, which is indistinguishable from a toggle that does not
+    work (§0.5 — degraded output must be visible in the artifact).
+    """
+    if not on:
+        return ""
+    present: list[str] = []
+    for layers in (exclusion_reasons or {}).values():
+        if layers and layers[0] not in present:
+            present.append(layers[0])
+    if not present:
+        return (f'<span style="color:{theme.Colors.text_muted}">'
+                "Why removed: nothing in this field is excluded.</span>")
+    inks = _layer_inks()
+    order = [label for _col, label in EXCLUSION_LAYERS if label in present]
+    keys = " &nbsp; ".join(
+        f'<span style="color:{inks[label]}">\u25a0</span> {_html.escape(label)}'
+        for label in order)
+    return (f'<span style="color:{theme.Colors.text_muted}">Why removed:</span> '
+            f"{keys}")
+
+
+def _paint_exclusion_outlines(rgb, boundary, center, exclusion_reasons, *,
+                              on: bool) -> None:
+    """Outline each excluded cell in the ink of the layer that removed it.
+
+    Shared by both draw modes so the toggle cannot mean one thing in the
+    intensity view and nothing at all in the binary one. A no-op when the
+    overlay is off or nothing is excluded; the *caller* is what says so on
+    screen, because a picture that is simply unchanged cannot.
+    """
+    if not on or not exclusion_reasons:
+        return
+    inks = _layer_inks()
+    for nid, layers in exclusion_reasons.items():
+        if not layers:
+            continue
+        # The FIRST layer names the outline, and the hover readout names them
+        # all: an outline can only be one colour, and manual comes first in
+        # that roster because it is the one a click undoes.
+        ink = inks.get(layers[0])
+        if ink is None:
+            continue
+        rgb[boundary & (center == int(nid))] = _np.asarray(
+            _rgb_of(ink), dtype=_np.uint8)
+
+
+def _rgb_of(hex_colour) -> tuple:
+    h = str(hex_colour).lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def refresh_review_image_layers_btn(ctx) -> None:
+    btn = ctx.runtime.review_image.layers_btn
+    if btn is None:
+        return
+    on = bool(ctx.state.review_image.show_exclusion_layers)
+    btn.setChecked(on)
+    btn.setText("Why removed: On" if on else "Why removed: Off")
+    btn.setToolTip(
+        "Colour each excluded cell by the layer that removed it — you\n"
+        "deleted it, the debris gate, the crop, the scatter gates, the\n"
+        "run's field verdict, or the focus cut. The colour key appears\n"
+        "under the picture, listing only the layers this field actually\n"
+        "has cells for.\n"
+        "\n"
+        "Inclusion is the AND of all six, so a cell can fail more than one.\n"
+        "An outline can only be one colour, so it shows the first — hover a\n"
+        "cell to read every layer that dropped it. That also means clicking\n"
+        "a cell back in CANNOT restore one a verdict column removed —\n"
+        "raise the threshold, or turn that layer off, instead.\n"
+        "\n"
+        "Works in Binary mask mode too."
+    )
+
+
+def toggle_review_image_exclusion_layers(ctx) -> None:
+    """Flip the why-was-this-removed colouring on/off and refresh."""
+    ctx.state.review_image.show_exclusion_layers = not bool(
+        ctx.state.review_image.show_exclusion_layers
+    )
+    refresh_review_image_layers_btn(ctx)
+    ctx.state.review_image.preserve_view_on_refresh = True
+    refresh_review_image_ctx(ctx)
 
 
 def toggle_review_image_outline(ctx) -> None:

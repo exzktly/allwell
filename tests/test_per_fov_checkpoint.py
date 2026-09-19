@@ -102,9 +102,18 @@ def test_save_then_load_round_trip(tmp_path):
         {"well": "A01", "fov": "F001", "area": 137, "mean_intensity": 1.5},
         {"well": "A01", "fov": "F001", "area": 92, "mean_intensity": 2.5},
     ]
-    _save_fov_checkpoint(tmp_path, "F001", records)
+    _save_fov_checkpoint(tmp_path, "F001", records,
+                         quality={"fov": "F001", "focus": 27.4,
+                                  "sat_frac": None})
     loaded = _load_fov_checkpoint(tmp_path, "F001")
-    assert loaded == records
+    assert loaded is not None
+    got_records, got_quality = loaded
+    assert got_records == records
+    # The quality rides in the SAME file as the records, so a resumed FOV is
+    # measured as completely as one that ran straight through. ``None`` for a
+    # metric that could not be computed has to survive the round trip too:
+    # collapsed to 0.0 it would be a measurement the plate score believes.
+    assert got_quality == {"fov": "F001", "focus": 27.4, "sat_frac": None}
 
 
 def test_save_writes_both_marker_and_records(tmp_path):
@@ -218,7 +227,7 @@ def test_simulated_resumption_skips_completed_fovs(tmp_path):
 
     # And the cached records load cleanly.
     loaded = _load_fov_checkpoint(tmp_path, "F001")
-    assert loaded == records_f1
+    assert loaded is not None and loaded[0] == records_f1
     # F002 has no checkpoint — caller must reprocess.
     assert _load_fov_checkpoint(tmp_path, "F002") is None
 
@@ -240,7 +249,7 @@ def test_full_well_records_assembly_after_resume(tmp_path):
     for fov_id, fresh in (("F001", None), ("F002", None), ("F003", f3)):
         cached = _load_fov_checkpoint(tmp_path, fov_id)
         if cached is not None:
-            assembled.extend(cached)
+            assembled.extend(cached[0])
         else:
             assembled.extend(fresh)  # type: ignore[arg-type]
             _save_fov_checkpoint(tmp_path, fov_id, fresh)  # type: ignore[arg-type]

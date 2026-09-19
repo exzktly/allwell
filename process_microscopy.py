@@ -49,7 +49,6 @@ Filename convention (underscore-separated):
 from __future__ import annotations
 
 import importlib.util
-import contextlib
 import json
 import logging
 import os
@@ -95,7 +94,7 @@ from util.schema import (  # noqa: F401  (re-exported for call sites and tests)
     parse_schema,
     validate_schema,
 )
-from util.zip_write import atomic_zip, replace_folder_with_archive, staging_path
+from util.zip_write import replace_folder_with_archive
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
 # here at module level.  They are imported inside _worker_init, after the
@@ -124,6 +123,8 @@ def __getattr__(name: str):  # PEP 562: only fires for names not in globals()
 # ``pipeline.stardist`` module (TensorFlow is imported lazily there; the model
 # is injected by ``_worker_init`` via ``set_model``). Re-exported so the
 # segmentation dispatch resolves them under this module too.
+import pipeline.field_quality as _field_quality
+from pipeline.field_quality import FOCUS_COLUMN  # noqa: F401 (re-exported)
 import pipeline.stardist as _stardist
 import pipeline.suspend as _suspend
 from pipeline.stardist import (
@@ -173,6 +174,9 @@ _LABELFREE_METHODS = ("cellpose_labelfree",)
 from pipeline.io import (  # noqa: F401
     _AtomicTextHandle, _fsync_path,
     _commit_staging_dir,
+    _compress_images_to_zip,
+    compress_images_to_zip,
+    extract_zip,
     _safe_atomic_text_write,
     _safe_imwrite,
     _safe_well,
@@ -477,135 +481,12 @@ def organize_loose_tifs_into_well_folders(
 
 # ---------------------------------------------------------------------------
 # Zip extraction / compression helpers
+#
+# ``extract_zip`` / ``compress_images_to_zip`` / ``_compress_images_to_zip``
+# live in ``pipeline.io`` beside ``merge_images_into_zip`` and
+# ``_verify_files_complete``, which are the same job: they are re-exported at
+# the top of this file, so every call site here and in the tests is unchanged.
 # ---------------------------------------------------------------------------
-
-def extract_zip(
-    zip_path: Path,
-    dest_dir: Path,
-    members_to_extract: set[str] | None = None,
-) -> int:
-    """
-    Extract image members of *zip_path* flat into *dest_dir*.
-
-    When *members_to_extract* is provided, only those base filenames are
-    extracted. This allows zip-mode processing to pull only the channel files
-    required by discovered image groups instead of unpacking every image.
-
-    CSV files and other non-image files inside the zip are skipped so
-    that outputs from a previous run packaged back into the input zip
-    cannot interfere with the current run or end up re-zipped in output.
-
-    Returns the number of image files extracted.
-    """
-    image_exts = set(GROUP_IMAGE_EXTS)
-    wanted = set(members_to_extract or [])
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    skipped: list[str] = []
-    extracted = 0
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        for member in zf.infolist():
-            # Strip any directory structure inside the zip; extract flat.
-            member_name = Path(member.filename).name
-            if not member_name:          # skip directory entries
-                continue
-            if member_name.startswith("."):
-                skipped.append(member_name)
-                continue
-            if Path(member_name).suffix.lower() not in image_exts:
-                skipped.append(member_name)
-                continue
-            if wanted and member_name not in wanted:
-                continue
-            target = dest_dir / member_name
-            with zf.open(member) as src, target.open("wb") as dst:
-                shutil.copyfileobj(src, dst)
-            extracted += 1
-    if skipped:
-        log.debug(
-            "Skipped %d non-image file(s) in %s: %s",
-            len(skipped), zip_path.name, ", ".join(skipped),
-        )
-    if wanted:
-        log.info("Extracted %d selected image(s) from %s -> %s", extracted, zip_path.name, dest_dir)
-    else:
-        log.info("Extracted %s  ->  %s", zip_path.name, dest_dir)
-    return extracted
-
-
-def compress_images_to_zip(image_dir: Path, out_zip: Path) -> int:
-    """
-    Compress all image files (TIF/TIFF/PNG) found in *image_dir* into
-    *out_zip*.  Returns the number of files added.
-    CSV files and any other non-image files are explicitly excluded.
-
-    Stray ``.tmp`` files left by a crashed atomic-write are skipped, and any
-    zero-byte file is logged + dropped so a partial / never-flushed write
-    can't be packaged into a corrupt archive.
-    """
-    return len(_compress_images_to_zip(image_dir, out_zip))
-
-
-def _compress_images_to_zip(image_dir: Path, out_zip: Path) -> list[Path]:
-    """The body of :func:`compress_images_to_zip`, returning the files packed.
-
-    A caller that then removes *image_dir* needs to know *which* files the
-    archive took, not how many: the extension filter, the ``.tmp`` skip and
-    :func:`_verify_files_complete` between them can all leave a file behind,
-    and deleting the directory takes those with it. The public function keeps
-    its count return for the call sites that only report a number.
-    """
-    include_exts = {".tif", ".tiff", ".png"}  # aw-image-exts-ok: what we write
-    candidate_files = sorted(
-        p for p in image_dir.iterdir()
-        if p.is_file()
-        and p.suffix.lower() in include_exts
-        and not p.name.endswith(".tmp")
-        # Stale _safe_imwrite / _AtomicTextHandle scratch files. The
-        # `__aw_tmp_` prefix is unique enough that user filenames
-        # don't false-positive (the old `.pid` substring would drop
-        # e.g. `exp.pidgin.A01.tif`).
-        and not p.name.startswith("__aw_tmp_")
-    )
-    image_files = _verify_files_complete(candidate_files)
-
-    if not image_files:
-        log.warning("No image files found in %s to compress.", image_dir)
-        return []
-
-    out_zip.parent.mkdir(parents=True, exist_ok=True)
-    # Build the zip via the same atomic-rename pattern the imwrite helper
-    # uses: stage at __aw_tmp_<out_zip>.pid<N>, fsync, verify, replace. Any
-    # caller that sees *out_zip* gets either the complete archive or the
-    # previous one — see util.zip_write.
-    tmp_zip = staging_path(out_zip)
-
-    def _cleanup_tmp() -> None:
-        try:
-            if tmp_zip.exists():
-                tmp_zip.unlink()
-        except OSError:
-            pass
-
-    def _build() -> None:
-        try:
-            with atomic_zip(out_zip) as zf:
-                for img_path in image_files:
-                    zf.write(img_path, arcname=img_path.name)
-        except BaseException:
-            _cleanup_tmp()
-            raise
-
-    # The out.zip is one of only two writes that must land on the output volume
-    # (the other is the per-well CSV), so it carries the same retry shield the
-    # image writer has always had — a transient fault here used to fail the
-    # whole well with a bare errno. Safe to re-run: staged to __aw_tmp_ and
-    # committed with os.replace.
-    retry_write(_build, what=out_zip.name, cleanup=_cleanup_tmp, path=out_zip)
-
-    log.info(
-        "Compressed %d image(s)  ->  %s", len(image_files), out_zip.name
-    )
-    return image_files
 
 
 def compress_folder_images_to_zip_and_remove(folder: Path, out_zip: Path) -> int:
@@ -777,7 +658,9 @@ def parse_filename(
 
 # The one image reader lives beside the writers in ``pipeline.io``, re-exported
 # so ``pm.load_2d_gray`` — the Playground's own frame reader — is unchanged.
-from pipeline.io import load_2d_gray  # noqa: F401,E402
+from pipeline.io import (  # noqa: F401,E402
+    load_2d_gray, load_2d_gray_with_ceiling,
+)
 
 # Empty-well (blank) sampling, the two model builders, the per-image lookup and
 # the guards live in the Qt-free ``pipeline.empty_well``. Re-exported here so
@@ -1055,158 +938,24 @@ def _segment_classical(image: np.ndarray) -> np.ndarray:
 #
 # The per-image sampler and timepoint helpers live in
 # ``pipeline.auto_threshold`` so the GUI's Cell Gating tab and this pipeline
-# run produce identical defaults on the same dataset. ``pipeline.auto_threshold``
-# depends only on ``numpy`` + ``random`` so the pipeline-only deployment
-# story is preserved.
+# run produce identical defaults on the same dataset; the pass that decides
+# which estimator applies and writes the result into the sidecar lives in
+# ``pipeline.auto_threshold_pass``. Both depend only on ``numpy`` + stdlib so
+# the pipeline-only deployment story is preserved.
 
 from pipeline.auto_threshold import (
     DEFAULT_CELLS_PER_IMAGE_CAP as _AUTO_THRESHOLD_CELLS_PER_IMAGE_CAP,  # noqa: F401
-    estimate_thresholds_from_outputs,
+    estimate_thresholds_from_outputs,  # noqa: F401
     pick_endpoint_timepoints as _pick_endpoint_timepoints,  # noqa: F401
     sample_cell_and_bg as _sample_cell_and_bg,  # noqa: F401
 )
-from pipeline.threshold_optimize import estimate_thresholds_from_controls
-from util.aw_safe import swallowed
-
-
-def _apply_thresholds_to_pipeline_info(
-    output_dir: Path,
-    thresholds: dict[str, float],
-    log: logging.Logger,
-) -> dict[str, float]:
-    """Merge ``thresholds`` into ``output_dir/pipeline_info.json`` under
-    ``cell_gating.thresh_frac_on``. User-set values are preserved.
-    """
-    if not thresholds:
-        return {}
-    info_path = output_dir / "pipeline_info.json"
-    if not info_path.exists():
-        info_path = output_dir.parent / "pipeline_info.json"
-    if not info_path.exists():
-        log.info("Auto-threshold: pipeline_info.json not found — defaults not persisted.")
-        return {}
-    try:
-        existing = json.loads(info_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        log.warning("Auto-threshold: cannot read %s: %s", info_path, exc)
-        return {}
-    if not isinstance(existing, dict):
-        return {}
-
-    cell_gating = dict(existing.get("cell_gating") or {})
-    tfo = dict(cell_gating.get("thresh_frac_on") or {})
-    written: dict[str, float] = {}
-    for ch, thr in thresholds.items():
-        if ch in tfo:  # never overwrite a user-set value
-            continue
-        tfo[ch] = float(thr)
-        written[ch] = float(thr)
-    if not written:
-        return {}
-    cell_gating["thresh_frac_on"] = tfo
-    existing["cell_gating"] = cell_gating
-    try:
-        write_json_atomic(info_path, existing)
-    except OSError as exc:
-        log.warning("Auto-threshold: cannot write %s: %s", info_path, exc)
-        return {}
-    return written
-
-
-def _segmentation_tokens(args) -> set[str]:
-    """Channel token(s) that ARE the segmentation input, lower-cased.
-
-    ``--nuclear_token`` (already remapped onto ``--phase_token`` for the
-    label-free methods by the time this runs) plus ``--cytoplasm_token`` under
-    seeded watershed — the same pair that joins ``fluor_tokens_for_quant``.
-    """
-    toks = {str(getattr(args, "nuclear_token", "") or "").strip().lower()}
-    if (getattr(args, "segmentation_method", "") == "stardist_seeded_watershed_cell"
-            and getattr(args, "cytoplasm_token", "")):
-        toks.add(str(args.cytoplasm_token).strip().lower())
-    return {t for t in toks if t}
-
-
-def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list[str],
-                            log: logging.Logger) -> dict[str, float]:
-    """Write the post-run per-channel ThreshFracOn defaults. Three modes:
-
-    * ``--no_auto_threshold`` — skip entirely.
-    * no control wells — Otsu on a pooled cell-mean / background-pixel
-      distribution (:func:`pipeline.auto_threshold.estimate_thresholds_from_outputs`).
-    * both control wells — the threshold maximising the relative fraction-on gap
-      between them, read from the per-well CSVs this run just wrote.
-
-    In both non-skip modes the segmentation channel is written **0**: it defines
-    cell boundaries rather than being something to gate on. Zero is not absent —
-    absent means the viewer's 50.0 default, whereas 0 counts every cell with a
-    positive intensity as ON, which is how the channel is neutralised.
-
-    Returns the channels actually written (existing values are never
-    overwritten). Never raises: auto-threshold is informational and the run's
-    real output is already on disk.
-    """
-    if getattr(args, "no_auto_threshold", False):
-        log.info("Auto-threshold skipped (--no_auto_threshold).")
-        return {}
-    try:
-        seg_tokens = _segmentation_tokens(args)
-        non_seg = [c for c in fluor_tokens_for_quant
-                   if str(c).strip().lower() not in seg_tokens]
-        pos = str(getattr(args, "pos_control_well", "") or "").strip()
-        neg = str(getattr(args, "neg_control_well", "") or "").strip()
-        if pos and neg:
-            log.info("Auto-threshold: control wells %s (positive) vs %s (negative).",
-                     pos, neg)
-            thresholds = estimate_thresholds_from_controls(
-                output_dir,
-                fluor_channels=non_seg,
-                csv_prefix=args.csv_prefix,
-                pos_well=pos,
-                neg_well=neg,
-                log=log,
-            )
-        else:
-            thresholds = estimate_thresholds_from_outputs(
-                output_dir,
-                fluor_channels=non_seg,
-                filename_schema=args.filename_schema,
-                filename_sep=args.filename_sep,
-                log=log,
-            )
-        # Which readout channels the estimate actually produced, before the
-        # segmentation channel's unconditional zero joins them — the two say
-        # very different things about the run and used to be reported as one.
-        estimated = sorted(thresholds)
-        for tok in seg_tokens:
-            thresholds[tok] = 0.0
-        written = _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
-        # Estimating nothing for every readout channel is a failure, and it has
-        # to be reported on its own terms rather than as part of the
-        # what-got-written summary: the segmentation channel's unconditional
-        # zero *is* a write, so it makes `written` truthy and the run reads as a
-        # success that happened to produce one value. That is exactly how the
-        # reported run looked.
-        if non_seg and not estimated:
-            log.warning(
-                "Auto-threshold: no threshold could be estimated for any of %s. "
-                "The per-well output archives yielded no usable image pairs — "
-                "see the per-well lines above for why.",
-                ", ".join(c.upper() for c in non_seg),
-            )
-        if written:
-            log.info(
-                "Auto-threshold defaults written for %d channel(s): %s",
-                len(written),
-                ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items()),
-            )
-        elif estimated or not non_seg:
-            log.info("Auto-threshold pass produced no new defaults "
-                     "(every channel already has a stored value).")
-        return written
-    except Exception as exc:
-        log.warning("Auto-threshold pass failed: %s", exc)
-        return {}
+from pipeline.threshold_optimize import estimate_thresholds_from_controls  # noqa: F401
+from pipeline.auto_threshold_pass import (  # noqa: F401
+    _apply_thresholds_to_pipeline_info,
+    _segmentation_tokens,
+    run_auto_threshold_pass,
+)
+from util.aw_safe import swallowed  # noqa: F401
 
 
 def build_processed_output_path(
@@ -1247,14 +996,58 @@ def build_processed_output_path(
 
 
 def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
-    """Load the nuclear frame + every fluor channel; verify shape consistency."""
+    """Load the nuclear frame + every fluor channel; verify shape consistency.
+
+    Returns ``(nir_raw, fluor_raws, acquisition)``. *acquisition* holds the
+    two metrics that can only be read **here**, and the two reasons are
+    different:
+
+    * ``sat_frac`` needs the camera's integer ceiling, which
+      :func:`pipeline.io.load_2d_gray` erases with its unconditional
+      ``float32`` cast — so this uses the sibling that hands the ceiling back.
+    * ``dyn_range`` needs the frame **before correction**.
+      :func:`_correct_image_group` divides by an illumination field and
+      subtracts a background, and both reshape the frame's spread, so measured
+      afterwards the number would describe the correction as much as the
+      acquisition.
+
+    **Focus is deliberately not among them any more.** It used to be, as a
+    frame-level statistic that had to be read here for the same reason
+    ``dyn_range`` does. It is now measured at each nucleus's own outline
+    (:func:`pipeline.field_quality.edge_focus`), which needs the segmentation
+    and therefore happens in :func:`_quantify_image_group` — on the
+    **corrected** frame the labels were computed from, so the outline the
+    estimator reads is the outline that was segmented. The correction
+    concern does not transfer: an edge's width is not something a flat-field
+    division or a background subtraction changes, which is the same property
+    that makes the measurement comparable between plates at all. Clipping is
+    the exception and it is upstream of everything here — a flat-topped
+    nucleus has a genuinely steeper edge, so a saturated plate reads sharper
+    than it is.
+
+    Costed rather than assumed: these two together are well under the ~0.4 s
+    the three used to take on a 2048² frame, against several seconds of
+    segmentation for the same group. There is no flag to switch them off; a
+    quality record that exists only when someone remembered to ask for it is
+    not one a plate-wide score can rely on. (The per-cell focus column *does*
+    have such a flag, and it is on by default for the same reason —
+    ``--no_focus_metric``.)
+    """
     log.info("Processing %s  (%d fluor channel(s): %s)",
              nuclear_path.name, len(fluor_paths), ", ".join(fluor_tokens))
     _stardist.set_fov_label(nuclear_path.name)
 
     _t = time.perf_counter()
-    nir_raw = load_2d_gray(nuclear_path)
+    nir_raw, _ceiling = load_2d_gray_with_ceiling(nuclear_path)
     log.info("  load nuclear: %.1f s  (shape %s)", time.perf_counter() - _t, nir_raw.shape)
+
+    _t = time.perf_counter()
+    acquisition = {
+        "sat_frac": _field_quality.saturated_fraction(nir_raw,
+                                                      dtype_max=_ceiling),
+        "dyn_range": _field_quality.dynamic_range(nir_raw),
+    }
+    log.info("  field quality: %.1f s  (pre-correction)", time.perf_counter() - _t)
 
     # Load every fluorescent channel and verify shape consistency.
     fluor_raws: list[np.ndarray] = []
@@ -1268,7 +1061,7 @@ def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
             )
         fluor_raws.append(img)
         log.info("  load fluor:  %.1f s  %s", time.perf_counter() - _t, fp.name)
-    return nir_raw, fluor_raws
+    return nir_raw, fluor_raws, acquisition
 
 
 def _correct_image_group(
@@ -1561,7 +1354,7 @@ def _write_processed_images(
 
 def _quantify_image_group(
     *, labels, fluor_tophat, fluor_tokens, nir_corr, nuclear_path, schema, sep,
-    shape_features,
+    shape_features, measure_focus: bool = True,
 ):
     """Per-nucleus intensity + shape/region quantification -> record dicts."""
     # Quantify each nucleus across all fluorescent channels.
@@ -1617,6 +1410,22 @@ def _quantify_image_group(
     # on this region area catches the blob that per-cell size misses.
     region_by_id = compute_region_areas(nir_corr, labels)
 
+    # Per-cell focus (always emitted), measured at each nucleus's own outline.
+    # It is the one focus number comparable between cells, fields, wells and
+    # plates — a transition WIDTH in pixels, so gain, pedestal, brightness and
+    # nucleus size barely move it, and only clipping moves it much. See
+    # ``pipeline.field_quality.edge_focus`` for the measured table, for why a
+    # score relative to its own frame cannot see a frame that is uniformly
+    # soft, and why every whole-image statistic confounds nucleus size with
+    # defocus. Measured on ``nir_corr``, the frame the labels were computed
+    # from, so the outline the estimator reads is the outline that was
+    # segmented.
+    # Off leaves the column out of the record entirely rather than filling it
+    # with a placeholder: a run that did not measure focus and a run that
+    # measured it and found nothing must not produce the same CSV.
+    focus_by_id = (_field_quality.cell_focus_by_label(nir_corr, labels)
+                   if measure_focus else {})
+
     for i, nid in enumerate(nuc_ids):
         rec: dict = {
             **meta,
@@ -1631,6 +1440,13 @@ def _quantify_image_group(
             rec[f"{pfx}_std_intensity"]   = float(stdv[i])
         rec.update(shape_by_id.get(int(nid), {}))
         rec["qc_region_area"] = float(region_by_id.get(int(nid), 0.0))
+        # Absent rather than 0.0 where the outline could not be measured: a
+        # cell nobody could measure and a cell measured and found soft are
+        # different facts, and pandas reads the empty CSV field as NaN, which
+        # every reader already treats as "no verdict".
+        if measure_focus:
+            _focus = focus_by_id.get(int(nid))
+            rec[FOCUS_COLUMN] = None if _focus is None else float(_focus)
         records.append(rec)
     log.info("  quantify:    %.1f s  (%d nuclei)", time.perf_counter() - _t, len(records))
 
@@ -1664,16 +1480,24 @@ def process_image_group(
     background_method: str = "sliding_disk",
     background_models: dict | None = None,
     qc_remove_debris: bool = False,
+    measure_focus: bool = True,
     cellpose_diameter: float = 0.0,
     cellpose_model: str = "cyto3",
     cellpose_flow_threshold: float = 0.4,
     cellpose_cellprob_threshold: float = 0.0,
     cellpose_nuclei_channel: str = "",
     phase_token: str = "",
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     """
     Process one nuclear image together with an arbitrary number of fluorescent
-    channel images.  Returns a list of per-nucleus measurement dicts.
+    channel images.
+
+    Returns ``(records, quality)`` — the per-nucleus measurement dicts, and the
+    one field-quality mapping for this FOV-group keyed by
+    :data:`pipeline.field_quality.METRIC_KEYS` plus the ``fov`` / ``timepoint``
+    that address it. Every metric may be ``None``: a value that could not be
+    computed is absent rather than zero, because a zero stored where nothing
+    was measured is a measurement the plate-wide score would then believe.
 
     *fluor_paths*        : one Path per fluorescent channel (same order as
                            *fluor_tokens*).
@@ -1687,7 +1511,8 @@ def process_image_group(
     Output CSV columns for each fluor channel are prefixed with the lower-cased
     token, e.g. "gfp_total_intensity", "mcherry_mean_intensity".
     """
-    nir_raw, fluor_raws = _load_image_group(nuclear_path, fluor_paths, fluor_tokens)
+    nir_raw, fluor_raws, acquisition = _load_image_group(
+        nuclear_path, fluor_paths, fluor_tokens)
 
     nir_raw, fluor_raws, nir_corr, fluor_tophat, fluor_corr = _correct_image_group(
         nir_raw, fluor_raws, nuclear_path=nuclear_path, nuclear_token=nuclear_token,
@@ -1737,11 +1562,23 @@ def process_image_group(
         background_method=background_method,
     )
 
-    return _quantify_image_group(
+    records = _quantify_image_group(
         labels=labels, fluor_tophat=fluor_tophat, fluor_tokens=fluor_tokens,
         nir_corr=nir_corr, nuclear_path=nuclear_path, schema=schema, sep=sep,
-        shape_features=shape_features,
+        shape_features=shape_features, measure_focus=measure_focus,
     )
+    parsed = parse_filename(nuclear_path, schema=schema, sep=sep)
+    return records, _field_quality.group_record(
+        acquisition=acquisition,
+        labels=labels,
+        corrected_image=nir_corr,
+        areas=[r["area"] for r in records if r.get("area") is not None],
+        cell_focus=([r.get(FOCUS_COLUMN) for r in records]
+                    if measure_focus else None),
+        fov=parsed.get("fov", ""),
+        timepoint=parsed.get("timepoint", ""),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Directory scan
@@ -1963,241 +1800,21 @@ def find_image_groups(
 # Worker initialiser
 # ---------------------------------------------------------------------------
 
-def _ensure_pkg_resources_shim() -> None:
-    """Install a minimal ``pkg_resources`` stand-in if setuptools' real
-    one is missing.
-
-    setuptools >= 80 and recent Python builds drop ``pkg_resources``,
-    but stardist's ``bioimageio_utils`` still does
-    ``from pkg_resources import get_distribution`` at import time. Back
-    that single call with ``importlib.metadata`` so the worker keeps
-    loading even when setuptools no longer ships the legacy module.
-    """
-    import sys as _sys
-    try:
-        import pkg_resources  # noqa: F401
-        return
-    except Exception:
-        swallowed()  # was: pass (silent except)
-    import types
-    from importlib import metadata as _md
-
-    class _DistInfo:
-        def __init__(self, version: str) -> None:
-            self.version = version
-
-    def _get_distribution(name: str) -> _DistInfo:
-        try:
-            return _DistInfo(_md.version(name))
-        except _md.PackageNotFoundError as exc:
-            raise Exception(f"DistributionNotFound: {exc}") from exc
-
-    shim = types.ModuleType("pkg_resources")
-    shim.get_distribution = _get_distribution           # type: ignore[attr-defined]
-    shim.DistributionNotFound = Exception               # type: ignore[attr-defined]
-    shim.VersionConflict = Exception                    # type: ignore[attr-defined]
-    shim.parse_version = lambda v: v                    # type: ignore[attr-defined]
-    _sys.modules["pkg_resources"] = shim
-
-
-# Substrings in an exception message that indicate a corrupt / truncated cached
-# model file (HDF5 weights or its download archive) rather than a transient
-# network / SSL problem — so we know it is safe to purge the cache and re-fetch.
-_CORRUPT_MODEL_MARKERS = (
-    "truncated file",
-    "unable to synchronously open file",
-    "file signature not found",
-    "bad object header",
-    "not a valid hdf5",
-    "unable to open file",
-    "bad magic number",         # truncated zip archive
-    "file is not a zip file",
+# The pretrained-weights cache, its cross-process download lock and the
+# pkg_resources shim now live in ``pipeline.stardist_cache`` — one job, and this
+# file is at its line budget. Re-exported rather than re-homed at the call sites
+# because both reach them through this module *by attribute at call time*:
+# ``services/frame_preview`` calls ``pm._load_stardist_pretrained(...)``, and the
+# tests patch ``pm._ensure_pkg_resources_shim`` expecting that call to see it.
+from pipeline.stardist_cache import (  # noqa: E402,F401 — re-exported
+    _ensure_pkg_resources_shim,
+    _load_stardist_pretrained,
+    _purge_stardist_cache,
+    _pid_alive,
+    _stardist_cache_models_dir,
+    _stardist_download_lock,
+    _stardist_lock_is_dead,
 )
-
-
-def _purge_stardist_cache() -> list[str]:
-    """Remove cached StarDist pretrained-model files so the next
-    ``from_pretrained`` re-downloads them.
-
-    ``StarDist2D.from_pretrained`` caches the model under the keras cache
-    (``$KERAS_HOME`` or ``~/.keras/models/…``) as ``weights_best.h5`` +
-    ``config.json``. A run interrupted mid-download (e.g. the worker was killed,
-    or an earlier failure aborted the pool) can leave a **truncated**
-    ``weights_best.h5``; the next run reuses it and h5py dies with
-    ``OSError: Unable to synchronously open file (truncated file: eof = …)``.
-
-    Deletes any model folder containing a StarDist weights file (and stray
-    ``*.h5`` / partial download archives) under each keras cache root. Returns
-    the paths removed, for logging.
-    """
-    roots: list[Path] = []
-    kh = os.environ.get("KERAS_HOME")
-    if kh:
-        roots.append(Path(kh))
-    roots.append(Path(os.path.expanduser("~")) / ".keras")
-    removed: list[str] = []
-    seen: set[str] = set()
-    for models in (r / "models" for r in roots):
-        if not models.is_dir():
-            continue
-        targets: set[Path] = set()
-        for p in models.rglob("*"):
-            if not p.is_file():
-                continue
-            low = p.name.lower()
-            if low == "weights_best.h5" or low.endswith("weights_best.h5"):
-                targets.add(p.parent)                       # whole model folder
-            elif low.endswith((".h5", ".zip", ".part", ".download", ".tmp")):
-                targets.add(p)                              # stray / partial file
-        for t in targets:
-            key = str(t)
-            if key in seen:
-                continue
-            seen.add(key)
-            try:
-                if t.is_dir():
-                    shutil.rmtree(t, ignore_errors=True)
-                else:
-                    t.unlink()
-                removed.append(key)
-            except OSError:
-                pass
-    return removed
-
-
-# Cross-process download serialisation (see _stardist_download_lock).
-_STARDIST_LOCK_TIMEOUT = 120.0   # s; max wait on a *live* download before going unlocked
-_STARDIST_LOCK_STALE   = 180.0   # s; reclaim a no-live-PID lock older than this
-_STARDIST_LOCK_POLL    = 0.25    # s between acquisition attempts
-
-
-def _pid_alive(pid: int) -> bool:
-    """Best-effort liveness check for a local PID (the download workers all share
-    the host). Unknown/unsupported (e.g. Windows ``os.kill(pid, 0)``) → assume
-    alive, so we never reclaim a lock we can't prove is dead."""
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False                       # definitively gone
-    except PermissionError:
-        return True                        # exists, owned by another user
-    except OSError:
-        return True                        # can't tell → assume alive (safe)
-    return True
-
-
-def _stardist_lock_is_dead(lockdir: Path) -> bool:
-    """A leaked lock is reclaimable when its recorded holder PID(s) are no longer
-    running (instant — the crashed/killed-worker case), or — no PID recorded, a
-    reused PID, or a hung holder — it is older than the stale window."""
-    pids: list[int] = []
-    try:
-        for p in lockdir.iterdir():
-            if p.name.startswith("pid.") and p.name[4:].isdigit():
-                pids.append(int(p.name[4:]))
-    except OSError:
-        return False
-    if pids and not any(_pid_alive(pid) for pid in pids):
-        return True                        # all recorded holders dead → reclaim now
-    try:
-        return (time.time() - lockdir.stat().st_mtime) > _STARDIST_LOCK_STALE
-    except OSError:
-        return False
-
-
-def _stardist_cache_models_dir() -> Path:
-    """Primary keras model-cache dir — ``$KERAS_HOME`` else ``~/.keras``, then
-    ``/models`` — where ``from_pretrained`` downloads the weights. Created if
-    missing. Mirrors the root logic in :func:`_purge_stardist_cache`."""
-    root = os.environ.get("KERAS_HOME") or os.path.join(os.path.expanduser("~"), ".keras")
-    models = Path(root) / "models"
-    models.mkdir(parents=True, exist_ok=True)
-    return models
-
-
-@contextlib.contextmanager
-def _stardist_download_lock(timeout: float | None = None):
-    """Cross-process advisory lock serialising the StarDist model download/purge.
-
-    All spawn-pool workers run ``_worker_init`` → ``from_pretrained`` at once; on
-    a cold cache they download the same file concurrently and truncate each
-    other (the recurring "cache corrupt" failure), and an unguarded purge can
-    delete another worker's in-flight download. Atomic ``os.mkdir`` of a lock
-    directory is the primitive: exactly one process wins and downloads; the rest
-    block, then load a *warm* cache. Degrades safely — on timeout, an unusable
-    cache dir, or any lock error, it proceeds WITHOUT the lock rather than fail
-    the run, and reclaims a stale lock left by a dead holder.
-    """
-    if timeout is None:                 # resolve at call time so tests can patch it
-        timeout = _STARDIST_LOCK_TIMEOUT
-    try:
-        lockdir = _stardist_cache_models_dir() / ".allwell_stardist_download.lock"
-    except OSError:
-        yield                       # cache dir unusable — run unsynchronised
-        return
-    deadline = time.monotonic() + timeout
-    held = False
-    while True:
-        try:
-            os.mkdir(lockdir)
-            held = True
-            # Record our PID so other workers can reclaim instantly if we die.
-            try:
-                (lockdir / f"pid.{os.getpid()}").touch()
-            except OSError:
-                pass
-            break
-        except FileExistsError:
-            # Reclaim immediately if the holder is dead (PID gone) — the leaked-
-            # lock-after-crash case — so a rerun never stalls for minutes; a
-            # genuinely live download is waited on up to the (short) timeout.
-            if _stardist_lock_is_dead(lockdir):
-                shutil.rmtree(lockdir, ignore_errors=True)
-                if lockdir.exists():            # couldn't remove → don't spin
-                    log.warning("StarDist download lock could not be reclaimed — "
-                                "proceeding without it.")
-                    break
-                continue
-            if time.monotonic() >= deadline:
-                log.warning("StarDist download lock held by a live process "
-                            ">%.0fs — proceeding without it.", timeout)
-                break
-            time.sleep(_STARDIST_LOCK_POLL)
-        except OSError:
-            break                   # can't create the lock (perms/fs) — unsynchronised
-    try:
-        yield
-    finally:
-        if held:
-            shutil.rmtree(lockdir, ignore_errors=True)
-
-
-def _load_stardist_pretrained(StarDist2D, name: str = "2D_versatile_fluo"):
-    """Load a StarDist pretrained model, recovering once from a corrupt cache.
-
-    If the first load fails because the cached weights / archive is truncated
-    (see :data:`_CORRUPT_MODEL_MARKERS`) — the classic symptom of a previous
-    run that died mid-download — purge the cache and re-download exactly once.
-    Any other error (and a second failure) propagates unchanged.
-
-    The whole body runs under :func:`_stardist_download_lock` so concurrent
-    workers serialise: only one downloads (the rest hit a warm cache), and the
-    purge+retry can't delete another worker's in-flight download.
-    """
-    with _stardist_download_lock():
-        try:
-            return StarDist2D.from_pretrained(name)
-        except Exception as exc:
-            if not any(m in str(exc).lower() for m in _CORRUPT_MODEL_MARKERS):
-                raise
-            removed = _purge_stardist_cache()
-            log.warning(
-                "StarDist model cache was corrupt (%s: %s) — purged %s and "
-                "re-downloading once.",
-                exc.__class__.__name__, exc, removed or "(nothing found to remove)")
-            return StarDist2D.from_pretrained(name)
 
 
 def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
@@ -2435,6 +2052,9 @@ def _process_groups_in_worker(
     staging dir); a per-FOV-group failure trace is written under
     ``<errors_dir>/errors/`` so "why did this timepoint fail?" has a durable
     answer even when the live log is muted. When None, no trace file is written.
+    It is also where this well's field-quality record is dropped, for the same
+    reason: the staging directory is deleted when the well finishes, and the
+    record has to outlive it to be collected into ``pipeline_info.json``.
 
     Returns (records, failed_names).
 
@@ -2476,9 +2096,16 @@ def _process_groups_in_worker(
     _fov_done = 0
     log.info("Well %s — %d FOV-group(s)", well_label, _fov_total)
 
+    #: One field-quality mapping per FOV-group that produced one, in whatever
+    #: order the groups finished. Written to the well's record at the end
+    #: against ``len(groups)``, so a well that failed, aborted or was suspended
+    #: part way declares the shortfall rather than presenting what it did
+    #: measure as the whole well.
+    quality_fields: list[dict] = []
+
     def _run_group(nuclear_path: Path, fluor_paths: list[Path]) -> list[dict]:
         _t0 = time.perf_counter()
-        recs = process_image_group(nuclear_path, fluor_paths, **kwargs)
+        recs, quality = process_image_group(nuclear_path, fluor_paths, **kwargs)
         log.info("FOV %s processed in %.1f s (%d nuclei)",
                  nuclear_path.name, time.perf_counter() - _t0, len(recs))
         for r in recs:
@@ -2489,13 +2116,25 @@ def _process_groups_in_worker(
         # appears "done" to the next invocation.
         try:
             _save_fov_checkpoint(tmp_images, _fov_stem(nuclear_path), recs,
-                                 settings_key)
+                                 settings_key, quality=quality)
         except OSError as ckpt_exc:
             log.warning(
                 "FOV %s — could not write checkpoint (%s); FOV will be "
                 "reprocessed on restart.", nuclear_path.name, ckpt_exc,
             )
+        _note_quality(quality)
         return recs
+
+    def _note_quality(quality: dict | None) -> None:
+        """Keep one FOV-group's quality, from whichever thread produced it.
+
+        ``list.append`` is atomic under the GIL and the FOV-group pool is a
+        ``ThreadPoolExecutor`` in this same process, so no lock is needed —
+        and the order does not matter, because every entry addresses itself
+        with its own ``fov`` / ``timepoint``.
+        """
+        if quality:
+            quality_fields.append(dict(quality))
 
     def _process_or_resume(
         nuclear_path: Path, fluor_paths: list[Path],
@@ -2505,11 +2144,18 @@ def _process_groups_in_worker(
         fov_id = _fov_stem(nuclear_path)
         cached = _load_fov_checkpoint(tmp_images, fov_id, settings_key)
         if cached is not None:
+            records, quality = cached
             log.info(
                 "FOV %s — resumed from checkpoint (%d records)",
-                nuclear_path.name, len(cached),
+                nuclear_path.name, len(records),
             )
-            return cached
+            # The checkpoint carries this group's quality precisely so a
+            # resumed well is measured as completely as one that ran straight
+            # through. Without it every resumed FOV would be a hole in the
+            # block, and a plate resumed once would be scored against a subset
+            # chosen by wherever the previous run happened to be killed.
+            _note_quality(quality)
+            return records
         return _run_group(nuclear_path, fluor_paths)
 
     # Storage that has run out does not recover mid-well. Without this a full
@@ -2612,6 +2258,25 @@ def _process_groups_in_worker(
             well_label, len(not_attempted), aborted_reason,
             ", ".join(not_attempted),
         )
+
+    # The well's quality record, against the number of FOV-groups the well
+    # HAS rather than the number that produced a measurement. A well that
+    # failed, aborted, or was suspended part way is then visibly partial in
+    # the artifact itself, which is what stops a plate-wide robust z being
+    # computed over a biased subset and reported as though it covered the
+    # plate. Best-effort: the writer swallows OSError and returns None,
+    # because a run that cannot write its own bookkeeping must still produce
+    # data.
+    # ``errors_dir`` is the persistent dataset output directory, despite its
+    # name (its docstring says so, and the per-FOV traces are only one thing it
+    # is used for). That is where the quality drop belongs: ``output_dir`` in
+    # *kwargs* is this well's staging directory, which the end-of-well cleanup
+    # deletes. None means the caller had no dataset directory to give, so there
+    # is nowhere to record and nothing to record it against.
+    if errors_dir is not None:
+        _field_quality.write_well_field_quality(
+            errors_dir, well_label, fields=quality_fields,
+            measured_of=_fov_total)
 
     return all_records, failed, aborted_reason, tuple(not_attempted)
 
@@ -3673,6 +3338,16 @@ def main() -> None:
                 "min_area": float(args.qc_min_area or 0.0),
                 "max_area": float(args.qc_max_area or 0.0),
                 "min_solidity": float(args.qc_min_solidity or 0.0),
+                "measure_focus": not args.no_focus_metric,
+                # RECORDED, not applied. The run measures the column and states
+                # the dataset's own cut; Review's Cell Gating tab is what acts
+                # on it, so a cut chosen wrongly costs a tick rather than a
+                # re-run. 0.0 means the run stated none -- which is the default,
+                # because the number depends mostly on the microscope and
+                # nothing in a run can guess it (Review's Cell Gating tab draws
+                # a well's own distribution, which is where a user finds
+                # theirs).
+                "focus_min": float(args.focus_min or 0.0),
             },
             phase_token=args.phase_token or "",
             execution_options=vars(args),
@@ -3822,6 +3497,7 @@ def main() -> None:
         background_method=args.background,
         background_models={},
         qc_remove_debris=args.qc_remove_debris,
+        measure_focus=not args.no_focus_metric,
         cellpose_diameter=args.cellpose_diameter,
         cellpose_model=args.cellpose_model,
         cellpose_flow_threshold=args.cellpose_flow_threshold,
@@ -3909,8 +3585,12 @@ def main() -> None:
     )
 
     # Any completeness records from a previous run in this output dir would be
-    # merged into this run's report; start clean.
+    # merged into this run's report; start clean. The same applies to the
+    # field-quality drops: left behind by an interrupted run, they would be
+    # folded into this run's block as though this run had measured them, and
+    # the well counts would then agree with nothing.
     clear_run_report(output_dir)
+    _field_quality.clear_field_quality(output_dir)
 
     # The boundary the end-of-run completeness check counts tracebacks from.
     # ``errors/`` is never cleared and its filenames carry a pid but no run id,
@@ -3995,6 +3675,15 @@ def main() -> None:
     # partly-failed well is indistinguishable from a whole one — see
     # pipeline/run_report.py.
     finalize_run_report(
+        output_dir, output_dir / PIPELINE_INFO_FILENAME,
+        atomic_writer=_safe_atomic_text_write, log=log,
+    )
+
+    # And each well's per-field quality metrics, the same way and for a
+    # related reason: without the block a defocused field is indistinguishable
+    # from a well one, and without its partial-well accounting a resumed run's
+    # biased subset is indistinguishable from a whole plate.
+    _field_quality.finalize_field_quality(
         output_dir, output_dir / PIPELINE_INFO_FILENAME,
         atomic_writer=_safe_atomic_text_write, log=log,
     )

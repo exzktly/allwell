@@ -40,6 +40,7 @@ from tifffile import imread, imwrite
 from skimage.segmentation import find_boundaries
 
 from util.retry_io import retry_io
+from util.image_exts import GROUP_IMAGE_EXTS
 from util.zip_write import atomic_zip, fsync_path, staging_path
 
 # Disk-capacity accounting (what the run needs, what is left, and how to say so
@@ -71,10 +72,43 @@ DEFAULT_SCRATCH_SUBDIR = Path(".allwell") / "scratch"
 
 def load_2d_gray(path: Path) -> np.ndarray:
     """Load a TIFF (or other format) as a 2-D float32 array."""
+    return load_2d_gray_with_ceiling(path)[0]
+
+
+def load_2d_gray_with_ceiling(path: Path) -> tuple[np.ndarray, float | None]:
+    """:func:`load_2d_gray`, plus the sensor maximum the file was stored at.
+
+    The array is identical — this calls the same reader and the same cast, and
+    :func:`load_2d_gray` is now a wrapper over this, so the two cannot drift.
+    What it adds is the number the cast destroys.
+
+    **Saturation is only knowable before the array becomes float.** A camera
+    writes integers with a hard ceiling (4095, 65535); the unconditional
+    ``float32`` cast above erases it, and "at the maximum" then means "at
+    3.4e38", which is identically zero for every field of every plate, for
+    ever — a number stored where nothing was measured. So the ceiling comes
+    back with the array and the caller passes it to
+    :func:`pipeline.field_quality.saturated_fraction`.
+
+    ``None`` for a float source, where there genuinely is no sensor ceiling to
+    report, and ``None`` is how that subsystem spells "nobody could say".
+
+    Comparing the float32 array against the *integer* ceiling is exact for the
+    dtypes a microscope actually writes: float32 carries 24 bits of mantissa,
+    so every ``uint8`` and ``uint16`` value round-trips. It would not be exact
+    for ``uint32`` or ``int64``, which no camera emits here; those are still
+    reported, and a value one ULP below the ceiling would read as saturated.
+    """
     img = imread(str(path))
     while img.ndim > 2:
         img = img[0]
-    return img.astype(np.float32)
+    ceiling: float | None = None
+    dt = np.asarray(img).dtype
+    if np.issubdtype(dt, np.integer):
+        ceiling = float(np.iinfo(dt).max)
+    elif np.issubdtype(dt, np.bool_):
+        ceiling = 1.0
+    return img.astype(np.float32), ceiling
 
 
 def default_scratch_base() -> Path | None:
@@ -604,6 +638,144 @@ def write_csvs_per_well(
 # CSV, and the new output images are merged into the existing ``<well>_out.zip``.
 # All three are atomic (tmp → fsync → rename) and de-dup so a re-run is a no-op.
 # ---------------------------------------------------------------------------
+
+# ── the input archive, and the output archive ───────────────────────────────
+#
+# The reader and the writer for a well's own ``.zip``, here rather than in
+# ``process_microscopy`` because ``merge_images_into_zip`` below and
+# ``_verify_files_complete`` above are the same job, and a second spelling of
+# "which members of an archive are images" is exactly the drift this module
+# exists to prevent. ``process_microscopy`` re-exports both names.
+
+
+def extract_zip(
+    zip_path: Path,
+    dest_dir: Path,
+    members_to_extract: set[str] | None = None,
+) -> int:
+    """
+    Extract image members of *zip_path* flat into *dest_dir*.
+
+    When *members_to_extract* is provided, only those base filenames are
+    extracted. This allows zip-mode processing to pull only the channel files
+    required by discovered image groups instead of unpacking every image.
+
+    CSV files and other non-image files inside the zip are skipped so
+    that outputs from a previous run packaged back into the input zip
+    cannot interfere with the current run or end up re-zipped in output.
+
+    Returns the number of image files extracted.
+    """
+    image_exts = set(GROUP_IMAGE_EXTS)
+    wanted = set(members_to_extract or [])
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    skipped: list[str] = []
+    extracted = 0
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for member in zf.infolist():
+            # Strip any directory structure inside the zip; extract flat.
+            member_name = Path(member.filename).name
+            if not member_name:          # skip directory entries
+                continue
+            if member_name.startswith("."):
+                skipped.append(member_name)
+                continue
+            if Path(member_name).suffix.lower() not in image_exts:
+                skipped.append(member_name)
+                continue
+            if wanted and member_name not in wanted:
+                continue
+            target = dest_dir / member_name
+            with zf.open(member) as src, target.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+            extracted += 1
+    if skipped:
+        log.debug(
+            "Skipped %d non-image file(s) in %s: %s",
+            len(skipped), zip_path.name, ", ".join(skipped),
+        )
+    if wanted:
+        log.info("Extracted %d selected image(s) from %s -> %s", extracted, zip_path.name, dest_dir)
+    else:
+        log.info("Extracted %s  ->  %s", zip_path.name, dest_dir)
+    return extracted
+
+
+def compress_images_to_zip(image_dir: Path, out_zip: Path) -> int:
+    """
+    Compress all image files (TIF/TIFF/PNG) found in *image_dir* into
+    *out_zip*.  Returns the number of files added.
+    CSV files and any other non-image files are explicitly excluded.
+
+    Stray ``.tmp`` files left by a crashed atomic-write are skipped, and any
+    zero-byte file is logged + dropped so a partial / never-flushed write
+    can't be packaged into a corrupt archive.
+    """
+    return len(_compress_images_to_zip(image_dir, out_zip))
+
+
+def _compress_images_to_zip(image_dir: Path, out_zip: Path) -> list[Path]:
+    """The body of :func:`compress_images_to_zip`, returning the files packed.
+
+    A caller that then removes *image_dir* needs to know *which* files the
+    archive took, not how many: the extension filter, the ``.tmp`` skip and
+    :func:`_verify_files_complete` between them can all leave a file behind,
+    and deleting the directory takes those with it. The public function keeps
+    its count return for the call sites that only report a number.
+    """
+    include_exts = {".tif", ".tiff", ".png"}  # aw-image-exts-ok: what we write
+    candidate_files = sorted(
+        p for p in image_dir.iterdir()
+        if p.is_file()
+        and p.suffix.lower() in include_exts
+        and not p.name.endswith(".tmp")
+        # Stale _safe_imwrite / _AtomicTextHandle scratch files. The
+        # `__aw_tmp_` prefix is unique enough that user filenames
+        # don't false-positive (the old `.pid` substring would drop
+        # e.g. `exp.pidgin.A01.tif`).
+        and not p.name.startswith("__aw_tmp_")
+    )
+    image_files = _verify_files_complete(candidate_files)
+
+    if not image_files:
+        log.warning("No image files found in %s to compress.", image_dir)
+        return []
+
+    out_zip.parent.mkdir(parents=True, exist_ok=True)
+    # Build the zip via the same atomic-rename pattern the imwrite helper
+    # uses: stage at __aw_tmp_<out_zip>.pid<N>, fsync, verify, replace. Any
+    # caller that sees *out_zip* gets either the complete archive or the
+    # previous one — see util.zip_write.
+    tmp_zip = staging_path(out_zip)
+
+    def _cleanup_tmp() -> None:
+        try:
+            if tmp_zip.exists():
+                tmp_zip.unlink()
+        except OSError:
+            pass
+
+    def _build() -> None:
+        try:
+            with atomic_zip(out_zip) as zf:
+                for img_path in image_files:
+                    zf.write(img_path, arcname=img_path.name)
+        except BaseException:
+            _cleanup_tmp()
+            raise
+
+    # The out.zip is one of only two writes that must land on the output volume
+    # (the other is the per-well CSV), so it carries the same retry shield the
+    # image writer has always had — a transient fault here used to fail the
+    # whole well with a bare errno. Safe to re-run: staged to __aw_tmp_ and
+    # committed with os.replace.
+    retry_write(_build, what=out_zip.name, cleanup=_cleanup_tmp, path=out_zip)
+
+    log.info(
+        "Compressed %d image(s)  ->  %s", len(image_files), out_zip.name
+    )
+    return image_files
+
 
 # Image extensions packed into an output well-zip (mirrors compress_images_to_zip
 # in process_microscopy). Kept here so merge_images_into_zip is self-contained

@@ -202,7 +202,8 @@ def test_a_lone_failure_does_not_stop_the_well(monkeypatch):
         seen.append(Path(nuclear_path).name)
         if "f3" in Path(nuclear_path).name:
             raise OSError("transient")
-        return [{"nucleus_id": 1}]
+        # (records, quality) — the group reports its own field quality.
+        return [{"nucleus_id": 1}], {"fov": Path(nuclear_path).stem}
 
     monkeypatch.setattr(pm, "process_image_group", _one_bad)
     groups = [(Path(f"exp_RFP_C02_f{i}_t0.tif"), []) for i in range(8)]

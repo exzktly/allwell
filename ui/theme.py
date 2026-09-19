@@ -224,6 +224,7 @@ class Colors:
     drop_shadow_md  = "rgba(0, 0, 0, 0.35)"        # --sh-2 floating overlay shadow
     inner_line_dk   = "rgba(0, 0, 0, 0.40)"        # --sh-1 hairline drop
     success_glow    = "rgba(74, 222, 128, 0.12)"   # halo around the "saved" dot
+    notice_wash     = "rgba(245, 158, 11, 0.10)"   # Notice panel fill (--warn at 10%)
 
 
 class CPub:
@@ -981,6 +982,36 @@ QWidget#ActiveGroupBanner {{
     border-radius: {r.sm}px;
 }}
 QLabel#Danger  {{ color: {c.danger}; }}
+/* A refusal, a validation failure, a scan that declined. Same colour as
+   Danger because the palette has one "this did not work" tone and two names
+   for it would be two tones within a release; the names differ in what they
+   describe, not in how loud they are -- Danger warns about what an action
+   WILL do, Error reports what something DID. Unstyled until now, which meant
+   the schema-validation labels in the Analyze form and the Zip Loose Folder
+   page rendered their errors in ordinary body colour. */
+QLabel#Error   {{ color: {c.danger}; }}
+/* A result the user must not skim past, that is NOT a failure: a detection
+   that could not guess, or a shortfall in what a guess covers. Two choices,
+   both deliberate.
+
+   Amber, not red. In this app red means a run died -- "Failures recorded" on
+   the plate legend, "failed" in the Wells legend -- and a scan that declined
+   to guess broke nothing and put no data at risk. Amber is already the tone
+   for "look at this, it is not what you wanted" (Partial, Completeness), and
+   spending red here would devalue it where it matters.
+
+   A panel, not only a colour. Sampled off the rendered audit, the muted body
+   grey and the danger red have relative luminance 0.241 and 0.233 -- a 3%
+   difference, so desaturated the two states were the same picture, with hue
+   carrying the whole signal for a state the user must not miss. The wash and
+   the left rule change the block's SHAPE, which survives greyscale, colour
+   vision deficiency, and the edge of vision. */
+QLabel#Notice  {{
+    color: {c.warn};
+    background: {c.notice_wash};
+    border-left: 2px solid {c.warn};
+    padding: 6px 8px;
+}}
 QLabel#Success {{ color: {c.success}; }}
 QLabel#Warn    {{ color: {c.warn}; }}
 

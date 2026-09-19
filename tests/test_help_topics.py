@@ -20,6 +20,8 @@ module), never re-typed here: a hand-copied roster tests itself, not the app.
 from __future__ import annotations
 
 import ast
+
+from tests._repo_scan import parse_source
 import re
 from pathlib import Path
 
@@ -42,24 +44,42 @@ def _headings() -> list[str]:
 
 
 def _analyze_section_titles() -> list[str]:
-    """The ``self._section(parent, "<title>", …)`` titles, in build order.
+    """The ``self._section(parent, "<title>", …)`` titles across the whole pane.
 
     Read from the source rather than by constructing the form: the titles are
     the map's keys, and a new section added without a topic has to fail here.
+
+    Every ``analyze/`` module, not ``analyze/form.py`` alone. The form is
+    assembled from mixins — ``seg_params``, ``schema_section``,
+    ``form_chrome`` — and a section builder that moves into one of them
+    vanishes from a scan pinned to the one file, taking its title with it. That
+    is not a quiet loss in either direction: the forward test stops checking a
+    section that still exists, and the reverse test reports its perfectly live
+    help key as naming a section that no longer exists. Extracting the Filename
+    Schema section did exactly that, and the reverse test is what noticed.
     """
-    src = (REPO_ROOT / "analyze/form.py").read_text(encoding="utf-8")
     titles: list[str] = []
-    for node in ast.walk(ast.parse(src)):
-        if not isinstance(node, ast.Call):
+    # Globbed from this module's own ``REPO_ROOT`` rather than through
+    # ``_repo_scan.python_sources``: ``test_guards_bite`` proves this guard by
+    # pointing that name at a synthetic tree, and a file list resolved from
+    # ``_repo_scan``'s own root would walk the real repository instead, leaving
+    # the proof measuring nothing. Parsing still goes through the shared cache
+    # (``tests/test_the_fast_lane_stays_fast.py``), which is the part that
+    # costs.
+    for path in sorted((REPO_ROOT / "analyze").rglob("*.py")):
+        if "__pycache__" in path.parts:
             continue
-        func = node.func
-        if not (isinstance(func, ast.Attribute) and func.attr == "_section"):
-            continue
-        # _section(parent, title, …) — the title is the second positional arg.
-        if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
-            value = node.args[1].value
-            if isinstance(value, str):
-                titles.append(value)
+        for node in ast.walk(parse_source(path)):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and func.attr == "_section"):
+                continue
+            # _section(parent, title, …) — the title is the second positional arg.
+            if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
+                value = node.args[1].value
+                if isinstance(value, str):
+                    titles.append(value)
     return titles
 
 
@@ -132,7 +152,7 @@ def test_every_datasets_tool_has_a_topic():
 
 def test_every_analyze_section_has_a_topic():
     titles = _analyze_section_titles()
-    assert titles, "found no _section() calls in analyze/form.py — parser drifted"
+    assert titles, "found no _section() calls under analyze/ — parser drifted"
     missing = [t for t in titles if t not in help_topics.ANALYZE_SECTION_HELP]
     assert not missing, (
         "Analyze form sections with no entry in help_topics.ANALYZE_SECTION_HELP; "

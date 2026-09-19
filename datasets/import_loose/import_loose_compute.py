@@ -287,3 +287,84 @@ def group_files_by_well(
     schema = parse_schema(filename_schema)
     result = _walk(Path(search_dir), schema=schema, sep=filename_sep, recursive=recursive)
     return result.by_well
+
+
+@dataclass(frozen=True)
+class SchemaDetection:
+    """What to do with a schema guess on this page, and what to say about it.
+
+    Pure, so the rule can be tested without building the page. ``apply`` is
+    whether the guess is good enough to write into the picker; ``message`` is
+    the sentence shown beneath it; ``problem`` styles that sentence as a refusal
+    rather than as a quieter success.
+    """
+
+    apply: bool
+    message: str
+    problem: bool
+
+    #: Deliberately absent as a field. The Analyze host puts the guess's
+    #: shortfall — which files will be skipped and why — in a second, louder
+    #: register beneath the summary. This page must not: its own readout
+    #: already ends with "N of M file(s) didn't match the schema and would be
+    #: left alone (e.g. …)", two lines below, in the same size and colour. Two
+    #: vocabularies for one count, stacked, is redundancy rather than emphasis
+    #: — and the page's own line is the better written of the two, because it
+    #: states the consequence rather than the mechanism.
+
+
+def detection_for_grouping(guess) -> SchemaDetection:
+    """Judge an inferred schema against what **this page** requires to run.
+
+    The first version of this function reasoned from what grouping needs in
+    principle — a well position and nothing else — and concluded that a
+    single-channel plate, whose constant channel token means no channel slot
+    can be placed, should be accepted here even though Analyze declines it.
+
+    That was wrong, and wrong in the way :file:`CLAUDE.md` §7.3 #6 describes:
+    it contradicted a comment six lines from the check that refutes it.
+    :meth:`~datasets.import_loose.view.ImportLoosePage._can_run` blocks on
+    ``SchemaPicker.errors()``, which validates against
+    ``util.schema.PIPELINE_REQUIRED_FIELDS`` — ``("channel", "well")`` — and
+    that comment already says why: *"a schema with no 'channel' produces
+    archives Analyze cannot then read, which is the only reason to build
+    them."* Applying a channel-less guess therefore turned a working page into
+    a dead one on a single press, with Run and Queue dark and the explanation
+    filed under success.
+
+    So the test is both fields, the same pair the run requires — and the
+    refusal says what is missing and what it costs, rather than declining
+    silently.
+    """
+    if guess is None:
+        return SchemaDetection(
+            False,
+            "No filename layout could be detected in that folder — the schema "
+            "below is unchanged.",
+            True,
+        )
+    fields = getattr(guess, "fields", [])
+    missing = [f for f in ("well", "channel") if f not in fields]
+    if not missing:
+        return SchemaDetection(True, guess.summary(), False)
+    if missing == ["channel"]:
+        # Named separately because it is the case a reader will think should
+        # have worked: the well is right there, and grouping by well is all
+        # this page does. The archives are the part that cannot work.
+        return SchemaDetection(
+            False,
+            f"{guess.summary()} No channel position was identified — every "
+            f"sampled filename carries the same one, or none. The archives "
+            f"this page writes are read by Analyze, which needs a channel, so "
+            f"the schema below is unchanged: set the channel position by hand "
+            f"if these files carry one.",
+            True,
+        )
+    names = " or ".join(missing)
+    return SchemaDetection(
+        False,
+        f"{guess.summary()} No {names} position was identified, so these files "
+        f"cannot be grouped into archives Analyze can read and the schema "
+        f"below is unchanged.",
+        True,
+    )

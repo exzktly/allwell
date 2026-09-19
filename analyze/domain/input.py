@@ -170,8 +170,29 @@ class AnalyzeInputMixin:
             guess = infer_from_dir(folder)
         except Exception:
             swallowed()  # a scan must never break folder selection
+            self._set_schema_detection(
+                "That folder could not be read, so no layout was detected.",
+                problem=True)
+            self._report_scan_guess(None)
             return
         if guess is None:
+            # Nothing recognisable, which is not the same as nothing found: the
+            # modal token count decides the layout, so this is also what a
+            # folder whose unparseable names outnumber its parseable ones
+            # returns. Either way the form is left exactly as the user set it,
+            # and saying so is the difference between a scan that declined and
+            # a scan that silently rewrote nothing.
+            self._set_schema_detection(
+                "Couldn't read a layout from these filenames — your settings "
+                "above are unchanged.", problem=True)
+            # The dashboard has to be told too. Both refusals used to return
+            # before this, so a scan that found nothing left the previous
+            # scan's line standing — and once the picker gained a readout of
+            # its own, the two surfaces openly contradicted each other: the
+            # dashboard naming a schema it had applied, the readout saying
+            # none was detected. Visible in the rendered audit, not in any
+            # test, because no test reads two widgets at once.
+            self._report_scan_guess(None)
             return
         # Sidecar-shaped keys, because that is what `_apply_pipeline_info` takes
         # and what `guess.channel_tokens().as_pipeline_info()` below already
@@ -201,10 +222,21 @@ class AnalyzeInputMixin:
             info.update(tokens.as_pipeline_info())
         if info:
             self._apply_pipeline_info(info)
+        # Beside the fields it just wrote, not only on the dashboard: the
+        # dashboard line scrolls away and these two fields keep values that look
+        # hand-entered for as long as the form is open.
+        if guess.confident:
+            self._set_schema_detection(guess.summary(), note=guess.shortfall())
+        else:
+            self._set_schema_detection(
+                f"{guess.summary()} No well and channel pair was identified, "
+                f"so your settings above are unchanged.", problem=True)
         self._report_scan_guess(
-            tokens, schema=guess.schema_str if guess.confident else "")
+            tokens, schema=guess.schema_str if guess.confident else "",
+            shortfall=guess.sampled - guess.matched)
 
-    def _report_scan_guess(self, tokens, *, schema: str = "") -> None:
+    def _report_scan_guess(self, tokens, *, schema: str = "",
+                           shortfall: int = 0) -> None:
         """State what the folder scan filled in, on the run dashboard.
 
         *schema* is the schema the scan actually applied, or ``""`` when it
@@ -227,6 +259,11 @@ class AnalyzeInputMixin:
             if tokens.phase_token:
                 part += f"; phase {tokens.phase_token}"
             parts.append(part)
+        # The dashboard asserted a clean scan while the picker's readout
+        # qualified it, so a reader who took the top line and skipped the
+        # sidebar started a run believing every file was in play.
+        if shortfall > 0:
+            parts.append(f"{shortfall} file(s) will not match")
         msg = "Scanned folder: " + "; ".join(parts)
         if tokens is not None:
             msg += " — check before running"

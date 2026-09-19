@@ -70,15 +70,6 @@ _POLL_BUDGET_S = 0.015
 # insert. Whichever limit is reached first ends the slice.
 _POLL_MAX_LINES = 500
 
-_PREVIEW_TOKENS = {
-    "experiment": "Exp01",
-    "well":       "B03",
-    "fov":        "F001",
-    "timepoint":  "02d04h30m",
-    "ignore":     "X",
-}
-
-
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
@@ -425,69 +416,6 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
     # _collapse_seg_param_stack / _refresh_segmentation_hints) live in
     # analyze.seg_params.AnalyzeSegParamsMixin, beside the parameter panel
     # they drive.
-
-    # ------------------------------------------------------------------
-    # Schema helpers
-    # ------------------------------------------------------------------
-    # The separator / dropdowns / schema-string control is
-    # ``widgets.schema_picker.SchemaPicker``, shared with the Datasets pane's
-    # Zip Loose Folder page. These read through to it; the preview below is the
-    # part that is genuinely Analyze's, since it is drawn from the channel
-    # tokens entered further down this same form.
-    def _schema_field_list(self) -> list[str]:
-        return self._schema_picker.fields()
-
-    def _schema_errors(self) -> list[str]:
-        return self._schema_picker.errors()
-
-    def _build_schema_arg(self) -> str:
-        return self._schema_picker.schema()
-
-    def _filename_sep(self) -> str:
-        return self._schema_picker.separator()
-
-    def _refresh_schema_preview(self) -> None:
-        if not hasattr(self, "_schema_picker") or not hasattr(self, "_schema_err_lbl"):
-            return
-        errors = self._schema_errors()
-        fields = self._schema_field_list()
-        sep = self._filename_sep()
-        schema_valid = not errors
-
-        if hasattr(self, "_input_edit"):
-            self._input_edit.setEnabled(schema_valid)
-            self._browse_btn.setEnabled(schema_valid)
-        if hasattr(self, "_folder_lock_lbl"):
-            self._folder_lock_lbl.setText("" if schema_valid else "Define the filename schema above first.")
-
-        if errors:
-            self._schema_err_lbl.setText("  ".join(errors))
-            self._schema_preview_lbl.setText("")
-            if hasattr(self, "_run_btn"):
-                self._run_btn.setEnabled(False)
-            return
-
-        self._schema_err_lbl.setText("")
-        if hasattr(self, "_run_btn"):
-            # A valid schema is necessary, not sufficient. This runs from four
-            # controls that stay live during a run — the segmentation-channel
-            # edit, every fluorescent row's edit, add/remove row, and the
-            # schema picker — so enabling unconditionally re-armed Run while a
-            # plate was still going, and pressing it started a second pipeline
-            # into the same output directory. `_set_running_ui_state` owns the
-            # other half of this flag; both must agree.
-            self._run_btn.setEnabled(not self._running)
-
-        nuclear_tok = (self._nuclear_token_edit.text().strip() if hasattr(self, "_nuclear_token_edit") else "NIR") or "NIR"
-        fluor_toks  = self._fluor_tokens_list() if self._fluor_rows else ["GFP"]
-        fluor_toks  = fluor_toks or ["GFP"]
-
-        def _make_example(chan_tok: str) -> str:
-            parts = [chan_tok if f == "channel" else _PREVIEW_TOKENS.get(f, "X") for f in fields]
-            return sep.join(parts) + ".tif"
-
-        lines = [f"e.g. {_make_example(nuclear_tok)}"] + [f"     {_make_example(t)}" for t in fluor_toks[:2]]
-        self._schema_preview_lbl.setText("\n".join(lines))
 
     # ------------------------------------------------------------------
     # Log panel

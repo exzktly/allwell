@@ -300,12 +300,30 @@ A common end-to-end run, from raw images to plots, takes five clicks:
 2. **Open input folder** — point at the folder of raw TIFs (or a folder of
    per-well ZIPs). All-Well briefly scans the filenames and **auto-fills the
    filename schema and channel tokens** it detects (including a best-guess
-   nuclear/fluorescent/phase role per channel). The status line under the run
-   controls names what it found and which channel it gave the segmentation role,
-   because the filled-in fields otherwise look exactly like ones you typed —
-   check them and adjust if the guess is off. Note that channels are listed in
-   filename order, which is usually alphabetical rather than the order they were
-   acquired in.
+   nuclear/fluorescent/phase role per channel). Because the filled-in fields
+   otherwise look exactly like ones you typed, two places say what happened: the
+   status line under the run controls names the channels it found and which one
+   it gave the segmentation role, and a readout under the Filename Schema
+   control says what layout was detected and **how many of the sampled filenames
+   actually match it**. When some do not, it names them and says why — for
+   example *"1 of the 25 filenames sampled does not fit this layout:
+   Exp01_GFP_ZZ9_f0_t0 — position 3 is 'ZZ9', not a well"*. A name whose **well**
+   position is not a valid well is not grouped into any archive and so is not
+   analysed, and the readout says so when that is the position at fault; a
+   mismatch elsewhere means the token is read as-is, which is worth checking but
+   does not lose the file. The count is of the sample — the scan reads a few
+   hundred names, not the whole plate. Channels are listed in filename order,
+   which is usually alphabetical rather than the order they were acquired in.
+
+   **Detect from filenames** re-runs that scan on demand. Use it after typing
+   over the guess, after fixing the separator by hand, or after pointing the
+   input field at a different folder without going through the browser. If
+   nothing can be detected it says so in amber and leaves your settings alone —
+   it never overwrites a schema with a worse guess. The same button is on the
+   Datasets pane's **Zip Loose Folder** page, which asks the same question about
+   the same filenames; that page needs only the well position, so it will accept
+   a layout Analyze declines (a single-channel plate, where there is no channel
+   position to find).
 3. Confirm the schema and channel tokens. Click **Run**.
 4. When the log prints "Processing complete" the app auto-switches to
    **Review** and loads the output folder.

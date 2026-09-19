@@ -437,3 +437,43 @@ def test_a_record_that_cannot_be_written_does_not_fail_the_run(tmp_path,
 def test_the_staging_directory_is_hidden_so_it_is_not_dataset_output():
     from pipeline.field_quality import FIELD_QUALITY_DIRNAME
     assert FIELD_QUALITY_DIRNAME.startswith(".")
+
+
+def test_the_smallest_nuclei_carry_a_known_bias_and_it_is_bounded():
+    """**A limitation, pinned so it cannot quietly get worse.**
+
+    At the pipeline's smallest accepted nucleus (``min_nucleus_area_px`` 50,
+    about 4 px radius) the interior left after eroding the ring is one or two
+    pixels wide and sits right against the transition, so it cannot give a
+    noise estimate separate from the edge. ``edge_focus`` falls back to the
+    background-only floor there, which is the biased estimator the two-sided
+    one replaced — and the bias reads *sharper*.
+
+    Measured, that makes the score **non-monotone at radius 4**: it falls from
+    sharp to one stop of defocus and then rises again. The fallback is
+    preferred to the alternative, which was returning ``None`` for every cell
+    at two stops of defocus — going silent at exactly the defocus the metric
+    exists to catch.
+
+    So this asserts what is actually true rather than what would be nice: at
+    radius 4 the sharp field still reads far above every defocused one, and
+    the rise among the defocused values stays inside a stated bound. A change
+    that widens it fails here instead of shipping quietly.
+    """
+    sharp = _field(radius=4.0, n_cells=20, seed=0, defocus=0.0)
+    soft = [_field(radius=4.0, n_cells=20, seed=0, defocus=d)
+            for d in (1.0, 2.0, 3.0)]
+    assert all(v is not None for v in soft), (
+        "the fallback exists so the smallest nuclei never go silent")
+    # The sharp-versus-soft separation survives, which is what the gate needs.
+    assert sharp > max(soft) * 2.0, (sharp, soft)
+    # And the known rise among the soft values is bounded. It is a rise -- the
+    # bias is real -- so this is a ceiling on it, not a monotonicity claim.
+    assert max(soft) / min(soft) < 2.5, soft
+
+    # Larger nuclei have an interior to measure and stay monotone, which is
+    # what localises the defect rather than leaving it a property of the
+    # estimator as a whole.
+    big = [_field(radius=8.0, n_cells=20, seed=0, defocus=d)
+           for d in (0.0, 1.0, 2.0, 3.0)]
+    assert all(big[i] > big[i + 1] for i in range(len(big) - 1)), big

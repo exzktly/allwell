@@ -239,6 +239,87 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None,
     return field
 
 
+#: The verdict layers, in the order a cell's exclusion is *explained*.
+#:
+#: Order is about the reader, not about precedence — the composition is an AND,
+#: so a cell failing three layers is out for all three and no one of them is
+#: "the" cause. Manual comes first because it is the one the user did and the
+#: only one they can undo from this tab; the rest follow the chokepoint's own
+#: order. Derived from one roster so the overlay, the readout and the legend
+#: cannot come to disagree about which layers exist.
+EXCLUSION_LAYERS = (
+    ("Included", "deleted here"),
+    ("QC_Pass", "debris gate"),
+    ("Crop_Pass", "outside the crop"),
+    ("Gate_Pass", "outside the scatter gates"),
+    ("Field_Pass", "field flagged by the run"),
+    ("Focus_Pass", "out of focus"),
+)
+
+
+def _verdict(sub, column):
+    """One layer's 0/1 for every row of *sub*; all-pass when it is absent.
+
+    The same fail-open the chokepoint applies, spelled the same way: a layer
+    that never ran, or ran and was switched off, keeps every row.
+    """
+    if column not in sub.columns:
+        return pd.Series(1, index=sub.index)
+    return pd.to_numeric(sub[column], errors="coerce").fillna(1).astype(int)
+
+
+def review_build_exclusion_reasons(
+    ctx, mask_arr, well: str, fov: str, tp: str,
+) -> dict[int, tuple[str, ...]]:
+    """``{nid: the layers that removed this cell}`` — empty tuple when kept.
+
+    **The overlay used to compose only three of the six layers**, so a cell the
+    focus gate or the run's field verdict had dropped was drawn as included
+    while every plot, statistic and export left it out. One picture, two
+    answers, with nothing on screen saying which was right. This is the single
+    derivation both the overlay and the Segmentation tab's "why was this
+    removed" readout now go through, so the two cannot drift apart again.
+
+    A tuple rather than one name because the composition is an AND: a cell can
+    fail several layers at once and naming only the first would tell a user to
+    undo something that would not bring it back.
+    """
+    center = _np.asarray(mask_arr)
+    reasons: dict[int, tuple[str, ...]] = {
+        int(nid): () for nid in _np.unique(center) if int(nid) > 0
+    }
+    df = get_rows(ctx, well)
+    if df is None or df.empty:
+        return reasons
+    keys = review_row_keys_series(ctx, df)
+    if keys is None:
+        return reasons
+    fov_eq = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "")
+    sub = df.loc[fov_eq.fillna(False).to_numpy()]
+    if sub.empty:
+        return reasons
+    sub_keys = keys.loc[sub.index]
+    nids = list(sub_keys.map(lambda k: k[2]).map(_safe_int_or_none))
+    columns = {col: list(_verdict(sub, col)) for col, _label in EXCLUSION_LAYERS}
+    overrides = ctx.runtime.review.included_overrides or {}
+    for row, nid in enumerate(nids):
+        if nid is None or nid not in reasons:
+            continue
+        failed = []
+        for col, label in EXCLUSION_LAYERS:
+            value = columns[col][row]
+            if col == "Included":
+                # The live override wins over the cached column, which is what
+                # makes a click take effect before the next projection.
+                ovr = overrides.get((well, fov, tp, str(nid)))
+                if ovr is not None:
+                    value = 0 if str(ovr).strip() == "0" else 1
+            if not value:
+                failed.append(label)
+        reasons[nid] = tuple(failed)
+    return reasons
+
+
 def review_build_include_map(
     ctx, mask_arr, well: str, fov: str, tp: str,
 ) -> dict[int, bool]:
@@ -247,58 +328,12 @@ def review_build_include_map(
     A8 D4: ctx-native — rows come from the ctx ``get_rows`` service and the
     manual overrides from the live ``ctx.runtime.review.included_overrides``.
     """
-    center = _np.asarray(mask_arr)
-    include_by_nid: dict[int, bool] = {
-        int(nid): True for nid in _np.unique(center) if int(nid) > 0
-    }
-    df = get_rows(ctx, well)
-    if df is not None and not df.empty:
-        keys = review_row_keys_series(ctx, df)
-        if keys is not None:
-            fov_eq = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "")
-            sub = df.loc[fov_eq.fillna(False).to_numpy()]
-            if not sub.empty:
-                sub_keys = keys.loc[sub.index]
-                nids = sub_keys.map(lambda k: k[2]).map(_safe_int_or_none)
-                incl = sub["Included"].map(lambda v: int(float(str(v).strip() or "1")) if str(v).strip() not in ("",) else 1)
-                # QC layer (QC_Pass) composes with manual/gating Included: a
-                # cell shows excluded when it fails QC *or* is manually/gated
-                # out (effective = manual-keep AND passes-QC). Absent column →
-                # all-pass (older data / QC off).
-                if "QC_Pass" in sub.columns:
-                    qc = sub["QC_Pass"].map(lambda v: int(float(str(v).strip() or "1")) if str(v).strip() not in ("",) else 1)
-                else:
-                    qc = pd.Series(1, index=sub.index)
-                # Crop layer (Crop_Pass) composes the same way: a cell whose
-                # centroid is outside the crop region shows excluded. Absent
-                # column → all-pass (no crop / older data).
-                if "Crop_Pass" in sub.columns:
-                    crop = sub["Crop_Pass"].map(lambda v: int(float(str(v).strip() or "1")) if str(v).strip() not in ("",) else 1)
-                else:
-                    crop = pd.Series(1, index=sub.index)
-                overrides = ctx.runtime.review.included_overrides or {}
-                for nid, base_incl, qc_pass, crop_pass in zip(nids, incl, qc, crop):
-                    if nid is None:
-                        continue
-                    ovr = overrides.get((well, fov, tp, str(nid)))
-                    if ovr is not None:
-                        inc = (str(ovr).strip() != "0")
-                    elif nid in include_by_nid:
-                        inc = bool(base_incl)
-                    else:
-                        continue
-                    include_by_nid[nid] = inc and bool(qc_pass) and bool(crop_pass)
-    # Apply overrides for cells present in the mask but without a CSV row
-    # (e.g. when no pipeline results are loaded yet).
-    for (ovr_well, ovr_fov, ovr_tp, ovr_nid), val in (ctx.runtime.review.included_overrides or {}).items():
-        if ovr_well != well or ovr_fov != fov or ovr_tp != tp:
-            continue
-        nid = _safe_int_or_none(ovr_nid)
-        if nid is None:
-            continue
-        if nid in include_by_nid:
-            include_by_nid[nid] = (val.strip() != "0")
-    return include_by_nid
+    # Derived from the reason map rather than recomposing the layers here.
+    # Two compositions of one AND is how the overlay came to show three layers
+    # while the chokepoint applied six, and a cell the focus gate had dropped
+    # was drawn as included.
+    reasons = review_build_exclusion_reasons(ctx, mask_arr, well, fov, tp)
+    return {nid: not why for nid, why in reasons.items()}
 
 
 def review_build_mfi_map(

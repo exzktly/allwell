@@ -94,6 +94,15 @@ class ReviewImageState:
     flatfield_field_cache: dict = field(default_factory=dict)
     binary_mask: bool = False
     show_outline: bool = True
+    #: Colour each excluded cell by the layer that removed it.
+    #:
+    #: Off by default: the overlay's normal job is to show what is kept, and a
+    #: field of differently-coloured rejects is a diagnostic view rather than
+    #: the working one. On, it is the only surface in the app that answers
+    #: "why is this cell gone" — which matters most for the layers a click
+    #: cannot undo, since the inclusion chokepoint is an AND and manual
+    #: curation cannot out-vote a verdict column.
+    show_exclusion_layers: bool = False
     boundary_color: tuple[int, int, int] = (255, 64, 64)
     selected_color: tuple[int, int, int] = (255, 230, 64)
     tint_color: tuple[int, int, int] = (255, 255, 255)

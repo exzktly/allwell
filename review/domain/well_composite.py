@@ -124,8 +124,16 @@ def score_well(well: str, focus_values, *, cut: float | None = None,
     fields and by how much of it is unmeasurable, both of which stand on their
     own. Inventing a cut here is the thing §D.2d measured and refused.
     """
-    vals = [v for v in (focus_values or ()) if v is not None]
-    total = len(list(focus_values or ()))
+    # Materialised ONCE. The first version filtered the iterable and then
+    # called ``len(list(...))`` on it again: handed a generator -- which this
+    # function's own docstring accepts -- the second pass saw an exhausted one,
+    # so ``total`` came back 0 and ``unmeasurable`` **negative**, and a well
+    # that was half unmeasurable was silently not flagged. A silently wrong
+    # number, in the module whose whole point is that missing evidence must be
+    # visible.
+    measured = list(focus_values or ())
+    vals = [v for v in measured if v is not None]
+    total = len(measured)
     unmeasurable = total - len(vals)
     median = _median(vals) if vals else None
     soft = sum(1 for v in vals if cut is not None and v < cut)
@@ -135,18 +143,26 @@ def score_well(well: str, focus_values, *, cut: float | None = None,
         noun = "field" if flagged_fields == 1 else "fields"
         reasons.append(flagged_note or
                        f"{flagged_fields} {noun} flagged by the run")
-    if cut is not None and median is not None and median < cut:
-        # The pooled statistic, and the strongest of the three -- a whole well
-        # softer than the cut is not a gradient, it is a well that was out of
-        # focus. Said first among the focus reasons for that reason.
-        reasons.append(f"the whole well is soft — median focus "
-                       f"{median:.3g}, below {cut:g}")
-    elif cut is not None and vals and soft / len(vals) > SOFT_FRACTION:
-        # Only when the median is fine: a well already called soft outright
-        # does not also need to be told what share of it is soft, and saying
-        # both reads as two findings where there is one.
-        reasons.append(f"{soft:,} of {len(vals):,} cells below {cut:g} "
-                       f"({soft / len(vals):.0%})")
+    if cut is not None and vals and soft / len(vals) > SOFT_FRACTION:
+        # **One rule, two sentences.** These were two branches, and the first
+        # was strictly dominated by the second: ``median < cut`` means more
+        # than half the cells are below it, which always exceeds a
+        # SOFT_FRACTION of 10 %, so the share rule fired on every well the
+        # median rule did. The pooled statistic §D.2c cites as the median
+        # rule's justification was therefore never what surfaced a well.
+        #
+        # The share is what decides; the median only changes how it is said,
+        # because "the whole well is soft" and "a third of it is" send a
+        # reader to different places and the number alone does not distinguish
+        # them.
+        share = soft / len(vals)
+        if median is not None and median < cut:
+            reasons.append(f"the whole well is soft — median focus "
+                           f"{median:.3g}, below {cut:g} "
+                           f"({soft:,} of {len(vals):,} cells, {share:.0%})")
+        else:
+            reasons.append(f"{soft:,} of {len(vals):,} cells below {cut:g} "
+                           f"({share:.0%})")
     if total and unmeasurable / total > UNMEASURABLE_FRACTION:
         reasons.append(f"{unmeasurable:,} of {total:,} cells carry no focus "
                        f"value ({unmeasurable / total:.0%}) — their outlines "

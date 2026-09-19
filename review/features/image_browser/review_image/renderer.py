@@ -376,6 +376,17 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
             state.review_image.include_cache.clear()
         state.review_image.include_cache[ic_key] = include_by_nid
 
+    # Which layer removed each excluded cell, for the "Why removed" overlay
+    # and the hover readout. Built only when the overlay asks for it, since it
+    # reads the well's rows; the include map above is derived from the same
+    # function, so the two cannot disagree about who is out.
+    reasons_by_nid = None
+    if bool(state.review_image.show_exclusion_layers):
+        from review.features.image_browser.review_image.collect import (
+            review_build_exclusion_reasons,
+        )
+        reasons_by_nid = review_build_exclusion_reasons(ctx, center, well, fov, tp)
+
     # Per-cell MFI for the hover tooltip — the displayed channel's
     # {chan}_mean_intensity keyed by nucleus id. Rebuilt each refresh so it
     # tracks the active channel / FOV / timepoint; empty for non-fluor overlays.
@@ -408,7 +419,7 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
         ctx,
         fluor_arr, center, include_by_nid,
         fit_lut=False, preserve_view=preserve_view, boundary=boundary,
-        above_by_nid=above_by_nid,
+        above_by_nid=above_by_nid, exclusion_reasons=reasons_by_nid,
     )
 
 
@@ -464,6 +475,7 @@ def draw_review_image(
     preserve_view: bool = False,
     boundary=None,
     above_by_nid: dict[int, bool] | None = None,
+    exclusion_reasons: dict[int, tuple] | None = None,
 ) -> None:
     # A8 D4: ctx-native pixmap compositor. Typed view/colour state lives on
     # ``ctx.state.review_image`` / ``ctx.state.image_view``; the QLabel host +
@@ -570,6 +582,24 @@ def draw_review_image(
             draw_boundary = boundary & include_mask
             boundary_color = _np.asarray(state.review_image.boundary_color, dtype=_np.uint8)
             rgb[draw_boundary] = boundary_color
+        # Excluded cells get an outline too, in the ink of the layer that
+        # removed them -- the only place in the app that says WHICH one did.
+        # Drawn whether or not the kept cells' outline is on, because the
+        # question "why is this one gone" is asked of a picture where the
+        # answer is invisible by construction.
+        if bool(state.review_image.show_exclusion_layers) and exclusion_reasons:
+            inks = _layer_inks()
+            for nid, layers in exclusion_reasons.items():
+                if not layers:
+                    continue
+                # The FIRST layer names the outline, and the readout names them
+                # all: an outline can only be one colour, and manual comes
+                # first in that roster because it is the one a click undoes.
+                ink = inks.get(layers[0])
+                if ink is None:
+                    continue
+                rgb[boundary & (center == int(nid))] = _np.asarray(
+                    _rgb_of(ink), dtype=_np.uint8)
             if sel_nid is not None:
                 sel_color = _np.asarray(state.review_image.selected_color, dtype=_np.uint8)
                 sel_boundary = boundary & (center == int(sel_nid))
@@ -1065,6 +1095,60 @@ def toggle_review_image_binary_mask(ctx) -> None:
     ctx.state.review_image.preserve_view_on_refresh = True
     refresh_review_image_ctx(ctx)
 
+
+
+#: Ink for each exclusion layer, keyed by the label
+#: ``collect.EXCLUSION_LAYERS`` gives it. Design tokens, never literals
+#: (ARCHITECTURE §8) — and chosen so the two the user can act on are the two
+#: that stand out: what they deleted, and what a threshold removed.
+#:
+#: ``accent2`` is deliberately absent: the plate's colour vocabulary reserves
+#: it and forbids it for anomaly use, and this overlay borrows that rule
+#: rather than inventing a second one.
+def _layer_inks():
+    from ui import theme
+    return {
+        "deleted here": theme.Colors.danger,
+        "debris gate": theme.Colors.warn,
+        "outside the crop": theme.Colors.text_muted,
+        "outside the scatter gates": theme.Colors.text_muted,
+        "field flagged by the run": theme.Colors.accent,
+        "out of focus": theme.Colors.success,
+    }
+
+
+def _rgb_of(hex_colour) -> tuple:
+    h = str(hex_colour).lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def refresh_review_image_layers_btn(ctx) -> None:
+    btn = ctx.runtime.review_image.layers_btn
+    if btn is None:
+        return
+    on = bool(ctx.state.review_image.show_exclusion_layers)
+    btn.setChecked(on)
+    btn.setText("Why removed: On" if on else "Why removed: Off")
+    btn.setToolTip(
+        "Colour each excluded cell by the layer that removed it — you\n"
+        "deleted it, the debris gate, the crop, the scatter gates, the\n"
+        "run's field verdict, or the focus cut.\n"
+        "\n"
+        "Inclusion is the AND of all six, so a cell can fail more than one\n"
+        "and the readout names every layer that dropped it. That also means\n"
+        "clicking a cell back in CANNOT restore one a verdict column\n"
+        "removed — raise the threshold, or turn that layer off, instead."
+    )
+
+
+def toggle_review_image_exclusion_layers(ctx) -> None:
+    """Flip the why-was-this-removed colouring on/off and refresh."""
+    ctx.state.review_image.show_exclusion_layers = not bool(
+        ctx.state.review_image.show_exclusion_layers
+    )
+    refresh_review_image_layers_btn(ctx)
+    ctx.state.review_image.preserve_view_on_refresh = True
+    refresh_review_image_ctx(ctx)
 
 
 def toggle_review_image_outline(ctx) -> None:

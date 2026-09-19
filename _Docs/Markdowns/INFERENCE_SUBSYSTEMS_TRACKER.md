@@ -707,6 +707,75 @@ one synthetic fixture is not a calibration (§0.10). The subsystem's existing
 rule applies unchanged: **report the map, propose the region, let the user
 confirm.** Nothing is excluded that the user has not seen.
 
+### D.2a Per cell as well as per field — measured
+
+**Yes, and it makes the rest simpler.** One column, `focus`, beside the
+per-cell shape features the pipeline already emits. Only focus is a per-cell
+property at all: `dyn_range`, `bg_level`, `nuc_count` and `nuc_area_median`
+are field aggregates by definition, and per-cell clipping is already
+derivable from the max-intensity columns each channel writes.
+
+**The size worry does not materialise for one column.** Measured at the
+precision the pipeline writes, on the 120,000-cell well
+`process_microscopy`'s own docstring names as a big one:
+
+| precision | per well | per cell |
+|---|---|---|
+| full `repr` | 2.22 MB | 18.5 B |
+| **4 significant figures** | **0.71 MB** | **5.9 B** |
+| 3 significant figures | 0.58 MB | 4.8 B |
+
+Against a CSV already at ~154 B/row, one 4-sig-fig column is about 4 % of a
+17-column file and less of a real one. A *vector* per cell would be the thing
+to refuse; one number is not.
+
+**Store the raw self-normalised value, not a "Focused" score.** The gateable
+form is the value relative to its own field's median — but that is derivable
+from the raw values plus the centroid columns already in the CSV, while the
+raw value is **not** recoverable from the relative one. And the difference is
+not academic:
+
+| frame blurred uniformly at σ | raw per-cell median | relative-to-field median |
+|---|---|---|
+| 0.0 | 28.36 | **1.000** |
+| 1.5 | 15.73 | **1.000** |
+| 3.0 | 8.44 | **1.000** |
+
+Normalising at write time destroys the only reading that can see a uniformly
+soft frame. Writing the raw number keeps both.
+
+### D.2b The finding that changes the plan: do **not** gate per cell
+
+A per-cell score separates sharp from soft *on average* — across a smooth
+focus gradient in one frame, the relative medians run 1.554 → 1.212 → 0.842
+→ 0.604 from the sharp edge to σ≈2.2. But a single cell is far too noisy to
+decide on. On a **uniformly sharp** frame with cell radii 0.9–2.4 px and
+amplitudes 600–6000:
+
+| population | p5 | median | p95 |
+|---|---|---|---|
+| sharp cells, varied size and brightness | **0.619** | 1.000 | 1.707 |
+| cells at σ≈2.2 in the gradient frame | — | **0.604** | — |
+
+The fifth percentile of perfectly sharp cells and the median of badly
+defocused ones are the same number. A 25×25 patch is not enough pixels, and
+any per-cell threshold would remove a large share of good cells and keep a
+large share of bad ones.
+
+**So: measure per cell, decide on a pooled statistic.** Pooling roughly
+thirty cells into a tile is exactly what pulled the sharp population to
+0.86–0.87 and the soft to 0.41–0.57 in §D.1 — the same statistic at n≈30
+rather than n=1.
+
+**And pooling from the CSV removes the decode.** With a `focus` column beside
+`shape_centroid_row` / `shape_centroid_col`, Review can build the tile map
+from the measurements alone: no image read, no `_out.zip` open, no re-run for
+the *map*. The exclusion is then per cell by centroid — the "sections of
+fields" behaviour — with no change to the crop's cardinality at all, which
+retires D6 before it is written. The one real cost is that the column is a
+new per-cell measurement, so a dataset only gets it by being re-run; D8's
+image-decode route stays the fallback for plates nobody will re-run.
+
 ### D.3 What it hangs off
 
 The machinery already exists and it is the machinery the user named.
@@ -729,11 +798,13 @@ the plate marker and the persistence are unchanged.
 | D1 | `focus_map(image, tiles)` — the self-normalised tiled statistic, undefined where a tile holds no signal | `todo` | `pipeline/field_quality.py` | the D.1 table, re-measured against the shipped function rather than against the probe |
 | D2 | **The density confound must not come back.** A guard that a uniformly sharp frame's map is flat across a thirty-fold range of cell count | `todo` | `tests/` | mutation: normalise by the frame variance and the guard fails at 0.02 |
 | D3 | An undefined tile is `None`, never 0.0, and the region proposal skips it rather than treating it as soft | `todo` | `pipeline/field_quality.py` | §7 #3 |
+| D3a | **One per-cell `focus` column**, raw and self-normalised, written beside the shape features. Not a "Focused" score: the relative form is derivable from the raw plus the centroids, the raw is not recoverable from the relative, and a uniformly soft frame is invisible in the relative form (§D.2a) | `todo` | `pipeline/shape_features.py` + `process_microscopy._quantify_image_group` | the §D.2a size table re-measured on a real well; a fixture blurred uniformly must move the raw column and leave the relative one at 1.000 |
+| D3b | **Nothing gates on a single cell.** A guard that the per-cell value is pooled before any verdict is taken | `todo` | `review/` | §D.2b: p5 of sharp cells is 0.619 against a defocused median of 0.604. Mutation: threshold per cell and the guard fails |
 | D4 | Per-cell verdict from a tile map + the cell's centroid, replacing the per-field one where a map exists | `todo` | `review/data/field_quality_cache.py` | the existing `Field_Pass` tests must still pass — this narrows the rule, it does not add a layer |
 | D5 | The proposal surface: the flagged field on Segmentation with its soft tiles outlined and the numbers shown | `todo` | `review/features/image_browser/` | driven through the real control (§7.6) |
-| D6 | Confirming writes a **per-field** region. Today there is one crop rectangle for the whole dataset (`ctx.state.dataset.crop_region`) | `todo` | `review/features/crop/` | the scope mechanism already exists (`FrameScope`); the cardinality does not |
-| D7 | Whole-field exclusion stays, off and secondary — a frame with no usable tiles at all falls out of the per-tile rule anyway | `todo` | `review/features/qc/tab_view.py` | |
-| D8 | **Where the map is computed.** Review, on demand, so every existing dataset benefits with no re-run — costs one decode per field inspected | `todo` | `review/` | the alternative (store it in the sidecar) needs a re-run of every plate and grows the block ~64× per field |
+| D6 | Confirming writes a **per-field** region, needing a crop cardinality this app does not have | `declined` | — | Retired by D3a before it was written. With a per-cell `focus` column the exclusion is per cell by centroid, which is what "remove only the soft sections" means and needs no rectangle at all — a focus gradient or a coverslip tilt is not a box, so a rectangle was always the wrong shape for it. The crop tool keeps its single region for the manual case it already serves |
+| D7 | Whole-field exclusion stays, off and secondary — and the per-cell column is **blind** to a uniformly soft frame once normalised, so the per-field metric is what still sees that case. The two are complementary, not alternatives | `todo` | `review/features/qc/tab_view.py` | the §D.2a table: relative median 1.000 at σ 0, 1.5 and 3.0 |
+| D8 | **Where the map is computed.** From the CSV — the per-cell column plus the centroids already there — so no image decode and no `_out.zip` open. Decoding in Review stays the fallback for plates nobody will re-run | `todo` | `review/` | the one real cost of the column is that a dataset gets it only by being re-run |
 | D9 | Renders, UX review, scientific review, docs, version bump, PR | `todo` | — | |
 
 ---

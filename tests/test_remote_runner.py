@@ -2047,6 +2047,16 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/completeness.py",
         # The blank-well sampler + model builders behind empty_well correction.
         "pipeline/empty_well.py",
+        # Per-field image-quality metrics (focus, saturation, dynamic range,
+        # background level), computed inside the quantification pass itself —
+        # so unlike the client-side entries below, the remote worker really
+        # does import this one.
+        "pipeline/field_quality.py",
+        # The pretrained-weights cache directory and the cross-process
+        # download lock that stops N workers fetching the same model at once.
+        # ``process_microscopy`` re-exports these, and the remote worker loads
+        # its model through them on every run.
+        "pipeline/stardist_cache.py",
         "pipeline/flatfield.py",
         # Per-FOV resume checkpoints, keyed on the output directory and the
         # settings so one plate cannot resume another's intermediates.

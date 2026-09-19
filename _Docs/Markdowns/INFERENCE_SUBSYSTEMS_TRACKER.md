@@ -405,7 +405,7 @@ to read before designing, not a question to put to a reviewer.
 | # | Row | State | Place | Evidence |
 |---|---|---|---|---|
 | A1 | **Discriminative-power gate.** On real plates: does the focus metric separate a defocused field from an in-focus one by more than biology separates two legitimate wells? The section does not proceed if it does not. (The first draft's A1 measured metric *cost*, which a `laplace` on a 2048² array passes trivially — a gate that cannot fail, §0.9 broken in row 1.) | `blocked` | needs real plates | the measured separation, written into this row |
-| A2 | Fix the normaliser | `done` | `pipeline/field_quality.focus_score` | **Normalised Tenengrad** — gradient energy over image variance. Gain 0.25/1/4 → 27.34/27.47/27.48; pedestal 0/100/1000 → 27.48/27.47/27.43; cell count 20→600 → 27.37–27.55 (**1.4 %**); defocus σ 0/1/2/4 → 27.47/19.60/10.43/4.19. Across three seeds at five cell counts, sharp (27.27–27.64) and defocused σ=2 (10.16–11.84) **do not overlap**. The rejected `var(laplace)/mean²` spans 30× on gain, 707× on pedestal and 6.7× on cell count alone |
+| A2 | Fix the normaliser | `done`, then **superseded** | `pipeline/field_quality.edge_focus` (`focus_score` is deleted — see §D.2-2 and row D5) | The normalised Tenengrad this row shipped was measured on the axis it was fixed for and was sound there: gain 0.25/1/4 → 27.34/27.47/27.48; pedestal 0/100/1000 → 27.48/27.47/27.43; cell count 20→600 → 27.37–27.55 (**1.4 %**); defocus σ 0/1/2/4 → 27.47/19.60/10.43/4.19; across three seeds at five cell counts, sharp (27.27–27.64) and σ=2 (10.16–11.84) **do not overlap**. The rejected `var(laplace)/mean²` spans 30× on gain, 707× on pedestal and 6.7× on cell count alone. What this row never measured is nucleus **size**, where the same statistic moves 7.8× against a 3.7× defocus signal (§D.2-1) — which is what deleted it |
 | A3 | Per-metric justification for "deviation from the plate implies artifact", and the split it produces | `done` | `field_quality.ACQUISITION_METRICS` / `BIOLOGICAL_METRICS`, justified in both module docstrings | three of six survived: focus, saturation, dynamic range. Nucleus count, median area and background are scored **within a well across its fields** and never plate-wide |
 | A4 | Extract a cohesive module from `process_microscopy.py` | `done` | `pipeline/stardist_cache.py` — the pkg_resources shim, Keras cache lookup, cross-process download lock, dead-holder reclaim and corrupt-cache purge | 4048 → 3828, budget ratcheted down. Two module constants could not follow the re-export (a re-export is a binding); the recovery tests now patch the module that owns them |
 | A5 | Extract a cohesive module from `services/remote_runner.py` to create headroom (§0.6) | `done` | `services/remote_conda.py` — how a command is built to run inside the remote's conda environment | one job asked in four places (single-run launch, batched driver, scheduler handoff, pre-flight probe) and needing the identical answer in all four: which env a host's `remote_python` resolves to, named or absolute prefix, what `conda run` argv that is, and the shell guard that proves it exists. 7326 → 7141, ratcheted down. Every name re-exported, so no call site and no test moved |
@@ -849,16 +849,22 @@ Laplacian's inversion was then re-checked on that same clean fixture in case
 it had the same cause — it did not, and is real at every band width, which is
 what sent the search to the noise floor.
 
-### D.2-2 What this says about the metric already built
+### D.2-2 What this did to the metric already built
 
-Section A's `focus_score` is the frame-level single-scale Tenengrad, so it
-carries the same 2.08 confounder. It is mitigated rather than absent: a plate
-is normally one cell line, and the score is a robust z **within a timepoint
-across the plate**, so a confounder roughly constant across the plate largely
-cancels. It is not mitigated on a plate with two cell lines, or where
-confluence changes nuclear size between conditions. Recorded here rather than
-in a commit message because A1 is the gate that can answer it, and this is now
-part of what A1 has to measure.
+Section A shipped `focus_score`, the frame-level single-scale Tenengrad,
+carrying the 2.08 confounder above. **It is deleted rather than mitigated.**
+The mitigation available to it was that a plate is normally one cell line and
+the score is a robust z within a timepoint across the plate, so a confounder
+roughly constant across the plate largely cancels — which fails on a plate with
+two cell lines, and fails where confluence changes nuclear size between
+conditions, and which cannot in principle see a plate that is uniformly soft.
+
+The field's `focus` is now the **median of its cells' own boundary values**
+(`field_focus`), so the field-level and cell-level numbers are the same
+measurement at two poolings rather than two different statistics that can
+disagree. That is what closes A.2: the field metric no longer carries a
+confounder for the plate-wide robust z to cancel, and it is absolutely
+comparable, so a uniformly soft plate is visible to it.
 
 ### D.2a Per cell as well as per field — measured
 
@@ -897,7 +903,9 @@ not academic:
 Normalising at write time destroys the only reading that can see a uniformly
 soft frame. Writing the raw number keeps both.
 
-### D.2b The finding that changes the plan: do **not** gate per cell
+### D.2b Why the Tenengrad could not be gated per cell
+
+**Superseded for the shipped metric by §D.2c, and kept because the reason it was true is the reason the estimator changed.** Everything below is a measurement of the *Tenengrad*. `edge_focus` is gated per cell, and §D.2c is the re-measurement that permits it.
 
 A per-cell score separates sharp from soft *on average* — across a smooth
 focus gradient in one frame, the relative medians run 1.554 → 1.212 → 0.842
@@ -929,38 +937,166 @@ retires D6 before it is written. The one real cost is that the column is a
 new per-cell measurement, so a dataset only gets it by being re-run; D8's
 image-decode route stays the fallback for plates nobody will re-run.
 
+### D.2c Per-cell gating, re-measured on the metric that replaced the Tenengrad
+
+§D.2b said **do not gate per cell**, on a measurement of the *Tenengrad*: the
+fifth percentile of perfectly sharp cells (0.619) and the median of badly
+defocused ones (0.604) were the same number, which is an AUC of about 0.5 —
+no discrimination at all. That finding does not transfer, and it has been
+re-measured on the shipped `edge_focus`.
+
+The fixture is deliberately harder than the one that chose the estimator. A
+perfect step edge is not what a microscope produces, and the first attempt at
+this measurement had every in-focus cell at 2.0087 ± 0.02 — the discrete
+Laplacian of an ideal step divided by its own height, which is a constant and
+not a measurement. So each nucleus carries its **own** boundary softness,
+σ_bio drawn uniformly over 0.8–1.8 px (a 2.25× range, standing in for
+chromatin at the envelope, a nucleus tilted in z, and the envelope itself),
+and the field's defocus adds in quadrature: σ_total = √(σ_bio² + σ_def²).
+Radii 4–16 px, amplitudes 500–6000, per-field read noise 8–25, six fields per
+population, ~290 cells each.
+
+| σ_def | p5 | p25 | median | p75 | p95 | AUC vs in-focus |
+|---|---|---|---|---|---|---|
+| 0.0 | 0.0698 | 0.1088 | 0.1569 | 0.2367 | 0.3124 | — |
+| 0.5 | 0.0718 | 0.1048 | 0.1367 | 0.1933 | 0.2548 | 0.578 |
+| 1.0 | 0.0615 | 0.0804 | 0.1005 | 0.1279 | 0.1552 | 0.777 |
+| 1.5 | 0.0339 | 0.0568 | 0.0708 | 0.0869 | 0.1165 | **0.913** |
+| 2.0 | 0.0228 | 0.0416 | 0.0540 | 0.0683 | 0.1037 | **0.952** |
+| 3.0 | 0.0123 | 0.0322 | 0.0470 | 0.0738 | 0.1486 | 0.916 |
+
+**So per-cell gating becomes legitimate, and stays imperfect.** At a cut placed
+at the fifth percentile of the in-focus population (0.0698), σ_def = 2.0 cells
+survive 23.2 % of the time and σ_def = 1.5 cells 51.8 %. The gate removes most
+of what is badly defocused and it keeps a real tail, so the surface has to
+report what it keeps and what it drops rather than implying the population is
+now clean.
+
+**Pooling is still strictly better**, exactly as §D.2b said, and both are kept
+for that reason. The median of 30 cells:
+
+| σ_def | p5 | median | p95 |
+|---|---|---|---|
+| 0.0 | 0.1351 | 0.1655 | 0.1950 |
+| 1.0 | 0.0913 | 0.1018 | **0.1164** |
+| 1.5 | 0.0618 | 0.0712 | 0.0806 |
+| 2.0 | 0.0483 | 0.0540 | 0.0589 |
+
+p5 of in-focus (0.1351) clears p95 of σ_def = 1.0 (0.1164) — **no overlap at
+one stop of defocus**, where the per-cell populations overlap heavily at the
+same σ. The per-cell column is what removes a gradient *within* a field; the
+pooled field and well numbers are what decide whether a well needs a human.
+They are two poolings of one measurement and the app uses both.
+
+The σ_def = 3.0 row is non-monotone against 2.0 at p75 and p95, which
+reproduces on this harder fixture the bound already written into
+`edge_focus`'s docstring: it is not a severity scale past σ ≈ 3.
+
+### D.2d No threshold can be identified automatically, and this is measured
+
+§B.0 refused to recommend a StarDist threshold, with the measurement that every
+plateau rule degenerates on a monotone curve. The same question was put to the
+focus column, and the answer is the same refusal for a different reason.
+
+Otsu's method on log₁₀ of the per-cell focus values — the natural choice, since
+the population is multiplicative and the raw scale has a long sharp tail — run
+over seven populations built from the fixture above. `η²` is Otsu's own
+separability, the between-class variance over the total:
+
+| population | Otsu cut | η² | good cells dropped | bad cells kept |
+|---|---|---|---|---|
+| **clean** — nothing defocused | 0.1363 | 0.627 | **39.5 %** | — |
+| clean, twice as many cells | 0.1363 | 0.627 | 39.5 % | — |
+| 25 % of cells at σ_def = 2 | 0.0890 | 0.655 | 12.0 % | 8.0 % |
+| 50 % of cells at σ_def = 2 | 0.0890 | 0.671 | 12.0 % | 8.0 % |
+| 50 % of cells at σ_def = 1.5 | 0.1127 | 0.637 | 26.8 % | 5.8 % |
+| 50 % of cells at σ_def = 1.0 | 0.1278 | 0.607 | 34.0 % | 25.3 % |
+| **everything** at σ_def = 2 | 0.0399 | 0.516 | 1.0 % | **76.1 %** |
+
+Two of those rows are the whole finding. On a **clean** plate the rule returns a
+number and throws away 39.5 % of good cells. On a **uniformly defocused** plate
+it splits the bad population against itself, returns 0.0399, and keeps 76 % of
+the cells it exists to catch — reporting almost nothing wrong about the worst
+plate in the table. Both are the silent substitution §7 is about, arriving
+through a recommendation rather than through a bug.
+
+And there is no refusal available. η² spans 0.516–0.671 across all seven, with
+the **clean** plate (0.627) scoring higher than three genuinely mixed ones. The
+statistic that would have to say "a cut exists here" cannot tell the two
+degenerate cases from the useful ones, so a rule gated on it would fire exactly
+where it must not.
+
+**So the Playground offers the distribution, not a number** — which is what
+Section B made accessible for StarDist, and the same thing made accessible for
+this metric: the evidence, the user's current cut drawn on it, and a live count
+of what that cut keeps and drops. A user looking at the plot can see whether
+their threshold sits in a valley or in the middle of one population, which is
+better evidence than a number they would have to trust.
+
 ### D.3 What it hangs off
 
 The machinery already exists and it is the machinery the user named.
 `crop/region.compute_crop_pass` decides per cell by centroid against a
 rectangle, takes a `FrameScope` naming which wells / FOVs / timepoints it
-applies to, and is ANDed at the same chokepoint. Segmentation's drag-delete
-removes cells inside a dragged box by pixel overlap. Neither needs inventing;
-what is missing is that the crop is a **single** rectangle for the whole
-dataset, and that nothing routes a flagged field to either tool.
+applies to, and is ANDed at the same chokepoint. That chokepoint —
+`df_included_mask` — already ANDs four independent 0/1 columns, so a fifth
+costs nothing structurally and inherits the fail-open contract every one of
+them has.
 
-`Field_Pass` narrows rather than a new layer being added: the column already
-means "this row's field is usable", and a per-tile verdict makes it mean "this
-row's part of its field is usable". The projector, the chokepoint, the toggle,
-the plate marker and the persistence are unchanged.
+**Two layers, not one, and they are not alternatives.** §D.2c measures why:
 
-### D.4 Rows
+* `Field_Pass` stays as it is — the run's own six-metric robust-z verdict,
+  per field, off by default, which is what sees a field that is anomalous for
+  reasons other than focus (clipped, low contrast, unlike the plate).
+* `Focus_Pass` is new — an **absolute** cut on the per-cell `qc_edge_focus`
+  column. It is what removes a gradient *within* a field, which is the
+  behaviour the user asked for and which no whole-field verdict can express.
+
+Neither subsumes the other, and the per-cell one cannot be derived from the
+per-field one: a field whose median is fine can still have a soft third.
+
+### D.4 Where the threshold comes from, and who applies it
+
+A cut on an absolutely-comparable column is a number about a **microscope**,
+not about a dataset: it depends on the PSF, the pixel size and the nuclear
+contrast, and it is stable across every plate taken on the same instrument at
+the same magnification. So the number belongs in the Analyze form beside the
+other acquisition-shaped settings, and §D.2d says it cannot be guessed.
+
+That gives three places and one number:
+
+1. **Analyze / Quality Control** — `Measure per-cell focus`, **on by default**,
+   and a threshold field that is **blank by default**. The run records both:
+   the column, and the threshold as the dataset's own stated cut.
+2. **The run records; it does not cut.** Ground rule §0.3. A pipeline that
+   dropped the cells would make the decision irreversible and would need a
+   re-run to revisit — and the threshold is exactly the number a user gets
+   wrong the first time. The recorded value seeds Review.
+3. **Review / Cell Gating** applies it, reversibly, and says what it did.
+
+### D.5 Rows
 
 | # | Row | State | Place | Evidence |
 |---|---|---|---|---|
-| D1 | `focus_map(image, tiles)` — the self-normalised tiled statistic, undefined where a tile holds no signal | `todo` | `pipeline/field_quality.py` | the D.1 table, re-measured against the shipped function rather than against the probe |
-| D2 | **The density confound must not come back.** A guard that a uniformly sharp frame's map is flat across a thirty-fold range of cell count | `todo` | `tests/` | mutation: normalise by the frame variance and the guard fails at 0.02 |
-| D3 | An undefined tile is `None`, never 0.0, and the region proposal skips it rather than treating it as soft | `todo` | `pipeline/field_quality.py` | §7 #3 |
-| D3a | **One per-cell `focus` column** — the noise-corrected boundary **Laplacian** of §D.2-1b, not the gradient and not the self-normalised Tenengrad. Absolutely comparable, so nothing is normalised at write time and a uniformly soft frame stays visible | `todo` | `pipeline/shape_features.py` + `process_microscopy._quantify_image_group` | the §D.2-1b table re-measured against the shipped function. Three properties must each be pinned by a mutation: drop the Laplacian for the gradient and the span falls 9.63× → 2.85×; drop the noise-floor subtraction and the column inverts above σ≈3; drop the contrast normalisation and gain moves it |
-| D3b | The metric is **undefined** where the boundary cannot be measured — no contrast, too few interior or exterior pixels, a mask that failed — never 0.0 | `todo` | `pipeline/field_quality.py` | §7 #3. Severe defocus degrades the segmentation, so this is undefined exactly where defocus is worst; the field-level metric is what covers that case |
-| D3c | **No frame-relative normalisation anywhere in the decision path.** A guard that the verdict reads the absolute value | `todo` | `review/` | mutation: normalise per field and a uniformly blurred plate stops being flagged — measured, relative median is 1.000 at σ 0, 1.5 and 3.0 |
-| D3d | Pooling still applies for **noise**, not for the confounder: a single cell's number is noisy even when unbiased | `todo` | `review/` | to be measured on the boundary statistic; the 0.619/0.604 overlap in §D.2b was the Tenengrad's, and does not transfer |
-| D4 | Per-cell verdict from a tile map + the cell's centroid, replacing the per-field one where a map exists | `todo` | `review/data/field_quality_cache.py` | the existing `Field_Pass` tests must still pass — this narrows the rule, it does not add a layer |
-| D5 | The proposal surface: the flagged field on Segmentation with its soft tiles outlined and the numbers shown | `todo` | `review/features/image_browser/` | driven through the real control (§7.6) |
-| D6 | Confirming writes a **per-field** region, needing a crop cardinality this app does not have | `declined` | — | Retired by D3a before it was written. With a per-cell `focus` column the exclusion is per cell by centroid, which is what "remove only the soft sections" means and needs no rectangle at all — a focus gradient or a coverslip tilt is not a box, so a rectangle was always the wrong shape for it. The crop tool keeps its single region for the manual case it already serves |
-| D7 | Whole-field exclusion stays, off and secondary — and the per-cell column is **blind** to a uniformly soft frame once normalised, so the per-field metric is what still sees that case. The two are complementary, not alternatives | `todo` | `review/features/qc/tab_view.py` | the §D.2a table: relative median 1.000 at σ 0, 1.5 and 3.0 |
-| D8 | **Where the map is computed.** From the CSV — the per-cell column plus the centroids already there — so no image decode and no `_out.zip` open. Decoding in Review stays the fallback for plates nobody will re-run | `todo` | `review/` | the one real cost of the column is that a dataset gets it only by being re-run |
-| D9 | Renders, UX review, scientific review, docs, version bump, PR | `todo` | — | |
+| D1 | The tiled self-normalised statistic | `declined` | — | Retired by D3a. Two independent reasons, each sufficient. The statistic is **frame-relative**, which §D.2-0 measured as blind to a uniformly soft frame (relative median exactly 1.000 at σ 0, 1.5 and 3.0). And a tile is a worse pooling unit than a cell: it has no idea where the cells are, so a tile's value moves with how many nuclei happen to fall in it. The per-cell column pools the same information over the objects the question is actually about |
+| D2 | The density confound must not come back | `done` | `tests/test_field_quality.py::test_focus_does_not_track_how_many_cells_are_in_the_field` and `::test_focus_does_not_track_how_BIG_the_nuclei_are` | measured on the shipped function: cell count 20→600 moves it <1.15×, nucleus radius 4→16 moves it 1.36× against 7.8× for the frame-level Tenengrad. The blind control in the size test scores >2× |
+| D3 | An unmeasurable outline is `None`, never 0.0 | `done` | `pipeline/field_quality.edge_focus` | §7 #3. `tests/test_field_quality.py::test_an_outline_that_cannot_be_measured_reports_nothing_rather_than_zero` |
+| D3a | **One per-cell `qc_edge_focus` column** — the noise-corrected boundary Laplacian of §D.2-1b | `done` | `pipeline/field_quality.edge_focus` + `process_microscopy._quantify_image_group` | the §D.2-1b sweep, re-measured on the shipped function: span 7.4× over σ 0→3, size confound 1.36×, noise drift 1.31× over a 15× range, sharp-vs-σ2 separation 2.71× |
+| D3b | Undefined where the boundary cannot be measured — no contrast, too few interior or exterior pixels | `done` | `pipeline/field_quality.edge_focus` | §7 #3, and the ring scales with the nucleus so that radius 4 (the pipeline's own `min_nucleus_area_px` of 50) is measurable rather than silently `None` |
+| D3c | **No frame-relative normalisation anywhere in the decision path** | `todo` | `tests/` | a guard over the AST of the decision path. Mutation: normalise per field and a uniformly blurred plate stops being flagged — §D.2-0 measured the relative median at exactly 1.000 for σ 0, 1.5 and 3.0 |
+| D3d | Pooling still applies, for noise rather than for the confounder — and both poolings ship | `done` | §D.2c | re-measured on this metric: per cell AUC 0.913 at σ_def 1.5 and 0.952 at 2.0, against ≈0.5 for the Tenengrad §D.2b measured. Pooled at n=30 the in-focus p5 (0.1351) clears the σ_def=1.0 p95 (0.1164) outright |
+| D4 | The field's `focus` is the **median of its own cells' boundary values**, so the two poolings cannot disagree | `done` | `pipeline/field_quality.field_focus` | `tests/test_field_quality_is_wired_into_a_run.py::test_the_fields_focus_is_the_median_of_its_cells_own_outlines` |
+| D5 | `focus_score` — the frame-level Tenengrad — is **deleted**, not kept beside its replacement | `done` | `pipeline/field_quality.py` | §D.2-2. Two statistics answering one question is how they come to disagree |
+| D6 | A per-field crop region, needing a crop cardinality this app does not have | `declined` | — | Retired by D3a before it was written. With a per-cell column the exclusion is per cell, which is what "remove only the soft sections" means and needs no rectangle at all — a focus gradient or a coverslip tilt is not a box. The crop tool keeps its single region for the manual case it already serves |
+| D7 | Whole-field exclusion stays, off and secondary, beside the per-cell gate rather than replaced by it | `todo` | `review/features/qc/tab_view.py` | §D.3: neither layer subsumes the other, and a field whose median is fine can still have a soft third |
+| D8 | **Where the gate reads from.** The CSV column the run already wrote — no image decode, no `_out.zip` open | `todo` | `review/data/` | the one real cost of the column is that a dataset gets it only by being re-run, which the panel must say rather than reading as "nothing was flagged" |
+| **D10** | **Analyze / QC: `Measure per-cell focus`, on by default and toggleable, plus the threshold field** | `todo` | `analyze/qc_section.py` (extracted — `analyze/form.py` is at 935 of its 936-line budget) + `fields.py` / `pinfo.py` / `cli_args.py` / `pipeline_service.py` / `settings_digest.py` | §D.4. The full seven-file chain the debris gate already takes; a setting that reaches six of the seven is a control that does nothing |
+| **D11** | The run **records** the threshold and does not apply it | `todo` | `process_microscopy.py` | §0.3 and §D.4 #2. Mutation: have the pipeline drop the cells and the decision becomes irreversible without a re-run |
+| **D12** | `Focus_Pass` — the per-cell 0/1, ANDed at the same chokepoint as its four siblings | `todo` | `review/data/focus_gate.py` | §D.3. Fail-open on a cell with no value: unmeasurable is not soft (§7 #3), and the count of them is reported rather than absorbed |
+| **D13** | Review / Cell Gating: the third gate, its threshold seeded from the run, with a live keep/drop readout | `todo` | `review/features/qc/tab_view.py` | §D.2c — the gate keeps a real tail (23.2 % of σ_def=2 cells at a cut set to the in-focus p5), so the surface reports what it keeps as well as what it drops |
+| **D14** | **The well composite**: one per-well verdict over the soft fraction, the unmeasurable fraction and the field flags, marking wells that need a human | `todo` | `review/domain/well_composite.py` + Home's plate map | §D.2c's pooled table — a well is where n is large enough for the median to be decisive. Each contributing reason is named in the tooltip; a composite that shows only a total is a number nobody can act on |
+| **D15** | **Playground: the per-cell focus distribution**, the current cut drawn on it, and **no recommendation** | `todo` | `review/domain/focus_distribution.py` + `review/features/image_browser/playground/` | §D.2d. Mutation: offer Otsu's cut and a clean plate loses 39.5 % of its good cells while a uniformly defocused one keeps 76 % of its bad ones |
+| D16 | Renders, UX review, scientific review, docs, version bump, PR | `todo` | — | |
 
 ---
 

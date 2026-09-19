@@ -14,7 +14,7 @@ import logging
 
 
 from .params import QCParams, compute_qc_pass
-from core.safe import swallowed
+from core.safe import swallow, swallowed
 from review.data.cache_projectors import project_verdict_column
 
 _logger = logging.getLogger("review")
@@ -136,6 +136,7 @@ def set_qc_params(ctx, params: QCParams) -> None:
     god-object."""
     ctx.state.qc.params = params
     recompute_qc_all(ctx)
+    _repaint_quality_markers(ctx)
     try:
         pers = ctx.persistence
         if pers is not None:
@@ -147,6 +148,23 @@ def set_qc_params(ctx, params: QCParams) -> None:
         redraw_app(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
+
+
+def _repaint_quality_markers(ctx) -> None:
+    """Tell Home's plate the cut moved, if Home has been built.
+
+    The plate's markers come from ``wells_needing_review``, which is a
+    function of ``params.focus_min``. Nothing in the redraw fan-out reaches
+    Home -- it is a page rather than a plot scope -- so without this the plate
+    and the panel that set the cut disagree until the user leaves the page and
+    comes back. The callback is installed by Home's own builder and is absent
+    before the page is built, which is the normal state on a fresh load.
+    """
+    cb = ctx.runtime.home.quality_refresh_cb
+    if cb is None:
+        return
+    with swallow("home quality markers"):
+        cb()
 
 
 def qc_excluded_count(ctx, labels=None, params: QCParams | None = None) -> tuple[int, int]:

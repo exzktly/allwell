@@ -9965,6 +9965,27 @@ its rows excluded while the panel said they were kept.
   than on the plate, clipping aside — and is **not** seeded on, because a
   recorded threshold is the user saying "this is my instrument's number", not
   "drop those cells from every plot without telling me".
+* **The cut is persisted only when it differs from the run's**
+  (`persistence/qc_params.save_to_data_dir`). Every other threshold on the
+  panel becomes the user's the moment they touch anything; this one also has
+  an authoritative source, and re-recording it is deliberately cheap because
+  `focus_min` sits outside the reuse key, so a re-run that changes only the
+  cut skips every well and still rewrites the sidecar. Storing it
+  unconditionally made that cheap path silently wrong: the section is written
+  whenever *any* control on the panel moves, so opening the panel once froze
+  the seeded number, and a later re-run recording a different one left Analyze
+  and Review showing two numbers for one dataset. Omitting the key means "not
+  overridden", and the loader re-seeds. When the user really has chosen their
+  own, `focus_gate.recorded_cut_note` names the run's number beside it, which
+  is also the only place in Review the recorded value is visible at all.
+* **The plate's quality markers are repainted from the cut**
+  (`ctx.runtime.home.quality_refresh_cb`, installed by Home's own builder and
+  called by `qc.controller.set_qc_params`). `wells_needing_review` is a
+  function of `focus_min` and was reachable only through `refresh_home` — page
+  activation and load — so changing the cut on Home ▸ Cell Gating and
+  switching to Home ▸ Overview left the plate marking wells against the
+  previous number, with the tooltips quoting it. The callback runs one way:
+  QC calls what Home installed, and neither feature imports the other.
 * **A cell with no focus value passes.** Undefined is not soft. Severe defocus
   degrades segmentation, so the column is missing exactly where defocus is
   worst — but so is a nucleus whose boundary profile cannot be read at all,

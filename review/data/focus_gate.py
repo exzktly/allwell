@@ -307,6 +307,38 @@ def focus_status(ctx) -> tuple[str, str]:
     return (base, register)
 
 
+def recorded_cut_note(ctx) -> str:
+    """What the *run* recorded, when that is not what is in force, or ``""``.
+
+    The run writes its cut into ``pipeline_info.json`` and Review seeds from
+    it. A user may then type their own, which is the control working as
+    designed — but from that moment the dataset carries two numbers, and
+    Analyze's form (restored from the sidecar) shows the other one. Nothing
+    anywhere used to say so, and there was no surface in Review that showed
+    the recorded value at all, so the divergence was not discoverable even by
+    looking for it.
+
+    The commoner half of that problem is fixed where it is caused: the
+    persistence layer stores the cut only when it differs from the run's, so
+    an untouched cut re-seeds and a later re-run is picked up. This sentence
+    covers what is left -- a cut the user really did choose -- and it names
+    both numbers rather than warning about a mismatch in the abstract.
+    """
+    from review.domain.qc_params import QCParams
+
+    params = focus_params(ctx)
+    if params is None:
+        return ""
+    recorded = QCParams.from_pipeline_info(
+        getattr(ctx.state.dataset, "pipeline_info", None)).focus_min
+    if recorded is None or recorded == params.focus_min:
+        return ""
+    if params.focus_min is None:
+        return (f"This dataset's run recorded a cut of {recorded:g}, which is "
+                f"not in force — the box above is blank.")
+    return (f"Yours, not the run's: this dataset's run recorded {recorded:g}.")
+
+
 def focus_effect_text(ctx) -> str:
     """What the switch is doing **right now**, or ``""``.
 

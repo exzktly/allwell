@@ -95,3 +95,166 @@ def test_clearing_curation_does_not_deny_the_measurement_either(loaded_app):
     clear_curation(app._ctx)
     after, _ = focus_status(app._ctx)
     assert "before per-cell focus was measured" not in after, after
+
+
+# ── finding 6: the plate must repaint when the cut moves ────────────────────
+
+def _plate_markers(app) -> set:
+    """The wells the Home plate is currently marking, read off the widget.
+
+    Deliberately the widget's own state rather than ``wells_needing_review``:
+    CLAUDE.md §7.4 #1 — the defect here is an outbound call that never
+    happened, and a test that reads the derivation passes happily while the
+    screen stays wrong. This is what a user would be looking at.
+    """
+    plate = app._ctx.widgets.get_or_none("_home_plate")
+    assert plate is not None, "the Home plate was never built"
+    return set(plate._grid._markers)
+
+
+def test_the_home_plate_repaints_when_the_focus_cut_moves(loaded_app):
+    """**The defect.** ``wells_needing_review`` is a function of the cut and
+    was reachable only through ``refresh_home`` — page activation, dataset
+    load, and the initial build. No cut-change path called it.
+
+    So a user could set the cut on Home ▸ Cell Gating, switch to Home ▸
+    Overview, and read a plate still marking wells against the *previous*
+    number, with the tooltips quoting it. Two surfaces on one page, one cut,
+    two answers.
+
+    The fixture has to make the two cuts disagree, or no assertion of any
+    strength could tell a repaint from a stale paint (§7.8 rule 2).
+    """
+    from review.features.home.controller import refresh_home
+    from review.features.qc.controller import set_qc_params
+
+    app = loaded_app
+    _give_the_plate_focus(app)
+
+    # A cut that marks wells, established through the path that always worked.
+    set_qc_params(app._ctx, QCParams(focus_min=0.10, exclude_soft_cells=False))
+    refresh_home(app._ctx)
+    marked = _plate_markers(app)
+    assert marked, (
+        "the fixture does not mark any well at a cut of 0.10, so this test "
+        "cannot tell a repaint from a stale paint")
+
+    # Now move it to a cut nothing is soft at, WITHOUT leaving the page.
+    set_qc_params(app._ctx, QCParams(focus_min=0.001, exclude_soft_cells=False))
+
+    assert not _plate_markers(app), (
+        "the plate is still marking " + ", ".join(sorted(_plate_markers(app)))
+        + " against the previous cut of 0.10; nothing repainted it")
+
+
+def test_the_plate_marks_wells_again_when_the_cut_comes_back(loaded_app):
+    """The other direction, which a callback wired to run only on a clear
+    would pass the test above while failing this one."""
+    from review.features.qc.controller import set_qc_params
+
+    app = loaded_app
+    _give_the_plate_focus(app)
+    set_qc_params(app._ctx, QCParams(focus_min=0.001, exclude_soft_cells=False))
+    assert not _plate_markers(app)
+
+    set_qc_params(app._ctx, QCParams(focus_min=0.10, exclude_soft_cells=False))
+    assert _plate_markers(app), (
+        "raising the cut marked no well, so the plate is not tracking it")
+
+
+# ── finding 4: the run's recorded cut must not be overridden in silence ─────
+
+def _set_recorded_cut(app, value) -> None:
+    """Rewrite the dataset's own sidecar cut, as a re-run would.
+
+    `focus_min` is deliberately outside the reuse key, so a re-run that changes
+    only the cut skips every well as up-to-date and still rewrites
+    `pipeline_info.json` — that cheap path is the whole reason this defect is
+    reachable, and the fixture has to reproduce it rather than a full re-run.
+    """
+    info = app._app_state.dataset.pipeline_info or {}
+    info.setdefault("qc_options", {})["focus_min"] = value
+    app._app_state.dataset.pipeline_info = info
+
+
+def test_a_rerun_that_changes_the_cut_reaches_review(loaded_app):
+    """**The defect.** Persistence won permanently.
+
+    The `qc_params` section is written whenever *any* Cell Gating control
+    moves — the debris checkbox, a bound, the field-quality box. Once written
+    it holds a `focus_min`, and `get_qc_params`' lazy seed from the sidecar is
+    never reached again for that dataset. So:
+
+    1. the run records 0.08 and Review seeds 0.08;
+    2. the user ticks the debris gate, which freezes 0.08 into persistence;
+    3. the user decides 0.08 was wrong, types 0.12 into Analyze and reprocesses
+       — which is cheap by design and rewrites the sidecar;
+    4. Review reopens showing **0.08** while Analyze's form shows **0.12**.
+
+    One dataset, two numbers, nothing anywhere saying so. This drives the real
+    save and the real load rather than the accessor, because the defect is in
+    what crosses the disk.
+    """
+    from review.persistence.qc_params import load_from_data_dir, save_to_data_dir
+    from review.features.qc.controller import set_qc_params
+
+    app = loaded_app
+    _give_the_plate_focus(app)
+    _set_recorded_cut(app, 0.08)
+
+    # (2) The user touches a control that has nothing to do with focus.
+    set_qc_params(app._ctx, QCParams(enabled=True, min_area=25.0, focus_min=0.08))
+    save_to_data_dir(app._ctx)
+
+    # (3) A re-run records a different cut.
+    _set_recorded_cut(app, 0.12)
+
+    # (4) Reopen.
+    load_from_data_dir(app._ctx)
+    assert app._app_state.qc.params.focus_min == 0.12, (
+        "Review is still using the cut frozen into persistence before the "
+        f"re-run: {app._app_state.qc.params.focus_min!r}, while the dataset's "
+        "own sidecar now records 0.12")
+    # And the debris bound the user really did choose survived the round trip,
+    # which is what separates this fix from "stop persisting the panel".
+    assert app._app_state.qc.params.min_area == 25.0
+
+
+def test_a_cut_the_user_typed_survives_and_says_whose_it_is(loaded_app):
+    """The other half, and the one a blanket "always re-seed" would break.
+
+    A number the user deliberately typed is theirs and must survive a reload.
+    What must not survive is the silence: Analyze's form shows the run's
+    number, so Review has to name both.
+    """
+    from review.data.focus_gate import recorded_cut_note
+    from review.persistence.qc_params import load_from_data_dir, save_to_data_dir
+    from review.features.qc.controller import set_qc_params
+
+    app = loaded_app
+    _give_the_plate_focus(app)
+    _set_recorded_cut(app, 0.08)
+
+    set_qc_params(app._ctx, QCParams(focus_min=0.20))
+    save_to_data_dir(app._ctx)
+    load_from_data_dir(app._ctx)
+
+    assert app._app_state.qc.params.focus_min == 0.20, (
+        "a cut the user typed was discarded on reload")
+    note = recorded_cut_note(app._ctx)
+    assert "0.08" in note, (
+        "the panel does not name the number the run recorded, so a user "
+        f"cannot see why Analyze disagrees with them: {note!r}")
+
+
+def test_nothing_is_said_when_the_cut_in_force_is_the_run_s(loaded_app):
+    """A note on every ordinary dataset would be noise, and would train the
+    reader to ignore the one that matters."""
+    from review.data.focus_gate import recorded_cut_note
+    from review.features.qc.controller import set_qc_params
+
+    app = loaded_app
+    _give_the_plate_focus(app)
+    _set_recorded_cut(app, 0.08)
+    set_qc_params(app._ctx, QCParams(focus_min=0.08))
+    assert recorded_cut_note(app._ctx) == ""

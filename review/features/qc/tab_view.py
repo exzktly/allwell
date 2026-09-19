@@ -27,7 +27,7 @@ from review.data.field_quality_cache import (
     field_quality_status,
 )
 from review.data.focus_gate import (
-    focus_effect_text, focus_gate_can_apply, focus_status,
+    focus_effect_text, focus_gate_can_apply, focus_status, recorded_cut_note,
 )
 from .controller import get_qc_params, qc_excluded_count, set_qc_params
 from .params import QCParams
@@ -542,7 +542,14 @@ def _refresh_focus_status(ctx, w) -> None:
     label.style().polish(label)
     effect = w.get("focus_effect")
     if effect is not None:
-        effect.setText(focus_effect_text(ctx))
+        # The provenance rides on the effect line rather than taking a third
+        # row of its own: it is empty in the ordinary case (the cut in force
+        # IS the run's), and when it is not, a user comparing this panel with
+        # Analyze's form needs both numbers side by side rather than a warning
+        # that they disagree.
+        effect.setText(" ".join(
+            part for part in (focus_effect_text(ctx), recorded_cut_note(ctx))
+            if part))
     # Live only when ticking it would exclude something. "Is there a column"
     # is the weaker predicate that leaves the box live on a dataset with no
     # threshold, where the tick stays ticked and drops nothing -- and every

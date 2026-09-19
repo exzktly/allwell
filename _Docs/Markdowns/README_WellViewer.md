@@ -1553,6 +1553,14 @@ buttons — you pick one or the other, because choosing the scatter option
   Type it into **Analyze ▸ Quality Control ▸ Out of focus below** so future
   runs record it and this box opens ready.
 
+  The box tracks what the run recorded. If you re-process the plate with a
+  different threshold, this box picks the new one up — it only keeps a number
+  of its own once you have typed one, and when you have, the line beneath says
+  what the run recorded so the two are never in disagreement without your
+  knowing. The plate on **Home ▸ Overview** repaints its quality markers as
+  soon as the cut changes, so the two halves of that page cannot show you
+  answers from different thresholds.
+
   Cells whose outlines could not be measured at all are **kept**, and the line
   under the checkbox says how many. An outline needs contrast across it and
   enough pixels either side, so a nucleus with no readable boundary profile has

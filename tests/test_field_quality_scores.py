@@ -213,3 +213,31 @@ def test_the_threshold_is_the_callers_to_move(threshold):
     rows.append(_field("A01", 99, focus=26.0))
     flagged = [v for v in score_fields(rows, z_threshold=threshold) if v.flagged]
     assert isinstance(flagged, list)
+
+
+def test_a_partly_measured_plate_is_refused_rather_than_scored():
+    """Excludes the scorer that reports a median it has no right to.
+
+    A resumed or incremental run measures only the fields it re-processed. The
+    plate median is then drawn from a biased subset and every field's robust z
+    against it is wrong — with nothing in the artifact saying so, which is the
+    silent substitution the whole subsystem exists to prevent.
+    """
+    rows = _plate(("A01", "A02"))
+    for r in rows:
+        r["partial_plate"] = r["well"] == "A02"
+
+    s = summarise(rows)
+    assert s.scored == 0 and s.flagged == 0
+    assert "only part of this plate" in s.describe()
+    assert "A02" in s.describe()
+    assert "biased sample" in s.describe()
+
+
+def test_a_fully_measured_plate_carrying_the_flag_as_false_still_scores():
+    """The boundary the other side of that refusal — the flag must not
+    disable scoring merely by being present."""
+    rows = _plate(("A01", "A02"))
+    for r in rows:
+        r["partial_plate"] = False
+    assert summarise(rows).scored == len(rows)

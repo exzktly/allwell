@@ -218,3 +218,100 @@ def test_the_two_metric_groups_are_disjoint_and_cover_the_roster():
     be a metric nothing decides how to score."""
     assert not set(ACQUISITION_METRICS) & set(BIOLOGICAL_METRICS)
     assert set(ACQUISITION_METRICS) | set(BIOLOGICAL_METRICS) == set(METRIC_KEYS)
+
+
+# ── the record on disk, and the gap it must not hide ────────────────────────
+
+def test_a_record_round_trips_through_the_collected_block(tmp_path):
+    from pipeline.field_quality import (
+        collect_field_quality, records_for_scoring, write_well_field_quality,
+    )
+
+    fields = [{"fov": i, "timepoint": "0h", "focus": 27.0 + i} for i in range(4)]
+    write_well_field_quality(tmp_path, "A01", fields=fields, measured_of=4)
+    block = collect_field_quality(tmp_path)
+
+    assert block["partial_wells"] == []
+    assert block["measured"] == 4 and block["measured_of"] == 4
+    rows = records_for_scoring(block)
+    assert len(rows) == 4
+    assert rows[0]["well"] == "A01"
+    assert rows[0]["key"] == ("A01", 0, "0h")
+    assert rows[0]["partial_plate"] is False
+
+
+def test_a_well_measured_in_part_is_recorded_as_partial(tmp_path):
+    """The gap a resumed or incremental run leaves.
+
+    ``_process_or_resume`` returns cached records without calling
+    ``process_image_group`` at all, and ``well_skip.incremental_for_well``
+    skips whole wells — so a block can cover a biased subset while looking
+    exactly like a block that covered the plate.
+    """
+    from pipeline.field_quality import (
+        collect_field_quality, records_for_scoring, write_well_field_quality,
+    )
+
+    write_well_field_quality(tmp_path, "A01",
+                             fields=[{"fov": 0, "timepoint": "0h"}],
+                             measured_of=8)
+    block = collect_field_quality(tmp_path)
+    assert block["partial_wells"] == ["A01"]
+    assert all(r["partial_plate"] for r in records_for_scoring(block))
+
+
+def test_a_record_with_no_expected_total_is_not_called_partial(tmp_path):
+    """Undefined is not a shortfall. A caller that cannot say how many fields
+    a well holds must not have that read as "some are missing"."""
+    from pipeline.field_quality import (
+        collect_field_quality, write_well_field_quality,
+    )
+
+    write_well_field_quality(tmp_path, "A01",
+                             fields=[{"fov": 0}], measured_of=None)
+    assert collect_field_quality(tmp_path)["partial_wells"] == []
+
+
+def test_collecting_from_a_directory_that_never_ran_is_empty_not_an_error(tmp_path):
+    from pipeline.field_quality import collect_field_quality, records_for_scoring
+
+    block = collect_field_quality(tmp_path)
+    assert block["wells"] == {} and block["partial_wells"] == []
+    assert records_for_scoring(block) == []
+    assert records_for_scoring(None) == []
+
+
+def test_a_corrupt_per_well_file_is_skipped_rather_than_taking_the_block_down(tmp_path):
+    from pipeline.field_quality import (
+        FIELD_QUALITY_DIRNAME, collect_field_quality, write_well_field_quality,
+    )
+
+    write_well_field_quality(tmp_path, "A01", fields=[{"fov": 0}], measured_of=1)
+    (tmp_path / FIELD_QUALITY_DIRNAME / "B02.json").write_text("{not json")
+    block = collect_field_quality(tmp_path)
+    assert set(block["wells"]) == {"A01"}
+
+
+def test_a_record_that_cannot_be_written_does_not_fail_the_run(tmp_path,
+                                                               monkeypatch):
+    """Best-effort, like run_report: a run that cannot write its own
+    bookkeeping must still produce data.
+
+    The failure is injected rather than provoked with a read-only directory:
+    the suite runs as root here, where the permission bits do not apply and
+    the write succeeds — a test that passes because the failure never happened
+    proves nothing about the handler.
+    """
+    import pipeline.field_quality as fq
+
+    def _boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(fq.tempfile, "mkstemp", _boom)
+    assert fq.write_well_field_quality(tmp_path, "A01", fields=[],
+                                       measured_of=1) is None
+
+
+def test_the_staging_directory_is_hidden_so_it_is_not_dataset_output():
+    from pipeline.field_quality import FIELD_QUALITY_DIRNAME
+    assert FIELD_QUALITY_DIRNAME.startswith(".")

@@ -70,6 +70,11 @@ bad: this module measures, and the Review side scores.
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
+from pathlib import Path
+
 import numpy as np
 from scipy.ndimage import sobel
 
@@ -206,3 +211,134 @@ def field_metrics(nuclear_image, *, labels=None, dtype_max: float | None = None,
         "nuc_count": count,
         "nuc_area_median": median_area,
     }
+
+
+# ── the record on disk ───────────────────────────────────────────────────────
+#
+# Same mechanism ``pipeline/run_report.py`` uses and for the same reasons: one
+# small JSON per well, dropped as the well worker finishes, collected by the
+# orchestrator into a named block inside ``pipeline_info.json``, then removed.
+# Process-safe by construction — one file per well, written atomically, never
+# appended to — so it works identically for the local worker pool, folder mode
+# and remote runs.
+#
+# Deliberately **not** folded into ``run_report``. Coverage accounting and
+# quality measurement answer different questions; ``run_report``'s payload is
+# already merged across a remote fetch by a function with its own semantics; and
+# a reader asking "was this well complete?" should not have to step over six
+# float metrics per field to find out.
+
+#: Hidden so it never looks like dataset output; removed once collected.
+FIELD_QUALITY_DIRNAME = ".aw_field_quality"
+
+#: The key the collected block takes inside ``pipeline_info.json``.
+FIELD_QUALITY_BLOCK = "field_quality"
+
+
+def _quality_dir(output_dir) -> Path:
+    return Path(output_dir) / FIELD_QUALITY_DIRNAME
+
+
+def write_well_field_quality(output_dir, well_label: str, *, fields: list[dict],
+                             measured_of: int | None = None) -> Path | None:
+    """Record one well's per-field metrics. Best-effort: never fails the run.
+
+    *fields* is one mapping per FOV-group measured, each carrying whatever
+    addresses it (``fov``, ``timepoint``) plus the metric values.
+
+    ``measured_of`` is how many FOV-groups the well *has*, against
+    ``len(fields)`` measured. **The gap is the whole of what a resumed or
+    incremental run must not hide.** ``_process_or_resume`` returns cached
+    records without calling ``process_image_group`` at all, and
+    ``well_skip.incremental_for_well`` skips whole wells, so a block covering
+    only what was re-processed is a biased subset — and scored as though it
+    covered the plate, every field's robust z is wrong with nothing in the
+    artifact saying so.
+    """
+    payload = {
+        "well": str(well_label),
+        "fields": list(fields),
+        "measured": len(fields),
+        "measured_of": (None if measured_of is None else int(measured_of)),
+    }
+    try:
+        d = _quality_dir(output_dir)
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / f"{well_label}.json"
+        fd, tmp = tempfile.mkstemp(dir=str(d), prefix=".tmp_", suffix=".json")
+        with os.fdopen(fd, "w") as fh:
+            json.dump(payload, fh, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        return path
+    except OSError:
+        # A run that cannot write its own bookkeeping must still produce data.
+        return None
+
+
+def well_is_partial(record: dict) -> bool:
+    """Whether a well's record covers fewer fields than the well holds."""
+    total = record.get("measured_of")
+    if total is None:
+        return False
+    return int(record.get("measured", 0)) < int(total)
+
+
+def collect_field_quality(output_dir) -> dict:
+    """Merge the per-well files into one block.
+
+    ``partial_wells`` is the list a consumer needs in order to say "this plate
+    was only partly measured" without re-deriving it — and it is the difference
+    between a scorer that knows its sample is biased and one that does not.
+    """
+    d = _quality_dir(output_dir)
+    wells: dict[str, dict] = {}
+    if d.is_dir():
+        for path in sorted(d.glob("*.json")):
+            try:
+                rec = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            wells[str(rec.get("well") or path.stem)] = rec
+    partial = sorted(w for w, r in wells.items() if well_is_partial(r))
+    return {
+        "wells": wells,
+        "partial_wells": partial,
+        "measured": sum(int(r.get("measured", 0)) for r in wells.values()),
+        "measured_of": sum(int(r.get("measured_of") or 0)
+                           for r in wells.values()) or None,
+    }
+
+
+def clear_field_quality(output_dir) -> None:
+    """Drop the staging directory once its contents are in ``pipeline_info``."""
+    d = _quality_dir(output_dir)
+    try:
+        for path in d.glob("*"):
+            path.unlink(missing_ok=True)
+        d.rmdir()
+    except OSError:
+        pass
+
+
+def records_for_scoring(block: dict | None) -> list[dict]:
+    """Flatten a collected block into the rows the Review-side scorer takes.
+
+    Each row carries its well and timepoint, because those are the axes the
+    scorer groups on, and a ``partial_plate`` flag drawn from
+    ``partial_wells`` — so a scorer handed a biased subset can say so rather
+    than reporting a plate median it has no right to.
+    """
+    if not isinstance(block, dict):
+        return []
+    partial = set(block.get("partial_wells") or ())
+    rows: list[dict] = []
+    for well, rec in (block.get("wells") or {}).items():
+        for fld in rec.get("fields") or ():
+            row = dict(fld)
+            row.setdefault("well", well)
+            row["key"] = (well, fld.get("fov"), fld.get("timepoint"))
+            row["partial_plate"] = well in partial
+            rows.append(row)
+    return rows

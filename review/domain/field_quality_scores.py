@@ -257,6 +257,21 @@ def summarise(records, **kwargs) -> PlateQualitySummary:
         return PlateQualitySummary(
             declined="This dataset was analysed before field quality was "
                      "recorded, so there is nothing to score.")
+    if any(r.get("partial_plate") for r in rows):
+        # A resumed or incremental run measures only the fields it
+        # re-processed, so the plate median is drawn from a biased subset —
+        # and every field's robust z against it is wrong. Scoring anyway and
+        # reporting the number would be the silent substitution this whole
+        # subsystem exists to prevent; the run that produced the block is the
+        # only thing that can fix it.
+        wells = sorted({str(r.get("well")) for r in rows
+                        if r.get("partial_plate")})
+        shown = ", ".join(wells[:4]) + ("…" if len(wells) > 4 else "")
+        return PlateQualitySummary(
+            declined=(f"Field quality was measured for only part of this plate "
+                      f"({len(wells)} well(s) partly measured: {shown}), so a "
+                      f"plate-wide comparison would be drawn from a biased "
+                      f"sample. Re-run those wells with Force to score them."))
     verdicts = score_fields(rows, **kwargs)
     flagged = [v for v in verdicts if v.flagged]
     drivers: dict[str, int] = {}

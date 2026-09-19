@@ -149,3 +149,48 @@ def request_stardist_labels(arr, *, prob_thresh=None, nms_thresh=None,
 
     return run_off_thread(_compute, on_done=on_done, on_failed=on_failed,
                           on_stage=on_stage)
+
+
+# ── threshold sweep ──────────────────────────────────────────────────────────
+
+def threshold_sweep_for_frame(arr, thresholds, *, nms_thresh=None,
+                              tile_px: int = 0, crop_px: int = 0,
+                              on_progress=None, should_stop=None):
+    """Nucleus count at each threshold — a delegate to
+    :func:`services.frame_preview.sweep_frame`, which holds the session's model.
+
+    A name here for the same reason ``stardist_labels_for_frame`` has one: this
+    module is the Playground's worker seam, and a test monkeypatching the sweep
+    patches it here rather than reaching into ``services``.
+    """
+    from services.frame_preview import sweep_frame
+    return sweep_frame(arr, thresholds, nms_thresh=nms_thresh,
+                       tile_px=tile_px, crop_px=crop_px,
+                       on_progress=on_progress, should_stop=should_stop)
+
+
+def request_threshold_sweep(arr, thresholds, *, nms_thresh=None,
+                            tile_px: int = 0, crop_px: int = 0, on_done,
+                            on_failed=None, on_progress=None,
+                            should_stop=None):
+    """Sweep *arr* on a daemon thread; call ``on_done(counts)`` on the GUI
+    thread. Returns the bridge (keep a reference alive).
+
+    The sweep is *M* segmentations rather than one, so it is the longest thing
+    the Playground can start — which is why ``should_stop`` reaches all the way
+    down to the loop and why a stopped sweep returns the counts it had. A
+    partial curve the user asked to stop is evidence; discarding it would spend
+    their wait for nothing.
+    """
+    # Resolved through the module global so a test patching
+    # ``threshold_sweep_for_frame`` is honoured, matching
+    # ``request_stardist_labels`` above.
+    def _compute(reporter=None):
+        return threshold_sweep_for_frame(
+            arr, thresholds, nms_thresh=nms_thresh, tile_px=tile_px,
+            crop_px=crop_px,
+            on_progress=None if reporter is None else reporter.progress,
+            should_stop=should_stop)
+
+    return run_off_thread(_compute, on_done=on_done, on_failed=on_failed,
+                          on_progress=on_progress)

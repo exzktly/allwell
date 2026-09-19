@@ -96,6 +96,27 @@ def segment_frame(arr, *, prob_thresh=None, nms_thresh=None, tile_px: int = 0,
                               tile_px=int(tile_px or 0)))
 
 
+def model_prob_threshold() -> float | None:
+    """The pretrained model's own probability threshold, or ``None``.
+
+    The number the Analyze form's default is *against* — the form ships 0.2
+    where the model says ~0.479 — so a plot marking only where the user is
+    cannot answer whether their value is sensible. Read off the loaded model
+    rather than written down here: a literal would be a fourth copy of a
+    number that lives in the weights' own ``thresholds.json``, and would go
+    stale the day anyone changes model.
+
+    ``None`` until something has loaded a model this session, which is the
+    honest answer rather than a guess.
+    """
+    thr = getattr(_GUI_STARDIST_MODEL, "thresholds", None)
+    prob = getattr(thr, "prob", None)
+    try:
+        return float(prob) if prob is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def centre_crop(arr, size: int):
     """The central ``size × size`` square of *arr*, or *arr* when it is smaller.
 

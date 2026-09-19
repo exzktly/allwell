@@ -88,15 +88,58 @@ def draw_threshold_curve(fig, curve) -> None:
 
     ax.plot(curve.thresholds, curve.counts, color=theme.Colors.accent, lw=1.8,
             marker="o", markersize=3.5, label="nuclei detected")
+    if curve.truncated:
+        # A hollow marker where the data stops, so the end of the measurement
+        # is distinguishable from the end of the axis.
+        ax.plot([curve.thresholds[-1]], [curve.counts[-1]], marker="o",
+                markersize=8, markerfacecolor="none",
+                markeredgecolor=theme.Colors.warn, markeredgewidth=1.6,
+                linestyle="none", label="stopped here")
     if curve.current is not None:
         ax.axvline(float(curve.current), color=txt_pri, lw=1.2, ls="--",
                    label=f"your threshold = {curve.current:g}")
-    ax.set_xlim(curve.thresholds[0], curve.thresholds[-1])
+    if curve.model_default is not None:
+        # The comparison the feature exists for. Without it the user can read
+        # their own value off the curve and has nothing to read it against.
+        ax.axvline(float(curve.model_default), color=theme.Colors.text_muted,
+                   lw=1.2, ls=":",
+                   label=f"model default = {curve.model_default:.3g}")
+
+    # The x-axis spans what was **asked for**, not what was measured. Rescaled
+    # to the eight points a stopped sweep got, the curve fills the panel and
+    # the picture asserts that the count barely moves on this frame -- which is
+    # the conclusion a reader would act on, and an artifact of stopping.
+    span = curve.requested_span
+    ax.set_xlim(*(span if span else (curve.thresholds[0], curve.thresholds[-1])))
     ax.set_ylim(0, max(1, max(curve.counts)) * 1.08)
     ax.set_xlabel("StarDist probability threshold", color=txt_pri)
     ax.set_ylabel("Nuclei detected", color=txt_pri)
-    ax.set_title(curve.describe(), color=txt_pri, fontsize=10)
-    leg = ax.legend(loc="upper right", framealpha=0.0, facecolor="none",
+    # Two lines: what was swept, then what the sweep found. The sibling
+    # optimizer curve names its subject the same way, and without it three
+    # consecutive sweeps repaint into three indistinguishable figures -- which
+    # then get saved into notebooks with no attribution at all.
+    title = curve.describe()
+    if curve.subject:
+        title = f"{curve.subject}\n{title}"
+    ax.set_title(title, color=txt_pri, fontsize=11)
+    caveat = curve.caveat()
+    if caveat:
+        # Inside the axes, in the app's "read this" tone, because it is a
+        # caveat and not a description -- and because appended to the title it
+        # ran off the right edge of the figure, clipped mid-word.
+        ax.text(0.015, 0.97, caveat, transform=ax.transAxes, va="top",
+                ha="left", fontsize=9, color=theme.Colors.warn)
+    # A flat run means the detections are insensitive to the cut, not that they
+    # are correct: a frame the model confidently segments as 350 nuclei plus 50
+    # pieces of debris draws the same plateau, and a user who came to validate
+    # their threshold will read the flat shoulder as validation.
+    ax.text(0.5, -0.16,
+            "A flat region means the count is insensitive to the threshold — "
+            "not that the detections are right. Check the outlines.",
+            transform=ax.transAxes, ha="center", va="top", fontsize=8.5,
+            color=txt_mut)
+    leg = ax.legend(loc="best", framealpha=0.85,
+                    facecolor=theme.Colors.panel, edgecolor=txt_mut,
                     fontsize=9)
     if leg is not None:
         for t in leg.get_texts():

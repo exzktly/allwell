@@ -274,14 +274,18 @@ def _capture_threshold_curve(app, w) -> None:
 
     grid = sweep_grid()
     measured = [int(round(400 / (1 + math.exp((t - 0.62) / 0.045)))) for t in grid]
+    common = dict(requested=len(grid), requested_span=(grid[0], grid[-1]),
+                  model_default=0.479071, subject="GFP · B03 · FOV 1 · 24h")
     cases = (
-        ("ok", curve_from_counts(grid, measured, current=0.2),
-         "a real sweep, with the user's own threshold marked"),
-        ("stopped", curve_from_counts(grid[:8], measured[:8], current=0.2),
-         "stopped early — the points measured so far are still drawn"),
-        ("declined", curve_from_counts(grid, [0] * len(grid)),
+        ("ok", curve_from_counts(grid, measured, current=0.2, **common),
+         "the user's threshold against the model's own default"),
+        ("stopped", curve_from_counts(grid[:8], measured[:8], current=0.2,
+                                      **common),
+         "stopped early — the unmeasured range stays visibly empty"),
+        ("declined", curve_from_counts(grid, [0] * len(grid), **common),
          "no nuclei at any threshold: the refusal is the figure"),
-        ("cropped", curve_from_counts(grid, measured, current=0.45, crop_px=512),
+        ("cropped", curve_from_counts(grid, measured, current=0.45,
+                                      crop_px=512, **common),
          "measured on a centre crop, and saying so"),
     )
     for slug, curve, desc in cases:

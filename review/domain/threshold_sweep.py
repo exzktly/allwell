@@ -116,6 +116,31 @@ class ThresholdCurve:
     crop_px: int = 0
     #: Why there is no curve. Empty when there is one.
     declined: str = ""
+    #: The pretrained model's own probability threshold, when the caller knows
+    #: it. **The comparison the whole feature is about**: the Analyze form
+    #: ships 0.2 against the model's own ~0.479, and a plot that marks only
+    #: where the user is cannot answer whether that is sensible. ``None`` when
+    #: no model has been loaded to ask.
+    model_default: float | None = None
+    #: What was swept — well, channel, timepoint, field — so a saved figure
+    #: says which frame it came from, and three consecutive sweeps are not
+    #: three indistinguishable pictures. The sibling optimizer curve titles
+    #: itself this way already.
+    subject: str = ""
+    #: How many thresholds were **asked for**, against ``len(points)`` measured.
+    #: The difference is the whole of what a stopped sweep must not hide: with
+    #: the axes rescaled to the eight points it got and a title reading "400
+    #: nuclei down to 397", a sweep abandoned before the knee asserts that the
+    #: count barely moves on this frame — the exact conclusion a reader would
+    #: act on, and an artifact of having stopped.
+    requested: int = 0
+    #: The full span asked for, so a truncated sweep can keep the unmeasured
+    #: part of the axis visibly empty rather than filling the panel.
+    requested_span: tuple[float, float] | None = None
+
+    @property
+    def truncated(self) -> bool:
+        return bool(self.requested) and len(self.points) < self.requested
 
     @property
     def counts(self) -> tuple[int, ...]:
@@ -144,16 +169,38 @@ class ThresholdCurve:
             return ""
         n = len(self.points)
         lo, hi = self.thresholds[0], self.thresholds[-1]
-        head = (f"{n} thresholds from {lo:g} to {hi:g}: "
-                f"{max(self.counts):,} nuclei down to {min(self.counts):,}.")
-        if self.crop_px:
-            head += (f" Measured on a {self.crop_px}×{self.crop_px} centre crop, "
-                     f"not the whole frame.")
+        if self.truncated:
+            # "so far" is load-bearing, not politeness: without it the sentence
+            # is a finding about the frame rather than a report of how far the
+            # sweep got, and the finding is false.
+            head = (f"Stopped after {n} of {self.requested} thresholds "
+                    f"({lo:g} to {hi:g}): {max(self.counts):,} nuclei down to "
+                    f"{min(self.counts):,} so far.")
+        else:
+            head = (f"{n} thresholds from {lo:g} to {hi:g}: "
+                    f"{max(self.counts):,} nuclei down to {min(self.counts):,}.")
         return head
+
+    def caveat(self) -> str:
+        """The sentence that changes how far these counts generalise, or ``""``.
+
+        Kept out of :meth:`describe` because a title is a *description* and
+        this is a *caveat*: rendered in the same weight and colour it read as
+        more of the same, and appended to the title it ran off the right edge
+        of an 820-pixel figure, clipped mid-word — truncating the one sentence
+        that says how far to trust the numbers.
+        """
+        if not self.crop_px:
+            return ""
+        return (f"Measured on a {self.crop_px}×{self.crop_px} centre crop, "
+                f"not the whole frame.")
 
 
 def curve_from_counts(thresholds, counts, *, current: float | None = None,
-                      crop_px: int = 0) -> ThresholdCurve:
+                      crop_px: int = 0, requested: int = 0,
+                      requested_span: tuple[float, float] | None = None,
+                      model_default: float | None = None,
+                      subject: str = "") -> ThresholdCurve:
     """Build a :class:`ThresholdCurve`, or decline with the reason.
 
     Three refusals, each of which would otherwise be drawn as a flat or empty
@@ -165,7 +212,10 @@ def curve_from_counts(thresholds, counts, *, current: float | None = None,
       model found nothing at any cut, and a line along zero says none of that;
     * **the count never moves** — every threshold gives the same number, so the
       frame has nothing to say about where the cut should go. That is a real
-      answer and it is not a curve.
+      answer and it is not a curve. **Only on a complete sweep**: derived from
+      the three points a user got before pressing Stop, that sentence is a
+      claim about the frame drawn from a fragment of the range, and it would be
+      wrong. A truncated flat run is reported as what it is instead.
 
     Declining is not the same as failing: the caller shows the sentence and the
     Playground keeps whatever it was displaying.
@@ -174,21 +224,39 @@ def curve_from_counts(thresholds, counts, *, current: float | None = None,
         SweepPoint(float(t), int(c))
         for t, c in zip(list(thresholds), list(counts), strict=False)
     ]
+    meta = dict(current=current, crop_px=crop_px, requested=requested,
+                requested_span=requested_span, model_default=model_default,
+                subject=subject)
+    truncated = bool(requested) and len(pairs) < requested
     if not pairs:
         return ThresholdCurve(
             declined="The sweep did not run, so there is nothing to plot.",
-            current=current, crop_px=crop_px)
+            **meta)
     counts_only = [p.count for p in pairs]
     if max(counts_only) <= 0:
+        where = ("at any of the thresholds measured before you stopped"
+                 if truncated else "at any threshold in the sweep")
         return ThresholdCurve(
-            declined=("No nuclei were detected at any threshold in the sweep, "
-                      "so there is no curve to read. Check the segmentation "
-                      "channel and the frame before reading anything into it."),
-            current=current, crop_px=crop_px)
+            declined=(f"No nuclei were detected {where}, so there is no curve "
+                      f"to read. Check the segmentation channel and the frame "
+                      f"before reading anything into it."),
+            **meta)
     if min(counts_only) == max(counts_only):
+        if truncated:
+            # Scoped to what was measured. The unscoped sentence is a verdict
+            # on the frame, and a verdict drawn from three of nineteen points
+            # is one the sweep did not earn.
+            return ThresholdCurve(
+                tuple(pairs),
+                declined=(f"The {len(pairs)} thresholds measured before you "
+                          f"stopped ({pairs[0].threshold:g} to "
+                          f"{pairs[-1].threshold:g}) all detected "
+                          f"{counts_only[0]:,} nuclei. The rest of the range "
+                          f"was not measured."),
+                **meta)
         return ThresholdCurve(
             declined=(f"Every threshold in the sweep detected the same "
                       f"{counts_only[0]:,} nuclei, so this frame says nothing "
                       f"about where the cut should go."),
-            current=current, crop_px=crop_px)
-    return ThresholdCurve(tuple(pairs), current=current, crop_px=crop_px)
+            **meta)
+    return ThresholdCurve(tuple(pairs), **meta)

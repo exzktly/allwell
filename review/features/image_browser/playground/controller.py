@@ -1162,6 +1162,23 @@ def playground_segment_now(ctx) -> None:
         on_done=_on_done, on_failed=_on_failed, on_stage=_on_stage)
 
 
+def _sweep_subject(ctx) -> str:
+    """What the sweep measured, for the figure's own title.
+
+    A loose image names its file; a dataset frame names the four things that
+    address it. Without this, three consecutive sweeps repaint the same window
+    into three indistinguishable pictures — and the window has a Save button,
+    so they leave for a lab notebook with no attribution at all.
+    """
+    st = _st(ctx)
+    if st.loose_image_path:
+        from pathlib import Path as _Path
+        return _Path(st.loose_image_path).name
+    parts = [st.channel, st.well,
+             f"FOV {st.fov}" if st.fov else None, st.timepoint]
+    return " · ".join(str(p) for p in parts if p)
+
+
 def _set_sweep_buttons(win, *, running: bool) -> None:
     """Offer Stop while a sweep runs, and not the sweep button twice.
 
@@ -1192,6 +1209,7 @@ def playground_sweep_now(ctx) -> None:
     The result is a curve, never a recommendation — see
     :mod:`review.domain.threshold_sweep` for the measurement behind that.
     """
+    from services.frame_preview import model_prob_threshold
     from review.domain.threshold_sweep import curve_from_counts, sweep_grid
     from review.features.image_browser.playground.sweep_curve_view import (
         show_threshold_curve,
@@ -1230,16 +1248,23 @@ def playground_sweep_now(ctx) -> None:
         _hide_progress(ctx)
         st.sweep_running = False
         _set_sweep_buttons(win, running=False)
-        curve = curve_from_counts(grid[:len(counts)], counts,
-                                  current=st.seg_prob_thresh)
+        curve = curve_from_counts(
+            grid[:len(counts)], counts,
+            current=st.seg_prob_thresh,
+            # Read off the model that was just loaded to run the sweep, not
+            # written down: a literal here would be a fourth copy of a number
+            # that lives in the weights' own thresholds.json.
+            model_default=model_prob_threshold(),
+            subject=_sweep_subject(ctx),
+            requested=len(grid), requested_span=(grid[0], grid[-1]))
         st.sweep_curve = curve
         # A sweep the user stopped is still evidence, and saying how far it got
         # is the difference between a partial curve and a wrong one.
-        stopped = len(counts) < len(grid)
-        st.sweep_status = curve.describe()
-        if stopped and counts:
-            st.sweep_status = (f"Stopped after {len(counts)} of {len(grid)} "
-                               f"thresholds. {st.sweep_status}")
+        # ``describe`` already says "Stopped after N of M ... so far" when the
+        # sweep was cut short, and it is the same sentence the figure carries.
+        # Prefixing a second one here made the status line say it twice.
+        st.sweep_status = " ".join(x for x in (curve.describe(), curve.caveat())
+                                   if x)
         if note:
             st.sweep_status = f"{st.sweep_status} — {note}"
         _set_status(win, st.sweep_status)

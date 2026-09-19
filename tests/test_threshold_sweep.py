@@ -144,12 +144,68 @@ def test_a_cropped_sweep_says_it_was_cropped():
     silent substitution CLAUDE.md §7 forbids.
     """
     curve = curve_from_counts([0.1, 0.2], [9, 4], crop_px=512)
-    assert "512×512 centre crop" in curve.describe()
-    assert "not the whole frame" in curve.describe()
+    assert "512×512 centre crop" in curve.caveat()
+    assert "not the whole frame" in curve.caveat()
+    # And it is NOT in the description: a title is a description, this is a
+    # caveat, and appended to the title it ran off the edge of the figure and
+    # clipped mid-word — truncating the one sentence saying how far to trust
+    # the numbers.
+    assert "crop" not in curve.describe()
 
 
 def test_an_uncropped_sweep_makes_no_claim_about_cropping():
-    assert "crop" not in curve_from_counts([0.1, 0.2], [9, 4]).describe()
+    assert curve_from_counts([0.1, 0.2], [9, 4]).caveat() == ""
+
+
+# ── a stopped sweep must not assert a finding it did not earn ───────────────
+
+def test_a_stopped_sweep_says_so_and_says_so_far():
+    """Excludes the title that reports a fragment as a finding.
+
+    With the axes rescaled to the eight points it got and a title reading
+    "400 nuclei down to 397", a sweep abandoned before the knee asserts that
+    the count barely moves on this frame — which is exactly the conclusion a
+    scientist would act on, and an artifact of having stopped. The complete
+    sweep of the same frame goes to zero.
+    """
+    grid = sweep_grid()
+    curve = curve_from_counts(grid[:8], [400, 400, 400, 399, 399, 398, 398, 397],
+                              requested=len(grid),
+                              requested_span=(grid[0], grid[-1]))
+    assert curve.truncated is True
+    text = curve.describe()
+    assert f"Stopped after 8 of {len(grid)}" in text
+    assert "so far" in text, "without it the sentence is a finding, not a report"
+
+
+def test_a_complete_sweep_is_not_marked_truncated():
+    grid = sweep_grid(steps=5)
+    curve = curve_from_counts(grid, _decay(grid), requested=len(grid))
+    assert curve.truncated is False
+    assert "Stopped" not in curve.describe()
+
+
+def test_a_flat_run_cut_short_is_scoped_rather_than_ruled_on():
+    """Excludes the verdict drawn from a fragment of the range.
+
+    "Every threshold detected the same 400 nuclei, so this frame says nothing
+    about where the cut should go" is a statement about the frame. Derived
+    from the three points a user got before pressing Stop — entirely likely,
+    since the first sweep of a session also loads TensorFlow — it is wrong.
+    """
+    grid = sweep_grid()
+    curve = curve_from_counts(grid[:3], [400] * 3, requested=len(grid))
+    assert "before you stopped" in curve.declined
+    assert "The rest of the range was not measured." in curve.declined
+    assert "says nothing about where the cut should go" not in curve.declined
+
+
+def test_a_frame_with_no_nuclei_scopes_its_refusal_when_cut_short():
+    grid = sweep_grid()
+    full = curve_from_counts(grid, [0] * len(grid), requested=len(grid))
+    part = curve_from_counts(grid[:3], [0] * 3, requested=len(grid))
+    assert "at any threshold in the sweep" in full.declined
+    assert "before you stopped" in part.declined
 
 
 def test_a_declined_curve_describes_its_refusal_and_nothing_else():

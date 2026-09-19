@@ -20,6 +20,8 @@ module), never re-typed here: a hand-copied roster tests itself, not the app.
 from __future__ import annotations
 
 import ast
+
+from tests._repo_scan import parse_source
 import re
 from pathlib import Path
 
@@ -57,10 +59,17 @@ def _analyze_section_titles() -> list[str]:
     Schema section did exactly that, and the reverse test is what noticed.
     """
     titles: list[str] = []
+    # Globbed from this module's own ``REPO_ROOT`` rather than through
+    # ``_repo_scan.python_sources``: ``test_guards_bite`` proves this guard by
+    # pointing that name at a synthetic tree, and a file list resolved from
+    # ``_repo_scan``'s own root would walk the real repository instead, leaving
+    # the proof measuring nothing. Parsing still goes through the shared cache
+    # (``tests/test_the_fast_lane_stays_fast.py``), which is the part that
+    # costs.
     for path in sorted((REPO_ROOT / "analyze").rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        for node in ast.walk(parse_source(path)):
             if not isinstance(node, ast.Call):
                 continue
             func = node.func

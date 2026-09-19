@@ -63,6 +63,9 @@ toggle_review_image_binary_mask = _lazy(_RI_RENDER, "toggle_review_image_binary_
 refresh_review_image_binary_btn = _lazy(_RI_RENDER, "refresh_review_image_binary_btn")
 toggle_review_image_outline = _lazy(_RI_RENDER, "toggle_review_image_outline")
 refresh_review_image_outline_btn = _lazy(_RI_RENDER, "refresh_review_image_outline_btn")
+toggle_review_image_exclusion_layers = _lazy(
+    _RI_RENDER, "toggle_review_image_exclusion_layers")
+refresh_review_image_layers_btn = _lazy(_RI_RENDER, "refresh_review_image_layers_btn")
 toggle_selected_review_cell = _lazy(_RI_RENDER, "toggle_selected_review_cell")
 set_on_cutoff = _lazy("review.core.channel_state_controller", "set_on_cutoff")
 
@@ -266,9 +269,6 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # "Why was this cell removed" -- the one surface in the app that answers
     # it. Beside the other two overlay toggles because it is the same kind of
     # control: it changes what the picture says, not what is included.
-    from review.features.image_browser.review_image.renderer import (
-        refresh_review_image_layers_btn, toggle_review_image_exclusion_layers,
-    )
     layers_btn = _QPushButton("Why removed: Off", view_panel)
     rt.layers_btn = layers_btn
     layers_btn.setProperty("variant", "toggle")

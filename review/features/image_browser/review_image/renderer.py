@@ -20,6 +20,7 @@ from review.data.data_loading import extract_well_token as _extract_well_token
 # renderer, so these resolve at module scope — no deferred cycle-break needed.
 from review.features.image_browser.review_image.collect import (
     flatfield_field_for,
+    review_build_exclusion_reasons,
     review_build_include_map,
     review_build_mfi_map,
     review_build_threshold_map,
@@ -381,10 +382,7 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
     # reads the well's rows; the include map above is derived from the same
     # function, so the two cannot disagree about who is out.
     reasons_by_nid = None
-    if bool(state.review_image.show_exclusion_layers):
-        from review.features.image_browser.review_image.collect import (
-            review_build_exclusion_reasons,
-        )
+    if getattr(state.review_image, "show_exclusion_layers", False):
         reasons_by_nid = review_build_exclusion_reasons(ctx, center, well, fov, tp)
 
     # Per-cell MFI for the hover tooltip — the displayed channel's
@@ -587,7 +585,8 @@ def draw_review_image(
         # Drawn whether or not the kept cells' outline is on, because the
         # question "why is this one gone" is asked of a picture where the
         # answer is invisible by construction.
-        if bool(state.review_image.show_exclusion_layers) and exclusion_reasons:
+        if (getattr(state.review_image, "show_exclusion_layers", False)
+                and exclusion_reasons):
             inks = _layer_inks()
             for nid, layers in exclusion_reasons.items():
                 if not layers:

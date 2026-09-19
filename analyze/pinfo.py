@@ -24,6 +24,22 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from core.safe import swallowed
 
 
+
+def _positive_or_none(value):
+    """*value* when it is a number above zero, else ``None``.
+
+    The sidecar spells "unset" as ``0.0`` for the numeric QC settings, which is
+    the right spelling on disk (a JSON null in a settings block reads as a
+    write that failed) and the wrong one in a form, where an empty box and a
+    typed zero are different statements.
+    """
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if f > 0 else None
+
+
 class AnalyzePipelineInfoMixin:
     """Read a ``pipeline_info.json`` sidecar back into the Analyze form."""
 
@@ -90,6 +106,8 @@ class AnalyzePipelineInfoMixin:
             "qc_min_area": qc.get("min_area"),
             "qc_max_area": qc.get("max_area"),
             "qc_min_solidity": qc.get("min_solidity"),
+            "measure_focus": qc.get("measure_focus"),
+            "focus_min": qc.get("focus_min"),
         }
         return {k: v for k, v in flat.items() if v is not None}
 
@@ -242,6 +260,29 @@ class AnalyzePipelineInfoMixin:
         s("_qc_min_area_edit", d.get("qc_min_area"))
         s("_qc_max_area_edit", d.get("qc_max_area"))
         s("_qc_min_solidity_edit", d.get("qc_min_solidity"))
+        # Per-cell focus, which arrives spelled two ways. A v2+ sidecar's
+        # ``execution_options`` is a ``vars(args)`` snapshot, so it carries the
+        # parser's own destination -- the NEGATIVE ``no_focus_metric`` -- while
+        # an older sidecar's ``qc_options`` carries the positive
+        # ``measure_focus`` the flattener builds. Reading only one of them
+        # restores nothing for half the datasets in existence, and which half
+        # depends on when the run happened.
+        nfm = d.get("no_focus_metric")
+        if nfm is not None and hasattr(self, "_focus_metric_cb"):
+            self._focus_metric_cb.setChecked(not bool(nfm))
+        else:
+            chk("_focus_metric_cb", d.get("measure_focus"))
+        # The threshold is the same key in both blocks, and 0.0 means "none
+        # stated" in both. It is set rather than skipped, which is the one
+        # place this restore departs from ``s()``: a sidecar that carries the
+        # key is making a statement about this dataset, and skipping a stated
+        # zero would leave the *previous* dataset's cut on screen for a
+        # dataset that never had one -- a number the form would then record
+        # into the next run. Absent entirely (a sidecar predating the column)
+        # still means "no statement", and the box keeps whatever it holds.
+        if "focus_min" in d and hasattr(self, "_focus_min_edit"):
+            _cut = _positive_or_none(d.get("focus_min"))
+            self._focus_min_edit.setText("" if _cut is None else str(_cut))
         s("_tophat_radius_nir_edit", d.get("tophat_radius_nir"))
         s("_tophat_radius_fluor_edit", d.get("tophat_radius_fluor"))
         chk("_no_tophat_nir_cb", d.get("no_tophat_nir"))

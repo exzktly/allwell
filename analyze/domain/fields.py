@@ -75,6 +75,13 @@ _FLOAT_FIELDS = {
     "qc_min_area":                 ("QC minimum area", 0.0, None, "qc_remove_debris"),
     "qc_max_area":                 ("QC maximum area", 0.0, None, "qc_remove_debris"),
     "qc_min_solidity":             ("QC minimum solidity", 0.0, 1.0, "qc_remove_debris"),
+    # Gated on the measurement, not on a cut of its own: the box is blank by
+    # default and a blank box is "no cut stated", which every numeric field
+    # here already treats as unset. The upper bound is the discrete Laplacian
+    # of an ideal step divided by its own height -- about 2 -- so a value above
+    # it is not a strict threshold but a value no real image can reach, and a
+    # run under it would exclude every cell in the plate.
+    "focus_min":                   ("Out-of-focus threshold", 0.0, 2.0, "measure_focus"),
     "cellpose_diameter":           ("Cellpose diameter", 0.0, None, None),
     "cellpose_flow_threshold":     ("Cellpose flow threshold", None, None, None),
     "cellpose_cellprob_threshold": ("Cellpose cell-probability threshold", None, None, None),

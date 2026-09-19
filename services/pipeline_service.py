@@ -289,6 +289,19 @@ def build_pipeline_args(
             if v > 0:
                 args += [flag, str(v)]
 
+    # Per-cell focus. On by default, so only the off case emits a flag, and an
+    # opts dict from before this control existed means on -- the same shape the
+    # auto-threshold and completeness checkboxes take above.
+    if not opts.get("measure_focus", True):
+        args.append("--no_focus_metric")
+    else:
+        try:
+            fmin = float(opts.get("focus_min", 0) or 0)
+        except (TypeError, ValueError):
+            fmin = 0.0
+        if fmin > 0:
+            args += ["--focus_min", str(fmin)]
+
     _emit_execution_flags(args, opts)
     _emit_stardist_threshold_flags(args, opts)
 

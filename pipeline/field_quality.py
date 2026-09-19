@@ -127,12 +127,6 @@ EDGE_BAND_RADIUS_FRAC = 0.34
 EDGE_PEAK_PCT = 95.0
 
 
-#: The per-cell column name. Prefixed like the other always-on per-cell
-#: quality columns (``qc_region_area``) rather than like a shape feature,
-#: because it is a property of the *imaging* rather than of the cell.
-FOCUS_COLUMN = "qc_edge_focus"
-
-
 def edge_focus(image, mask) -> float | None:
     """How sharp one nucleus's own outline is. Higher is sharper.
 
@@ -444,6 +438,7 @@ def group_record(*, acquisition: dict, labels, corrected_image, areas,
 # dependency budgets.
 from pipeline.field_quality_record import (  # noqa: E402,F401
     FIELD_QUALITY_BLOCK,
+    FOCUS_COLUMN,
     FIELD_QUALITY_DIRNAME,
     clear_field_quality,
     collect_field_quality,

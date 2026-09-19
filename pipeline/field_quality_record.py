@@ -36,6 +36,20 @@ from pathlib import Path
 from pipeline.run_report import merge_into_pipeline_info
 from util.json_write import write_json_atomic
 
+#: The per-cell focus column's name, as it appears in every well CSV.
+#:
+#: Here rather than beside the estimator that fills it, because this is the
+#: half of the subsystem that does not measure anything: Review's data layer
+#: and the Analyze form's argument parser both need the *name* and neither
+#: should pull numpy and scipy in to get it. ``pipeline.field_quality``
+#: re-exports it, so the pipeline's own call sites are unchanged.
+#:
+#: Prefixed like the other always-on per-cell quality columns
+#: (``qc_region_area``) rather than like a shape feature, because it is a
+#: property of the *imaging* rather than of the cell.
+FOCUS_COLUMN = "qc_edge_focus"
+
+
 #: Hidden so it never looks like dataset output; removed once collected.
 FIELD_QUALITY_DIRNAME = ".aw_field_quality"
 

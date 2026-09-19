@@ -1338,7 +1338,7 @@ def _write_processed_images(
 
 def _quantify_image_group(
     *, labels, fluor_tophat, fluor_tokens, nir_corr, nuclear_path, schema, sep,
-    shape_features,
+    shape_features, measure_focus: bool = True,
 ):
     """Per-nucleus intensity + shape/region quantification -> record dicts."""
     # Quantify each nucleus across all fluorescent channels.
@@ -1402,7 +1402,11 @@ def _quantify_image_group(
     # defocus. Measured on ``nir_corr``, the frame the labels were computed
     # from, so the outline the estimator reads is the outline that was
     # segmented.
-    focus_by_id = _field_quality.cell_focus_by_label(nir_corr, labels)
+    # Off leaves the column out of the record entirely rather than filling it
+    # with a placeholder: a run that did not measure focus and a run that
+    # measured it and found nothing must not produce the same CSV.
+    focus_by_id = (_field_quality.cell_focus_by_label(nir_corr, labels)
+                   if measure_focus else {})
 
     for i, nid in enumerate(nuc_ids):
         rec: dict = {
@@ -1422,8 +1426,9 @@ def _quantify_image_group(
         # cell nobody could measure and a cell measured and found soft are
         # different facts, and pandas reads the empty CSV field as NaN, which
         # every reader already treats as "no verdict".
-        _focus = focus_by_id.get(int(nid))
-        rec[FOCUS_COLUMN] = None if _focus is None else float(_focus)
+        if measure_focus:
+            _focus = focus_by_id.get(int(nid))
+            rec[FOCUS_COLUMN] = None if _focus is None else float(_focus)
         records.append(rec)
     log.info("  quantify:    %.1f s  (%d nuclei)", time.perf_counter() - _t, len(records))
 
@@ -1457,6 +1462,7 @@ def process_image_group(
     background_method: str = "sliding_disk",
     background_models: dict | None = None,
     qc_remove_debris: bool = False,
+    measure_focus: bool = True,
     cellpose_diameter: float = 0.0,
     cellpose_model: str = "cyto3",
     cellpose_flow_threshold: float = 0.4,
@@ -1541,7 +1547,7 @@ def process_image_group(
     records = _quantify_image_group(
         labels=labels, fluor_tophat=fluor_tophat, fluor_tokens=fluor_tokens,
         nir_corr=nir_corr, nuclear_path=nuclear_path, schema=schema, sep=sep,
-        shape_features=shape_features,
+        shape_features=shape_features, measure_focus=measure_focus,
     )
     parsed = parse_filename(nuclear_path, schema=schema, sep=sep)
     return records, _field_quality.group_record(
@@ -1549,7 +1555,8 @@ def process_image_group(
         labels=labels,
         corrected_image=nir_corr,
         areas=[r["area"] for r in records if r.get("area") is not None],
-        cell_focus=[r.get(FOCUS_COLUMN) for r in records],
+        cell_focus=([r.get(FOCUS_COLUMN) for r in records]
+                    if measure_focus else None),
         fov=parsed.get("fov", ""),
         timepoint=parsed.get("timepoint", ""),
     )
@@ -3313,6 +3320,15 @@ def main() -> None:
                 "min_area": float(args.qc_min_area or 0.0),
                 "max_area": float(args.qc_max_area or 0.0),
                 "min_solidity": float(args.qc_min_solidity or 0.0),
+                "measure_focus": not args.no_focus_metric,
+                # RECORDED, not applied. The run measures the column and states
+                # the dataset's own cut; Review's Cell Gating tab is what acts
+                # on it, so a cut chosen wrongly costs a tick rather than a
+                # re-run. 0.0 means the run stated none -- which is the default,
+                # because the number depends on the microscope and nothing in a
+                # run can guess it (the Playground's focus distribution is where
+                # a user finds theirs).
+                "focus_min": float(args.focus_min or 0.0),
             },
             phase_token=args.phase_token or "",
             execution_options=vars(args),
@@ -3462,6 +3478,7 @@ def main() -> None:
         background_method=args.background,
         background_models={},
         qc_remove_debris=args.qc_remove_debris,
+        measure_focus=not args.no_focus_metric,
         cellpose_diameter=args.cellpose_diameter,
         cellpose_model=args.cellpose_model,
         cellpose_flow_threshold=args.cellpose_flow_threshold,

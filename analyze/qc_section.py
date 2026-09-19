@@ -246,3 +246,98 @@ class AnalyzeQCSectionMixin:
                 row.setVisible(on)
         self._qc_remove_debris_cb.toggled.connect(_sync_debris)
         _sync_debris()
+
+        self._build_focus_rows(sec)
+
+    def _build_focus_rows(self, sec: QWidget) -> None:
+        """Per-cell focus: measure it by default, and state a cut without
+        applying one.
+
+        **The measurement is on by default and the cut is not set**, and the
+        asymmetry is the whole design.
+
+        Measuring costs a few percent of quantification time and one CSV
+        column, and it is the only evidence a later reader has that part of a
+        field was soft. A run without it cannot be asked the question
+        afterwards without being re-run over the images, so the default is on
+        and the checkbox is there for a user who knows they do not want the
+        column.
+
+        The cut is the opposite. It is a number about a **microscope** — it
+        depends on the point-spread function, the pixel size and the nuclear
+        contrast, and it is stable across every plate taken on the same
+        instrument at the same magnification — so this application cannot
+        guess it, and measuring said so rather than leaving it unexamined:
+        Otsu's method on the per-cell values returns a number for a plate with
+        nothing wrong with it and throws away two fifths of its good cells,
+        and on a uniformly defocused plate it splits the bad population
+        against itself and keeps three quarters of the cells it exists to
+        catch. Otsu's own separability cannot tell those two cases apart from
+        the useful ones, so there is nothing to gate a recommendation on.
+        Review's Image Playground draws the distribution instead, which is
+        where a user finds their own number.
+
+        And the run **records** that number rather than acting on it. A
+        threshold is what a user gets wrong the first time; a pipeline that
+        dropped the cells would make revisiting it cost a re-run over the
+        images, while a value recorded in ``pipeline_info.json`` seeds Review's
+        Cell Gating tab, where the same cut is one tick to change and one tick
+        to undo.
+        """
+        self._focus_metric_cb = WrapCheckBox(
+            "Measure per-cell focus (boundary sharpness)", sec)
+        self._focus_metric_cb.setChecked(True)
+        self._focus_metric_cb.setToolTip(
+            "Adds one column per cell, measured at each nucleus's own outline: "
+            "the sharpness of the intensity transition there, divided by the "
+            "cell's own contrast and corrected for the background's noise.\n"
+            "\n"
+            "It is comparable between cells, fields, wells and plates, which is "
+            "what lets Review flag a soft PART of a field — a focus gradient or "
+            "a coverslip tilt — instead of only whole fields. A score relative "
+            "to its own frame cannot see a frame that is uniformly soft, "
+            "because every cell in it deviates from its neighbours by nothing.\n"
+            "\n"
+            "Costs a few percent of quantification time. Turning it off means a "
+            "dataset carries no focus evidence at all, and asking the question "
+            "later needs a re-run.")
+        sec.layout().addWidget(self._focus_metric_cb)
+
+        rf = self._row(sec, "Out of focus below")
+        self._focus_min_edit = self._entry(rf, "", width=80)
+        self._focus_min_edit.setPlaceholderText("none")
+        self._focus_min_edit.setToolTip(
+            "The per-cell focus value below which a cell is out of focus. "
+            "RECORDED with the dataset, NOT applied by this run — Review's Cell "
+            "Gating tab is what excludes the cells, so a cut chosen wrongly "
+            "costs a tick rather than a re-run.\n"
+            "\n"
+            "Leave blank unless you have measured one. The number depends on "
+            "your microscope rather than on the plate, so it is the same for "
+            "every plate taken at the same magnification — and nothing here can "
+            "guess it. Review's Image Playground draws the distribution of "
+            "these values for a frame, with a live count of what a cut would "
+            "keep and drop, which is where the number comes from.")
+        rf.layout().addStretch(1)
+
+        focus_hint = QLabel(
+            "Recorded with the dataset, not applied here — Review's Cell Gating "
+            "tab excludes the cells and can undo it. Find your number in "
+            "Review ▸ Image Browser ▸ Playground.", sec)
+        focus_hint.setObjectName("Muted")
+        focus_hint.setWordWrap(True)
+        sec.layout().addWidget(focus_hint)
+
+        # The cut is meaningless without the column, so the whole group hides
+        # with it rather than sitting greyed out — the same treatment the
+        # debris bounds get above, and for the same reason. Toggle the *parent*
+        # rows: hiding the ``_row()`` cell alone strands the "Out of focus
+        # below" label, which lives in the cell's parent.
+        self._focus_rows = (rf.parentWidget(), focus_hint)
+
+        def _sync_focus(_=None) -> None:
+            on = self._focus_metric_cb.isChecked()
+            for row in self._focus_rows:
+                row.setVisible(on)
+        self._focus_metric_cb.toggled.connect(_sync_focus)
+        _sync_focus()

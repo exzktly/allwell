@@ -459,3 +459,69 @@ def test_the_smallest_nuclei_are_monotone_too_now_that_there_is_no_ring():
         assert all(v is not None for v in vals), (radius, vals)
         assert all(vals[i] > vals[i + 1] for i in range(len(vals) - 1)), (
             radius, vals)
+
+
+# ── the ceiling, which a user's cut is validated against ────────────────────
+
+def test_the_estimator_never_exceeds_its_declared_ceiling():
+    """``FOCUS_SCORE_CEILING`` is a bound on a USER'S THRESHOLD, so it has to
+    be a bound on the statistic.
+
+    The score is one over a transition width measured on a profile binned at
+    one pixel, so the width has a floor and the score has a ceiling. That is
+    measured rather than derived — a noiseless hard-edged disc reads 0.8333 at
+    radius 6, 10, 16 and 24 alike, because the floor comes from the binning
+    rather than from the object — and `analyze/domain/fields.py` refuses any
+    cut above it, which is what stops a user entering a number no cell could
+    clear and getting a plate with every cell excluded.
+
+    Name the wrong implementation: asserting "the ceiling is 0.8333" would
+    pass while the estimator returned 2.0, which is the state this replaced.
+    The assertion is on the statistic, over the sharpest input that exists.
+    """
+    import numpy as np
+
+    from pipeline.field_quality import edge_focus
+    from pipeline.field_quality_record import FOCUS_SCORE_CEILING
+
+    seen = []
+    for radius in (5, 6, 10, 16, 24):
+        size = radius * 6
+        yy, xx = np.mgrid[:size, :size]
+        centre = size // 2
+        mask = (yy - centre) ** 2 + (xx - centre) ** 2 <= radius * radius
+        # A hard step with no blur at all: nothing an optical system can
+        # produce is sharper than a binary edge.
+        img = np.where(mask, 1000.0, 0.0)
+        value = edge_focus(img, mask)
+        assert value is not None, f"radius {radius} could not be measured"
+        seen.append(value)
+        assert value <= FOCUS_SCORE_CEILING + 1e-9, (
+            f"radius {radius} scored {value:.4f}, above the ceiling "
+            f"{FOCUS_SCORE_CEILING:.4f} that the Analyze form validates a "
+            f"user's threshold against")
+
+    # The ceiling is TIGHT, not merely an upper bound: a loose one would let
+    # the form accept cuts that still delete the plate. A perfect step should
+    # reach it.
+    assert max(seen) == pytest.approx(FOCUS_SCORE_CEILING, rel=1e-6), (
+        f"the sharpest possible edge reads {max(seen):.4f} against a declared "
+        f"ceiling of {FOCUS_SCORE_CEILING:.4f}; the bound no longer describes "
+        f"the estimator")
+
+
+def test_the_ceiling_does_not_depend_on_nucleus_size():
+    """The floor comes from the binning, not from the object — which is why
+    one constant can bound the score for every plate."""
+    import numpy as np
+
+    from pipeline.field_quality import edge_focus
+
+    values = []
+    for radius in (6, 10, 16, 24):
+        size = radius * 6
+        yy, xx = np.mgrid[:size, :size]
+        centre = size // 2
+        mask = (yy - centre) ** 2 + (xx - centre) ** 2 <= radius * radius
+        values.append(edge_focus(np.where(mask, 1000.0, 0.0), mask))
+    assert max(values) == pytest.approx(min(values), rel=1e-9), values

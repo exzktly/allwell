@@ -49,6 +49,26 @@ from util.json_write import write_json_atomic
 #: property of the *imaging* rather than of the cell.
 FOCUS_COLUMN = "qc_edge_focus"
 
+#: The largest value the estimator can return, for anything.
+#:
+#: ``edge_focus`` is the reciprocal of a transition width measured on a profile
+#: binned at one pixel, so the width has a floor and the score has a ceiling.
+#: **Measured** rather than derived: a noiseless hard-edged disc reads
+#: ``0.8333`` — one over 1.2 px — and it reads that at radius 6, 10, 16 and 24
+#: alike, because the floor comes from the binning rather than from the object.
+#: Reproduce with ``edge_focus`` on a filled circle over a zero background.
+#:
+#: Here, beside the column name, for the same reason that is here: the Analyze
+#: form validates a user's threshold against it and must not import numpy and
+#: scipy to do so.
+#:
+#: It is a real bound on a user's cut, not decoration. The field that takes
+#: that cut was bounded at ``2.0`` — a rationale written for the Laplacian
+#: estimator that has since been deleted — which let a user type a number no
+#: image can reach and get a plate with every cell excluded and nothing said.
+#: For scale, a sharp plate measured here sits at 0.417–0.448.
+FOCUS_SCORE_CEILING = 1.0 / 1.2
+
 
 #: Hidden so it never looks like dataset output; removed once collected.
 FIELD_QUALITY_DIRNAME = ".aw_field_quality"

@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import math
 
+from pipeline.field_quality_record import FOCUS_SCORE_CEILING
+
 
 # ── Entry-boundary parsing + numeric validation ─────────────────────────────
 #
@@ -77,11 +79,21 @@ _FLOAT_FIELDS = {
     "qc_min_solidity":             ("QC minimum solidity", 0.0, 1.0, "qc_remove_debris"),
     # Gated on the measurement, not on a cut of its own: the box is blank by
     # default and a blank box is "no cut stated", which every numeric field
-    # here already treats as unset. The upper bound is the discrete Laplacian
-    # of an ideal step divided by its own height -- about 2 -- so a value above
-    # it is not a strict threshold but a value no real image can reach, and a
-    # run under it would exclude every cell in the plate.
-    "focus_min":                   ("Out-of-focus threshold", 0.0, 2.0, "measure_focus"),
+    # here already treats as unset.
+    #
+    # The upper bound is the estimator's own ceiling (``FOCUS_SCORE_CEILING``,
+    # measured 0.8333), so the validator now refuses a cut that no cell could
+    # ever clear instead of accepting it and leaving the user with a plate
+    # whose every cell is excluded and nothing on screen saying why. It was
+    # 2.0, justified by a sentence about the discrete Laplacian of an ideal
+    # step -- true of the estimator that has since been deleted, and roughly
+    # 2.4x above anything the one that replaced it can return. Rejecting the
+    # value IS the feedback the form was missing; no band of "aggressive but
+    # legal" is invented here, because where that band sits depends on the
+    # objective and the pixel size, which is the whole reason the cut is a
+    # number about a microscope.
+    "focus_min":                   ("Out-of-focus threshold", 0.0,
+                                    FOCUS_SCORE_CEILING, "measure_focus"),
     "cellpose_diameter":           ("Cellpose diameter", 0.0, None, None),
     "cellpose_flow_threshold":     ("Cellpose flow threshold", None, None, None),
     "cellpose_cellprob_threshold": ("Cellpose cell-probability threshold", None, None, None),

@@ -511,7 +511,21 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
         dataset.well_paths[label] = path
     dataset.cache[label] = read_well_frame(dataset.well_paths[label])
     for _project in iter_cache_projectors():
-        _project(ctx, label)
+        # **Guarded per projector, matching ``qc.controller.recompute_qc_all``.**
+        # The same registry list is walked from two places, and until now the
+        # two had different failure contracts: a raise there lost one verdict
+        # column, a raise here lost the whole WELL, because this is the call
+        # that decides whether a frame enters the cache at all. One layer must
+        # never take down the others, and losing a well is the larger of the
+        # two failures, so the unguarded one was the wrong side of the
+        # asymmetry. Each projector already reports its own per-well failures
+        # through ``project_verdict_column``; this catches a projector that
+        # raises outside that walk.
+        try:
+            _project(ctx, label)
+        except Exception:
+            _logger.exception(
+                "cache projector %r failed for well %r", _project, label)
     # The loader used to have to record this itself, having built the frame
     # outside this function; the verdict now travels with the load.
     record_fov_verdict(ctx, label, dataset.cache[label])

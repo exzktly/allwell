@@ -1277,9 +1277,18 @@ def _register_cache_projectors() -> None:
     Field quality is registered here like the rest even though it lives under
     ``data/`` rather than under a feature. It is registered rather than called
     directly for the same reason the other three are: ``load_and_project`` runs
-    the list without naming anything, so a profile that strips a feature strips
-    its projector with it, and this stays the one place that knows what the
-    list contains.
+    the list without naming anything, so this stays the one place that knows
+    what the list contains.
+
+    **These four registrations are unconditional.** An earlier version of this
+    paragraph said "a profile that strips a feature strips its projector with
+    it", which is not true of the code beneath it: nothing here consults the
+    feature registry or the active profile, and each `_lazy_projector` resolves
+    its module on call. That is the right behaviour rather than a gap to close
+    — every one of these four is an *inclusion* layer, and a build that drops a
+    tab must not thereby change which cells count. It is said plainly because
+    the sentence it replaces would send a reader looking for a gate that has
+    never existed.
 
     **The curation projector is bound with ``note_change=False``.** It is
     writing onto a frame ``load_and_project`` created a moment ago, which

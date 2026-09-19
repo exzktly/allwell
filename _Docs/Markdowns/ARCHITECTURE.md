@@ -10026,6 +10026,27 @@ its rows excluded while the panel said they were kept.
   than on the plate, clipping aside — and is **not** seeded on, because a
   recorded threshold is the user saying "this is my instrument's number", not
   "drop those cells from every plot without telling me".
+* **The threshold field is bounded by the estimator's own ceiling.**
+  `pipeline.field_quality_record.FOCUS_SCORE_CEILING` is 0.8333 — one over
+  1.2 px, because the score is the reciprocal of a width measured on a profile
+  binned at one pixel, so the width has a floor. Measured rather than derived,
+  and identical at radius 6, 10, 16 and 24, since the floor comes from the
+  binning rather than from the object. It lives beside `FOCUS_COLUMN` in the
+  stdlib-only record module because the Analyze form validates against it and
+  must not import numpy and scipy to do so. Refusing an impossible value *is*
+  the feedback that form was missing; no "aggressive but legal" band is
+  invented, because where that band sits depends on the objective and the pixel
+  size, which is the reason the cut is a number about a microscope at all. For
+  scale, a sharp plate measures 0.417–0.448.
+* **A projector that raises costs one column, never a well.** The registry is
+  walked from two places — `data_loading.load_and_project` at load and
+  `qc.controller.recompute_qc_all` on a Cell Gating change — and both guard
+  each call. The loader's was once unguarded, which was the wrong side of the
+  asymmetry: a raise during the recompute loses a verdict column, while a raise
+  during the load loses the whole well, because that call is what decides
+  whether the frame enters the cache. The four registrations are
+  **unconditional** and no profile gates them: each is an inclusion layer, and
+  a build that drops a tab must not thereby change which cells count.
 * **Analyze remembers the cut between sessions**, alone among that form's
   fields (`qc_section.FOCUS_MIN_SETTING`, through `core.app_settings`). The
   asymmetry is the control's own argument: every other field on the form

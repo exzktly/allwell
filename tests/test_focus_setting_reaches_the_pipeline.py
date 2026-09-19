@@ -148,10 +148,37 @@ def test_an_unusable_threshold_is_refused_before_the_run(text):
     assert errs, f"{text!r} reached the pipeline unchallenged"
 
 
-@pytest.mark.parametrize("text", ["", "0.08", "1.5"])
+@pytest.mark.parametrize("text", ["", "0.08", "0.42"])
 def test_a_usable_threshold_is_not_refused(text):
     from analyze.domain.fields import _numeric_option_errors
     assert not _numeric_option_errors({"measure_focus": True, "focus_min": text})
+
+
+def test_a_cut_no_cell_could_clear_is_refused_rather_than_accepted():
+    """**This parameter list used to say 1.5 was usable.** It is not, and the
+    test was asserting the defect an adversarial review reported: the field
+    was bounded at 2.0 on a rationale written for the Laplacian estimator that
+    has since been deleted, so Analyze accepted a number no cell can reach and
+    the user got a plate with every cell excluded and nothing saying why.
+
+    Measured, ``edge_focus`` cannot exceed ``FOCUS_SCORE_CEILING`` (0.8333 —
+    one over 1.2 px, set by the profile's one-pixel binning and the same at
+    radius 6, 10, 16 and 24), and a sharp plate sits at 0.417–0.448. Refusing
+    the value IS the feedback the form was missing.
+    """
+    from pipeline.field_quality_record import FOCUS_SCORE_CEILING
+    from analyze.domain.fields import _numeric_option_errors
+
+    assert _numeric_option_errors(
+        {"measure_focus": True, "focus_min": "1.5"}), (
+        "a cut above the estimator's ceiling was accepted; it would exclude "
+        "every cell in the plate")
+    # And the bound is the ceiling itself, not a number near it -- so a later
+    # change to the estimator's binning moves both together.
+    assert not _numeric_option_errors(
+        {"measure_focus": True, "focus_min": str(FOCUS_SCORE_CEILING)})
+    assert _numeric_option_errors(
+        {"measure_focus": True, "focus_min": str(FOCUS_SCORE_CEILING * 1.01)})
 
 
 def test_the_threshold_is_not_validated_while_the_measurement_is_off():

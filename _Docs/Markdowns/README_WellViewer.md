@@ -1557,6 +1557,16 @@ buttons — you pick one or the other, because choosing the scatter option
   Opening a dataset that recorded its own cut still shows you that dataset's
   number, not your remembered one.
 
+  It will not accept a value no cell could reach. The measurement has a ceiling
+  of about 0.83 — the sharpest edge that can be represented at all — and a
+  well-focused plate measures nearer 0.42, so a number above the ceiling would
+  exclude every cell in the plate. Analyze refuses it rather than running and
+  leaving you to find the empty result afterwards.
+
+  If you type a threshold and then untick **Measure per-cell focus**, the form
+  says so: that number is not recorded with the dataset while the measurement
+  is off, and it would otherwise disappear along with the row it sat in.
+
   The box tracks what the run recorded. If you re-process the plate with a
   different threshold, this box picks the new one up — it only keeps a number
   of its own once you have typed one, and when you have, the line beneath says

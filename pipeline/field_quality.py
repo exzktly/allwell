@@ -124,8 +124,11 @@ METRIC_KEYS = (
 #: uniform across a plate by design, so a field far from the plate's own median
 #: is evidence of an acquisition fault.
 #:
-#: ``focus`` stays here now that it is absolutely comparable, and the two
-#: readings are complementary rather than redundant. The absolute cut (Review's
+#: ``focus`` stays here because it is comparable across plates — it is a
+#: transition width in pixels, so gain, pedestal, brightness, nucleus size and
+#: crowding each move it by under 5 %, and only clipping moves it much (a
+#: flat-topped nucleus reads sharper, up to 1.45x). The two readings are
+#: complementary rather than redundant. The absolute cut (Review's
 #: per-cell focus gate) answers "is this soft?"; the plate-wide robust z here
 #: answers "is this field unlike its plate?", which catches a field that is
 #: *worse than its neighbours* while still above anyone's threshold — and which

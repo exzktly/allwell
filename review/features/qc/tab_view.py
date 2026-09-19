@@ -287,8 +287,12 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         "The per-cell focus value below which a cell counts as out of focus. "
         "Seeded from this dataset's own run when it recorded one.\n"
         "Blank means no cut, and nothing here can supply a default: the "
-        "number depends on the microscope rather than on the plate. Review ▸ "
-        "Image Browser ▸ Playground draws the distribution of these values "
+        "number depends mostly on the microscope — the point-spread function, "
+        "the pixel size, the nuclear contrast — rather than on the plate. It "
+        "is a transition width in pixels, so brightness, cell size and "
+        "crowding each move it under 5 %; clipping is the exception, and a "
+        "saturated plate reads sharper than it is.\n"
+        "Distribution… beside this box draws the selected well's own curve "
         "with a live count of what a cut would keep and drop.")
     foc_head_layout.addWidget(foc_edit)
     foc_head_layout.addSpacing(8)

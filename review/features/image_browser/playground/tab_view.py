@@ -338,9 +338,10 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         "Measure every outline on screen and plot how sharp each cell is, "
         "with your own cut marked and a live count of what it keeps and "
         "drops.\n"
-        "This is where the Analyze form's \u201cOut of focus below\u201d "
-        "number comes from — nothing can guess it, because it depends on the "
-        "microscope rather than on the plate.\n"
+        "This is one source for the Analyze form's \u201cOut of focus "
+        "below\u201d number — nothing can guess it, because it depends "
+        "mostly on the microscope rather than on the plate. Clipping is what "
+        "breaks that: a saturated frame reads sharper than it is.\n"
         "It suggests no threshold: the distribution is the answer.")
     focus_btn.clicked.connect(lambda _=False: playground_focus_now(ctx))
     sbl.addWidget(focus_btn)

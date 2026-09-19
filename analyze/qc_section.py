@@ -263,11 +263,15 @@ class AnalyzeQCSectionMixin:
         and the checkbox is there for a user who knows they do not want the
         column.
 
-        The cut is the opposite. It is a number about a **microscope** — it
-        depends on the point-spread function, the pixel size and the nuclear
-        contrast, and it is stable across every plate taken on the same
-        instrument at the same magnification — so this application cannot
-        guess it, and measuring said so rather than leaving it unexamined:
+        The cut is the opposite. It is mostly a number about a
+        **microscope** — it depends on the point-spread function, the pixel
+        size and the nuclear contrast. The column is a transition width in
+        pixels, so gain, pedestal, brightness, nucleus size and crowding each
+        move it by under 5 %, and a cut carries from plate to plate on one
+        instrument at one magnification. Two things do move it and a user
+        carrying a number between plates should know both: a clipped nucleus
+        reads sharper (to 1.45x), and chromatin texture reaches 1.14x. Either
+        way this application cannot guess it, and measuring said so rather than leaving it unexamined:
         Otsu's method on the per-cell values returns a number for a plate with
         nothing wrong with it and throws away two fifths of its good cells,
         and on a uniformly defocused plate it splits the bad population
@@ -288,15 +292,19 @@ class AnalyzeQCSectionMixin:
             "Measure per-cell focus (boundary sharpness)", sec)
         self._focus_metric_cb.setChecked(True)
         self._focus_metric_cb.setToolTip(
-            "Adds one column per cell, measured at each nucleus's own outline: "
-            "the sharpness of the intensity transition there, divided by the "
-            "cell's own contrast and corrected for the background's noise.\n"
+            "Adds one column per cell, measured at each nucleus's own "
+            "outline: how far the intensity takes to travel from inside the "
+            "cell to outside it. Defocus widens that transition; brightness "
+            "changes its height and not its width, so the number is a "
+            "distance in pixels rather than an amount of contrast.\n"
             "\n"
-            "It is comparable between cells, fields, wells and plates, which is "
-            "what lets Review flag a soft PART of a field — a focus gradient or "
-            "a coverslip tilt — instead of only whole fields. A score relative "
-            "to its own frame cannot see a frame that is uniformly soft, "
-            "because every cell in it deviates from its neighbours by nothing.\n"
+            "That is what makes it comparable between cells, fields, wells "
+            "and plates, and so what lets Review flag a soft PART of a field "
+            "— a focus gradient or a coverslip tilt — instead of only whole "
+            "fields. A score relative to its own frame cannot see a frame "
+            "that is uniformly soft, because every cell in it deviates from "
+            "its neighbours by nothing. Clipping is the one thing that "
+            "biases it: a flat-topped nucleus reads sharper than it is.\n"
             "\n"
             "Costs a few percent of quantification time. Turning it off means a "
             "dataset carries no focus evidence at all, and asking the question "
@@ -312,11 +320,12 @@ class AnalyzeQCSectionMixin:
             "Gating tab is what excludes the cells, so a cut chosen wrongly "
             "costs a tick rather than a re-run.\n"
             "\n"
-            "Leave blank unless you have measured one. The number depends on "
-            "your microscope rather than on the plate, so it is the same for "
-            "every plate taken at the same magnification — and nothing here can "
-            "guess it. Review's Image Playground draws the distribution of "
-            "these values for a frame, with a live count of what a cut would "
+            "Leave blank unless you have measured one. The number depends "
+            "mostly on your microscope rather than on the plate, so a cut "
+            "carries between plates taken the same way — clipping is the "
+            "exception, and a saturated plate reads sharper than it is. "
+            "Nothing here can guess it. Review ▸ Home ▸ Cell Gating draws a "
+            "well's own distribution with a live count of what a cut would "
             "keep and drop, which is where the number comes from.")
         rf.layout().addStretch(1)
 

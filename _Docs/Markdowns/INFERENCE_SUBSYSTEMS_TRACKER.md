@@ -711,10 +711,10 @@ confirm.** Nothing is excluded that the user has not seen.
 
 A frame-relative score cannot see a frame that is *uniformly* soft: every cell
 deviates from its neighbours by nothing. Measured, relative-to-field median is
-exactly **1.000** at σ 0, 1.5 and 3.0. So the verdict has to be on an
-absolutely comparable number.
+exactly **1.000** at σ 0, 1.5 and 3.0. So the verdict has to be on a number
+that means the same thing from one frame to the next.
 
-**And the shipped statistic is not absolutely comparable.** Measured on sharp
+**And the statistic shipped at the time did not.** Measured on sharp
 frames, varying only nucleus radius:
 
 | | span | |
@@ -765,9 +765,12 @@ Nuisance parameters do not move it: gain ×0.25 and ×4 and pedestal 1000 give
 2.7445 against a baseline of 2.7445; 20 vs 80 cells give 2.7465 / 2.7462; 3×
 noise gives 2.7542.
 
-So the score **is** absolutely comparable, needs no frame-relative
-normalisation, and therefore sees a uniformly soft frame — which is what the
-whole objection asked for.
+So on *this* fixture the score needed no frame-relative normalisation and
+therefore saw a uniformly soft frame, which is what the whole objection asked
+for. The fixture is the qualifier: it gave every disc the same amplitude and
+only uniform additive noise, which is the one regime in which an edge-energy
+statistic is amplitude-free. §D.2e is what happens when that assumption is
+dropped, and §D.2f is the statistic that does not need it.
 
 **It is computable only per cell**, because it needs the mask. Recording focus
 per cell is not a convenience or an optimisation: it is the only place a
@@ -786,7 +789,15 @@ self-reporting rather than silent (no cells → nothing measured → the
 field-level metric is what covers that case), and it is why the two layers stay
 complementary.
 
-### D.2-1b The optimal per-cell estimator, chosen by sweep
+### D.2-1b The per-cell estimator, chosen by sweep — and replaced
+
+**This section records how the first per-cell estimator was chosen. It is not
+what ships; §D.2f is.** The sweep below was run over band-and-ring geometries
+measuring edge *energy*, and its conclusion — that a per-cell edge statistic
+beats every whole-frame one on the size confounder — survives and is why the
+column is per cell at all. What did not survive is the family it searched
+within: every edge-energy statistic entangles amplitude with blur, which is
+what §D.2e measured and §D.2f fixes by measuring a width directly.
 
 Per cell we know where the edge is and what the cell's own contrast is, so the
 estimator can be built around the quantity defocus actually is: the width of
@@ -838,9 +849,10 @@ Each piece earns its place:
   dilutes it with band pixels that are not on the edge.
 * **Noise floor removed** — as above.
 
-It is **absolutely comparable**, so nothing anywhere in the decision path is
-normalised against the frame. That was the whole objection, and this is what
-answers it.
+It was claimed **absolutely comparable**, and the principle behind that — that
+nothing anywhere in the decision path is normalised against the frame — is
+right and still holds. The claim about this particular statistic was not:
+§D.2e measured it false on brightness, and §D.2f is the form that earns it.
 
 **Two artefacts caught while measuring, both recorded because each fooled me
 once.** A 1.85× "noise drift" attributed to the p95 reducer was neighbouring
@@ -863,8 +875,8 @@ The field's `focus` is now the **median of its cells' own boundary values**
 (`field_focus`), so the field-level and cell-level numbers are the same
 measurement at two poolings rather than two different statistics that can
 disagree. That is what closes A.2: the field metric no longer carries a
-confounder for the plate-wide robust z to cancel, and it is absolutely
-comparable, so a uniformly soft plate is visible to it.
+confounder for the plate-wide robust z to cancel, and it is comparable across
+plates (§D.2f), so a uniformly soft plate is visible to it.
 
 ### D.2a Per cell as well as per field — measured
 
@@ -1033,12 +1045,13 @@ of what that cut keeps and drops. A user looking at the plot can see whether
 their threshold sits in a valley or in the middle of one population, which is
 better evidence than a number they would have to trust.
 
-### D.2e The absolute-comparability claim is FALSE, and it was measured on a
-fixture that could not see the confounder
+### D.2e Why the edge-energy estimator was abandoned
 
-**This section retracts the claim the rest of section D is built on.** An
-adversarial scientific review found it and it reproduces on an independently
-written fixture.
+**This section records why the estimator changed. It measures the form that
+was replaced; §D.2f measures the one that ships.** An adversarial scientific
+review found the defect and it reproduced on an independently written
+fixture — and every claim it retracted has since been re-earned by a different
+statistic rather than argued back.
 
 `edge_focus` is claimed "absolutely comparable between cells, fields, wells and
 plates". It is comparable across **gain and pedestal (exactly)**, across
@@ -1093,13 +1106,15 @@ noise model under which the design is sound.
 
 **What this invalidates**: `Focus_Pass` as an absolute per-cell cut (D12, D13),
 the well composite's median-against-cut rule (D14), the Analyze threshold field
-as "a number about a microscope, stable across every plate on that instrument"
+as "a number about a microscope, the same on every plate from that instrument"
 (D10, D11), and the Playground's premise that a user can choose one number for
 their scope. **What survives**: the per-cell measurement as *evidence*, the
 size-confounder improvement over the frame-level Tenengrad, the gain/pedestal
 invariance, and the undefined-is-not-zero discipline throughout.
 
-Four further confirmed findings, each measured:
+Four further confirmed findings, each measured — and **all four are gone with
+the geometry that produced them**, because a distance transform has no ring to
+mis-size, no noise floor to contaminate and no band width to fail:
 
 * **A hole in the measurable range.** Equivalent radius 4.41–4.78 px (area
   ≈ 62–78) returns `None` unconditionally, while both smaller (49–61) and
@@ -1119,6 +1134,80 @@ Four further confirmed findings, each measured:
   minimum and at σ=7 reads *above* the σ=2 value, on isolated cells with no
   neighbour contamination. The cause is the contrast denominator collapsing
   faster than the numerator, not the ring width the docstring blames.
+
+### D.2f The estimator that ships: a width, not an energy
+
+The cause of everything in §D.2e is one thing: **amplitude and blur are
+entangled in every edge-energy statistic.** A dim cell and a blurred cell both
+carry little gradient per pixel, and no normaliser separates them, because the
+quantity being normalised already mixes them. Two fixes were tried within the
+energy family and both are recorded here because each looked promising and
+neither worked. Pushing the contrast measurement away from the blur halo and
+weighting the noise floor by the band's real composition together cut the
+rebound from 2.24× to 1.78× without removing it. Requiring the edge to clear
+the noise floor by a margin removed it completely — by refusing the low-signal
+cells, which at one stop of defocus left **6 %** of dim cells measurable
+against **100 %** of bright ones. That is the brightness bias again wearing a
+refusal, and it is worse than the defect it fixes, because a refusal
+correlated with brightness is invisible in the output.
+
+What defocus actually changes is the **width** of the transition, and a width
+is a distance in pixels — independent of gain, pedestal and amplitude by
+construction rather than by correction. The signed distance transform gives
+every pixel's distance from the outline; binning intensity by that distance
+gives the transition profile; the distance from 20 % to 80 % of the cell's own
+contrast is the classic knife-edge width, and the score is its reciprocal.
+
+Measured on a shot-noise fixture at the cell size the user gave us (20 px
+across), five seeds, against the form it replaced:
+
+| varying only | energy | width |
+|---|---|---|
+| brightness, 80× in amplitude | 1.52× | **1.03×** |
+| nucleus size, 14–28 px | 1.09× | **1.01×** |
+| read noise, 2 → 30 | 1.02× | 1.01× |
+| neighbours, 30 px → contact | 1.14× | **1.02×** |
+| chromatin texture, 0 → 0.8 | 1.50× | **1.14×** |
+| saturation, clipped to 60 % | 2.87× | **1.45×** |
+| gain and pedestal | exact | exact |
+| rebound past σ = 2 | **2.24×** | **1.00×** |
+| cells measurable at σ = 1, dim vs bright | 100 % | 100 % |
+
+Independently re-measured when this section was written, on a separately
+written fixture: σ 0 → 8 reads 0.8329 / 0.6457 / 0.3666 / 0.2933 / 0.2374 /
+0.1773 / 0.1491 / 0.1325 / 0.1271 — falling at **every** step, sharp-to-σ2
+3.51×, brightness 1.03× over 200–16000, size 1.05× over radius 7–14, crowding
+1.03× to contact, gain and pedestal identical to six decimal places.
+
+**The cost, stated plainly.** The dynamic range is narrower: sharp-to-σ2 is
+3.5× here against 2.71× for the energy form on its own fixture, but the energy
+form's *apparent* range came partly from the rebound it was about to suffer. A
+gap that never inverts is worth more than a large one that does.
+
+**What is left, and it is not nothing.** Clipping biases the value upward, and
+this one is not error — a flat-topped nucleus genuinely does have a steeper
+transition. Measured against the ceiling, with the nuclei at amplitude 2000
+over a background of 100:
+
+| ceiling | `sat_frac` | focus | vs unclipped |
+|---|---|---|---|
+| 2400 | 0.00000 | 0.3666 | 1.00× |
+| 2100 | 0.00910 | 0.3669 | 1.00× |
+| 2050 | 0.01659 | 0.3751 | 1.02× |
+| 1900 | 0.02291 | 0.3996 | 1.09× |
+| 1600 | 0.02576 | 0.4801 | 1.31× |
+| 1400 | 0.02796 | 0.5318 | 1.45× |
+
+**`sat_frac` cannot be used to bound it**, which is the part worth carrying
+forward: it is capped by the fraction of the frame the nuclei cover — 2.4 %
+here — so it stops rising while the bias keeps climbing. A sparse plate can
+have every nucleus flat-topped at a `sat_frac` of two percent. The honest
+statement, and the one every surface now makes, is that a cut chosen on a
+well-exposed plate is too aggressive on a saturated one; there is no threshold
+in `sat_frac` that makes that check mechanical.
+
+Chromatin texture at 1.14× is the largest remaining confounder on an
+unsaturated plate.
 
 ### D.3 What it hangs off
 
@@ -1144,11 +1233,15 @@ per-field one: a field whose median is fine can still have a soft third.
 
 ### D.4 Where the threshold comes from, and who applies it
 
-A cut on an absolutely-comparable column is a number about a **microscope**,
-not about a dataset: it depends on the PSF, the pixel size and the nuclear
-contrast, and it is stable across every plate taken on the same instrument at
-the same magnification. So the number belongs in the Analyze form beside the
-other acquisition-shaped settings, and §D.2d says it cannot be guessed.
+A cut on this column is mostly a number about a **microscope** rather than
+about a dataset: it depends on the PSF, the pixel size and the nuclear
+contrast, and §D.2f measures it moving under 5 % across brightness, nucleus
+size and crowding, so a cut carries between plates taken on one instrument at
+one magnification. Two residuals qualify "mostly" and every surface that
+states the claim now states them too: clipping biases it upward to 1.45×, and
+chromatin texture reaches 1.14×. So the number belongs in the Analyze form
+beside the other acquisition-shaped settings, and §D.2d says it cannot be
+guessed.
 
 That gives three places and one number:
 
@@ -1247,7 +1340,7 @@ where those tests go.
 | # | Row | State | Place | Evidence |
 |---|---|---|---|---|
 | D17 | **The estimator is non-monotone past two stops of defocus**, so a floor cut keeps the worst cells and drops milder ones. Measured 2.24× recovery from the minimum; the guard stopped at four stops and bounded the tail rather than requiring each step to fall | `done` | `pipeline/field_quality.edge_focus` | Closed by the rewrite: the statistic is now the **width** of the intensity transition rather than its energy. Re-measured independently on a shot-noise fixture at the cell size the user gave (20 px across), 5 seeds: σ 0→8 reads 0.8329 / 0.6457 / 0.3666 / 0.2933 / 0.2374 / 0.1773 / 0.1491 / 0.1325 / 0.1271 — **strictly falling at every step**, so the rebound is 1.00×. `tests/test_field_quality.py` walks the grid to eight stops and requires each step to fall |
-| D18 | **Four tooltips, two docstrings, the manual, ARCHITECTURE ×2 and §D.4 still assert the comparability claim §D.2e retracted** — and §D.2e itself is now out of date, because it measured the estimator that was replaced | `todo` | the twelve sites the review listed | Not a blanket retraction and not the original claim: the sweep states what the **shipped** estimator measures |
+| D18 | **Four tooltips, two docstrings, the manual, ARCHITECTURE ×2 and §D.4 still assert the comparability claim §D.2e retracted** — and §D.2e itself was out of date, because it measured the estimator that was replaced | `done` | fifteen sites across `analyze/`, `review/`, `pipeline/`, `process_microscopy.py`, both live documents and §D.2-0 / §D.2-1b / §D.2-2 / §D.2e / §D.4 here; §D.2f is new and holds the measurement | Neither a blanket retraction nor the original claim. Re-measured independently on a separately written shot-noise fixture before a word was rewritten: brightness 1.03×, size 1.05×, crowding 1.03×, texture 1.02× over 0–0.3, gain and pedestal identical to six decimals, σ 0→8 falling at **every** step. Clipping is the one real residual at 1.45×, and `sat_frac` does not bound it — it is capped by the nuclear area fraction, so a sparse plate can be wholly flat-topped at 2 %. `tests/test_focus_claims_stay_measured.py` holds it: a text block claiming comparability about focus must carry the clipping caveat within reach. **A phrase ban would not have worked** — the exact wording that shipped is a sentence this repository still wants to write — and the positional rule found three sites the hand sweep had missed, including one in the Playground tooltip. Proven by mutating HEAD (the base ref has none of these files), and eight cases in `test_guards_bite.py`, four violations and four clearances |
 | D19 | **A Gating or Curation reset makes the panel deny the dataset was ever measured.** The reset empties the row cache; every focus predicate reads the cache; the panel then names a remedy — re-run the whole plate — that is not needed. `focus_gate`'s own docstring calls this the one distinction that must never collapse | `done` | `review/data/focus_gate.dataset_has_focus_column` returns `bool \| None` | `tests/test_focus_tools_in_a_real_app.py`, two tests, one per route in. Mutation: return `False` for an empty cache instead of `None` and both fail with the false sentence in the message |
 | D20 | **The persisted `qc_params` block permanently overrides the run's recorded cut.** Touching any Cell Gating control writes the block; the lazy `from_pipeline_info` seed is then never reached again, so a later re-run that records a different number leaves Analyze and Review showing two numbers for one dataset with no warning | `todo` | `review/persistence/qc_params.py` | §7: a silent substitution. The box's own tooltip asserts a provenance that has by then stopped being true |
 | D21 | **The Playground measures a different channel and a differently-corrected frame from the column the cut applies to.** Its curve is the selected channel with the Playground's own corrections; the column is always the nuclear channel with the run's. Measured 1.78× on the median and 8× on the p5–p95 spread between channels; ≤2.6 % for five of seven corrections and **1.27×** for `fft_bandpass` | `todo` | `playground` focus button + `_sweep_subject` | A cut read off the wrong channel can exclude 100 % of the nuclear population. The saved figure does not record the correction modes, so it cannot be told from one measured differently |

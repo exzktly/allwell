@@ -19,17 +19,21 @@ still have a soft third, and no whole-field verdict can express that.
 **Why the cut is absolute.** A score relative to its own frame cannot see a
 frame that is uniformly soft, because every cell in it deviates from its
 neighbours by nothing — measured, the relative median is exactly 1.000 at three
-very different focus states. The estimator is built to be comparable between
-cells, fields, wells and plates so that one number can serve, and the number
-comes from the run's own sidecar or from the user, never from this module.
+very different focus states. The estimator is a transition *width* in pixels,
+which is what makes one number able to serve: gain and pedestal do not move it
+at all, and brightness, nucleus size and crowding move it by under 5 %. Two
+things do move it, and a user comparing plates should know both — a clipped
+nucleus reads sharper (up to 1.45x when the ceiling cuts well into the
+interior), and chromatin texture reaches 1.14x. The number itself comes from
+the run's own sidecar or from the user, never from this module.
 
 **Three things this refuses to do, each because the alternative is a silent
 substitution.**
 
 * A cell with **no** focus value passes. Undefined is not soft. Severe defocus
   degrades segmentation, so the column is missing exactly where defocus is
-  worst — but so is a cell too small to carry a measurable ring, and treating
-  the two alike would quietly delete the smallest nuclei on every plate. The
+  worst — but so is a nucleus whose boundary profile cannot be read at all,
+  and treating the two alike would quietly delete cells on every plate. The
   count of them is reported instead, and the *field* metric is what covers the
   case the per-cell one cannot see.
 * A dataset with **no column at all** gets no ``Focus_Pass`` column, rather

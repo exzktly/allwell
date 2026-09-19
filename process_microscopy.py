@@ -1020,7 +1020,10 @@ def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
     estimator reads is the outline that was segmented. The correction
     concern does not transfer: an edge's width is not something a flat-field
     division or a background subtraction changes, which is the same property
-    that makes the measurement comparable between plates at all.
+    that makes the measurement comparable between plates at all. Clipping is
+    the exception and it is upstream of everything here — a flat-topped
+    nucleus has a genuinely steeper edge, so a saturated plate reads sharper
+    than it is.
 
     Costed rather than assumed: these two together are well under the ~0.4 s
     the three used to take on a 2048² frame, against several seconds of
@@ -1408,8 +1411,10 @@ def _quantify_image_group(
     region_by_id = compute_region_areas(nir_corr, labels)
 
     # Per-cell focus (always emitted), measured at each nucleus's own outline.
-    # It is the one focus number that is comparable between cells, fields,
-    # wells and plates — see ``pipeline.field_quality.edge_focus`` for why a
+    # It is the one focus number comparable between cells, fields, wells and
+    # plates — a transition WIDTH in pixels, so gain, pedestal, brightness and
+    # nucleus size barely move it, and only clipping moves it much. See
+    # ``pipeline.field_quality.edge_focus`` for the measured table, for why a
     # score relative to its own frame cannot see a frame that is uniformly
     # soft, and why every whole-image statistic confounds nucleus size with
     # defocus. Measured on ``nir_corr``, the frame the labels were computed
@@ -3338,9 +3343,10 @@ def main() -> None:
                 # the dataset's own cut; Review's Cell Gating tab is what acts
                 # on it, so a cut chosen wrongly costs a tick rather than a
                 # re-run. 0.0 means the run stated none -- which is the default,
-                # because the number depends on the microscope and nothing in a
-                # run can guess it (the Playground's focus distribution is where
-                # a user finds theirs).
+                # because the number depends mostly on the microscope and
+                # nothing in a run can guess it (Review's Cell Gating tab draws
+                # a well's own distribution, which is where a user finds
+                # theirs).
                 "focus_min": float(args.focus_min or 0.0),
             },
             phase_token=args.phase_token or "",

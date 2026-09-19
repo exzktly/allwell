@@ -9809,45 +9809,57 @@ measurement the plate-wide comparison then believes.
 **Where each metric can be read, and why it is read there.**
 `pipeline/field_quality.py` holds all six.
 
-`focus` is measured **at each nucleus's own outline** (`edge_focus`), and every
-part of it was chosen by measurement against the alternatives:
+`focus` is measured **at each nucleus's own outline** (`edge_focus`), and it
+measures the **width** of the intensity transition there rather than its
+energy. That one choice is the whole design. Defocus is a property of the
+optics: it sets how far the intensity takes to travel from inside the object
+to outside. Brightness sets the *amplitude* of that transition and not its
+width, so a width is independent of gain, pedestal and amplitude by
+construction, while every edge-energy statistic confounds the two — a dim cell
+and a blurred cell both carry little gradient per pixel.
 
-    sqrt(max(0, peak|∇²I|_edge² − peak|∇²I|_background²)) / contrast
+The signed distance transform gives, for each pixel near the outline, how far
+it is from the boundary. Binning intensity by that distance gives the
+transition profile directly, and the distance the profile takes to rise from
+`EDGE_RISE_LO` to `EDGE_RISE_HI` of the cell's own contrast is the classic
+knife-edge width. The score is its reciprocal, so higher stays sharper. There
+is no ring, no noise floor and no band geometry to fail — a distance transform
+has nothing to mis-size against a nucleus.
 
-* **The Laplacian, not the gradient.** At a step edge blurred by a Gaussian of
-  width σ the peak gradient scales as 1/σ and the peak Laplacian as 1/σ² —
-  twice as sensitive in log terms. Over σ 0→3 the gradient form spans 2.85×,
-  this one 9.63×.
-* **At the outline, not over the frame.** Defocus is a property of the optics:
-  it sets the width of the intensity transition at an edge, and that width is
-  the same whatever the object's size. That is what removes the confounder
-  disqualifying every whole-image statistic — measured on the shipped
-  function, a fourfold nucleus-size range spans **1.36×**, against **7.8×** for
-  a frame-level Tenengrad, whose defocus signal over the same fixtures is only
-  3.7×. A metric that moves with nuclear size reports a cell line with large
-  nuclei, or the wells where a cytotoxic compound worked, as out of focus.
-* **Divided by the cell's own contrast** — median inside minus median in a ring
-  outside — which removes gain and an additive pedestal exactly.
-* **With the background ring's own Laplacian subtracted in quadrature.** Noise
-  adds Laplacian energy, so a dim noisy cell reads as *sharper* than it is,
-  which is the false-negative direction. Without the correction the value
-  inverts above σ≈3; with it, monotone through σ≈3 and the drift over a
-  fifteenfold noise range falls from 1.86× to 1.31×.
+**Measured on a shot-noise fixture at a realistic cell size** (20 px across),
+against the edge-energy form this replaced:
 
-The ring scales with the nucleus (`EDGE_BAND_RADIUS_FRAC`) rather than being a
-fixed three pixels, because a fixed band left every nucleus under about six
-pixels of radius entirely unmeasurable — a whole class of plate silently
-carrying no focus measurement at all. Radius 4, the pipeline's own
-`min_nucleus_area_px` of 50, is measurable.
+| varying only | energy | width |
+|---|---|---|
+| brightness, 80× in amplitude | 1.52× | **1.03×** |
+| nucleus size, 14–28 px | 1.09× | **1.01×** |
+| read noise, 2 → 30 | 1.02× | 1.01× |
+| neighbours, 30 px → contact | 1.14× | **1.02×** |
+| chromatin texture, 0 → 0.8 | 1.50× | **1.14×** |
+| saturation, clipped to 60 % | 2.87× | **1.45×** |
+| gain and pedestal | exact | exact |
 
-**It is absolutely comparable between cells, fields, wells and plates**, which
-is the property the whole layer rests on: a score relative to its own frame
-cannot see a frame that is uniformly soft, because every cell in it deviates
-from its neighbours by nothing — measured, the relative median is exactly
-1.000 at three very different focus states. It is **not** a severity scale past
-σ≈3: beyond that the outline has spread wider than the ring reading it and the
-value flattens, which is acceptable because severe defocus is also where
-segmentation fails and there is frequently no outline left to read.
+So it is comparable between cells, fields, wells and plates, which is the
+property the whole layer rests on: a score relative to its own frame cannot
+see a frame that is uniformly soft, because every cell in it deviates from its
+neighbours by nothing — measured, the relative median is exactly 1.000 at
+three very different focus states. **Two residuals qualify that and belong in
+any sentence a user reads**: clipping biases it upward, because a flat-topped
+nucleus genuinely does have a steeper transition, and chromatin texture
+reaches 1.14×. `sat_frac` is recorded per field but does not bound the first
+of those — it is capped by the fraction of the frame the nuclei cover, so on a
+sparse plate every nucleus can be flat-topped while `sat_frac` stays near a
+couple of percent.
+
+**And it is monotone**, which the energy form was not. That form turned back
+up past two stops of defocus and recovered 2.24× from its minimum, so a cut
+near the soft end excluded the mildly defocused cells and *kept* the
+catastrophic ones while reporting a confident count of what it had removed.
+Over the same sweep to eight stops this form falls at every step, with every
+cell measurable at every stop. An SNR margin was tried first and rejected: it
+restored monotonicity by refusing the low-SNR cells, which at one stop of
+defocus left 6 % of dim cells measurable against 100 % of bright ones — the
+brightness bias again, wearing a refusal.
 
 The value is written per cell as the `qc_edge_focus` column (named in
 `pipeline/field_quality_record.py`, which is stdlib-only, so Review's data
@@ -9949,15 +9961,14 @@ its rows excluded while the panel said they were kept.
 * **The focus cut needs both a switch and a number** (`focus_gate_is_active`).
   A cut with the switch off is a number the user has recorded; the switch on
   with no cut is a request nothing here can honour. `focus_min` is seeded from
-  the run's own sidecar — the value depends on the microscope rather than on
-  the plate — and is **not** seeded on, because a recorded threshold is the
-  user saying "this is my instrument's number", not "drop those cells from
-  every plot without telling me".
+  the run's own sidecar — the value depends mostly on the microscope rather
+  than on the plate, clipping aside — and is **not** seeded on, because a
+  recorded threshold is the user saying "this is my instrument's number", not
+  "drop those cells from every plot without telling me".
 * **A cell with no focus value passes.** Undefined is not soft. Severe defocus
   degrades segmentation, so the column is missing exactly where defocus is
-  worst — but so is a nucleus too small to carry a measurable ring, and
-  treating the two alike would quietly delete the smallest nuclei on every
-  plate. The count of them is named on the panel, as **kept**, because a
+  worst — but so is a nucleus whose boundary profile cannot be read at all,
+  and treating the two alike would quietly delete cells on every plate. The count of them is named on the panel, as **kept**, because a
   reader who believed the gate removed everything soft would be wrong about
   exactly those rows.
 * **A well whose FOV labels are untrusted is refused, not joined onto.**
@@ -10023,8 +10034,8 @@ of unreadable outlines.
 
 **Where the threshold comes from, and who applies it.** The number is a
 property of the **microscope** — the point-spread function, the pixel size, the
-nuclear contrast — so it is stable across every plate taken on one instrument
-at one magnification, and it is stated in the Analyze form
+nuclear contrast — so a cut carries between plates taken on one instrument at
+one magnification, clipping aside, and it is stated in the Analyze form
 (`analyze/qc_section.py`: `Measure per-cell focus`, on by default, and
 `Out of focus below`, blank by default). The run **records** it in
 `pipeline_info.json` and never acts on it: a threshold is what a user gets

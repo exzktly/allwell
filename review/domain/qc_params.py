@@ -93,11 +93,14 @@ class QCParams:
     #: field cannot see a field that is uniformly soft, because every cell in
     #: it deviates from its neighbours by nothing — measured, the relative
     #: median is exactly 1.000 at three very different focus states. The
-    #: estimator behind the column is built to be comparable between cells,
-    #: fields, wells and plates precisely so this number can be one number.
+    #: estimator behind the column is a transition *width* in pixels, which is
+    #: what lets this be one number: gain and pedestal do not move it, and
+    #: brightness, nucleus size and crowding move it under 5 %. Clipping does
+    #: move it — a flat-topped nucleus reads sharper — so a cut chosen on an
+    #: unsaturated plate is too aggressive on a saturated one.
     #:
     #: Seeded from the run's own sidecar when it stated one, because the value
-    #: depends on the microscope rather than on the plate. ``None`` means no
+    #: depends mostly on the microscope rather than on the plate. ``None`` means no
     #: cut, which is what a dataset whose run stated none carries.
     focus_min: float | None = None
     min_area: float | None = None

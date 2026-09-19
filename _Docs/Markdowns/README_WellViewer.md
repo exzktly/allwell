@@ -1517,33 +1517,46 @@ buttons — you pick one or the other, because choosing the scatter option
   still have a soft third, and no whole-field verdict can say so. The two
   controls are independent and neither replaces the other.
 
-  It works off a number the run records for every cell: how sharp the boundary
-  of that nucleus is, measured at the outline itself and divided by the cell's
-  own contrast. Measuring at the outline is what makes the number mean the same
-  thing everywhere — defocus sets the width of the intensity transition at an
-  edge, and that width does not depend on how big the nucleus is or how many
-  are in the field. So the value is comparable between cells, fields, wells and
-  plates, and the cut you type is an **absolute** one rather than a comparison
-  with the field's own average. That matters: a score relative to its own frame
-  cannot see a frame that is uniformly soft, because every cell in it deviates
-  from its neighbours by nothing.
+  It works off a number the run records for every cell: how far the intensity
+  takes to travel from inside that nucleus to outside it, measured at the
+  outline itself. Defocus is what widens that transition, and a width is a
+  distance in pixels — brightness changes how *tall* the step is, not how wide,
+  and the width does not depend on how big the nucleus is or how many are in
+  the field. So the value means the same thing everywhere, and the cut you type
+  is an **absolute** one rather than a comparison with the field's own average.
+  That matters: a score relative to its own frame cannot see a frame that is
+  uniformly soft, because every cell in it deviates from its neighbours by
+  nothing.
+
+  Measured across an eightyfold brightness range the value moves 3 %, across a
+  14–28 px range of nucleus size 1 %, and as nuclei crowd together to touching
+  2 %. **Two things do move it**, and they are worth knowing before you carry a
+  cut from one plate to another. Chromatin texture reaches 14 %. And a
+  *clipped* image reads sharper than it is — up to 45 % — because a nucleus
+  whose middle is flat-topped genuinely does have a steeper edge, so a cut
+  chosen on a well-exposed plate will be too aggressive on a saturated one.
 
   The threshold box beside the checkbox starts blank, or holds whatever the run
   recorded. **Nothing can fill it in for you**, and that is a measured
   conclusion rather than caution: the obvious automatic rule returns a number
   for a plate with nothing wrong with it and throws away two fifths of its good
   cells, and on a plate that is uniformly out of focus it does almost nothing
-  at all. Where the number comes from instead is
-  **Image Browser ▸ Playground ▸ Focus distribution…**, which plots every cell
-  on the frame in front of you, marks your current cut, and says live how many
-  cells it keeps and how many it drops. Find a value once for your microscope
-  and magnification; it will be the same for every plate taken the same way.
+  at all. Where the number comes from instead is the
+  **Distribution…** button beside the box, which plots every cell of the
+  selected well — every field and every timepoint it holds — marks your current
+  cut, and says live how many cells it keeps and how many it drops.
+  **Image Browser ▸ Playground ▸ Focus distribution…** draws the same curve for
+  the single frame in front of you, which is the one to use while you are
+  tuning that frame's corrections. Find a value once for your microscope and
+  magnification and it will carry between plates taken the same way, exposure
+  permitting.
   Type it into **Analyze ▸ Quality Control ▸ Out of focus below** so future
   runs record it and this box opens ready.
 
   Cells whose outlines could not be measured at all are **kept**, and the line
   under the checkbox says how many. An outline needs contrast across it and
-  enough pixels either side, so a nucleus too small or too faint has no value —
+  enough pixels either side, so a nucleus with no readable boundary profile has
+  no value —
   and so does a cell in a badly defocused field, where segmentation itself
   starts to fail. Those are not the same as a cell measured and found soft, and
   the app never treats them alike.

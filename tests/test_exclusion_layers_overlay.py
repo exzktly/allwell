@@ -210,3 +210,244 @@ def test_the_toggle_reaches_the_state_and_the_button_text():
     # that a click will not undo a verdict column.
     assert "CANNOT restore" in seen["tip"]
     refresh_review_image_layers_btn(ctx)
+
+
+# ── what the first draft of the overlay could not say ───────────────────────
+#
+# Everything below came out of an adversarial review of the shipped feature.
+# The theme is one thing: each of these is a property the OLD implementation
+# also satisfied under the assertions that existed, which is CLAUDE.md §7.8's
+# question -- name the wrong implementation that still passes this -- answered
+# out loud. `test_every_layer_has_an_ink_and_none_is_the_reserved_tint` above
+# passes with all six inks identical, and two of them were.
+
+_MIN_LAYER_DE = 31.0      #: measured floor on the shipped palette
+_MIN_LAYER_LUM = 0.28     #: what a one-pixel stroke needs on this plot surface
+
+
+def _srgb_to_linear(v):
+    v /= 255.0
+    return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+
+def _rel_luminance(rgb):
+    r, g, b = (_srgb_to_linear(x) for x in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _lab(rgb):
+    r, g, b = (_srgb_to_linear(x) for x in rgb)
+    x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+
+    def f(t):
+        return t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116
+
+    fx, fy, fz = f(x), f(y), f(z)
+    return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+
+def _delta_e(a, b):
+    return sum((p - q) ** 2 for p, q in zip(_lab(a), _lab(b))) ** 0.5
+
+
+def test_no_two_layers_share_a_colour():
+    """**The defect.** "Outside the crop" and "outside the scatter gates" were
+    both ``text_muted`` — the same pixel value, ΔE exactly 0 — so the overlay
+    could not tell apart two of the six answers its own button promises.
+
+    Asserting a *floor* rather than "they differ": two colours can differ by
+    one bit and be as unreadable as one. The floor is the palette's measured
+    minimum, so it ratchets the way this repository's budgets do.
+    """
+    from review.features.image_browser.review_image.renderer import (
+        _layer_inks, _rgb_of,
+    )
+
+    inks = _layer_inks()
+    labels = [label for _col, label in EXCLUSION_LAYERS]
+    worst, pair = None, None
+    for i, a in enumerate(labels):
+        for b in labels[i + 1:]:
+            d = _delta_e(_rgb_of(inks[a]), _rgb_of(inks[b]))
+            if worst is None or d < worst:
+                worst, pair = d, (a, b)
+    assert worst >= _MIN_LAYER_DE, (
+        f"{pair[0]!r} and {pair[1]!r} are only ΔE {worst:.1f} apart; the "
+        f"overlay cannot distinguish two of its own answers")
+
+
+def test_every_layer_ink_is_bright_enough_to_see():
+    """A one-pixel stroke on a dark fluorescence frame. ``text_muted``, which
+    two layers used, sits at 0.144 — the two that shared a colour were also
+    the two least visible."""
+    from review.features.image_browser.review_image.renderer import (
+        _layer_inks, _rgb_of,
+    )
+
+    inks = _layer_inks()
+    for _col, label in EXCLUSION_LAYERS:
+        lum = _rel_luminance(_rgb_of(inks[label]))
+        assert lum >= _MIN_LAYER_LUM, f"{label!r} is too dark to read ({lum:.3f})"
+
+
+def test_no_layer_is_painted_in_the_apps_good_colour():
+    """Every cell this overlay marks has been **removed**. ``success`` is the
+    app's own "good" token — it said the opposite of what happened, and on a
+    green-tinted channel a green outline is close to invisible besides."""
+    from review.features.image_browser.review_image.renderer import _layer_inks
+    from ui import theme
+
+    assert theme.Colors.success not in _layer_inks().values()
+
+
+def test_the_overlay_is_painted_outside_the_binary_branch():
+    """**The defect.** The ink block sat inside the ``else`` of the binary
+    split. In Binary mode the reasons were computed — a full row fetch and
+    verdict walk per refresh — and then never read, while the button went on
+    saying "Why removed: On". A toggle that is on and does nothing.
+
+    **This asserts the structure, and that is the point.** The first version
+    of this test drove the shared painter directly and passed against the
+    defect, because what was wrong was not the painter but the branch that
+    never called it — CLAUDE.md §7.8 exactly: name the wrong implementation
+    that still passes. The fix hoists the call out of the ``if``/``else`` so
+    no branch can forget it, and what is worth pinning is that it stayed
+    hoisted. Anything nested in a conditional is a branch that can be wrong in
+    one mode and right in the other, which is how this shipped.
+    """
+    import ast
+
+    from tests._repo_scan import parse_source, REPO_ROOT
+
+    path = (REPO_ROOT / "review" / "features" / "image_browser" /
+            "review_image" / "renderer.py")
+    fn = next(n for n in ast.walk(parse_source(path))
+              if isinstance(n, ast.FunctionDef) and n.name == "draw_review_image")
+
+    def _calls(body):
+        return [n for stmt in body for n in ast.walk(stmt)
+                if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name)
+                and n.func.id == "_paint_exclusion_outlines"]
+
+    nested = [stmt for stmt in fn.body if isinstance(stmt, (ast.If, ast.For,
+                                                            ast.While, ast.Try))]
+    assert not _calls(nested), (
+        "the overlay painter is back inside a conditional in "
+        "draw_review_image; it must run for every draw mode, and a branch "
+        "that can forget it is how Binary mode shipped drawing nothing")
+    top = [stmt for stmt in fn.body if not isinstance(stmt, (ast.If, ast.For,
+                                                             ast.While, ast.Try))]
+    assert len(_calls(top)) == 1, (
+        "expected exactly one unconditional call to the overlay painter")
+
+
+def test_the_overlay_painter_inks_an_excluded_cell():
+    """The painter itself, which the structural test above does not measure."""
+    import numpy as np
+    from review.features.image_browser.review_image.renderer import (
+        _layer_inks, _paint_exclusion_outlines, _rgb_of,
+    )
+
+    center = np.zeros((6, 6), np.int32)
+    center[2:4, 2:4] = 7
+    boundary = center > 0
+    rgb = np.zeros((6, 6, 3), np.uint8)   # a binary frame: this cell is below
+    _paint_exclusion_outlines(rgb, boundary, center,
+                              {7: ("out of focus",)}, on=True)
+    painted = set(map(tuple, rgb[boundary].tolist()))
+    assert painted == {_rgb_of(_layer_inks()["out of focus"])}, painted
+
+
+def test_the_painter_is_a_no_op_when_the_overlay_is_off():
+    import numpy as np
+    from review.features.image_browser.review_image.renderer import (
+        _paint_exclusion_outlines,
+    )
+
+    center = np.zeros((6, 6), np.int32)
+    center[2:4, 2:4] = 7
+    rgb = np.zeros((6, 6, 3), np.uint8)
+    _paint_exclusion_outlines(rgb, center > 0, center,
+                              {7: ("out of focus",)}, on=False)
+    assert not rgb.any()
+
+
+def test_the_legend_names_only_the_layers_present_in_this_field():
+    """**The defect.** There was no legend anywhere — the button's tooltip
+    named the six layers in prose and never said which colour was which, so
+    the picture used six inks the user had no way to read.
+
+    Only what is on screen is listed, so every entry answers a cell the user
+    can actually see. The Home plate refuses to draw its marker without a
+    legend row; this borrows that invariant.
+    """
+    from review.features.image_browser.review_image.renderer import (
+        _exclusion_legend_html, _layer_inks,
+    )
+
+    html = _exclusion_legend_html(
+        None, {1: ("out of focus",), 2: ("debris gate",)}, on=True)
+    assert "out of focus" in html and "debris gate" in html
+    assert _layer_inks()["out of focus"] in html
+    assert _layer_inks()["debris gate"] in html
+    # And nothing about the four layers this field has no cell for.
+    for absent in ("outside the crop", "deleted here"):
+        assert absent not in html, absent
+
+
+def test_the_legend_says_so_when_nothing_is_excluded():
+    """**The defect.** With the toggle on and nothing excluded the picture is
+    unchanged and no surface said why — indistinguishable from a feature that
+    does not work (§0.5)."""
+    from review.features.image_browser.review_image.renderer import (
+        _exclusion_legend_html,
+    )
+
+    html = _exclusion_legend_html(None, {}, on=True)
+    assert "nothing in this field is excluded" in html
+
+
+def test_there_is_no_legend_when_the_overlay_is_off():
+    from review.features.image_browser.review_image.renderer import (
+        _exclusion_legend_html,
+    )
+
+    assert _exclusion_legend_html(None, {1: ("out of focus",)}, on=False) == ""
+
+
+def test_the_hover_readout_names_every_layer_that_dropped_a_cell():
+    """**The defect.** Three docstrings and the button's own tooltip promised
+    a readout that "names every layer that dropped it", and no such readout
+    existed: the hover emitted position, channel value, cell id and MFI and
+    nothing about exclusion. A cell failing three layers was drawn in one
+    colour with the other two unreachable from any surface in the app.
+    """
+    from review.features.image_browser.review_image.collect import (
+        exclusion_phrase,
+    )
+
+    ctx = SimpleNamespace(state=SimpleNamespace(review_image=SimpleNamespace(
+        exclusion_reasons_by_nid={3: ("debris gate", "out of focus")})))
+    phrase = exclusion_phrase(ctx, 3)
+    assert "debris gate" in phrase and "out of focus" in phrase
+
+
+def test_the_hover_readout_tells_kept_from_unknown():
+    """Three states, and collapsing any two of them is the substitution this
+    subsystem exists to prevent: the overlay is off (say nothing), it is on
+    and this cell is kept (say so), it is on and this cell is out (say what
+    dropped it)."""
+    from review.features.image_browser.review_image.collect import (
+        exclusion_phrase,
+    )
+
+    off = SimpleNamespace(state=SimpleNamespace(review_image=SimpleNamespace(
+        exclusion_reasons_by_nid=None)))
+    assert exclusion_phrase(off, 3) == ""
+
+    on_kept = SimpleNamespace(state=SimpleNamespace(review_image=SimpleNamespace(
+        exclusion_reasons_by_nid={3: ()})))
+    assert "kept" in exclusion_phrase(on_kept, 3)

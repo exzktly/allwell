@@ -45,6 +45,7 @@ from review.features.image_browser.review_image.collect import (  # noqa: F401
     _load_arrays_from_refs,
     _split_background_wells,
     any_review_rows,
+    exclusion_phrase,
     flatfield_field_for,
     review_build_include_map,
     review_build_threshold_map,
@@ -513,6 +514,7 @@ def _show_image_pixel_tooltip(ctx, event, channel_label: str, label) -> None:
                 mfi = mfi_by_nid.get(nid)
                 if mfi is not None:
                     extra += f"  MFI:{mfi:.1f}"
+                extra += exclusion_phrase(ctx, nid)
         except Exception:
             swallowed()  # was: pass (silent except)
     global_pos = lbl.mapToGlobal(QPoint(ex, ey))

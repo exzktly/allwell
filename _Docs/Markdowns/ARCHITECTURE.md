@@ -9797,6 +9797,47 @@ the queue page.
 
 ---
 
+### 6.6b Why a cell is gone: the Segmentation overlay
+
+Inclusion is the AND of six verdict layers (`Included`, `QC_Pass`, `Crop_Pass`,
+`Gate_Pass`, `Field_Pass`, `Focus_Pass`), and the picture that shows a user
+their cells is the one place that AND is invisible by construction: an excluded
+cell simply has no outline. The **Why removed** toggle
+(`renderer.toggle_review_image_exclusion_layers`) outlines each excluded cell in
+the ink of the layer that removed it.
+
+Four rules hold it together, and each replaced a way the first version was
+quietly wrong.
+
+* **One roster.** `collect.EXCLUSION_LAYERS` names the layers and their order,
+  and `review_build_include_map` is *derived* from `review_build_exclusion_reasons`
+  rather than recomposing the AND — so the overlay and the inclusion the rest of
+  the app honours cannot drift. Order is about the reader rather than about
+  precedence: the composition is an AND, so a cell failing three layers is out
+  for all three and none of them is "the" cause. Manual comes first because it
+  is the one a click undoes.
+* **Six answers need six colours.** `_layer_inks` maps each label to a design
+  token, chosen by measurement: every pairwise CIE76 ΔE is at least 31 and every
+  relative luminance at least 0.28, which is what a one-pixel stroke needs on
+  this plot surface. Two layers once shared `text_muted` — ΔE of exactly 0, and
+  the darkest ink in the set — so the overlay could not distinguish two of the
+  answers its own button promises. `accent2` is excluded because the plate's
+  colour vocabulary reserves it, and `success` because every cell this marks has
+  been removed and green is the app's "good" token.
+* **The painter runs outside the draw-mode branch.** It was once inside the
+  `else` of the binary split, so Binary mode computed every reason — a row fetch
+  and verdict walk per refresh — and discarded them while the button read "Why
+  removed: On". Hoisting the call is what makes that unrepeatable, and
+  `tests/test_exclusion_layers_overlay.py` pins the structure rather than the
+  behaviour of either branch.
+* **Three surfaces, and all three exist.** The outline names the first layer,
+  the hover readout (`controller._exclusion_phrase`) names every layer, and the
+  status line carries a colour key for the layers present in this field —
+  including a sentence when the overlay is on and nothing is excluded, because
+  an unchanged picture is indistinguishable from a control that does not work.
+  The Home plate's rule that no mark may appear without a legend row is borrowed
+  here rather than reinvented.
+
 ### 6.7 Field quality: what the run measured about its own pictures
 
 Every FOV-group the pipeline processes is measured on six numbers, and the

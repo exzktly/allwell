@@ -3829,6 +3829,21 @@ reviewing and curating individual cells.
   binary + mask-overlay controls; the QC debris gate. **Hover** a nucleus to
   read its pixel value, cell id, and **mean fluorescence (MFI)** for the current
   channel (the same per-cell readout the Image Table shows).
+- **Why removed** — a toggle on the control row that outlines every *excluded*
+  cell in the colour of the layer that removed it: you deleted it, the debris
+  gate, the crop, the scatter gates, the run's field verdict, or the focus cut.
+  A colour key appears under the picture, listing only the layers this field
+  actually has cells for, and if the toggle is on and nothing here is excluded
+  the line says that rather than leaving you with an unchanged picture and no
+  way to tell whether the control worked.
+
+  Being *included* is the AND of all six layers, so a cell can fail more than
+  one and an outline can only be one colour — it shows the first, and hovering
+  the cell names every layer that dropped it. That is also why clicking a cell
+  back in cannot restore one a verdict column removed: raise that threshold, or
+  switch that layer off, instead. The overlay works in the binary (≥ threshold)
+  view too, which is usually where the question comes up, since a binary mask is
+  already a picture of which cells counted.
 - **The status line says when it is showing you less than it was asked for.**
   Two cases, each of which would otherwise look like an ordinary picture. If reading the
   well's archive stopped part way, the line ends with **INCOMPLETE** and the

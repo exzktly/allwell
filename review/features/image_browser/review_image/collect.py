@@ -245,8 +245,12 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None,
 #: so a cell failing three layers is out for all three and no one of them is
 #: "the" cause. Manual comes first because it is the one the user did and the
 #: only one they can undo from this tab; the rest follow the chokepoint's own
-#: order. Derived from one roster so the overlay, the readout and the legend
-#: cannot come to disagree about which layers exist.
+#: order. Derived from one roster so the overlay, the hover readout and the
+#: legend under the picture cannot come to disagree about which layers exist —
+#: and all three now exist, which was not true when this comment was first
+#: written: the "readout" it named was promised by three docstrings and a
+#: tooltip and had never been built, so every layer past the first was
+#: unreachable from any surface in the app.
 EXCLUSION_LAYERS = (
     ("Included", "deleted here"),
     ("QC_Pass", "debris gate"),
@@ -266,6 +270,28 @@ def _verdict(sub, column):
     if column not in sub.columns:
         return pd.Series(1, index=sub.index)
     return pd.to_numeric(sub[column], errors="coerce").fillna(1).astype(int)
+
+
+def exclusion_phrase(ctx, nid: int) -> str:
+    """What the "Why removed" overlay knows about this cell, as text.
+
+    Empty while the overlay is off, so the readout does not grow a clause
+    nobody asked for. With it on, **every** layer is named: inclusion is an
+    AND of six, the outline can only be one colour, and without this a cell
+    failing three of them had two answers that could not be reached from any
+    surface in the app.
+
+    "kept" is said out loud rather than left implicit, because the alternative
+    -- saying nothing -- is what a cell the overlay has no opinion about looks
+    like, and those are different facts.
+    """
+    reasons = ctx.state.review_image.exclusion_reasons_by_nid
+    if reasons is None:
+        return ""
+    layers = reasons.get(int(nid))
+    if not layers:
+        return "  kept"
+    return "  removed by: " + ", ".join(layers)
 
 
 def review_build_exclusion_reasons(

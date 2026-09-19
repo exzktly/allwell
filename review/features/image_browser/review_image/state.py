@@ -80,6 +80,12 @@ class ReviewImageState:
     # channel / FOV / timepoint — rebuilt each full refresh so the hover tooltip
     # can report the cell-under-cursor's MFI without re-slicing the CSV per move.
     mfi_by_nid: dict | None = None
+    #: Which verdict layers removed each excluded cell, for the hover readout.
+    #: Rebuilt by the renderer on every refresh alongside ``mfi_by_nid``, and
+    #: only while the "Why removed" overlay is on -- building it reads the
+    #: well's rows. ``None`` means the overlay is off, which the readout has to
+    #: tell apart from "on, and this cell is included".
+    exclusion_reasons_by_nid: dict | None = None
 
     # render options
     # Which image stage the canvas shows: "corrected" (final = flat-field +

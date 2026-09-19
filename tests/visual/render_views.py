@@ -236,7 +236,11 @@ def capture_review(app) -> None:
     print("[schema detection]")
     _capture_schema_detection(app, w, rev)
 
-    # 13) Help drawer dialog.
+    # 13) The Playground's threshold curve, in all three of its states.
+    print("[threshold curve]")
+    _capture_threshold_curve(app, w)
+
+    # 14) Help drawer dialog.
     print("[dialogs]")
     try:
         w._toggle_help_drawer()
@@ -246,6 +250,56 @@ def capture_review(app) -> None:
         print(f"  help drawer skipped: {exc}")
 
     w.close()
+
+
+def _capture_threshold_curve(app, w) -> None:
+    """Grab the threshold-curve window: a real sweep, a refusal, and a stop.
+
+    Drawn from synthetic counts rather than from a real sweep, because the
+    session installs no TensorFlow (CLAUDE.md §10.6) and the drawing is the
+    part a UX reviewer has to see. The counts are the shape a real 512x512
+    frame produced against StarDist 0.8.5 in an isolated venv, so the curve
+    has the real thing's proportions rather than an invented sag.
+    """
+    import math
+
+    from PySide6.QtWidgets import QDialog, QVBoxLayout
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
+
+    from review.domain.threshold_sweep import curve_from_counts, sweep_grid
+    from review.features.image_browser.playground.sweep_curve_view import (
+        draw_threshold_curve,
+    )
+
+    grid = sweep_grid()
+    measured = [int(round(400 / (1 + math.exp((t - 0.62) / 0.045)))) for t in grid]
+    common = dict(requested=len(grid), requested_span=(grid[0], grid[-1]),
+                  model_default=0.479071, subject="GFP · B03 · FOV 1 · 24h")
+    cases = (
+        ("ok", curve_from_counts(grid, measured, current=0.2, **common),
+         "the user's threshold against the model's own default"),
+        ("stopped", curve_from_counts(grid[:8], measured[:8], current=0.2,
+                                      **common),
+         "stopped early — the unmeasured range stays visibly empty"),
+        ("declined", curve_from_counts(grid, [0] * len(grid), **common),
+         "no nuclei at any threshold: the refusal is the figure"),
+    )
+    for slug, curve, desc in cases:
+        dlg = QDialog(w)
+        dlg.setWindowTitle("Threshold curve")
+        dlg.resize(820, 460)
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(8, 8, 8, 8)
+        fig = Figure(figsize=(7.8, 4.4), dpi=100)
+        canvas = FigureCanvas(fig)
+        lay.addWidget(canvas)
+        draw_threshold_curve(fig, curve)
+        dlg.show()
+        settle(app, 250)
+        canvas.draw()
+        grab(dlg, f"94-threshold-curve-{slug}", f"Threshold curve — {desc}")
+        dlg.close()
 
 
 def _build_detect_corpus(root: Path, *, parses: bool) -> Path:

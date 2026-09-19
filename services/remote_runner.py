@@ -5103,6 +5103,12 @@ class Fetcher:
                 if csv_count:
                     self._merge_fetched_csvs(tmp_csv_dir)
             finally:
+                # `_new_transit_dir` made this directory for this one well a
+                # few lines above and nothing of the user's is ever in it, so
+                # removing the whole thing is safe. Exempted by name in
+                # tests/test_no_unarchived_delete.py::_SCRATCH_DIR_ALLOWLIST,
+                # which otherwise catches this function for reaching an
+                # archive writer through `_materialize`.
                 shutil.rmtree(tmp_csv_dir, ignore_errors=True)
             # The temp dir is gone by now; name the volume it lived on, which is
             # what the user would have to look at.
@@ -5326,6 +5332,13 @@ class Fetcher:
             self._log(f"[remote] merge: {well}_out.zip → +{n} new image(s)\n")
             return True
         finally:
+            # The extraction directory this function made for this one well,
+            # holding only what `zf.extractall` just put there. The user's own
+            # files are in `well_zip` and in `dest`, neither of which is
+            # removed. Exempted by name in
+            # tests/test_no_unarchived_delete.py::_SCRATCH_DIR_ALLOWLIST,
+            # which otherwise catches this function for calling
+            # `pipeline.io.merge_images_into_zip`.
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # Mid-run sidecar ────────────────────────────────────────────────────

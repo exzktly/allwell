@@ -1454,6 +1454,16 @@ UNARCHIVED_DELETE_CLEAN = {
         "def clear(dest):\n"
         "    shutil.rmtree(dest, ignore_errors=True)\n"
     ),
+    # A name this module never binds is not followed, whatever the repo-wide
+    # closure knows about that name elsewhere. The guard is handed
+    # `compress_images_to_zip` as a known writer and must still clear this,
+    # because nothing here imports or defines it.
+    "known-writer-name-but-no-binding": (
+        "import shutil\n"
+        "def stage(folder, target):\n"
+        "    obj.compress_images_to_zip(folder, target)\n"
+        "    shutil.rmtree(folder)\n"
+    ),
     # The propagation is module-local on purpose: a same-named helper in some
     # other module must not make this function an archive writer.
     "same-name-helper-lives-elsewhere": (
@@ -1466,18 +1476,47 @@ UNARCHIVED_DELETE_CLEAN = {
 }
 
 
+#: Handed to the guard as the repo-wide closure, so the two shapes below that
+#: turn on an imported writer are measured against a name it really knows.
+_KNOWN_WRITERS = frozenset({"compress_images_to_zip"})
+
+
 @pytest.mark.parametrize("shape", sorted(UNARCHIVED_DELETE_VIOLATIONS))
 def test_unarchived_delete_guard_catches(shape):
     from tests.test_no_unarchived_delete import offenders_in
-    found = offenders_in(UNARCHIVED_DELETE_VIOLATIONS[shape], "probe.py")
+    found = offenders_in(UNARCHIVED_DELETE_VIOLATIONS[shape], "probe.py",
+                         _KNOWN_WRITERS)
     assert found, f"the {shape} spelling walked past the guard"
 
 
 @pytest.mark.parametrize("shape", sorted(UNARCHIVED_DELETE_CLEAN))
 def test_unarchived_delete_guard_clears(shape):
     from tests.test_no_unarchived_delete import offenders_in
-    found = offenders_in(UNARCHIVED_DELETE_CLEAN[shape], "probe.py")
+    found = offenders_in(UNARCHIVED_DELETE_CLEAN[shape], "probe.py",
+                         _KNOWN_WRITERS)
     assert not found, f"the guard fired on a legitimate {shape}: {found}"
+
+
+def test_unarchived_delete_guard_follows_a_writer_across_an_import():
+    """The shape that blinded this guard when `compress_images_to_zip` moved.
+
+    `process_well_zip_task` reached `atomic_zip` only through a function that
+    left `process_microscopy.py` for `pipeline/io.py`. The module-local
+    closure stopped following it there, both real pairings in that file went
+    unseen, and the suite went **greener** rather than red.
+    """
+    from tests.test_no_unarchived_delete import offenders_in
+    source = (
+        "import shutil\n"
+        "from pipeline.io import compress_images_to_zip\n"
+        "def pack_and_clear(folder, target):\n"
+        "    compress_images_to_zip(folder, target)\n"
+        "    shutil.rmtree(folder)\n"
+    )
+    assert not offenders_in(source, "probe.py"), (
+        "without the repo-wide closure there is nothing to follow")
+    assert offenders_in(source, "probe.py", _KNOWN_WRITERS), (
+        "an imported archive writer the module binds must still be followed")
 
 
 # ── figures registered without a stable preference key ───────────────────────

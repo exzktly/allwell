@@ -241,7 +241,12 @@ ANALYZE_TAB_BUDGET = 781
 # with in analyze.schema_section.AnalyzeSchemaSectionMixin. Genuine extraction
 # -- ratchet down. New work on that section goes in that module, which is where
 # the headroom this freed is meant to be spent.
-ANALYZE_TAB_FORM_BUDGET = 936
+# 936 -> 727: _build_qc_section joined analyze.qc_section.AnalyzeQCSectionMixin.
+# The section had one line of headroom left in this file and two controls still
+# to gain, so the choice was an extraction or a raised budget, and the ratchet
+# only moves down. Genuine extraction -- the whole builder moved, nothing was
+# duplicated, and new Quality Control work goes in that module.
+ANALYZE_TAB_FORM_BUDGET = 727
 
 
 def _line_count(rel: str) -> int:

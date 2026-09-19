@@ -23,7 +23,7 @@ from review.core.selection_controller import (
 )
 
 from . import collect as hc
-from review.data.field_quality_cache import flagged_by_well
+from review.data.focus_gate import wells_needing_review
 from .plate_panel import (
     FLAGGED_FIELD_GLYPH, legend_marker_style, paint_field_quality, paint_plate,
     well_tooltip,
@@ -442,7 +442,13 @@ def _paint_plate(ctx) -> None:
     # closed, and why field quality would not belong in it even if it were
     # not. The same mapping feeds the tooltip, so a glyph cannot appear
     # without the sentence that explains it.
-    quality = flagged_by_well(ctx)
+    #
+    # The composite, not the field verdict alone: a well whose fields all look
+    # ordinary while a third of its cells are soft is exactly the well this
+    # marker exists for, and no whole-field verdict can see it. See
+    # ``review.domain.well_composite`` for the three reasons and where each
+    # of their bounds comes from.
+    quality = wells_needing_review(ctx)
     paint_field_quality(plate, quality)
     plate.setWellTooltipProvider(
         lambda well: well_tooltip(well, cells, record_wells, quality))

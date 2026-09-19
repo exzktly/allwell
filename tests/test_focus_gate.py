@@ -548,3 +548,85 @@ def test_the_two_image_quality_layers_compose_rather_than_replace():
     assert list(got["Field_Pass"]) == [0, 1]
     assert list(got["Focus_Pass"]) == [1, 0]
     assert list(df_included_mask(got)) == [False, False]
+
+
+# ── the well composite, through the data layer ──────────────────────────────
+
+def test_the_marker_sees_a_gradient_no_field_verdict_can():
+    """**The case the composite exists for.** The plate's own field verdicts
+    are clean; a third of one well's cells are soft while its median is
+    perfectly sharp, which is what a focus gradient across a field looks like.
+    Excludes the marker built on the field verdict alone, which this branch
+    started with."""
+    from review.data.focus_gate import wells_needing_review
+
+    clean = _frame([0.30] * 50)
+    gradient = _frame([0.30] * 35 + [0.02] * 15)
+    ctx = _live_ctx({"A01": clean, "A02": gradient},
+                    QCParams(focus_min=0.10))
+    marked = wells_needing_review(ctx)
+    assert set(marked) == {"A02"}
+    assert "15 of 50 cells below 0.1" in marked["A02"]
+
+
+def test_the_marker_still_carries_the_run_s_own_field_flags():
+    """The composite adds a reason; it must not drop the one that was there.
+    Excludes the replacement that quietly loses every flagged well on a
+    dataset with no focus column."""
+    from review.data.focus_gate import wells_needing_review
+
+    ctx = _live_ctx({"A01": _two_fields()}, QCParams(), _flagged_block())
+    marked = wells_needing_review(ctx)
+    assert "A01" in marked
+    assert "flagged" in marked["A01"]
+
+
+def test_a_dataset_with_neither_marks_nothing():
+    """A plate with no focus column and no flagged fields. Excludes the
+    implementation that marks every well it has rows for."""
+    from review.data.focus_gate import wells_needing_review
+
+    plain = pd.DataFrame({"nucleus_id": [1, 2], "area_px": [50, 60]})
+    assert wells_needing_review(_live_ctx({"A01": plain}, QCParams())) == {}
+
+
+def test_nothing_is_marked_on_focus_before_a_cut_is_chosen():
+    """§D.2d: no threshold can be guessed, so a dataset whose run stated none
+    is not silently judged against an invented one."""
+    from review.data.focus_gate import wells_needing_review
+
+    ctx = _live_ctx({"A01": _frame([0.30] * 20 + [0.02] * 30)}, QCParams())
+    assert wells_needing_review(ctx) == {}
+
+
+def test_the_marker_does_not_wait_for_the_gate_to_be_switched_on():
+    """The plate map reports; the gate filters. A user who has not chosen to
+    exclude anything is still owed the finding — which is the same split the
+    Cell Gating panel already makes between its sentence and its effect line.
+    """
+    from review.data.focus_gate import wells_needing_review
+
+    cache = {"A01": _frame([0.30] * 35 + [0.02] * 15)}
+    off = _live_ctx(cache, QCParams(focus_min=0.10))
+    on = _live_ctx(cache, QCParams(exclude_soft_cells=True, focus_min=0.10))
+    assert wells_needing_review(off) == wells_needing_review(on)
+    assert wells_needing_review(off)
+
+
+def test_the_unmeasurable_reach_the_composite_as_missing_rather_than_zero():
+    """``per_well_focus`` keeps a NaN as ``None``. Excludes the adapter that
+    drops them (the composite could then not count them) and the one that
+    coerces them to 0.0 (every plate with small nuclei reads as soft)."""
+    from review.data.focus_gate import per_well_focus
+
+    ctx = _live_ctx({"A01": _frame([0.30, None, 0.02])}, QCParams())
+    assert per_well_focus(ctx) == {"A01": [0.30, None, 0.02]}
+
+
+def test_a_well_with_no_column_reaches_the_composite_as_empty():
+    """Not omitted: "measured and empty" and "never measured" stay
+    distinguishable one layer up."""
+    from review.data.focus_gate import per_well_focus
+
+    plain = pd.DataFrame({"nucleus_id": [1], "area_px": [50]})
+    assert per_well_focus(_live_ctx({"A01": plain}, QCParams())) == {"A01": []}

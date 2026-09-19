@@ -249,6 +249,21 @@ def capture_review(app) -> None:
     print("[field quality]")
     _capture_field_quality(app, w, rev)
 
+    # 14b) The per-cell focus layer, on the three surfaces it reaches: the
+    # third gate on the same Cell Gating panel, the Home plate's composite
+    # marker, and the Playground's distribution window. Rendered with values
+    # on screen for the same reason as the block above -- the feature IS the
+    # readout.
+    print("[cell focus]")
+    _capture_cell_focus(app, w, rev)
+    _capture_focus_distribution(app, w)
+
+    # 14c) The Analyze form's two new Quality Control controls, in both of
+    # their states: the measurement on with its threshold row showing, and the
+    # measurement off with the row hidden rather than greyed out.
+    print("[analyze focus controls]")
+    _capture_analyze_focus(app, w, rev)
+
     # 15) Help drawer dialog.
     print("[dialogs]")
     try:
@@ -368,6 +383,182 @@ def _capture_field_quality(app, w, rev) -> None:
             info.pop(FIELD_QUALITY_BLOCK, None)
         else:
             info[FIELD_QUALITY_BLOCK] = prior
+
+
+def _capture_cell_focus(app, w, rev) -> None:
+    """The per-cell focus gate and the plate composite, with values present.
+
+    The focus column is written per cell by a run, so it is injected into the
+    row cache here rather than produced — this session installs no TensorFlow
+    and, more to the point, the fixture dataset predates the column. The
+    values are the shape a real frame gives: a sharp population around 0.3
+    with a soft corner around 0.02, which is what a focus gradient across a
+    field actually looks like.
+    """
+    import numpy as _np
+
+    from pipeline.field_quality_record import FOCUS_COLUMN
+
+    cache = rev._app_state.dataset.cache
+    if not cache:
+        print("  cell focus skipped: no wells cached")
+        return
+    labels = sorted(cache)
+    saved = {}
+    rng = _np.random.default_rng(7)
+    for idx, label in enumerate(labels):
+        df = cache[label]
+        if df is None or len(df) == 0:
+            continue
+        saved[label] = df[FOCUS_COLUMN].copy() if FOCUS_COLUMN in df.columns else None
+        n = len(df)
+        # One well carries a gradient (a third of it soft), the rest are
+        # sharp. A plate where every well is marked shows nothing about the
+        # composite; a plate where none is shows nothing either.
+        soft = int(n * 0.35) if idx == 1 else int(n * 0.02)
+        vals = _np.concatenate([
+            rng.normal(0.30, 0.05, max(0, n - soft)).clip(0.12, None),
+            rng.normal(0.03, 0.01, soft).clip(0.005, None)])
+        rng.shuffle(vals)
+        df[FOCUS_COLUMN] = vals[:n]
+
+    params = rev._app_state.qc.params
+    try:
+        if not goto(app, rev, "Home"):
+            print("  cell focus skipped: Home page not reachable")
+            return
+        from review.domain.qc_params import QCParams
+        from review.features.qc.tab_view import qc_gate_refresh_widgets
+
+        for slug, new_params, desc in (
+                ("reported", QCParams(focus_min=0.10),
+                 "the per-cell focus cut, reported and not yet applied"),
+                ("applied",
+                 QCParams(exclude_soft_cells=True, focus_min=0.10),
+                 "the same cut switched on — the effect line is the only "
+                 "thing on the panel that moves"),
+                ("no-cut", QCParams(),
+                 "measured with no threshold chosen — the panel points at "
+                 "where a number comes from rather than inventing one")):
+            rev._app_state.qc.params = new_params
+            if _inner_tab(rev, "Cell Gating") is not None:
+                qc_gate_refresh_widgets(rev)
+                settle(app, 300)
+                grab(w, f"74-cell-focus-gate-{slug}", f"Cell Gating — {desc}")
+
+        rev._app_state.qc.params = QCParams(focus_min=0.10)
+        if _inner_tab(rev, "Overview") is not None:
+            from review.features.home.controller import refresh_home
+            with contextlib.suppress(Exception):
+                refresh_home(rev._ctx)
+            settle(app, 350)
+            grab(w, "75-cell-focus-plate",
+                 "Home plate — a well marked by the composite for a focus "
+                 "gradient its fields' own verdicts cannot see")
+    finally:
+        rev._app_state.qc.params = params
+        for label, col in saved.items():
+            df = cache.get(label)
+            if df is None:
+                continue
+            if col is None:
+                df.drop(columns=[FOCUS_COLUMN], inplace=True, errors="ignore")
+            else:
+                df[FOCUS_COLUMN] = col
+
+
+def _capture_focus_distribution(app, w) -> None:
+    """The Playground's focus-distribution window, in three states.
+
+    Drawn from values rather than from a live segmentation, for the same
+    reason the threshold curve beside it is: the drawing is what a reviewer
+    has to see. The three are the ones a user actually meets — a frame with a
+    soft population and a cut placed in the gap, the same frame with no cut
+    chosen, and a frame where nothing could be measured at all.
+    """
+    import numpy as _np
+
+    from PySide6.QtWidgets import QDialog, QVBoxLayout
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
+
+    from review.domain.focus_distribution import distribution_from_values
+    from review.features.image_browser.playground.focus_curve_view import (
+        draw_focus_distribution,
+    )
+
+    rng = _np.random.default_rng(11)
+    sharp = rng.normal(0.30, 0.055, 260).clip(0.12, None)
+    soft = rng.normal(0.035, 0.012, 95).clip(0.006, None)
+    values = [float(v) for v in _np.concatenate([sharp, soft])]
+    values += [None] * 12
+
+    states = (
+        ("cut", distribution_from_values(
+            values, cut=0.10, subject="DAPI · B03 · FOV 2 · live StarDist"),
+         "a frame with a soft population, the user's own cut marked and its "
+         "consequence on the figure"),
+        ("no-cut", distribution_from_values(
+            values, subject="DAPI · B03 · FOV 2 · live StarDist"),
+         "the same frame with no cut chosen — nothing is suggested, and the "
+         "figure says that was measured rather than cautious"),
+        ("nothing", distribution_from_values(
+            [None] * 40, subject="DAPI · B03 · FOV 2 · live StarDist"),
+         "a frame where no outline could be measured — the refusal is the "
+         "figure, and it is itself a finding about the frame"),
+    )
+    for slug, dist, desc in states:
+        popup = QDialog(w)
+        popup.setWindowTitle("Focus distribution")
+        popup.resize(820, 460)
+        layout = QVBoxLayout(popup)
+        layout.setContentsMargins(8, 8, 8, 8)
+        fig = Figure(figsize=(7.8, 4.4), dpi=100)
+        canvas = FigureCanvas(fig)
+        layout.addWidget(canvas)
+        draw_focus_distribution(fig, dist)
+        canvas.draw()
+        popup.show()
+        settle(app, 250)
+        grab(popup, f"76-focus-distribution-{slug}",
+             f"Focus distribution — {desc}")
+        popup.close()
+
+
+def _capture_analyze_focus(app, w, rev) -> None:
+    """The Analyze form's Quality Control section, with the focus controls.
+
+    Both states, because the threshold row **hides** with the measurement
+    rather than greying out, and a greyed-out orphan field is exactly what
+    that choice exists to avoid — so the off state is as much of the design as
+    the on one.
+    """
+    analyze = getattr(rev, "_analyze", None) or getattr(w, "_analyze", None)
+    if analyze is None or not hasattr(analyze, "_focus_metric_cb"):
+        print("  analyze focus controls skipped: form not built")
+        return
+    # Index 1 is the Analyze pane, as the mode grab above establishes.
+    rev._central_pane_stack.setCurrentIndex(1)
+    settle(app, 400)
+    was_on = analyze._focus_metric_cb.isChecked()
+    was_cut = analyze._focus_min_edit.text()
+    try:
+        analyze._focus_metric_cb.setChecked(True)
+        analyze._focus_min_edit.setText("0.083")
+        settle(app, 300)
+        grab(w, "93-analyze-focus-on",
+             "Analyze ▸ Quality Control — per-cell focus measured by default, "
+             "with a cut recorded rather than applied")
+        analyze._focus_metric_cb.setChecked(False)
+        settle(app, 300)
+        grab(w, "93-analyze-focus-off",
+             "Analyze ▸ Quality Control — the measurement off, and the "
+             "threshold row hidden rather than left as a greyed-out orphan")
+    finally:
+        analyze._focus_metric_cb.setChecked(was_on)
+        analyze._focus_min_edit.setText(was_cut)
+        rev._central_pane_stack.setCurrentIndex(0)
+        settle(app)
 
 
 def _inner_tab(rev, title: str):

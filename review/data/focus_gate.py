@@ -312,3 +312,44 @@ def focus_gate_can_apply(ctx) -> bool:
         return False
     soft, _u, _t = plate_focus_counts(ctx)
     return soft > 0
+
+
+def per_well_focus(ctx) -> dict[str, list]:
+    """``{well: its per-cell focus values}`` from the row cache.
+
+    ``None`` is kept in place for a cell with no value, because the composite
+    counts those apart from the soft ones and cannot do that from a list they
+    have been dropped from. A well with no column contributes an empty list
+    rather than being omitted, so "measured and empty" and "never measured"
+    stay distinguishable one layer up.
+    """
+    cache = getattr(ctx.state.dataset, "cache", None) or {}
+    out: dict[str, list] = {}
+    for label, df in cache.items():
+        vals = focus_values(df)
+        if vals is None:
+            out[label] = []
+            continue
+        out[label] = [None if v != v else float(v) for v in vals]
+    return out
+
+
+def wells_needing_review(ctx) -> dict[str, str]:
+    """``{well: why}`` for the wells the plate map should mark.
+
+    The one place the two image-quality layers are combined, so the marker,
+    the tooltip and the legend cannot be built from three different ideas of
+    which wells are in trouble. The composite itself is
+    :mod:`review.domain.well_composite`, which takes plain numbers and knows
+    nothing about a dataset — this is the adapter that reads them.
+    """
+    from review.data.field_quality_cache import flagged_detail_by_well
+    from review.domain.well_composite import score_plate
+    from review.domain.well_composite import (
+        wells_needing_review as _needing,
+    )
+
+    params = focus_params(ctx)
+    cut = None if params is None else params.focus_min
+    return _needing(score_plate(per_well_focus(ctx), cut=cut,
+                                flagged=flagged_detail_by_well(ctx)))

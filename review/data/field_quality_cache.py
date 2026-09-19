@@ -240,14 +240,15 @@ def field_quality_status(ctx) -> tuple[str, str]:
     return (base, REGISTER_PLAIN)
 
 
-def flagged_by_well(ctx) -> dict[str, str]:
-    """Well → one sentence naming what the run flagged there.
+def flagged_detail_by_well(ctx) -> dict[str, tuple[int, str]]:
+    """Well → ``(how many fields were flagged, the sentence saying which)``.
 
-    The plate map's marker and its tooltip both come from this, so a glyph can
-    never appear without an explanation and the two can never disagree about
-    which wells carry one. Empty when the plate could not be scored, for the
-    same reason :func:`flagged_fields` flags nothing there: a refusal is not a
-    finding, and a marker is a finding.
+    Both halves from one walk, because the composite on Home needs the count
+    and the plate's tooltip needs the sentence, and reading the count back out
+    of its own prose would be a second derivation of a fact this function
+    already has — one that could then disagree with the marker beside it.
+    :func:`flagged_by_well` is the sentence-only view of this, so the two
+    cannot describe different wells.
     """
     from pipeline.field_quality import records_for_scoring
     from review.domain.field_quality_scores import score_fields, summarise
@@ -263,7 +264,7 @@ def flagged_by_well(ctx) -> dict[str, str]:
         if verdict.flagged:
             per_well.setdefault(str(row.get("well") or ""), []).append(
                 (str(row.get("fov") or ""), verdict.describe()))
-    out: dict[str, str] = {}
+    out: dict[str, tuple[int, str]] = {}
     for well, hits in per_well.items():
         if not well:
             continue
@@ -277,8 +278,22 @@ def flagged_by_well(ctx) -> dict[str, str]:
         # tooltip nor the Cell Gating sentence yielded the (well, field)
         # address the Image Browser needs, and a flagged well was a dead end.
         where = f"field {fov}" if fov else "an unnamed field"
-        out[well] = f"{head} — worst: {where}, {why}" if why else head
+        out[well] = (len(hits),
+                     f"{head} — worst: {where}, {why}" if why else head)
     return out
+
+
+def flagged_by_well(ctx) -> dict[str, str]:
+    """Well → one sentence naming what the run flagged there.
+
+    The sentence-only view of :func:`flagged_detail_by_well`. The plate map's
+    marker and its tooltip both come from this, so a glyph can never appear
+    without an explanation and the two can never disagree about which wells
+    carry one. Empty when the plate could not be scored, for the same reason
+    :func:`flagged_fields` flags nothing there: a refusal is not a finding,
+    and a marker is a finding.
+    """
+    return {w: note for w, (_n, note) in flagged_detail_by_well(ctx).items()}
 
 
 def exclusion_can_apply(ctx) -> bool:

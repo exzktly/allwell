@@ -30,6 +30,7 @@ from review.features.image_browser.playground.controller import (
     correction_controls_enabled, playground_clear_loose_image, playground_on_change,
     playground_open_loose_image, playground_repopulate_dropdowns,
     playground_segment_now,
+    playground_focus_now,
     playground_sweep_now,
     playground_sweep_stop,
 )
@@ -321,6 +322,29 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     sweep_stop_btn.clicked.connect(lambda _=False: playground_sweep_stop(ctx))
     sbl.addWidget(sweep_btn)
     sbl.addWidget(sweep_stop_btn)
+
+    # The second threshold this tab helps choose, beside the first. The
+    # Analyze form's "Out of focus below" box is blank by default and nothing
+    # in this application can fill it -- the automatic rule was measured and
+    # refused (review.domain.focus_distribution) -- so this button is where
+    # the number comes from, exactly as the curve beside it is where the
+    # probability threshold's number comes from.
+    #
+    # Not given a Stop twin: the sweep is M segmentations and runs for
+    # minutes, while this is one measurement per outline over a mask that
+    # already exists.
+    focus_btn = QPushButton("Focus distribution…", seg_btn_row)
+    focus_btn.setToolTip(
+        "Measure every outline on screen and plot how sharp each cell is, "
+        "with your own cut marked and a live count of what it keeps and "
+        "drops.\n"
+        "This is where the Analyze form's \u201cOut of focus below\u201d "
+        "number comes from — nothing can guess it, because it depends on the "
+        "microscope rather than on the plate.\n"
+        "It suggests no threshold: the distribution is the answer.")
+    focus_btn.clicked.connect(lambda _=False: playground_focus_now(ctx))
+    sbl.addWidget(focus_btn)
+    app._playground_focus_btn = focus_btn
     app._playground_sweep_btn = sweep_btn
     app._playground_sweep_stop_btn = sweep_stop_btn
     # Registered so ``_set_sweep_buttons`` can grey it out for the length of a

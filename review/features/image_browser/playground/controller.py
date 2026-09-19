@@ -45,6 +45,7 @@ from review.features.image_browser.playground.renderer import (
 # ``show_threshold_curve``, TensorFlow inside the service the worker calls), so
 # deferring them would be a cycle-workaround spelling for no cycle.
 from review.features.image_browser.playground import (
+    focus_curve_view as _focus_view,
     sweep_curve_view as _sweep_view,
     worker as _worker,
 )
@@ -1524,3 +1525,72 @@ def playground_hover(ctx, event) -> None:
     from PySide6.QtGui import QCursor
     from PySide6.QtWidgets import QToolTip
     QToolTip.showText(QCursor.pos(), f"({px}, {py})  =  {float(a[py, px]):.1f}")
+
+
+# ── the other threshold this tab helps choose ───────────────────────────────
+
+
+def playground_focus_now(ctx) -> None:
+    """Draw the per-cell focus distribution for the frame on screen.
+
+    The sibling of :func:`playground_sweep_now` for the *other* number this
+    application asks a user to pick, and deliberately much cheaper: the sweep
+    is M segmentations, while this is one measurement per outline over a mask
+    that already exists. It runs on the GUI thread for that reason — measured,
+    a few hundred nuclei on a 2048² frame is well inside a repaint — and a
+    worker would buy nothing but a second staleness problem.
+
+    It measures **the mask the overlay is currently showing**, through
+    :func:`_mask_source`, so the outlines a user can see and the values they
+    are about to threshold on are the same objects. A pipeline mask is as
+    valid a subject as a live segmentation here — this is a question about
+    focus, not about detection — but which one was used goes into the figure's
+    title, because a mask that cannot respond to the Correction controls and
+    one that can are different evidence.
+
+    Like the threshold curve, it recommends nothing. See
+    :mod:`review.domain.focus_distribution` for the measurement that refused
+    to, which is sharper than the sweep's: the obvious automatic rule discards
+    two fifths of a clean plate's good cells and keeps three quarters of a
+    uniformly defocused one's bad ones, with nothing able to tell the two
+    apart.
+    """
+    from review.domain.focus_distribution import (
+        NO_CELLS, distribution_from_values,
+    )
+
+    st = _st(ctx)
+    win = ctx.window
+    # Same re-render as the sweep and Segment paths: the pixels measured must
+    # be the ones the current widget values produce.
+    playground_on_change(ctx)
+    arr, note = _segmentation_frame(ctx)
+    mask, provenance = _mask_source(ctx)
+    if arr is None:
+        _set_status(win, note)
+        return
+    if mask is None:
+        # Not an error and not an empty plot: the user pressed a button and is
+        # owed the reason, and "there is no mask on screen" is a different
+        # statement from "no outline could be measured".
+        dist = distribution_from_values((), subject=_sweep_subject(ctx),
+                                        declined=NO_CELLS)
+        _focus_view.show_focus_distribution(ctx, dist)
+        return
+
+    from pipeline.field_quality import cell_focus_by_label
+
+    values = list(cell_focus_by_label(arr, mask).values())
+    params = getattr(getattr(ctx.state, "qc", None), "params", None)
+    # The user's OWN cut, from the gate that will actually apply it, rather
+    # than a number this tab keeps of its own. Two copies of a threshold is
+    # how the plot comes to mark a line the filter is not using.
+    cut = None if params is None else params.focus_min
+    subject = _sweep_subject(ctx)
+    # Which mask, in the title: a pipeline mask and a live segmentation are
+    # different evidence and the plot is savable.
+    subject = f"{subject} · {provenance}" if subject else provenance
+    dist = distribution_from_values(values, cut=cut, subject=subject)
+    st.focus_distribution = dist
+    _focus_view.show_focus_distribution(ctx, dist)
+    _set_status(win, dist.describe())

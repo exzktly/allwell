@@ -589,6 +589,101 @@ def test_the_threshold_curve_button_is_built_and_connected(playground_app):
     assert pc._st(app._ctx).sweep_running is False
 
 
+# ── focus distribution, through the real constructor and the real button ─────
+
+
+def test_the_focus_distribution_button_is_built_and_connected(playground_app):
+    """The §7.8 rule-3 test for the *other* threshold this tab helps choose.
+
+    Everything about the distribution itself is tested cheaply in
+    ``tests/test_focus_distribution.py`` against values a test supplies; this
+    is the one that presses the shipped button and asks what reached the
+    window. The Response tab in this same application raised ``TypeError`` on
+    every real construction while about 130 of its own tests were green,
+    because not one of them called its builder — so "the control is offered"
+    has a measured price here.
+    """
+    import numpy as _np
+
+    app = playground_app
+    btn = getattr(app, "_playground_focus_btn", None)
+    assert btn is not None, "the button was never built"
+    assert "focus" in btn.text().lower()
+
+    import review.features.image_browser.playground.controller as pc
+    orig_frame = pc._segmentation_frame
+    orig_mask = pc._mask_source
+
+    # Three discs at two very different blurs, so the distribution has a real
+    # shape and a cut placed between them separates them. A single blur would
+    # let a broken measurement (every cell the same number) pass everything
+    # below.
+    from scipy.ndimage import gaussian_filter
+    n = 120
+    yy, xx = _np.mgrid[0:n, 0:n]
+    labels = _np.zeros((n, n), _np.int32)
+    img = _np.full((n, n), 300.0)
+    for k, (cy, cx) in enumerate(((30, 30), (30, 90), (90, 60)), start=1):
+        d = _np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+        labels[d <= 10] = k
+        img += 2500.0 * (d <= 10)
+    img = gaussian_filter(img, 0.8)
+
+    pc._segmentation_frame = lambda ctx: (img, "")
+    pc._mask_source = lambda ctx: (labels, "live StarDist")
+
+    shown = {}
+    import review.features.image_browser.playground.focus_curve_view as fcv
+    orig_show = fcv.show_focus_distribution
+    try:
+        fcv.show_focus_distribution = lambda ctx, dist: shown.update(dist=dist)
+        btn.click()
+    finally:
+        fcv.show_focus_distribution = orig_show
+        pc._segmentation_frame = orig_frame
+        pc._mask_source = orig_mask
+
+    dist = shown.get("dist")
+    assert dist is not None, "pressing the button showed nothing"
+    assert dist.declined == "", dist.declined
+    # The values, not just "a distribution arrived": three outlines were
+    # measured and each got a positive number.
+    assert dist.measurable == 3
+    assert all(v > 0 for v in dist.values)
+    # And which mask it measured is on the figure's subject, because a
+    # pipeline mask and a live segmentation are different evidence.
+    assert "live StarDist" in dist.subject
+
+
+def test_the_focus_button_with_no_mask_says_so_rather_than_drawing_nothing(
+        playground_app):
+    """The user pressed a button and is owed an answer. Excludes the early
+    return that opens no window at all, and the one that opens an empty plot.
+    """
+    import numpy as _np
+
+    app = playground_app
+    import review.features.image_browser.playground.controller as pc
+    orig_frame = pc._segmentation_frame
+    orig_mask = pc._mask_source
+    pc._segmentation_frame = lambda ctx: (_np.zeros((16, 16), _np.float32), "")
+    pc._mask_source = lambda ctx: (None, "none")
+
+    shown = {}
+    import review.features.image_browser.playground.focus_curve_view as fcv
+    orig_show = fcv.show_focus_distribution
+    try:
+        fcv.show_focus_distribution = lambda ctx, dist: shown.update(dist=dist)
+        app._playground_focus_btn.click()
+    finally:
+        fcv.show_focus_distribution = orig_show
+        pc._segmentation_frame = orig_frame
+        pc._mask_source = orig_mask
+
+    assert shown.get("dist") is not None, "no window was opened"
+    assert shown["dist"].declined, "the window was opened with no reason in it"
+
+
 def test_the_sweeps_result_survives_the_repaint_that_follows_it(playground_app):
     """Excludes the sentence that is written and immediately overwritten.
 

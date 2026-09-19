@@ -240,13 +240,30 @@ def merge_sample_definitions(info1: dict, info2: dict, *, well_map: dict[str, st
                     current_id=current_id, plot_groups=plot_groups)
 
 
-#: Analysis blocks that cannot be combined by rule — each is a decision made
-#: under one plate's imaging conditions — paired with the words to describe it.
+#: Analysis blocks that cannot be combined by rule — each is a decision or a
+#: measurement made under one plate's imaging conditions — paired with the words
+#: to describe it.
+#:
+#: Written by hand, and for most of its life unguarded: a block nobody
+#: remembered to add here was silently kept from plate 1 and dropped from
+#: plate 2, with no warning, because the merged sidecar starts as
+#: ``dict(info1)``. ``run_report`` was missing for exactly that reason.
+#: ``tests/test_sidecar_blocks_are_merge_rostered.py`` now holds this roster
+#: against the ``*_BLOCK`` constants the pipeline declares, so a new block is
+#: covered by having been named.
 _UNMERGEABLE_BLOCKS: tuple[tuple[str, str], ...] = (
     ("cell_gating", "cell gating"),
     ("ratios", "ratio metrics"),
     ("qc_options", "QC parameters"),
     ("smfish_thresholds", "smFISH thresholds"),
+    # Per-well coverage accounting: how many FOV-groups each well was expected
+    # to yield against how many it did. Counted under one run's input, so the
+    # merged plate cannot carry one of the two and call it both.
+    ("run_report", "run coverage"),
+    # Per-field image-quality metrics. Worse than merely unmergeable: merging
+    # also remaps well labels, so plate 1's block would be keyed on the labels
+    # it had before the remap and would mis-attribute the half it kept.
+    ("field_quality", "field quality"),
 )
 
 

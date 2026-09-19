@@ -18,7 +18,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QCheckBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget,
+    QCheckBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QVBoxLayout, QWidget,
 )
 
 from review.data.field_quality_cache import (
@@ -290,6 +291,23 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         "Image Browser ▸ Playground draws the distribution of these values "
         "with a live count of what a cut would keep and drop.")
     foc_head_layout.addWidget(foc_edit)
+    foc_head_layout.addSpacing(8)
+    # The evidence for the number, beside the box it goes in. The Playground
+    # draws one FIELD of one channel; the cut applies to the whole dataset, so
+    # a per-WELL curve is the one that answers "what will this do to my data".
+    # Pooling every field and timepoint the well holds, from the column the
+    # run already wrote -- no image decode.
+    foc_curve_btn = QPushButton("Distribution…", foc_head)
+    foc_curve_btn.setToolTip(
+        "Plot the selected well's per-cell focus as a cumulative curve, with "
+        "your cut marked and a live count of what it keeps and drops.\n"
+        "\n"
+        "Pools every field and timepoint in the well, which is the scope the "
+        "cut actually applies at — the Image Playground's version measures a "
+        "single field of whichever channel is on screen there.")
+    foc_curve_btn.clicked.connect(
+        lambda _=False: _show_well_focus_curve(ctx))
+    foc_head_layout.addWidget(foc_curve_btn)
     foc_head_layout.addStretch(1)
     foc_layout.addWidget(foc_head)
     foc_status = QLabel("", foc)
@@ -461,6 +479,44 @@ def _refresh_field_quality_status(ctx, w) -> None:
     box.setToolTip(_FQ_TOOLTIP if box.isEnabled() else
                    "Nothing to exclude on this dataset — the line below says "
                    "why.")
+
+
+def _selected_well(ctx) -> str:
+    """The well this panel's curve is about.
+
+    The plate's current selection when there is exactly one, otherwise the
+    last one clicked, otherwise the first the dataset holds — in that order,
+    because a user who has selected one well means that one, and a user who
+    has selected six is not asking a per-well question.
+    """
+    sel = getattr(ctx.state, "selection", None)
+    wells = sorted(getattr(sel, "selected_wells", None) or ())
+    if len(wells) == 1:
+        return wells[0]
+    last = getattr(sel, "last_sel", "") or ""
+    if last:
+        return str(last)
+    if wells:
+        return wells[0]
+    cache = getattr(ctx.state.dataset, "cache", None) or {}
+    return next(iter(sorted(cache)), "")
+
+
+def _show_well_focus_curve(ctx) -> None:
+    """Open the selected well's focus distribution.
+
+    Reuses the Playground's window and renderer rather than drawing a second
+    one: the two views answer the same question at different scopes, and a
+    user comparing them must not have to decide whether two differently-drawn
+    curves mean the same thing.
+    """
+    from review.core.focus_curve_view import show_focus_distribution
+    from review.data.focus_gate import well_focus_distribution
+
+    well = _selected_well(ctx)
+    if not well:
+        return
+    show_focus_distribution(ctx, well_focus_distribution(ctx, well))
 
 
 def _refresh_focus_status(ctx, w) -> None:

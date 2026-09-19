@@ -357,9 +357,9 @@ class ReviewApp(QWidget):
         # lives in the PersistenceRegistry (self._persistence, built below).
         self._runtime.review_image.source_seg = None
         self._runtime.review_image.color_swatches = {}
-        self._runtime.review_image.binary_btn = None
-        self._runtime.review_image.layers_btn = None
-        self._runtime.review_image.outline_btn = None
+        self._runtime.review.focus_curve_popup = None
+        for _btn in ("binary_btn", "layers_btn", "outline_btn"):
+            setattr(self._runtime.review_image, _btn, None)
 
         from review.core.app_shell_view import build_ui
         build_ui(self)

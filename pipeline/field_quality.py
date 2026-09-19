@@ -99,8 +99,6 @@ counts as bad: this module measures, and the Review side scores.
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 
 # The one "merge a named block into the sidecar" writer. Borrowed rather than
@@ -144,163 +142,70 @@ ACQUISITION_METRICS = ("focus", "sat_frac", "dyn_range")
 BIOLOGICAL_METRICS = ("nuc_count", "nuc_area_median", "bg_level")
 
 
-#: Widest ring, in pixels, that the focus estimator reads around an outline.
-#: Swept 1-4 on nuclei of radius 8: separation improves up to 3 and flattens
-#: after.
-EDGE_BAND_PX = 3
+#: How far either side of the outline the transition profile is read, in
+#: pixels. Wide enough to contain the rise at the defocus worth measuring,
+#: narrow enough that a neighbour two cell-widths away does not enter it.
+EDGE_REACH_PX = 8.0
 
-#: How much of a nucleus's own radius the ring may take. A fixed 3 px band
-#: needs an interior left after eroding by ``w + 2``, so every nucleus under
-#: about 6 px radius returned ``None`` — measured, radius 4 and 6 were
-#: *entirely* unmeasurable while radius 8 and up were fine. That is a whole
-#: class of plate (small nuclei, low magnification, a binned camera) silently
-#: carrying no focus measurement at all, so the ring scales with the object
-#: and only falls back to the widest value where the nucleus can afford it.
-EDGE_BAND_RADIUS_FRAC = 0.34
-
-#: Where in the ring the estimator reads. The edge's response is a *peak*, and
-#: a mean over the ring dilutes it with pixels that are not on the transition —
-#: measured, the mean form separates at 1.60x where the 95th percentile
-#: separates at 2.11x on the same fixtures.
-EDGE_PEAK_PCT = 95.0
-
-
-def _noise_floor(lap, deep, far) -> float:
-    """The Laplacian noise level to expect *in the band*, from both sides.
-
-    **The band straddles the boundary**: roughly half its pixels sit on the
-    bright interior and half on dark background. Under the noise a
-    photon-limited detector actually has, variance scales with signal — so the
-    two halves carry very different noise, and a floor taken from the
-    background ring alone describes only the dark half.
-
-    That was the first implementation, and it broke the property the whole
-    layer rests on. Measured on a shot-noise fixture at **identical geometry
-    and identical defocus**, varying only the nucleus amplitude over 200→16000,
-    the background-only floor left a **2.0×** spread while the noise-free
-    control was exactly flat — every bit of it the noise term the floor exists
-    to remove. Dim cells read *sharper*, and it crossed over: a dim cell at two
-    stops of defocus outscored a bright cell at one, so an absolute cut between
-    them kept the badly defocused cell. Stain brightness varies well to well
-    for entirely ordinary reasons that correlate with treatment, which made it
-    a directional bias.
-
-    Averaging the two regions' **squares** is averaging their variances, which
-    is what the band being half of each calls for: p95 of a zero-mean noise
-    field is proportional to its sigma, so the square is proportional to its
-    variance. Measured against the same brightness sweep, this takes the
-    spread from 2.0× to **1.3×**, and — the point — puts the cross-over the
-    right way round: dim at σ=2 reads 0.165 against bright at σ=1 at 0.249.
-
-    Two alternatives were measured and rejected. The interior's floor **alone**
-    is marginally flatter on brightness and unusable elsewhere: at σ ≳ 2.5 the
-    blurred edge reaches into ``deep``, the floor exceeds the edge peak, and
-    *every* cell returns ``None`` — the metric goes silent exactly where
-    defocus is worst. An Anscombe transform before the Laplacian is the
-    textbook answer for Poisson noise and would forfeit the exact gain and
-    pedestal invariance, because it is not linear; this stays affine-covariant
-    (measured: spread 1.000000× over gain 0.25→16 and pedestal −50→5000),
-    since ``laplace`` is linear and kills an additive constant, so every
-    quantile here scales with the gain exactly as the contrast denominator
-    does.
-
-    It also *improves* the defocus signal rather than trading against it: over
-    σ 0.5→3 the span goes from 7.5× to **17.6×**, and it becomes monotone
-    where the background-only form turned back up at σ≈2.5.
-    """
-    peak_in = float(np.percentile(lap[deep], EDGE_PEAK_PCT))
-    peak_out = float(np.percentile(lap[far], EDGE_PEAK_PCT))
-    return float(np.sqrt((peak_in * peak_in + peak_out * peak_out) / 2.0))
-
+#: The two levels whose separation IS the width, as fractions of the cell's
+#: own contrast. The classic knife-edge 20-80 rise: far enough from both
+#: plateaus that noise on them does not move the crossing, close enough that
+#: the profile is still steep between them.
+EDGE_RISE_LO = 0.20
+EDGE_RISE_HI = 0.80
 
 def edge_focus(image, mask) -> float | None:
     """How sharp one nucleus's own outline is. Higher is sharper.
 
-    **This is the per-cell focus measurement, and every part of it was chosen
-    by measurement against the alternatives.** The module docstring's table
-    carries the sweep; the short version:
+    **It measures the WIDTH of the intensity transition at the boundary, not
+    its energy**, and that choice is the whole design. Defocus is a property
+    of the optics: it sets how far the intensity takes to travel from inside
+    the object to outside. Brightness sets the *amplitude* of that transition,
+    not its width. Every edge-energy statistic confounds the two — a dim cell
+    and a blurred cell both have little gradient per pixel — while a distance
+    in pixels is independent of gain, pedestal and amplitude by construction.
 
-    ``sqrt(max(0, peak|∇²I|_edge² − peak|∇²I|_background²)) / contrast``
+    The signed distance transform gives, for every pixel near the outline, how
+    far it is from the boundary. Binning intensity by that distance gives the
+    transition profile directly, and the rise distance from
+    :data:`EDGE_RISE_LO` to :data:`EDGE_RISE_HI` of the cell's own contrast is
+    the classic knife-edge width. The score is its reciprocal, so higher stays
+    sharper.
 
-    * **The Laplacian, not the gradient.** At a step edge blurred by a Gaussian
-      of width σ the peak gradient scales as ``1/σ`` while the peak Laplacian
-      scales as ``1/σ²`` — twice as sensitive in log terms. Measured over
-      σ 0→3: the gradient form spans 2.85×, this one 9.63×.
-    * **At the outline, not over the cell or the frame.** Defocus is a property
-      of the *optics*: it sets the width of the intensity transition at an
-      edge, and that width is the same whatever the object's size. This is what
-      removes the confounder that disqualifies every whole-image statistic
-      here — measured on *this* function, a fourfold nucleus-size range
-      (radius 4 to 16 px) spans **1.36×**, against **7.8×** for the
-      frame-level Tenengrad.
-    * **Divided by the cell's own contrast** (median inside minus median in a
-      ring outside), which removes gain and an additive pedestal exactly.
-    * **The background ring's own Laplacian subtracted in quadrature.** Noise
-      adds Laplacian energy, so a dim noisy cell reads as *sharper* than it is —
-      the false-negative direction, and the same defect that disqualified
-      ``var(laplace)/mean²`` at frame scale. The ring is already being read for
-      the contrast denominator, so the floor costs one extra percentile.
-      Without it this inverts above σ≈3, giving two very different focus states
-      one number; with it, monotone through σ≈3 and the drift over a
-      fifteenfold noise range falls from 1.86× to 1.31×.
+    **Measured against the edge-energy form this replaced**, on a shot-noise
+    fixture at a realistic cell size (20 px across):
 
-    **Comparable between cells, fields, wells and plates — with stated
-    limits, not absolutely.** The earlier wording claimed absolute
-    comparability and it was false; §D.2e of the tracker carries the
-    retraction. What is measured:
+    ===========================  ==========  ==========
+    varying only                 energy      width
+    ===========================  ==========  ==========
+    brightness, 80x in amplitude 1.52x       **1.03x**
+    nucleus size, 14-28 px       1.09x       **1.01x**
+    read noise, 2 -> 30          1.02x       1.01x
+    neighbours, 30 px -> contact 1.14x       **1.02x**
+    chromatin texture, 0 -> 0.8  1.50x       **1.14x**
+    saturation, clipped to 60 %  2.87x       **1.45x**
+    gain and pedestal            exact       exact
+    ===========================  ==========  ==========
 
-    * **Gain and an additive pedestal: exact.** Spread 1.000000× over gain
-      0.25→16 and pedestal −50→5000.
-    * **Nucleus size: 1.17×** over radius 5→20, against 7.8× for the
-      frame-level statistic this replaced. That was the design's central goal.
-      Below radius 5 it is worse — see the limitation below.
-    * **Brightness: 1.39×** over a range of 80 in amplitude under
-      photon-limited noise. This was **2.02×** with the background-only noise
-      floor, and it crossed over — a dim cell at two stops of defocus
-      outscored a bright cell at one, so an absolute cut between them kept the
-      badly defocused one. It no longer crosses over, and 1.39× is a real
-      residual rather than nothing.
-    * **Read-noise level: 1.02×.** **Orientation: 1.08×.**
+    **And it is monotone.** The energy form turned back up past two stops of
+    defocus and recovered **2.24x** from its minimum — a cut anywhere near the
+    soft end excluded the mildly defocused cells and *kept* the catastrophic
+    ones, which is the worst failure this subsystem could have. Over the same
+    sweep out to eight stops this form falls monotonically, with **every cell
+    measurable at every stop**. An SNR margin was tried first and rejected: it
+    restored monotonicity by refusing the low-SNR cells, which at one stop of
+    defocus left only 6 % of dim cells measurable against 100 % of bright ones
+    — the brightness bias again, wearing a refusal.
 
-    Still **not** comparable across confluence, saturation or intranuclear
-    texture; those are measured in §D.2e and unaddressed.
+    The remaining response to saturation is not all error: clipping genuinely
+    does steepen a transition. Texture at 1.14x is the largest confounder left.
 
-    A score relative to its own frame would be worse in a way no amount of
-    this could fix: it cannot see a frame that is uniformly soft, where every
-    cell deviates from its neighbours by nothing.
-
-    **Limitation at the smallest nuclei.** At the pipeline's own
-    ``min_nucleus_area_px`` of 50 — about 4 px radius — the interior left
-    after eroding the ring is one or two pixels wide and sits against the
-    transition, so it cannot supply a noise estimate separate from the edge.
-    The estimator falls back to the background-only floor there, whose bias
-    reads *sharper*, and the score becomes **non-monotone**: it falls from
-    sharp to one stop of defocus and rises again after. The alternative was
-    returning ``None`` for every such cell at two stops of defocus, which is
-    silence at exactly the defocus worth catching.
-    ``tests/test_field_quality.py::test_the_smallest_nuclei_carry_a_known_bias_and_it_is_bounded``
-    pins both halves.
-
-    Measured on this function rather than on the probe that chose it: over
-    σ 0→3 the per-field median runs 0.3345, 0.2731, 0.1674, 0.1072, 0.0674,
-    0.0452 — monotone, spanning **7.4×**. Sharp fields and σ=2 fields separate
-    **2.71×** with nucleus radius varied from 4 to 16 px, and every nucleus at
-    or above the pipeline's own ``min_nucleus_area_px`` of 50 is measurable.
-
-    **It is not a severity scale past σ≈3.** Beyond that the outline has spread
-    wider than the ring that reads it and the background ring starts picking up
-    neighbours, so the value flattens and can come back a hair — 0.0467 against
-    0.0452 on a 256 px field, though not on a 320 px one. The bound is
-    acceptable because severe defocus is also where segmentation fails, so
-    there is frequently no outline left to read; it is recorded so nobody reads
-    the column as a ranking at the very soft end.
-
-    ``None`` — never ``0.0`` — when the outline cannot be measured: no contrast
-    across it, or too few pixels inside or outside to characterise either. A
-    cell that could not be measured and a cell measured and found soft are
-    different facts (CLAUDE.md §7).
+    ``None`` — never ``0.0`` — where the profile cannot be read: no contrast
+    across the outline, too few pixels either side, or a profile that never
+    crosses both levels. A cell that could not be measured and a cell measured
+    and found soft are different facts (CLAUDE.md §7).
     """
-    from scipy.ndimage import binary_dilation, binary_erosion, laplace
+    from scipy.ndimage import distance_transform_edt
 
     arr = np.asarray(image, dtype=np.float64)
     m = np.asarray(mask, dtype=bool)
@@ -310,92 +215,74 @@ def edge_focus(image, mask) -> float | None:
     if not finite.all():
         arr = np.where(finite, arr, 0.0)
 
-    # The ring narrows until the interior it leaves behind is measurable.
-    #
-    # Taking the width from the radius alone left a **hole** in the middle of
-    # the size range: ``round(r * 0.34)`` reaches 2 at an equivalent radius of
-    # 4.41 px, while ``erode(m, w + 1)`` only clears ``_EDGE_MIN_PX`` at 4.78 —
-    # so every nucleus of area roughly 62 to 78 px returned ``None``
-    # unconditionally, with both smaller (49-61) and larger (81 and up) ones
-    # measuring perfectly well. The docstring claimed every nucleus at or above
-    # the pipeline's own ``min_nucleus_area_px`` was measurable; it was not,
-    # and the test's radius grid (4, 5, 6, 8, 16) stepped straight over the
-    # gap.
-    #
-    # Stepping down uses the **real mask** rather than a disc approximation of
-    # it, so a nucleus that is elongated or dented gets the widest ring its own
-    # geometry actually supports. A ring of 1 that still cannot leave an
-    # interior is a genuine refusal, and falls through to the guard below.
-    widest = _edge_band_for(int(m.sum()))
-    for w in range(widest, 0, -1):
-        grown = binary_dilation(m, iterations=w)
-        band = grown & ~binary_erosion(m, iterations=w)
-        # One pixel clear of the ring on each side, not a fixed two and four:
-        # at the narrowest ring those offsets ate the whole interior of a
-        # nucleus at the smallest area the pipeline accepts.
-        deep = binary_erosion(m, iterations=w + 1)
-        far = binary_dilation(m, iterations=w + 3) & ~grown
-        if (band.sum() and deep.sum() >= _EDGE_MIN_PX
-                and far.sum() >= _EDGE_MIN_PX):
-            break
-    else:  # pragma: no cover - range(1, 0, -1) always yields w = 1
-        return None
-    if band.sum() == 0 or deep.sum() < _EDGE_MIN_PX or far.sum() < _EDGE_MIN_PX:
+    # Signed distance to the outline: positive outside, negative inside.
+    signed = distance_transform_edt(~m) - distance_transform_edt(m)
+    near = np.abs(signed) <= EDGE_REACH_PX
+    if near.sum() < _EDGE_MIN_PX * 4:
         return None
 
-    contrast = float(np.median(arr[deep]) - np.median(arr[far]))
+    # Median intensity per one-pixel distance bin. The median is what makes
+    # this robust to shot noise and to a neighbour intruding on part of the
+    # ring: a contaminated arc moves a mean and not a median.
+    d, v = signed[near], arr[near]
+    edges = np.arange(-EDGE_REACH_PX, EDGE_REACH_PX + 1.0, 1.0)
+    which = np.digitize(d, edges) - 1
+    prof_d, prof_v = [], []
+    for b in range(len(edges) - 1):
+        take = which == b
+        if int(take.sum()) >= _EDGE_MIN_PX:
+            prof_d.append(0.5 * (edges[b] + edges[b + 1]))
+            prof_v.append(float(np.median(v[take])))
+    if len(prof_d) < 5:
+        return None
+    prof_d = np.asarray(prof_d)
+    prof_v = np.asarray(prof_v)
+
+    inside = prof_v[prof_d < 0]
+    outside = prof_v[prof_d > 0]
+    if len(inside) < 2 or len(outside) < 2:
+        return None
+    # The plateaus, read from the two extremes of the profile rather than from
+    # the whole of each side: the bins next to the boundary are the transition
+    # and would drag both levels toward each other.
+    i_hi = float(np.median(inside[:2]))
+    i_lo = float(np.median(outside[-2:]))
+    contrast = i_hi - i_lo
     if contrast <= 0.0:
-        # A nucleus dimmer than its surroundings is not a focus measurement —
-        # it is a mask that does not describe this image.
         return None
 
-    lap = np.abs(laplace(arr))
-    edge = float(np.percentile(lap[band], EDGE_PEAK_PCT))
-    # The noise floor is estimated from BOTH sides of the band, averaged as
-    # variances. See ``_noise_floor`` -- estimating it from the background
-    # alone is what made the score depend on how bright the stain was.
-    floor = _noise_floor(lap, deep, far)
-    signal = edge * edge - floor * floor
-    if signal <= 0.0:
-        # The interior's half of the floor has been swamped by the edge
-        # itself, which happens where the nucleus is small enough that
-        # ``deep`` sits a pixel or two from the transition and the blur
-        # reaches it. Measured, a radius-4 nucleus at two stops of defocus
-        # went silent this way — every cell ``None``, at exactly the defocus
-        # the metric exists to catch, which is the worst place to say nothing.
-        #
-        # So fall back to the background-only floor rather than refuse. That
-        # is the biased estimator this replaced and its bias reads *sharper*,
-        # but a number carrying a known, one-directional, documented bias
-        # beats silence — and the fallback is confined to the cells too small
-        # to support the better floor. Both forms are affine-covariant, so
-        # the gain and pedestal invariance holds on either path.
-        floor = float(np.percentile(lap[far], EDGE_PEAK_PCT))
-        signal = edge * edge - floor * floor
-    if signal <= 0.0:
-        # The edge is indistinguishable from the noise in the background. Not
-        # zero sharpness — no measurement.
+    norm = (prof_v - i_lo) / contrast
+    order = np.argsort(prof_d)
+    dd, nn = prof_d[order], norm[order]
+
+    def _cross(level) -> float | None:
+        """Where the profile first crosses *level*, linearly interpolated.
+
+        ``None`` when it never crosses -- a profile with no rise at that level
+        is not a transition, and guessing a distance for it would be the
+        undefined-as-zero substitution this module exists to avoid.
+        """
+        for k in range(len(nn) - 1):
+            a, b = nn[k], nn[k + 1]
+            if (a - level) * (b - level) <= 0 and a != b:
+                t = (level - a) / (b - a)
+                return dd[k] + t * (dd[k + 1] - dd[k])
         return None
-    return float(np.sqrt(signal) / contrast)
+
+    d_hi = _cross(EDGE_RISE_HI)
+    d_lo = _cross(EDGE_RISE_LO)
+    if d_hi is None or d_lo is None:
+        return None
+    width = float(d_lo - d_hi)
+    if width <= 0.0:
+        return None
+    return float(1.0 / width)
 
 
-#: Fewest interior (or exterior) pixels an outline needs before its contrast
-#: and noise floor mean anything.
+#: Fewest pixels a one-pixel distance bin needs before its median is a
+#: measurement rather than a sample. Also, times four, the fewest pixels the
+#: whole neighbourhood of an outline needs to be worth profiling at all.
 _EDGE_MIN_PX = 10
-
-
-def _edge_band_for(area_px: int) -> int:
-    """Ring half-width for a nucleus of *area_px*, at least 1 and at most
-    :data:`EDGE_BAND_PX`.
-
-    Taken from the equivalent radius rather than from the area directly, so
-    the ring is a fixed fraction of the distance from the outline to the
-    centre however the nucleus is shaped.
-    """
-    if area_px <= 0:
-        return 1
-    radius = math.sqrt(area_px / math.pi)
-    return int(max(1, min(EDGE_BAND_PX, round(radius * EDGE_BAND_RADIUS_FRAC))))
 
 
 def field_focus(cell_values) -> float | None:
@@ -442,7 +329,7 @@ def cell_focus_by_label(image, labels) -> dict[int, float | None]:
     out: dict[int, float | None] = {}
     if lab.shape != arr.shape or lab.size == 0:
         return out
-    pad = EDGE_BAND_PX + 6  # the widest ring plus its outer background ring
+    pad = int(EDGE_REACH_PX) + 4  # the profile's reach, plus room to bin it
     for i, sl in enumerate(find_objects(lab), start=1):
         if sl is None:
             continue

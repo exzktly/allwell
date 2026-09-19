@@ -360,3 +360,50 @@ def wells_needing_review(ctx) -> dict[str, str]:
     cut = None if params is None else params.focus_min
     return _needing(score_plate(per_well_focus(ctx), cut=cut,
                                 flagged=flagged_detail_by_well(ctx)))
+
+
+def well_focus_distribution(ctx, well: str):
+    """One well's per-cell focus values as a
+    :class:`~review.domain.focus_distribution.FocusDistribution`.
+
+    **The plate-wide companion to the Playground's per-frame view**, and the
+    one the threshold is actually chosen against: the cut applies to a whole
+    dataset, while the Playground measures one field of one channel. A well
+    pools every field and timepoint it holds, from the column the run already
+    wrote — no image decode, no ``_out.zip`` opened.
+
+    Cells with no value are **counted, not dropped**, so the readout can say
+    how much of the well could not be judged at all. The cut comes from the
+    same ``QCParams`` the gate applies, so the line on this plot and the rows
+    the gate removes cannot be different numbers.
+    """
+    from review.domain.focus_distribution import distribution_from_values
+
+    params = focus_params(ctx)
+    cut = None if params is None else params.focus_min
+    cache = getattr(ctx.state.dataset, "cache", None) or {}
+    df = cache.get(well)
+    if df is None or len(df) == 0:
+        # NOT ``NO_CELLS``: that refusal is worded for one frame ("segment it
+        # first"), and the remedy here is different -- this well has no rows
+        # loaded at all.
+        return distribution_from_values(
+            (), cut=cut, subject=str(well),
+            declined=f"No measurements are loaded for {well}, so there is "
+                     f"nothing to draw. Select a well that this dataset holds.")
+    vals = focus_values(df)
+    if vals is None:
+        # Measured-and-empty and never-measured are different facts; this is
+        # the second, and it gets the sentence that names the remedy.
+        return distribution_from_values(
+            (), cut=cut, subject=str(well),
+            declined="This dataset was analysed before per-cell focus was "
+                     "measured, so this well has no distribution to draw. "
+                     "Re-running it with Analyze \u25b8 Quality Control "
+                     "\u25b8 Measure per-cell focus records the column.")
+    n_fields = 0
+    if "fov" in df.columns:
+        n_fields = int(df["fov"].astype(str).nunique())
+    where = f"{well} \u00b7 {n_fields} field(s)" if n_fields else str(well)
+    return distribution_from_values(
+        [None if v != v else float(v) for v in vals], cut=cut, subject=where)

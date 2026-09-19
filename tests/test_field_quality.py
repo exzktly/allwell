@@ -149,43 +149,44 @@ def test_focus_does_not_track_how_BIG_the_nuclei_are():
 
 
 def test_focus_falls_monotonically_with_defocus_and_by_enough_to_matter():
-    """Monotone to σ=3; beyond that it flattens rather than continuing down.
+    """**Out to eight stops, not four, and that is the point.**
 
-    Stated as what it is rather than as what would read better. On this 256 px
-    fixture σ=4 comes back a hair *above* σ=3 (0.0467 against 0.0452); on a
-    320 px one with the same discs it stays below. The cause is the same in
-    both: past σ≈3 the outline has spread beyond the ring that reads it and
-    the background ring is picking up the neighbouring cells, so the estimator
-    is measuring less and less of an edge.
+    The previous estimator measured edge *energy* and turned back up past two
+    stops: it recovered 2.24x from its minimum, so a cut anywhere near the
+    soft end excluded the mildly defocused cells and **kept** the
+    catastrophically defocused ones. The guard that should have caught it
+    stopped at sigma=4 and asserted only that the tail stayed under a fifth of
+    the maximum -- which sigma=4 satisfied while sigma=6 and sigma=8 both
+    failed it, unevaluated. The assertion was weaker than the claim
+    (CLAUDE.md 7.8 face two), and the wrong implementation passed it.
 
-    That bound is acceptable and it is bounded: severe defocus is also where
-    segmentation fails, so there is often no outline to read at all, and the
-    ranking that matters — in focus against out of it — is intact with a
-    factor of seven between them. It is asserted here so nobody reads the
-    column as a severity scale past σ=3.
+    So this walks the whole grid and requires every step to fall. The current
+    estimator measures the transition's **width**, which can only grow with
+    blur, so monotonicity is a property of the design rather than a hope.
     """
-    vals = [_field(defocus=d) for d in (0.0, 0.5, 1.0, 1.5, 2.0, 3.0)]
-    assert vals == sorted(vals, reverse=True), vals
-    assert vals[0] / vals[-1] > 5, "and by enough to be a signal"
-
-    # And past the monotone range it must still not climb back toward sharp.
-    beyond = _field(defocus=4.0)
-    assert beyond < vals[vals.index(max(vals))] / 5
+    grid = (0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0)
+    vals = [_field(radius=8.0, n_cells=20, seed=0, defocus=d) for d in grid]
+    assert all(v is not None for v in vals), list(zip(grid, vals))
+    for a, b, lo, hi in zip(vals, vals[1:], grid, grid[1:]):
+        assert a > b, f"sigma {lo} -> {hi} did not fall: {a:.4f} -> {b:.4f}"
+    assert vals[0] / vals[grid.index(2.0)] > 1.8, vals
 
 
 def test_sharp_and_defocused_fields_do_not_overlap_across_size_and_count():
     """The discriminative claim, stated as the separation it actually is.
 
-    What matters is not that the metric responds to defocus but that the
-    response is bigger than the spread caused by everything it must ignore --
-    which is exactly where the frame-level statistic failed.
+    The gap is narrower than the edge-energy form's was, and that is the trade
+    this estimator makes knowingly: it gives up dynamic range to buy
+    monotonicity and brightness invariance, neither of which the
+    wider-ranging form had. A gap that never inverts is worth more than a
+    large one that does.
     """
     sharp = [_field(radius=r, n_cells=n, seed=s)
              for r in (4.0, 8.0, 16.0) for n in (8, 20) for s in (0, 1)]
     soft = [_field(radius=r, n_cells=n, seed=s, defocus=2.0)
             for r in (4.0, 8.0, 16.0) for n in (8, 20) for s in (0, 1)]
-    assert min(sharp) > max(soft)
-    assert min(sharp) / max(soft) > 2.0, "and with room to put a cut between"
+    assert all(v is not None for v in sharp + soft)
+    assert min(sharp) > max(soft), (min(sharp), max(soft))
 
 
 def test_a_noisy_dim_cell_does_not_read_as_sharper_than_it_is():
@@ -439,41 +440,22 @@ def test_the_staging_directory_is_hidden_so_it_is_not_dataset_output():
     assert FIELD_QUALITY_DIRNAME.startswith(".")
 
 
-def test_the_smallest_nuclei_carry_a_known_bias_and_it_is_bounded():
-    """**A limitation, pinned so it cannot quietly get worse.**
+def test_the_smallest_nuclei_are_monotone_too_now_that_there_is_no_ring():
+    """The bias this used to pin is **gone**, and so is its mechanism.
 
-    At the pipeline's smallest accepted nucleus (``min_nucleus_area_px`` 50,
-    about 4 px radius) the interior left after eroding the ring is one or two
-    pixels wide and sits right against the transition, so it cannot give a
-    noise estimate separate from the edge. ``edge_focus`` falls back to the
-    background-only floor there, which is the biased estimator the two-sided
-    one replaced — and the bias reads *sharper*.
+    The edge-energy form read a ring around the outline, and at the smallest
+    nucleus the pipeline accepts there was no interior left to estimate a
+    noise floor from -- so it fell back to a biased floor and the score rose
+    again past one stop of defocus. Measuring the transition's width needs no
+    ring and no floor, so there is nothing left to degrade.
 
-    Measured, that makes the score **non-monotone at radius 4**: it falls from
-    sharp to one stop of defocus and then rises again. The fallback is
-    preferred to the alternative, which was returning ``None`` for every cell
-    at two stops of defocus — going silent at exactly the defocus the metric
-    exists to catch.
-
-    So this asserts what is actually true rather than what would be nice: at
-    radius 4 the sharp field still reads far above every defocused one, and
-    the rise among the defocused values stays inside a stated bound. A change
-    that widens it fails here instead of shipping quietly.
+    Kept rather than deleted, because "the small-nucleus case is fine now" is
+    exactly the claim that should be held by an assertion rather than by a
+    commit message.
     """
-    sharp = _field(radius=4.0, n_cells=20, seed=0, defocus=0.0)
-    soft = [_field(radius=4.0, n_cells=20, seed=0, defocus=d)
-            for d in (1.0, 2.0, 3.0)]
-    assert all(v is not None for v in soft), (
-        "the fallback exists so the smallest nuclei never go silent")
-    # The sharp-versus-soft separation survives, which is what the gate needs.
-    assert sharp > max(soft) * 2.0, (sharp, soft)
-    # And the known rise among the soft values is bounded. It is a rise -- the
-    # bias is real -- so this is a ceiling on it, not a monotonicity claim.
-    assert max(soft) / min(soft) < 2.5, soft
-
-    # Larger nuclei have an interior to measure and stay monotone, which is
-    # what localises the defect rather than leaving it a property of the
-    # estimator as a whole.
-    big = [_field(radius=8.0, n_cells=20, seed=0, defocus=d)
-           for d in (0.0, 1.0, 2.0, 3.0)]
-    assert all(big[i] > big[i + 1] for i in range(len(big) - 1)), big
+    for radius in (4.0, 5.0, 6.0):
+        vals = [_field(radius=radius, n_cells=20, seed=0, defocus=d)
+                for d in (0.0, 1.0, 2.0, 3.0)]
+        assert all(v is not None for v in vals), (radius, vals)
+        assert all(vals[i] > vals[i + 1] for i in range(len(vals) - 1)), (
+            radius, vals)

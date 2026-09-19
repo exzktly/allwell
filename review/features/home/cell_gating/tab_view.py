@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 from core.safe import swallowed
 from widgets import menu_exec
 from review.core.ui_helpers import (
+    SECTION_HEADER_MARGINS,
     build_section_header,
     install_canvas_wheel_scroll,
 )
@@ -74,6 +75,16 @@ from review.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 _GATING_PLOT_MIN_H = 420
 _GATE_BTN_MIN_W = 150
 _RADIO_INDENT = 20
+#: The left inset a section's own lead-in lines take.
+#:
+#: ``build_section_header`` lays its title out inside a block with 8 px of
+#: left margin, while a lead-in added straight to the section layout starts at
+#: 0 — so "Always applied:" and "Then include cells by (choose one):" sat
+#: measurably **left of the "Cell inclusion" heading that owns them** (364 and
+#: 365 against the title's 373), which reads as the lead-ins outranking their
+#: own section. Matched to the header rather than written independently, so
+#: the two cannot drift apart again.
+_LEAD_IN_INDENT = SECTION_HEADER_MARGINS[0]
 
 # Widget-registry key for each layer's gate picker. The controller reads the
 # buttons through ``_GATE_BUTTON_ATTR`` (the runtime attr the registry stamps);
@@ -195,6 +206,7 @@ def _lead_in(parent: QWidget, text: str) -> QLabel:
     """
     lbl = QLabel(text, parent)
     lbl.setObjectName("Secondary")
+    lbl.setContentsMargins(_LEAD_IN_INDENT, 0, 0, 0)
     return lbl
 
 

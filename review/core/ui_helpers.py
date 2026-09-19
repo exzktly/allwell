@@ -405,13 +405,20 @@ class SectionTitleLabel(QLabel):
         return QSize(width, self.heightForWidth(width))
 
 
+#: The margins a section-header block takes. Named so a section's own lead-in
+#: lines can inset to match: a lead-in added straight to the section layout
+#: starts at 0 and therefore sat left of the heading that owns it, which reads
+#: as the lead-in outranking its own section.
+SECTION_HEADER_MARGINS = (8, 4, 8, 4)
+
+
 def build_section_header(
     parent: QWidget,
     title: str,
     *,
     hint: str | None = None,
     buttons: tuple = (),
-    margins: tuple = (8, 4, 8, 4),
+    margins: tuple = SECTION_HEADER_MARGINS,
 ) -> QWidget:
     """Return a header block with a section title, and optionally a hint below.
 

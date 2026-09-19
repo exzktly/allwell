@@ -183,7 +183,13 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 870
 # 895 -> 855: the run-outcome path (_surface_run_failure and the headline
 # shortener behind it) moved to analyze.log_pane.AnalyzeLogPaneMixin, which
 # already owns the log view that path reveals.
-ANALYZE_TAB_BUDGET = 855
+# 855 -> 781: the Filename Schema section's helpers and its preview refresh
+# (_schema_field_list / _schema_errors / _build_schema_arg / _filename_sep /
+# _refresh_schema_preview, plus the _PREVIEW_TOKENS table they read) moved to
+# analyze.schema_section.AnalyzeSchemaSectionMixin, beside the controls they
+# write to -- which were in analyze/form.py, so the widget and the one function
+# that fills it had been in different files under different budgets.
+ANALYZE_TAB_BUDGET = 781
 
 # analyze/form.py carried no budget while analyze/tab.py did, so every
 # addition to the pair landed here by default. Opened at its measured size so it
@@ -206,7 +212,11 @@ ANALYZE_TAB_BUDGET = 855
 # 1086 -> 994: the pane's output half (the log view, the raw-log toggle and the
 # "Last run ·" card) moved to analyze.log_pane.AnalyzeLogPaneMixin. It is one job
 # and it is not form-building. Genuine extraction -- ratchet down again.
-ANALYZE_TAB_FORM_BUDGET = 994
+# 994 -> 936: _build_schema_section joined the schema helpers it shares state
+# with in analyze.schema_section.AnalyzeSchemaSectionMixin. Genuine extraction
+# -- ratchet down. New work on that section goes in that module, which is where
+# the headroom this freed is meant to be spent.
+ANALYZE_TAB_FORM_BUDGET = 936
 
 
 def _line_count(rel: str) -> int:

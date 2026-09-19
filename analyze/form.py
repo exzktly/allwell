@@ -29,6 +29,7 @@ from analyze.domain.fields import (  # noqa: F401 — re-exported for analyze.ta
     _numeric_option_errors,
 )
 from analyze.pinfo import AnalyzePipelineInfoMixin
+from analyze.schema_section import AnalyzeSchemaSectionMixin
 from analyze.seg_params import AnalyzeSegParamsMixin
 from services.remote_config import default_remote_index, load_remotes
 from widgets.checkable_dropdown import CheckableDropdown
@@ -46,11 +47,11 @@ from pipeline.capacity import ALLOW_LOW_DISK_HELP
 # ---------------------------------------------------------------------------
 from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP  # noqa: F401 (re-export)
 from util.well_token import canonical_well_label, is_valid_well_name
-from widgets.schema_picker import SchemaPicker
 
 
 class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
-                          AnalyzePipelineInfoMixin, AnalyzeSegParamsMixin):
+                          AnalyzePipelineInfoMixin, AnalyzeSchemaSectionMixin,
+                          AnalyzeSegParamsMixin):
     """The Analyze-tab Qt form builders. Mixed into ``AnalyzeTab`` (with
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""
 
@@ -72,33 +73,6 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         self._build_scratch_section(parent)
         self._build_run_controls(parent)
         parent.layout().addStretch(1)
-
-    def _build_schema_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Filename Schema")
-
-        # The separator, the five position dropdowns and the schema string they
-        # write are one reusable control (`widgets.schema_picker`), because the
-        # Datasets pane's Zip Loose Folder page asks the user the same question
-        # about the same filenames. Passing `self._row` in keeps it inside this
-        # form's label column and general look.
-        self._schema_picker = SchemaPicker(
-            sec,
-            row_factory=self._row,
-            combo_width=self._CB_W,
-            schema_edit_min_width=self._SCHEMA_STR_EDIT_MIN_W,
-        )
-        sec.layout().addWidget(self._schema_picker)
-        self._schema_picker.changed.connect(self._refresh_schema_preview)
-
-        self._schema_err_lbl = QLabel("", sec)
-        self._schema_err_lbl.setObjectName("Error")
-        self._schema_err_lbl.setWordWrap(True)
-        sec.layout().addWidget(self._schema_err_lbl)
-
-        self._schema_preview_lbl = QLabel("", sec)
-        self._schema_preview_lbl.setObjectName("Muted")
-        self._schema_preview_lbl.setWordWrap(True)
-        sec.layout().addWidget(self._schema_preview_lbl)
 
     def _build_channel_tokens_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Channel Tokens")

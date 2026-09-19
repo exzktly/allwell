@@ -115,7 +115,10 @@ def test_process_image_group_forwards_phase_token(monkeypatch):
     nir = _structured_image(9)
     bf = _structured_image(10)
 
-    monkeypatch.setattr(pm, "_load_image_group", lambda n, f, t: (nir, [bf]))
+    # Three values now: the loader also measures the acquisition metrics,
+    # which it must do before anything corrects the array.
+    monkeypatch.setattr(pm, "_load_image_group",
+                        lambda n, f, t: (nir, [bf], {}))
 
     def _capture(nir_raw, fluor_raws, **kwargs):
         seen["phase_token"] = kwargs.get("phase_token")

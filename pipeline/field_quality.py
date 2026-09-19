@@ -78,6 +78,14 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import sobel
 
+# The one "merge a named block into the sidecar" writer. Borrowed rather than
+# re-implemented: a second atomic merge would be a second set of rules about
+# what happens when the file is missing or malformed, and the two would
+# diverge on the first bug fixed in only one of them. It lives in
+# ``run_report`` because that block was the first to need it; that is a
+# historical fact about the sidecar, not a layer this module sits above.
+from pipeline.run_report import merge_into_pipeline_info
+
 #: Keys a field record carries. Named once so the writer, the reader and the
 #: scorer cannot drift — a metric added to one and not the others is invisible
 #: exactly the way a missing roster entry is.
@@ -213,6 +221,43 @@ def field_metrics(nuclear_image, *, labels=None, dtype_max: float | None = None,
     }
 
 
+def group_record(*, acquisition: dict, labels, corrected_image, areas,
+                 fov: str = "", timepoint: str = "") -> dict:
+    """One FOV-group's quality record: the pre-correction half plus the rest.
+
+    *acquisition* is what the loader measured **before** anything rewrote the
+    array — focus, saturation and dynamic range, in that state for the reasons
+    :func:`saturated_fraction` and the module docstring give. The three
+    biological metrics are measured here because they need the segmentation:
+    the nucleus count and the median nuclear area come from *labels*, and the
+    background level is the median of the pixels **outside** them on
+    *corrected_image*, which is the one place a background that failed to
+    subtract is visible at all.
+
+    The split is not cosmetic. :mod:`review.domain.field_quality_scores` scores
+    the acquisition three against the whole plate and the biological three only
+    within a well, because a treatment that kills cells legitimately moves the
+    count and a plate-wide z on it would flag the biology as an artifact.
+
+    *fov* and *timepoint* address the record, and come from the caller because
+    the filename parse lives in ``process_microscopy``. Both may be ``""`` — a
+    plate with no FOV slot in its schema still has one field per well, and an
+    empty address is honest where an invented ``1`` is not.
+    """
+    lab = None if labels is None else np.asarray(labels)
+    vals = list(areas or ())
+    record = {
+        "fov": str(fov or ""),
+        "timepoint": str(timepoint or ""),
+        "nuc_count": (int(lab.max()) if lab is not None and lab.size else None),
+        "nuc_area_median": (float(np.median(np.asarray(vals, dtype=np.float64)))
+                            if vals else None),
+        "bg_level": background_level(corrected_image, lab),
+    }
+    record.update(acquisition)
+    return record
+
+
 # ── the record on disk ───────────────────────────────────────────────────────
 #
 # Same mechanism ``pipeline/run_report.py`` uses and for the same reasons: one
@@ -320,6 +365,45 @@ def clear_field_quality(output_dir) -> None:
         d.rmdir()
     except OSError:
         pass
+
+
+def finalize_field_quality(output_dir, info_path, *, atomic_writer, log) -> None:
+    """Fold the per-well quality files into ``pipeline_info.json``.
+
+    Called once at the end of a run, mirroring
+    :func:`pipeline.run_report.finalize_run_report` — same staging directory
+    shape, same atomic merge, same best-effort posture. A run must not fail
+    because it could not describe itself, and a plate with no block at all is
+    correctly read by the Review side as "analysed before field quality was
+    recorded" rather than as a plate measured and found clean.
+
+    The partial count is logged rather than left for a reader to derive,
+    because it is the one fact that decides whether the block can be scored at
+    all: a resumed or incremental run measures only the fields it
+    re-processed, so a plate-wide comparison drawn from it is biased, and the
+    scorer refuses rather than reporting a number.
+    """
+    try:
+        block = collect_field_quality(output_dir)
+        if block.get("wells"):
+            merge_into_pipeline_info(
+                info_path, {FIELD_QUALITY_BLOCK: block},
+                atomic_writer=atomic_writer)
+            partial = block.get("partial_wells") or []
+            if partial:
+                shown = ", ".join(partial[:8]) + ("…" if len(partial) > 8 else "")
+                log.warning(
+                    "Field quality: %d of %d well(s) were only PARTLY measured "
+                    "(%s). A plate-wide comparison over this block would be "
+                    "drawn from a biased sample, so Review will decline to "
+                    "score it; re-run those wells with --force to complete it.",
+                    len(partial), len(block["wells"]), shown)
+            else:
+                log.info("Field quality: %d field(s) measured across %d well(s).",
+                         block.get("measured", 0), len(block["wells"]))
+        clear_field_quality(output_dir)
+    except Exception as exc:
+        log.warning("Could not record field quality: %s", exc)
 
 
 def records_for_scoring(block: dict | None) -> list[dict]:

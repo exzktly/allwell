@@ -71,10 +71,43 @@ DEFAULT_SCRATCH_SUBDIR = Path(".allwell") / "scratch"
 
 def load_2d_gray(path: Path) -> np.ndarray:
     """Load a TIFF (or other format) as a 2-D float32 array."""
+    return load_2d_gray_with_ceiling(path)[0]
+
+
+def load_2d_gray_with_ceiling(path: Path) -> tuple[np.ndarray, float | None]:
+    """:func:`load_2d_gray`, plus the sensor maximum the file was stored at.
+
+    The array is identical — this calls the same reader and the same cast, and
+    :func:`load_2d_gray` is now a wrapper over this, so the two cannot drift.
+    What it adds is the number the cast destroys.
+
+    **Saturation is only knowable before the array becomes float.** A camera
+    writes integers with a hard ceiling (4095, 65535); the unconditional
+    ``float32`` cast above erases it, and "at the maximum" then means "at
+    3.4e38", which is identically zero for every field of every plate, for
+    ever — a number stored where nothing was measured. So the ceiling comes
+    back with the array and the caller passes it to
+    :func:`pipeline.field_quality.saturated_fraction`.
+
+    ``None`` for a float source, where there genuinely is no sensor ceiling to
+    report, and ``None`` is how that subsystem spells "nobody could say".
+
+    Comparing the float32 array against the *integer* ceiling is exact for the
+    dtypes a microscope actually writes: float32 carries 24 bits of mantissa,
+    so every ``uint8`` and ``uint16`` value round-trips. It would not be exact
+    for ``uint32`` or ``int64``, which no camera emits here; those are still
+    reported, and a value one ULP below the ceiling would read as saturated.
+    """
     img = imread(str(path))
     while img.ndim > 2:
         img = img[0]
-    return img.astype(np.float32)
+    ceiling: float | None = None
+    dt = np.asarray(img).dtype
+    if np.issubdtype(dt, np.integer):
+        ceiling = float(np.iinfo(dt).max)
+    elif np.issubdtype(dt, np.bool_):
+        ceiling = 1.0
+    return img.astype(np.float32), ceiling
 
 
 def default_scratch_base() -> Path | None:

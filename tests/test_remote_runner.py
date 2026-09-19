@@ -2038,6 +2038,10 @@ def test_required_files_list_is_what_we_promised():
         # segmenters/writers), re-imported at module top level.
         "pipeline/__init__.py",
         "pipeline/auto_threshold.py",
+        # The post-run pass over that sampler — which estimator this
+        # run's arguments call for, and the merge into
+        # pipeline_info.json. Called at the end of every run.
+        "pipeline/auto_threshold_pass.py",
         "pipeline/background.py",
         "pipeline/capacity.py",
     # The pipeline's argparse declaration, imported by process_microscopy at

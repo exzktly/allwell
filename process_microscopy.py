@@ -123,6 +123,7 @@ def __getattr__(name: str):  # PEP 562: only fires for names not in globals()
 # ``pipeline.stardist`` module (TensorFlow is imported lazily there; the model
 # is injected by ``_worker_init`` via ``set_model``). Re-exported so the
 # segmentation dispatch resolves them under this module too.
+import pipeline.field_quality as _field_quality
 import pipeline.stardist as _stardist
 import pipeline.suspend as _suspend
 from pipeline.stardist import (
@@ -776,7 +777,9 @@ def parse_filename(
 
 # The one image reader lives beside the writers in ``pipeline.io``, re-exported
 # so ``pm.load_2d_gray`` — the Playground's own frame reader — is unchanged.
-from pipeline.io import load_2d_gray  # noqa: F401,E402
+from pipeline.io import (  # noqa: F401,E402
+    load_2d_gray, load_2d_gray_with_ceiling,
+)
 
 # Empty-well (blank) sampling, the two model builders, the per-image lookup and
 # the guards live in the Qt-free ``pipeline.empty_well``. Re-exported here so
@@ -1054,158 +1057,24 @@ def _segment_classical(image: np.ndarray) -> np.ndarray:
 #
 # The per-image sampler and timepoint helpers live in
 # ``pipeline.auto_threshold`` so the GUI's Cell Gating tab and this pipeline
-# run produce identical defaults on the same dataset. ``pipeline.auto_threshold``
-# depends only on ``numpy`` + ``random`` so the pipeline-only deployment
-# story is preserved.
+# run produce identical defaults on the same dataset; the pass that decides
+# which estimator applies and writes the result into the sidecar lives in
+# ``pipeline.auto_threshold_pass``. Both depend only on ``numpy`` + stdlib so
+# the pipeline-only deployment story is preserved.
 
 from pipeline.auto_threshold import (
     DEFAULT_CELLS_PER_IMAGE_CAP as _AUTO_THRESHOLD_CELLS_PER_IMAGE_CAP,  # noqa: F401
-    estimate_thresholds_from_outputs,
+    estimate_thresholds_from_outputs,  # noqa: F401
     pick_endpoint_timepoints as _pick_endpoint_timepoints,  # noqa: F401
     sample_cell_and_bg as _sample_cell_and_bg,  # noqa: F401
 )
-from pipeline.threshold_optimize import estimate_thresholds_from_controls
-from util.aw_safe import swallowed
-
-
-def _apply_thresholds_to_pipeline_info(
-    output_dir: Path,
-    thresholds: dict[str, float],
-    log: logging.Logger,
-) -> dict[str, float]:
-    """Merge ``thresholds`` into ``output_dir/pipeline_info.json`` under
-    ``cell_gating.thresh_frac_on``. User-set values are preserved.
-    """
-    if not thresholds:
-        return {}
-    info_path = output_dir / "pipeline_info.json"
-    if not info_path.exists():
-        info_path = output_dir.parent / "pipeline_info.json"
-    if not info_path.exists():
-        log.info("Auto-threshold: pipeline_info.json not found — defaults not persisted.")
-        return {}
-    try:
-        existing = json.loads(info_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        log.warning("Auto-threshold: cannot read %s: %s", info_path, exc)
-        return {}
-    if not isinstance(existing, dict):
-        return {}
-
-    cell_gating = dict(existing.get("cell_gating") or {})
-    tfo = dict(cell_gating.get("thresh_frac_on") or {})
-    written: dict[str, float] = {}
-    for ch, thr in thresholds.items():
-        if ch in tfo:  # never overwrite a user-set value
-            continue
-        tfo[ch] = float(thr)
-        written[ch] = float(thr)
-    if not written:
-        return {}
-    cell_gating["thresh_frac_on"] = tfo
-    existing["cell_gating"] = cell_gating
-    try:
-        write_json_atomic(info_path, existing)
-    except OSError as exc:
-        log.warning("Auto-threshold: cannot write %s: %s", info_path, exc)
-        return {}
-    return written
-
-
-def _segmentation_tokens(args) -> set[str]:
-    """Channel token(s) that ARE the segmentation input, lower-cased.
-
-    ``--nuclear_token`` (already remapped onto ``--phase_token`` for the
-    label-free methods by the time this runs) plus ``--cytoplasm_token`` under
-    seeded watershed — the same pair that joins ``fluor_tokens_for_quant``.
-    """
-    toks = {str(getattr(args, "nuclear_token", "") or "").strip().lower()}
-    if (getattr(args, "segmentation_method", "") == "stardist_seeded_watershed_cell"
-            and getattr(args, "cytoplasm_token", "")):
-        toks.add(str(args.cytoplasm_token).strip().lower())
-    return {t for t in toks if t}
-
-
-def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list[str],
-                            log: logging.Logger) -> dict[str, float]:
-    """Write the post-run per-channel ThreshFracOn defaults. Three modes:
-
-    * ``--no_auto_threshold`` — skip entirely.
-    * no control wells — Otsu on a pooled cell-mean / background-pixel
-      distribution (:func:`pipeline.auto_threshold.estimate_thresholds_from_outputs`).
-    * both control wells — the threshold maximising the relative fraction-on gap
-      between them, read from the per-well CSVs this run just wrote.
-
-    In both non-skip modes the segmentation channel is written **0**: it defines
-    cell boundaries rather than being something to gate on. Zero is not absent —
-    absent means the viewer's 50.0 default, whereas 0 counts every cell with a
-    positive intensity as ON, which is how the channel is neutralised.
-
-    Returns the channels actually written (existing values are never
-    overwritten). Never raises: auto-threshold is informational and the run's
-    real output is already on disk.
-    """
-    if getattr(args, "no_auto_threshold", False):
-        log.info("Auto-threshold skipped (--no_auto_threshold).")
-        return {}
-    try:
-        seg_tokens = _segmentation_tokens(args)
-        non_seg = [c for c in fluor_tokens_for_quant
-                   if str(c).strip().lower() not in seg_tokens]
-        pos = str(getattr(args, "pos_control_well", "") or "").strip()
-        neg = str(getattr(args, "neg_control_well", "") or "").strip()
-        if pos and neg:
-            log.info("Auto-threshold: control wells %s (positive) vs %s (negative).",
-                     pos, neg)
-            thresholds = estimate_thresholds_from_controls(
-                output_dir,
-                fluor_channels=non_seg,
-                csv_prefix=args.csv_prefix,
-                pos_well=pos,
-                neg_well=neg,
-                log=log,
-            )
-        else:
-            thresholds = estimate_thresholds_from_outputs(
-                output_dir,
-                fluor_channels=non_seg,
-                filename_schema=args.filename_schema,
-                filename_sep=args.filename_sep,
-                log=log,
-            )
-        # Which readout channels the estimate actually produced, before the
-        # segmentation channel's unconditional zero joins them — the two say
-        # very different things about the run and used to be reported as one.
-        estimated = sorted(thresholds)
-        for tok in seg_tokens:
-            thresholds[tok] = 0.0
-        written = _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
-        # Estimating nothing for every readout channel is a failure, and it has
-        # to be reported on its own terms rather than as part of the
-        # what-got-written summary: the segmentation channel's unconditional
-        # zero *is* a write, so it makes `written` truthy and the run reads as a
-        # success that happened to produce one value. That is exactly how the
-        # reported run looked.
-        if non_seg and not estimated:
-            log.warning(
-                "Auto-threshold: no threshold could be estimated for any of %s. "
-                "The per-well output archives yielded no usable image pairs — "
-                "see the per-well lines above for why.",
-                ", ".join(c.upper() for c in non_seg),
-            )
-        if written:
-            log.info(
-                "Auto-threshold defaults written for %d channel(s): %s",
-                len(written),
-                ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items()),
-            )
-        elif estimated or not non_seg:
-            log.info("Auto-threshold pass produced no new defaults "
-                     "(every channel already has a stored value).")
-        return written
-    except Exception as exc:
-        log.warning("Auto-threshold pass failed: %s", exc)
-        return {}
+from pipeline.threshold_optimize import estimate_thresholds_from_controls  # noqa: F401
+from pipeline.auto_threshold_pass import (  # noqa: F401
+    _apply_thresholds_to_pipeline_info,
+    _segmentation_tokens,
+    run_auto_threshold_pass,
+)
+from util.aw_safe import swallowed  # noqa: F401
 
 
 def build_processed_output_path(
@@ -1246,14 +1115,43 @@ def build_processed_output_path(
 
 
 def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
-    """Load the nuclear frame + every fluor channel; verify shape consistency."""
+    """Load the nuclear frame + every fluor channel; verify shape consistency.
+
+    Returns ``(nir_raw, fluor_raws, acquisition)``. *acquisition* holds the
+    three metrics that can only be read **here**, and the two reasons are
+    different:
+
+    * ``sat_frac`` needs the camera's integer ceiling, which
+      :func:`pipeline.io.load_2d_gray` erases with its unconditional
+      ``float32`` cast — so this uses the sibling that hands the ceiling back.
+    * ``focus`` and ``dyn_range`` need the frame **before correction**.
+      :func:`_correct_image_group` divides by an illumination field and
+      subtracts a background, and both reshape local variance — which is
+      exactly what a focus metric reads. Measured after correction the number
+      would describe the correction as much as the acquisition.
+
+    Costed rather than assumed: the three together are ~0.4 s on a 2048²
+    frame against several seconds of segmentation for the same group, so
+    ~10 % of a run. There is no flag to switch them off; a quality record
+    that exists only when someone remembered to ask for it is not one a
+    plate-wide score can rely on.
+    """
     log.info("Processing %s  (%d fluor channel(s): %s)",
              nuclear_path.name, len(fluor_paths), ", ".join(fluor_tokens))
     _stardist.set_fov_label(nuclear_path.name)
 
     _t = time.perf_counter()
-    nir_raw = load_2d_gray(nuclear_path)
+    nir_raw, _ceiling = load_2d_gray_with_ceiling(nuclear_path)
     log.info("  load nuclear: %.1f s  (shape %s)", time.perf_counter() - _t, nir_raw.shape)
+
+    _t = time.perf_counter()
+    acquisition = {
+        "focus": _field_quality.focus_score(nir_raw),
+        "sat_frac": _field_quality.saturated_fraction(nir_raw,
+                                                      dtype_max=_ceiling),
+        "dyn_range": _field_quality.dynamic_range(nir_raw),
+    }
+    log.info("  field quality: %.1f s  (pre-correction)", time.perf_counter() - _t)
 
     # Load every fluorescent channel and verify shape consistency.
     fluor_raws: list[np.ndarray] = []
@@ -1267,7 +1165,7 @@ def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
             )
         fluor_raws.append(img)
         log.info("  load fluor:  %.1f s  %s", time.perf_counter() - _t, fp.name)
-    return nir_raw, fluor_raws
+    return nir_raw, fluor_raws, acquisition
 
 
 def _correct_image_group(
@@ -1669,10 +1567,17 @@ def process_image_group(
     cellpose_cellprob_threshold: float = 0.0,
     cellpose_nuclei_channel: str = "",
     phase_token: str = "",
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     """
     Process one nuclear image together with an arbitrary number of fluorescent
-    channel images.  Returns a list of per-nucleus measurement dicts.
+    channel images.
+
+    Returns ``(records, quality)`` — the per-nucleus measurement dicts, and the
+    one field-quality mapping for this FOV-group keyed by
+    :data:`pipeline.field_quality.METRIC_KEYS` plus the ``fov`` / ``timepoint``
+    that address it. Every metric may be ``None``: a value that could not be
+    computed is absent rather than zero, because a zero stored where nothing
+    was measured is a measurement the plate-wide score would then believe.
 
     *fluor_paths*        : one Path per fluorescent channel (same order as
                            *fluor_tokens*).
@@ -1686,7 +1591,8 @@ def process_image_group(
     Output CSV columns for each fluor channel are prefixed with the lower-cased
     token, e.g. "gfp_total_intensity", "mcherry_mean_intensity".
     """
-    nir_raw, fluor_raws = _load_image_group(nuclear_path, fluor_paths, fluor_tokens)
+    nir_raw, fluor_raws, acquisition = _load_image_group(
+        nuclear_path, fluor_paths, fluor_tokens)
 
     nir_raw, fluor_raws, nir_corr, fluor_tophat, fluor_corr = _correct_image_group(
         nir_raw, fluor_raws, nuclear_path=nuclear_path, nuclear_token=nuclear_token,
@@ -1736,11 +1642,21 @@ def process_image_group(
         background_method=background_method,
     )
 
-    return _quantify_image_group(
+    records = _quantify_image_group(
         labels=labels, fluor_tophat=fluor_tophat, fluor_tokens=fluor_tokens,
         nir_corr=nir_corr, nuclear_path=nuclear_path, schema=schema, sep=sep,
         shape_features=shape_features,
     )
+    parsed = parse_filename(nuclear_path, schema=schema, sep=sep)
+    return records, _field_quality.group_record(
+        acquisition=acquisition,
+        labels=labels,
+        corrected_image=nir_corr,
+        areas=[r["area"] for r in records if r.get("area") is not None],
+        fov=parsed.get("fov", ""),
+        timepoint=parsed.get("timepoint", ""),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Directory scan
@@ -2214,6 +2130,9 @@ def _process_groups_in_worker(
     staging dir); a per-FOV-group failure trace is written under
     ``<errors_dir>/errors/`` so "why did this timepoint fail?" has a durable
     answer even when the live log is muted. When None, no trace file is written.
+    It is also where this well's field-quality record is dropped, for the same
+    reason: the staging directory is deleted when the well finishes, and the
+    record has to outlive it to be collected into ``pipeline_info.json``.
 
     Returns (records, failed_names).
 
@@ -2255,9 +2174,16 @@ def _process_groups_in_worker(
     _fov_done = 0
     log.info("Well %s — %d FOV-group(s)", well_label, _fov_total)
 
+    #: One field-quality mapping per FOV-group that produced one, in whatever
+    #: order the groups finished. Written to the well's record at the end
+    #: against ``len(groups)``, so a well that failed, aborted or was suspended
+    #: part way declares the shortfall rather than presenting what it did
+    #: measure as the whole well.
+    quality_fields: list[dict] = []
+
     def _run_group(nuclear_path: Path, fluor_paths: list[Path]) -> list[dict]:
         _t0 = time.perf_counter()
-        recs = process_image_group(nuclear_path, fluor_paths, **kwargs)
+        recs, quality = process_image_group(nuclear_path, fluor_paths, **kwargs)
         log.info("FOV %s processed in %.1f s (%d nuclei)",
                  nuclear_path.name, time.perf_counter() - _t0, len(recs))
         for r in recs:
@@ -2268,13 +2194,25 @@ def _process_groups_in_worker(
         # appears "done" to the next invocation.
         try:
             _save_fov_checkpoint(tmp_images, _fov_stem(nuclear_path), recs,
-                                 settings_key)
+                                 settings_key, quality=quality)
         except OSError as ckpt_exc:
             log.warning(
                 "FOV %s — could not write checkpoint (%s); FOV will be "
                 "reprocessed on restart.", nuclear_path.name, ckpt_exc,
             )
+        _note_quality(quality)
         return recs
+
+    def _note_quality(quality: dict | None) -> None:
+        """Keep one FOV-group's quality, from whichever thread produced it.
+
+        ``list.append`` is atomic under the GIL and the FOV-group pool is a
+        ``ThreadPoolExecutor`` in this same process, so no lock is needed —
+        and the order does not matter, because every entry addresses itself
+        with its own ``fov`` / ``timepoint``.
+        """
+        if quality:
+            quality_fields.append(dict(quality))
 
     def _process_or_resume(
         nuclear_path: Path, fluor_paths: list[Path],
@@ -2284,11 +2222,18 @@ def _process_groups_in_worker(
         fov_id = _fov_stem(nuclear_path)
         cached = _load_fov_checkpoint(tmp_images, fov_id, settings_key)
         if cached is not None:
+            records, quality = cached
             log.info(
                 "FOV %s — resumed from checkpoint (%d records)",
-                nuclear_path.name, len(cached),
+                nuclear_path.name, len(records),
             )
-            return cached
+            # The checkpoint carries this group's quality precisely so a
+            # resumed well is measured as completely as one that ran straight
+            # through. Without it every resumed FOV would be a hole in the
+            # block, and a plate resumed once would be scored against a subset
+            # chosen by wherever the previous run happened to be killed.
+            _note_quality(quality)
+            return records
         return _run_group(nuclear_path, fluor_paths)
 
     # Storage that has run out does not recover mid-well. Without this a full
@@ -2391,6 +2336,25 @@ def _process_groups_in_worker(
             well_label, len(not_attempted), aborted_reason,
             ", ".join(not_attempted),
         )
+
+    # The well's quality record, against the number of FOV-groups the well
+    # HAS rather than the number that produced a measurement. A well that
+    # failed, aborted, or was suspended part way is then visibly partial in
+    # the artifact itself, which is what stops a plate-wide robust z being
+    # computed over a biased subset and reported as though it covered the
+    # plate. Best-effort: the writer swallows OSError and returns None,
+    # because a run that cannot write its own bookkeeping must still produce
+    # data.
+    # ``errors_dir`` is the persistent dataset output directory, despite its
+    # name (its docstring says so, and the per-FOV traces are only one thing it
+    # is used for). That is where the quality drop belongs: ``output_dir`` in
+    # *kwargs* is this well's staging directory, which the end-of-well cleanup
+    # deletes. None means the caller had no dataset directory to give, so there
+    # is nowhere to record and nothing to record it against.
+    if errors_dir is not None:
+        _field_quality.write_well_field_quality(
+            errors_dir, well_label, fields=quality_fields,
+            measured_of=_fov_total)
 
     return all_records, failed, aborted_reason, tuple(not_attempted)
 
@@ -3688,8 +3652,12 @@ def main() -> None:
     )
 
     # Any completeness records from a previous run in this output dir would be
-    # merged into this run's report; start clean.
+    # merged into this run's report; start clean. The same applies to the
+    # field-quality drops: left behind by an interrupted run, they would be
+    # folded into this run's block as though this run had measured them, and
+    # the well counts would then agree with nothing.
     clear_run_report(output_dir)
+    _field_quality.clear_field_quality(output_dir)
 
     # The boundary the end-of-run completeness check counts tracebacks from.
     # ``errors/`` is never cleared and its filenames carry a pid but no run id,
@@ -3774,6 +3742,15 @@ def main() -> None:
     # partly-failed well is indistinguishable from a whole one — see
     # pipeline/run_report.py.
     finalize_run_report(
+        output_dir, output_dir / PIPELINE_INFO_FILENAME,
+        atomic_writer=_safe_atomic_text_write, log=log,
+    )
+
+    # And each well's per-field quality metrics, the same way and for a
+    # related reason: without the block a defocused field is indistinguishable
+    # from a well one, and without its partial-well accounting a resumed run's
+    # biased subset is indistinguishable from a whole plate.
+    _field_quality.finalize_field_quality(
         output_dir, output_dir / PIPELINE_INFO_FILENAME,
         atomic_writer=_safe_atomic_text_write, log=log,
     )

@@ -95,7 +95,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # cross-process download lock, its dead-holder reclaim and the corrupt-cache
 # purge. One job, and this file could not otherwise grow at all. Genuine
 # extraction -- ratchet down to the new size.
-PROCESS_MICROSCOPY_BUDGET = 3828
+# 3828 -> 3804: field quality is measured per FOV-group and recorded per well,
+# which cost this file about 140 lines of wiring, so two things moved out to
+# pay for it and then some. The post-run auto-threshold pass --
+# `_apply_thresholds_to_pipeline_info`, `_segmentation_tokens` and
+# `run_auto_threshold_pass` -- is now `pipeline/auto_threshold_pass.py`: it
+# decides which of the two estimators a run's arguments call for, merges the
+# result into the sidecar without overwriting a user's value, and says what it
+# managed, none of which is a threshold calculation. And composing one
+# FOV-group's quality record moved beside the metrics it composes, as
+# `pipeline.field_quality.group_record`. Every name is re-exported, so no call
+# site moved with either.
+PROCESS_MICROSCOPY_BUDGET = 3804
 
 # `services/remote_runner.py` is the largest module in the repo — nearly twice
 # `process_microscopy.py` — and until now the only large one with nothing

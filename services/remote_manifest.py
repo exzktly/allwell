@@ -89,6 +89,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # package or the run aborts with ModuleNotFoundError.
     "pipeline/__init__.py",
     "pipeline/auto_threshold.py",
+    # The post-run pass over that sampler: which estimator this run's
+    # arguments call for, and the merge into pipeline_info.json.
+    # process_microscopy re-exports it and calls it at the end of every
+    # run, remote included.
+    "pipeline/auto_threshold_pass.py",
     "pipeline/background.py",
     "pipeline/capacity.py",
     # The pipeline's argparse declaration. The remote runs process_microscopy,

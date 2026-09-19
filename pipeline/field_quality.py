@@ -1,4 +1,8 @@
-"""Per-field image-quality metrics: what a run can say about the pictures it read.
+"""Image-quality metrics: what a run can say about the pictures it read.
+
+Six numbers per FOV-group, and — for focus alone — one number per **cell**.
+The per-cell one is the column ``qc_edge_focus`` in every well CSV; the
+field's own ``focus`` is the median of it. Everything else here is per field.
 
 ``pipeline/run_report.py`` exists because a run that lost FOV-groups still wrote
 a per-well CSV and ``<well>_out.zip``, and on disk that output was
@@ -62,10 +66,35 @@ Flat to **1.4 %** across a thirty-fold cell-count range, falling **6.6x** under
 defocus, and across three seeds at five cell counts the sharp frames
 (27.27-27.64) and the defocused ones (10.16-11.84) do not overlap at all.
 
-That is a synthetic measurement and it settles the *form* of the statistic, not
-its threshold. Whether the separation survives real optics, real stains and real
-plates is the open question, and it is why nothing here decides what counts as
-bad: this module measures, and the Review side scores.
+**And it is not what this module computes either.** That table measures cell
+*count*, and the axis it never measured is nucleus **size** — where the same
+statistic moves **7.8x** over a fourfold radius range against a defocus signal
+of only **3.7x**, with the two ranges completely overlapping. A metric that
+moves with nuclear size reports a cell line with large nuclei, and the wells
+where a cytotoxic compound arrested the cycle, as out of focus. It is the same
+defect as the density one above, one variable along, and no amount of
+normalising a whole-image statistic removes it: every such statistic is a
+function of what is in the field as much as of how well it was seen.
+
+Both tables are kept because they are what the search had to walk through, and
+because each rejected form is one somebody will propose again.
+
+What this module computes instead: the focus metric is per **cell**
+----------------------------------------------------------------------
+
+:func:`edge_focus` measures the width of the intensity transition at one
+nucleus's own boundary, which is what defocus physically *is* — a property of
+the optics, and therefore the same whatever the object's size. Over the same
+fourfold radius range it spans **1.36x**. Its full derivation, and the sweep
+over reducer, band width and operator that chose it, are in that function's own
+docstring; the field's ``focus`` is the median of its cells' values
+(:func:`field_focus`), so the two poolings are one measurement rather than two
+statistics that can disagree.
+
+All of that is synthetic, and it settles the *form* of the statistic rather
+than its threshold. Whether the separation survives real optics, real stains
+and real plates is the open question, and it is why nothing here decides what
+counts as bad: this module measures, and the Review side scores.
 """
 
 from __future__ import annotations

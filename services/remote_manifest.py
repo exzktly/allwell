@@ -106,6 +106,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # Per-field image-quality metrics, computed inside the quantification
     # pass, so the remote worker genuinely needs it.
     "pipeline/field_quality.py",
+    # The pretrained-weights cache and its cross-process download lock.
+    # process_microscopy re-exports these; the remote worker loads the
+    # model through them on every run.
+    "pipeline/stardist_cache.py",
     "pipeline/flatfield.py",
     # Per-FOV resume checkpoints, keyed on the output directory and the run's
     # settings so one plate cannot resume another's intermediates.

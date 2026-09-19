@@ -17,6 +17,13 @@ import time
 from pathlib import Path
 
 import process_microscopy as pm
+# The cache, its lock and the pkg_resources shim live here now;
+# ``pm`` re-exports them, and a re-export is a *binding* — patching
+# ``sd_cache._STARDIST_LOCK_STALE`` would not be seen by the function that
+# reads it, which resolves the name in this module's globals
+# (ARCHITECTURE §6.4). The functions are still driven through ``pm``,
+# because that is how ``services/frame_preview`` reaches them.
+import pipeline.stardist_cache as sd_cache
 
 
 def _seed_cache(keras_home: Path) -> Path:
@@ -118,7 +125,7 @@ def test_lock_stale_is_reclaimed(tmp_path, monkeypatch):
     monkeypatch.setenv("KERAS_HOME", str(tmp_path))
     lockdir = pm._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
     lockdir.mkdir(parents=True)
-    old = time.time() - pm._STARDIST_LOCK_STALE - 10      # older than stale window
+    old = time.time() - sd_cache._STARDIST_LOCK_STALE - 10      # older than stale window
     os.utime(lockdir, (old, old))
 
     class FakeSD:
@@ -137,8 +144,8 @@ def test_lock_dead_holder_reclaimed_instantly(tmp_path, monkeypatch):
     # leaking the lockdir. The rerun must reclaim it AT ONCE (the holder PID is
     # dead), not stall for the timeout — even with mtime-staleness disabled.
     monkeypatch.setenv("KERAS_HOME", str(tmp_path))
-    monkeypatch.setattr(pm, "_STARDIST_LOCK_STALE", 1e9)    # disable mtime fallback
-    monkeypatch.setattr(pm, "_STARDIST_LOCK_TIMEOUT", 30.0)  # would be slow if it waited
+    monkeypatch.setattr(sd_cache, "_STARDIST_LOCK_STALE", 1e9)  # disable mtime fallback
+    monkeypatch.setattr(sd_cache, "_STARDIST_LOCK_TIMEOUT", 30.0)  # would be slow if it waited
     monkeypatch.setattr(pm, "_pid_alive", lambda pid: False)  # recorded holder is dead
     lockdir = pm._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
     lockdir.mkdir(parents=True)
@@ -158,8 +165,8 @@ def test_lock_dead_holder_reclaimed_instantly(tmp_path, monkeypatch):
 
 def test_lock_timeout_degrades_to_unlocked(tmp_path, monkeypatch):
     monkeypatch.setenv("KERAS_HOME", str(tmp_path))
-    monkeypatch.setattr(pm, "_STARDIST_LOCK_TIMEOUT", 0.2)
-    monkeypatch.setattr(pm, "_STARDIST_LOCK_STALE", 1e9)   # never treat as stale
+    monkeypatch.setattr(sd_cache, "_STARDIST_LOCK_TIMEOUT", 0.2)
+    monkeypatch.setattr(sd_cache, "_STARDIST_LOCK_STALE", 1e9)   # never treat as stale
     lockdir = pm._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
     lockdir.mkdir(parents=True)                            # held by a (fake) live holder
 

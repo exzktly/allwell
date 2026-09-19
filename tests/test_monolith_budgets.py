@@ -90,7 +90,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # correction could not be built) moved to `pipeline/empty_well.py`, taking the
 # new-manifest-entry cost the note above declined. Every name is re-exported,
 # so no call site and no test moved with it.
-PROCESS_MICROSCOPY_BUDGET = 4048
+# 4048 -> 3828: the StarDist pretrained-weights cache moved to
+# pipeline.stardist_cache -- the pkg_resources shim, the Keras cache lookup, the
+# cross-process download lock, its dead-holder reclaim and the corrupt-cache
+# purge. One job, and this file could not otherwise grow at all. Genuine
+# extraction -- ratchet down to the new size.
+PROCESS_MICROSCOPY_BUDGET = 3828
 
 # `services/remote_runner.py` is the largest module in the repo — nearly twice
 # `process_microscopy.py` — and until now the only large one with nothing

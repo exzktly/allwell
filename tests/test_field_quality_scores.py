@@ -30,12 +30,25 @@ def _field(well, fov, *, focus=27.0, sat=0.0, dyn=2800.0, count=300,
 
 
 def _plate(wells=("A01", "A02", "B01"), n_fov=10, **kw):
-    """A plate with the spread real fields have — a flat one has no MAD."""
+    """A plate with the spread real fields have.
+
+    **Every** metric varies field to field, including nucleus count. That is
+    not decoration: a fixture whose controls all report exactly 300 nuclei has
+    a pooled MAD of zero, so a plate-wide scorer *refuses* rather than flags —
+    and the test that exists to catch a plate-wide scorer passes against one.
+    It did, until a mutation that should have broken it changed nothing
+    (CLAUDE.md §7.8 rule 2: build the fixture so the right and the wrong answer
+    differ).
+    """
     out = []
     for w in wells:
         for i in range(n_fov):
-            out.append(_field(w, i, focus=27.0 + (i % 5) * 0.2,
-                              dyn=2800.0 + (i % 5) * 10.0, **kw))
+            base = dict(focus=27.0 + (i % 5) * 0.2,
+                        dyn=2800.0 + (i % 5) * 10.0,
+                        count=300 + (i % 7) * 9,
+                        area=40.0 + (i % 4) * 1.5)
+            base.update(kw)
+            out.append(_field(w, i, **base))
     return out
 
 
@@ -53,6 +66,15 @@ def test_a_cytotoxic_well_is_not_flagged_as_an_artifact():
     for i in range(10):
         rows.append(_field("C12", i, focus=27.0 + (i % 5) * 0.2,
                            count=15 + (i % 3)))
+
+    # The premise, asserted rather than assumed: pooled across the plate, the
+    # treated fields really are many MADs out, so a plate-wide scorer would
+    # flag them and this test would fail against one.
+    pooled = [r["nuc_count"] for r in rows]
+    zs, why = robust_z(pooled)
+    assert why == "", "the fixture must give the pooled scorer something to score"
+    assert abs(zs[-1]) > DEFAULT_Z_THRESHOLD, (
+        f"a plate-wide rule would flag the treated well at z={zs[-1]:.1f}")
 
     verdicts = {v.key: v for v in score_fields(rows)}
     treated = [v for k, v in verdicts.items() if k[0] == "C12"]

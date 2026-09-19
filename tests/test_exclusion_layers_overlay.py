@@ -69,17 +69,42 @@ def _frame(**cols):
 
 def test_every_layer_the_chokepoint_ands_is_named():
     """The roster must cover the chokepoint, or the overlay goes on being
-    blind to whatever it omits — which is exactly how it missed three."""
-    import inspect
+    blind to whatever it omits — which is exactly how it missed three.
 
-    from review.data import data_loading
+    **Measured, not scraped.** This read `inspect.getsource(df_included_mask)`
+    and looked for each column name as a literal, which stopped describing the
+    chokepoint the moment those literals moved into the module-level
+    `VERDICT_LAYERS` roster the function now iterates. It went red rather than
+    quietly green, which is the survivable direction — but a guard whose
+    subject is "what does this function actually exclude" should ask that
+    question of the function, not of its text.
 
-    src = inspect.getsource(data_loading.df_included_mask)
+    So each layer is driven through `df_included_mask` itself: a row failing
+    that column alone must not count. A column the chokepoint silently stopped
+    reading fails here; a column the overlay cannot name fails here; and a
+    seventh layer added to one and not the other fails here too.
+    """
+    import pandas as pd
+
+    from review.data.data_loading import VERDICT_LAYERS, df_included_mask
+
+    gating = ("Included",) + tuple(VERDICT_LAYERS)
     named = {col for col, _label in EXCLUSION_LAYERS}
-    for col in ("Included", "QC_Pass", "Crop_Pass", "Gate_Pass",
-                "Field_Pass", "Focus_Pass"):
-        assert f'"{col}"' in src, f"{col} is not at the chokepoint any more"
-        assert col in named, f"{col} gates inclusion and the overlay cannot name it"
+    assert named == set(gating), (
+        f"the overlay names {sorted(named)} and inclusion is decided by "
+        f"{sorted(gating)}; a cell can be dropped for a reason the picture "
+        f"cannot show, or shown a reason that no longer drops it")
+
+    for col in gating:
+        df = pd.DataFrame({"nucleus_id": [1, 2]})
+        # Every layer all-pass except this one, on row 2 alone.
+        for other in gating:
+            df[other] = 1
+        df[col] = [1, 0]
+        mask = list(df_included_mask(df))
+        assert mask == [True, False], (
+            f"{col} no longer decides inclusion at the chokepoint, so the "
+            f"overlay names a layer that does not drop anything: {mask}")
 
 
 def test_a_focus_excluded_cell_is_named_and_shown_excluded():

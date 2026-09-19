@@ -31,6 +31,38 @@ reads identically to one that forgot it.
   discard the wells where a treatment worked. The metrics move, and the model is
   split in two.
 
+## This document is live, and it leads the work
+
+It is not a record of what was decided; it is the instruction for what happens
+next, and it is wrong the moment it stops matching the tree. Six rules keep it
+that way, and they are what make it worth reading at all.
+
+1. **Read it before touching anything.** The first act of any session working on
+   these subsystems is to open this file and find the first row that is not
+   `done` or `declined`. That row is the work. A session that starts from a
+   recollection of where things stood is the failure mode §6.1 exists to
+   prevent.
+2. **The row and the code move in the same commit.** Never a batch at the end of
+   a session, never "once CI is green". A tracker updated in arrears is a
+   summary, and summaries are what failed before.
+3. **What a row learns goes into the row.** A measurement, a refuted assumption,
+   a file that turned out to be somewhere else — it is written down where the
+   next reader will look, not left in a commit message. Rows carry their
+   evidence column for exactly this.
+4. **A finding is a row.** Anything a reviewer, a test failure, or the tree
+   itself turns up becomes a numbered row before it is acted on, so that acting
+   on it can be recorded. Rows added this way are appended under the row that
+   produced them and keep its letter.
+5. **A row that turns out to be wrong is `declined` with the reason, never
+   deleted.** A deleted row and a forgotten row look identical six months later.
+6. **Report progress by reading this file, not by remembering.** If the honest
+   answer is "I believe so", the honest answer is "I have not checked".
+
+The prose sections above each row table are part of the same contract: when a
+measurement changes what a section is doing, the prose is rewritten to describe
+what is now true, in the same commit. This file states what is true *now* — the
+history is in `git log`.
+
 ## How to read the rows
 
 Every row has a state, a place, and — once it is `done` — the test that pins it.

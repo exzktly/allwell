@@ -51,12 +51,14 @@ class AnalyzeSchemaSectionMixin:
         # form's label column and general look.
         self._schema_picker = SchemaPicker(
             sec,
+            detect_label="Detect from filenames",
             row_factory=self._row,
             combo_width=self._CB_W,
             schema_edit_min_width=self._SCHEMA_STR_EDIT_MIN_W,
         )
         sec.layout().addWidget(self._schema_picker)
         self._schema_picker.changed.connect(self._refresh_schema_preview)
+        self._schema_picker.detectRequested.connect(self._detect_schema_from_input)
 
         self._schema_err_lbl = QLabel("", sec)
         self._schema_err_lbl.setObjectName("Error")
@@ -130,3 +132,38 @@ class AnalyzeSchemaSectionMixin:
 
         lines = [f"e.g. {_make_example(nuclear_tok)}"] + [f"     {_make_example(t)}" for t in fluor_toks[:2]]
         self._schema_preview_lbl.setText("\n".join(lines))
+
+    # ------------------------------------------------------------------
+    # Detection
+    # ------------------------------------------------------------------
+    def _detect_schema_from_input(self) -> None:
+        """Re-run the folder scan against whatever the input field names now.
+
+        The same call browsing to a folder makes, deliberately: two ways of
+        asking one question are two answers waiting to disagree, and the scan is
+        already bounded to a sample of the names rather than a walk. What the
+        button adds is the ability to ask **again** — after typing over the
+        guess, after fixing the separator by hand, after pointing at a different
+        folder in the text field rather than through the browser.
+
+        An empty field is its own answer and says so, rather than scanning the
+        process's working directory.
+        """
+        folder = self._input_edit.text().strip() if hasattr(self, "_input_edit") else ""
+        if not folder:
+            self._set_schema_detection(
+                "Choose an input folder first — there are no filenames to read.",
+                problem=True)
+            return
+        self._autofill_from_input_scan(folder)
+
+    def _set_schema_detection(self, text: str, *, problem: bool = False) -> None:
+        """Put *text* under the picker as the result of the last detection.
+
+        Guarded, because the scan runs from ``_browse_input`` as well as from
+        the button, and the browse path can fire before this section is built
+        when a folder arrives on the command line.
+        """
+        picker = getattr(self, "_schema_picker", None)
+        if picker is not None:
+            picker.setDetection(text, problem=problem)

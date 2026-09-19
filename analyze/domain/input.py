@@ -170,8 +170,20 @@ class AnalyzeInputMixin:
             guess = infer_from_dir(folder)
         except Exception:
             swallowed()  # a scan must never break folder selection
+            self._set_schema_detection(
+                "That folder could not be read, so no layout was detected.",
+                problem=True)
             return
         if guess is None:
+            # Nothing recognisable, which is not the same as nothing found: the
+            # modal token count decides the layout, so this is also what a
+            # folder whose unparseable names outnumber its parseable ones
+            # returns. Either way the form is left exactly as the user set it,
+            # and saying so is the difference between a scan that declined and
+            # a scan that silently rewrote nothing.
+            self._set_schema_detection(
+                "No filename layout could be detected in that folder — the "
+                "schema below is unchanged.", problem=True)
             return
         # Sidecar-shaped keys, because that is what `_apply_pipeline_info` takes
         # and what `guess.channel_tokens().as_pipeline_info()` below already
@@ -201,6 +213,14 @@ class AnalyzeInputMixin:
             info.update(tokens.as_pipeline_info())
         if info:
             self._apply_pipeline_info(info)
+        # Beside the fields it just wrote, not only on the dashboard: the
+        # dashboard line scrolls away and these two fields keep values that look
+        # hand-entered for as long as the form is open.
+        self._set_schema_detection(
+            guess.summary() if guess.confident
+            else (f"{guess.summary()} No well and channel pair was identified, "
+                  f"so the schema below is unchanged."),
+            problem=not guess.confident)
         self._report_scan_guess(
             tokens, schema=guess.schema_str if guess.confident else "")
 

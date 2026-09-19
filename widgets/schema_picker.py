@@ -32,7 +32,8 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget,
+    QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
+    QWidget,
 )
 
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP, SCHEMA_FIELDS, parse_schema, validate_schema
@@ -74,11 +75,15 @@ class SchemaPicker(QWidget):
     """
 
     changed = Signal()
+    #: Pressed the detect button. Carries nothing: the widget has no idea where
+    #: filenames come from, and finding that out is the host's job.
+    detectRequested = Signal()
 
     def __init__(
         self,
         parent: QWidget | None = None,
         *,
+        detect_label: str = "",
         row_factory: Callable[[QWidget, str], QWidget] | None = None,
         combo_width: int = _COMBO_W,
         schema_edit_min_width: int = _SCHEMA_EDIT_MIN_W,
@@ -141,6 +146,27 @@ class SchemaPicker(QWidget):
         # would otherwise thrash through five fields mid-word.
         self._schema_edit.textChanged.connect(lambda _t: self.changed.emit())
         self._schema_edit.editingFinished.connect(self._on_schema_text_committed)
+
+        # The detect control is opt-in, and deliberately so. A button that is
+        # always built is a button a host can forget to connect, and a schema
+        # detector that does nothing when pressed looks exactly like one that
+        # found nothing — the failure this whole control exists to stop being
+        # invisible. Passing a label is the host saying it has filenames to
+        # offer and will answer `detectRequested`.
+        self._detect_btn: QPushButton | None = None
+        self._detect_lbl: QLabel | None = None
+        if detect_label:
+            cell = self._row(self, "")
+            self._detect_btn = QPushButton(detect_label, cell)
+            self._detect_btn.setObjectName("Secondary")
+            self._detect_btn.clicked.connect(lambda: self.detectRequested.emit())
+            cell.layout().addWidget(self._detect_btn)
+            cell.layout().addStretch(1)
+
+            self._detect_lbl = QLabel("", self)
+            self._detect_lbl.setObjectName("Muted")
+            self._detect_lbl.setWordWrap(True)
+            outer.addWidget(self._detect_lbl)
 
     # ── layout ───────────────────────────────────────────────────────────────
     def _plain_row(self, parent: QWidget, label: str) -> QWidget:
@@ -242,3 +268,32 @@ class SchemaPicker(QWidget):
     @property
     def combos(self) -> list[QComboBox]:
         return list(self._combos)
+
+    def setDetection(self, text: str, *, problem: bool = False) -> None:  # Qt naming
+        """Show *text* beneath the control as the result of a detection.
+
+        The widget does not compose this sentence and does not know what it
+        means — it is handed one and shows it. *problem* picks the styled
+        object name, so a refusal reads as a refusal rather than as a quieter
+        success; the two must not look alike, which is the one thing this
+        readout exists for.
+
+        A no-op when the host did not ask for the detect control, so a caller
+        cannot push a result into a picker that never offered to find one.
+        """
+        if self._detect_lbl is None:
+            return
+        self._detect_lbl.setObjectName("Error" if problem else "Muted")
+        # An object name changed after the sheet was applied does not restyle on
+        # its own; Qt re-polishes only when told to.
+        self._detect_lbl.style().unpolish(self._detect_lbl)
+        self._detect_lbl.style().polish(self._detect_lbl)
+        self._detect_lbl.setText(text or "")
+
+    def detectionText(self) -> str:  # Qt naming
+        """What :meth:`setDetection` last displayed, or ``""``."""
+        return self._detect_lbl.text() if self._detect_lbl is not None else ""
+
+    def detectButton(self) -> QPushButton | None:
+        """The detect button, or ``None`` when the host did not ask for one."""
+        return self._detect_btn

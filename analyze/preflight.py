@@ -203,6 +203,12 @@ class AnalyzePreflightMixin:
         self._preflight_dir: str = ""
         self._preflight_dismissed: str = ""
         self._preflight_coverage: str = ""
+        #: The run's own field-quality sentence for this folder, QUOTED from
+        #: ``pipeline.field_quality.summarize`` rather than composed here. The
+        #: Analyze tab and the end-of-run log then cannot say different things
+        #: about the same block — §0.3 of the plan, and the reason the
+        #: summariser lives pipeline-side at all.
+        self._preflight_field_quality: str = ""
         #: The folder a scan is currently walking, or ``""`` for none. One
         #: scan at a time: the settle timer bounds how often a scan is *asked*
         #: for, not how long one takes, and a plate on a slow network volume
@@ -245,6 +251,7 @@ class AnalyzePreflightMixin:
             # headline goes with the coverage line — it is the previous
             # folder's sentence, and it is what a repaint would put back up.
             self._preflight_coverage = ""
+            self._preflight_field_quality = ""
             self._preflight_headline_text = ""
             banner.setVisible(False)
             self._hide_resume_banner()
@@ -285,6 +292,7 @@ class AnalyzePreflightMixin:
         if not headline:
             banner.setVisible(False)
             return
+        self._preflight_field_quality = _field_quality_line(Path(target))
         self._render_preflight(headline)
         self._start_coverage_scan()
 
@@ -315,6 +323,7 @@ class AnalyzePreflightMixin:
         new information, not the thing the user waved away.
         """
         self._preflight_coverage = ""
+        self._preflight_field_quality = ""
         self._preflight_dismissed = ""
         with swallow("re-reading the output folder after a run"):
             self._refresh_output(immediate=True)
@@ -432,6 +441,7 @@ class AnalyzePreflightMixin:
         self._preflight_suppressed = self._resume_card_covers(self._preflight_dir)
         head = "" if self._preflight_suppressed else headline
         text = " ".join(p for p in (head, self._preflight_coverage,
+                                    self._preflight_field_quality,
                                     self._scope_line()) if p)
         self._preflight_label.setText(text)
         # An empty report is not a report. With its account of the run
@@ -714,6 +724,42 @@ def _previous_settings(out_dir: Path) -> tuple[dict, str]:
             from analyze.pinfo import AnalyzePipelineInfoMixin
             return AnalyzePipelineInfoMixin._pinfo_flat(info), "pipeline_info.json"
     return {}, ""
+
+
+def _field_quality_line(output_dir: Path) -> str:
+    """The run's own field-quality sentence for *output_dir*, or ``""``.
+
+    **Quoted, not composed.** ``pipeline.field_quality.summarize`` is the one
+    place that turns a collected block into a sentence, and the end-of-run log
+    prints the same call — so the Analyze tab and the log cannot describe the
+    same folder differently. This function reads the block and hands it over;
+    it decides nothing.
+
+    Read straight off disk rather than from anything the form holds, because
+    this runs when a folder is *picked* and the block is a fact about that
+    folder rather than about this session. Any failure to read is silence: a
+    pre-flight strip exists to report, and a strip that reported its own
+    inability to parse a sidecar would be noise in the one place the user is
+    trying to decide whether to press Run.
+
+    Module-level and taking a plain path, like ``_scan_coverage`` beside it,
+    so it can be exercised without a widget.
+    """
+    import json
+
+    from pipeline.field_quality import FIELD_QUALITY_BLOCK, summarize
+
+    info_path = output_dir / "pipeline_info.json"
+    if not info_path.is_file():
+        return ""
+    try:
+        info = json.loads(info_path.read_text())
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(info, dict):
+        return ""
+    block = info.get(FIELD_QUALITY_BLOCK)
+    return summarize(block if isinstance(block, dict) else None)
 
 
 def _scan_coverage(input_dir: Path, output_dir: Path, opts: dict) -> dict | None:

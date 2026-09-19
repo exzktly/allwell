@@ -29,7 +29,15 @@ log = logging.getLogger(__name__)
 
 #: Bumped when the checkpoint payload's shape changes, so a run never reads a
 #: record it would misinterpret.
-_FOV_CHECKPOINT_SCHEMA = 1
+#:
+#: 1 → 2: the payload gained ``quality``, the FOV-group's field-quality
+#: mapping. A version-1 checkpoint has the records but no quality, and a
+#: resume that accepted it would produce a well whose quality block silently
+#: covered fewer fields than the well holds — the plate-wide robust z is then
+#: computed against a biased subset with nothing in the artifact saying so.
+#: Refusing it costs one FOV of reprocessing and is the only answer that keeps
+#: the block honest.
+_FOV_CHECKPOINT_SCHEMA = 2
 
 
 def _json_safe(records: list[dict]) -> list[dict]:
@@ -134,14 +142,20 @@ def _checkpoint_paths(tmp_images: Path, fov_id: str) -> tuple[Path, Path]:
     )
 
 def _load_fov_checkpoint(tmp_images: Path, fov_id: str,
-                         settings_key: str = "") -> list[dict] | None:
-    """Return cached records for ``fov_id``, or None if no valid
+                         settings_key: str = "") -> tuple[list[dict], dict] | None:
+    """Return ``(records, quality)`` for ``fov_id``, or None if no valid
     checkpoint exists.
 
     Treats a missing marker, a missing records file, an unreadable
     records file, or a schema-version mismatch all as "no checkpoint" —
     in every case the caller will reprocess the FOV and overwrite the
     on-disk state.
+
+    ``quality`` is the FOV-group's field-quality mapping, restored so a
+    resumed well is measured as completely as one that ran straight through.
+    It is a plain ``dict`` and may be empty, which is how a checkpoint written
+    by a run whose group produced no quality reads; it is never ``None``, so a
+    caller cannot confuse "no checkpoint" with "checkpoint with no quality".
     """
     records_file, marker = _checkpoint_paths(tmp_images, fov_id)
     if not (marker.exists() and records_file.exists()):
@@ -166,23 +180,38 @@ def _load_fov_checkpoint(tmp_images: Path, fov_id: str,
     records = payload.get("records")
     if not isinstance(records, list):
         return None
-    return records
+    quality = payload.get("quality")
+    if not isinstance(quality, dict):
+        # The schema check above already refuses a version-1 payload, so this
+        # is a version-2 file whose quality is malformed rather than absent.
+        # An empty mapping keeps the tuple's shape; the well's ``measured``
+        # count then falls short of ``measured_of`` and the block says partial,
+        # which is exactly right — this field was not measured.
+        quality = {}
+    return records, quality
 
 def _save_fov_checkpoint(
     tmp_images: Path, fov_id: str, records: list[dict],
-    settings_key: str = "",
+    settings_key: str = "", quality: dict | None = None,
 ) -> None:
-    """Atomically persist ``records`` and create the ``.done`` marker.
+    """Atomically persist ``records`` + ``quality`` and create the ``.done``
+    marker.
 
     Writes records.json first, fsync-then-rename, then touches the marker
     — so a process killed between the two writes leaves NO marker and
     the next run reprocesses the FOV (rather than reading half-written
     records).
+
+    *quality* rides along rather than living in its own file because the two
+    describe the same FOV-group and must be resumed or reprocessed together:
+    stored apart, a kill between the two writes leaves records whose quality
+    is missing, and the well then reports a field count it cannot back.
     """
     records_file, marker = _checkpoint_paths(tmp_images, fov_id)
     tmp = records_file.with_suffix(".records.json.tmp")
     payload = {"schema": _FOV_CHECKPOINT_SCHEMA,
                "settings": str(settings_key or ""),
+               "quality": _json_safe([dict(quality or {})])[0],
                "records": _json_safe(records)}
     text = json.dumps(payload)
     with open(tmp, "w", encoding="utf-8") as fh:

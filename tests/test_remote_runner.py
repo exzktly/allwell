@@ -2038,6 +2038,10 @@ def test_required_files_list_is_what_we_promised():
         # segmenters/writers), re-imported at module top level.
         "pipeline/__init__.py",
         "pipeline/auto_threshold.py",
+        # The post-run pass over that sampler — which estimator this
+        # run's arguments call for, and the merge into
+        # pipeline_info.json. Called at the end of every run.
+        "pipeline/auto_threshold_pass.py",
         "pipeline/background.py",
         "pipeline/capacity.py",
     # The pipeline's argparse declaration, imported by process_microscopy at
@@ -2047,6 +2051,20 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/completeness.py",
         # The blank-well sampler + model builders behind empty_well correction.
         "pipeline/empty_well.py",
+        # Per-field image-quality metrics (focus, saturation, dynamic range,
+        # background level), computed inside the quantification pass itself —
+        # so unlike the client-side entries below, the remote worker really
+        # does import this one.
+        "pipeline/field_quality.py",
+        # Its stdlib-only half — the per-well record, the collected block and
+        # the merge the fetch performs. Imported by the remote CLIENT, which
+        # may not reach numpy or scipy.
+        "pipeline/field_quality_record.py",
+        # The pretrained-weights cache directory and the cross-process
+        # download lock that stops N workers fetching the same model at once.
+        # ``process_microscopy`` re-exports these, and the remote worker loads
+        # its model through them on every run.
+        "pipeline/stardist_cache.py",
         "pipeline/flatfield.py",
         # Per-FOV resume checkpoints, keyed on the output directory and the
         # settings so one plate cannot resume another's intermediates.

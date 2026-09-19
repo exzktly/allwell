@@ -237,6 +237,9 @@ allwell/
 │   │   ├── input.py            ← run-dir resolver, OME-TIFF redirect, channel rows,
 │   │   │                          browse-time folder scan
 │   │   └── job_edit.py         ← the inverse of collect_spec, for the queue's edit flow
+│   ├── qc_section.py           ← the Quality Control section: the pixel
+│   │                              corrections, the debris gate, and the
+│   │                              per-cell focus measurement and its cut
 │   ├── schema_section.py       ← the Filename Schema section: picker, detection,
 │   │                            readout, and the preview that refreshes them
 │   ├── seg_params.py           ← per-method segmentation params + StarDist thresholds
@@ -296,12 +299,22 @@ allwell/
 │   │                              and where a well's output files live
 │   ├── suspend.py              ← suspend / resume a run in flight
 │   ├── run_report.py           ← the end-of-run summary the log and Review both read
+│   ├── field_quality.py        ← per-cell + per-field image-quality metrics (§6.7)
+│   ├── field_quality_record.py ← the per-well record those are collected
+│   │                              through, and the CSV column's name.
+│   │                              Stdlib-only: the remote client merges this
+│   │                              block without the imaging stack behind it
+│   ├── stardist_cache.py       ← the pretrained-weights cache dir and the
+│   │                              cross-process download lock
+│   ├── auto_threshold_pass.py  ← the post-run pass: which estimator this run's
+│   │                              arguments call for, and the sidecar merge
 │   ├── capacity.py             ← disk-space accounting: what a run needs on the
 │   │                              scratch and output volumes, what is left there
 │   ├── sidecar.py              ← the pipeline_info.json blocks the user owns
 │   │                              (cell_gating / sample_definitions / ratios /
 │   │                              notes), preserved across any wholesale rewrite
 │   └── io.py                   ← atomic output writers (images / CSVs / overlay)
+│                                  + a well's own archive, read and written
 │                                 + the scratch base & staging-dir lifecycle (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
 │   ├── dir_scan.py             ← "what is directly inside this directory?", answered out
@@ -498,6 +511,8 @@ review/
 │   │   zipfile_cache.py, zip_members.py, auto_threshold.py, crop_tool.py,
 │   │   metric_labels.py, cache_projectors.py, curation.py, well_repository.py,
 │   │   image_repository.py
+│   ├── field_quality_cache.py, focus_gate.py   ← the run's own image-quality
+│   │   verdicts, per field and per cell, onto the row cache (§6.7)
 │   ├── frame_load.py, dataset_dims.py   ← the layer under every image grid:
 │   │   an address → its pixels, and what a dataset offers per dimension
 ├── domain/                        ← Qt-free models + pure logic
@@ -4114,7 +4129,7 @@ Per-feature controllers / renderers (under `review/features/`):
 | `features/preview/delete_scope_view.py` | The **Delete scope ▾** spec and its thin wrappers. Fields live on `ReviewImageState.delete_scope_*`, an un-armed field means "the displayed one", the reset reads *Reset to this frame*, and nothing has to be re-derived on a change because the scope is only read when a drag finishes. |
 | `features/crop/{controller,region}.py` | The crop layer: one rectangle in mask-pixel space, the frames it is applied to, and the `Crop_Pass` column that carries its verdict into the `df_included_mask` chokepoint. `region.py` is pure pandas — `centroids_inside` (shared with the region delete), `compute_crop_pass`, `crop_effect_for_df`, and `FrameScope` / `rows_in_scope`, the per-row "is this row's frame in scope?" test built on `image_identity.frame_token_series`, plus `frame_in_scope`, the frame-level question a *view* asks ("is the box I am drawing filtering this picture?") answered from the same rows rather than from a second comparison of the same tokens. **The token pass is memoised on the frame** (identity + length keyed, so a copy recomputes): normalising a well's FOV/timepoint tokens is per-row Python and dominates every scope question — ~430 ms on a 200k-row well — and it is asked once per projection and again on every canvas redraw. A scope that names only wells skips it altogether. It never touches `Included`, so moving, scoping or clearing the crop cannot clobber hand-curated edits. **Everything about it fails open**: no region, no centroid columns, a NaN centroid, or a frame the scope does not name all leave the cell passing — the crop excludes only cells it can place inside a box it was armed for. The scope's default is every frame, so an unscoped crop is the plate-wide filter it has always been; narrowing it re-projects and reports the new counts once the run of ticks settles (see `frame_scope_view.py` below), because changing which frames the box filters changes the numbers exactly as moving the box would. `set_crop_region` reports the crop's *effect* (cells excluded of otherwise-included, across loaded wells) rather than only that a box was set, and warns loudly when the dataset has no `shape_centroid_*` columns at all — a crop that excludes nothing must not look like one that worked. |
 | `features/preview/crop_scope_view.py` | The **Crop scope ▾** builder. The spec itself (`CROP_SCOPE`) lives in `features/crop/controller.py`, next to the `Crop_Pass` projection and the Reset actions that also have to keep it honest — every path that changes a scoped crop is on that side, and each must relabel the button or it goes on advertising a scope the state no longer holds. |
-| `features/image_browser/playground/{controller,renderer,worker}.py` | Segmentation-page **Playground** sub-tab: an interactive testbed for the pipeline's background-flattening / subtraction methods *and* its StarDist segmentation, on a single frame. **Two frame sources**, resolved by `_resolve_frame`: the dataset frame addressed by the sidebar plate's well plus the channel / timepoint / FOV combos, or — winning when set — a **loose image** opened straight from disk with "Open image…" (`state.loose_image_path`, read through the pipeline's own `load_2d_gray`, cached by path so the correction memo's `id()` key still hits). The loose source is what makes the tab usable with **no dataset loaded at all**, which is the state you are in when choosing settings for a plate you have not run yet; it disables the dataset selectors, has no precomputed mask, and refuses the reference-well correction modes (`empty_well` / `basic`, which need a whole well to sample) **by name** in the status line rather than presenting an uncorrected frame as corrected. Loading a dataset ends loose mode (`PlaygroundState.clear_caches`). Applies the chosen flat-field + background method through `process_microscopy.correct_single_frame` — the **same** per-frame orchestration the batch worker's `_correct` uses (extracted so pipeline and Playground share one code path; a parity test pins the equivalence), so no method is reimplemented. The `empty_well` / `basic` reference fields are estimated from a chosen background well on a daemon thread via a queued-signal bridge (smFISH pattern). **Those fields are cached by everything that decides which one gets estimated** — `("ff", well, channel, mode)` and `("bg", well, channel)` in `state.ref_fields` — because `basic` and `empty_well` produce *different* flat-fields from the same frames (`estimate_basic_flatfield` versus `normalize_flatfield(B)`) and the additive background field is only estimated when the background method is `empty_well`. A cache keyed on less than that answers "already built" for a field it never built, and `apply_flatfield` then no-ops **silently** on the `None` it is handed, so the correction appears to do nothing. `_reference_fields_for` is the single resolver both the render path and the Segment button go through, so the frame on screen and the frame handed to StarDist can never be corrected differently; when a needed field is absent it **downgrades that half of the correction to `none`** and names the refusal in the read-out, rather than reporting a mode that did not run. A build that finds no usable frames is recorded in `state.ref_missing` with its reason — held apart from `ref_fields` so "not built yet" (build it) stays distinguishable from "cannot be built" (report it, and never respawn the worker on the next keystroke). `_build_reference_then_render` captures the well and the modes at *request* time and files the result under keys built from those captures, so a dropdown changed while the worker runs cannot relabel what it computed. The correction itself stays synchronous on the GUI thread, so `playground_on_change` memoizes its result (`state.last_correction_key`/`last_corrected_arr`, keyed on the decoded frame's identity — safe because `image_discovery`'s decode cache returns the same array object on a hit — plus every correction parameter) and skips recomputing when nothing that affects the output changed; `build_playground_tab` triggers exactly one render on first open (via `registry._activate_playground`, which always follows the tab's construction in the same dispatch), not its own redundant call plus the activation hook's. **The stage control — labelled "Correct up to" (`state.source`: raw / flatfield / corrected) — heads the Correction section and is a master switch, not a view option** — `raw` returns before any correction runs and `flatfield` forces `bg_method="none"`, so most of that section is dead on those stages. `correction_controls_enabled(stage)` is the pure rule for which controls each stage consults (radius / small-px / mesh are *background* parameters, so they are dead on `flatfield` too) and `_sync_method_rows` greys out the rest; it previously sat in the Display section two groups below the controls it silenced, which made an inactive panel read as a broken one. A muted caption under it states what it governs — "decides which controls below run — Raw runs none" — because "Stage" named a step of the pipeline rather than the effect on the panel, and a control whose meaning lives only in its tooltip has already failed the reader who did not hover. **The read-out** (`_status_text`, the "What you're looking at" box) states in words everything this tab can be ambiguous about, because none of it is visible in the picture: the frame; the stage and the correction *actually applied*; the displayed array's range/mean; the mask's provenance (`_mask_source`), label count, what the QC size filter removed, and whether it even fits the frame; and which rule drew what is on screen. `_render` records those facts in `state.display_facts` as it draws them, so the read-out reports what the renderer did rather than re-deriving it — a second derivation is a second chance to describe something that did not happen. The range is load-bearing rather than decorative: the LUT re-derives its window from the displayed array while it reads `auto`, so a correction can move the data while leaving the picture identical (for `fov_median`, a scalar subtraction, *pixel*-identical), and the numbers are how it proves it ran. **Binary mode is the sharpest case**: `build_frame_rgb` picks between three rules — a per-cell mean gate, a per-*pixel* threshold when no usable mask exists, and the whole labelled footprint when there is no per-cell verdict — which mean completely different things and render identically as white-on-black. `_binary_rule` names which one ran, and the read-out says so along with where the threshold came from (this tab, or the channel's app-wide ON value). Binary mode fills each label in **its own colour** by default (`state.binary_label_colors`, the *Colour cells* toggle): cells painted a common white merge into one shape wherever they touch, so a segmentation that failed to split two nuclei looks identical to one that split them correctly — which is the question the tab exists to answer. `frame_render.label_color_lut` is a golden-ratio hue walk indexed by label id, deterministic and RNG-free so a cell keeps its colour between redraws, with saturation and value stepping on their own irrationals so near-colliding hues still separate; consecutive ids land far apart, which is what matters because touching nuclei are usually numbered consecutively. The per-pixel fallback is left white and reported as such — it has no labels to colour, and colouring it would imply a per-cell distinction it never made. A **Cells** row sits directly under the Segmentation controls with the one number those controls are tuned against: `_count_text` formats the *same* `display_facts` the paragraph read-out uses — a formatting, never a second derivation — giving the labels drawn, what the QC filter dropped, and (only under the per-cell rule, the only one that reaches a per-cell verdict) how many clear the threshold. It reads `—` rather than `0` wherever there is no count to give — no mask at all, or live labels that no longer describe this frame — because zero is a measurement and unknown is not. Display goes through `core.frame_render.build_frame_rgb` (re-exported here as `build_playground_rgb`) and a binary/boundary overlay; per-source LUT memory, click-drag pan, frame-local binary threshold (defaults from but never writes back to the app-wide `ThreshFracOn`), and a QC size-cleanup preview are Playground-local. **Live StarDist preview** (the Segmentation section): a *Live StarDist* toggle, the two detection thresholds, and an explicit **Segment** button run `pipeline.stardist.segment_nuclei` on the frame currently displayed, so the preview is the pipeline's own inference rather than a lookalike — including the input scrubbing and near-constant-field refusal that make StarDist's uncatchable ClipperLib abort unreachable, which matters more here because an abort in the GUI process would take the whole application down. The inference itself lives in `services.frame_preview`, which holds the session's single loaded model and keeps the TF import out of a Qt module (this package is imported at GUI start-up). `worker.stardist_labels_for_frame` is the thin seam onto it; `request_stardist_labels` and `request_reference_fields` both marshal their result back through `core.worker_bridge.run_off_thread`, the one-shot queued-signal bridge (`ctx.runtime.playground.seg_bridge` / `.ref_bridge`). Both also **report while they run**, through that bridge's `progress` / `stage` signals, onto the shared status-row bar the smFISH Apply-to-All and the dataset load already drive (`_show_progress` / `_step_progress` / `_hide_progress`, all GUI-thread). The reference build is determinate — one step per frame decoded, which is where its wall-clock goes. Segmentation is **indeterminate**: one frame's inference has no interior milestones to count and the wait is dominated by a one-off model load, so a percentage would be invented; instead `segment_frame` names its two phases (`STAGE_LOADING` / `STAGE_SEGMENTING`) through an `on_stage` callable and the status line says which is running, because reporting the 10-30 s TensorFlow load identically to the seconds-long segmentation leaves a first Segment looking like a hang. The bar is hidden on **every** exit path including failure — one left sweeping under an error message is its own false statement. The GUI-thread correction (`correct_single_frame`) deliberately gets no bar: it is synchronous, so nothing could animate through it. Segmentation runs on the **corrected** frame whatever stage is displayed, because that is what the pipeline segments — `_segmentation_frame` pins the stage to `corrected` and returns a note naming the mismatch, so a nucleus count can never be read as belonging to a picture it did not come from. For the same reason `seg_key` excludes the display stage: switching Raw ↔ Corrected describes the same pixels and must not invalidate labels. `_mask_source` decides the overlay: live labels when they are current, the pipeline's saved mask when live mode is off, and **nothing** when live labels have gone stale — it must not fall back to the pipeline's mask under a status line describing live ones, which is one mask on screen and a different one claimed. The tab is the app's **only** interactive segmenter, and does two jobs: choosing settings before a run (Open image… a representative frame, tune, then type the two values into the Analyze form's matching fields) and diagnosing after one (a processed well, with the pipeline's own saved mask to compare against). The Analyze form is deliberately the only place the run's parameters are *stored*; re-typing two numbers is cheaper than a second, thinner preview that duplicates this one. |
+| `features/image_browser/playground/{controller,renderer,worker}.py` | Segmentation-page **Playground** sub-tab: an interactive testbed for the pipeline's background-flattening / subtraction methods *and* its StarDist segmentation, on a single frame. **Two frame sources**, resolved by `_resolve_frame`: the dataset frame addressed by the sidebar plate's well plus the channel / timepoint / FOV combos, or — winning when set — a **loose image** opened straight from disk with "Open image…" (`state.loose_image_path`, read through the pipeline's own `load_2d_gray`, cached by path so the correction memo's `id()` key still hits). The loose source is what makes the tab usable with **no dataset loaded at all**, which is the state you are in when choosing settings for a plate you have not run yet; it disables the dataset selectors, has no precomputed mask, and refuses the reference-well correction modes (`empty_well` / `basic`, which need a whole well to sample) **by name** in the status line rather than presenting an uncorrected frame as corrected. Loading a dataset ends loose mode (`PlaygroundState.clear_caches`). Applies the chosen flat-field + background method through `process_microscopy.correct_single_frame` — the **same** per-frame orchestration the batch worker's `_correct` uses (extracted so pipeline and Playground share one code path; a parity test pins the equivalence), so no method is reimplemented. The `empty_well` / `basic` reference fields are estimated from a chosen background well on a daemon thread via a queued-signal bridge (smFISH pattern). **Those fields are cached by everything that decides which one gets estimated** — `("ff", well, channel, mode)` and `("bg", well, channel)` in `state.ref_fields` — because `basic` and `empty_well` produce *different* flat-fields from the same frames (`estimate_basic_flatfield` versus `normalize_flatfield(B)`) and the additive background field is only estimated when the background method is `empty_well`. A cache keyed on less than that answers "already built" for a field it never built, and `apply_flatfield` then no-ops **silently** on the `None` it is handed, so the correction appears to do nothing. `_reference_fields_for` is the single resolver both the render path and the Segment button go through, so the frame on screen and the frame handed to StarDist can never be corrected differently; when a needed field is absent it **downgrades that half of the correction to `none`** and names the refusal in the read-out, rather than reporting a mode that did not run. A build that finds no usable frames is recorded in `state.ref_missing` with its reason — held apart from `ref_fields` so "not built yet" (build it) stays distinguishable from "cannot be built" (report it, and never respawn the worker on the next keystroke). `_build_reference_then_render` captures the well and the modes at *request* time and files the result under keys built from those captures, so a dropdown changed while the worker runs cannot relabel what it computed. The correction itself stays synchronous on the GUI thread, so `playground_on_change` memoizes its result (`state.last_correction_key`/`last_corrected_arr`, keyed on the decoded frame's identity — safe because `image_discovery`'s decode cache returns the same array object on a hit — plus every correction parameter) and skips recomputing when nothing that affects the output changed; `build_playground_tab` triggers exactly one render on first open (via `registry._activate_playground`, which always follows the tab's construction in the same dispatch), not its own redundant call plus the activation hook's. **The stage control — labelled "Correct up to" (`state.source`: raw / flatfield / corrected) — heads the Correction section and is a master switch, not a view option** — `raw` returns before any correction runs and `flatfield` forces `bg_method="none"`, so most of that section is dead on those stages. `correction_controls_enabled(stage)` is the pure rule for which controls each stage consults (radius / small-px / mesh are *background* parameters, so they are dead on `flatfield` too) and `_sync_method_rows` greys out the rest; it previously sat in the Display section two groups below the controls it silenced, which made an inactive panel read as a broken one. A muted caption under it states what it governs — "decides which controls below run — Raw runs none" — because "Stage" named a step of the pipeline rather than the effect on the panel, and a control whose meaning lives only in its tooltip has already failed the reader who did not hover. **The read-out** (`_status_text`, the "What you're looking at" box) states in words everything this tab can be ambiguous about, because none of it is visible in the picture: the frame; the stage and the correction *actually applied*; the displayed array's range/mean; the mask's provenance (`_mask_source`), label count, what the QC size filter removed, and whether it even fits the frame; and which rule drew what is on screen. `_render` records those facts in `state.display_facts` as it draws them, so the read-out reports what the renderer did rather than re-deriving it — a second derivation is a second chance to describe something that did not happen. The range is load-bearing rather than decorative: the LUT re-derives its window from the displayed array while it reads `auto`, so a correction can move the data while leaving the picture identical (for `fov_median`, a scalar subtraction, *pixel*-identical), and the numbers are how it proves it ran. **Binary mode is the sharpest case**: `build_frame_rgb` picks between three rules — a per-cell mean gate, a per-*pixel* threshold when no usable mask exists, and the whole labelled footprint when there is no per-cell verdict — which mean completely different things and render identically as white-on-black. `_binary_rule` names which one ran, and the read-out says so along with where the threshold came from (this tab, or the channel's app-wide ON value). Binary mode fills each label in **its own colour** by default (`state.binary_label_colors`, the *Colour cells* toggle): cells painted a common white merge into one shape wherever they touch, so a segmentation that failed to split two nuclei looks identical to one that split them correctly — which is the question the tab exists to answer. `frame_render.label_color_lut` is a golden-ratio hue walk indexed by label id, deterministic and RNG-free so a cell keeps its colour between redraws, with saturation and value stepping on their own irrationals so near-colliding hues still separate; consecutive ids land far apart, which is what matters because touching nuclei are usually numbered consecutively. The per-pixel fallback is left white and reported as such — it has no labels to colour, and colouring it would imply a per-cell distinction it never made. A **Cells** row sits directly under the Segmentation controls with the one number those controls are tuned against: `_count_text` formats the *same* `display_facts` the paragraph read-out uses — a formatting, never a second derivation — giving the labels drawn, what the QC filter dropped, and (only under the per-cell rule, the only one that reaches a per-cell verdict) how many clear the threshold. It reads `—` rather than `0` wherever there is no count to give — no mask at all, or live labels that no longer describe this frame — because zero is a measurement and unknown is not. Display goes through `core.frame_render.build_frame_rgb` (re-exported here as `build_playground_rgb`) and a binary/boundary overlay; per-source LUT memory, click-drag pan, frame-local binary threshold (defaults from but never writes back to the app-wide `ThreshFracOn`), and a QC size-cleanup preview are Playground-local. **Live StarDist preview** (the Segmentation section): a *Live StarDist* toggle, the two detection thresholds, and an explicit **Segment** button run `pipeline.stardist.segment_nuclei` on the frame currently displayed, so the preview is the pipeline's own inference rather than a lookalike — including the input scrubbing and near-constant-field refusal that make StarDist's uncatchable ClipperLib abort unreachable, which matters more here because an abort in the GUI process would take the whole application down. The inference itself lives in `services.frame_preview`, which holds the session's single loaded model and keeps the TF import out of a Qt module (this package is imported at GUI start-up). `worker.stardist_labels_for_frame` is the thin seam onto it; `request_stardist_labels` and `request_reference_fields` both marshal their result back through `core.worker_bridge.run_off_thread`, the one-shot queued-signal bridge (`ctx.runtime.playground.seg_bridge` / `.ref_bridge`). Both also **report while they run**, through that bridge's `progress` / `stage` signals, onto the shared status-row bar the smFISH Apply-to-All and the dataset load already drive (`_show_progress` / `_step_progress` / `_hide_progress`, all GUI-thread). The reference build is determinate — one step per frame decoded, which is where its wall-clock goes. Segmentation is **indeterminate**: one frame's inference has no interior milestones to count and the wait is dominated by a one-off model load, so a percentage would be invented; instead `segment_frame` names its two phases (`STAGE_LOADING` / `STAGE_SEGMENTING`) through an `on_stage` callable and the status line says which is running, because reporting the 10-30 s TensorFlow load identically to the seconds-long segmentation leaves a first Segment looking like a hang. The bar is hidden on **every** exit path including failure — one left sweeping under an error message is its own false statement. The GUI-thread correction (`correct_single_frame`) deliberately gets no bar: it is synchronous, so nothing could animate through it. Segmentation runs on the **corrected** frame whatever stage is displayed, because that is what the pipeline segments — `_segmentation_frame` pins the stage to `corrected` and returns a note naming the mismatch, so a nucleus count can never be read as belonging to a picture it did not come from. For the same reason `seg_key` excludes the display stage: switching Raw ↔ Corrected describes the same pixels and must not invalidate labels. `_mask_source` decides the overlay: live labels when they are current, the pipeline's saved mask when live mode is off, and **nothing** when live labels have gone stale — it must not fall back to the pipeline's mask under a status line describing live ones, which is one mask on screen and a different one claimed. **The threshold curve** answers the one question the Probability field cannot: whether the value in it is a sensible one for this plate. `playground_sweep_now` segments the displayed frame at each of `review.domain.threshold_sweep.sweep_grid()` — 19 thresholds from 0.05 to 0.95, not 0 to 1, because at 0 StarDist keeps every candidate polygon the network emitted and at 1 nothing survives, and both ends cost the most — and `sweep_curve_view.show_threshold_curve` plots count against threshold in a non-modal window modelled on the Cell Gating optimizer's, marking where the user currently is. **It recommends nothing, and that is a decision with a measurement behind it**: the plateau rule it replaced (midpoint of the widest run of small `|Δ log count|`) returns either the sweep's zero tail, suggesting detect-nothing, or its low-threshold shoulder, which reproduces the Analyze form's own hardcoded 0.2 to three decimal places — decided by how `log(0)` happens to be guarded, since a monotone curve has no interior plateau maximum and every widest-flat-region rule therefore lands at an extreme. The module docstring carries the table. Four states are refusals rather than plots — a sweep that never ran, a frame that was **not swept at all**, no nuclei at any threshold, and a count that never moves — and each is drawn *as the figure*, because a line along zero reads as a plate whose nuclei sit below the lowest cut when it is far more often a wrong segmentation channel. The not-swept refusal is the near-constant frame, and it is its own sentence rather than nineteen zeros for the reason this whole subsystem exists: the network never ran on it, so "no nuclei were detected at any threshold" describes a measurement that was never taken and is indistinguishable from a genuinely empty well the network really did scan. `sweep_frame` answers `None` for it, refuses **before** loading the model rather than after a 10-30 s TensorFlow import, and `curve_from_counts` takes that refusal in preference to every rule about counts. **The frame is prepared exactly as `segment_nuclei` prepares it**, through the shared `pipeline.stardist.prepare_stardist_input` — percentile normalisation to [0, 1] plus the input scrubbing — and a near-constant field is refused through the same `is_near_constant`, before anything reaches the network. Both are load-bearing rather than tidy. `model.predict` takes `normalizer=None` and assumes its input is already normalised, so handed the corrected frame in raw camera counts it returned 6 nuclei falling to 4 across the whole range where the truth was 86 falling to 0, **did not decline**, and drew the flat line this feature's own manual tells the reader means the threshold does not matter. And a sweep is nineteen NMS passes per press, so nineteen times one Segment press's exposure to the uncatchable ClipperLib abort that would take the application down with it. The sweep then costs **one** inference rather than *M*: `frame_preview._resolve_at_thresholds` caches `model.predict`'s `(prob, dist)` pair and resolves instances from it per threshold. Measured on the shipped path against nineteen full `segment_nuclei` calls on the same frame and grid: **8.8×** faster, with identical counts at every threshold — on a frame whose dimensions are multiples of 16, which is the caveat the docstring states: `predict_instances` selects candidates sparsely on the *padded* probability map while `predict` crops first, so where a frame's height or width is not a multiple of the network's `div_by` the two exclude slightly different border bands and can differ by nuclei whose centres sit in the last few pixels. That resolve API is private, so the fast path answers `None` and the caller falls back to one `segment_frame` per threshold; tiling skips it entirely, because the measurement was taken untiled. `should_stop` reaches inside the loop and a stopped sweep returns and plots the counts it had — a partial curve the user asked for is evidence, but it is drawn and described as a fragment: the x-axis spans the range that was **requested** rather than the part that was measured, a hollow marker says where the measurement stopped, and the sentence reads "Stopped after N of M … so far". Rescaled to the eight points a stopped sweep got, the line runs corner to corner and the picture asserts that the count barely moves on this frame — a conclusion a scientist would act on and an artifact of having stopped. The same scoping applies to the never-moves refusal, which names how many thresholds it saw and says the rest was not measured. The sweep's own sentence is written by the read-out rather than beside it: `_describe_sweep` contributes it to every exit from `playground_on_change` through `_set_frame_status`, including the three early returns that never reach `_status_text`, because the controller used to write it with `_set_status` and then trigger the repaint that overwrote it. **What the curve describes is captured at dispatch, not read back at completion** (`_sweep_key`, `_sweep_subject` and the user's own threshold, all taken before the worker starts): nothing disables the tab while a sweep runs, so a subject read in the completion callback names whatever the user clicked on since, the figure is titled with a frame it never saw, and the staleness check compares that title against itself and finds nothing. `_sweep_key` is the address **and** `_seg_key` minus the probability threshold, because the correction, its parameters, the background well and the NMS threshold all change the pixels without changing the frame's name — NMS most sharply, since it moves every count on the curve. When any of it no longer matches, the read-out says so and keeps the counts underneath, because the dialog is still open showing them. Segment and the sweep are mutually exclusive: both reach the session's single model, so each greys the other's button out and each declines by name if reached anyway, and `frame_preview._MODEL_LOCK` serialises the model regardless — on a first load two threads would otherwise both call the pretrained loader, whose cross-process advisory lock is keyed on the holder's pid and therefore cannot recognise itself, so the second waits out its whole 120 s timeout and then loads a second copy of the weights. Button state is the controller's (`_set_sweep_buttons`), on every exit path including failure and no-frame: `playground_on_change` reflects the *frame* and has never looked at a running flag, so leaving it to that fan-out would be a dead Stop button and a second sweep started over the first. The tab is the app's **only** interactive segmenter, and does two jobs: choosing settings before a run (Open image… a representative frame, tune, then type the two values into the Analyze form's matching fields) and diagnosing after one (a processed well, with the pipeline's own saved mask to compare against). The Analyze form is deliberately the only place the run's parameters are *stored*; re-typing two numbers is cheaper than a second, thinner preview that duplicates this one. |
 | `features/image_browser/cell_browser/{controller,collect,worker,tab_view,criteria_view}.py` | Cell Browser gallery: a filtered grid of per-cell crops composed off-thread (`worker.CellImageLoader`, reusing the Image Table loaders + zip cache). Sources cells from the active **plate selection** (`collect.cell_browser_source_wells`). **Deferred render:** every control — filters (criteria/timepoint/FOV/sort), channel chips, the per-channel `LUT ▾` popover (LUT min/max + a colour swatch editing `tint_by_channel`), and the **Raw / Corrected** source `SegmentedControl` (`CellBrowserState.use_tophat`, threaded through `load_page` → `compose_cell_rgb` → `_load_array`) — only *stages* state; the single top-bar **Generate** button (`controller.apply_filters`) re-collects and re-composites. There is no separate "Apply filters" button. **Gate-source mode** (the sidebar's *From scatter gate* checkbox, `CellBrowserState.scatter_gate_mode`) swaps the numeric filter for the scatter gate(s): `criteria_view._set_criteria_enabled` disables the criteria rows + *Add criterion* and reveals a muted line stating why. The checkbox is deliberately sticky — nothing resets it on tab switch or dataset load — so that line is the only on-screen account of an editor that is otherwise inertly greyed out. |
 | `features/home/groups/controller.py` | Home → Sample Map → **Groups**: replicate-set editing — adding a set from the plate picker, refreshing the tab's plate, and the Quick-Replicates pairing that chunks the current selection into groups of a chosen size along a Rows / Columns walk. The pure part of that (`make_replicate_pairs`) is here; the colour and membership rules it reads are `domain/selections_model.py`, which `core/` uses without importing a feature. **A group is named after what it is, once the plate can say.** The generated name is the tokens of the wells in it — `A01/A02` — which locates a group and describes nothing, so `name_sets_from_variables` re-reads each set through `sample_variables.names_for_well_sets` and takes the composed name where the variables give one: `HeLa · 10 µM`. Where they do not — a plate with no variables, a group whose wells disagree about every one of them — the tokens stay, because they are a true statement about a group nothing else can describe. The composed name rides onto the `Selection` with `name_is_verbatim`, and it has to: a `Dose` of `10` with no unit typed **is** `replicate_display_label`'s auto-generated-name pattern, so without the flag every axis would draw back the well tokens this naming exists to replace. The **New Replicate Set** dialog does the same live — the name box fills in from the wells being picked on its plate, and stops the moment the user types over it, which is why the last offered name is remembered rather than the field re-derived on each change. `build_rep_add_dialog` builds and wires that dialog and `rep_add` is the `exec` over it, split because a closure reachable only from inside a modal is reachable from no test: a modal blocks for ever under the offscreen QPA, so `tests/test_group_names_from_variables.py` builds the real dialog, selects wells on the real plate and reads the real name box. **Editing a group on the plate keeps the members the plate cannot show.** `panel_view._commit_plate_to_current` carries through the group's wells that are not in `dataset.well_paths` instead of rebuilding membership from the plate alone: a plate can only paint the wells this load holds, so a subset load turned every plate edit into a silent deletion of the rest of the group, autosaved as such. The list can then hold a token with no plate position, so the sort key is `_plate_order` rather than a bare `parse_rc` — sorting a `(None, None)` beside real keys raises. |
 | `features/export/{service,style}.py` | CSV export (`service.py`) + the floating Export Style sidebar's prefs + apply pipeline (`style.py`); `style.py` also owns `copy_figure_to_clipboard` (Copy SVG → native macOS pasteboard via pyobjc, Qt-clipboard fallback). |
@@ -6706,7 +6721,16 @@ capture/restore pair around the fetch; `process_microscopy.write_pipeline_info`
 preserves the same list when a re-run rewrites the sidecar in place, so the two
 paths share one definition of whose data it is. `run_report` keeps its own
 merge (`pipeline/run_report.py`) because its records merge per well rather than
-being restored wholesale.
+being restored wholesale, and `field_quality` keeps a matching one
+(`merge_fetched_field_quality`) for the same reason and a sharper consequence:
+losing coverage records loses history, but losing quality records produces a
+**wrong number**, because the acquisition metrics are scored as a robust z
+against the plate. A block silently reduced to the wells one remote
+incremental run touched gives each of them a z against its own tiny median,
+and the shortfall accounting cannot catch it — every one of those wells is
+individually complete, so nothing is marked partial and the scorer proceeds.
+The capture is read **before** the rsync and merged after, which is the half a
+guard in `tests/test_remote_incremental.py` pins.
 
 Inputs / outputs / contract:
 
@@ -6847,6 +6871,21 @@ noted:
   module state — `_segment_stardist_nuclei` is the worker-global wrapper over it,
   and the Review pane's Playground calls the same function directly, so an
   interactive preview and a batch run cannot diverge.
+
+  **The two steps before the network are their own functions**, because a
+  second caller arrived and the copy it would otherwise have made is the
+  copy that gets one of them wrong. `prepare_stardist_input(img)` scrubs
+  non-finite values and normalises to [0, 1] on the 1st and 99.8th
+  percentiles, using `csbdeep.utils.normalize` where csbdeep is importable
+  and a NumPy equivalent otherwise (measured against each other on real
+  frames: maximum difference 1.19e-07, float32 epsilon). `is_near_constant(img)`
+  is the refusal beside it: a field with no spread is the classic trigger for
+  StarDist's ClipperLib abort, which is uncatchable and takes the process
+  down, so it is declined before the network sees it rather than handled
+  after. `segment_nuclei` calls both, and so does the Playground's threshold
+  sweep — which reaches `model.predict` directly for its per-threshold
+  resolve, and would otherwise be handing raw camera counts to a call that
+  takes `normalizer=None`.
 
   **Tiling.** Large frames blow up StarDist's peak memory, so `pipeline.stardist`
   can tile the prediction: `--stardist_tile_px` (an Analyze-tab spinner with an
@@ -7844,7 +7883,7 @@ A remote run needs exactly one thing installed on the host: a conda environment
 holding the pipeline's dependencies. Two pieces of code care whether it is
 there — `remote_runner`'s pre-launch guard, and `services/remote_bootstrap.py`,
 which creates it — and they answer with the same shell,
-`remote_runner.CONDA_ENV_SHELL_HELPERS` (`aw_env_prefix` / `aw_env_is_valid` /
+`remote_conda.CONDA_ENV_SHELL_HELPERS` (`aw_env_prefix` / `aw_env_is_valid` /
 `aw_env_stale_dir`). That sharing is the point of the module-level constant:
 when the two disagreed, the disagreement had no way out.
 
@@ -9839,6 +9878,409 @@ the rail and inserts the banner; `_end_session` takes it down and returns to
 the queue page.
 
 ---
+
+### 6.6b Why a cell is gone: the Segmentation overlay
+
+Inclusion is the AND of six verdict layers (`Included`, `QC_Pass`, `Crop_Pass`,
+`Gate_Pass`, `Field_Pass`, `Focus_Pass`), and the picture that shows a user
+their cells is the one place that AND is invisible by construction: an excluded
+cell simply has no outline. The **Why removed** toggle
+(`renderer.toggle_review_image_exclusion_layers`) outlines each excluded cell in
+the ink of the layer that removed it.
+
+Four rules hold it together, and each replaced a way the first version was
+quietly wrong.
+
+* **One roster.** `collect.EXCLUSION_LAYERS` names the layers and their order,
+  and `review_build_include_map` is *derived* from `review_build_exclusion_reasons`
+  rather than recomposing the AND — so the overlay and the inclusion the rest of
+  the app honours cannot drift. Order is about the reader rather than about
+  precedence: the composition is an AND, so a cell failing three layers is out
+  for all three and none of them is "the" cause. Manual comes first because it
+  is the one a click undoes.
+* **Six answers need six colours.** `_layer_inks` maps each label to a design
+  token, chosen by measurement: every pairwise CIE76 ΔE is at least 31 and every
+  relative luminance at least 0.28, which is what a one-pixel stroke needs on
+  this plot surface. Two layers once shared `text_muted` — ΔE of exactly 0, and
+  the darkest ink in the set — so the overlay could not distinguish two of the
+  answers its own button promises. `accent2` is excluded because the plate's
+  colour vocabulary reserves it, and `success` because every cell this marks has
+  been removed and green is the app's "good" token.
+* **The painter runs outside the draw-mode branch.** It was once inside the
+  `else` of the binary split, so Binary mode computed every reason — a row fetch
+  and verdict walk per refresh — and discarded them while the button read "Why
+  removed: On". Hoisting the call is what makes that unrepeatable, and
+  `tests/test_exclusion_layers_overlay.py` pins the structure rather than the
+  behaviour of either branch.
+* **Three surfaces, and all three exist.** The outline names the first layer,
+  the hover readout (`controller._exclusion_phrase`) names every layer, and the
+  status line carries a colour key for the layers present in this field —
+  including a sentence when the overlay is on and nothing is excluded, because
+  an unchanged picture is indistinguishable from a control that does not work.
+  The Home plate's rule that no mark may appear without a legend row is borrowed
+  here rather than reinvented.
+
+### 6.7 Field quality: what the run measured about its own pictures
+
+Every FOV-group the pipeline processes is measured on six numbers, and the
+whole subsystem is built around one distinction: **a metric that could not be
+computed is absent, never zero.** `None` travels from the measurement through
+the record, the checkpoint, the sidecar and the scorer without ever being
+collapsed to a number, because a stored `0.0` where nothing was measured is a
+measurement the plate-wide comparison then believes.
+
+**Where each metric can be read, and why it is read there.**
+`pipeline/field_quality.py` holds all six.
+
+`focus` is measured **at each nucleus's own outline** (`edge_focus`), and it
+measures the **width** of the intensity transition there rather than its
+energy. That one choice is the whole design. Defocus is a property of the
+optics: it sets how far the intensity takes to travel from inside the object
+to outside. Brightness sets the *amplitude* of that transition and not its
+width, so a width is independent of gain, pedestal and amplitude by
+construction, while every edge-energy statistic confounds the two — a dim cell
+and a blurred cell both carry little gradient per pixel.
+
+The signed distance transform gives, for each pixel near the outline, how far
+it is from the boundary. Binning intensity by that distance gives the
+transition profile directly, and the distance the profile takes to rise from
+`EDGE_RISE_LO` to `EDGE_RISE_HI` of the cell's own contrast is the classic
+knife-edge width. The score is its reciprocal, so higher stays sharper. There
+is no ring, no noise floor and no band geometry to fail — a distance transform
+has nothing to mis-size against a nucleus.
+
+**Measured on a shot-noise fixture at a realistic cell size** (20 px across),
+against the edge-energy form this replaced:
+
+| varying only | energy | width |
+|---|---|---|
+| brightness, 80× in amplitude | 1.52× | **1.03×** |
+| nucleus size, 14–28 px | 1.09× | **1.01×** |
+| read noise, 2 → 30 | 1.02× | 1.01× |
+| neighbours, 30 px → contact | 1.14× | **1.02×** |
+| chromatin texture, 0 → 0.8 | 1.50× | **1.14×** |
+| saturation, clipped to 60 % | 2.87× | **1.45×** |
+| gain and pedestal | exact | exact |
+
+So it is comparable between cells, fields, wells and plates, which is the
+property the whole layer rests on: a score relative to its own frame cannot
+see a frame that is uniformly soft, because every cell in it deviates from its
+neighbours by nothing — measured, the relative median is exactly 1.000 at
+three very different focus states. **Two residuals qualify that and belong in
+any sentence a user reads**: clipping biases it upward, because a flat-topped
+nucleus genuinely does have a steeper transition, and chromatin texture
+reaches 1.14×. `sat_frac` is recorded per field but does not bound the first
+of those — it is capped by the fraction of the frame the nuclei cover, so on a
+sparse plate every nucleus can be flat-topped while `sat_frac` stays near a
+couple of percent.
+
+**And it is monotone**, which the energy form was not. That form turned back
+up past two stops of defocus and recovered 2.24× from its minimum, so a cut
+near the soft end excluded the mildly defocused cells and *kept* the
+catastrophic ones while reporting a confident count of what it had removed.
+Over the same sweep to eight stops this form falls at every step, with every
+cell measurable at every stop. An SNR margin was tried first and rejected: it
+restored monotonicity by refusing the low-SNR cells, which at one stop of
+defocus left 6 % of dim cells measurable against 100 % of bright ones — the
+brightness bias again, wearing a refusal.
+
+The value is written per cell as the `qc_edge_focus` column (named in
+`pipeline/field_quality_record.py`, which is stdlib-only, so Review's data
+layer and the argument parser can have the name without pulling numpy and
+scipy in behind it). A field's `focus` is the **median of its own cells'
+values** (`field_focus`), so the field-level and cell-level numbers are two
+poolings of one measurement rather than two statistics that can disagree. It
+is measured on the corrected frame the labels were computed from, so the
+outline the estimator reads is the outline that was segmented.
+
+Measuring is on by default and is switched off with `--no_focus_metric`, which
+leaves the column **out of the record entirely** rather than filling it: a run
+that did not measure focus and a run that measured it and found nothing must
+not produce the same CSV. That flag is in the reuse key (`util/settings_digest`)
+because it decides whether the column exists; `--focus_min` is deliberately
+not, because the run records that number and never acts on it.
+
+Two of the remaining metrics can only be read at particular moments.
+`sat_frac` needs the camera's integer ceiling, which `pipeline.io.load_2d_gray`
+destroys with its unconditional `float32` cast — "at the dtype maximum" would
+then mean "at 3.4e38", identically zero for every field of every plate, for
+ever — so `load_2d_gray_with_ceiling` hands that number back alongside an
+identical array, and the old function is a wrapper over the new one so the two
+cannot drift. `dyn_range` is measured **before correction**, in
+`_load_image_group`, because the flat-field division and the background
+subtraction both reshape the frame's spread. The remaining three need the
+segmentation and are measured after it, in `field_quality.group_record`.
+
+**The scoring is split in two, and the split is the feature.**
+`review/domain/field_quality_scores.py` scores the *acquisition* metrics
+(`focus`, `sat_frac`, `dyn_range`) as a robust z **within a timepoint, across
+the plate**, because those are properties a plate should hold constant by
+design. The *biological* ones (`nuc_count`, `nuc_area_median`, `bg_level`) are
+scored **within a well, across its own fields**, where the fields are technical
+replicates of one biology and disagreement really is a technical fault. Scored
+plate-wide they would flag the biology: a cytotoxic compound drops the nucleus
+count ten- to twenty-fold, which is `|z| ≫ 5`, so an exclusion built on it
+would delete the wells with the largest treatment effect and bias every
+dose-response toward null. Timepoints are a grouping axis for the same reason —
+pooling t=0 with t=72h makes each mutually anomalous in a time course.
+
+There is deliberately **no combined score**. A max of `|z|` over a varying
+number of metrics is not comparable between fields: one scored on three
+metrics has a larger maximum than one scored on one, for no reason to do with
+the pictures. Zero-inflated metrics take an absolute bound instead of a
+relative one, because `sat_frac` is 0 for most fields on a good plate, which
+makes the MAD zero and switches the metric off exactly when one saturated
+field is the thing worth finding. Where the MAD is zero for any other metric
+the answer is `None` and a stated reason — not `0.0`, which would claim every
+field sits exactly at the median and could never flag anything.
+
+**The record, and the gap it must not hide.** Each well drops one JSON into a
+hidden `.aw_field_quality/` as it finishes, collected into the sidecar's
+`field_quality` block at the end of the run and then removed — the same
+mechanism `run_report` uses, deliberately kept separate because coverage
+accounting and quality measurement answer different questions. A well's record
+states `measured_of` as the number of FOV-groups the well **has**, not the
+number that produced a measurement, so a well that failed or aborted part way
+is visibly partial in the artifact. The per-FOV checkpoint carries a group's
+quality in the same file as its records (`_FOV_CHECKPOINT_SCHEMA` 2; a
+version-1 checkpoint is refused rather than misread), so a resumed well is
+measured as completely as one that ran straight through.
+
+**On the Review side the subsystem reports, and only filters when asked.**
+`review/data/field_quality_cache.py` projects the verdicts onto the row cache
+as a `Field_Pass` column — the fourth in the same family as `Included`,
+`QC_Pass` and `Crop_Pass`, ANDed at the same chokepoint, registered as a cache
+projector like the other three. `review/data/focus_gate.py` is the fifth,
+`Focus_Pass`, and the two are **not alternatives**: the field verdict removes a
+whole field or none of it, while the per-cell cut removes the soft *part* of a
+field — a focus gradient, a coverslip tilt — which is not a whole-field fact
+and is not a rectangle either, so it is a column rather than a crop. A field
+whose median is fine can still have a soft third. Most of both modules is about
+when **not** to write their column, and every refusal has one shape: a filter
+applied on evidence it does not have is worse than no filter, because the rows
+it drops are chosen by something nobody can account for.
+
+**A verdict layer that can be switched off must be re-projected *and*
+removable.** The cache projectors run at load; `qc.controller.recompute_qc_all`
+is the pass that runs when a control on the Cell Gating panel moves, and it
+re-runs **every registered projector** rather than naming the layers. It
+projected `QC_Pass` alone for as long as that panel held one switchable layer,
+which was correct then and silently wrong the moment it grew a second: measured
+on a plate with one field genuinely flagged, ticking the exclusion wrote no
+column at all, the chokepoint had nothing to AND, and the exclusion did not
+happen until the dataset was reopened — while the panel reported the flag
+correctly the whole time. Going through the registry means a layer added later
+is re-projected by having been registered. The mirror image is
+`cache_projectors.drop_verdict_column`: a projector whose switch is off
+**removes** its column rather than returning early, because returning early
+leaves the previous setting's verdict on the frame and unticking the box left
+its rows excluded while the panel said they were kept.
+
+* **Both toggles are off by default** (`QCParams.exclude_flagged_fields` and
+  `exclude_soft_cells`, on the Cell Gating panel, persisted in the same section
+  as the debris gate). Turning either on changes every number in the app, so it
+  is chosen after reading what was found rather than discovered afterwards. The
+  findings are reported either way.
+* **A ticked box stays live** (`tab_view._arm_state`). Both boxes are disabled
+  where ticking them would exclude nothing, which is the right rule for an
+  *unticked* one — but disabling does not untick, and a box that is checked and
+  disabled is armed, persisted as on, and unreachable. Lowering the cut until
+  nothing was soft was enough to get there, and raising it later fired the gate
+  without the user re-arming anything. Disabling exists to stop someone arming
+  a control that would do nothing; a control already armed must stay
+  disarmable, and its tooltip says why it currently drops nothing.
+* **The counts are over the cells the analysis would otherwise keep**
+  (`focus_gate.candidate_rows`), composed from `df_included_mask` minus
+  `Focus_Pass` rather than from a second list of layers. Counting every row
+  instead made a debris-heavy plate mark every well "needs review — N cells
+  carry no focus value", about the shattered fragments `qc_region_area` exists
+  to remove and whose outlines `edge_focus` therefore cannot read; and it made
+  "currently excluding N cells" count rows the layer *marks* rather than rows
+  it *removes*. Subtracting `Focus_Pass` specifically is the other half: the
+  full chokepoint would make the panel report nothing to exclude the moment the
+  gate was switched on. The count is plate-wide while the plots are
+  selection-scoped, and the sentence says "across the plate" rather than
+  leaving the reader to assume.
+* **The focus cut needs both a switch and a number** (`focus_gate_is_active`).
+  A cut with the switch off is a number the user has recorded; the switch on
+  with no cut is a request nothing here can honour. `focus_min` is seeded from
+  the run's own sidecar — the value depends mostly on the microscope rather
+  than on the plate, clipping aside — and is **not** seeded on, because a
+  recorded threshold is the user saying "this is my instrument's number", not
+  "drop those cells from every plot without telling me".
+* **The Playground's curve carries its own qualification.**
+  `FocusDistribution.caveats` is drawn on the figure in `warn` ink, above the
+  no-recommendation line, and is distinct from `declined`: a caveat does not
+  stop the curve being drawn, because the measurement is real and only what
+  may be concluded from it is in question. Two are supplied
+  (`playground/controller._focus_caveats`). The tab measures whichever channel
+  is selected there with that tab's own Correction dropdowns — which is what
+  the tab is for — while the `qc_edge_focus` column a cut applies to is always
+  the nuclear channel with the run's settings; measured on identical optics,
+  geometry and mask, a dim textured reporter reads 1.78× the nuclear median
+  with an eightfold p5–p95 spread, so a cut read off the wrong curve can
+  exclude the entire nuclear population. And the curve is computed from pixels
+  rather than from the CSV, so it draws for a dataset carrying no column at
+  all, where the number cannot be applied without re-running the plate. The
+  figure's subject also records the correction modes: five of the seven methods
+  move the value by ≤2.6 %, but `fft_bandpass` moves it 1.27×, and this window
+  has a Save button. A declined curve carries no caveats — a refusal already
+  occupies the whole figure and states its reason.
+* **The threshold field is bounded by the estimator's own ceiling.**
+  `pipeline.field_quality_record.FOCUS_SCORE_CEILING` is 0.8333 — one over
+  1.2 px, because the score is the reciprocal of a width measured on a profile
+  binned at one pixel, so the width has a floor. Measured rather than derived,
+  and identical at radius 6, 10, 16 and 24, since the floor comes from the
+  binning rather than from the object. It lives beside `FOCUS_COLUMN` in the
+  stdlib-only record module because the Analyze form validates against it and
+  must not import numpy and scipy to do so. Refusing an impossible value *is*
+  the feedback that form was missing; no "aggressive but legal" band is
+  invented, because where that band sits depends on the objective and the pixel
+  size, which is the reason the cut is a number about a microscope at all. For
+  scale, a sharp plate measures 0.417–0.448.
+* **A projector that raises costs one column, never a well.** The registry is
+  walked from two places — `data_loading.load_and_project` at load and
+  `qc.controller.recompute_qc_all` on a Cell Gating change — and both guard
+  each call. The loader's was once unguarded, which was the wrong side of the
+  asymmetry: a raise during the recompute loses a verdict column, while a raise
+  during the load loses the whole well, because that call is what decides
+  whether the frame enters the cache. The four registrations are
+  **unconditional** and no profile gates them: each is an inclusion layer, and
+  a build that drops a tab must not thereby change which cells count.
+* **Analyze remembers the cut between sessions**, alone among that form's
+  fields (`qc_section.FOCUS_MIN_SETTING`, through `core.app_settings`). The
+  asymmetry is the control's own argument: every other field on the form
+  describes the plate being processed, while this one describes the microscope
+  and is documented as carrying between plates, so retyping it each run
+  contradicts the sentence beside it. A dataset restore runs after the build
+  and therefore still wins — what *this* dataset recorded beats what this user
+  last typed, which is the same precedence Review's side of the cut takes. A
+  cleared box removes the key rather than leaving the old value to reappear.
+  And a cut typed with the measurement unticked says it is being discarded:
+  the form collects it, the validator skips it (its gate is falsy) and the
+  service drops it, so without the notice a typed number vanished with the row
+  it sat in.
+* **The cut is persisted only when it differs from the run's**
+  (`persistence/qc_params.save_to_data_dir`). Every other threshold on the
+  panel becomes the user's the moment they touch anything; this one also has
+  an authoritative source, and re-recording it is deliberately cheap because
+  `focus_min` sits outside the reuse key, so a re-run that changes only the
+  cut skips every well and still rewrites the sidecar. Storing it
+  unconditionally made that cheap path silently wrong: the section is written
+  whenever *any* control on the panel moves, so opening the panel once froze
+  the seeded number, and a later re-run recording a different one left Analyze
+  and Review showing two numbers for one dataset. Omitting the key means "not
+  overridden", and the loader re-seeds. When the user really has chosen their
+  own, `focus_gate.recorded_cut_note` names the run's number beside it, which
+  is also the only place in Review the recorded value is visible at all.
+* **The plate's quality markers are repainted from the cut**
+  (`ctx.runtime.home.quality_refresh_cb`, installed by Home's own builder and
+  called by `qc.controller.set_qc_params`). `wells_needing_review` is a
+  function of `focus_min` and was reachable only through `refresh_home` — page
+  activation and load — so changing the cut on Home ▸ Cell Gating and
+  switching to Home ▸ Overview left the plate marking wells against the
+  previous number, with the tooltips quoting it. The callback runs one way:
+  QC calls what Home installed, and neither feature imports the other.
+* **A cell with no focus value passes.** Undefined is not soft. Severe defocus
+  degrades segmentation, so the column is missing exactly where defocus is
+  worst — but so is a nucleus whose boundary profile cannot be read at all,
+  and treating the two alike would quietly delete cells on every plate. The count of them is named on the panel, as **kept**, because a
+  reader who believed the gate removed everything soft would be wrong about
+  exactly those rows.
+* **A well whose FOV labels are untrusted is refused, not joined onto.**
+  `review/domain/fov_integrity.py` exists because a well whose filenames do not
+  match the schema arrives with *every* row labelled field 1, indistinguishable
+  from a well that genuinely has one field. A per-field verdict joined onto
+  that either spreads one field's verdict across all of them or matches
+  nothing, and the second is indistinguishable from a well measured and found
+  clean. The refusal is named on screen: a well silently exempt from a filter
+  and a well that passed it look identical in a plot.
+* **A partly measured plate filters nothing**, and the panel quotes the
+  scorer's own refusal rather than paraphrasing it.
+
+**Two surfaces, and the register each uses.** The Cell Gating panel carries the
+control and one sentence with four states — no block, a refusal, a finding,
+nothing flagged. Only the two where the software could not do what was asked
+wear the amber `QLabel#Notice` band; a finding is ordinary text, because a
+result is not a failure and dressing them alike collapses the distinction the
+states exist for. The Home plate marks a flagged well with a **glyph**, not a
+ninth colour: that palette is closed under a written invariant (no state
+carries a colour another state carries), `accent2` is reserved and forbidden
+for anomaly use, and `threshold` was measured indistinguishable from `warn` by
+the plate's own render guard. The glyph is also the right channel on its own
+terms — field quality is orthogonal to coverage, and a well can be complete and
+out of focus. It carries a legend row of its own whenever the plate shows one,
+because that plate's invariant is that no well is left without a row to explain
+it, and the same mapping feeds the tooltip so a mark cannot appear without its
+reason. That row is separated from the ones above it and counts *wells*: the
+column above partitions the plate, its counts sum to the wells, and an overlay
+appended flush to it double-counts a well that is already in one of those rows.
+
+**The glyph vocabulary is now two marks and should not become three without a
+reason written down.** The Analyze run dashboard paints `✕` on a well that
+errored; this plate paints `!` on a well holding a field the run flagged. Both
+go through `WellPlateSelector.setWellMarker`, which draws bold at 0.78 of the
+well's height in an ink chosen by measuring the fill's relative luminance
+(`marker_ink`) rather than by asking whether the well happens to carry a group
+colour — that proxy put a dark mark on the `text_muted` fill at a contrast
+ratio of 3.88:1, and a 1 px stem picked up subpixel fringing that reads as a
+rendering fault.
+
+**The plate's marker is a composite, not the field verdict alone.**
+`review/domain/well_composite.py` scores each well over three independent
+reasons and `review/data/focus_gate.wells_needing_review` is the adapter that
+feeds it the numbers already on disk — no image decode, no output archive
+opened. The case the field verdict alone misses is the one the per-cell column
+exists for: a well whose fields all look ordinary while a third of its cells
+are soft. Every reason is named in the tooltip, because a composite that shows
+only a total is a number nobody can act on.
+
+Each bound is accounted for. A flagged field is the pipeline's own robust
+comparison and needs no bound of ours. A well whose **median** focus is below
+the cut uses the pooled statistic the measurements support — at a pooling of
+thirty cells the in-focus fifth percentile clears the one-pixel-defocus
+ninety-fifth outright, where the per-cell distributions at that defocus overlap
+heavily. `SOFT_FRACTION` is twice the five per cent a well-placed cut removes
+from a perfectly in-focus population by construction, which is the smallest
+round number that cannot be the cut's own false-positive rate.
+`UNMEASURABLE_FRACTION` is the one bound with no measurement under it and is
+much looser, because it states that the *evidence* is missing rather than that
+the well is bad, and a plate of genuinely small nuclei carries a standing share
+of unreadable outlines.
+
+**Where the threshold comes from, and who applies it.** The number is a
+property of the **microscope** — the point-spread function, the pixel size, the
+nuclear contrast — so a cut carries between plates taken on one instrument at
+one magnification, clipping aside, and it is stated in the Analyze form
+(`analyze/qc_section.py`: `Measure per-cell focus`, on by default, and
+`Out of focus below`, blank by default). The run **records** it in
+`pipeline_info.json` and never acts on it: a threshold is what a user gets
+wrong the first time, and a pipeline that dropped the cells would make
+revisiting it cost a re-run over the images, while a recorded value seeds
+Review's gate where the same cut is one tick to change and one tick to undo.
+
+**Nothing suggests a value for it**, and that is measured rather than cautious.
+Otsu's method on the per-cell values — the natural choice, since the population
+is multiplicative — returns a cut for a plate with nothing wrong with it and
+discards **39.5 %** of its good cells; on a uniformly defocused plate it splits
+the bad population against itself and keeps **76 %** of the cells it exists to
+catch. Its own separability spans 0.516–0.671 across both degenerate cases and
+five useful ones, with the clean plate scoring higher than three genuinely
+mixed ones, so there is no statistic to gate a recommendation on. The
+Playground draws the distribution instead
+(`review/domain/focus_distribution.py`, `playground/focus_curve_view.py`): a
+cumulative curve, because a histogram's shape is an artifact of its bin width
+while "at this cut, how much of my frame goes" is read off a cumulative curve
+directly — with the user's own cut marked, its consequence annotated on the
+figure, and the refusal stated on the figure too, since the plot is savable and
+a reader who does not know the absence was measured will read it as an
+omission. It is the same answer `review/domain/threshold_sweep.py` reached for
+StarDist's probability threshold, by a different route, and the two windows are
+deliberately built alike.
+
+`pipeline.field_quality.summarize` is the single composition of "what did field
+quality find". The end-of-run log prints it and the Analyze tab's pre-flight
+strip **quotes** it, so the two cannot describe one folder differently.
 
 ## 7. The widget library (`widgets/`)
 

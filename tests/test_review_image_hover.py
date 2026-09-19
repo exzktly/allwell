@@ -79,3 +79,54 @@ def test_hover_no_array_hides(monkeypatch):
     # Neither handle nor fallback → no value tooltip (hideText, no crash).
     _show_image_pixel_tooltip(_stub_app(last_fluor_arr=None), _Evt(20, 20), "GFP", lbl)
     assert not calls
+
+
+def _stub_app_with_reasons(reasons, mask):
+    ctx = _stub_app()
+    ctx.state.review_image.mfi_by_nid = {}
+    ctx.state.review_image.exclusion_reasons_by_nid = reasons
+    return ctx
+
+
+def test_the_tooltip_itself_carries_the_exclusion_reasons(monkeypatch):
+    """**Asserted at the boundary, on purpose** (CLAUDE.md §7.4 #1).
+
+    The defect was that a promised readout did not exist: three docstrings and
+    the "Why removed" button's own tooltip said it "names every layer that
+    dropped it", while the hover emitted position, channel value, cell id and
+    MFI and nothing else. A test that calls the phrase helper directly passes
+    with the helper wired to nothing — which is exactly what it did on the
+    first attempt at this test, and is why the assertion is on the string Qt
+    is handed.
+    """
+    calls = _capture(monkeypatch)
+    lbl = QLabel()
+    lbl.resize(40, 40)
+    lbl._sz_w = lbl._sz_h = 40
+    lbl._raw_arr = np.zeros((10, 10), dtype=np.float32)
+    mask = np.zeros((10, 10), np.int32)
+    mask[5, 5] = 3
+    lbl._mask_arr = mask
+    ctx = _stub_app_with_reasons({3: ("debris gate", "out of focus")}, mask)
+
+    _show_image_pixel_tooltip(ctx, _Evt(20, 20), "GFP", lbl)
+
+    text = calls[-1][1]
+    assert "debris gate" in text and "out of focus" in text, text
+
+
+def test_the_tooltip_says_nothing_about_exclusion_while_the_overlay_is_off(monkeypatch):
+    calls = _capture(monkeypatch)
+    lbl = QLabel()
+    lbl.resize(40, 40)
+    lbl._sz_w = lbl._sz_h = 40
+    lbl._raw_arr = np.zeros((10, 10), dtype=np.float32)
+    mask = np.zeros((10, 10), np.int32)
+    mask[5, 5] = 3
+    lbl._mask_arr = mask
+    ctx = _stub_app_with_reasons(None, mask)
+
+    _show_image_pixel_tooltip(ctx, _Evt(20, 20), "GFP", lbl)
+
+    text = calls[-1][1]
+    assert "removed by" not in text and "kept" not in text, text

@@ -28,6 +28,14 @@ from util.json_write import write_json_atomic
 # Hidden so it never looks like dataset output; removed once collected.
 RUN_REPORT_DIRNAME = ".aw_run_report"
 
+#: The key this block takes inside ``pipeline_info.json``. Declared rather than
+#: spelled at the call site so ``tests/test_sidecar_blocks_are_merge_rostered.py``
+#: can see it: a block nobody remembered to add to
+#: ``datasets.merge_plates.merge_plates_compute._UNMERGEABLE_BLOCKS`` is silently
+#: dropped by a plate merge, with no warning, because that roster is written by
+#: hand.
+RUN_REPORT_BLOCK = "run_report"
+
 
 def _report_dir(output_dir: Path | str) -> Path:
     return Path(output_dir) / RUN_REPORT_DIRNAME

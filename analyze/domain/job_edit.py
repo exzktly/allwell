@@ -42,7 +42,7 @@ from core.safe import swallowed
 def _opts_as_pinfo_keys(opts: dict) -> dict:
     """Translate a job spec's ``opts`` into the keys ``_apply_pipeline_info`` reads.
 
-    Four options are spelled differently by the two sides, and each is a silent
+    Five options are spelled differently by the two sides, and each is a silent
     wrong value rather than a crash if left unbridged:
 
     * ``raw`` is the form's input folder; the sidecar calls it ``input_dir``.
@@ -59,7 +59,17 @@ def _opts_as_pinfo_keys(opts: dict) -> dict:
       cannot read as a float — so a blank would leave whatever the field
       already held. Also restored explicitly by the caller.
 
-    A fifth, ``allow_low_disk``, is spelled the same on both sides and still
+    * ``measure_focus`` is positive here and recorded as its negative,
+      ``no_focus_metric``, in a sidecar — the same shape as
+      ``auto_threshold`` above, and for the same reason: the pipeline takes
+      the flag that turns the measurement *off*. Unbridged, a queued job that
+      switched per-cell focus off came back with it on, and the run it then
+      produced would carry a column its author had declined. ``focus_min`` is
+      spelled the same on both sides and needs no bridge; a blank one round
+      trips as a blank because ``_apply_focus_settings`` clears the box on a
+      stated zero rather than skipping it.
+
+    A sixth, ``allow_low_disk``, is spelled the same on both sides and still
     has to be restored by the caller: ``_apply_pipeline_info`` refuses it on
     purpose, because a sidecar describes some folder's last run and must not
     re-arm a safety override for the next one. A queued job is a decision the
@@ -73,6 +83,8 @@ def _opts_as_pinfo_keys(opts: dict) -> dict:
         d["no_auto_threshold"] = not bool(d["auto_threshold"])
     if "run_check" in d:
         d["no_run_check"] = not bool(d["run_check"])
+    if "measure_focus" in d:
+        d["no_focus_metric"] = not bool(d["measure_focus"])
     return d
 
 

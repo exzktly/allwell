@@ -1454,6 +1454,16 @@ UNARCHIVED_DELETE_CLEAN = {
         "def clear(dest):\n"
         "    shutil.rmtree(dest, ignore_errors=True)\n"
     ),
+    # A name this module never binds is not followed, whatever the repo-wide
+    # closure knows about that name elsewhere. The guard is handed
+    # `compress_images_to_zip` as a known writer and must still clear this,
+    # because nothing here imports or defines it.
+    "known-writer-name-but-no-binding": (
+        "import shutil\n"
+        "def stage(folder, target):\n"
+        "    obj.compress_images_to_zip(folder, target)\n"
+        "    shutil.rmtree(folder)\n"
+    ),
     # The propagation is module-local on purpose: a same-named helper in some
     # other module must not make this function an archive writer.
     "same-name-helper-lives-elsewhere": (
@@ -1466,18 +1476,47 @@ UNARCHIVED_DELETE_CLEAN = {
 }
 
 
+#: Handed to the guard as the repo-wide closure, so the two shapes below that
+#: turn on an imported writer are measured against a name it really knows.
+_KNOWN_WRITERS = frozenset({"compress_images_to_zip"})
+
+
 @pytest.mark.parametrize("shape", sorted(UNARCHIVED_DELETE_VIOLATIONS))
 def test_unarchived_delete_guard_catches(shape):
     from tests.test_no_unarchived_delete import offenders_in
-    found = offenders_in(UNARCHIVED_DELETE_VIOLATIONS[shape], "probe.py")
+    found = offenders_in(UNARCHIVED_DELETE_VIOLATIONS[shape], "probe.py",
+                         _KNOWN_WRITERS)
     assert found, f"the {shape} spelling walked past the guard"
 
 
 @pytest.mark.parametrize("shape", sorted(UNARCHIVED_DELETE_CLEAN))
 def test_unarchived_delete_guard_clears(shape):
     from tests.test_no_unarchived_delete import offenders_in
-    found = offenders_in(UNARCHIVED_DELETE_CLEAN[shape], "probe.py")
+    found = offenders_in(UNARCHIVED_DELETE_CLEAN[shape], "probe.py",
+                         _KNOWN_WRITERS)
     assert not found, f"the guard fired on a legitimate {shape}: {found}"
+
+
+def test_unarchived_delete_guard_follows_a_writer_across_an_import():
+    """The shape that blinded this guard when `compress_images_to_zip` moved.
+
+    `process_well_zip_task` reached `atomic_zip` only through a function that
+    left `process_microscopy.py` for `pipeline/io.py`. The module-local
+    closure stopped following it there, both real pairings in that file went
+    unseen, and the suite went **greener** rather than red.
+    """
+    from tests.test_no_unarchived_delete import offenders_in
+    source = (
+        "import shutil\n"
+        "from pipeline.io import compress_images_to_zip\n"
+        "def pack_and_clear(folder, target):\n"
+        "    compress_images_to_zip(folder, target)\n"
+        "    shutil.rmtree(folder)\n"
+    )
+    assert not offenders_in(source, "probe.py"), (
+        "without the repo-wide closure there is nothing to follow")
+    assert offenders_in(source, "probe.py", _KNOWN_WRITERS), (
+        "an imported archive writer the module binds must still be followed")
 
 
 # ── figures registered without a stable preference key ───────────────────────
@@ -4570,3 +4609,73 @@ def test_split_literal_guard_clears_a_path_that_is_not_a_repository_file(
         "test_a_path_written_as_several_literals_still_exists",
         extra={"_EXTRA_SOURCES": ()})
     assert exc is None, f"a non-repository path was wrongly accused: {exc}"
+
+
+# ── the focus column's comparability claim ──────────────────────────────────
+
+FOCUS_CLAIM_VIOLATIONS = {
+    # The wording that actually shipped, in four tooltips at once. A guard
+    # built as a list of banned phrases passes this, which is why the rule is
+    # positional instead.
+    "tooltip": ('def build(w):\n'
+                '    w.setToolTip(\n'
+                '        "Adds a per-cell focus column. It is comparable "\n'
+                '        "between cells, fields, wells and plates.")\n'),
+    # The manual's form of it.
+    "manual": ('def build(w):\n'
+               '    w.setToolTip("Find an out-of-focus cut once for your "\n'
+               '                 "microscope; the same for every plate taken "\n'
+               '                 "the same way.")\n'),
+    # A module docstring, which is where the retraction did reach once and
+    # then stopped.
+    "docstring": '"""The focus cut. It depends on the microscope, not the plate."""\n',
+    # A comment block, which no string-constant walk would see.
+    "comment": ('# Per-cell focus, comparable between plates, so one cut\n'
+                '# serves the whole instrument.\n'
+                'X = 1\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FOCUS_CLAIM_VIOLATIONS))
+def test_focus_claim_guard_catches_an_unqualified_claim(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_focus_claim.py", FOCUS_CLAIM_VIOLATIONS[shape])
+    exc = _run_scan(
+        monkeypatch, "tests.test_focus_claims_stay_measured",
+        "test_no_source_file_claims_comparability_without_the_clipping_caveat",
+        [bad])
+    assert exc is not None, f"the {shape} focus claim went uncaught"
+    assert "bad_focus_claim.py" in str(exc)
+
+
+FOCUS_CLAIM_CLEARED = {
+    # The claim with its caveat is the sentence this repository wants to write.
+    "qualified": ('def build(w):\n'
+                  '    w.setToolTip("Per-cell focus is comparable between "\n'
+                  '                 "plates. Clipping is the exception: a "\n'
+                  '                 "saturated frame reads sharper.")\n'),
+    # The caveat may land in the next block -- a docstring routinely states
+    # the claim in one paragraph and qualifies it in the next.
+    "caveat_next_block": ('"""Focus, comparable between plates."""\n'
+                          '# Saturation is the exception.\n'
+                          'X = 1\n'),
+    # A line-wrapped caveat is still a caveat. The guard's own first draft
+    # missed this and reported a clean file as an offender.
+    "wrapped_caveat": ('def build(w):\n'
+                       '    w.setToolTip("Out-of-focus cuts carry between "\n'
+                       '                 "plates, exposure\\n"\n'
+                       '                 "permitting.")\n'),
+    # "focus" alone is not this subject: a shared focus TIMEPOINT is
+    # "comparable across tabs" and has nothing to do with the metric.
+    "focus_timepoint": ('# Shared focus timepoint, stored as hours so it is\n'
+                        '# comparable across tabs.\n'
+                        'focus_timepoint = None\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FOCUS_CLAIM_CLEARED))
+def test_focus_claim_guard_clears_what_it_should(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_focus_claim.py", FOCUS_CLAIM_CLEARED[shape])
+    assert _run_scan(
+        monkeypatch, "tests.test_focus_claims_stay_measured",
+        "test_no_source_file_claims_comparability_without_the_clipping_caveat",
+        [good]) is None, f"the {shape} case was wrongly flagged"

@@ -44,6 +44,33 @@ def iter_cache_projectors() -> list[Callable]:
     return list(_PROJECTORS)
 
 
+def drop_verdict_column(ctx, label: str | None, *, column: str) -> None:
+    """Remove *column* from cached well frame(s), if it is there.
+
+    **The other half of a switchable verdict layer, and the half that was
+    missing.** A projector whose switch is off returns early and writes
+    nothing, which is right for a frame that never had the column — and wrong
+    for one that does, because the previous setting's verdict stays on the
+    frame and the chokepoint goes on ANDing it. Measured: a flagged field
+    stayed excluded after its exclusion was unticked, and the panel said
+    "currently kept" over rows that were still gone.
+
+    Removing it rather than writing an all-pass column, for the reason the
+    walk below removes it on failure: an explicit 1 everywhere asserts the
+    layer ran and found nothing, which is not what a switched-off layer says.
+    An absent column is the one state every consumer already reads as
+    all-pass.
+    """
+    cache = getattr(ctx.state.dataset, "cache", None) or {}
+    labels = [label] if label is not None else list(cache.keys())
+    for lbl in labels:
+        df = cache.get(lbl)
+        if df is None or len(df) == 0:
+            continue
+        if column in getattr(df, "columns", ()):
+            df.drop(columns=[column], inplace=True)
+
+
 def project_verdict_column(
     ctx,
     label: str | None,

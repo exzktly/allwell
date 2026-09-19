@@ -80,6 +80,12 @@ class ReviewImageState:
     # channel / FOV / timepoint — rebuilt each full refresh so the hover tooltip
     # can report the cell-under-cursor's MFI without re-slicing the CSV per move.
     mfi_by_nid: dict | None = None
+    #: Which verdict layers removed each excluded cell, for the hover readout.
+    #: Rebuilt by the renderer on every refresh alongside ``mfi_by_nid``, and
+    #: only while the "Why removed" overlay is on -- building it reads the
+    #: well's rows. ``None`` means the overlay is off, which the readout has to
+    #: tell apart from "on, and this cell is included".
+    exclusion_reasons_by_nid: dict | None = None
 
     # render options
     # Which image stage the canvas shows: "corrected" (final = flat-field +
@@ -94,6 +100,15 @@ class ReviewImageState:
     flatfield_field_cache: dict = field(default_factory=dict)
     binary_mask: bool = False
     show_outline: bool = True
+    #: Colour each excluded cell by the layer that removed it.
+    #:
+    #: Off by default: the overlay's normal job is to show what is kept, and a
+    #: field of differently-coloured rejects is a diagnostic view rather than
+    #: the working one. On, it is the only surface in the app that answers
+    #: "why is this cell gone" — which matters most for the layers a click
+    #: cannot undo, since the inclusion chokepoint is an AND and manual
+    #: curation cannot out-vote a verdict column.
+    show_exclusion_layers: bool = False
     boundary_color: tuple[int, int, int] = (255, 64, 64)
     selected_color: tuple[int, int, int] = (255, 230, 64)
     tint_color: tuple[int, int, int] = (255, 255, 255)

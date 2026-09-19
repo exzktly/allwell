@@ -517,3 +517,342 @@ def test_threshold_change_redraws_scope_plots(loaded_app, monkeypatch):
         lambda a, *ar, **k: (calls.__setitem__("n", calls["n"] + 1), orig(a, *ar, **k))[1])
     set_thresh_frac_on(loaded_app._ctx, 123.0)
     assert calls["n"] >= 1
+
+
+# ── threshold curve, through the real constructor and the real button ────────
+#
+# CLAUDE.md §7.8 rule 3: one test per feature goes through the entry point the
+# app calls, not the seam underneath it. Everything else about the curve is
+# tested cheaply in ``tests/test_playground_threshold_curve.py`` against stubs
+# that cannot disagree with their author; this is the one that can.
+
+def test_the_threshold_curve_button_is_built_and_connected(playground_app):
+    """Excludes the button that is built and wired to nothing.
+
+    The Playground already had a Segment button whose running flag reaches no
+    widget at all, so "the control exists" was never evidence that pressing it
+    does anything here.
+    """
+    app = playground_app
+    btn = getattr(app, "_playground_sweep_btn", None)
+    stop = getattr(app, "_playground_sweep_stop_btn", None)
+    assert btn is not None and stop is not None
+    assert "curve" in btn.text().lower()
+    # ``isHidden``, not ``isVisible``. The fixture builds the tab into a
+    # QWidget that is never shown, and a child of an unshown parent answers
+    # ``isVisible() == False`` whatever its own flag says (measured: default
+    # -> visible=False hidden=False; after setVisible(False) -> visible=False
+    # hidden=True). So the ``isVisible() is False`` these three sites carried
+    # was true however the code behaved, and deleting
+    # ``sweep_stop_btn.setVisible(False)`` from tab_view left Stop offered
+    # permanently with every assertion green.
+    assert stop.isHidden(), "Stop is offered only while a sweep runs"
+
+    import review.features.image_browser.playground.controller as pc
+    orig_frame = pc._segmentation_frame
+
+    reached = {}
+
+    # The CSV-only fixture produces no per-well image archives, so the tab has
+    # no frame to sweep — which is its own test below. Here the frame is
+    # supplied at the seam directly under the button, so the press still goes
+    # through the real handler.
+    import numpy as _np
+    pc._segmentation_frame = lambda ctx: (_np.zeros((32, 32), _np.float32), "")
+
+    def _fake_request(arr, thresholds, **kw):
+        reached["thresholds"] = list(thresholds)
+        reached["arr_shape"] = getattr(arr, "shape", None)
+        kw["on_done"]([len(thresholds) - i for i in range(len(thresholds))])
+        return object()
+
+    import review.features.image_browser.playground.worker as pw
+    orig = pw.request_threshold_sweep
+    shown = {}
+    import review.features.image_browser.playground.sweep_curve_view as scv
+    orig_show = scv.show_threshold_curve
+    try:
+        pw.request_threshold_sweep = _fake_request
+        scv.show_threshold_curve = lambda ctx, curve: shown.update(curve=curve)
+        btn.click()
+    finally:
+        pw.request_threshold_sweep = orig
+        scv.show_threshold_curve = orig_show
+        pc._segmentation_frame = orig_frame
+
+    assert reached.get("thresholds"), "pressing the button started no sweep"
+    assert reached["arr_shape"] is not None, "the sweep got no frame"
+    assert shown.get("curve") is not None, "the curve was computed and not shown"
+    assert shown["curve"].declined == ""
+    # And the controller put the buttons back, on the success path.
+    assert btn.isEnabled() is True
+    assert pc._st(app._ctx).sweep_running is False
+
+
+# ── focus distribution, through the real constructor and the real button ─────
+
+
+def test_the_focus_distribution_button_is_built_and_connected(playground_app):
+    """The §7.8 rule-3 test for the *other* threshold this tab helps choose.
+
+    Everything about the distribution itself is tested cheaply in
+    ``tests/test_focus_distribution.py`` against values a test supplies; this
+    is the one that presses the shipped button and asks what reached the
+    window. The Response tab in this same application raised ``TypeError`` on
+    every real construction while about 130 of its own tests were green,
+    because not one of them called its builder — so "the control is offered"
+    has a measured price here.
+    """
+    import numpy as _np
+
+    app = playground_app
+    btn = getattr(app, "_playground_focus_btn", None)
+    assert btn is not None, "the button was never built"
+    assert "focus" in btn.text().lower()
+
+    import review.features.image_browser.playground.controller as pc
+    orig_frame = pc._segmentation_frame
+    orig_mask = pc._mask_source
+
+    # Three discs at two very different blurs, so the distribution has a real
+    # shape and a cut placed between them separates them. A single blur would
+    # let a broken measurement (every cell the same number) pass everything
+    # below.
+    from scipy.ndimage import gaussian_filter
+    n = 120
+    yy, xx = _np.mgrid[0:n, 0:n]
+    labels = _np.zeros((n, n), _np.int32)
+    img = _np.full((n, n), 300.0)
+    for k, (cy, cx) in enumerate(((30, 30), (30, 90), (90, 60)), start=1):
+        d = _np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+        labels[d <= 10] = k
+        img += 2500.0 * (d <= 10)
+    img = gaussian_filter(img, 0.8)
+
+    pc._segmentation_frame = lambda ctx: (img, "")
+    pc._mask_source = lambda ctx: (labels, "live StarDist")
+
+    shown = {}
+    import review.features.image_browser.playground.focus_curve_view as fcv
+    orig_show = fcv.show_focus_distribution
+    try:
+        fcv.show_focus_distribution = lambda ctx, dist: shown.update(dist=dist)
+        btn.click()
+    finally:
+        fcv.show_focus_distribution = orig_show
+        pc._segmentation_frame = orig_frame
+        pc._mask_source = orig_mask
+
+    dist = shown.get("dist")
+    assert dist is not None, "pressing the button showed nothing"
+    assert dist.declined == "", dist.declined
+    # The values, not just "a distribution arrived": three outlines were
+    # measured and each got a positive number.
+    assert dist.measurable == 3
+    assert all(v > 0 for v in dist.values)
+    # And which mask it measured is on the figure's subject, because a
+    # pipeline mask and a live segmentation are different evidence.
+    assert "live StarDist" in dist.subject
+
+
+def test_the_focus_button_with_no_mask_says_so_rather_than_drawing_nothing(
+        playground_app):
+    """The user pressed a button and is owed an answer. Excludes the early
+    return that opens no window at all, and the one that opens an empty plot.
+    """
+    import numpy as _np
+
+    app = playground_app
+    import review.features.image_browser.playground.controller as pc
+    orig_frame = pc._segmentation_frame
+    orig_mask = pc._mask_source
+    pc._segmentation_frame = lambda ctx: (_np.zeros((16, 16), _np.float32), "")
+    pc._mask_source = lambda ctx: (None, "none")
+
+    shown = {}
+    import review.features.image_browser.playground.focus_curve_view as fcv
+    orig_show = fcv.show_focus_distribution
+    try:
+        fcv.show_focus_distribution = lambda ctx, dist: shown.update(dist=dist)
+        app._playground_focus_btn.click()
+    finally:
+        fcv.show_focus_distribution = orig_show
+        pc._segmentation_frame = orig_frame
+        pc._mask_source = orig_mask
+
+    assert shown.get("dist") is not None, "no window was opened"
+    assert shown["dist"].declined, "the window was opened with no reason in it"
+
+
+def test_the_sweeps_result_survives_the_repaint_that_follows_it(playground_app):
+    """Excludes the sentence that is written and immediately overwritten.
+
+    The controller used to write the curve's sentence with ``_set_status`` and
+    then call ``playground_on_change`` to redraw the frame with the new
+    thresholds. That fan-out rebuilds the whole read-out from ``_status_text``,
+    which had never heard of the sweep — so the result, the stage-mismatch note
+    appended to it and "Threshold curve failed: …" were each written and lost
+    within one turn of the event loop, leaving a dialog full of curve and a
+    read-out describing only the frame. Measured on the real widget, it read
+    "No raw image for the selected frame."
+
+    The wrong implementation that would still pass an assertion on
+    ``st.sweep_status`` is exactly the one that shipped: the state was correct
+    and never reached the label. So this asserts the boundary (§7.4 #1).
+    """
+    import numpy as _np
+    import review.features.image_browser.playground.controller as pc
+    import review.features.image_browser.playground.worker as pw
+    import review.features.image_browser.playground.sweep_curve_view as scv
+
+    app = playground_app
+    orig_frame, orig_req, orig_show = (pc._segmentation_frame,
+                                       pw.request_threshold_sweep,
+                                       scv.show_threshold_curve)
+
+    def _fake_request(arr, thresholds, **kw):
+        kw["on_done"]([len(thresholds) - i for i in range(len(thresholds))])
+        return object()
+
+    try:
+        pc._segmentation_frame = lambda ctx: (
+            _np.zeros((32, 32), _np.float32), "")
+        pw.request_threshold_sweep = _fake_request
+        scv.show_threshold_curve = lambda ctx, curve: None
+        app._playground_sweep_btn.click()
+    finally:
+        pc._segmentation_frame = orig_frame
+        pw.request_threshold_sweep = orig_req
+        scv.show_threshold_curve = orig_show
+
+    st = pc._st(app._ctx)
+    assert st.sweep_status, "the controller recorded no result at all"
+    shown = app._playground_status.text()
+    assert st.sweep_status in shown, (
+        f"the sweep's sentence never reached the read-out; it says {shown!r}")
+
+
+def test_a_failed_sweep_says_so_on_the_read_out_and_restores_the_buttons(
+        playground_app):
+    """The failure path goes through the same fan-out, and is the path most
+    likely to be left saying nothing — StarDist is an optional dependency, so
+    "not installed" is the message a user is most likely to need."""
+    import numpy as _np
+    import review.features.image_browser.playground.controller as pc
+    import review.features.image_browser.playground.worker as pw
+
+    app = playground_app
+    orig_frame, orig_req = pc._segmentation_frame, pw.request_threshold_sweep
+
+    def _fake_request(arr, thresholds, **kw):
+        kw["on_failed"]("StarDist is not installed")
+        return object()
+
+    try:
+        pc._segmentation_frame = lambda ctx: (
+            _np.zeros((32, 32), _np.float32), "")
+        pw.request_threshold_sweep = _fake_request
+        app._playground_sweep_btn.click()
+    finally:
+        pc._segmentation_frame = orig_frame
+        pw.request_threshold_sweep = orig_req
+
+    assert "StarDist is not installed" in app._playground_status.text()
+    assert app._playground_sweep_btn.isEnabled() is True
+    assert app._playground_sweep_stop_btn.isHidden()
+    assert pc._st(app._ctx).sweep_running is False
+    assert pc._st(app._ctx).sweep_curve is None
+
+
+def test_the_curve_is_attributed_to_the_frame_it_was_dispatched_on(
+        playground_app):
+    """Excludes the title read after the sweep, which can never be wrong.
+
+    Nothing disables the frame selectors while a sweep runs, and a sweep is
+    the longest thing this tab can start — nineteen segmentations, plus a
+    10-30 s TensorFlow load on the first press of a session. That is exactly
+    the window in which a user clicks elsewhere. Reading the subject in the
+    completion callback names whatever they clicked on, so the figure is
+    titled with a frame it never saw, the window has a Save button, and the
+    staleness check compares that title against itself and finds nothing.
+
+    The wrong implementation that passes an assertion on ``_describe_sweep``
+    alone is exactly that one, which is why this presses the real button and
+    moves the selection from inside the sweep.
+    """
+    import numpy as _np
+    import review.features.image_browser.playground.controller as pc
+    import review.features.image_browser.playground.worker as pw
+    import review.features.image_browser.playground.sweep_curve_view as scv
+
+    app = playground_app
+    st = pc._st(app._ctx)
+    st.well, st.channel, st.fov, st.timepoint = "B03", "GFP", "1", "24h"
+    orig_frame, orig_req, orig_show = (pc._segmentation_frame,
+                                       pw.request_threshold_sweep,
+                                       scv.show_threshold_curve)
+
+    def _fake_request(arr, thresholds, **kw):
+        # The user clicks another well while the sweep is in flight.
+        st.well = "C04"
+        st.seg_prob_thresh = 0.77
+        kw["on_done"]([len(thresholds) - i for i in range(len(thresholds))])
+        return object()
+
+    try:
+        pc._segmentation_frame = lambda ctx: (
+            _np.zeros((32, 32), _np.float32), "")
+        pw.request_threshold_sweep = _fake_request
+        scv.show_threshold_curve = lambda ctx, curve: None
+        app._playground_sweep_btn.click()
+    finally:
+        pc._segmentation_frame = orig_frame
+        pw.request_threshold_sweep = orig_req
+        scv.show_threshold_curve = orig_show
+
+    curve = st.sweep_curve
+    assert curve is not None
+    assert "B03" in curve.subject, (
+        f"the curve is attributed to {curve.subject!r}, which is not the "
+        f"frame it was dispatched on")
+    assert "C04" not in curve.subject
+    # The user's own threshold is marked at the value that was in force, not
+    # at whatever they typed while waiting.
+    assert curve.current != 0.77
+    # And the move is now visible in the read-out rather than hidden by a
+    # subject that agrees with itself.
+    assert "not what is on screen" in app._playground_status.text()
+
+
+def test_pressing_stop_marks_the_sweep_to_stop(playground_app):
+    """The flag the worker polls, set by the real button."""
+    import review.features.image_browser.playground.controller as pc
+
+    app = playground_app
+    st = pc._st(app._ctx)
+    st.sweep_stop = False
+    app._playground_sweep_stop_btn.click()
+    assert st.sweep_stop is True
+
+
+def test_a_sweep_with_no_frame_declines_and_leaves_the_buttons_usable(playground_app):
+    """Excludes the early return that leaves Stop showing and the curve button
+    dead — which is what the fixture actually does, since a CSV-only dataset
+    produces no image archives to sweep."""
+    import review.features.image_browser.playground.controller as pc
+
+    app = playground_app
+    started = []
+    import review.features.image_browser.playground.worker as pw
+    orig = pw.request_threshold_sweep
+    try:
+        pw.request_threshold_sweep = lambda *a, **k: started.append(1)
+        app._playground_sweep_btn.click()
+    finally:
+        pw.request_threshold_sweep = orig
+
+    assert started == [], "a sweep was started with no frame to sweep"
+    assert app._playground_sweep_btn.isEnabled() is True
+    assert app._playground_sweep_stop_btn.isHidden()
+    assert pc._st(app._ctx).sweep_running is False
+

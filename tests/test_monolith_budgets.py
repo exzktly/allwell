@@ -90,7 +90,23 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # correction could not be built) moved to `pipeline/empty_well.py`, taking the
 # new-manifest-entry cost the note above declined. Every name is re-exported,
 # so no call site and no test moved with it.
-PROCESS_MICROSCOPY_BUDGET = 4048
+# 4048 -> 3828: the StarDist pretrained-weights cache moved to
+# pipeline.stardist_cache -- the pkg_resources shim, the Keras cache lookup, the
+# cross-process download lock, its dead-holder reclaim and the corrupt-cache
+# purge. One job, and this file could not otherwise grow at all. Genuine
+# extraction -- ratchet down to the new size.
+# 3828 -> 3804: field quality is measured per FOV-group and recorded per well,
+# which cost this file about 140 lines of wiring, so two things moved out to
+# pay for it and then some. The post-run auto-threshold pass --
+# `_apply_thresholds_to_pipeline_info`, `_segmentation_tokens` and
+# `run_auto_threshold_pass` -- is now `pipeline/auto_threshold_pass.py`: it
+# decides which of the two estimators a run's arguments call for, merges the
+# result into the sidecar without overwriting a user's value, and says what it
+# managed, none of which is a threshold calculation. And composing one
+# FOV-group's quality record moved beside the metrics it composes, as
+# `pipeline.field_quality.group_record`. Every name is re-exported, so no call
+# site moved with either.
+PROCESS_MICROSCOPY_BUDGET = 3804
 
 # `services/remote_runner.py` is the largest module in the repo — nearly twice
 # `process_microscopy.py` — and until now the only large one with nothing
@@ -112,7 +128,24 @@ PROCESS_MICROSCOPY_BUDGET = 4048
 # module, and this budget caps the file it lived in — so a required entry could
 # fail the budget, and the budget could only be met by not adding it. A data
 # declaration with no behaviour was the right thing to move.
-REMOTE_RUNNER_BUDGET = 7326
+# 7326 -> 7145: merging the field-quality block across a remote fetch cost
+# nineteen lines here, and the conda-environment cluster moved out to pay for
+# them -- `services/remote_conda.py`. One job, asked in four places (the
+# single-run launch, the batched driver, the scheduler handoff and the
+# pre-flight probe) and needing the identical answer in all four: given a
+# host's `remote_python`, which conda environment does the pipeline run in, is
+# it named or an absolute prefix, what `conda run` argv is that, and what
+# shell guard proves it exists before anything launches into it. Every name is
+# re-exported, so no call site and no test moved with it.
+# 7145 -> 7061: the file was exactly at its budget, so the two comments the
+# unarchived-delete guard's new exemptions need at their sites could not be
+# written at all -- the budget could only be met by leaving an exemption
+# unexplained. The shell a granted node runs while it waits, and the clocks
+# that time it, moved to `services/remote_wait_snippets.py`: one job, asked by
+# the single-shot job waiting for its upload and by the batch driver waiting
+# for its next batch, with one dependency and nothing that runs anything. Every
+# name is re-exported, so no call site and no test moved with it.
+REMOTE_RUNNER_BUDGET = 7061
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis
@@ -216,7 +249,12 @@ ANALYZE_TAB_BUDGET = 781
 # with in analyze.schema_section.AnalyzeSchemaSectionMixin. Genuine extraction
 # -- ratchet down. New work on that section goes in that module, which is where
 # the headroom this freed is meant to be spent.
-ANALYZE_TAB_FORM_BUDGET = 936
+# 936 -> 729: _build_qc_section joined analyze.qc_section.AnalyzeQCSectionMixin.
+# The section had one line of headroom left in this file and two controls still
+# to gain, so the choice was an extraction or a raised budget, and the ratchet
+# only moves down. Genuine extraction -- the whole builder moved, nothing was
+# duplicated, and new Quality Control work goes in that module.
+ANALYZE_TAB_FORM_BUDGET = 729
 
 
 def _line_count(rel: str) -> int:

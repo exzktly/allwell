@@ -10,10 +10,14 @@ so re-gating QC can never clobber hand-curated include/exclude edits.
 
 from __future__ import annotations
 
+import logging
+
 
 from .params import QCParams, compute_qc_pass
-from core.safe import swallowed
+from core.safe import swallow, swallowed
 from review.data.cache_projectors import project_verdict_column
+
+_logger = logging.getLogger("review")
 
 
 def get_qc_params(ctx) -> QCParams:
@@ -62,14 +66,46 @@ def apply_qc_to_cache(ctx, label: str | None = None) -> list[str]:
 
 
 def recompute_qc_all(ctx) -> None:
-    """Re-project ``QC_Pass`` onto all cached wells and bump the caches/version
-    so downstream consumers recompute on the next read.
+    """Re-project **every** verdict layer onto all cached wells and bump the
+    caches/version so downstream consumers recompute on the next read.
 
     A8 teardown: takes ``ctx`` — projects QC over typed state and invalidates the
-    stats cache through the ctx-native ``invalidate_stats_cache`` core helper."""
+    stats cache through the ctx-native ``invalidate_stats_cache`` core helper.
+
+    **It re-runs the other registered projectors too, and that is a fix rather
+    than a tidy-up.** The cache projectors run at *load*, and this is the one
+    pass that runs when a control on the Cell Gating panel moves. For a long
+    time it re-projected ``QC_Pass`` alone, which was correct while the panel
+    held only the debris gate — and silently wrong the moment it grew a second
+    switchable layer. Measured on a plate with one field flagged: ticking
+    "Exclude fields the run flagged" wrote no ``Field_Pass`` column at all, the
+    chokepoint saw nothing to AND, and the exclusion did not happen until the
+    dataset was reopened. The panel meanwhile reported the flag correctly, so
+    the control looked like it had worked.
+
+    Going through the registry rather than naming the layers keeps that from
+    recurring: a verdict layer added later is re-projected by having been
+    registered, which is the property the registry exists for. The projectors
+    are the same callables ``load_and_project`` runs, so this cannot apply a
+    different set of layers than a freshly opened dataset carries.
+    """
     from review.core.notifications import report_verdict_failures
     from review.core.selection_controller import invalidate_stats_cache
+    from review.data.cache_projectors import iter_cache_projectors
     failed = apply_qc_to_cache(ctx, None)
+    for projector in iter_cache_projectors():
+        # QC's own is in this list and has just run; running it twice is a
+        # pure recompute of the same verdict from the same params, and
+        # skipping it would mean matching callables by identity through a
+        # lazy-import wrapper.
+        try:
+            projector(ctx, None)
+        except Exception:
+            # One layer must never take down the others, and each already
+            # reports its own per-well failures through
+            # ``project_verdict_column``. This catches only the case where a
+            # projector raises outside that walk.
+            _logger.exception("verdict re-projection failed for %r", projector)
     # Reported here, at the re-projection, rather than at the per-well load:
     # this is the pass that runs when the user moves a threshold, and it is the
     # only moment at which a well can silently stop being gated by the settings
@@ -100,6 +136,7 @@ def set_qc_params(ctx, params: QCParams) -> None:
     god-object."""
     ctx.state.qc.params = params
     recompute_qc_all(ctx)
+    _repaint_quality_markers(ctx)
     try:
         pers = ctx.persistence
         if pers is not None:
@@ -111,6 +148,23 @@ def set_qc_params(ctx, params: QCParams) -> None:
         redraw_app(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
+
+
+def _repaint_quality_markers(ctx) -> None:
+    """Tell Home's plate the cut moved, if Home has been built.
+
+    The plate's markers come from ``wells_needing_review``, which is a
+    function of ``params.focus_min``. Nothing in the redraw fan-out reaches
+    Home -- it is a page rather than a plot scope -- so without this the plate
+    and the panel that set the cut disagree until the user leaves the page and
+    comes back. The callback is installed by Home's own builder and is absent
+    before the page is built, which is the normal state on a fresh load.
+    """
+    cb = ctx.runtime.home.quality_refresh_cb
+    if cb is None:
+        return
+    with swallow("home quality markers"):
+        cb()
 
 
 def qc_excluded_count(ctx, labels=None, params: QCParams | None = None) -> tuple[int, int]:

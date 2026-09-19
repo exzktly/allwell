@@ -351,9 +351,22 @@ def _warn_no_area_column(where: str) -> None:
     )
 
 
-def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Series:
+#: The verdict columns composed with ``Included``, in the order they are
+#: ANDed. Written once so a surface that needs the composition *minus one
+#: layer* subtracts from this rather than restating it -- the focus panel
+#: counts over the cells that would otherwise be analysed, which is neither
+#: every row in the frame nor the rows its own cut has already judged.
+#:
+#: ``Included`` is not in it: it is the only one whose absence means all-pass
+#: for a different reason (no curation has happened) and whose blanks mean
+#: dropped rather than kept.
+VERDICT_LAYERS = ("QC_Pass", "Crop_Pass", "Gate_Pass", "Field_Pass", "Focus_Pass")
+
+
+def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
+                     except_layer: str | None = None) -> pd.Series:
     """Rows that count toward analysis: ``Included == 1`` composed with the QC,
-    crop, and scatter-gate layers.
+    crop, scatter-gate and field-quality layers.
 
     Manual curation / cell-gating own the ``Included`` column; the QC layer owns
     a separate ``QC_Pass`` column (1 = passes debris gating); the crop layer owns
@@ -361,28 +374,54 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Serie
     inclusion mode owns ``Gate_Pass`` (1 = inside the drawn scatter gates). The
     effective inclusion is the AND of the four — ``manual-keep AND passes-QC AND
     inside-crop AND inside-gate`` — so each layer re-gating never clobbers the
-    others. ``QC_Pass`` / ``Crop_Pass`` / ``Gate_Pass`` are optional: when absent
-    (no such layer / older data) each is treated as all-pass.
+    others. Two more join them, both off by default and both about image
+    quality rather than about the cells:
+
+    * ``Field_Pass`` (1 = the run did not flag this row's field) is written
+      only when the user has turned that exclusion on and only for wells whose
+      FOV labels can be trusted — see :mod:`review.data.field_quality_cache`,
+      which explains why an untrusted well is refused rather than joined onto.
+    * ``Focus_Pass`` (1 = this cell's own outline was not soft) is an absolute
+      cut on the per-cell focus column — see :mod:`review.data.focus_gate`.
+      It is the one layer here that can remove *part* of a field, which is
+      what a focus gradient or a coverslip tilt actually looks like.
+
+    Neither subsumes the other: a field whose median is fine can still have a
+    soft third, and a uniformly soft field is invisible to any per-cell cut
+    relative to its own frame, which is why the per-cell one is absolute.
+
+    ``QC_Pass`` / ``Crop_Pass`` / ``Gate_Pass`` / ``Field_Pass`` /
+    ``Focus_Pass`` are optional: when absent (no such layer / older data / the
+    exclusion switched off) each is treated as all-pass.
 
     ``include_gate=False`` drops the ``Gate_Pass`` layer. The per-cell scatter —
     where the gates are drawn — passes it by default, so it keeps showing the
     full cloud with the gates over it rather than filtering itself by its own
     gates; its "Apply gates" toggle opts back in.
+
+    ``except_layer`` drops one named verdict column, for a surface that is
+    **about** that layer and must not filter its own evidence by it: the focus
+    panel counting how many cells a cut would remove has to count over the
+    cells that would otherwise be in the analysis — neither over the debris the
+    QC gate already dropped, nor over the ones its own cut is about to.
     """
     if "Included" not in df.columns:
         mask = pd.Series(True, index=df.index)
     else:
         incl = pd.to_numeric(df["Included"], errors="coerce").fillna(0)
         mask = incl.eq(1)
-    if "QC_Pass" in df.columns:
-        qc = pd.to_numeric(df["QC_Pass"], errors="coerce").fillna(1)
-        mask = mask & qc.eq(1)
-    if "Crop_Pass" in df.columns:
-        crop = pd.to_numeric(df["Crop_Pass"], errors="coerce").fillna(1)
-        mask = mask & crop.eq(1)
-    if include_gate and "Gate_Pass" in df.columns:
-        gate = pd.to_numeric(df["Gate_Pass"], errors="coerce").fillna(1)
-        mask = mask & gate.eq(1)
+    for column in VERDICT_LAYERS:
+        if column == except_layer:
+            continue
+        if column == "Gate_Pass" and not include_gate:
+            continue
+        if column not in df.columns:
+            continue
+        # ``fillna(1)`` throughout: an unreadable verdict keeps the row. A cell
+        # nobody could measure and a cell measured and found wanting are
+        # different facts, and only the second is a reason to drop anything.
+        verdict = pd.to_numeric(df[column], errors="coerce").fillna(1)
+        mask = mask & verdict.eq(1)
     return mask
 
 
@@ -472,7 +511,21 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
         dataset.well_paths[label] = path
     dataset.cache[label] = read_well_frame(dataset.well_paths[label])
     for _project in iter_cache_projectors():
-        _project(ctx, label)
+        # **Guarded per projector, matching ``qc.controller.recompute_qc_all``.**
+        # The same registry list is walked from two places, and until now the
+        # two had different failure contracts: a raise there lost one verdict
+        # column, a raise here lost the whole WELL, because this is the call
+        # that decides whether a frame enters the cache at all. One layer must
+        # never take down the others, and losing a well is the larger of the
+        # two failures, so the unguarded one was the wrong side of the
+        # asymmetry. Each projector already reports its own per-well failures
+        # through ``project_verdict_column``; this catches a projector that
+        # raises outside that walk.
+        try:
+            _project(ctx, label)
+        except Exception:
+            _logger.exception(
+                "cache projector %r failed for well %r", _project, label)
     # The loader used to have to record this itself, having built the frame
     # outside this function; the verdict now travels with the load.
     record_fov_verdict(ctx, label, dataset.cache[label])

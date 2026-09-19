@@ -47,13 +47,11 @@ import time
 import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from collections.abc import Callable, Iterable
 
 from services.subprocess_text import TEXT_UTF8
 from services.remote_config import (
-    DEFAULT_CONDA_ENV,
-    DEFAULT_REMOTE_PYTHON,
     RemoteHost,
     launcher_time_seconds,
     scale_launcher_time,
@@ -70,6 +68,26 @@ from util.fov import sort_key as fov_sort_key
 from util.dir_scan import files_in, subdirs_in
 from util.image_exts import GROUP_IMAGE_EXTS
 from util.timepoint import sort_key as tp_sort_key
+# The conda-environment resolution cluster, re-exported so every call site in
+# this module (and the tests that reach for it) is unchanged by the move.
+from services.remote_conda import (  # noqa: F401
+    CONDA_ENV_SHELL_HELPERS,
+    _CONDA_ACTIVATE_SNIPPET,
+    DEFAULT_ENV_SELECTOR,
+    EnvSelector,
+    _conda_env_guard,
+    _conda_env_selector,
+    _conda_run_prefix,
+    _conda_run_prefix_for,
+)
+# The record half of field quality, which is stdlib-only. Importing
+# ``pipeline.field_quality`` here would pull numpy and scipy into the remote
+# client — a guard walks this module's import graph and says so, because the
+# client is sent to hosts where the pipeline's dependencies are not installed.
+from pipeline.field_quality_record import (
+    merge_fetched_field_quality,
+    read_field_quality_block,
+)
 from pipeline.run_report import (
     merge_fetched_run_report,
     read_run_report_block,
@@ -151,6 +169,18 @@ _WELL_XFER_INTERVAL_S = 1.0
 # The transport layer — rsync capability probes, remote-path quoting, the retry
 # funnel every transfer passes through, and the progress-line reader — lives in
 # its own module. Re-exported so every existing import keeps working.
+# The shell a granted node runs while it waits for its input, and the clocks
+# that time it. Re-exported so every call site and test here is unchanged --
+# see services/remote_wait_snippets.py.
+from services.remote_wait_snippets import (  # noqa: F401
+    UPLOAD_HEARTBEAT_S,
+    UPLOAD_HEARTBEAT_STALE_S,
+    UPLOAD_WAIT_POLL_S,
+    UPLOAD_WAIT_TIMEOUT_S,
+    _UPLOAD_WAIT_EXIT,
+    _heartbeat_stale_snippet,
+    _wait_for_upload_snippet,
+)
 from services.remote_transport import (  # noqa: F401
     _RSYNC_FILENAME_RE,
     _RSYNC_RETRY_CODES,
@@ -2101,216 +2131,6 @@ def _remote_scratch_export(value: str) -> str:
     return f'export ALLWELL_SCRATCH_DIR="{value}"; '
 
 
-# v5.2.13: bash snippet that locates conda.sh wherever conda is
-# installed (``$HOME/miniforge3`` for bootstrap-managed installs OR
-# whatever ``conda info --base`` reports for pre-existing system
-# condas) and sources it. Mirrors the discovery logic in
-# ``services/remote_bootstrap.py`` so the runner doesn't care which path
-# bootstrap actually used.
-#
-# Why ``conda run --no-capture-output -n <env>`` rather than the old
-# hard-coded ``host.remote_python``: on hosts where the bootstrap
-# found a pre-existing system conda (HPC module, ``/opt/conda``,
-# etc.) the env lives somewhere like ``/opt/conda/envs/allwell``, not
-# under ``~/miniforge3``. The hard-coded path then exits 127 — the
-# v5.2.12 user hit exactly this. ``conda run`` resolves the python
-# from inside the env so it works regardless of conda's install
-# location.
-_CONDA_ACTIVATE_SNIPPET = (
-    'CONDA_SH=""; '
-    'if [ -f "$HOME/miniforge3/etc/profile.d/conda.sh" ]; then '
-    'CONDA_SH="$HOME/miniforge3/etc/profile.d/conda.sh"; '
-    'elif command -v conda >/dev/null 2>&1; then '
-    '_base=$(conda info --base 2>/dev/null); '
-    '[ -n "$_base" ] && [ -f "$_base/etc/profile.d/conda.sh" ] '
-    '&& CONDA_SH="$_base/etc/profile.d/conda.sh"; '
-    'fi; '
-    'if [ -z "$CONDA_SH" ]; then '
-    'echo "[remote] ERROR: cannot find conda.sh on remote" >&2; '
-    'exit 127; '
-    'fi; '
-    '. "$CONDA_SH"'
-)
-
-
-def _conda_run_prefix(env_name: str = DEFAULT_CONDA_ENV) -> list[str]:
-    """Argv prefix that runs the following command inside conda env
-    ``env_name``. ``--no-capture-output`` makes stdout/stderr stream
-    through unchanged so the existing progress parser keeps working."""
-    return ["conda", "run", "--no-capture-output", "-n", env_name]
-
-
-# How the pipeline's conda environment is named on the remote: either by env
-# *name* (``conda run -n allwell``, resolved through conda's own envs dirs) or
-# by absolute *prefix* (``conda run -p /path/to/env``).
-EnvSelector = tuple[str, str]
-
-DEFAULT_ENV_SELECTOR: EnvSelector = ("name", DEFAULT_CONDA_ENV)
-
-
-def _conda_env_selector(remote_python: str) -> tuple[EnvSelector, str]:
-    """Resolve a host's ``remote_python`` to a ``conda run`` selector.
-
-    Returns the selector plus a warning to show the user (empty when there is
-    nothing to say).
-
-    The Remotes dialog offers a **Remote python** field, and the run path used
-    to ignore it entirely — every run was hard-coded to ``conda run -n allwell``
-    no matter what the host was configured with. A user who pointed that field
-    at a different environment (which is the only reason to touch it) got their
-    setting silently dropped and the run died on the remote with conda's own
-    ``EnvironmentLocationNotFound: not a conda environment``, naming a path they
-    had never configured. The field is honoured here instead.
-
-    Left at its default the field is only a *placeholder*, not a fact — the
-    bootstrap creates the env inside whichever conda it found, which on a host
-    with a pre-existing system conda is not under ``~/miniforge3``. So the
-    default keeps the name selector and lets conda resolve it, which is what
-    makes a system-conda install work at all.
-
-    A value that is not shaped like ``<env>/bin/python`` cannot name an
-    environment; rather than guess, the name selector is kept and the caller is
-    told the setting was not usable.
-    """
-    value = (remote_python or "").strip()
-    if not value or value == DEFAULT_REMOTE_PYTHON:
-        return DEFAULT_ENV_SELECTOR, ""
-    path = PurePosixPath(value)
-    if path.parent.name == "bin" and path.name.startswith("python"):
-        return ("prefix", str(path.parent.parent)), ""
-    return DEFAULT_ENV_SELECTOR, (
-        f"configured Remote python {value!r} is not shaped like "
-        f"'<env>/bin/python', so it cannot name a conda environment; "
-        f"falling back to the env named {DEFAULT_CONDA_ENV!r}"
-    )
-
-
-def _conda_run_prefix_for(selector: EnvSelector) -> list[str]:
-    """``conda run`` argv prefix for *selector* (``-n name`` or ``-p prefix``)."""
-    kind, value = selector
-    return ["conda", "run", "--no-capture-output",
-            "-p" if kind == "prefix" else "-n", value]
-
-
-# Shell helpers for locating and validating a conda env on the remote. Shared
-# with ``services/remote_bootstrap.py`` so the runner's pre-launch check and the
-# bootstrap's create-or-skip decision cannot disagree about whether an
-# environment exists — the state where they *did* disagree is the one that
-# stranded users (see :func:`_conda_env_guard`).
-#
-# Validity is conda's own test, ``is_conda_environment()``: a prefix is an
-# environment iff it holds ``conda-meta/history``. A directory without that file
-# is not an environment no matter what it contains, and conda refuses both to
-# run in it and to create over it.
-CONDA_ENV_SHELL_HELPERS = r"""
-aw_env_prefix() {
-    conda env list 2>/dev/null | awk -v n="$1" '$1 == n { print $NF }' | head -1
-}
-aw_env_is_valid() {
-    [ -n "$1" ] && [ -f "$1/conda-meta/history" ]
-}
-aw_env_stale_dir() {
-    for _c in "$HOME/.conda/envs/$1" "$(conda info --base 2>/dev/null)/envs/$1"; do
-        if [ -d "$_c" ] && [ ! -f "$_c/conda-meta/history" ]; then
-            printf '%s\n' "$_c"
-            return 0
-        fi
-    done
-    return 1
-}
-"""
-
-
-def _conda_env_guard(selector: EnvSelector) -> str:
-    """Bash that aborts with an actionable message if *selector* has no usable env.
-
-    Without this the run reaches ``conda run`` and dies on conda's own
-    ``EnvironmentLocationNotFound: not a conda environment: <path>`` — a line
-    with no ``[remote]`` prefix, no host name, and no hint that the fix is to
-    bootstrap the host. It is also indistinguishable, in a scrolling log, from
-    an error the *pipeline* raised, which sends the diagnosis to the wrong
-    machine entirely.
-
-    Two states have to be told apart, because the fix differs and conda's own
-    message conflates them:
-
-    *No environment.* The host was never bootstrapped. Bootstrap it.
-
-    *A directory that is not an environment.* Something exists at the prefix but
-    holds no ``conda-meta/history`` — an env creation that failed part-way,
-    which on a cluster is most often a full home-directory quota. This is the
-    worse state: conda will neither run in it nor ``conda create`` over it, so
-    the run fails *and* a plain re-bootstrap fails behind it. The message names
-    the directory, because that is the thing that has to go.
-
-    The check runs on the remote, immediately before the pipeline launches, so
-    on a scheduler-backed host it runs **inside the allocation** — the compute
-    node is where the env has to exist, and it is not always the login node's
-    filesystem.
-    """
-    kind, value = selector
-    value_q = _remote_quote(value)
-    if kind == "prefix":
-        # The prefix is given, so there is nothing to look up: it either is an
-        # environment, is a directory that is not one, or is absent.
-        resolve = (
-            f'AW_PREFIX={value_q}; '
-            f'AW_STALE=""; '
-            f'if [ -d "$AW_PREFIX" ] && ! aw_env_is_valid "$AW_PREFIX"; then '
-            f'AW_STALE="$AW_PREFIX"; fi'
-        )
-        what = f'conda env prefix {value}'
-        # No double quotes anywhere in these strings: they are interpolated
-        # into a double-quoted bash ``echo``, where a stray " ends the string
-        # and the message arrives mangled (or the shell fails to parse it).
-        missing_fix = ('Set this hosts Remote python to the env python, or run '
-                       'Analyze -> Remotes -> Bootstrap to create the env.')
-    else:
-        resolve = (
-            f'AW_PREFIX="$(aw_env_prefix {value_q})"; '
-            f'AW_STALE="$(aw_env_stale_dir {value_q} || true)"'
-        )
-        what = f"conda env {value}"
-        missing_fix = ('Run Analyze -> Remotes -> Bootstrap for this host to '
-                       'create it, or set Remote python to an existing env '
-                       'python.')
-    # The guard never deletes: a run is not the time to modify the host, and
-    # what is inside that directory is unreadable to us. Print the one command
-    # that unblocks it and let the user decide.
-    stale_fix = ('ACTION REQUIRED: remove that directory yourself, then re-run '
-                 'Analyze -> Remotes -> Bootstrap to rebuild the env:')
-    return (
-        f'{CONDA_ENV_SHELL_HELPERS} '
-        f'{resolve}; '
-        f'if ! aw_env_is_valid "$AW_PREFIX"; then '
-        f'echo "[remote] ERROR: {what} is not usable on $(hostname)." >&2; '
-        f'if [ -n "$AW_STALE" ]; then '
-        f'echo "[remote] $AW_STALE exists but is not a conda environment '
-        f'(no conda-meta/history)." >&2; '
-        f'echo "[remote] An env creation failed part-way — on a cluster a full '
-        f'home-directory quota is the usual cause. conda will neither run in '
-        f'it nor create over it." >&2; '
-        f'echo "[remote] {stale_fix}" >&2; '
-        f'echo "[remote]     rm -rf $AW_STALE" >&2; '
-        f'echo "[remote] Check the quota first (quota -s, or du -sh \\$HOME) — '
-        f'if that is what stopped the install, it will stop the next one too." '
-        f'>&2; '
-        f'else '
-        f'echo "[remote] {missing_fix}" >&2; '
-        f'fi; '
-        f'echo "[remote] conda base: $(conda info --base 2>/dev/null || '
-        f'echo unknown)" >&2; '
-        f'echo "[remote] environments conda can see:" >&2; '
-        # Prefix conda's own listing too. Every line of this block has to be
-        # attributable to the remote at a glance — an unprefixed listing in the
-        # middle of a labelled block reads like local output, which is the
-        # confusion the whole guard exists to remove.
-        f"conda env list 2>/dev/null | sed 's/^/[remote]   /' >&2 || true; "
-        f'exit 127; '
-        f'fi'
-    )
-
-
 def _scheduler_handoff_lines(launcher: str, *, batch: int | None = None) -> str:
     """The lines announcing that the run is now waiting on a scheduler.
 
@@ -2347,119 +2167,10 @@ def _scheduler_handoff_lines(launcher: str, *, batch: int | None = None) -> str:
 # after it: on a busy cluster the queue wait and the transfer then overlap
 # instead of running end to end.
 
-# How long a granted allocation will wait for that file before giving up. The
-# node is idle and billed for every second of it, so this is a backstop against
-# a dead uploader holding a node, not a budget to be spent — a healthy upload
-# writes the sentinel as soon as rsync returns. Exit code is distinct so the
-# failure reads as "the upload never finished", not as a pipeline crash.
-UPLOAD_WAIT_TIMEOUT_S = 7200
-UPLOAD_WAIT_POLL_S = 3
-_UPLOAD_WAIT_EXIT = 75
-
-# Touched on the remote every ``UPLOAD_HEARTBEAT_S`` for as long as an upload is
-# actually in flight. The deadline above is a backstop against a hung uploader;
-# this is the answer to a *dead* one — the app being killed, the laptop closing,
-# the network going — where waiting out two hours of idle, billed node is the
-# wrong behaviour. A heartbeat that stops advancing frees the node in about a
-# minute regardless of how long the upload legitimately needed.
-#
-# The file is touched over ssh, so its mtime is the *remote* clock and the job
-# comparing it against its own ``date`` is not measuring clock skew between two
-# machines.
-UPLOAD_HEARTBEAT_S = 30
-UPLOAD_HEARTBEAT_STALE_S = 120
-
 # Ceiling on one short ssh control command (mkdir, touch, rm -rf). Generous
 # enough for an ``rm -rf`` of a run directory on a slow shared filesystem, and
 # far short of the hours an unbounded one can park a thread for.
 SSH_CONTROL_TIMEOUT_S = 120.0
-
-
-def _heartbeat_stale_snippet(heartbeat: str, message: str) -> tuple[str, str]:
-    """``(init, check)`` shell for "has the app stopped beating?".
-
-    Both waiting loops — the single-shot job waiting for its upload and the
-    batch driver waiting for its next batch — ask the same question, so they
-    ask it with the same shell rather than each carrying a copy that can drift.
-
-    Two things it deliberately does not do, because the cost of a wrong answer
-    is a granted node thrown away:
-
-    * **``stat`` is not assumed to be GNU.** ``stat -c %Y`` is coreutils;
-      ``stat -f %m`` is the BSD spelling. A login node with only the latter used
-      to yield an empty mtime, which read as "epoch 0" and therefore as
-      infinitely stale — every run on such a host aborted the instant it was
-      granted a node, blaming the app. When neither spelling works the timestamp
-      is unknowable, so the check says so once and stops judging: losing the
-      early hand-back is a far smaller harm than never running at all. The ssh
-      dying still tears the job down.
-    * **A missing file is not instantly fatal.** The app touches the heartbeat
-      before the job can look, but the two see it across a shared filesystem
-      whose metadata may lag. An absent file is tolerated for the same window as
-      a stale one before the node is handed back.
-    """
-    if not heartbeat:
-        return "", ""
-    hb_q = _remote_quote(heartbeat)
-    misses = max(1, int(UPLOAD_HEARTBEAT_STALE_S // UPLOAD_WAIT_POLL_S))
-    init = "_aw_miss=0; _aw_warn=0; "
-    check = (
-        f'if [ -e {hb_q} ]; then '
-        f'_aw_miss=0; '
-        f'_aw_hb=$(stat -c %Y {hb_q} 2>/dev/null || '
-        f'stat -f %m {hb_q} 2>/dev/null || echo ""); '
-        f'_aw_now=$(date +%s); '
-        f'if [ -z "$_aw_hb" ]; then '
-        f'if [ "$_aw_warn" -eq 0 ]; then _aw_warn=1; '
-        f'echo "[remote] WARN this host cannot report a file\'s modification '
-        f'time, so the job cannot tell whether the app is still there — it '
-        f'will hold the node until the pipeline runs or the walltime ends"; '
-        f'fi; '
-        f'elif [ "$((_aw_now - $_aw_hb))" -gt {UPLOAD_HEARTBEAT_STALE_S} ]; '
-        f'then echo "{message}"; exit {_UPLOAD_WAIT_EXIT}; fi; '
-        f'else '
-        f'_aw_miss=$((_aw_miss+1)); '
-        f'if [ "$_aw_miss" -gt {misses} ]; then '
-        f'echo "{message}"; exit {_UPLOAD_WAIT_EXIT}; fi; '
-        f'fi; '
-    )
-    return init, check
-
-
-def _wait_for_upload_snippet(sentinel: str, heartbeat: str = "") -> str:
-    """Shell that blocks until *sentinel* exists, or gives the node back.
-
-    Runs **inside** the allocation, so its output reaches the user on the same
-    stdout as the rest of the run. Announcing both edges matters: a job that
-    has been granted a node but is waiting on bytes looks exactly like a job
-    that has hung, and the whole point of asking for the node early is that
-    this window is expected.
-    """
-    sentinel_q = _remote_quote(sentinel)
-    waited = int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S)
-    # A stale heartbeat means the uploader is gone — killed, disconnected,
-    # asleep — and nothing will ever write the sentinel. Checked before the
-    # deadline because it is the case that actually happens; the deadline is
-    # for an uploader that is alive but wedged.
-    init, stale = _heartbeat_stale_snippet(
-        heartbeat,
-        f"[remote] ERROR the uploader stopped responding "
-        f"({UPLOAD_HEARTBEAT_STALE_S}s without a heartbeat) — giving the "
-        f"node back")
-    return (
-        f'if [ ! -f {sentinel_q} ]; then '
-        f'echo "[remote] scheduler: node granted; waiting for the upload to '
-        f'finish before starting the pipeline…"; fi; '
-        f'_aw_w=0; {init}'
-        f'while [ ! -f {sentinel_q} ]; do '
-        f'_aw_w=$((_aw_w+1)); '
-        f'{stale}'
-        f'if [ "$_aw_w" -gt {waited} ]; then '
-        f'echo "[remote] ERROR the upload never completed — giving the node '
-        f'back after {UPLOAD_WAIT_TIMEOUT_S}s"; exit {_UPLOAD_WAIT_EXIT}; fi; '
-        f'sleep {UPLOAD_WAIT_POLL_S}; done; '
-        f'echo "[remote] scheduler: input is complete — starting the pipeline"; '
-    )
 
 
 def _only_my_job(jid_var: str, marker: str) -> str:
@@ -5295,6 +5006,12 @@ class Fetcher:
                 if csv_count:
                     self._merge_fetched_csvs(tmp_csv_dir)
             finally:
+                # `_new_transit_dir` made this directory for this one well a
+                # few lines above and nothing of the user's is ever in it, so
+                # removing the whole thing is safe. Exempted by name in
+                # tests/test_no_unarchived_delete.py::_SCRATCH_DIR_ALLOWLIST,
+                # which otherwise catches this function for reaching an
+                # archive writer through `_materialize`.
                 shutil.rmtree(tmp_csv_dir, ignore_errors=True)
             # The temp dir is gone by now; name the volume it lived on, which is
             # what the user would have to look at.
@@ -5518,6 +5235,13 @@ class Fetcher:
             self._log(f"[remote] merge: {well}_out.zip → +{n} new image(s)\n")
             return True
         finally:
+            # The extraction directory this function made for this one well,
+            # holding only what `zf.extractall` just put there. The user's own
+            # files are in `well_zip` and in `dest`, neither of which is
+            # removed. Exempted by name in
+            # tests/test_no_unarchived_delete.py::_SCRATCH_DIR_ALLOWLIST,
+            # which otherwise catches this function for calling
+            # `pipeline.io.merge_images_into_zip`.
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # Mid-run sidecar ────────────────────────────────────────────────────
@@ -6334,6 +6058,14 @@ class RemoteRunner:
         # re-run path preserves.
         info_path = run.local_output_dir / "pipeline_info.json"
         prior_run_report = read_run_report_block(info_path)
+        # The field-quality block has the same problem and a worse consequence.
+        # Coverage records losing history is a loss of history; field quality
+        # reduced to the wells one remote incremental run touched gives every
+        # one of those wells a robust z computed against its own eight-well
+        # median, and the shortfall accounting cannot catch it — each of those
+        # wells is individually complete, so nothing is marked partial and the
+        # scorer proceeds.
+        prior_field_quality = read_field_quality_block(info_path)
         prior_user_blocks = read_user_blocks(info_path)
         for top in ("pipeline_info.json",):
             self._rsync_optional(
@@ -6344,6 +6076,9 @@ class RemoteRunner:
         if merge_fetched_run_report(info_path, prior_run_report):
             log("[remote] merged this run's completeness records into the "
                 "existing pipeline_info run_report.\n")
+        if merge_fetched_field_quality(info_path, prior_field_quality):
+            log("[remote] merged this run's field-quality measurements into "
+                "the existing pipeline_info field_quality.\n")
         restored = restore_user_blocks(info_path, prior_user_blocks)
         if restored:
             log(f"[remote] restored local pipeline_info block(s) the fetched "

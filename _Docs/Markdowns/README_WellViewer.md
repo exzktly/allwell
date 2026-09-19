@@ -521,13 +521,54 @@ else, or once a run has written there again.
     **Review → Image Browser → [Playground](#playground)**, which segments with
     these same two values and can open any image straight from disk — then type
     what worked into the two fields here.
+  - The Playground's **Threshold curve…** button answers the question this field
+    otherwise leaves you guessing at. It segments the frame on screen at nineteen
+    probability thresholds and plots how many nuclei each one finds, with a
+    dashed line where your current value sits. A value on a long flat stretch
+    means the detection is not sensitive to the exact number, so moving it a
+    little changes nothing; a value on the steep part means small changes move
+    the count a great deal, and is worth looking at the picture for. **It does
+    not suggest a threshold**, deliberately: every rule for picking one off this
+    curve that was tried either recommended detecting nothing or recommended the
+    number the field already starts at, for reasons to do with the shape of the
+    curve rather than with your plate. A flat stretch also means only that the
+    *count* is insensitive to the cut — not that the outlines are right, which
+    is still worth checking in the picture; the plot says so under its axis.
+    The sweep takes longer than a single Segment, and **Stop** ends it early —
+    whatever was measured up to that point is still plotted, on the full
+    horizontal range you asked for rather than rescaled to the part it reached,
+    with a hollow marker where it stopped and a sentence saying how many of the
+    nineteen thresholds it got through. Both the plot's title and the read-out
+    under the image name the frame the curve was measured on — the one it was
+    measured on, not whatever is selected when it finishes — and if you move
+    to another frame, or change the correction, the background well or the
+    Overlap threshold, the read-out says the curve no longer describes what is
+    on screen rather than leaving the old counts sitting under a new picture.
+    Changing the Probability value does **not** stale it: that is the number
+    the curve exists to help you choose.
+  - **Segment** and **Threshold curve…** cannot run at the same time — they
+    share one loaded detector — so each greys the other out while it works.
+  - A frame with no contrast at all is not swept, and says so in those words
+    rather than reporting that no nuclei were found: nothing was measured, and
+    that is a different statement from measuring zero.
 
 ### 5. Quality control — field flatness & background correction
 
 The **Quality Control** section bundles optional, pre-measurement clean-up that
 runs **per channel at quantification time** (so it changes the pixel values that
 get measured and can only be changed by re-running the pipeline). There are two
-independent correction stages plus a debris filter:
+independent correction stages, a debris filter, and one measurement:
+
+**Measure per-cell focus** is on by default and adds one column to every well's
+CSV: how sharp each nucleus's own boundary is. It costs a few percent of the
+run, and it is the only evidence a later reader has that part of a field was
+soft — a dataset without it cannot be asked the question afterwards without
+being re-run over the images. **Out of focus below** beside it is the cut for
+that number, and it is **recorded with the dataset rather than applied by the
+run**: nothing is dropped here, and Review's Cell Gating tab is where the
+exclusion actually happens, so a threshold chosen wrongly costs a tick rather
+than a re-run. Leave the box blank unless you have measured a value; see
+[Cell Gating](#cell-gating) for where that number comes from.
 
 1. **Flat-field (illumination) correction** — *multiplicative*. Models the slow
    illumination profile (vignetting / uneven excitation) as a smooth field `F`,
@@ -1460,6 +1501,138 @@ buttons — you pick one or the other, because choosing the scatter option
   the per-channel **intensity minimum** (the `Include ≥` column below), or the
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
   drawn a gate there, the scatter option is greyed out and says so.
+
+  **Exclude fields the run flagged** sits under the debris gate and works on
+  whole fields of view rather than on single cells. While a run processes a
+  plate it measures six things about every field it looks at — how sharply
+  focused it is, how much of it is clipped at the sensor's maximum, how much
+  contrast it has, how many nuclei it found, how large they are, and how bright
+  the background is — and afterwards compares each field with the rest of the
+  plate. The first three are compared plate-wide, within a timepoint, because a
+  well-run plate should be uniform in them. The last three are compared only
+  *within a well, across its own fields*: a compound that kills cells
+  legitimately drops the nucleus count, and a plate-wide comparison would flag
+  the wells where the experiment worked.
+
+  The line under the checkbox says what the run found whether or not the box is
+  ticked — the flags are reported by default and applied only if you ask. Tick
+  it and every cell from a flagged field drops out of every plot, statistic and
+  export, exactly like a cell the debris gate removed. Three things stop it:
+
+  - a dataset analysed before this existed, which says so rather than reporting
+    that nothing was flagged;
+  - a plate only **partly** measured — a resumed or incremental run measures
+    only the fields it re-processed, so a comparison against the plate would be
+    drawn from a biased sample. Nothing is excluded, and the line says which
+    wells are short. Re-run those wells with **Force** to complete it;
+  - a well whose FOV labels do not identify its fields. The app can tell when a
+    well's filenames did not decompose and every row arrived labelled field 1;
+    a per-field verdict cannot be attached to such a well at all, so every row
+    there is kept whatever the box is set to, and the line names the wells.
+
+  **Exclude out-of-focus cells** sits beneath it and does the other half of the
+  job: it removes individual *cells* whose own outlines read soft, rather than
+  whole fields. That is what a focus gradient across one field looks like, or a
+  tilted coverslip — a field whose overall focus is perfectly acceptable can
+  still have a soft third, and no whole-field verdict can say so. The two
+  controls are independent and neither replaces the other.
+
+  It works off a number the run records for every cell: how far the intensity
+  takes to travel from inside that nucleus to outside it, measured at the
+  outline itself. Defocus is what widens that transition, and a width is a
+  distance in pixels — brightness changes how *tall* the step is, not how wide,
+  and the width does not depend on how big the nucleus is or how many are in
+  the field. So the value means the same thing everywhere, and the cut you type
+  is an **absolute** one rather than a comparison with the field's own average.
+  That matters: a score relative to its own frame cannot see a frame that is
+  uniformly soft, because every cell in it deviates from its neighbours by
+  nothing.
+
+  Measured across an eightyfold brightness range the value moves 3 %, across a
+  14–28 px range of nucleus size 1 %, and as nuclei crowd together to touching
+  2 %. **Two things do move it**, and they are worth knowing before you carry a
+  cut from one plate to another. Chromatin texture reaches 14 %. And a
+  *clipped* image reads sharper than it is — up to 45 % — because a nucleus
+  whose middle is flat-topped genuinely does have a steeper edge, so a cut
+  chosen on a well-exposed plate will be too aggressive on a saturated one.
+
+  The threshold box beside the checkbox starts blank, or holds whatever the run
+  recorded. **Nothing can fill it in for you**, and that is a measured
+  conclusion rather than caution: the obvious automatic rule returns a number
+  for a plate with nothing wrong with it and throws away two fifths of its good
+  cells, and on a plate that is uniformly out of focus it does almost nothing
+  at all. Where the number comes from instead is the
+  **Distribution…** button beside the box, which plots every cell of the
+  selected well — every field and every timepoint it holds — marks your current
+  cut, and says live how many cells it keeps and how many it drops.
+  **Image Browser ▸ Playground ▸ Focus distribution…** draws the same curve for
+  the single frame in front of you, which is the one to use while you are
+  tuning that frame's corrections. That one measures whichever channel is
+  selected on the Playground, with the Playground's own correction settings —
+  so if you are looking at a channel other than the nuclear stain, the figure
+  says so in amber. The cut you type into Cell Gating applies to the nuclear
+  channel the run measured, and the two can differ by a good deal, so a number
+  read off another channel's curve is not one to carry across without
+  checking. The figure also says when the dataset carries no focus column at
+  all, since the curve will draw from the pixels either way and the number
+  could not be applied without re-running the plate. The correction settings go
+  into the figure's title, so a saved plot can be told from one measured
+  differently. Find a value once for your microscope and
+  magnification and it will carry between plates taken the same way, exposure
+  permitting.
+  Type it into **Analyze ▸ Quality Control ▸ Out of focus below** so future
+  runs record it and this box opens ready. That field remembers what you last
+  typed between sessions — it is the one setting on the Analyze form that does,
+  because it describes your microscope rather than the plate in front of you.
+  Opening a dataset that recorded its own cut still shows you that dataset's
+  number, not your remembered one.
+
+  It will not accept a value no cell could reach. The measurement has a ceiling
+  of about 0.83 — the sharpest edge that can be represented at all — and a
+  well-focused plate measures nearer 0.42, so a number above the ceiling would
+  exclude every cell in the plate. Analyze refuses it rather than running and
+  leaving you to find the empty result afterwards.
+
+  If you type a threshold and then untick **Measure per-cell focus**, the form
+  says so: that number is not recorded with the dataset while the measurement
+  is off, and it would otherwise disappear along with the row it sat in.
+
+  The box tracks what the run recorded. If you re-process the plate with a
+  different threshold, this box picks the new one up — it only keeps a number
+  of its own once you have typed one, and when you have, the line beneath says
+  what the run recorded so the two are never in disagreement without your
+  knowing. The plate on **Home ▸ Overview** repaints its quality markers as
+  soon as the cut changes, so the two halves of that page cannot show you
+  answers from different thresholds.
+
+  The counts under the checkbox are about the cells that would otherwise be in
+  your analysis — a cell the debris gate, the crop, your gates or your own
+  deletion has already removed is not counted here, in either direction. That
+  matters most on a plate with a lot of debris: the fragments the debris gate
+  removes are largely the same ones whose outlines cannot be measured, so
+  without this every well on such a plate would be marked for review about
+  cells you had already filtered out. The count is across the whole plate,
+  which the sentence says, while the plots you are looking at are scoped to
+  your selection.
+
+  Cells whose outlines could not be measured at all are **kept**, and the line
+  under the checkbox says how many. An outline needs contrast across it and
+  enough pixels either side, so a nucleus with no readable boundary profile has
+  no value —
+  and so does a cell in a badly defocused field, where segmentation itself
+  starts to fail. Those are not the same as a cell measured and found soft, and
+  the app never treats them alike.
+
+  If a dataset was analysed before this existed it carries no focus column and
+  says so. Re-run it with **Analyze ▸ Quality Control ▸ Measure per-cell focus**
+  ticked — it is on by default — to get one.
+
+  On the **Home** tab's plate map, a well that needs a look carries a `!` and a
+  legend row. Three things put it there, and hovering the well says which: the
+  run flagged one of its fields; the well's median focus is below your cut, so
+  the whole well is soft rather than part of it; or too much of the well could
+  not be measured at all. The end-of-run log and the Analyze tab's pre-flight
+  line report the field-level measurement for the folder as a whole.
 
   **Area and Region area are not the same measurement**, and the difference is
   the reason both exist. **Area** is the size of the one cell — how many pixels
@@ -3747,6 +3920,21 @@ reviewing and curating individual cells.
   binary + mask-overlay controls; the QC debris gate. **Hover** a nucleus to
   read its pixel value, cell id, and **mean fluorescence (MFI)** for the current
   channel (the same per-cell readout the Image Table shows).
+- **Why removed** — a toggle on the control row that outlines every *excluded*
+  cell in the colour of the layer that removed it: you deleted it, the debris
+  gate, the crop, the scatter gates, the run's field verdict, or the focus cut.
+  A colour key appears under the picture, listing only the layers this field
+  actually has cells for, and if the toggle is on and nothing here is excluded
+  the line says that rather than leaving you with an unchanged picture and no
+  way to tell whether the control worked.
+
+  Being *included* is the AND of all six layers, so a cell can fail more than
+  one and an outline can only be one colour — it shows the first, and hovering
+  the cell names every layer that dropped it. That is also why clicking a cell
+  back in cannot restore one a verdict column removed: raise that threshold, or
+  switch that layer off, instead. The overlay works in the binary (≥ threshold)
+  view too, which is usually where the question comes up, since a binary mask is
+  already a picture of which cells counted.
 - **The status line says when it is showing you less than it was asked for.**
   Two cases, each of which would otherwise look like an ordinary picture. If reading the
   well's archive stopped part way, the line ends with **INCOMPLETE** and the

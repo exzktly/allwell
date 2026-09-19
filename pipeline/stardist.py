@@ -257,6 +257,92 @@ def quiet_frozen_tf_logging() -> None:
         swallowed("quiet_frozen_tf_logging: TF import/config failed")
 
 
+def _percentile_normalize(arr, pmin: float = 1.0, pmax: float = 99.8):
+    """``csbdeep.utils.normalize(arr, pmin, pmax, clip=True)``, or its equal.
+
+    csbdeep is imported where it exists — a real run always has it, since
+    StarDist depends on it — and the numpy form below runs only where it does
+    not, which in practice is the test environment and a GUI build that has
+    never loaded TensorFlow.
+
+    The fallback is **measured** equivalent rather than assumed so: over random
+    frames at scales from 1e-3 to 65535, and over a constant frame, the largest
+    absolute difference between the two was 1.19e-07 — exactly float32 epsilon,
+    i.e. the same function evaluated twice. That measurement is the only reason
+    a fallback is acceptable here at all; a normalisation that quietly differed
+    would make the preview and the pipeline disagree about the same frame.
+    """
+    try:
+        from csbdeep.utils import normalize
+    except ImportError:
+        # ``np.percentile`` returns a float64 scalar. Under numpy 1.x's
+        # value-based casting that still leaves a float32 array; under NEP 50
+        # (numpy 2) it would promote the whole expression to float64 and this
+        # fallback would silently start returning a different dtype from
+        # csbdeep's ``normalize``, which casts its own bounds to the target
+        # dtype first. The app pins numpy 1.24, so this is latent — and it is
+        # exactly the kind of divergence a dependency bump introduces without
+        # touching a line of this file, so the casts are explicit.
+        lo = np.float32(np.percentile(arr, pmin))
+        hi = np.float32(np.percentile(arr, pmax))
+        out = (arr.astype(np.float32) - lo) / (hi - lo + np.float32(1e-20))
+        return np.clip(out, 0.0, 1.0).astype(np.float32)
+    return normalize(arr, pmin, pmax, clip=True)
+
+
+def prepare_stardist_input(image) -> "np.ndarray":
+    """Scrub, normalise and clamp *image* into the distribution StarDist expects.
+
+    **Every caller that hands an array to the network must go through this**,
+    and it is a shared function rather than three lines inlined because the
+    second caller got it wrong the first time. The Playground's threshold sweep
+    resolved instances straight off ``model.predict(frame)`` on the corrected
+    frame — raw camera counts — and measured 6 nuclei falling to 4 across the
+    whole threshold range on a frame where the truth is 86 falling to 0. It did
+    not fail: it drew a flat line, and the manual tells the reader a flat line
+    means the threshold does not matter. The opposite of the truth, confidently,
+    with nothing marking the shortfall.
+
+    ``StarDist2D.predict`` takes ``normalizer=None`` and its own docstring says
+    that assumes the image is already normalised. Nothing enforces it.
+
+    The clamp is not tidiness either. StarDist can hit an **uncatchable C++
+    ClipperLib abort** — a ``terminate()``, not an exception — when fed
+    non-finite or out-of-distribution input, and in the GUI process that takes
+    the whole application down rather than one worker. Two ways in: a single
+    NaN or Inf pixel, since ``normalize`` uses ``np.percentile`` rather than the
+    nan-aware variant and one NaN turns every percentile NaN; and huge *finite*
+    values, since an empty-well flat-field divides by a near-zero field and
+    amplifies a dim region by ~100x while ``normalize(clip=False)`` does not cut
+    the top end. So: scrub non-finite, normalise **with** ``clip=True``, then
+    clamp explicitly, leaving the input strictly inside
+    :data:`_STARDIST_INPUT_CLIP`.
+    """
+    arr = np.asarray(image, dtype=np.float32)
+    if not np.all(np.isfinite(arr)):
+        arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    out = _percentile_normalize(arr)
+    if not np.all(np.isfinite(out)):
+        out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+    np.clip(out, _STARDIST_INPUT_CLIP[0], _STARDIST_INPUT_CLIP[1], out=out)
+    return out
+
+
+def is_near_constant(image) -> bool:
+    """Whether *image* has effectively no dynamic range.
+
+    A near-constant field has no nuclei and is the classic ClipperLib trigger,
+    so every caller skips prediction on one rather than risking the abort.
+    Shared for the same reason the prelude is: the sweep runs nineteen NMS
+    passes per press, so it has nineteen times the exposure of one Segment
+    press, and it had none of the protection.
+    """
+    arr = np.asarray(image)
+    if arr.size == 0:
+        return True
+    return float(arr.max()) - float(arr.min()) < 1e-6
+
+
 def segment_nuclei(nir_corr: np.ndarray, *, model,
                    params: StarDistParams = DEFAULT_STARDIST_PARAMS) -> np.ndarray:
     """Segment nuclei in one corrected frame with an explicit model + params.
@@ -267,7 +353,6 @@ def segment_nuclei(nir_corr: np.ndarray, *, model,
     including the input scrubbing and the near-constant-field refusal below.
     ``_segment_stardist_nuclei`` is the worker-global-driven wrapper over it.
     """
-    from csbdeep.utils import normalize
     if model is None:
         raise RuntimeError(
             "StarDist model is not initialised. "
@@ -288,13 +373,7 @@ def segment_nuclei(nir_corr: np.ndarray, *, model,
     # normalize WITH ``clip=True`` and an explicit clamp so the input is strictly
     # in [0, 1] — the distribution StarDist was trained on — making the abort
     # impossible regardless of the upstream correction.
-    arr = np.asarray(nir_corr, dtype=np.float32)
-    if not np.all(np.isfinite(arr)):
-        arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-    nir_norm = normalize(arr, 1, 99.8, clip=True)
-    if not np.all(np.isfinite(nir_norm)):
-        nir_norm = np.nan_to_num(nir_norm, nan=0.0, posinf=0.0, neginf=0.0)
-    np.clip(nir_norm, _STARDIST_INPUT_CLIP[0], _STARDIST_INPUT_CLIP[1], out=nir_norm)
+    nir_norm = prepare_stardist_input(nir_corr)
 
     # ── ClipperLib diagnostics ───────────────────────────────────────────────
     # The abort ("coordinate outside allowed range") happens *inside*
@@ -314,7 +393,7 @@ def segment_nuclei(nir_corr: np.ndarray, *, model,
 
     # A near-constant field has no nuclei and is the classic ClipperLib trigger —
     # skip prediction (0 nuclei) rather than risk the uncatchable abort.
-    if hi - lo < 1e-6:
+    if is_near_constant(nir_norm):
         log.warning("  seg-input %s: near-constant field (dyn_range≈0) — skipping "
                     "StarDist (0 nuclei) to avoid a ClipperLib abort", fov)
         return np.zeros(nir_norm.shape, dtype=np.int32)

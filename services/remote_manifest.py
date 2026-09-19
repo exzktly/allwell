@@ -89,6 +89,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # package or the run aborts with ModuleNotFoundError.
     "pipeline/__init__.py",
     "pipeline/auto_threshold.py",
+    # The post-run pass over that sampler: which estimator this run's
+    # arguments call for, and the merge into pipeline_info.json.
+    # process_microscopy re-exports it and calls it at the end of every
+    # run, remote included.
+    "pipeline/auto_threshold_pass.py",
     "pipeline/background.py",
     "pipeline/capacity.py",
     # The pipeline's argparse declaration. The remote runs process_microscopy,
@@ -103,6 +108,17 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # --flatfield/--background empty_well. The remote genuinely runs these:
     # a batched run reads its blank out of --background_dir on the worker.
     "pipeline/empty_well.py",
+    # Per-field image-quality metrics, computed inside the quantification
+    # pass, so the remote worker genuinely needs it.
+    "pipeline/field_quality.py",
+    # Its stdlib-only half: the per-well record, the collected block and
+    # the merge the remote fetch performs. Imported by the remote client
+    # itself, which is why it may not reach the imaging stack.
+    "pipeline/field_quality_record.py",
+    # The pretrained-weights cache and its cross-process download lock.
+    # process_microscopy re-exports these; the remote worker loads the
+    # model through them on every run.
+    "pipeline/stardist_cache.py",
     "pipeline/flatfield.py",
     # Per-FOV resume checkpoints, keyed on the output directory and the run's
     # settings so one plate cannot resume another's intermediates.

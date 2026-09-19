@@ -30,6 +30,9 @@ from review.features.image_browser.playground.controller import (
     correction_controls_enabled, playground_clear_loose_image, playground_on_change,
     playground_open_loose_image, playground_repopulate_dropdowns,
     playground_segment_now,
+    playground_focus_now,
+    playground_sweep_now,
+    playground_sweep_stop,
 )
 from review.features.image_browser.playground.renderer import render_playground_display
 
@@ -292,6 +295,69 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         playground_segment_now(ctx)
     seg_btn.clicked.connect(lambda _=False: _on_segment())
     sbl.addWidget(seg_btn)
+
+    # The curve beside the single answer, because the Probability field above
+    # is the one number on this tab with no evidence attached to it: the
+    # Analyze form's default for it is a constant, and until now the only way
+    # to argue with that constant was to try values one at a time and remember
+    # the counts. The button draws all of them at once. It marks where the user
+    # currently is and suggests nothing -- see
+    # ``review.domain.threshold_sweep`` for the measurement behind that.
+    sweep_btn = QPushButton("Threshold curve…", seg_btn_row)
+    sweep_btn.setToolTip(
+        "Segment the displayed frame at a range of probability thresholds and "
+        "plot how many nuclei each one finds.\n"
+        "Slower than Segment — it runs the detector across the whole range — "
+        "and it suggests no threshold: the curve is the answer.")
+    sweep_stop_btn = QPushButton("Stop", seg_btn_row)
+    sweep_stop_btn.setToolTip(
+        "Stop after the threshold now running. What was measured so far is "
+        "still plotted.")
+    sweep_stop_btn.setVisible(False)
+
+    # Button state is the controller's, through ``_set_sweep_buttons``: it is
+    # the half that knows when the sweep actually ended, and it has to run on
+    # the failure and no-frame paths too.
+    sweep_btn.clicked.connect(lambda _=False: playground_sweep_now(ctx))
+    sweep_stop_btn.clicked.connect(lambda _=False: playground_sweep_stop(ctx))
+    sbl.addWidget(sweep_btn)
+    sbl.addWidget(sweep_stop_btn)
+
+    # The second threshold this tab helps choose, beside the first. The
+    # Analyze form's "Out of focus below" box is blank by default and nothing
+    # in this application can fill it -- the automatic rule was measured and
+    # refused (review.domain.focus_distribution) -- so this button is where
+    # the number comes from, exactly as the curve beside it is where the
+    # probability threshold's number comes from.
+    #
+    # Not given a Stop twin: the sweep is M segmentations and runs for
+    # minutes, while this is one measurement per outline over a mask that
+    # already exists.
+    focus_btn = QPushButton("Focus distribution…", seg_btn_row)
+    focus_btn.setToolTip(
+        "Measure every outline on screen and plot how sharp each cell is, "
+        "with your own cut marked and a live count of what it keeps and "
+        "drops.\n"
+        "This is one source for the Analyze form's \u201cOut of focus "
+        "below\u201d number — nothing can guess it, because it depends "
+        "mostly on the microscope rather than on the plate. Clipping is what "
+        "breaks that: a saturated frame reads sharper than it is.\n"
+        "It suggests no threshold: the distribution is the answer.")
+    focus_btn.clicked.connect(lambda _=False: playground_focus_now(ctx))
+    sbl.addWidget(focus_btn)
+    app._playground_focus_btn = focus_btn
+    app._playground_sweep_btn = sweep_btn
+    app._playground_sweep_stop_btn = sweep_stop_btn
+    # Registered so ``_set_sweep_buttons`` can grey it out for the length of a
+    # sweep. Segment and the sweep reach the session's one StarDist model, and
+    # nothing about either looked at the other's running flag — so a Segment
+    # press during a sweep started a second thread into the same object, which
+    # on the first load of a session means both threads racing to fetch the
+    # weights under a cross-process lock that cannot see itself. The model is
+    # serialised in ``services.frame_preview`` regardless; this is what stops
+    # the user ever waiting on that.
+    app._playground_segment_btn = seg_btn
+
     sbl.addStretch(1)
     cl.addWidget(seg_btn_row)
 

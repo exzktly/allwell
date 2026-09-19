@@ -25,10 +25,15 @@ import pandas as pd
 
 from util.fov import sort_key as fov_sort_key
 from pipeline.threshold_optimize import (  # noqa: F401 (re-export)
+    DEFAULT_MAX_CANDIDATES,
+    DEFAULT_SPECIFICITY_WEIGHT,
+    MAX_SWEEP_STEPS,
     ThreshFracOptimizationResult,
     best_from_curves as _best_from_curves,
+    floor_unsupported as _floor_unsupported,
     frac_curve,
     fraction_on_for_threshold,
+    optimize_between_populations as _optimize_between_populations,
     relative_gap as _relative_gap,
     sweep_thresholds as _sweep_thresholds,
 )
@@ -309,20 +314,18 @@ def scan_fc_fractions(
                 op_ctrl=op_ctrl, op_t0=op_t0, order=order,
             )
 
-    # Statistical support, on exactly the branch where it is defined. When no
-    # fold change is applied these fractions *are* ``k / n`` and both ``n``s are
-    # right here, so the objective is the pipeline's objective — smoothed the
-    # way ``optimize_between_populations`` smooths it, which is what makes this
-    # module's opening claim ("the two cannot give different answers on the same
-    # data") true rather than aspirational. It was unsmoothed unconditionally,
-    # and this is the *default* path: the controller leaves every fold-change
-    # array ``None`` unless the user picks one. Measured on two overlapping
-    # 300-cell populations the two objectives chose grid points 1104 and 1209;
-    # on a skewed lognormal pair, 1231 and 2366.
+    # The fold-changed branch is unsmoothed, and not by omission: its fractions
+    # have been through ``scale_bar_value`` and are no longer ``k / n`` — they
+    # exceed 1 and go negative — so there is no ``k`` to add one to.
     #
-    # The fold-changed branch stays unsmoothed, and not by omission: its
-    # fractions have been through ``scale_bar_value`` and are no longer ``k / n``
-    # — they exceed 1 and go negative — so there is no ``k`` to add one to.
+    # The ``not fc_on`` branch below is smoothed, and is reached only from tests
+    # now: ``_optimize_thresh_frac_on_between_wells`` returns to
+    # ``optimize_between_populations`` before calling this when no fold change is
+    # set, and ``opt_curve_view`` re-derives that path's own curve. It is kept
+    # because the function is a public scan over two populations and answering
+    # "what is the relative gap here" differently depending on whether a caller
+    # happened to pass a control array would be a trap; the smoothing is what
+    # makes the raw answer match what the pipeline used to compute.
     if not fc_on:
         return fa, fb, _relative_gap(fa, fb,
                                      n_a=int(values_a.size), n_b=int(values_b.size))
@@ -461,9 +464,10 @@ def _optimize_thresh_frac_on_between_wells(
     channel_key: str,
     min_threshold: float,
     max_threshold: float,
-    steps: int,
+    steps: int = DEFAULT_MAX_CANDIDATES,
     ratios=None,
     timepoint=None,
+    weight: float = DEFAULT_SPECIFICITY_WEIGHT,
     ctrl_values=None,
     base_values_a=None,
     base_values_b=None,
@@ -471,25 +475,42 @@ def _optimize_thresh_frac_on_between_wells(
     op_t0: str = "ratio",
     order: str = "ctrl_first",
 ) -> ThreshFracOptimizationResult:
-    """Return the threshold maximizing the **relative** fraction-on gap:
-    ``|fraction_on(A) - fraction_on(B)| / max(fraction_on(A), fraction_on(B))``.
+    """The threshold best separating well A from well B, on one of two objectives.
 
-    The absolute gap ``|fa - fb|`` peaks wherever the populations diverge
-    *most in count* — useful when both wells share an "on" tail. But for two
-    skewed fluorescence distributions where most cells are barely-on, the
-    absolute gap stays small even where the well *ratio* differs sharply
-    (one well 5% on, the other 0.5% on is a 10× difference but only 0.045
-    in absolute terms). Normalising by the larger fraction surfaces those
-    relative differences instead, which is what a fraction-on cut is
-    supposed to discriminate. When both fractions are zero we treat the
-    relative gap as zero rather than emit ``nan``.
+    **Without fold change** — the default, and what the button does unless the
+    user picks a control or a baseline — this is
+    :func:`~pipeline.threshold_optimize.optimize_between_populations`, the same
+    call the pipeline's end-of-run control-well pass makes, so the tab and the
+    run cannot answer the same question differently. Well A is the *positive*
+    arm: the score is a lower confidence bound on ``TPR(A) - weight * FPR(B)``,
+    which is asymmetric on purpose, and two wells passed the wrong way round are
+    refused rather than silently optimised backwards.
+
+    **With fold change** the scanned fractions have been through
+    ``scale_bar_value`` and are no longer counts over a total — they exceed 1 and
+    go negative — so the confidence bound is undefined and the scan keeps the
+    relative-gap objective ``|fa-fb| / max(|fa|, |fb|)``. That objective is the
+    one with no N term, so :func:`~pipeline.threshold_optimize.floor_unsupported`
+    excludes any candidate cut that leaves neither well enough cells to judge it
+    on. A count floor is coarser than a confidence bound and is the most that can
+    be done on a metric that is no longer a proportion; the result says which
+    objective produced it.
+
+    Measured, so that the floor is not credited with more than it does: on this
+    branch the tail is mostly kept out of reach by ``best_from_curves``' tie-break
+    rather than by the floor. The relative gap ties across a long run on real
+    data and the first tied index wins, which is the lowest threshold attaining
+    the maximum and so structurally not a tail cut. Several fixtures built to
+    make the floor change the chosen threshold did not — it changed only which
+    candidates were scored. The floor is the backstop for the case the tie-break
+    does not cover, a tail that is the unique maximum.
 
     ``timepoint`` is an optional ``(kind, value)`` token (see
     :func:`_distinct_timepoints`); when given, only rows at that timepoint
-    contribute to each well's fraction-on.
+    contribute to each well's fraction-on. ``steps`` caps the candidate grid — it
+    is a ceiling on resolution, not the resolution itself, which comes from the
+    data.
     """
-    thresholds = _sweep_thresholds(min_threshold, max_threshold, steps)
-
     values_a = _valid_values_for_channel(df_a, channel_key, ratios, timepoint)
     values_b = _valid_values_for_channel(df_b, channel_key, ratios, timepoint)
     if values_a.size == 0:
@@ -497,9 +518,24 @@ def _optimize_thresh_frac_on_between_wells(
     if values_b.size == 0:
         raise ValueError("Well B has no valid finite values for the selected channel.")
 
-    # Raw fraction-on scan, optionally fold-change-adjusted at each threshold
-    # (control / baseline value arrays supplied by the caller). With all None
-    # this is the original raw-fraction relative-gap scan.
+    fold_change_on = (ctrl_values is not None or base_values_a is not None
+                      or base_values_b is not None)
+    if not fold_change_on:
+        return _optimize_between_populations(
+            values_a, values_b,
+            min_threshold=min_threshold, max_threshold=max_threshold,
+            max_candidates=int(steps), weight=weight,
+        )
+
+    # ``steps`` is a CEILING on the candidate count, and this branch's grid is a
+    # linspace with its own hard cap, so the ceiling is clamped rather than
+    # rejected. Without the clamp the field's own default (DEFAULT_MAX_CANDIDATES,
+    # 20001) exceeded MAX_SWEEP_STEPS and every fold-change optimise raised
+    # "steps must be 10,001 or fewer" — a limit the user never chose, named after
+    # a field the window no longer has. Every fold-change test passed an explicit
+    # small ``steps``, so none of them saw it.
+    thresholds = _sweep_thresholds(
+        min_threshold, max_threshold, min(int(steps), MAX_SWEEP_STEPS))
     fa, fb, diffs = scan_fc_fractions(
         thresholds, values_a, values_b,
         ctrl_values=ctrl_values,
@@ -507,8 +543,59 @@ def _optimize_thresh_frac_on_between_wells(
         base_values_b=base_values_b,
         op_ctrl=op_ctrl, op_t0=op_t0, order=order,
     )
-    return _best_from_curves(thresholds, fa, fb, diffs,
-                             n_a=values_a.size, n_b=values_b.size)
+    scores, floor = _floor_unsupported(diffs, values_a, values_b, thresholds)
+    if not np.isfinite(scores).any() or float(np.nanmax(scores)) <= 0.0:
+        raise ValueError(
+            "no scanned threshold separates the two wells' fold-change-adjusted "
+            "fraction-on. Adjust Min/Max to span the data, or pick different "
+            "wells, timepoint or fold-change settings."
+        )
+    return _best_from_curves(thresholds, fa, fb, scores,
+                             n_a=values_a.size, n_b=values_b.size,
+                             support_floor=floor)
+
+
+def format_optimizer_result(result, well_a: str, well_b: str) -> str:
+    """The optimizer's one-line readout. Pure: a result and two names in.
+
+    Reports the cut, what it leaves standing in each well as a **count over the
+    well total** rather than a bare percentage, and the score — named, because
+    the two objectives produce numbers on different scales and a reader cannot
+    tell 0.87 of one from 0.87 of the other.
+
+    The plateau is stated whenever there is one. A clean assay has a real
+    plateau, the empty valley between the two populations, and every cut inside
+    it classifies identically; printing one number out of a run of two hundred
+    as though the scan had found a peak is the false precision this line exists
+    to avoid.
+    """
+    from pipeline.threshold_optimize import OBJECTIVE_SUPPORTED
+
+    if result.objective == OBJECTIVE_SUPPORTED:
+        arms = (f"{well_a} {result.k_a:,}/{result.n_a:,} ON ({100 * result.frac_a:.1f}%), "
+                f"{well_b} {result.k_b:,}/{result.n_b:,} ON ({100 * result.frac_b:.2f}%)")
+        score = (f"separation \u2265 {result.difference:.3f} at 95% confidence "
+                 f"(Youden J = {result.youden:.3f}")
+        score += ")" if result.weight == 1.0 else f", weight {result.weight:g})"
+    else:
+        arms = (f"{well_a} adjusted fraction-on {result.frac_a:.3f} (n={result.n_a:,}), "
+                f"{well_b} {result.frac_b:.3f} (n={result.n_b:,})")
+        score = f"relative gap {result.difference:.3f} (fold-change scan)"
+    line = f"threshold = {result.threshold:.6g}; {arms}; {score}."
+    if result.tie_count > 1:
+        shape = ("a contiguous run spanning"
+                 if result.tie_contiguous else
+                 "scattered, not adjacent on the grid, across")
+        # Which point of the run was taken differs by objective, and saying the
+        # wrong one is worse than saying nothing: the bounded path reports the
+        # midpoint of the run (``plateau_pick``) while the fold-change path
+        # reports ``np.argmax``'s first index, which is the run's bottom edge.
+        picked = ("the midpoint of the run around the best is what was applied"
+                  if result.objective == OBJECTIVE_SUPPORTED else
+                  "the lowest of them is what was applied")
+        line += (f" {result.tie_count:,} cuts scored that same best, {shape} "
+                 f"{result.tie_span:.4g} intensity unit(s); {picked}.")
+    return line
 
 
 def _cell_gating_first_frame_rows(df) -> tuple:

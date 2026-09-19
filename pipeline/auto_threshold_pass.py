@@ -24,7 +24,7 @@ import json
 import logging
 from pathlib import Path
 
-from pipeline.auto_threshold import estimate_thresholds_from_outputs
+from pipeline.auto_threshold import estimate_thresholds_from_outputs, no_threshold_reason
 from pipeline.threshold_optimize import estimate_thresholds_from_controls
 from util.json_write import write_json_atomic
 
@@ -148,11 +148,15 @@ def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list
         # success that happened to produce one value. That is exactly how the
         # reported run looked.
         if non_seg and not estimated:
+            # The reason is chosen by the mode that actually ran. The two fail
+            # for unrelated reasons and only one of them reads an output
+            # archive, so naming the Otsu reason under the control method sent
+            # the user to inspect archives nothing had opened -- a failure
+            # reported as a different failure.
             log.warning(
-                "Auto-threshold: no threshold could be estimated for any of %s. "
-                "The per-well output archives yielded no usable image pairs — "
-                "see the per-well lines above for why.",
-                ", ".join(c.upper() for c in non_seg),
+                "Auto-threshold: no threshold could be estimated for any of "
+                "%s. %s", ", ".join(c.upper() for c in non_seg),
+                no_threshold_reason(has_control_wells=bool(pos and neg)),
             )
         if written:
             log.info(

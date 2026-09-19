@@ -315,6 +315,26 @@ def _otsu_per_channel(channels, per_channel, attempted, decode_failed, log
     return thresholds
 
 
+def no_threshold_reason(*, has_control_wells: bool) -> str:
+    """Why the end-of-run pass produced nothing, in the mode it actually ran.
+
+    The two modes fail for unrelated reasons and only one of them reads an
+    output archive. Naming the Otsu reason under the control method sends the
+    user to inspect archives that nothing opened — the same substitution this
+    codebase treats as a defect everywhere else, a failure reported as a
+    different failure. The control method's own failures are per channel and
+    already in the log; the likeliest by far is that the two wells do not
+    separate, which its predecessor could not report at all because it always
+    returned a number.
+    """
+    if has_control_wells:
+        return ("None of the per-channel comparisons between the two control "
+                "wells succeeded — see the per-channel lines above, which name "
+                "the reason for each.")
+    return ("The per-well output archives yielded no usable image pairs — see "
+            "the per-well lines above for why.")
+
+
 def estimate_thresholds_from_outputs(
     output_dir: Path,
     *,

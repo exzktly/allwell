@@ -35,7 +35,9 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from core.safe import swallowed
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
+from util.schema_infer import infer_from_dir
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
 from widgets.schema_picker import SchemaPicker
@@ -45,7 +47,9 @@ from datasets.core.dataset_paths import (
     destination_is_complete_dataset,
 )
 from datasets.import_loose.dashboard import ImportLooseDashboard
-from datasets.import_loose.import_loose_compute import scan_folder
+from datasets.import_loose.import_loose_compute import (
+    detection_for_grouping, scan_folder,
+)
 
 
 #: A marker this tool never writes. The shared destination rule exempts a folder
@@ -165,8 +169,10 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         # against Analyze's dropdowns — meant the user typed by hand what they
         # pick from a list one pane over, with no field vocabulary in front of
         # them and nothing to say which spellings the pipeline understands.
-        self._schema_picker = SchemaPicker(self)
+        self._schema_picker = SchemaPicker(
+            self, detect_label="Detect from filenames")
         self._schema_picker.changed.connect(self._on_readout_input_changed)
+        self._schema_picker.detectRequested.connect(self._detect_schema)
         outer.addWidget(self._schema_picker)
 
         self._schema_err = QLabel("", self)
@@ -430,6 +436,37 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         self.dashboard.set_wells(preview.wells)
         self.dashboard.set_headline(f"Ready — {len(preview.wells)} well(s) to zip.")
         self.dashboard.setVisible(True)
+
+    def _detect_schema(self) -> None:
+        """Fill the schema picker from the loose folder's own filenames.
+
+        The same inference the Analyze pane runs when a folder is picked, which
+        this page never called even though it parses the very filenames Analyze
+        will go on to read. The *verdict* differs, though, and
+        :func:`~datasets.import_loose.import_loose_compute.detection_for_grouping`
+        owns that difference: grouping by well needs a well slot and nothing
+        else, where Analyze also needs a channel.
+        """
+        source = self.source_path().strip()
+        if not source:
+            self._schema_picker.setDetection(
+                "Choose a loose-TIF folder first — there are no filenames to "
+                "read.", problem=True)
+            return
+        try:
+            guess = infer_from_dir(source)
+        except Exception:
+            swallowed()  # a scan must never break the page
+            self._schema_picker.setDetection(
+                "That folder could not be read, so no layout was detected.",
+                problem=True)
+            return
+        verdict = detection_for_grouping(guess)
+        if verdict.apply:
+            self._schema_picker.setSeparator(guess.separator)
+            self._schema_picker.setSchema(guess.schema_str)
+        self._schema_picker.setDetection(verdict.message, problem=verdict.problem)
+        self._on_readout_input_changed()
 
     def _on_source_changed(self) -> None:
         set_variant(self._run_btn, "primary")

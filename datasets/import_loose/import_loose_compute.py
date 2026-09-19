@@ -287,3 +287,56 @@ def group_files_by_well(
     schema = parse_schema(filename_schema)
     result = _walk(Path(search_dir), schema=schema, sep=filename_sep, recursive=recursive)
     return result.by_well
+
+
+@dataclass(frozen=True)
+class SchemaDetection:
+    """What to do with a schema guess on this page, and what to say about it.
+
+    Pure, so the rule can be tested without building the page. ``apply`` is
+    whether the guess is good enough to write into the picker; ``message`` is
+    the sentence shown beneath it; ``problem`` styles that sentence as a refusal
+    rather than as a quieter success.
+    """
+
+    apply: bool
+    message: str
+    problem: bool
+
+
+def detection_for_grouping(guess) -> SchemaDetection:
+    """Judge an inferred schema *for this page's purpose*, which is not Analyze's.
+
+    Analyze applies a guess only when it is ``confident`` — a well slot **and** a
+    channel slot — because it has to name the channels it will quantify, and a
+    schema with ``ignore`` where the channel belongs fails its own validator.
+    This page only ever groups files by well. A single-channel plate carries a
+    constant channel token, so no channel slot can be placed and the guess comes
+    back not confident; refusing it here would decline a layout that groups
+    perfectly well, for a reason belonging to a different page.
+
+    So the test here is the well slot alone, and a guess that reaches it without
+    a channel is applied with the difference stated rather than hidden.
+    """
+    if guess is None:
+        return SchemaDetection(
+            False,
+            "No filename layout could be detected in that folder — the schema "
+            "below is unchanged.",
+            True,
+        )
+    if "well" not in getattr(guess, "fields", []):
+        return SchemaDetection(
+            False,
+            f"{guess.summary()} No well position was identified, so these files "
+            f"cannot be grouped by well and the schema below is unchanged.",
+            True,
+        )
+    if "channel" in guess.fields:
+        return SchemaDetection(True, guess.summary(), False)
+    return SchemaDetection(
+        True,
+        f"{guess.summary()} No channel position was identified, which grouping "
+        f"by well does not need — but Analyze will ask for one.",
+        False,
+    )

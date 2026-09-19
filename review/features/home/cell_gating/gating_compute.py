@@ -25,10 +25,14 @@ import pandas as pd
 
 from util.fov import sort_key as fov_sort_key
 from pipeline.threshold_optimize import (  # noqa: F401 (re-export)
+    DEFAULT_MAX_CANDIDATES,
+    DEFAULT_SPECIFICITY_WEIGHT,
     ThreshFracOptimizationResult,
     best_from_curves as _best_from_curves,
+    floor_unsupported as _floor_unsupported,
     frac_curve,
     fraction_on_for_threshold,
+    optimize_between_populations as _optimize_between_populations,
     relative_gap as _relative_gap,
     sweep_thresholds as _sweep_thresholds,
 )
@@ -461,9 +465,10 @@ def _optimize_thresh_frac_on_between_wells(
     channel_key: str,
     min_threshold: float,
     max_threshold: float,
-    steps: int,
+    steps: int = DEFAULT_MAX_CANDIDATES,
     ratios=None,
     timepoint=None,
+    weight: float = DEFAULT_SPECIFICITY_WEIGHT,
     ctrl_values=None,
     base_values_a=None,
     base_values_b=None,
@@ -471,25 +476,33 @@ def _optimize_thresh_frac_on_between_wells(
     op_t0: str = "ratio",
     order: str = "ctrl_first",
 ) -> ThreshFracOptimizationResult:
-    """Return the threshold maximizing the **relative** fraction-on gap:
-    ``|fraction_on(A) - fraction_on(B)| / max(fraction_on(A), fraction_on(B))``.
+    """The threshold best separating well A from well B, on one of two objectives.
 
-    The absolute gap ``|fa - fb|`` peaks wherever the populations diverge
-    *most in count* — useful when both wells share an "on" tail. But for two
-    skewed fluorescence distributions where most cells are barely-on, the
-    absolute gap stays small even where the well *ratio* differs sharply
-    (one well 5% on, the other 0.5% on is a 10× difference but only 0.045
-    in absolute terms). Normalising by the larger fraction surfaces those
-    relative differences instead, which is what a fraction-on cut is
-    supposed to discriminate. When both fractions are zero we treat the
-    relative gap as zero rather than emit ``nan``.
+    **Without fold change** — the default, and what the button does unless the
+    user picks a control or a baseline — this is
+    :func:`~pipeline.threshold_optimize.optimize_between_populations`, the same
+    call the pipeline's end-of-run control-well pass makes, so the tab and the
+    run cannot answer the same question differently. Well A is the *positive*
+    arm: the score is a lower confidence bound on ``TPR(A) - weight * FPR(B)``,
+    which is asymmetric on purpose, and two wells passed the wrong way round are
+    refused rather than silently optimised backwards.
+
+    **With fold change** the scanned fractions have been through
+    ``scale_bar_value`` and are no longer counts over a total — they exceed 1 and
+    go negative — so the confidence bound is undefined and the scan keeps the
+    relative-gap objective ``|fa-fb| / max(|fa|, |fb|)``. That objective is the
+    one with no N term, so :func:`~pipeline.threshold_optimize.floor_unsupported`
+    excludes any candidate cut that leaves neither well enough cells to judge it
+    on. The floor is coarser than a confidence bound and is the most that can be
+    done on a metric that is no longer a proportion; the result says which
+    objective produced it.
 
     ``timepoint`` is an optional ``(kind, value)`` token (see
     :func:`_distinct_timepoints`); when given, only rows at that timepoint
-    contribute to each well's fraction-on.
+    contribute to each well's fraction-on. ``steps`` caps the candidate grid — it
+    is a ceiling on resolution, not the resolution itself, which comes from the
+    data.
     """
-    thresholds = _sweep_thresholds(min_threshold, max_threshold, steps)
-
     values_a = _valid_values_for_channel(df_a, channel_key, ratios, timepoint)
     values_b = _valid_values_for_channel(df_b, channel_key, ratios, timepoint)
     if values_a.size == 0:
@@ -497,9 +510,16 @@ def _optimize_thresh_frac_on_between_wells(
     if values_b.size == 0:
         raise ValueError("Well B has no valid finite values for the selected channel.")
 
-    # Raw fraction-on scan, optionally fold-change-adjusted at each threshold
-    # (control / baseline value arrays supplied by the caller). With all None
-    # this is the original raw-fraction relative-gap scan.
+    fold_change_on = (ctrl_values is not None or base_values_a is not None
+                      or base_values_b is not None)
+    if not fold_change_on:
+        return _optimize_between_populations(
+            values_a, values_b,
+            min_threshold=min_threshold, max_threshold=max_threshold,
+            max_candidates=int(steps), weight=weight,
+        )
+
+    thresholds = _sweep_thresholds(min_threshold, max_threshold, int(steps))
     fa, fb, diffs = scan_fc_fractions(
         thresholds, values_a, values_b,
         ctrl_values=ctrl_values,
@@ -507,8 +527,16 @@ def _optimize_thresh_frac_on_between_wells(
         base_values_b=base_values_b,
         op_ctrl=op_ctrl, op_t0=op_t0, order=order,
     )
-    return _best_from_curves(thresholds, fa, fb, diffs,
-                             n_a=values_a.size, n_b=values_b.size)
+    scores, floor = _floor_unsupported(diffs, values_a, values_b, thresholds)
+    if not np.isfinite(scores).any() or float(np.nanmax(scores)) <= 0.0:
+        raise ValueError(
+            "no scanned threshold separates the two wells' fold-change-adjusted "
+            "fraction-on. Adjust Min/Max to span the data, or pick different "
+            "wells, timepoint or fold-change settings."
+        )
+    return _best_from_curves(thresholds, fa, fb, scores,
+                             n_a=values_a.size, n_b=values_b.size,
+                             support_floor=floor)
 
 
 def _cell_gating_first_frame_rows(df) -> tuple:

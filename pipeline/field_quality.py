@@ -96,6 +96,15 @@ METRIC_KEYS = (
 #: Metrics that describe how the picture was **taken**. These are expected to be
 #: uniform across a plate by design, so a field far from the plate's own median
 #: is evidence of an acquisition fault.
+#:
+#: ``focus`` stays here now that it is absolutely comparable, and the two
+#: readings are complementary rather than redundant. The absolute cut (Review's
+#: per-cell focus gate) answers "is this soft?"; the plate-wide robust z here
+#: answers "is this field unlike its plate?", which catches a field that is
+#: *worse than its neighbours* while still above anyone's threshold — and which
+#: needs no threshold to be chosen at all, so it works on a plate whose user
+#: has not set one. What the z cannot see is a plate that is uniformly soft;
+#: that is exactly what the absolute cut is for, and why both exist.
 ACQUISITION_METRICS = ("focus", "sat_frac", "dyn_range")
 
 #: Metrics that describe **what was in the well**. A cytotoxic compound drops

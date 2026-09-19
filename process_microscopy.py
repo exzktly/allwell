@@ -999,23 +999,36 @@ def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
     """Load the nuclear frame + every fluor channel; verify shape consistency.
 
     Returns ``(nir_raw, fluor_raws, acquisition)``. *acquisition* holds the
-    three metrics that can only be read **here**, and the two reasons are
+    two metrics that can only be read **here**, and the two reasons are
     different:
 
     * ``sat_frac`` needs the camera's integer ceiling, which
       :func:`pipeline.io.load_2d_gray` erases with its unconditional
       ``float32`` cast — so this uses the sibling that hands the ceiling back.
-    * ``focus`` and ``dyn_range`` need the frame **before correction**.
+    * ``dyn_range`` needs the frame **before correction**.
       :func:`_correct_image_group` divides by an illumination field and
-      subtracts a background, and both reshape local variance — which is
-      exactly what a focus metric reads. Measured after correction the number
-      would describe the correction as much as the acquisition.
+      subtracts a background, and both reshape the frame's spread, so measured
+      afterwards the number would describe the correction as much as the
+      acquisition.
 
-    Costed rather than assumed: the three together are ~0.4 s on a 2048²
-    frame against several seconds of segmentation for the same group, so
-    ~10 % of a run. There is no flag to switch them off; a quality record
-    that exists only when someone remembered to ask for it is not one a
-    plate-wide score can rely on.
+    **Focus is deliberately not among them any more.** It used to be, as a
+    frame-level statistic that had to be read here for the same reason
+    ``dyn_range`` does. It is now measured at each nucleus's own outline
+    (:func:`pipeline.field_quality.edge_focus`), which needs the segmentation
+    and therefore happens in :func:`_quantify_image_group` — on the
+    **corrected** frame the labels were computed from, so the outline the
+    estimator reads is the outline that was segmented. The correction
+    concern does not transfer: an edge's width is not something a flat-field
+    division or a background subtraction changes, which is the same property
+    that makes the measurement comparable between plates at all.
+
+    Costed rather than assumed: these two together are well under the ~0.4 s
+    the three used to take on a 2048² frame, against several seconds of
+    segmentation for the same group. There is no flag to switch them off; a
+    quality record that exists only when someone remembered to ask for it is
+    not one a plate-wide score can rely on. (The per-cell focus column *does*
+    have such a flag, and it is on by default for the same reason —
+    ``--no_focus_metric``.)
     """
     log.info("Processing %s  (%d fluor channel(s): %s)",
              nuclear_path.name, len(fluor_paths), ", ".join(fluor_tokens))

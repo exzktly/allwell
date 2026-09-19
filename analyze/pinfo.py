@@ -25,7 +25,7 @@ from core.safe import swallowed
 
 
 
-def _positive_or_none(value):
+def _positive_or_none(value) -> object | None:
     """*value* when it is a number above zero, else ``None``.
 
     The sidecar spells "unset" as ``0.0`` for the numeric QC settings, which is
@@ -70,6 +70,40 @@ class AnalyzePipelineInfoMixin:
         except Exception as exc:  # never crash the slot
             QMessageBox.warning(self, "Partial load",
                                 f"Some fields could not be restored:\n{exc}")
+
+    def _apply_focus_settings(self, d: dict, chk) -> None:
+        """Restore the two per-cell focus controls from a flattened sidecar.
+
+        Its own method rather than four more lines in ``_apply_pipeline_info``
+        because neither half of it fits that function's ``s`` / ``chk``
+        helpers, and because the restore pushed that function over the
+        complexity ratchet — which the ratchet asks to be answered with an
+        extraction rather than a raised number.
+
+        **The measurement arrives spelled two ways.** A v2+ sidecar's
+        ``execution_options`` is a ``vars(args)`` snapshot, so it carries the
+        parser's own destination — the *negative* ``no_focus_metric`` — while
+        an older sidecar's ``qc_options`` carries the positive
+        ``measure_focus`` the flattener builds. Reading only one of them
+        restores nothing for half the datasets in existence, and which half
+        depends on when the run happened.
+
+        **The threshold is set rather than skipped**, which is the one place
+        this restore departs from ``s()``. ``0.0`` means "no cut stated" in
+        both blocks, and skipping a stated zero would leave the *previous*
+        dataset's cut on screen for a dataset that never had one — a number
+        the form would then record into the next run. A sidecar carrying the
+        key is making a statement about this dataset; one that predates the
+        column makes none, and the box keeps whatever it holds.
+        """
+        nfm = d.get("no_focus_metric")
+        if nfm is not None and hasattr(self, "_focus_metric_cb"):
+            self._focus_metric_cb.setChecked(not bool(nfm))
+        else:
+            chk("_focus_metric_cb", d.get("measure_focus"))
+        if "focus_min" in d and hasattr(self, "_focus_min_edit"):
+            cut = _positive_or_none(d.get("focus_min"))
+            self._focus_min_edit.setText("" if cut is None else str(cut))
 
     @staticmethod
     def _pinfo_flat(info: dict) -> dict:
@@ -260,29 +294,7 @@ class AnalyzePipelineInfoMixin:
         s("_qc_min_area_edit", d.get("qc_min_area"))
         s("_qc_max_area_edit", d.get("qc_max_area"))
         s("_qc_min_solidity_edit", d.get("qc_min_solidity"))
-        # Per-cell focus, which arrives spelled two ways. A v2+ sidecar's
-        # ``execution_options`` is a ``vars(args)`` snapshot, so it carries the
-        # parser's own destination -- the NEGATIVE ``no_focus_metric`` -- while
-        # an older sidecar's ``qc_options`` carries the positive
-        # ``measure_focus`` the flattener builds. Reading only one of them
-        # restores nothing for half the datasets in existence, and which half
-        # depends on when the run happened.
-        nfm = d.get("no_focus_metric")
-        if nfm is not None and hasattr(self, "_focus_metric_cb"):
-            self._focus_metric_cb.setChecked(not bool(nfm))
-        else:
-            chk("_focus_metric_cb", d.get("measure_focus"))
-        # The threshold is the same key in both blocks, and 0.0 means "none
-        # stated" in both. It is set rather than skipped, which is the one
-        # place this restore departs from ``s()``: a sidecar that carries the
-        # key is making a statement about this dataset, and skipping a stated
-        # zero would leave the *previous* dataset's cut on screen for a
-        # dataset that never had one -- a number the form would then record
-        # into the next run. Absent entirely (a sidecar predating the column)
-        # still means "no statement", and the box keeps whatever it holds.
-        if "focus_min" in d and hasattr(self, "_focus_min_edit"):
-            _cut = _positive_or_none(d.get("focus_min"))
-            self._focus_min_edit.setText("" if _cut is None else str(_cut))
+        self._apply_focus_settings(d, chk)
         s("_tophat_radius_nir_edit", d.get("tophat_radius_nir"))
         s("_tophat_radius_fluor_edit", d.get("tophat_radius_fluor"))
         chk("_no_tophat_nir_cb", d.get("no_tophat_nir"))

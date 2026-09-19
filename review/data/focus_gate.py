@@ -48,9 +48,14 @@ domain's parameters and nothing above either.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from review.data.cache_projectors import (
     drop_verdict_column, project_verdict_column,
 )
+
+if TYPE_CHECKING:  # annotations only — this module must not import pandas at
+    import pandas as pd  # noqa: F401   module scope (the data layer is light)
 
 #: The column this writes. Named like its four siblings (``QC_Pass``,
 #: ``Crop_Pass``, ``Field_Pass``) because it is the same kind of thing: a
@@ -75,7 +80,7 @@ def gate_is_on(ctx) -> bool:
     return bool(params is not None and params.focus_gate_is_active)
 
 
-def focus_values(df):
+def focus_values(df) -> "pd.Series | None":
     """The frame's focus column as floats, or ``None`` when it has none.
 
     ``None`` and an all-NaN column are different answers and both occur: the
@@ -92,7 +97,7 @@ def focus_values(df):
     return pd.to_numeric(df[FOCUS_COLUMN], errors="coerce")
 
 
-def compute_focus_pass(df, params):
+def compute_focus_pass(df, params) -> "pd.Series":
     """``1`` where a cell is usable, ``0`` where it read as soft.
 
     Pure function of the frame and *params*, so a test can ask it directly.

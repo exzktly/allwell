@@ -186,3 +186,191 @@ def test_the_funnel_label_reports_real_numbers_after_a_build(loaded_app, qtbot):
     text = ctx.widgets.get("_cell_gating_funnel_label").text()
     assert "segmented cells" in text
     assert "QC debris gate" in text
+
+
+def test_pressing_optimize_writes_the_cutoff_the_scan_chose(loaded_app, qtbot,
+                                                            monkeypatch):
+    """The button, pressed, end to end — not the helper underneath it.
+
+    Eighteen files exercise the optimizer's compute layer and none of them
+    presses this button, which is the gap a callback bug lives in: the scan can
+    be perfect while the value never reaches the field the gating pass reads.
+    So this drives the real widgets — set the combos, type the range, click —
+    and asserts the ThreshFracOn edit afterwards.
+
+    The two wells' rows are substituted so the fixture's own data cannot decide
+    whether the assertion is possible. They are built to make the right and the
+    wrong answers differ: Well A is 70% responders at 1500 against a background
+    mode at 200, Well B is all background, so the cut belongs between the modes
+    and a scan that silently did nothing would leave the field at its default.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from review.features.home.cell_gating import controller as ctl
+
+    ctx = loaded_app._ctx
+    _build(ctx, qtbot)
+
+    rt = ctx.runtime.cell_gating
+    # From the combo, not from a sorted channel list: the scan reads the
+    # combo's ``currentData``, and a fixture whose alphabetically-first channel
+    # is not the combo's first one would leave this measuring nothing but its
+    # own mismatch.
+    channel = str(rt.opt_channel_combo.currentData()
+                  or rt.opt_channel_combo.currentText()).strip()
+    wells = [rt.opt_well_a_combo.itemText(i)
+             for i in range(rt.opt_well_a_combo.count())]
+    if len(wells) < 2:
+        pytest.skip("fixture has one well; the optimizer needs two")
+
+    rng = np.random.default_rng(2)
+    hot = np.concatenate([rng.lognormal(np.log(1500), 0.25, 700),
+                          rng.lognormal(np.log(200), 0.3, 300)])
+    cold = rng.lognormal(np.log(200), 0.3, 1000)
+
+    def _rows(_ctx, well):
+        values = hot if well == wells[0] else cold
+        return pd.DataFrame({
+            "area_px": [100] * len(values),
+            "Included": [1] * len(values),
+            f"{channel}_mean_intensity": values,
+        })
+
+    monkeypatch.setattr(ctl, "get_rows", _rows)
+
+    rt.opt_well_a_combo.setCurrentIndex(0)
+    rt.opt_well_b_combo.setCurrentIndex(1)
+    rt.opt_min_edit.setText("0")
+    rt.opt_max_edit.setText("5000")
+
+    edit = rt.thresh_frac_edits[channel]
+    edit.setText("0")
+    ctx.widgets.get("_cell_gating_opt_btn").click()
+
+    applied = float(edit.text())
+    assert 400.0 < applied < 1200.0, (
+        f"the button left the ON cutoff at {edit.text()!r}; the status line "
+        f"says {rt.opt_result_label.text()!r}"
+    )
+    # The readout has to carry the N, since the N is what the cut rests on.
+    status = rt.opt_result_label.text()
+    assert "/1,000 ON" in status
+    assert "95% confidence" in status
+
+
+def test_the_specificity_weight_field_reaches_the_scan(loaded_app, qtbot,
+                                                       monkeypatch):
+    """A field nothing reads is a field that lies, so press the button twice.
+
+    Raising the weight makes a cell counted ON in Well B more expensive, which
+    moves the cut up. Asserting the field exists would pass with it wired to
+    nothing; asserting that the two clicks disagree cannot.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from review.features.home.cell_gating import controller as ctl
+
+    ctx = loaded_app._ctx
+    _build(ctx, qtbot)
+
+    rt = ctx.runtime.cell_gating
+    # From the combo, not from a sorted channel list: the scan reads the
+    # combo's ``currentData``, and a fixture whose alphabetically-first channel
+    # is not the combo's first one would leave this measuring nothing but its
+    # own mismatch.
+    channel = str(rt.opt_channel_combo.currentData()
+                  or rt.opt_channel_combo.currentText()).strip()
+    wells = [rt.opt_well_a_combo.itemText(i)
+             for i in range(rt.opt_well_a_combo.count())]
+    if len(wells) < 2:
+        pytest.skip("fixture has one well; the optimizer needs two")
+
+    rng = np.random.default_rng(8)
+    hot = np.concatenate([rng.normal(1500, 200, 700), rng.normal(300, 80, 300)])
+    cold = np.concatenate([rng.normal(300, 80, 900), rng.normal(900, 150, 100)])
+
+    def _rows(_ctx, well):
+        values = hot if well == wells[0] else cold
+        return pd.DataFrame({
+            "area_px": [100] * len(values),
+            "Included": [1] * len(values),
+            f"{channel}_mean_intensity": values,
+        })
+
+    monkeypatch.setattr(ctl, "get_rows", _rows)
+    rt.opt_well_a_combo.setCurrentIndex(0)
+    rt.opt_well_b_combo.setCurrentIndex(1)
+    rt.opt_min_edit.setText("0")
+    rt.opt_max_edit.setText("3000")
+    edit = rt.thresh_frac_edits[channel]
+
+    rt.opt_weight_edit.setText("1")
+    ctx.widgets.get("_cell_gating_opt_btn").click()
+    plain = float(edit.text())
+
+    rt.opt_weight_edit.setText("10")
+    ctx.widgets.get("_cell_gating_opt_btn").click()
+    strict = float(edit.text())
+
+    assert strict > plain, (
+        f"the Spec. weight field changed nothing: {plain} then {strict}")
+
+
+def test_the_optimizer_curve_popup_draws_without_raising(loaded_app, qtbot,
+                                                         monkeypatch, caplog):
+    """The popup is built inside a ``swallowed``, so a crash in it is silent.
+
+    Every line the confidence-bounded objective added to ``opt_curve_view`` —
+    the re-derived candidate grid, the counts, the score curve — sits behind
+    that handler, and a ``raise`` as the function's first statement left the
+    suite green. So this presses the button and then reads the log the handler
+    writes to, which is the only place the failure surfaces.
+    """
+    import logging
+
+    import numpy as np
+    import pandas as pd
+
+    from review.features.home.cell_gating import controller as ctl
+
+    ctx = loaded_app._ctx
+    _build(ctx, qtbot)
+
+    rt = ctx.runtime.cell_gating
+    channel = str(rt.opt_channel_combo.currentData()
+                  or rt.opt_channel_combo.currentText()).strip()
+    wells = [rt.opt_well_a_combo.itemText(i)
+             for i in range(rt.opt_well_a_combo.count())]
+    if len(wells) < 2:
+        pytest.skip("fixture has one well; the optimizer needs two")
+
+    rng = np.random.default_rng(2)
+    hot = np.concatenate([rng.lognormal(np.log(1500), 0.25, 700),
+                          rng.lognormal(np.log(200), 0.3, 300)])
+    cold = rng.lognormal(np.log(200), 0.3, 1000)
+
+    def _rows(_ctx, well):
+        values = hot if well == wells[0] else cold
+        return pd.DataFrame({"area_px": [100] * len(values),
+                             "Included": [1] * len(values),
+                             f"{channel}_mean_intensity": values})
+
+    monkeypatch.setattr(ctl, "get_rows", _rows)
+    rt.opt_well_a_combo.setCurrentIndex(0)
+    rt.opt_well_b_combo.setCurrentIndex(1)
+    rt.opt_min_edit.setText("0")
+    rt.opt_max_edit.setText("5000")
+
+    with caplog.at_level(logging.ERROR):
+        ctx.widgets.get("_cell_gating_opt_btn").click()
+
+    failures = [r.getMessage() for r in caplog.records
+                if "optimizer curve popup failed" in r.getMessage()]
+    assert not failures, failures
+    popup = ctx.runtime.cell_gating.opt_curve_popup
+    assert popup is not None, "the validation graph was never opened"
+    # And it drew the objective that actually ran, not the other one.
+    labels = [ln.get_label() for ln in popup._fig.axes[0].lines]
+    assert "separation, 95% lower bound" in labels

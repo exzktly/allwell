@@ -1,12 +1,20 @@
 """Two-population threshold optimizer — the shared numeric core.
 
 Picks the threshold best separating two per-cell intensity populations (a
-positive- and a negative-control well) by sweeping candidates and taking the
-largest relative fraction-on gap, ``|fa-fb| / max(|fa|, |fb|)``.
+positive- and a negative-control well). The score at each candidate threshold is
+the **lower confidence bound on the separation it achieves**: Youden's
+``J = TPR - w * FPR`` over the two control wells, reduced by the width of its own
+95 % confidence interval, so a cut that looks perfect because almost nothing
+survives it scores near zero rather than near one. :func:`supported_separation`
+states the arithmetic and :func:`optimize_between_populations` the search.
 
 Shared by ``process_microscopy``'s end-of-run pass and the Cell Gating tab's
 "Optimize ThreshFracOn" button, so the two cannot give different answers on the
-same data. The pipeline may not import ``review`` (ARCHITECTURE §6.2), so
+same data *at the same specificity weight*. The pipeline always runs at
+``DEFAULT_SPECIFICITY_WEIGHT`` — it has no flag for it and no user to ask — while
+the tab exposes the field, so a user who raises it is deliberately asking the tab
+a different question from the one the run answered. The pipeline may not import
+``review`` (ARCHITECTURE §6.2), so
 the core lives here and the viewer's fold-change layer stays behind in
 ``gating_compute`` — moving it would drag ``domain.fold_change`` into the
 pipeline's import graph.
@@ -31,18 +39,53 @@ from dataclasses import dataclass
 import numpy as np
 
 
-# Defaults for callers with no user to ask (the pipeline); the GUI uses its own
-# fields. The upper bound is a percentile, not the max: a few saturated cells
-# would stretch the grid into a region where both fractions are 0 and the gap
-# can never win the argmax.
-DEFAULT_SWEEP_STEPS = 512
-SWEEP_HI_PERCENTILE = 99.5
+# Bounds on the linspace grid, which now has exactly one user: the Cell Gating
+# window's fold-change scan, whose Min/Max fields the user types. The
+# supported-separation path takes its grid from the data
+# (:func:`candidate_thresholds`) and has no step count to bound.
 MIN_SWEEP_STEPS = 2
 MAX_SWEEP_STEPS = 10001
+
+# 95 % two-sided normal quantile — the confidence level every bound in this
+# module is stated at. Written out rather than pulled from ``scipy``: the
+# pipeline ships to headless hosts with a deliberately thin dependency set.
+DEFAULT_CONFIDENCE_Z = 1.959963984540054
+
+# The significance level the separability test is run at, matching the
+# confidence the bound above is stated at. See
+# :func:`separability_critical_value`.
+DEFAULT_ALPHA = 0.05
+
+# How much a false positive in the negative control costs relative to a false
+# negative in the positive control. 1.0 is plain Youden — the textbook ROC cut
+# point, and what the pipeline uses. The Cell Gating optimizer exposes the field
+# because the right answer is a property of the assay: background-on in the
+# negative control contaminates every other well's fraction-on readout, so an
+# assay read against a near-zero baseline wants more than symmetric cost.
+DEFAULT_SPECIFICITY_WEIGHT = 1.0
+
+# A candidate threshold must leave at least this many cells above it in one of
+# the two wells to be considered at all. The confidence bound already collapses
+# where the counts are thin, so this is a floor rather than the mechanism; it
+# exists for the fold-change scan in
+# ``review.features.home.cell_gating.gating_compute``, whose adjusted fractions
+# are not ``k / n`` and therefore have no confidence bound to collapse.
+DEFAULT_MIN_SUPPORT = 10
+
+# Ceiling on the exact candidate grid. The grid is one point between each pair
+# of consecutive distinct pooled values, so a two-well pair of 100k cells yields
+# ~200k candidates; above this many the grid is subsampled evenly. Chosen so the
+# spacing is finer than any threshold a user would distinguish while the scan
+# stays well under a tenth of a second.
+DEFAULT_MAX_CANDIDATES = 20001
 
 # Significant figures kept when a threshold is stored. See
 # :func:`round_stored_threshold`.
 _STORED_SIG_FIGS = 3
+
+# The two objectives a result can carry. See ``ThreshFracOptimizationResult``.
+OBJECTIVE_SUPPORTED = "supported-separation"
+OBJECTIVE_RELATIVE_GAP = "relative-gap"
 
 
 def round_stored_threshold(value: float) -> float:
@@ -77,11 +120,28 @@ def round_stored_threshold(value: float) -> float:
 class ThreshFracOptimizationResult:
     """Best threshold scan result for a two-population fraction-on comparison.
 
-    ``tie_count`` and ``tie_span`` describe the *plateau* the reported threshold
-    was picked from: how many grid points scored the identical best objective,
-    and how wide a range of thresholds those points span. ``argmax`` returns the
-    first of them, so without these two numbers a flat run of 73 grid points is
-    presented as if the optimiser had found one answer.
+    ``objective`` names which score produced ``difference``, because the two are
+    not comparable numbers: ``OBJECTIVE_SUPPORTED`` is a lower confidence bound
+    on ``TPR - weight * FPR`` (so 0.87 means "at least 87 points of separation,
+    at 95 % confidence") while ``OBJECTIVE_RELATIVE_GAP`` is the unitless ratio
+    ``|fa-fb| / max(|fa|, |fb|)``, which reaches 1.0 on a single cell. A caller
+    printing one of these without naming which it holds is printing a number
+    nobody can interpret.
+
+    ``k_a`` / ``k_b`` are the cells left above the reported threshold in each
+    well and ``youden`` the point estimate the bound was taken from; all three
+    are ``None`` under ``OBJECTIVE_RELATIVE_GAP``, where the scanned fractions
+    have been through a fold change and are no longer counts over a total.
+    ``support_floor`` is the minimum ``max(k_a, k_b)`` a candidate had to clear
+    to be scanned at all, ``0`` when no floor was applied.
+
+    ``tie_count`` and ``tie_span`` describe the run the reported threshold was
+    picked from, and which point of it was taken depends on the objective:
+    ``OBJECTIVE_SUPPORTED`` reports the midpoint of the contiguous run
+    (:func:`plateau_pick`) while ``OBJECTIVE_RELATIVE_GAP`` reports
+    ``np.argmax``'s first index, the run's bottom edge. A caller printing one
+    number off a run of two hundred without saying so is stating a precision the
+    scan did not find.
 
     ``tie_span`` is the distance between the lowest and highest tied threshold,
     which is only the width of a *plateau* when the tied points are adjacent on
@@ -101,6 +161,12 @@ class ThreshFracOptimizationResult:
     tie_count: int = 1
     tie_span: float = 0.0
     tie_contiguous: bool = True
+    objective: str = OBJECTIVE_RELATIVE_GAP
+    k_a: int | None = None
+    k_b: int | None = None
+    youden: float | None = None
+    weight: float = DEFAULT_SPECIFICITY_WEIGHT
+    support_floor: int = 0
 
 
 def fraction_on_for_threshold(values: np.ndarray, threshold: float) -> float:
@@ -204,6 +270,7 @@ def best_from_curves(
     *,
     n_a: int,
     n_b: int,
+    support_floor: int = 0,
 ) -> ThreshFracOptimizationResult:
     """Package the argmax of *diffs* as a result, plateau included.
 
@@ -238,26 +305,313 @@ def best_from_curves(
         tie_count=int(tied.size),
         tie_span=float(tied.max() - tied.min()) if tied.size else 0.0,
         tie_contiguous=contiguous,
+        objective=OBJECTIVE_RELATIVE_GAP,
+        support_floor=int(support_floor),
     )
 
 
-def sweep_bounds(*populations: np.ndarray) -> tuple[float, float]:
-    """``(lo, hi)`` sweep bounds from the pooled *populations*.
+# ── The supported-separation objective ───────────────────────────────────────
+#
+# What a threshold is actually being asked for here is a classifier: cells above
+# it are called ON, and the two control wells are the labelled examples. The
+# quality of that classifier at a candidate cut is its true-positive rate in the
+# positive control against its false-positive rate in the negative one, and the
+# standard summary of the pair is Youden's ``J = TPR - FPR`` — the height of the
+# ROC curve above the diagonal, and equivalently the Kolmogorov-Smirnov distance
+# between the two intensity distributions.
+#
+# ``J`` on its own is a point estimate from two binomial samples, and the whole
+# defect being fixed here is a score that ignores how many cells it was measured
+# on. So the score is not ``J`` but a **lower confidence bound** on it. Where the
+# counts are large the bound sits just under the estimate and the two agree;
+# where a cut has thinned one arm to a handful of cells the interval swallows the
+# estimate and the score collapses. No separate penalty term, no tuning constant:
+# the uncertainty in the measurement is the penalty.
 
-    ``lo`` is the pooled minimum, not 0.0 — channels sit on a background offset,
-    and starting at zero wastes half the grid where both fractions are 1.0.
-    Returns a degenerate ``(lo, lo)`` when there is no spread to scan.
+
+def wilson_bounds(k, n: int, z: float = DEFAULT_CONFIDENCE_Z):
+    """``(lo, hi)`` Wilson score interval for ``k / n``. Vectorised over *k*.
+
+    Wilson rather than the textbook ``p ± z·sqrt(p(1-p)/n)`` because this
+    objective lives or dies at ``k = 0`` and ``k = n``, where the Wald standard
+    error is exactly zero and would report a threshold that let no negative-
+    control cell through as having *no* uncertainty at all — which is the
+    arithmetic behind the bug this module is being rewritten for. The Wilson
+    interval is derived by inverting the score test instead, so it keeps a
+    sensible width at both ends: ``0 / 100000`` carries an upper bound of
+    ~3.8e-5 rather than 0.
+
+    *n* of zero returns ``(0, 1)`` — no information, the widest honest answer.
+    """
+    k = np.asarray(k, dtype=float)
+    n = float(n)
+    if n <= 0:
+        return np.zeros_like(k), np.ones_like(k)
+    p = k / n
+    denom = 1.0 + z * z / n
+    centre = (p + z * z / (2.0 * n)) / denom
+    half = (z / denom) * np.sqrt(p * (1.0 - p) / n + z * z / (4.0 * n * n))
+    return np.clip(centre - half, 0.0, 1.0), np.clip(centre + half, 0.0, 1.0)
+
+
+def supported_separation(
+    k_pos, n_pos: int, k_neg, n_neg: int, *,
+    weight: float = DEFAULT_SPECIFICITY_WEIGHT,
+    z: float = DEFAULT_CONFIDENCE_Z,
+):
+    """Lower confidence bound on ``TPR - weight * FPR``, per candidate threshold.
+
+    ``k_pos`` / ``k_neg`` are the cells above the candidate in the positive and
+    negative control; ``n_pos`` / ``n_neg`` the two well totals. Vectorised over
+    the candidate axis; returns one score per candidate.
+
+    The bound is Newcombe's hybrid-score method for the difference of two
+    independent proportions: take each arm's Wilson interval and combine the
+    distances that move the difference downward,
+
+        lcb = (p1 - w·p2) - sqrt( (p1 - l1)² + (w·(u2 - p2))² )
+
+    where ``(l1, ·)`` bounds the positive arm and ``(·, u2)`` the negative one.
+    Newcombe rather than a pooled normal approximation for the same reason
+    :func:`wilson_bounds` is used at all: the method is built to stay honest when
+    a proportion sits against 0 or 1, which is exactly where a fraction-on cut
+    spends its time.
+
+    *weight* scales the false-positive arm, in the estimate and in its
+    uncertainty alike — a cost this large on the error rate is a cost that large
+    on being wrong about the error rate. ``1.0`` is plain Youden.
+
+    **What this buys over the point estimate.** The numbers are pinned by
+    ``tests/test_threshold_optimize.py::test_the_score_falls_as_the_cells_behind_it_run_out``
+    rather than only stated here, since a figure in a docstring is not
+    re-measured when the code moves under it. In summary: on a threshold holding
+    ten positive cells out of 100,000 against zero negative ones the score is
+    4.0e-5 — near zero mostly because the true-positive rate is 1e-4, with the
+    negative arm's Wilson upper bound accounting for about a quarter of the
+    reduction rather than all of it — against 0.54 at a cut holding 60,000
+    against 5,000.
+
+    This is the *selection* score and not a separability test. Whether the two
+    wells differ at all is asked once, before the argmax, by
+    :func:`separability_critical_value` — because the maximum of ten thousand
+    per-candidate bounds clears zero on noise about half the time, and no
+    property of this function fixes that.
+    """
+    n_pos = int(n_pos)
+    n_neg = int(n_neg)
+    w = float(weight)
+    p1 = np.asarray(k_pos, dtype=float) / max(n_pos, 1)
+    p2 = np.asarray(k_neg, dtype=float) / max(n_neg, 1)
+    lo1, _hi1 = wilson_bounds(k_pos, n_pos, z)
+    _lo2, hi2 = wilson_bounds(k_neg, n_neg, z)
+    estimate = p1 - w * p2
+    width = np.sqrt((p1 - lo1) ** 2 + (w * (hi2 - p2)) ** 2)
+    return estimate - width
+
+
+def separability_critical_value(n_a: int, n_b: int,
+                                alpha: float = DEFAULT_ALPHA) -> float:
+    """Smallest ``max(TPR - FPR)`` that is not explainable by sampling noise.
+
+    The one-sided two-sample Smirnov critical value,
+    ``sqrt(-ln(alpha) / 2 * (n_a + n_b) / (n_a * n_b))``.
+
+    **Why a separate test at all**, when the objective is already a confidence
+    bound: the bound is *per candidate*, and the scan maximises it over every
+    distinguishable cut — thousands of them. A one-sided 95 % bound clearing
+    zero on one pre-chosen candidate means something; the *largest* of ten
+    thousand such bounds clears zero on noise routinely, and no amount of care
+    inside :func:`supported_separation` fixes that, because the problem is the
+    maximisation and not the bound. Measured on 200 pairs drawn from one
+    lognormal distribution, 2,000 cells each: ``max(score) > 0`` on 92 of them.
+    Reporting a threshold for 46 % of genuinely inseparable well pairs is the
+    same class of failure as the objective this module replaced — a confident
+    number where there is nothing to be confident about.
+
+    ``max(TPR - FPR)`` is the one-sided two-sample Kolmogorov-Smirnov statistic,
+    so its null distribution is known and the critical value carries the
+    multiplicity of the whole scan. Measured false-positive rate on pairs drawn
+    from one distribution: 6 % at n = 2,000 per well, 4.3 % at n = 200, 3.7 % at
+    n = 50, against the 5 % the asymptotic formula targets — the overshoot at
+    large n is the asymptotic approximation, not a second bug.
+
+    The statistic is the **unweighted** difference even when the objective is
+    weighted. The weight says what an error costs, which is a question about
+    what to do; whether the two wells differ at all is a question about the
+    data, and the cost of being wrong does not change the answer to it.
+    """
+    n_a = int(n_a)
+    n_b = int(n_b)
+    if n_a <= 0 or n_b <= 0:
+        return float("inf")
+    return float(math.sqrt(-0.5 * math.log(float(alpha)) * (n_a + n_b) / (n_a * n_b)))
+
+
+def counts_above(values_sorted: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
+    """How many of *values_sorted* are strictly above each of *thresholds*.
+
+    *values_sorted* must already be sorted ascending; the caller sorts once and
+    reuses it. ``searchsorted`` makes the whole sweep ``O((N + T) log N)`` rather
+    than the ``O(N·T)`` of counting the array once per threshold — which matters
+    because :func:`candidate_thresholds` produces one candidate per distinct
+    value rather than a fixed 512.
+    """
+    return values_sorted.size - np.searchsorted(
+        values_sorted, np.asarray(thresholds, dtype=float), side="right")
+
+
+def candidate_thresholds(
+    *populations: np.ndarray,
+    lo: float | None = None,
+    hi: float | None = None,
+    max_candidates: int = DEFAULT_MAX_CANDIDATES,
+) -> np.ndarray:
+    """The exact candidate grid: midpoints between consecutive pooled values.
+
+    Fraction-on is a step function of the threshold, so it takes exactly one
+    value between any two adjacent observations and every threshold in that
+    interval classifies every cell identically. Scanning the midpoints therefore
+    evaluates *every distinguishable cut* and nothing else — there is no
+    resolution to choose, no step size to get wrong, and no grid point that lands
+    where the curve is mid-step.
+
+    The midpoint rather than the observation itself so the reported threshold
+    does not sit on a cell's own value, where a float comparison decides whether
+    that cell is in or out.
+
+    *lo* / *hi* clip the range when the caller has bounds to impose (the Cell
+    Gating window's Min/Max fields). *max_candidates* caps the result, subsampled
+    evenly, for populations large enough that one candidate per value is more
+    resolution than anyone can act on.
+
+    Returns an empty array when the pooled values carry no spread — the caller
+    treats that as "nothing to scan" rather than scanning one point.
     """
     finite = [np.asarray(p, dtype=float).ravel() for p in populations if p is not None]
     pooled = np.concatenate(finite) if finite else np.array([], dtype=float)
-    pooled = pooled[np.isfinite(pooled)]
-    if pooled.size == 0:
-        return 0.0, 0.0
-    lo = float(pooled.min())
-    hi = float(np.percentile(pooled, SWEEP_HI_PERCENTILE))
-    if not np.isfinite(hi) or hi <= lo:
-        hi = float(pooled.max())
-    return lo, hi
+    pooled = np.unique(pooled[np.isfinite(pooled)])
+    if pooled.size < 2:
+        return np.array([], dtype=float)
+    grid = (pooled[:-1] + pooled[1:]) / 2.0
+    if lo is not None:
+        grid = grid[grid >= float(lo)]
+    if hi is not None:
+        grid = grid[grid <= float(hi)]
+    cap = int(max_candidates)
+    if cap < MIN_SWEEP_STEPS:
+        raise ValueError(
+            f"max_candidates must be at least {MIN_SWEEP_STEPS}; "
+            f"{max_candidates!r} would scan a grid with nothing to choose "
+            "between."
+        )
+    if grid.size > cap:
+        grid = grid[np.linspace(0, grid.size - 1, cap).round().astype(np.int64)]
+    return grid
+
+
+def support_floor(n_a: int, n_b: int,
+                  requested: int = DEFAULT_MIN_SUPPORT) -> int:
+    """The smallest ``max(k_a, k_b)`` a candidate threshold must clear.
+
+    *requested* cells, except on populations too small to spare them: a floor of
+    10 against two wells of 12 cells would reject every cut worth making, so it
+    drops to a tenth of the larger well. Returns 0 when even that is meaningless.
+    """
+    biggest = max(int(n_a), int(n_b))
+    if biggest <= 0:
+        return 0
+    return max(1, min(int(requested), biggest // 10))
+
+
+def floor_unsupported(
+    scores: np.ndarray,
+    values_a: np.ndarray,
+    values_b: np.ndarray,
+    thresholds: np.ndarray,
+    *,
+    min_support: int = DEFAULT_MIN_SUPPORT,
+) -> tuple[np.ndarray, int]:
+    """Blank out candidates that neither population supports; ``(scores, floor)``.
+
+    For the fold-change scan, whose adjusted fractions have been through
+    ``scale_bar_value`` and are no longer ``k / n`` — they exceed 1 and go
+    negative — so :func:`supported_separation` cannot be computed on them and
+    there is no confidence bound to collapse where the counts run out. The
+    relative-gap objective is unbounded in that region: it reaches its maximum
+    wherever one arm empties first, on however few cells, which at plate-scale
+    ``n`` is a threshold holding a handful of cells out of a hundred thousand.
+
+    A count floor is the coarse version of the same idea and the only version
+    available here: a candidate is scanned only if at least one of the two wells
+    still holds :func:`support_floor` cells above it. Masked candidates are set
+    to ``-inf`` rather than dropped, so every array stays on the grid's own index
+    and the curve the popup plots is still the curve that was scored.
+
+    Returns the floor actually applied, which is ``0`` when the floor would have
+    excluded every candidate — a two-well pair small enough for that is one where
+    the caller is better off with an unsupported answer it can see than with no
+    answer at all, and the returned ``0`` is how it can see it.
+    """
+    scores = np.asarray(scores, dtype=float)
+    floor = support_floor(np.size(values_a), np.size(values_b), min_support)
+    if floor <= 0:
+        return scores, 0
+    ka = counts_above(np.sort(np.asarray(values_a, dtype=float).ravel()), thresholds)
+    kb = counts_above(np.sort(np.asarray(values_b, dtype=float).ravel()), thresholds)
+    supported = np.maximum(ka, kb) >= floor
+    if not supported.any():
+        return scores, 0
+    return np.where(supported, scores, -np.inf), floor
+
+
+def plateau_pick(thresholds: np.ndarray, scores: np.ndarray
+                 ) -> tuple[int, float, int, float, bool]:
+    """``(idx, threshold, tie_count, tie_span, contiguous)`` for the best score.
+
+    ``np.argmax`` returns the first index at the maximum, so on a plateau — and a
+    clean assay has a real one, the empty valley between the two populations,
+    where every cut classifies identically — it reports the bottom edge. The
+    bottom edge is set by the brightest cell in the negative control, which is
+    the single least stable number in the data.
+
+    So the reported threshold is the **midpoint of the contiguous run containing
+    that argmax**, which is the same answer for a plateau of one and the middle
+    of the valley otherwise. Ties elsewhere on the grid are counted and spanned
+    for the caller to report, but they do not move the point: a bimodal objective
+    can score its maximum at two separated places, and the midpoint *between*
+    those is a threshold that scored lower than both.
+    """
+    scores = np.asarray(scores, dtype=float)
+    thresholds = np.asarray(thresholds, dtype=float)
+    # ``max`` of an array holding a NaN is NaN, and ``scores == nan`` is empty,
+    # so the tie set would be indexed at [0] and raise. No caller here produces
+    # a NaN today, but ``optimize_between_populations`` guards with ``nanmax``
+    # elsewhere, and one of the two had to be wrong.
+    best = float(np.nanmax(scores))
+    tied = np.flatnonzero(scores == best)
+    if tied.size == 0:
+        raise ValueError("every candidate score is NaN; nothing to pick from.")
+    first = int(tied[0])
+    contiguous = bool(tied.size <= 1
+                      or tied.size == int(tied[-1] - tied[0]) + 1)
+    span = float(thresholds[tied].max() - thresholds[tied].min()) if tied.size else 0.0
+    # Walk out from the argmax while the score holds, so a non-contiguous tie set
+    # contributes only the run the argmax is actually standing on.
+    end = first
+    while end + 1 < scores.size and scores[end + 1] == best:
+        end += 1
+    idx = (first + end) // 2
+    return idx, float(thresholds[idx]), int(tied.size), span, contiguous
+
+
+def _normal_cdf(z: float) -> float:
+    """Standard normal CDF, for turning *z* back into the confidence it states."""
+    return 0.5 * (1.0 + math.erf(float(z) / math.sqrt(2.0)))
+
+
+def _normal_cdf(z: float) -> float:
+    """Standard normal CDF, for turning *z* back into the confidence it states."""
+    return 0.5 * (1.0 + math.erf(float(z) / math.sqrt(2.0)))
 
 
 def optimize_between_populations(
@@ -266,39 +620,132 @@ def optimize_between_populations(
     *,
     min_threshold: float | None = None,
     max_threshold: float | None = None,
-    steps: int = DEFAULT_SWEEP_STEPS,
+    max_candidates: int = DEFAULT_MAX_CANDIDATES,
+    weight: float = DEFAULT_SPECIFICITY_WEIGHT,
+    z: float = DEFAULT_CONFIDENCE_Z,
+    alpha: float = DEFAULT_ALPHA,
 ) -> ThreshFracOptimizationResult:
-    """Threshold best separating *values_a* from *values_b*.
+    """Threshold best separating *values_a* (positive) from *values_b* (negative).
 
-    The raw (no fold-change) sweep the pipeline uses; bounds default to
-    :func:`sweep_bounds`. Raises ``ValueError`` on an empty population or an
-    unusable range, so callers skip the channel rather than record a guess.
+    Scores every distinguishable cut (:func:`candidate_thresholds`) by the lower
+    confidence bound on its separation (:func:`supported_separation`) and returns
+    the midpoint of the best plateau (:func:`plateau_pick`).
+
+    *values_a* is the arm the score is written to favour: the objective is
+    ``TPR(a) - weight * FPR(b)``, so passing the wells the other way round is a
+    different question and will usually return a different answer. The symmetric
+    objective this replaced could not tell the two apart at all, which is why its
+    caller had to guess at a swap from the reported fractions afterwards.
+
+    Raises ``ValueError``, so callers skip the channel rather than record a
+    guess, when either population is empty, when the pooled values carry no
+    spread to scan, or when **the two wells do not differ at the 5 % level** —
+    the last being a real answer about the data (an assay that did not work, two
+    wells that are not the controls they were named as, a pair entered the wrong
+    way round) and not a failure of the search. That test is
+    :func:`separability_critical_value`, a one-sided two-sample Smirnov test
+    over the whole scan, and it is deliberately not "the best score came out
+    negative": a per-candidate bound maximised over thousands of candidates
+    clears zero on noise about half the time.
     """
-    values_a = np.asarray(values_a, dtype=float)
-    values_b = np.asarray(values_b, dtype=float)
+    values_a = np.asarray(values_a, dtype=float).ravel()
+    values_b = np.asarray(values_b, dtype=float).ravel()
+    values_a = values_a[np.isfinite(values_a)]
+    values_b = values_b[np.isfinite(values_b)]
     if values_a.size == 0:
         raise ValueError("Population A has no valid finite values.")
     if values_b.size == 0:
         raise ValueError("Population B has no valid finite values.")
 
-    if min_threshold is None or max_threshold is None:
-        auto_lo, auto_hi = sweep_bounds(values_a, values_b)
-        lo = auto_lo if min_threshold is None else float(min_threshold)
-        hi = auto_hi if max_threshold is None else float(max_threshold)
-    else:
-        lo, hi = float(min_threshold), float(max_threshold)
-    if hi <= lo:
+    if (min_threshold is not None and max_threshold is not None
+            and float(max_threshold) < float(min_threshold)):
         raise ValueError(
-            "threshold range is degenerate — the populations carry no spread "
-            "to scan across."
+            "max threshold must be greater than or equal to min threshold.")
+
+    grid = candidate_thresholds(
+        values_a, values_b,
+        lo=min_threshold, hi=max_threshold, max_candidates=max_candidates,
+    )
+    if grid.size == 0:
+        # Two different faults, and blaming the data for the second one sends
+        # the user to re-run a plate that is fine.
+        if candidate_thresholds(values_a, values_b).size == 0:
+            raise ValueError(
+                "threshold range is degenerate — the populations carry no "
+                "spread to scan across."
+            )
+        pooled_lo = float(min(values_a.min(), values_b.min()))
+        pooled_hi = float(max(values_a.max(), values_b.max()))
+        raise ValueError(
+            "the scanned range holds no threshold — the cells span "
+            f"{pooled_lo:.6g} to {pooled_hi:.6g} and the range excludes all of "
+            "it. Widen Min/Max to span the data."
         )
 
-    thresholds = sweep_thresholds(lo, hi, steps)
-    fa = frac_curve(values_a, thresholds)
-    fb = frac_curve(values_b, thresholds)
-    diffs = relative_gap(fa, fb, n_a=values_a.size, n_b=values_b.size)
-    return best_from_curves(thresholds, fa, fb, diffs,
-                            n_a=values_a.size, n_b=values_b.size)
+    sorted_a = np.sort(values_a)
+    sorted_b = np.sort(values_b)
+    n_a_size = int(values_a.size)
+    n_b_size = int(values_b.size)
+    k_a = counts_above(sorted_a, grid)
+    k_b = counts_above(sorted_b, grid)
+    scores = supported_separation(
+        k_a, values_a.size, k_b, values_b.size, weight=weight, z=z)
+
+    # No count floor on this path, deliberately. ``floor_unsupported`` is the
+    # coarse stand-in the fold-change scan needs because its adjusted fractions
+    # admit no confidence bound; here the bound *is* the mechanism, and it is
+    # both stricter where it matters and correct where a floor is not. A floor
+    # of ten cells is wrong for a positive control with five real responders out
+    # of a hundred: the bound scores that cut a barely-positive 0.003 — weak, and
+    # weak is the honest answer — while a floor of ten would have refused the
+    # channel outright. ``support_floor`` on the result reports the 0 that was
+    # applied, so the two paths' results stay readable side by side.
+    floor = 0
+
+    # The separability test, before the argmax and not derived from it: the
+    # scores are per-candidate bounds and the best of thousands of them clears
+    # zero on noise, so the question "do these two wells differ at all" needs a
+    # statistic whose null distribution accounts for the whole scan. See
+    # :func:`separability_critical_value`.
+    observed = float(np.max(k_a / n_a_size - k_b / n_b_size))
+    needed = separability_critical_value(n_a_size, n_b_size, alpha)
+    if not (observed > needed):
+        raise ValueError(
+            f"no threshold separates these two populations at the "
+            f"{100 * (1 - float(alpha)):.0f}% level — the best any cut achieves "
+            f"is {observed:.4f} more of well A above it than well B, and "
+            f"{needed:.4f} is what {n_a_size:,} against {n_b_size:,} cells "
+            "would produce by chance. Check that the two wells are the "
+            "controls you meant, in that order, and that the assay worked."
+        )
+
+    idx, threshold, tie_count, tie_span, contiguous = plateau_pick(grid, scores)
+    n_a = n_a_size
+    n_b = n_b_size
+    # Recount at the reported midpoint rather than reading the plateau's first
+    # index: on a plateau the counts are identical by construction, and where
+    # they are not the reported number must describe the threshold reported.
+    ka = int(counts_above(sorted_a, np.array([threshold]))[0])
+    kb = int(counts_above(sorted_b, np.array([threshold]))[0])
+    tpr = ka / n_a
+    fpr = kb / n_b
+    return ThreshFracOptimizationResult(
+        threshold=threshold,
+        frac_a=tpr,
+        frac_b=fpr,
+        difference=float(scores[idx]),
+        n_a=n_a,
+        n_b=n_b,
+        tie_count=tie_count,
+        tie_span=tie_span,
+        tie_contiguous=contiguous,
+        objective=OBJECTIVE_SUPPORTED,
+        k_a=ka,
+        k_b=kb,
+        youden=float(tpr - float(weight) * fpr),
+        weight=float(weight),
+        support_floor=int(floor),
+    )
 
 
 # ── Pipeline-side layer: per-well CSVs → per-channel thresholds ──────────────
@@ -394,14 +841,16 @@ def estimate_thresholds_from_controls(
     pos_well: str,
     neg_well: str,
     log,
-    steps: int = DEFAULT_SWEEP_STEPS,
+    weight: float = DEFAULT_SPECIFICITY_WEIGHT,
+    max_candidates: int = DEFAULT_MAX_CANDIDATES,
 ) -> dict[str, float]:
     """Per-channel thresholds separating the positive from the negative control.
 
-    A channel missing from either well, or with no spread to scan, is skipped
-    with a warning rather than falling back to Otsu — a sidecar mixing two
-    estimators is unexplainable. Stored through
-    :func:`round_stored_threshold`, matching the Otsu pass.
+    A channel missing from either well, with no spread to scan, or with no cut
+    that separates the two wells at 95 % confidence is skipped with a warning
+    rather than falling back to Otsu — a sidecar mixing two estimators is
+    unexplainable. Stored through :func:`round_stored_threshold`, matching the
+    Otsu pass.
     """
     pos_csv = find_well_csv(output_dir, csv_prefix, pos_well)
     neg_csv = find_well_csv(output_dir, csv_prefix, neg_well)
@@ -429,7 +878,10 @@ def estimate_thresholds_from_controls(
             )
             continue
         try:
-            result = optimize_between_populations(values_pos, values_neg, steps=steps)
+            result = optimize_between_populations(
+                values_pos, values_neg,
+                weight=weight, max_candidates=max_candidates,
+            )
         except ValueError as exc:
             log.warning("Auto-threshold: skipping %s — %s", ch, exc)
             continue
@@ -443,44 +895,44 @@ def estimate_thresholds_from_controls(
             )
             continue
         out[ch] = round_stored_threshold(result.threshold)
+        # Recount at the STORED value, not the unrounded one. A camera cut of
+        # 547.7 is stored as 548, and the whole point of the line below is that
+        # its counts describe the cut the sidecar carries.
+        k_pos = int(np.count_nonzero(values_pos > out[ch]))
+        k_neg = int(np.count_nonzero(values_neg > out[ch]))
+        # Both counts and both totals, not just the fractions: the whole point of
+        # this estimator is that a cut is only as good as the cells behind it, so
+        # the line that reports the cut reports them too.
         log.info(
-            "Auto-threshold %s: %.4g  (%s %.1f%% on / %s %.1f%% on, "
-            "supported gap %.3f; n=%d/%d)",
-            ch, out[ch], pos_well, 100.0 * result.frac_a,
-            neg_well, 100.0 * result.frac_b, result.difference,
-            result.n_a, result.n_b,
+            "Auto-threshold %s: %.4g  (%s %d/%d ON = %.1f%%, %s %d/%d ON = %.2f%%; "
+            "separation \u2265 %.3f at 95%% confidence, Youden J = %.3f)",
+            ch, out[ch],
+            pos_well, k_pos, result.n_a, 100.0 * k_pos / result.n_a,
+            neg_well, k_neg, result.n_b, 100.0 * k_neg / result.n_b,
+            result.difference, result.youden,
         )
-        # The scan is a step function, so the best score is usually shared by a
-        # run of grid points and the reported threshold is merely the lowest of
-        # them. A plateau spanning a meaningful share of the swept range is a
-        # weak answer, and it used to be reported exactly like a sharp one.
+        # A plateau is the honest shape of the answer on a clean assay — the
+        # empty valley between the two populations, every cut inside it
+        # classifying identically. The reported threshold is its midpoint, and
+        # saying so is the difference between a range and a false precision.
         if result.tie_count > 1:
-            # Rounded the same way the stored value is, so the two lines cannot
-            # disagree about the number they both name.
-            #
-            # "Spanning" is only true of a contiguous run. When the tied points
-            # are separated the span covers thresholds that scored lower, so the
-            # line says "between" and names the gap rather than describing a
-            # plateau nobody measured.
             shape = (
-                "spanning %.4g intensity unit(s) (%.4g to %.4g)"
+                "a contiguous run spanning %.4g intensity unit(s)"
                 if result.tie_contiguous else
-                "scattered across %.4g intensity unit(s) (between %.4g and "
-                "%.4g, not adjacent on the grid)"
+                "%.4g intensity unit(s) apart but NOT adjacent on the grid, so "
+                "cuts between them scored lower"
             )
             log.info(
-                "Auto-threshold %s: that score is shared by %d of %d grid "
-                "point(s), " + shape + " — the lowest of them is reported.",
-                ch, result.tie_count, steps, result.tie_span, out[ch],
-                round_stored_threshold(result.threshold + result.tie_span),
+                "Auto-threshold %s: %d candidate cut(s) scored that same "
+                "maximum, " + shape + "; the midpoint of the run around the "
+                "best is what was stored.",
+                ch, result.tie_count, result.tie_span,
             )
-        # The objective is symmetric, so it cannot tell the wells apart — this
-        # is the only guard against a swap poisoning every downstream default.
-        if result.frac_a < result.frac_b:
-            log.warning(
-                "Auto-threshold %s: the positive control (%s) has a LOWER "
-                "fraction-on than the negative control (%s) at the chosen "
-                "threshold. Are the two control wells swapped?",
-                ch, pos_well, neg_well,
+        if k_neg == 0:
+            log.info(
+                "Auto-threshold %s: the negative control has no cell above the "
+                "stored cut, so its fraction-on floor is set by well size "
+                "(< %.3f%%) rather than measured.",
+                ch, 100.0 / result.n_b,
             )
     return out

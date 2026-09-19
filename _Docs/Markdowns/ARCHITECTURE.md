@@ -3898,7 +3898,7 @@ none: neither has an ON cutoff of its own. The effective value comes from
 line and every statistic that divides by that cutoff read the same number
 through the same key resolution. Editing either cutoff
 replots the CDFs; a ThreshFracOn edit used to leave its own line where the old
-value was, on the panel the user was looking at to choose it. The optimizer — twelve controls answering an
+value was, on the panel the user was looking at to choose it. The optimizer — fourteen controls answering an
 occasional question — is not on the tab at all: `optimizer_view` builds it into
 its own **non-modal** window (non-modal because its answer is judged against the
 CDFs behind it), hidden, at tab-build time, so every optimizer widget handle
@@ -4139,7 +4139,7 @@ Data-layer helpers (under `review/data/`):
 
 | Module | Role |
 |--------|------|
-| `data/auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `pipeline.auto_threshold` so the pipeline and the GUI agree exactly. The Cell Gating tab's *two-well* optimizer shares its numeric core the same way, through `pipeline.threshold_optimize` — the sweep, the relative-fraction-on-gap objective and the range/steps validation live there, so the Analyze side's control-well pass and the Review side's "Optimize ThreshFracOn" button reduce to one implementation. `gating_compute` re-exports those names and keeps only what depends on the viewer: the fold-change layer (which would otherwise drag `review.domain.fold_change` into `pipeline/`) and the DataFrame/ratio plumbing. |
+| `data/auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `pipeline.auto_threshold` so the pipeline and the GUI agree exactly. The Cell Gating tab's *two-well* optimizer shares its numeric core the same way, through `pipeline.threshold_optimize` — the candidate grid, the confidence-bounded separation objective, the separability test and the range validation live there, so the Analyze side's control-well pass and the Review side's "Optimize ThreshFracOn" button reduce to one implementation. `gating_compute` re-exports those names and keeps only what depends on the viewer: the fold-change layer (which would otherwise drag `review.domain.fold_change` into `pipeline/`) and the DataFrame/ratio plumbing. |
 | `data/zipfile_cache.py` | Process-wide LRU of open `ZipFile` handles, lock-guarded so `read_member_bytes` / `scan_zip_members` share one open file across the thousands of per-member reads the Image Table / heatmap / smFISH-worker paths issue. Invalidated on dataset swap, through `ImageRepository.invalidate` together with the decoded-array LRU; it also re-opens by itself when a path's mtime changes, so a re-run pipeline cannot be read through a handle onto the old archive. Both caches hand out **shared** objects — the same decoded array to every caller that asks for an image, one serialised handle per zip — so neither is named outside the module that owns it, which `tests/test_image_cache_encapsulation.py` pins. That guard locks in a property that already held rather than repairing one that failed. |
 
 ### 5.6 The data layer
@@ -6420,42 +6420,124 @@ tail of `main()`, with three modes:
 |---|---|
 | `--no_auto_threshold` | nothing |
 | no control wells | Otsu on a pooled per-cell / background-pixel distribution, per channel (`pipeline.auto_threshold.estimate_thresholds_from_outputs`) |
-| `--pos_control_well` **and** `--neg_control_well` | per channel, the threshold maximising the support-weighted relative fraction-on gap between those two wells (`pipeline.threshold_optimize.estimate_thresholds_from_controls`) |
+| `--pos_control_well` **and** `--neg_control_well` | per channel, the threshold whose separation between those two wells best survives its own 95 % confidence interval (`pipeline.threshold_optimize.estimate_thresholds_from_controls`) |
 
-**The control-well objective is Laplace-smoothed, and reports its plateau.**
-`relative_gap` divides `|fa - fb|` by `max(|fa|, |fb|)`, which is exactly 1.0 at
-every threshold where the negative control is empty however few positive cells
-sit above the cut — so the objective could not tell "97 % of positives on
-against 0 %" from "one cell on against none". Given the two population sizes,
-both fractions are smoothed to `(k + 1) / (n + 2)` before the ratio is taken,
-which costs nothing where the counts are real and collapses the score where they
-are not. The counts are a keyword rather than a requirement because the viewer's
-fold-change scan (`gating_compute.scan_fc_fractions`) adjusts each fraction
-before the gap is taken, so its values are no longer `k / n` — they exceed 1 and
-go negative — and there is no `k` to add one to; that path keeps the unsmoothed
-objective.
+**The control-well objective scores a cut by the separation it can support.**
+A threshold between two control wells is a classifier, and the two controls are
+its labelled examples: cells above it are called ON, so the cut's quality is its
+true-positive rate in the positive control against its false-positive rate in
+the negative one. The standard summary of that pair is Youden's
+`J = TPR - w·FPR` — the height of the ROC curve above the diagonal, and
+equivalently the Kolmogorov-Smirnov distance between the two intensity
+distributions. `w` is `DEFAULT_SPECIFICITY_WEIGHT`, 1.0 for the pipeline and a
+field in the Cell Gating optimizer, because what a false positive in the
+negative control costs relative to a missed responder is a property of the assay:
+background-on in the negative control contaminates every other well's
+fraction-on readout, so an assay read against a near-zero baseline wants more
+than symmetric cost.
 
-Smoothing shortens the tied run without moving the answer, and the distinction
-matters because only the second half is what a user feels. `np.argmax` returns
-the *first* tied index, and the tied run's lower edge is set by where the
-negative control's fraction-on reaches zero — which smoothing does not touch.
-Measured on two well-separated 400-cell control populations, smoothing cuts the
-grid points at the maximum from 485 of 512 to 354, every one of them off the top
-of the run; the reported threshold is identical, and moving a single
-negative-control cell out to 1500 still shifts the gate by 1252 intensity units
-either way. So the instability the audit found is still present, and what ships
-against it is visibility rather than a cure. `best_from_curves` records how many
-grid points scored the identical best objective, how wide a threshold range they
-cover, and whether those points are adjacent on the grid (`tie_count`,
-`tie_span`, `tie_contiguous` on `ThreshFracOptimizationResult`), and the pipeline
-logs all three: fraction-on is a step function, so the best score is usually
-shared by a run of grid points and the reported threshold is merely the lowest of
-them. Contiguity is part of the report because `tie_span` is `max - min` of the
-tied thresholds, which for a bimodal objective covers ground that scored lower —
-describing that as a span would state that every threshold between the two
-maxima had scored the best. Which point of a genuine plateau *ought* to be
-reported is a question about the assay, and is deliberately left open rather than
-answered with a silently different default.
+`J` alone is a point estimate from two binomial samples, and a point estimate has
+no N in it. So the score `supported_separation` returns is a **lower confidence
+bound** on `J`, by Newcombe's hybrid-score method over Wilson intervals:
+
+```
+score = (p1 - w·p2) - sqrt( (p1 - l1)² + (w·(u2 - p2))² )
+```
+
+where `(l1, ·)` bounds the positive arm and `(·, u2)` the negative one. Wilson
+rather than the textbook `p ± z·sqrt(p(1-p)/n)` because the objective lives at
+`k = 0` and `k = n`, where a Wald standard error is exactly zero: it would report
+a cut that let no negative-control cell through as carrying no uncertainty at
+all. Where the counts are large the bound sits just under the estimate; where a
+cut has thinned one arm to a handful of cells the interval swallows the estimate
+and the score collapses. The uncertainty in the measurement is the penalty —
+there is no separate term and no tuning constant.
+
+**Whether the two wells differ at all is a separate question, asked separately.**
+The bound above is *per candidate*, and the scan maximises it over thousands of
+candidates. A one-sided 95 % bound clearing zero on one pre-chosen candidate
+means something; the largest of ten thousand such bounds clears zero on noise
+routinely. Measured on 200 pairs drawn from one lognormal distribution, 2,000
+cells each, `max(score) > 0` on **92** of them — so reading the objective's own
+sign as a separability verdict would have applied a threshold to 46 % of
+genuinely inseparable well pairs, which is the same class of failure as the
+objective being replaced. No property of `supported_separation` fixes that,
+because the problem is the maximisation and not the bound.
+
+So `optimize_between_populations` runs a real test before the argmax:
+`max(TPR - FPR)` is the one-sided two-sample Kolmogorov-Smirnov statistic, whose
+null distribution is known, and `separability_critical_value` is the Smirnov
+critical value `sqrt(-ln(α)/2 · (n_a+n_b)/(n_a·n_b))`. Measured false-positive
+rate on pairs from one distribution: 6 % at n = 2,000 per well, 4.3 % at n = 200,
+3.7 % at n = 50, against the 5 % the asymptotic form targets. The statistic is
+the *unweighted* difference even when the objective is weighted — what an error
+costs is a question about what to do, and it does not change whether the two
+wells differ. Failing the test raises, so the caller skips the channel; the
+message names what the best cut achieved against what that many cells would
+produce by chance.
+
+Two further properties follow from the objective itself.
+
+*It is asymmetric,* `TPR(a) - w·FPR(b)`, so a swapped pair of control wells does
+not separate in the direction being asked about and is refused by the same test,
+instead of being optimised backwards and then queried in a warning afterwards.
+
+*The candidate grid is the data's own.* `candidate_thresholds` returns one point
+between each pair of consecutive distinct pooled values, counted with
+`searchsorted`. Fraction-on is a step function of the threshold, so that grid
+evaluates every distinguishable cut and nothing else: there is no resolution to
+choose, no step size to get wrong, and no percentile clip needed to keep the
+search out of the tail. Two wells of 100,000 cells scan in about 0.05 s;
+`DEFAULT_MAX_CANDIDATES` subsamples evenly above 20,001 candidates.
+
+*Indistinguishable cuts collapse, and what remains is reported from its middle.*
+Because each candidate sits between two neighbouring pooled values, crossing one
+always changes a count, so genuine ties are rare — the empty valley of a clean
+assay becomes a single candidate rather than a run of nine hundred. Where ties do
+survive (a subsampled grid, or two count pairs that score alike) `plateau_pick`
+reports the midpoint of the contiguous run containing the argmax rather than
+`np.argmax`'s first index. That is not an arbitrary choice among equals: the
+bottom edge of such a run is the cut set by the brightest cell in the negative
+control, the single least stable number in the data. `tie_count`, `tie_span` and
+`tie_contiguous` still ride on `ThreshFracOptimizationResult` and the pipeline
+still logs all three, with contiguity stated because `tie_span` is `max - min` of
+the tied thresholds and for a bimodal objective covers ground that scored lower.
+
+**What this replaced, and why the replacement was not optional.** The objective
+was `|fa - fb| / max(|fa|, |fb|)` with both fractions Laplace-smoothed to
+`(k + 1) / (n + 2)`, which is algebraically "maximise the count ratio
+`(k_a+1)/(k_b+1)`". That is scale-free in N by construction: a cut retaining ten
+positive-control cells and zero negative-control cells outranks one retaining
+sixty thousand and five thousand, and the `+1` that held it back at small N is
+noise at plate scale. On synthetic lognormal controls where the correct gate is
+known, it put the cut far out in the tail and kept a fraction of the responders
+the gate exists to count.
+
+The cases that number the claim are in the tests rather than here, because a
+figure in a document is not re-measured when the code moves under it:
+`test_the_cut_is_not_pushed_into_the_tail_to_buy_a_cleaner_ratio` fixes the
+headline case (5,000 cells a side, 60 % responders) and carries the old
+objective's answer on that exact fixture in its docstring;
+`test_one_cell_in_the_negative_control_does_not_move_the_gate` fixes the
+stability claim; `test_inseparable_wells_are_refused_at_about_the_stated_rate`
+fixes the refusal rate over 120 draws rather than one.
+
+**The viewer's fold-change scan keeps the old objective, floored.**
+`gating_compute.scan_fc_fractions` adjusts each fraction through
+`scale_bar_value` before the gap is taken, so its values are no longer `k / n` —
+they exceed 1 and go negative — and no confidence bound is defined on them. That
+branch therefore keeps `relative_gap`, and gains the coarse version of the same
+idea: `floor_unsupported` blanks any candidate leaving neither well
+`support_floor` cells, which is `DEFAULT_MIN_SUPPORT` except on populations too
+small to spare it, and `0` (reported on the result) when the floor would exclude
+every candidate. Measured, so the floor is not credited with more than it does:
+on that branch the tail is mostly kept out of reach by `best_from_curves`'
+first-index tie-break rather than by the floor, since the relative gap ties
+across a long run and the lowest tied threshold is structurally not a tail cut.
+The floor is the backstop for the case that tie-break does not cover. Every
+result carries `objective`, `OBJECTIVE_SUPPORTED` or `OBJECTIVE_RELATIVE_GAP`,
+because the two scores are not on one scale and a caller printing one without
+naming it is printing a number nobody can interpret.
 
 **A stored threshold is rounded, never rounded away.** All three estimators
 wrote `float(round(x))`, which is right for camera counts — a cut of 547.7 reads

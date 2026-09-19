@@ -15,6 +15,13 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout
 
 from ui import theme
 from review.data.data_loading import get_rows
+from pipeline.threshold_optimize import (
+    OBJECTIVE_SUPPORTED,
+    candidate_thresholds,
+    counts_above,
+    floor_unsupported,
+    supported_separation,
+)
 from review.features.home.cell_gating.gating_compute import (
     ThreshFracOptimizationResult,
     _opt_curve_ylim,
@@ -56,12 +63,43 @@ def _cell_gating_show_opt_curve_popup(
     values_b = _valid_values_for_channel(
         get_rows(ctx, well_b), channel_key, ratios, timepoint,
     )
-    thresholds = np.linspace(lo, hi, int(steps))
-    # Use the SAME scan the optimizer ran (raw, or fold-change-adjusted) so the
-    # popup curve is exactly the metric argmax operated on.
-    frac_a, frac_b, diffs = scan_fc_fractions(
-        thresholds, values_a, values_b, **(fc_kwargs or {}),
-    )
+    # Re-derive the SAME scan the optimizer ran, on the same grid and the same
+    # objective, so the curve is the metric the search operated on and not a
+    # plausible-looking neighbour of it. The two branches diverge exactly where
+    # the optimizer's do: with no fold change the score is the confidence-bounded
+    # separation, otherwise the floored relative gap.
+    if result.objective == OBJECTIVE_SUPPORTED:
+        thresholds = candidate_thresholds(
+            values_a, values_b, lo=lo, hi=hi, max_candidates=int(steps))
+        if thresholds.size == 0:
+            return
+        k_a = counts_above(np.sort(values_a), thresholds)
+        k_b = counts_above(np.sort(values_b), thresholds)
+        frac_a = k_a / max(values_a.size, 1)
+        frac_b = k_b / max(values_b.size, 1)
+        diffs = supported_separation(k_a, values_a.size, k_b, values_b.size,
+                                     weight=result.weight)
+        # A weighted score bottoms out near ``-(1 + weight)``, and the y-limits
+        # are derived from whatever is plotted — so at weight 10 the axis opens
+        # to about [-9, 1] and the two fraction-on curves collapse into a band in
+        # the top tenth of the figure, which is the half of the plot the user
+        # opened it to read. Clipped at the bottom because the region below zero
+        # says only "worse than no separation", and how much worse is not a
+        # number anyone acts on.
+        diffs = np.maximum(diffs, -1.0)
+        score_label = "separation, 95% lower bound (clipped at −1)"
+        y_label = "Fraction-on / supported separation"
+    else:
+        thresholds = np.linspace(lo, hi, int(steps))
+        frac_a, frac_b, diffs = scan_fc_fractions(
+            thresholds, values_a, values_b, **(fc_kwargs or {}),
+        )
+        diffs, _floor = floor_unsupported(diffs, values_a, values_b, thresholds)
+        # The mask is -inf, which no axis can scale to. Zero is this score's own
+        # "no separation worth having", which is what an unsupported cut has.
+        diffs = np.where(np.isfinite(diffs), diffs, 0.0)
+        score_label = "|Δ| / max(|fa|, |fb|)"
+        y_label = "Fraction-on / relative gap"
 
     popup = ctx.runtime.cell_gating.opt_curve_popup
     if popup is None or not popup.isVisible():
@@ -103,8 +141,7 @@ def _cell_gating_show_opt_curve_popup(
             label=f"fraction-on({well_a})")
     ax.plot(thresholds, frac_b, color=theme.Colors.gate_curve_b, lw=1.4,
             label=f"fraction-on({well_b})")
-    ax.plot(thresholds, diffs, color=accent, lw=1.8,
-            label="|Δ| / max(|fa|, |fb|)")
+    ax.plot(thresholds, diffs, color=accent, lw=1.8, label=score_label)
     ax.axvline(
         result.threshold, color=txt_pri, lw=1.2, ls="--",
         label=f"chosen threshold = {result.threshold:.4g}",
@@ -112,11 +149,11 @@ def _cell_gating_show_opt_curve_popup(
     ax.set_xlim(float(thresholds[0]), float(thresholds[-1]))
     ax.set_ylim(*_opt_curve_ylim(frac_a, frac_b, diffs))
     ax.set_xlabel(f"Threshold ({channel_key})", color=txt_pri)
-    ax.set_ylabel("Fraction-on / relative gap", color=txt_pri)
+    ax.set_ylabel(y_label, color=txt_pri)
     tp_note = "" if timepoint is None else f" @ {_timepoint_label(timepoint)}"
     ax.set_title(
         f"{channel_key}: {well_a} vs {well_b}{tp_note} "
-        f"— scan {lo:g}…{hi:g}, {int(steps)} points",
+        f"— scan {lo:g}…{hi:g}, {thresholds.size:,} candidate cut(s)",
         color=txt_pri, fontsize=11,
     )
     leg = ax.legend(loc="upper right", framealpha=0.0, facecolor="none", fontsize=9)

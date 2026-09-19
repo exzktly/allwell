@@ -1061,7 +1061,7 @@ def _segment_classical(image: np.ndarray) -> np.ndarray:
 
 from pipeline.auto_threshold import (
     DEFAULT_CELLS_PER_IMAGE_CAP as _AUTO_THRESHOLD_CELLS_PER_IMAGE_CAP,  # noqa: F401
-    estimate_thresholds_from_outputs,
+    estimate_thresholds_from_outputs, no_threshold_reason,
     pick_endpoint_timepoints as _pick_endpoint_timepoints,  # noqa: F401
     sample_cell_and_bg as _sample_cell_and_bg,  # noqa: F401
 )
@@ -1134,8 +1134,9 @@ def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list
     * ``--no_auto_threshold`` — skip entirely.
     * no control wells — Otsu on a pooled cell-mean / background-pixel
       distribution (:func:`pipeline.auto_threshold.estimate_thresholds_from_outputs`).
-    * both control wells — the threshold maximising the relative fraction-on gap
-      between them, read from the per-well CSVs this run just wrote.
+    * both control wells — per channel, the cut whose separation between them
+      best survives its own 95% confidence interval, from the per-well CSVs this
+      run just wrote. A channel whose wells do not differ is skipped.
 
     In both non-skip modes the segmentation channel is written **0**: it defines
     cell boundaries rather than being something to gate on. Zero is not absent —
@@ -1189,10 +1190,9 @@ def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list
         # reported run looked.
         if non_seg and not estimated:
             log.warning(
-                "Auto-threshold: no threshold could be estimated for any of %s. "
-                "The per-well output archives yielded no usable image pairs — "
-                "see the per-well lines above for why.",
-                ", ".join(c.upper() for c in non_seg),
+                "Auto-threshold: no threshold could be estimated for any of "
+                "%s. %s", ", ".join(c.upper() for c in non_seg),
+                no_threshold_reason(has_control_wells=bool(pos and neg)),
             )
         if written:
             log.info(

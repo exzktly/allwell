@@ -237,6 +237,8 @@ allwell/
 │   │   ├── input.py            ← run-dir resolver, OME-TIFF redirect, channel rows,
 │   │   │                          browse-time folder scan
 │   │   └── job_edit.py         ← the inverse of collect_spec, for the queue's edit flow
+│   ├── schema_section.py       ← the Filename Schema section: picker, detection,
+│   │                            readout, and the preview that refreshes them
 │   ├── seg_params.py           ← per-method segmentation params + StarDist thresholds
 │   ├── log_pane.py             ← the output pane — log view, raw-log toggle,
 │   │                              run-outcome surfacing, "Last run ·" card
@@ -5414,14 +5416,55 @@ and only the interactive picker triggers it, so the converter's "Open in Analyze
 handoff keeps supplying its own channel roles instead of being re-guessed.
 
 **A guess must be visible and must not destroy.** The fields it writes look no
-different from hand-entered ones, so `_report_scan_guess` names the channels it
-found and which of them took the segmentation and phase roles in the run
-dashboard's status line; otherwise a wrong guess first surfaces in a sidecar
-after a run. A scan that recognised no channel slot contributes no channel keys
+different from hand-entered ones, so a wrong guess would otherwise first surface
+in a sidecar after a run. Two surfaces say what happened, and they are told the
+same thing: `_report_scan_guess` writes the run dashboard's status line, naming
+the channels found, which of them took the segmentation and phase roles, and how
+many sampled filenames will *not* match; and the picker itself carries a readout
+directly beneath the control, which persists while the dashboard line scrolls
+away. Both refusal paths report too — a scan that returned early used to leave
+the previous scan's dashboard line standing, which was invisible while the
+dashboard was the only surface and became an open contradiction once the picker
+had a readout of its own.
+
+A scan that recognised no channel slot contributes no channel keys
 at all, and `_apply_pipeline_info` treats an absent `fluor_tokens` key as "leave
 the rows alone" — the same rule its scalar setters follow. An empty list reaching
 `_set_fluor_rows` reads as "no channels" and collapses the rows to the single
 default one, which would wipe a hand-typed list.
+
+**The user can ask again, and the two hosts judge the answer differently.**
+`widgets.schema_picker.SchemaPicker` offers a **Detect from filenames** button
+and the readout beneath it, both opt-in behind a `detect_label` argument — a
+button that is always built is a button a host can forget to connect, and a
+schema detector that does nothing when pressed looks exactly like one that found
+nothing. The widget knows nothing about folders: it emits `detectRequested` and
+displays sentences it is handed.
+
+The Analyze host answers that signal by making the same `_autofill_from_input_scan`
+call browsing makes, so the two cannot give different answers about one folder,
+and it stays synchronous for the same reason the scan is bounded at
+`_SAMPLE_LIMIT` names rather than walking. The Datasets pane's **Zip Loose
+Folder** page shares the control and reaches its own verdict through
+`datasets.import_loose.import_loose_compute.detection_for_grouping`: Analyze
+applies a guess only when it is `confident` — a well slot **and** a channel slot
+— because it must name the channels it quantifies, while that page only ever
+groups by well. A single-channel plate carries a constant channel token, so no
+channel slot can be placed, and copying Analyze's rule there would decline a
+layout that groups perfectly well.
+
+**The readout has two registers, because its two halves carry different weight.**
+`InferredSchema.summary()` is the neutral statement — what was detected, the
+separator, and how many of the sampled names matched. `InferredSchema.shortfall()`
+is the statement about the user's *data*: which files will be skipped and why,
+phrased as a consequence rather than as a mechanism. The picker shows the first
+as muted body text and the second as a `QLabel#Notice` panel (§8), so the two
+differ in outline rather than only in hue. A name counts as matched when it
+splits into the right number of positions **and** every slot the guess claimed
+accepts its token — checked with the predicate that claimed the slot, carried out
+of `_classify_slots`, never looked up from the field name. The bare-number FOV
+pass claims a slot `_is_fov` itself rejects, so a name-keyed check would report
+nothing matched on a plate that is entirely well-formed.
 
 **Slots are classified strictest-predicate-first, and ties go leftmost.**
 `t<n>` and `f<n>` can only be what they look like; a 96-well label cannot, because
@@ -7891,6 +7934,20 @@ to `AnalyzeTab._apply_pipeline_info`, so Analyze's Channel Tokens arrive
 pre-filled. The channel names are written into the output filenames regardless
 of the roles.
 
+`QLabel#Notice` is the app's "read this, it is not what you wanted" block: the
+`warn` tone, a ten-per-cent wash of it, and a two-pixel left rule. It is
+**amber, not red**, because red here means a run died — *Failures recorded* on
+the plate legend, `failed` in the Wells legend — and spending it on a scan that
+merely declined to guess devalues it where it matters. It is a **panel, not a
+colour**: measured off the rendered audit, muted body grey and `danger` red sit
+at relative luminance 0.241 and 0.233, a three per cent difference, so
+desaturated the two read as the same block and hue carried the whole signal.
+The wash and the rule change the block's shape, which survives greyscale,
+colour vision deficiency and the edge of vision. `QLabel#Error` is the narrower
+sibling and stays `danger`: it marks a value that is *invalid*, which the schema
+picker's validation labels are and a declined detection is not. Both were
+unstyled until the audit was looked at rather than run.
+
 That callback takes a `pipeline_info`-shaped settings dict and an `incremental`
 flag, and both of its callers use them: the converter passes the channel roles
 it assigned, Validate & Repair passes the dataset's whole recorded sidecar with
@@ -9838,7 +9895,7 @@ The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which u
 | `NamedPageStack` (in `core/centre_view.py`, not `widgets/` — but morally a widget) | A `QStackedWidget` keyed by page name; supports `detachPage`/`reattachPage` (Split View). |
 | `RailNav` | The left-rail section navigator. |
 | `info_icon` (`widgets/info_icon.py`) | The `ⓘ` hover-for-more marker, styled by the `#InfoHint` QSS rule. A function rather than a class — it returns a configured `QLabel`. Shared by the Analyze form (`AnalyzeFormChromeMixin._info_icon` delegates to it) and the Playground's threshold rows, so the app has one "there is an explanation here" affordance rather than a copy per pane. Sets WhatsThis as well as the tooltip, which is the route that works for someone who cannot hold a hover. |
-| `SchemaPicker` (`widgets/schema_picker.py`) | The filename-schema builder: a separator box, one dropdown per filename position, and the colon-delimited schema string the two of them write. The dropdowns and the string are two views of one value and sync both ways, each write blocking the other's signals so they cannot chase each other. Vocabulary and validity come from `util.schema` — the module the pipeline parses schemas with — so the picker offers exactly the fields the pipeline understands, reads a string the way `parse_schema` reads it (empty tokens collapse, rather than the dropdowns showing a layout the run will not use), and reports errors in `validate_schema`'s own wording. `schema()` returns the typed string in preference to the dropdowns, since the string can express more positions than there are dropdowns. `row_factory(parent, label) -> cell` is the layout seam: the Analyze form passes its own `_row` so the picker sits inside that form's label column, and the Datasets pane's Zip Loose Folder page takes the default plain row. Mounted by both, because both ask the user about the same filenames — Zip Loose Folder produces the archives Analyze then reads. |
+| `SchemaPicker` (`widgets/schema_picker.py`) | The filename-schema builder: a separator box, one dropdown per filename position, and the colon-delimited schema string the two of them write. The dropdowns and the string are two views of one value and sync both ways, each write blocking the other's signals so they cannot chase each other. Vocabulary and validity come from `util.schema` — the module the pipeline parses schemas with — so the picker offers exactly the fields the pipeline understands, reads a string the way `parse_schema` reads it (empty tokens collapse, rather than the dropdowns showing a layout the run will not use), and reports errors in `validate_schema`'s own wording. `schema()` returns the typed string in preference to the dropdowns, since the string can express more positions than there are dropdowns. `row_factory(parent, label) -> cell` is the layout seam: the Analyze form passes its own `_row` so the picker sits inside that form's label column, and the Datasets pane's Zip Loose Folder page takes the default plain row. Mounted by both, because both ask the user about the same filenames — Zip Loose Folder produces the archives Analyze then reads. **Detection is opt-in**: passing `detect_label` builds a *Detect from filenames* button and the two-register readout beneath it, and a host that will not answer `detectRequested` therefore never shows a button that does nothing. `setDetection(text, note=…, problem=…)` takes sentences the picker neither composes nor understands; the neutral half is muted body text and the note is a `QLabel#Notice` panel, so a result the reader must not skim past differs in outline and not only in hue. |
 | `SegmentedControl`, `ChipGroup`, `Stepper`, `StyledSlider`, `ToggleSwitch` | Form controls; each exposes `bindingAdapter()` returning `(getter, setter, change_signal)` for the Export Style sidebar's binding loop. |
 | `SavedSelectionsList` | The rich saved-selection list with composition (drag-to-reorder, per-group flat well editing, recolour popovers). A group is one condition — its wells are its implicit replicate set, so there are no replicate sub-partitions / solo strips. An expanded row draws its wells as disabled `ChipGroup` chips, and a row with **no** wells draws a named `(no wells)` placeholder instead — an empty strip and a strip that failed to build otherwise look identical. Nothing wraps the chip build, deliberately: `widgets/chip_group` ships in every profile and every frozen bundle (`all_well.spec` filters by excluded *feature* directory, never by widget), so a catch there could only ever swallow a real fault and render a comma list that reads as a deliberate compact style. Where the row does fall back — a caller's `plate_factory` raising, which leaves the compose popover on a full-grid plate rather than the caller's narrowed one — it logs at WARNING with the exception, because that substitution changes which wells the chooser offers. |
 | `LutSelector`, `GradientStrip` | The colour-map picker and its preview strip. |

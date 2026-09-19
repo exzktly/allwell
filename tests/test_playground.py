@@ -581,6 +581,86 @@ def test_the_threshold_curve_button_is_built_and_connected(playground_app):
     assert pc._st(app._ctx).sweep_running is False
 
 
+def test_the_sweeps_result_survives_the_repaint_that_follows_it(playground_app):
+    """Excludes the sentence that is written and immediately overwritten.
+
+    The controller used to write the curve's sentence with ``_set_status`` and
+    then call ``playground_on_change`` to redraw the frame with the new
+    thresholds. That fan-out rebuilds the whole read-out from ``_status_text``,
+    which had never heard of the sweep — so the result, the stage-mismatch note
+    appended to it and "Threshold curve failed: …" were each written and lost
+    within one turn of the event loop, leaving a dialog full of curve and a
+    read-out describing only the frame. Measured on the real widget, it read
+    "No raw image for the selected frame."
+
+    The wrong implementation that would still pass an assertion on
+    ``st.sweep_status`` is exactly the one that shipped: the state was correct
+    and never reached the label. So this asserts the boundary (§7.4 #1).
+    """
+    import numpy as _np
+    import review.features.image_browser.playground.controller as pc
+    import review.features.image_browser.playground.worker as pw
+    import review.features.image_browser.playground.sweep_curve_view as scv
+
+    app = playground_app
+    orig_frame, orig_req, orig_show = (pc._segmentation_frame,
+                                       pw.request_threshold_sweep,
+                                       scv.show_threshold_curve)
+
+    def _fake_request(arr, thresholds, **kw):
+        kw["on_done"]([len(thresholds) - i for i in range(len(thresholds))])
+        return object()
+
+    try:
+        pc._segmentation_frame = lambda ctx: (
+            _np.zeros((32, 32), _np.float32), "")
+        pw.request_threshold_sweep = _fake_request
+        scv.show_threshold_curve = lambda ctx, curve: None
+        app._playground_sweep_btn.click()
+    finally:
+        pc._segmentation_frame = orig_frame
+        pw.request_threshold_sweep = orig_req
+        scv.show_threshold_curve = orig_show
+
+    st = pc._st(app._ctx)
+    assert st.sweep_status, "the controller recorded no result at all"
+    shown = app._playground_status.text()
+    assert st.sweep_status in shown, (
+        f"the sweep's sentence never reached the read-out; it says {shown!r}")
+
+
+def test_a_failed_sweep_says_so_on_the_read_out_and_restores_the_buttons(
+        playground_app):
+    """The failure path goes through the same fan-out, and is the path most
+    likely to be left saying nothing — StarDist is an optional dependency, so
+    "not installed" is the message a user is most likely to need."""
+    import numpy as _np
+    import review.features.image_browser.playground.controller as pc
+    import review.features.image_browser.playground.worker as pw
+
+    app = playground_app
+    orig_frame, orig_req = pc._segmentation_frame, pw.request_threshold_sweep
+
+    def _fake_request(arr, thresholds, **kw):
+        kw["on_failed"]("StarDist is not installed")
+        return object()
+
+    try:
+        pc._segmentation_frame = lambda ctx: (
+            _np.zeros((32, 32), _np.float32), "")
+        pw.request_threshold_sweep = _fake_request
+        app._playground_sweep_btn.click()
+    finally:
+        pc._segmentation_frame = orig_frame
+        pw.request_threshold_sweep = orig_req
+
+    assert "StarDist is not installed" in app._playground_status.text()
+    assert app._playground_sweep_btn.isEnabled() is True
+    assert app._playground_sweep_stop_btn.isVisible() is False
+    assert pc._st(app._ctx).sweep_running is False
+    assert pc._st(app._ctx).sweep_curve is None
+
+
 def test_pressing_stop_marks_the_sweep_to_stop(playground_app):
     """The flag the worker polls, set by the real button."""
     import review.features.image_browser.playground.controller as pc

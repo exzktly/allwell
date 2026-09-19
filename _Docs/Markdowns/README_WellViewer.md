@@ -531,9 +531,17 @@ else, or once a run has written there again.
     not suggest a threshold**, deliberately: every rule for picking one off this
     curve that was tried either recommended detecting nothing or recommended the
     number the field already starts at, for reasons to do with the shape of the
-    curve rather than with your plate. The sweep takes longer than a single
-    Segment, and **Stop** ends it early — whatever was measured up to that point
-    is still plotted.
+    curve rather than with your plate. A flat stretch also means only that the
+    *count* is insensitive to the cut — not that the outlines are right, which
+    is still worth checking in the picture; the plot says so under its axis.
+    The sweep takes longer than a single Segment, and **Stop** ends it early —
+    whatever was measured up to that point is still plotted, on the full
+    horizontal range you asked for rather than rescaled to the part it reached,
+    with a hollow marker where it stopped and a sentence saying how many of the
+    nineteen thresholds it got through. Both the plot's title and the read-out
+    under the image name the frame the curve was measured on, and if you move
+    to another frame the read-out says so rather than leaving the old counts
+    sitting under a new picture.
 
 ### 5. Quality control — field flatness & background correction
 

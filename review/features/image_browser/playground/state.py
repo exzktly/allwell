@@ -163,5 +163,6 @@ class PlaygroundState:
         self.sweep_curve = None
         self.sweep_running = False
         self.sweep_stop = False
+        self.sweep_status = ""
         self.seg_key = None
         self.seg_status = ""

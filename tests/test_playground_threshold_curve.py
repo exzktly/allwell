@@ -42,6 +42,13 @@ def _decay(grid, total=400):
     return [int(round(total / (1 + math.exp((t - 0.5) / 0.05)))) for t in grid]
 
 
+def _marker_only_lines(ax):
+    """The single-point, markers-only artists — i.e. the "stopped here" dot."""
+    return [ln for ln in ax.lines
+            if str(ln.get_linestyle()).lower() == "none"
+            and len(ln.get_xdata()) == 1]
+
+
 # ── what is drawn ───────────────────────────────────────────────────────────
 
 def test_the_figure_carries_the_curve_and_the_users_own_threshold():
@@ -186,3 +193,266 @@ def test_a_stopped_sweep_keeps_the_points_it_measured():
     assert len(counts) == 8
     curve = curve_from_counts(grid[:len(counts)], counts)
     assert len(curve.points) == 8
+
+
+# ── the comparison the feature exists for ───────────────────────────────────
+
+def test_the_model_default_is_drawn_beside_the_users_own_threshold():
+    """Excludes the plot that marks where the user is against nothing.
+
+    The wrong implementation that would still pass "there is a dashed line
+    somewhere" is the one this branch started as: the user's own threshold
+    marked, and no reference to read it against. Both verticals are asserted
+    by *position*, so a figure carrying one of them twice fails too.
+    """
+    grid = sweep_grid()
+    fig = Figure()
+    draw_threshold_curve(fig, curve_from_counts(grid, _decay(grid), current=0.2,
+                                                model_default=0.479071))
+    ax = fig.axes[0]
+    verticals = [ln for ln in ax.lines
+                 if len(set(ln.get_xdata())) == 1 and len(ln.get_xdata()) == 2]
+    xs = sorted(float(ln.get_xdata()[0]) for ln in verticals)
+    assert xs == pytest.approx([0.2, 0.479071])
+    labels = " ".join(t.get_text() for t in ax.get_legend().get_texts())
+    assert "model default = 0.479" in labels
+    assert "your threshold = 0.2" in labels
+
+
+def test_a_sweep_with_no_model_default_draws_one_vertical_not_two():
+    """``model_prob_threshold()`` is ``None`` until a model has been loaded,
+    and a guessed reference line is worse than none."""
+    grid = sweep_grid()
+    fig = Figure()
+    draw_threshold_curve(fig, curve_from_counts(grid, _decay(grid), current=0.2))
+    ax = fig.axes[0]
+    verticals = [ln for ln in ax.lines
+                 if len(ln.get_xdata()) == 2 and len(set(ln.get_xdata())) == 1]
+    assert len(verticals) == 1
+
+
+# ── a stopped sweep, as a picture ───────────────────────────────────────────
+
+def test_a_stopped_sweep_leaves_the_unmeasured_range_visibly_empty():
+    """Excludes the figure that rescales to the fragment it measured.
+
+    The wrong implementation that passes "the curve is drawn" is matplotlib's
+    own autoscale: eight points from 0.05 to 0.2 fill the panel, the line runs
+    corner to corner, and the picture asserts a finding about the whole range
+    that the sweep never reached. The x limits must be what was *asked for*.
+    """
+    grid = sweep_grid()
+    measured = _decay(grid)[:8]
+    fig = Figure()
+    draw_threshold_curve(fig, curve_from_counts(
+        grid[:8], measured, current=0.2, requested=len(grid),
+        requested_span=(grid[0], grid[-1])))
+    ax = fig.axes[0]
+    assert ax.get_xlim() == pytest.approx((grid[0], grid[-1]))
+    # And the axis is genuinely wider than the data, or the assertion above
+    # would be satisfied by autoscale on a complete sweep.
+    assert max(grid[:8]) < grid[-1] - 0.3
+
+
+def test_a_stopped_sweep_marks_where_the_measurement_stopped():
+    """Excludes the figure whose line simply ends mid-panel.
+
+    With the axis spanning the whole requested range, a line that stops has to
+    say whether it stopped because the sweep did or because the counts did.
+    """
+    grid = sweep_grid()
+    fig = Figure()
+    curve = curve_from_counts(grid[:8], _decay(grid)[:8], requested=len(grid),
+                              requested_span=(grid[0], grid[-1]))
+    draw_threshold_curve(fig, curve)
+    ax = fig.axes[0]
+    # ``get_linestyle`` answers "None", capitalised, for a line drawn with
+    # markers only. Spelling it "none" here matched nothing, which also made
+    # the complete-sweep test below pass against a figure that drew the marker
+    # unconditionally -- CLAUDE.md §7.8, caught by writing the positive case
+    # first and watching it fail.
+    ends = _marker_only_lines(ax)
+    assert len(ends) == 1
+    assert float(ends[0].get_xdata()[0]) == pytest.approx(grid[7])
+    assert ends[0].get_markerfacecolor() == "none", "hollow, not a data point"
+    assert "stopped here" in " ".join(t.get_text()
+                                      for t in ax.get_legend().get_texts())
+
+
+def test_a_complete_sweep_carries_no_stopped_marker():
+    grid = sweep_grid()
+    fig = Figure()
+    draw_threshold_curve(fig, curve_from_counts(grid, _decay(grid)))
+    ax = fig.axes[0]
+    assert _marker_only_lines(ax) == []
+    assert ax.get_xlim() == pytest.approx((grid[0], grid[-1]))
+
+
+# ── what the figure says about itself ───────────────────────────────────────
+
+def test_the_figure_names_the_frame_it_measured():
+    """Excludes three consecutive sweeps repainting into three
+    indistinguishable pictures, saved to a notebook with no attribution."""
+    grid = sweep_grid()
+    fig = Figure()
+    draw_threshold_curve(fig, curve_from_counts(grid, _decay(grid),
+                                                subject="GFP · B03 · FOV 1"))
+    title = fig.axes[0].get_title()
+    assert title.startswith("GFP · B03 · FOV 1\n")
+    assert "19 thresholds" in title
+
+
+def test_the_figure_warns_that_a_plateau_is_not_a_validation():
+    """Excludes the plot whose flat shoulder reads as confirmation.
+
+    The wrong implementation that passes "some text was drawn" is the title,
+    so this asserts the sentence.
+    """
+    grid = sweep_grid()
+    fig = Figure()
+    draw_threshold_curve(fig, curve_from_counts(grid, _decay(grid)))
+    said = " ".join(t.get_text() for t in fig.axes[0].texts)
+    assert "insensitive to the threshold" in said
+    assert "not that the detections are right" in said
+
+
+# ── a truncated flat run is not the "count never moves" finding ─────────────
+
+def test_a_flat_start_to_a_stopped_sweep_is_scoped_to_what_was_measured():
+    """Excludes the finding derived from three points before the knee.
+
+    A *complete* sweep whose count never moves says something true about the
+    frame: the threshold does not matter here. Derived from the fragment a
+    user got before pressing Stop, the same sentence is an artifact of
+    stopping — the complete sweep of this frame goes to zero. So the refusal
+    is still made (the user pressed a button and is owed an answer) but it is
+    scoped: it names how many thresholds it saw and says the rest was not
+    measured.
+
+    The wrong implementation that would pass "it declines" is the unscoped
+    one, which is why both halves below are asserted against each other.
+    """
+    grid = sweep_grid()
+    short = curve_from_counts(grid[:3], [400, 400, 400], requested=len(grid),
+                              requested_span=(grid[0], grid[-1]))
+    assert short.truncated is True
+    assert "before you stopped" in short.declined
+    assert "was not measured" in short.declined
+
+    # The identical counts, swept to the end, are a finding about the frame
+    # and must NOT carry either hedge.
+    whole = curve_from_counts([0.1, 0.2, 0.3], [400, 400, 400])
+    assert whole.truncated is False
+    assert whole.declined
+    assert "before you stopped" not in whole.declined
+    assert "was not measured" not in whole.declined
+
+
+# ── what the controller puts into the curve, and what the read-out keeps ────
+
+class _Lbl:
+    def __init__(self):
+        self.t = ""
+
+    def setText(self, v):
+        self.t = str(v)
+
+    def text(self):
+        return self.t
+
+
+def _ctx_with(st):
+    """A context thin enough to call the read-out helpers against.
+
+    Mine, so it cannot disagree with me (§7.8 face one) — which is why the
+    sweep's own read-out is also driven through the real widget in
+    ``tests/test_playground.py``. This file covers the shapes that one press
+    cannot reach in a single run.
+    """
+    return SimpleNamespace(
+        window=SimpleNamespace(_playground_status=_Lbl()),
+        state=SimpleNamespace(playground=st),
+        runtime=SimpleNamespace(playground=SimpleNamespace()),
+    )
+
+
+def test_the_curve_is_asked_for_the_models_own_default_not_a_literal():
+    """Excludes the reference line hardcoded to whatever the weights say today.
+
+    ``model_prob_threshold`` reads ``model.thresholds.prob`` off the loaded
+    model, so the number on the plot is the number the sweep was measured
+    against. A literal would be a fourth copy of it and would go stale the day
+    anyone changes model — and the wrong implementation that passes "there is
+    a default" is exactly a literal.
+    """
+    import services.frame_preview as fp
+    import review.features.image_browser.playground.controller as pc
+    src = pc.playground_sweep_now.__doc__ or ""
+    assert "recommendation" in src
+    # The controller imports it from the service rather than writing a number.
+    import inspect
+    body = inspect.getsource(pc.playground_sweep_now)
+    assert "model_prob_threshold()" in body
+    assert "0.47" not in body, "a literal copy of the weights' own threshold"
+    # And the service reads it off the model rather than returning a constant.
+    assert "thresholds" in inspect.getsource(fp.model_prob_threshold)
+
+
+def test_a_curve_measured_on_another_frame_says_so_rather_than_sitting_there():
+    """Excludes the sentence that describes one frame under a picture of
+    another.
+
+    The result now survives a repaint, which is what makes this reachable:
+    sweep B03, then click to C04, and without this the read-out goes on
+    reporting B03's counts beside C04's pixels. The dialog is still open
+    showing that curve, so the honest move is to name whose frame it is — not
+    to drop the sentence and leave the picture unexplained.
+    """
+    from review.features.image_browser.playground import controller as pc
+    from review.features.image_browser.playground.state import PlaygroundState
+
+    grid = sweep_grid()
+    st = PlaygroundState(well="B03", channel="GFP", fov="1", timepoint="24h")
+    curve = curve_from_counts(grid, _decay(grid), subject="GFP · B03 · FOV 1 · 24h")
+    st.sweep_curve = curve
+    st.sweep_status = curve.describe()
+    ctx = _ctx_with(st)
+
+    assert pc._describe_sweep(ctx) == [st.sweep_status], "same frame, no hedge"
+
+    st.well = "C04"
+    lines = pc._describe_sweep(ctx)
+    assert len(lines) == 2
+    assert "not the frame on screen" in lines[0]
+    assert "GFP · B03 · FOV 1 · 24h" in lines[0]
+    assert lines[1] == st.sweep_status, "the counts are still shown, not dropped"
+
+
+def test_a_running_sweep_never_leaves_the_readout_silent():
+    from review.features.image_browser.playground import controller as pc
+    from review.features.image_browser.playground.state import PlaygroundState
+
+    st = PlaygroundState()
+    st.sweep_running = True
+    assert pc._describe_sweep(_ctx_with(st)) == ["Threshold curve: sweeping…"]
+    st.sweep_status = "Threshold curve: 4 of 19…"
+    assert pc._describe_sweep(_ctx_with(st)) == ["Threshold curve: 4 of 19…"]
+
+
+def test_no_sweep_yet_adds_no_line_at_all():
+    from review.features.image_browser.playground import controller as pc
+    from review.features.image_browser.playground.state import PlaygroundState
+    assert pc._describe_sweep(_ctx_with(PlaygroundState())) == []
+
+
+def test_loading_another_dataset_drops_the_previous_plates_sweep():
+    """``clear_caches`` runs on a dataset swap. A sentence about the previous
+    plate's frame, left in the read-out of the new one, is the same silent
+    substitution one selector click away."""
+    from review.features.image_browser.playground.state import PlaygroundState
+    st = PlaygroundState()
+    st.sweep_status = "19 thresholds from 0.05 to 0.95: 86 nuclei down to 0."
+    st.sweep_curve = object()
+    st.clear_caches()
+    assert st.sweep_status == ""
+    assert st.sweep_curve is None

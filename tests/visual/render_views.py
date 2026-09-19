@@ -284,9 +284,6 @@ def _capture_threshold_curve(app, w) -> None:
          "stopped early — the unmeasured range stays visibly empty"),
         ("declined", curve_from_counts(grid, [0] * len(grid), **common),
          "no nuclei at any threshold: the refusal is the figure"),
-        ("cropped", curve_from_counts(grid, measured, current=0.45,
-                                      crop_px=512, **common),
-         "measured on a centre crop, and saying so"),
     )
     for slug, curve, desc in cases:
         dlg = QDialog(w)

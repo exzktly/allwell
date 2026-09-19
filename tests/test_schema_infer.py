@@ -191,3 +191,115 @@ def test_phase_channel_does_not_take_the_segmentation_role(tmp_path):
     assert tokens.phase_token == "DIC"
     assert tokens.nuclear_token != "DIC"
     assert "DIC" in tokens.fluor_tokens
+
+
+# ── the match report (what the guess parses, and what it does not) ──────────
+#
+# The readout these back exists because the guess is written into two form
+# fields whose new values look no different from hand-entered ones, so a wrong
+# guess is otherwise invisible until it turns up in a sidecar after a run.
+# Each test below names the wrong implementation it excludes, because an
+# assertion that a count "looks plausible" is satisfied by several of them.
+
+
+def test_every_sampled_name_counts_as_parsed_on_a_clean_corpus():
+    guess = infer_schema(_default_stems())
+    assert guess is not None
+    assert guess.sampled == len(_default_stems())
+    assert guess.matched == guess.sampled
+    assert guess.misses == ()
+
+
+def test_a_name_that_splits_right_but_fails_a_slot_is_not_counted_as_parsed():
+    """Excludes the report that counts token-count agreement and stops there.
+
+    ``ZZ9`` is not a well label, but ``exp_GFP_ZZ9_f0_t0`` splits into exactly
+    the five tokens the schema wants. A report built on ``len(parts) == k``
+    alone calls it parsed, and the count then says nothing the schema string did
+    not already say.
+    """
+    stems = _default_stems() + ["exp_GFP_ZZ9_f0_t0"]
+    guess = infer_schema(stems)
+    assert guess is not None
+    assert guess.fields[2] == "well"
+    assert guess.matched == len(stems) - 1
+    assert guess.misses == (("exp_GFP_ZZ9_f0_t0", "well slot reads 'ZZ9'"),)
+
+
+def test_a_bare_number_fov_slot_is_checked_with_the_rule_that_claimed_it():
+    """Excludes the report that checks ``_is_fov`` on every slot named ``fov``.
+
+    ``_classify_slots`` has a last pass that claims a leftover all-numeric
+    column as the FOV slot — a slot ``_is_fov`` itself rejects, since it accepts
+    only ``f<n>``. A report that looks the field name up in a table of
+    predicates instead of asking which predicate claimed the slot calls **every
+    name on such a plate** unparsed, and reports 0 of N on a plate that is
+    entirely well-formed.
+    """
+    stems = [f"exp_{c}_{w}_{n}_t0"
+             for w in ("A01", "A02") for n in ("1", "2") for c in ("DAPI", "GFP")]
+    guess = infer_schema(stems)
+    assert guess is not None
+    assert guess.fields == ["experiment", "channel", "well", "fov", "timepoint"]
+    assert guess.matched == len(stems), guess.summary()
+    assert guess.misses == ()
+
+
+def test_misses_are_capped_and_the_remainder_is_counted_not_dropped():
+    """Excludes the report that quotes examples and lets the rest vanish."""
+    good = _default_stems(wells=("A01", "A02", "A03", "B01", "B02", "B03"))
+    stems = good + [f"junk{i}" for i in range(10)]
+    guess = infer_schema(stems)
+    assert guess is not None
+    assert len(guess.misses) == 3
+    assert guess.sampled - guess.matched == 10
+    assert "7 more" in guess.summary()
+
+
+def test_a_corpus_whose_majority_does_not_split_is_refused_outright():
+    """The modal token count decides the layout, so a corpus where the
+    malformed names outnumber the well-formed ones infers nothing at all —
+    ``infer_schema`` returns ``None`` rather than describing the minority.
+
+    Pinned because it is the boundary either side of the test above, and
+    because a caller that renders a summary has to handle the ``None`` before
+    it can render anything. Found by writing the capping test with ten junk
+    names against eight good ones and watching the whole inference refuse.
+    """
+    stems = _default_stems() + [f"junk{i}" for i in range(10)]
+    assert len(stems) - 8 > 8, "the junk must be the majority for this to bite"
+    assert infer_schema(stems) is None
+
+
+def test_summary_states_the_schema_the_separator_and_both_counts():
+    """Excludes the summary that reads well and says nothing checkable."""
+    stems = _default_stems() + ["exp_GFP_ZZ9_f0_t0"]
+    text = infer_schema(stems).summary()
+    assert "experiment:channel:well:fov:timepoint" in text
+    assert "'_'" in text
+    assert f"{len(stems) - 1} of {len(stems)}" in text
+    assert "ZZ9" in text
+
+
+def test_summary_on_a_clean_corpus_says_all_of_them():
+    text = infer_schema(_default_stems()).summary()
+    assert f"all {len(_default_stems())} sampled filenames parse" in text
+    assert "Not parsed" not in text
+
+
+def test_the_count_survives_the_round_trip_from_a_real_folder(tmp_path):
+    """The counts must come back from ``infer_from_dir``, not only from the
+    pure entry point — that is the one the Analyze form calls."""
+    src = tmp_path / "in"
+    src.mkdir()
+    for stem in _default_stems():
+        (src / f"{stem}.tif").write_bytes(b"")
+    (src / "exp_GFP_ZZ9_f0_t0.tif").write_bytes(b"")
+    # The mess real folders carry, none of which is an input image.
+    (src / ".DS_Store").write_bytes(b"")
+    (src / "._exp_GFP_A01_f0_t0.tif").write_bytes(b"")
+    (src / "notes.txt").write_text("")
+    guess = infer_from_dir(src)
+    assert guess is not None
+    assert guess.sampled == len(_default_stems()) + 1
+    assert guess.matched == len(_default_stems())

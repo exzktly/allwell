@@ -50,6 +50,7 @@ from util.well_token import canonical_well_label, is_valid_well_name
 _SEP_CANDIDATES = ("_", "-", ".")
 _MIN_SLOT_FRACTION = 0.7      # a slot must parse this uniformly to earn a role
 _SAMPLE_LIMIT = 400           # names sampled — "briefly scanning", not a full walk
+_MISS_EXAMPLES = 3            # unparsed names quoted in the readout, not counted
 
 _TP_RE = re.compile(r"(?i)^t\d+$")
 _FOV_RE = re.compile(r"(?i)^f\d+$")
@@ -65,10 +66,44 @@ class InferredSchema:
     fields: list[str] = field(default_factory=list)   # per slot; SCHEMA_FIELDS vocab
     channels: list[str] = field(default_factory=list)  # distinct channel tokens, in order
     confident: bool = False   # a well AND a channel slot were both identified
+    #: How many filename stems were sampled to reach this guess.
+    sampled: int = 0
+    #: How many of them parse *under this guess* — they split into the right
+    #: number of tokens and every slot the guess claimed accepts its token.
+    matched: int = 0
+    #: Up to :data:`_MISS_EXAMPLES` of the ones that did not, each paired with
+    #: the reason, so a user reading the readout can see what the guess trips
+    #: over rather than only how often.
+    misses: tuple[tuple[str, str], ...] = ()
 
     @property
     def schema_str(self) -> str:
         return ":".join(self.fields)
+
+    def summary(self) -> str:
+        """One sentence naming the guess and how much of the sample it parses.
+
+        The whole reason this exists: the guess is applied to two form fields
+        "whose new values look no different from hand-entered ones"
+        (``analyze/domain/input.py``), so without a sentence saying what it was
+        derived from and how well it fits, a wrong guess is invisible until it
+        turns up in a sidecar after a run. A count is what makes it visible.
+        """
+        head = f"{self.schema_str}, separator {self.separator!r}"
+        if not self.sampled:
+            return f"{head} — no filenames were sampled."
+        if self.matched == self.sampled:
+            n = self.sampled
+            return (f"{head} — all {n:,} sampled filename{'' if n == 1 else 's'} "
+                    f"parse.")
+        body = (f"{head} — {self.matched:,} of {self.sampled:,} sampled "
+                f"filenames parse.")
+        if self.misses:
+            shown = "; ".join(f"{stem} ({why})" for stem, why in self.misses)
+            more = self.sampled - self.matched - len(self.misses)
+            tail = f", and {more:,} more" if more > 0 else ""
+            body += f" Not parsed: {shown}{tail}."
+        return body
 
     def channel_tokens(self) -> ChannelTokens:
         """The channel role assignment seeded from the guessed channel tokens."""
@@ -92,6 +127,15 @@ def _is_timepoint(tok: str) -> bool:
 
 def _is_fov(tok: str) -> bool:
     return bool(_FOV_RE.match(tok or "")) and parse_fov(tok) is not None
+
+
+def _is_bare_number(tok: str) -> bool:
+    """The predicate behind the bare-number FOV slot in :func:`_classify_slots`.
+
+    Named rather than inlined so the match report can check such a slot with
+    the same rule that claimed it.
+    """
+    return bool(_BARE_NUM_RE.match(tok or ""))
 
 
 # ── sampling ─────────────────────────────────────────────────────────────────
@@ -253,10 +297,23 @@ def _pick_channel_slot(cols, used: set[int]) -> int | None:
     return best_i
 
 
-def _classify_slots(rows: list[list[str]], k: int) -> tuple[list[str], int | None, int | None]:
+def _classify_slots(rows: list[list[str]], k: int):
+    """``(fields, well_i, chan_i, checks)`` for *rows* split into *k* slots.
+
+    ``checks`` maps a slot index to the predicate that earned it its role, and
+    exists so :func:`_match_report` can ask each slot the same question that
+    claimed it. Asking a different one is the out-of-domain mistake this module
+    already has one scar from: the bare-number FOV pass below claims a slot
+    ``_is_fov`` itself rejects, so a report checking ``_is_fov`` there would
+    call every well in the plate unparsed. Only the slots claimed by a token
+    predicate appear — ``channel`` and ``experiment`` are defined *from* the
+    rows, so every row satisfies them by construction, and ``ignore`` asks
+    nothing.
+    """
     cols = [[r[i] for r in rows] for i in range(k)]
     fields = ["ignore"] * k
     used: set[int] = set()
+    checks: dict[int, object] = {}
 
     # Order matters, and it runs strictest-predicate-first. ``t<n>`` and
     # ``f<n>`` can only be what they look like; a well label cannot. The reverse
@@ -265,13 +322,13 @@ def _classify_slots(rows: list[list[str]], k: int) -> tuple[list[str], int | Non
     # answer, and the real well column was then left over as ``ignore``.
     tp_i = _best_slot(cols, _is_timepoint, used)
     if tp_i is not None:
-        fields[tp_i] = "timepoint"; used.add(tp_i)
+        fields[tp_i] = "timepoint"; used.add(tp_i); checks[tp_i] = _is_timepoint
     fov_i = _best_slot(cols, _is_fov, used)
     if fov_i is not None:
-        fields[fov_i] = "fov"; used.add(fov_i)
+        fields[fov_i] = "fov"; used.add(fov_i); checks[fov_i] = _is_fov
     well_i = _best_slot(cols, _is_well, used)
     if well_i is not None:
-        fields[well_i] = "well"; used.add(well_i)
+        fields[well_i] = "well"; used.add(well_i); checks[well_i] = _is_well
     for i in range(k):
         if i not in used and len(set(cols[i])) == 1:
             fields[i] = "experiment"; used.add(i)
@@ -301,12 +358,54 @@ def _classify_slots(rows: list[list[str]], k: int) -> tuple[list[str], int | Non
                 continue
             if all(_BARE_NUM_RE.match(v or "") for v in col):
                 fields[i] = "fov"; fov_i = i; used.add(i)
+                checks[i] = _is_bare_number
                 break
-    return fields, well_i, chan_i
+    return fields, well_i, chan_i, checks
 
 
 def _channels_in_order(rows: list[list[str]], chan_i: int) -> list[str]:
     return list(dict.fromkeys(r[chan_i] for r in rows))
+
+
+#: Human wording per slot role, for the reason attached to an unparsed name.
+_ROLE_WORD = {"well": "well", "timepoint": "timepoint", "fov": "FOV"}
+
+
+def _match_report(stems: list[str], sep: str, k: int, fields: list[str],
+                  checks: dict) -> tuple[int, tuple[tuple[str, str], ...]]:
+    """How many of *stems* parse under this guess, and why the rest do not.
+
+    A name parses when it splits into *k* tokens under *sep* **and** every slot
+    the guess claimed by a token predicate accepts its token. The second half is
+    the part worth having: a slot is claimed at
+    :data:`_MIN_SLOT_FRACTION` agreement, so up to three names in ten can carry
+    a token the slot's own rule rejects and the guess still looks clean. Those
+    names reach the pipeline and are bucketed under whatever the token happens
+    to parse as — which is exactly the kind of quiet shortfall a count makes
+    visible.
+
+    The predicates come from :func:`_classify_slots` rather than from the field
+    name, so each slot is asked the question that claimed it.
+    """
+    matched = 0
+    misses: list[tuple[str, str]] = []
+    for stem in stems:
+        parts = stem.split(sep)
+        if len(parts) != k:
+            if len(misses) < _MISS_EXAMPLES:
+                misses.append((stem, f"splits into {len(parts)}, not {k}"))
+            continue
+        why = ""
+        for i, fld in enumerate(fields):
+            pred = checks.get(i)
+            if pred is not None and not pred(parts[i]):
+                why = f"{_ROLE_WORD.get(fld, fld)} slot reads {parts[i]!r}"
+                break
+        if not why:
+            matched += 1
+        elif len(misses) < _MISS_EXAMPLES:
+            misses.append((stem, why))
+    return matched, tuple(misses)
 
 
 def infer_schema(stems, *, default_sep: str = DEFAULT_SEP) -> InferredSchema | None:
@@ -322,6 +421,7 @@ def infer_schema(stems, *, default_sep: str = DEFAULT_SEP) -> InferredSchema | N
         return None
     best: InferredSchema | None = None
     best_score = (-1, -1)
+    best_ctx: tuple[str, int, list[str], dict] | None = None
     for sep in _SEP_CANDIDATES:
         splits = [s.split(sep) for s in stems]
         counts = Counter(len(p) for p in splits)
@@ -329,15 +429,24 @@ def infer_schema(stems, *, default_sep: str = DEFAULT_SEP) -> InferredSchema | N
         if k < 2:
             continue
         rows = [p for p in splits if len(p) == k]
-        fields, well_i, chan_i = _classify_slots(rows, k)
+        fields, well_i, chan_i, checks = _classify_slots(rows, k)
         channels = _channels_in_order(rows, chan_i) if chan_i is not None else []
         score = ((well_i is not None) + (chan_i is not None), freq)
         if score > best_score:
             best_score = score
+            best_ctx = (sep, k, fields, checks)
             best = InferredSchema(
                 separator=sep, fields=fields, channels=channels,
                 confident=well_i is not None and chan_i is not None,
+                sampled=len(stems),
             )
+    # Counted once, for the winner only. Scoring still uses `freq` — how many
+    # names split consistently — because changing what picks the separator is a
+    # change to which schema is proposed, and this row only adds a statement
+    # about the schema already being proposed.
+    if best is not None and best_ctx is not None:
+        sep, k, fields, checks = best_ctx
+        best.matched, best.misses = _match_report(stems, sep, k, fields, checks)
     return best
 
 

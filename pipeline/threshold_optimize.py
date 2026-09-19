@@ -582,7 +582,6 @@ def optimize_between_populations(
     max_threshold: float | None = None,
     max_candidates: int = DEFAULT_MAX_CANDIDATES,
     weight: float = DEFAULT_SPECIFICITY_WEIGHT,
-    min_support: int = DEFAULT_MIN_SUPPORT,
     z: float = DEFAULT_CONFIDENCE_Z,
 ) -> ThreshFracOptimizationResult:
     """Threshold best separating *values_a* (positive) from *values_b* (negative).
@@ -613,6 +612,11 @@ def optimize_between_populations(
     if values_b.size == 0:
         raise ValueError("Population B has no valid finite values.")
 
+    if (min_threshold is not None and max_threshold is not None
+            and float(max_threshold) < float(min_threshold)):
+        raise ValueError(
+            "max threshold must be greater than or equal to min threshold.")
+
     grid = candidate_thresholds(
         values_a, values_b,
         lo=min_threshold, hi=max_threshold, max_candidates=max_candidates,
@@ -630,12 +634,16 @@ def optimize_between_populations(
     scores = supported_separation(
         k_a, values_a.size, k_b, values_b.size, weight=weight, z=z)
 
-    # The floor is the coarse guard the confidence bound makes largely redundant;
-    # it is applied anyway, through the same helper the fold-change scan uses, so
-    # the two paths cannot end up with two definitions of "enough cells to judge
-    # this cut on".
-    scores, floor = floor_unsupported(
-        scores, values_a, values_b, grid, min_support=min_support)
+    # No count floor on this path, deliberately. ``floor_unsupported`` is the
+    # coarse stand-in the fold-change scan needs because its adjusted fractions
+    # admit no confidence bound; here the bound *is* the mechanism, and it is
+    # both stricter where it matters and correct where a floor is not. A floor
+    # of ten cells is wrong for a positive control with five real responders out
+    # of a hundred: the bound scores that cut a barely-positive 0.003 — weak, and
+    # weak is the honest answer — while a floor of ten would have refused the
+    # channel outright. ``support_floor`` on the result reports the 0 that was
+    # applied, so the two paths' results stay readable side by side.
+    floor = 0
 
     if not np.isfinite(scores).any() or float(np.nanmax(scores)) <= 0.0:
         raise ValueError(

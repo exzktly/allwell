@@ -34,9 +34,11 @@ import pytest
 from pipeline.auto_threshold import _index_members, _SchemaReader, _otsu_per_channel
 from pipeline.threshold_optimize import (
     best_from_curves,
+    candidate_thresholds,
     estimate_thresholds_from_controls,
     frac_curve,
     optimize_between_populations,
+    read_channel_values,
     relative_gap,
     round_stored_threshold,
     sweep_bounds,
@@ -215,63 +217,65 @@ def _write_well_csv(path, values, channel="gfp"):
             w.writerow([i, f"{float(v):.6f}"])
 
 
-def test_the_plateau_reaches_the_run_log(tmp_path, caplog):
-    """The tie is only useful if it is printed, so assert the line, not the field.
+def _bimodal_scores(shape, *, split: bool):
+    """A score curve with a known tie shape, for the run-log wording tests.
 
-    A bimodal positive population against a tight negative one leaves the two
-    fractions constant across the whole gap between the modes, so hundreds of
-    grid points score identically and the reported threshold is the lowest of
-    them. That is exactly the case the reader has to be told about.
+    The objective is replaced rather than coaxed out of cell values: the
+    assertion is about what the run *says* when the scan comes out a given
+    shape, and ``plateau_pick`` and the log line both still run for real. Under
+    the exact candidate grid a genuine tie is rare by construction — each
+    candidate sits between two neighbouring pooled values, so crossing one
+    always changes a count — which is the improvement, and also why the wording
+    has to be pinned through an injected curve.
     """
-    rng = np.random.default_rng(11)
-    pos = np.concatenate([rng.normal(200, 20, 200), rng.normal(2000, 100, 200)])
-    neg = rng.normal(200, 20, 400)
-    _write_well_csv(tmp_path / "plate_A01.csv", pos)
-    _write_well_csv(tmp_path / "plate_H12.csv", neg)
-    log = logging.getLogger("test_plateau")
-    with caplog.at_level(logging.INFO, logger="test_plateau"):
-        out = estimate_thresholds_from_controls(
-            tmp_path, fluor_channels=["GFP"], csv_prefix="plate",
-            pos_well="A01", neg_well="H12", log=log)
-    assert "gfp" in out
-    assert "is shared by" in caplog.text
-    assert "grid point" in caplog.text
-    # The range it names really is the range of the tied thresholds, and the
-    # value it reports really is the lowest of them.
-    thresholds = sweep_thresholds(*sweep_bounds(pos, neg), 512)
-    fa, fb = frac_curve(pos, thresholds), frac_curve(neg, thresholds)
-    diffs = relative_gap(fa, fb, n_a=pos.size, n_b=neg.size)
-    tied = thresholds[diffs == diffs.max()]
-    assert f"{len(tied)} of 512" in caplog.text
-    # The bounds are printed through the same rounding as the stored value, so
-    # the headline and the plateau line cannot name the same threshold twice
-    # with two different numbers.
-    assert f"{round_stored_threshold(float(tied.min())):.4g}" in caplog.text
-    assert f"{round_stored_threshold(float(tied.max())):.4g}" in caplog.text
-    assert out["gfp"] == pytest.approx(round_stored_threshold(float(tied.min())))
+    scores = np.full(shape, 0.10)
+    n = len(scores)
+    if split:
+        scores[n // 4] = 0.90
+        scores[(3 * n) // 4] = 0.90
+    else:
+        scores[n // 4: n // 4 + 40] = 0.90
+    return scores
 
 
-def test_a_contiguous_plateau_is_described_as_a_span(tmp_path, caplog):
-    """The wording has to match the shape: adjacent grid points do span a range."""
-    rng = np.random.default_rng(11)
-    pos = np.concatenate([rng.normal(200, 20, 200), rng.normal(2000, 100, 200)])
-    neg = rng.normal(200, 20, 400)
-    _write_well_csv(tmp_path / "plate_A01.csv", pos)
-    _write_well_csv(tmp_path / "plate_H12.csv", neg)
-    thresholds = sweep_thresholds(*sweep_bounds(pos, neg), 512)
-    fa, fb = frac_curve(pos, thresholds), frac_curve(neg, thresholds)
-    result = best_from_curves(thresholds, fa, fb,
-                              relative_gap(fa, fb, n_a=pos.size, n_b=neg.size),
-                              n_a=pos.size, n_b=neg.size)
-    assert result.tie_count > 1
-    assert result.tie_contiguous, "this fixture is meant to produce one run"
+def test_a_contiguous_plateau_reaches_the_run_log_as_a_span(tmp_path, caplog,
+                                                            monkeypatch):
+    """A run of equally-scoring cuts is stated, and its midpoint is what is stored.
+
+    ``argmax`` alone reports the bottom of such a run, which is not an arbitrary
+    choice among equals: it is the cut set by the brightest cell in the negative
+    control, the least stable number in the data. Both facts belong in the log —
+    that the answer came off a plateau at all, and which point of it was taken.
+    """
+    import pipeline.threshold_optimize as mod
+
+    monkeypatch.setattr(
+        mod, "supported_separation",
+        lambda ka, na, kb, nb, **kw: _bimodal_scores(np.shape(ka), split=False))
+    rng = np.random.default_rng(3)
+    _write_well_csv(tmp_path / "plate_A01.csv", rng.normal(900, 200, 300))
+    _write_well_csv(tmp_path / "plate_H12.csv", rng.normal(300, 200, 300))
     log = logging.getLogger("test_span_wording")
     with caplog.at_level(logging.INFO, logger="test_span_wording"):
-        estimate_thresholds_from_controls(
+        out = mod.estimate_thresholds_from_controls(
             tmp_path, fluor_channels=["GFP"], csv_prefix="plate",
             pos_well="A01", neg_well="H12", log=log)
-    assert "spanning" in caplog.text
-    assert "not adjacent on the grid" not in caplog.text
+    assert "40 candidate cut(s) scored that same maximum" in caplog.text
+    assert "a contiguous run spanning" in caplog.text
+    assert "NOT adjacent on the grid" not in caplog.text
+    assert "the midpoint of the run around the best is what was stored" in caplog.text
+
+    # And it really is the midpoint: rebuild the grid the scan used and check
+    # the stored value against the middle of the injected run, not against the
+    # first index the scan would otherwise have reported.
+    pos = read_channel_values(tmp_path / "plate_A01.csv", "gfp")
+    neg = read_channel_values(tmp_path / "plate_H12.csv", "gfp")
+    grid = candidate_thresholds(pos, neg)
+    run = np.flatnonzero(_bimodal_scores(grid.shape, split=False) == 0.90)
+    assert out["gfp"] == pytest.approx(
+        round_stored_threshold(float(grid[(run[0] + run[-1]) // 2])))
+    assert out["gfp"] != pytest.approx(
+        round_stored_threshold(float(grid[run[0]])))
 
 
 def test_two_separated_maxima_are_not_described_as_a_span(tmp_path, caplog,
@@ -283,20 +287,12 @@ def test_two_separated_maxima_are_not_described_as_a_span(tmp_path, caplog,
     that as a span states that every threshold in it scored the best, which is
     the degraded-output-looks-like-good-output failure the plateau line exists
     to prevent.
-
-    The objective is replaced rather than reverse-engineered from cell values:
-    the assertion is about what the run *says* when the scan comes out bimodal,
-    and ``best_from_curves`` and the log line both still run for real.
     """
     import pipeline.threshold_optimize as mod
 
-    def bimodal(fa, fb, *, n_a=None, n_b=None):
-        diffs = np.full(np.asarray(fa).shape, 0.10)
-        diffs[len(diffs) // 4] = 0.90
-        diffs[(3 * len(diffs)) // 4] = 0.90
-        return diffs
-
-    monkeypatch.setattr(mod, "relative_gap", bimodal)
+    monkeypatch.setattr(
+        mod, "supported_separation",
+        lambda ka, na, kb, nb, **kw: _bimodal_scores(np.shape(ka), split=True))
     rng = np.random.default_rng(3)
     _write_well_csv(tmp_path / "plate_A01.csv", rng.normal(900, 200, 300))
     _write_well_csv(tmp_path / "plate_H12.csv", rng.normal(300, 200, 300))
@@ -305,12 +301,12 @@ def test_two_separated_maxima_are_not_described_as_a_span(tmp_path, caplog,
         mod.estimate_thresholds_from_controls(
             tmp_path, fluor_channels=["GFP"], csv_prefix="plate",
             pos_well="A01", neg_well="H12", log=log)
-    assert "is shared by 2 of" in caplog.text, caplog.text
-    assert "not adjacent on the grid" in caplog.text, (
+    assert "2 candidate cut(s) scored that same maximum" in caplog.text, caplog.text
+    assert "NOT adjacent on the grid" in caplog.text, (
         "two separated maxima were reported as if every threshold between "
         f"them had scored the best: {caplog.text!r}"
     )
-    assert "spanning" not in caplog.text
+    assert "contiguous run spanning" not in caplog.text
 
 
 def test_two_separated_maxima_are_not_reported_as_one_plateau():
@@ -473,16 +469,23 @@ def test_the_viewers_estimator_keeps_a_sub_one_gate(monkeypatch):
 def test_the_viewer_and_the_pipeline_choose_the_same_threshold(seed_a, seed_b, kind):
     """`threshold_optimize`'s own docstring says they cannot differ.
 
-    They did. The pipeline passes population sizes to `relative_gap` and the
-    Cell Gating tab's scan did not, unconditionally — including on the raw
-    fraction-on branch, where the fractions *are* `k / n` and both `n`s are two
-    lines away, and which is the default (the controller leaves every
-    fold-change array `None` until a user picks one). Measured before the fix:
-    grid points 1104 vs 1209 on overlapping populations, 1231 vs 2366 on a
-    skewed pair.
+    They did, twice over. The pipeline passed population sizes to `relative_gap`
+    and the Cell Gating tab's scan did not — and then the two grids differed as
+    well, the tab scanning a user-typed linspace and the pipeline a percentile-
+    clipped one. Measured before the fix: grid points 1104 vs 1209 on
+    overlapping populations, 1231 vs 2366 on a skewed pair.
+
+    Both entry points now reduce to `optimize_between_populations`, so this
+    drives each one as its own caller does — a DataFrame through the tab's
+    helper, arrays through the pipeline's — rather than reassembling either
+    scan here. Reassembling it is what let the two drift in the first place: a
+    test that rebuilds the viewer's scan by hand agrees with whatever it
+    rebuilt, not with what the tab runs.
     """
+    import pandas as pd
+
     from review.features.home.cell_gating.gating_compute import (
-        scan_fc_fractions,
+        _optimize_thresh_frac_on_between_wells,
     )
 
     ra, rb = np.random.default_rng(seed_a), np.random.default_rng(seed_b)
@@ -493,15 +496,23 @@ def test_the_viewer_and_the_pipeline_choose_the_same_threshold(seed_a, seed_b, k
     else:
         a, b = ra.normal(2000, 100, 400), rb.normal(200, 20, 400)
 
-    thresholds = sweep_thresholds(*sweep_bounds(a, b), 512)
-    fa, fb, diffs = scan_fc_fractions(thresholds, a, b)
-    viewer = best_from_curves(thresholds, fa, fb, diffs,
-                              n_a=a.size, n_b=b.size).threshold
-    pipeline = optimize_between_populations(a, b, steps=512).threshold
-    assert viewer == pytest.approx(pipeline), (
-        f"the Cell Gating tab would report {viewer!r} and the pipeline "
-        f"{pipeline!r} for the same two populations"
+    def _frame(values):
+        return pd.DataFrame({"area_px": [100] * len(values),
+                             "Included": [1] * len(values),
+                             "gfp_mean_intensity": values})
+
+    lo, hi = float(min(a.min(), b.min())), float(max(a.max(), b.max()))
+    viewer = _optimize_thresh_frac_on_between_wells(
+        _frame(a), _frame(b), channel_key="gfp",
+        min_threshold=lo, max_threshold=hi)
+    pipeline = optimize_between_populations(a, b, min_threshold=lo, max_threshold=hi)
+    assert viewer.threshold == pytest.approx(pipeline.threshold), (
+        f"the Cell Gating tab would report {viewer.threshold!r} and the "
+        f"pipeline {pipeline.threshold!r} for the same two populations"
     )
+    assert viewer.difference == pytest.approx(pipeline.difference)
+    assert viewer.objective == pipeline.objective
+    assert (viewer.k_a, viewer.k_b) == (pipeline.k_a, pipeline.k_b)
 
 
 def test_the_fold_changed_branch_stays_unsmoothed():

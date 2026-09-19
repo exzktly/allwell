@@ -25,6 +25,10 @@ from PySide6.QtWidgets import (
 
 from widgets.flow_layout import FlowLayout, flow_group
 from review.core.ui_helpers import build_section_header
+from pipeline.threshold_optimize import (
+    DEFAULT_MAX_CANDIDATES,
+    DEFAULT_SPECIFICITY_WEIGHT,
+)
 from review.features.home.cell_gating.controller import (
     _cell_gating_autofill_opt_range,
     _cell_gating_on_opt_scope_changed,
@@ -53,8 +57,9 @@ def build_optimizer_window(ctx, parent: QWidget) -> QDialog:
 
     opt_layout.addWidget(build_section_header(
         win, "Optimize ThreshFracOn between two wells",
-        hint="Scans thresholds across a range and applies the one that best "
-             "separates the two wells' fraction-on.",
+        hint="Scans thresholds across a range and applies the one whose "
+             "separation between the two wells is best supported by the "
+             "cells behind it.",
     ))
 
     opt_row = QWidget(win)
@@ -86,22 +91,47 @@ def build_optimizer_window(ctx, parent: QWidget) -> QDialog:
     opt_max = reg.register("_cell_gating_opt_max_edit", QLineEdit("100.0", opt_row))
     opt_max.setFixedWidth(theme.Metrics.num_field_w_lg)
     opt_row_layout.addWidget(flow_group(opt_row, "Max:", opt_max))
-    opt_steps = reg.register("_cell_gating_opt_steps_edit", QLineEdit("101", opt_row))
+    opt_weight = reg.register(
+        "_cell_gating_opt_weight_edit",
+        QLineEdit(f"{DEFAULT_SPECIFICITY_WEIGHT:g}", opt_row))
+    opt_weight.setFixedWidth(theme.Metrics.short_field_w)
+    opt_weight.setToolTip(
+        "How much a cell counted ON in Well B costs relative to a cell missed "
+        "in Well A, in the score being maximised (TPR − w × FPR).\n\n"
+        "1 is the textbook ROC cut point and treats the two errors alike. "
+        "Raise it when Well B is a negative control whose background-on "
+        "contaminates every other well's fraction-on readout: on a badly "
+        "overlapping pair, w=1 left 5.0% of Well B above the cut, w=3 left "
+        "2.3% and w=10 left 0.5%, each costing a few points of Well A's "
+        "fraction-on."
+    )
+    opt_row_layout.addWidget(flow_group(opt_row, "Spec. weight:", opt_weight))
+    opt_steps = reg.register(
+        "_cell_gating_opt_steps_edit",
+        QLineEdit(f"{DEFAULT_MAX_CANDIDATES}", opt_row))
     opt_steps.setFixedWidth(theme.Metrics.short_field_w)
     opt_steps.setToolTip(
-        "Number of thresholds scanned across the Min–Max range, evenly "
-        "spaced via numpy.linspace. NOT a step size — \"101\" scans 101 "
-        "thresholds (every 1 unit across a 0–100 range). Higher values "
-        "give a finer scan at the cost of a little compute."
+        "A CEILING on how many thresholds are scanned — not the number "
+        "scanned, and not a step size.\n\n"
+        "Fraction-on is a step function of the threshold, so the scan already "
+        "evaluates every cut the data can tell apart: one candidate between "
+        "each pair of neighbouring cell values, which is usually far fewer "
+        "than this cap. Two wells of 100,000 cells would offer ~200,000 "
+        "candidates and the cap subsamples those evenly. The whole scan takes "
+        "well under a second either way."
     )
-    opt_row_layout.addWidget(flow_group(opt_row, "# Points:", opt_steps))
+    opt_row_layout.addWidget(flow_group(opt_row, "Max points:", opt_steps))
     opt_btn = QPushButton("Optimize ThreshFracOn", opt_row)
     opt_btn.setProperty("variant", "secondary")
     opt_btn.setToolTip(
-        "Scan # Points thresholds between Min and Max for the selected "
-        "channel, compute fraction-on in Well A and Well B at each "
-        "threshold, then apply the threshold that maximizes their "
-        "relative fraction-on gap, |Δ| / max(fa, fb)."
+        "Scan every distinguishable threshold between Min and Max for the "
+        "selected channel and apply the one whose separation between the two "
+        "wells survives its own 95% confidence interval — so a cut that "
+        "looks perfect only because almost no cell is left above it does not "
+        "win.\n\n"
+        "Well A is the positive arm: the score is TPR(A) − w × "
+        "FPR(B), so the two wells are not interchangeable, and a pair passed "
+        "the wrong way round is refused rather than optimised backwards."
     )
     opt_btn.clicked.connect(lambda _=False: cell_gating_optimize_thresh_frac_on(ctx))
     reg.register("_cell_gating_opt_btn", opt_btn)

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from pipeline.threshold_optimize import relative_gap
+from pipeline.threshold_optimize import floor_unsupported, relative_gap
 import pandas as pd
 
 from review.features.home.cell_gating.gating_compute import (
@@ -128,3 +128,95 @@ def test_opt_curve_ylim_expands_for_out_of_range_curves():
     # Non-finite values are ignored, never crashing or poisoning the range.
     lo, hi = _opt_curve_ylim(np.array([np.nan, np.inf, 0.3]))
     assert np.isfinite(lo) and np.isfinite(hi)
+
+
+def test_the_fold_change_branch_keeps_the_relative_gap_and_says_so():
+    """Its fractions are not ``k / n`` any more, so no confidence bound applies.
+
+    ``scale_bar_value`` divides (or subtracts) each well's fraction-on by a
+    control's at the same threshold, so the scanned quantity exceeds 1 and goes
+    negative. There is no ``k`` to put a Wilson interval around. The branch
+    therefore keeps ``|fa-fb| / max(|fa|, |fb|)`` — and the result says which
+    objective produced it, because the two numbers are not on one scale.
+    """
+    rng = np.random.default_rng(5)
+    a = _df(list(rng.normal(1500, 200, 400)))
+    b = _df(list(rng.normal(400, 120, 400)))
+    ctrl = rng.normal(700, 150, 400)
+    base = dict(channel_key="gfp", min_threshold=0, max_threshold=3000, steps=512)
+
+    raw = _optimize_thresh_frac_on_between_wells(a, b, **base)
+    folded = _optimize_thresh_frac_on_between_wells(a, b, **base, ctrl_values=ctrl)
+
+    assert raw.objective == "supported-separation"
+    assert folded.objective == "relative-gap"
+    # The count fields belong to the bounded objective and must not be invented
+    # for the other one: a caller printing them would be printing a number that
+    # does not describe the fractions the scan actually compared.
+    assert (folded.k_a, folded.k_b, folded.youden) == (None, None, None)
+    assert raw.k_a is not None
+
+
+def test_the_fold_change_branch_will_not_score_a_cut_nothing_supports():
+    """The coarse stand-in for the bound, on the branch that cannot have one.
+
+    Well A holds ten bright cells in a thousand; Well B holds none that bright.
+    The relative gap is at its maximum out there and has no N term to stop it,
+    which is the reported defect. ``floor_unsupported`` blanks every candidate
+    that leaves neither well ten cells, so the scan cannot land on it.
+    """
+    values_a = [200.0] * 990 + [5000.0] * 10
+    values_b = [200.0] * 800 + [900.0] * 200
+    a, b = _df(values_a), _df(values_b)
+    ctrl = np.array([200.0] * 900 + [900.0] * 100)
+    base = dict(channel_key="gfp", min_threshold=0, max_threshold=6000,
+                steps=2001, ctrl_values=ctrl, op_ctrl="subtract")
+
+    result = _optimize_thresh_frac_on_between_wells(a, b, **base)
+
+    assert result.support_floor == 10
+    # The ten-cell tail is out of reach; the cut lands where a population still
+    # stands behind it.
+    assert result.threshold < 5000.0
+    assert max((np.asarray(values_a) > result.threshold).sum(),
+               (np.asarray(values_b) > result.threshold).sum()) >= 10
+
+
+def test_the_floor_shrinks_to_what_a_small_pair_of_wells_can_spare():
+    """Ten cells is the ask, not the rule.
+
+    A floor of ten against two wells of a dozen cells would reject every cut
+    worth making, so it drops to a tenth of the larger well — never below one,
+    because a cut with nothing above it in either well is not a cut.
+    """
+    thresholds = np.linspace(0.0, 100.0, 51)
+    scores = np.linspace(0.0, 1.0, 51)
+    tiny_a = np.array([10.0, 90.0, 95.0])
+    tiny_b = np.array([5.0, 8.0, 9.0])
+
+    out, floor = floor_unsupported(scores, tiny_a, tiny_b, thresholds)
+
+    assert floor == 1
+    # Above 95 nothing is left in either well, so those candidates are blanked
+    # and the ones below are untouched.
+    assert np.isneginf(out[thresholds > 95.0]).all()
+    assert np.array_equal(out[thresholds < 95.0], scores[thresholds < 95.0])
+
+
+def test_the_floor_stands_down_when_it_would_exclude_every_candidate():
+    """``support_floor == 0`` on the result is how the caller can see it happened.
+
+    The Min/Max fields are a user's to type, and a range sitting entirely above
+    the data leaves no candidate with a cell above it. Masking all of them would
+    turn a bad range into "these wells do not separate", which is a different
+    and wrong answer. The scan reports what it can and says the floor was not
+    applied.
+    """
+    values = np.array([1.0, 2.0, 3.0])
+    thresholds = np.linspace(500.0, 900.0, 21)
+    scores = np.linspace(0.0, 1.0, 21)
+
+    out, floor = floor_unsupported(scores, values, values, thresholds)
+
+    assert floor == 0
+    assert np.array_equal(out, scores)

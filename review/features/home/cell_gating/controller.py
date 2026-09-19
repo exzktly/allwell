@@ -55,6 +55,7 @@ from review.domain.gating_state import (
 from review.domain.metric_registry import channel_supports_smfish
 from review.domain.plot_members import plot_replicate_sets
 from review.domain.viewer_state import parse_rc
+from pipeline.threshold_optimize import DEFAULT_SPECIFICITY_WEIGHT
 from review.features.home.cell_gating.gating_compute import (
     _cell_gating_first_frame_rows,
     _cell_gating_valid_rows,
@@ -67,6 +68,7 @@ from review.features.home.cell_gating.gating_compute import (
     apply_fluor_gating,
     format_inclusion_counts,
     format_inclusion_funnel,
+    format_optimizer_result as _format_opt_result,
     inclusion_counts,
     inclusion_funnel,
 )
@@ -1115,24 +1117,35 @@ def cell_gating_optimize_thresh_frac_on(ctx) -> None:
         lo = float(ctx.runtime.cell_gating.opt_min_edit.text())
         hi = float(ctx.runtime.cell_gating.opt_max_edit.text())
         steps = int(float(ctx.runtime.cell_gating.opt_steps_edit.text()))
+        weight_edit = ctx.runtime.cell_gating.opt_weight_edit
+        weight = (DEFAULT_SPECIFICITY_WEIGHT if weight_edit is None
+                  else float(weight_edit.text()))
         tp_combo = ctx.runtime.cell_gating.opt_timepoint_combo
         timepoint = tp_combo.currentData() if tp_combo is not None else None
     except ValueError:
-        _status("Optimize ThreshFracOn: Min, Max, and # Points must be numeric.")
+        _status("Optimize ThreshFracOn: Min, Max, Max points and Spec. weight "
+                "must be numeric.")
         return
     except Exception as exc:
         _status(f"Optimize ThreshFracOn: controls are not ready ({exc}).")
         return
-    # # Points is the NUMBER OF thresholds we scan (numpy.linspace's third
-    # arg), NOT a step size. A small value (e.g. 2) only samples the
-    # endpoints — argmax(|Δ|) then lands at whichever boundary has the
-    # bigger diff, which is a useless answer. Refuse the degenerate range
-    # with a user-facing message so the field's semantics is unmissable.
+    # Max points is a CEILING on the candidate grid, which the data itself sets
+    # (one cut between each pair of neighbouring cell values). A tiny ceiling
+    # subsamples that grid down to a handful of cuts and the best of those is
+    # then whichever happened to be sampled, which is a useless answer — so the
+    # floor stays, with a message that states what the field now means.
     if steps < 10:
         _status(
-            "Optimize ThreshFracOn: # Points must be at least 10 — it's the "
-            "number of thresholds scanned across the Min–Max range, not a "
-            "step size."
+            "Optimize ThreshFracOn: Max points must be at least 10 — it caps "
+            "how many of the thresholds the data offers get scanned, and a cap "
+            "that small leaves nothing to choose between."
+        )
+        return
+    if not (weight > 0):
+        _status(
+            "Optimize ThreshFracOn: Spec. weight must be greater than 0 — it "
+            "is what a cell counted ON in Well B costs relative to a cell "
+            "missed in Well A. Use 1 to weigh the two alike."
         )
         return
 
@@ -1156,37 +1169,26 @@ def cell_gating_optimize_thresh_frac_on(ctx) -> None:
             steps=steps,
             ratios=ratios,
             timepoint=timepoint,
+            weight=weight,
             **fc_kwargs,
         )
     except ValueError as exc:
-        _status(f"Optimize ThreshFracOn: {exc}")
+        # The scan's own refusals already say what is wrong with the data; the
+        # range is added here because it is the part the user can change from
+        # this window, and the scan does not know it came from two fields.
+        _status(f"Optimize ThreshFracOn ({channel_key}, {well_a} vs {well_b} "
+                f"across [{lo:g}, {hi:g}]): {exc}")
         return
 
     tp_note = ("" if timepoint is None else f" at {_timepoint_label(timepoint)}") + fc_note
-    # A zero best difference means the scan range never crossed where the two
-    # wells' fraction-on diverge (e.g. the range sits entirely below/above the
-    # data). Applying ``lo`` there would be the old "always the smallest value"
-    # bug — surface it instead of silently writing a meaningless threshold.
-    if not (result.difference > 0):
-        _status(
-            f"Optimize ThreshFracOn: {well_a} and {well_b} have the same "
-            f"fraction-on across [{lo:g}, {hi:g}]{tp_note} for {channel_key}. "
-            "Adjust Min/Max to span the data, or pick different wells/timepoint."
-        )
-        return
-
     edit = (ctx.runtime.cell_gating.thresh_frac_edits or {}).get(channel_key)
     if edit is None:
         _status(f"Optimize ThreshFracOn: no ThreshFracOn field for {channel_key}.")
         return
     edit.setText(f"{result.threshold:.6g}")
     cell_gating_on_threshold_frac_on_change(ctx)
-    _status(
-        f"Optimized {channel_key}{tp_note}: threshold={result.threshold:.6g}; "
-        f"{well_a} fraction-on={result.frac_a:.3f} (n={result.n_a}), "
-        f"{well_b} fraction-on={result.frac_b:.3f} (n={result.n_b}); "
-        f"|Δ|/max={result.difference:.3f}."
-    )
+    _status(f"Optimized {channel_key}{tp_note}: "
+            f"{_format_opt_result(result, well_a, well_b)}")
     # Validation popup: show fraction-on(A), fraction-on(B), and |Δ| as
     # functions of the scanned threshold, with the chosen threshold marked.
     # Lets the user eyeball whether argmax landed where they'd expect, vs.

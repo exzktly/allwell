@@ -539,6 +539,43 @@ def _optimize_thresh_frac_on_between_wells(
                              support_floor=floor)
 
 
+def format_optimizer_result(result, well_a: str, well_b: str) -> str:
+    """The optimizer's one-line readout. Pure: a result and two names in.
+
+    Reports the cut, what it leaves standing in each well as a **count over the
+    well total** rather than a bare percentage, and the score — named, because
+    the two objectives produce numbers on different scales and a reader cannot
+    tell 0.87 of one from 0.87 of the other.
+
+    The plateau is stated whenever there is one. A clean assay has a real
+    plateau, the empty valley between the two populations, and every cut inside
+    it classifies identically; printing one number out of a run of two hundred
+    as though the scan had found a peak is the false precision this line exists
+    to avoid.
+    """
+    from pipeline.threshold_optimize import OBJECTIVE_SUPPORTED
+
+    if result.objective == OBJECTIVE_SUPPORTED:
+        arms = (f"{well_a} {result.k_a:,}/{result.n_a:,} ON ({100 * result.frac_a:.1f}%), "
+                f"{well_b} {result.k_b:,}/{result.n_b:,} ON ({100 * result.frac_b:.2f}%)")
+        score = (f"separation \u2265 {result.difference:.3f} at 95% confidence "
+                 f"(Youden J = {result.youden:.3f}")
+        score += ")" if result.weight == 1.0 else f", weight {result.weight:g})"
+    else:
+        arms = (f"{well_a} adjusted fraction-on {result.frac_a:.3f} (n={result.n_a:,}), "
+                f"{well_b} {result.frac_b:.3f} (n={result.n_b:,})")
+        score = f"relative gap {result.difference:.3f} (fold-change scan)"
+    line = f"threshold = {result.threshold:.6g}; {arms}; {score}."
+    if result.tie_count > 1:
+        shape = ("a contiguous run spanning"
+                 if result.tie_contiguous else
+                 "scattered, not adjacent on the grid, across")
+        line += (f" {result.tie_count:,} cuts scored that same best, {shape} "
+                 f"{result.tie_span:.4g} intensity unit(s); the midpoint of the "
+                 f"run around the best is what was applied.")
+    return line
+
+
 def _cell_gating_first_frame_rows(df) -> tuple:
     """Return ``(sub_df, description)`` for the first FOV's first timepoint."""
     if df is None or df.empty:

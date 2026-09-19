@@ -517,3 +517,98 @@ def test_threshold_change_redraws_scope_plots(loaded_app, monkeypatch):
         lambda a, *ar, **k: (calls.__setitem__("n", calls["n"] + 1), orig(a, *ar, **k))[1])
     set_thresh_frac_on(loaded_app._ctx, 123.0)
     assert calls["n"] >= 1
+
+
+# ── threshold curve, through the real constructor and the real button ────────
+#
+# CLAUDE.md §7.8 rule 3: one test per feature goes through the entry point the
+# app calls, not the seam underneath it. Everything else about the curve is
+# tested cheaply in ``tests/test_playground_threshold_curve.py`` against stubs
+# that cannot disagree with their author; this is the one that can.
+
+def test_the_threshold_curve_button_is_built_and_connected(playground_app):
+    """Excludes the button that is built and wired to nothing.
+
+    The Playground already had a Segment button whose running flag reaches no
+    widget at all, so "the control exists" was never evidence that pressing it
+    does anything here.
+    """
+    app = playground_app
+    btn = getattr(app, "_playground_sweep_btn", None)
+    stop = getattr(app, "_playground_sweep_stop_btn", None)
+    assert btn is not None and stop is not None
+    assert "curve" in btn.text().lower()
+    assert stop.isVisible() is False, "Stop is offered only while a sweep runs"
+
+    import review.features.image_browser.playground.controller as pc
+    orig_frame = pc._segmentation_frame
+
+    reached = {}
+
+    # The CSV-only fixture produces no per-well image archives, so the tab has
+    # no frame to sweep — which is its own test below. Here the frame is
+    # supplied at the seam directly under the button, so the press still goes
+    # through the real handler.
+    import numpy as _np
+    pc._segmentation_frame = lambda ctx: (_np.zeros((32, 32), _np.float32), "")
+
+    def _fake_request(arr, thresholds, **kw):
+        reached["thresholds"] = list(thresholds)
+        reached["arr_shape"] = getattr(arr, "shape", None)
+        kw["on_done"]([len(thresholds) - i for i in range(len(thresholds))])
+        return object()
+
+    import review.features.image_browser.playground.worker as pw
+    orig = pw.request_threshold_sweep
+    shown = {}
+    import review.features.image_browser.playground.sweep_curve_view as scv
+    orig_show = scv.show_threshold_curve
+    try:
+        pw.request_threshold_sweep = _fake_request
+        scv.show_threshold_curve = lambda ctx, curve: shown.update(curve=curve)
+        btn.click()
+    finally:
+        pw.request_threshold_sweep = orig
+        scv.show_threshold_curve = orig_show
+        pc._segmentation_frame = orig_frame
+
+    assert reached.get("thresholds"), "pressing the button started no sweep"
+    assert reached["arr_shape"] is not None, "the sweep got no frame"
+    assert shown.get("curve") is not None, "the curve was computed and not shown"
+    assert shown["curve"].declined == ""
+    # And the controller put the buttons back, on the success path.
+    assert btn.isEnabled() is True
+    assert pc._st(app._ctx).sweep_running is False
+
+
+def test_pressing_stop_marks_the_sweep_to_stop(playground_app):
+    """The flag the worker polls, set by the real button."""
+    import review.features.image_browser.playground.controller as pc
+
+    app = playground_app
+    st = pc._st(app._ctx)
+    st.sweep_stop = False
+    app._playground_sweep_stop_btn.click()
+    assert st.sweep_stop is True
+
+
+def test_a_sweep_with_no_frame_declines_and_leaves_the_buttons_usable(playground_app):
+    """Excludes the early return that leaves Stop showing and the curve button
+    dead — which is what the fixture actually does, since a CSV-only dataset
+    produces no image archives to sweep."""
+    import review.features.image_browser.playground.controller as pc
+
+    app = playground_app
+    started = []
+    import review.features.image_browser.playground.worker as pw
+    orig = pw.request_threshold_sweep
+    try:
+        pw.request_threshold_sweep = lambda *a, **k: started.append(1)
+        app._playground_sweep_btn.click()
+    finally:
+        pw.request_threshold_sweep = orig
+
+    assert started == [], "a sweep was started with no frame to sweep"
+    assert app._playground_sweep_btn.isEnabled() is True
+    assert app._playground_sweep_stop_btn.isVisible() is False
+    assert pc._st(app._ctx).sweep_running is False

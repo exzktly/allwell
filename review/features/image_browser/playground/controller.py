@@ -1162,6 +1162,115 @@ def playground_segment_now(ctx) -> None:
         on_done=_on_done, on_failed=_on_failed, on_stage=_on_stage)
 
 
+def _set_sweep_buttons(win, *, running: bool) -> None:
+    """Offer Stop while a sweep runs, and not the sweep button twice.
+
+    Done here, explicitly, rather than through ``playground_on_change``: that
+    fan-out reflects the *frame*, and nothing in it has ever looked at
+    ``seg_running`` either. Describing this as handled by a fan-out that does
+    not handle it is the branch-that-exists mistake (CLAUDE.md §7.7), and the
+    symptom would be a dead Stop button and a second sweep started over the
+    first.
+    """
+    btn = getattr(win, "_playground_sweep_btn", None)
+    stop = getattr(win, "_playground_sweep_stop_btn", None)
+    if btn is not None:
+        btn.setEnabled(not running)
+    if stop is not None:
+        stop.setVisible(running)
+        stop.setEnabled(running)
+
+
+def playground_sweep_now(ctx) -> None:
+    """Sweep the probability threshold over the displayed frame, on a worker.
+
+    Button-driven for the same reason ``playground_segment_now`` is, and more
+    so: a sweep is *M* segmentations, so it is the longest thing this tab can
+    start. It runs on the **corrected** frame, the one segmentation runs on, so
+    the curve and the Segment button describe the same pixels.
+
+    The result is a curve, never a recommendation — see
+    :mod:`review.domain.threshold_sweep` for the measurement behind that.
+    """
+    from review.domain.threshold_sweep import curve_from_counts, sweep_grid
+    from review.features.image_browser.playground.sweep_curve_view import (
+        show_threshold_curve,
+    )
+    from review.features.image_browser.playground.worker import (
+        request_threshold_sweep,
+    )
+
+    st = _st(ctx)
+    win = ctx.window
+    if st.sweep_running:
+        return
+    # Same re-render as the Segment path, and for the same reason: the pixels
+    # swept must be the ones the current widget values produce.
+    playground_on_change(ctx)
+    arr, note = _segmentation_frame(ctx)
+    if arr is None:
+        _set_status(win, note)
+        _set_sweep_buttons(win, running=False)
+        return
+
+    grid = sweep_grid()
+    st.sweep_running = True
+    st.sweep_stop = False
+    st.sweep_status = f"Threshold curve: 0 of {len(grid)}…"
+    _set_sweep_buttons(win, running=True)
+    _set_status(win, "Threshold curve: sweeping… (the first run of a session "
+                     "also loads TensorFlow — ~10-30 s, and it stays resident)")
+    _show_progress(ctx, 0)
+
+    def _on_progress(done: int, total: int) -> None:
+        st.sweep_status = f"Threshold curve: {done} of {total}…"
+        _set_status(win, st.sweep_status)
+
+    def _finish(counts) -> None:
+        _hide_progress(ctx)
+        st.sweep_running = False
+        _set_sweep_buttons(win, running=False)
+        curve = curve_from_counts(grid[:len(counts)], counts,
+                                  current=st.seg_prob_thresh)
+        st.sweep_curve = curve
+        # A sweep the user stopped is still evidence, and saying how far it got
+        # is the difference between a partial curve and a wrong one.
+        stopped = len(counts) < len(grid)
+        st.sweep_status = curve.describe()
+        if stopped and counts:
+            st.sweep_status = (f"Stopped after {len(counts)} of {len(grid)} "
+                               f"thresholds. {st.sweep_status}")
+        if note:
+            st.sweep_status = f"{st.sweep_status} — {note}"
+        _set_status(win, st.sweep_status)
+        show_threshold_curve(ctx, curve)
+        playground_on_change(ctx)
+
+    def _on_failed(msg: str) -> None:
+        _hide_progress(ctx)
+        st.sweep_running = False
+        _set_sweep_buttons(win, running=False)
+        st.sweep_curve = None
+        st.sweep_status = f"Threshold curve failed: {msg}"
+        _set_status(win, st.sweep_status)
+        playground_on_change(ctx)
+
+    ctx.runtime.playground.sweep_bridge = request_threshold_sweep(
+        arr, grid, nms_thresh=st.seg_nms_thresh, on_done=_finish,
+        on_failed=_on_failed, on_progress=_on_progress,
+        should_stop=lambda: bool(st.sweep_stop))
+
+
+def playground_sweep_stop(ctx) -> None:
+    """Ask a running sweep to stop after the threshold it is on.
+
+    Sets a flag the worker polls rather than killing the thread: the counts
+    gathered so far are returned and drawn, because a partial curve the user
+    asked for is evidence and throwing it away spends their wait for nothing.
+    """
+    _st(ctx).sweep_stop = True
+
+
 def playground_open_loose_image(ctx, path: str) -> None:
     """Adopt *path* as the frame, leaving dataset mode."""
     st = _st(ctx)

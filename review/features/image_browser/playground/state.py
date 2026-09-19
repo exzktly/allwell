@@ -102,6 +102,17 @@ class PlaygroundState:
     seg_key: tuple | None = None
     seg_status: str = ""
     seg_running: bool = False
+    # ── threshold sweep ──────────────────────────────────────────────────────
+    # Nucleus count against the probability threshold, for the frame on screen.
+    # The result is a ``review.domain.threshold_sweep.ThresholdCurve``; it is
+    # held as ``object`` for the same reason ``seg_labels`` is, so this module
+    # stays free of anything it would otherwise have to import.
+    sweep_curve: object = None
+    sweep_running: bool = False
+    # Set by the Stop button and polled inside the sweep loop, which is the
+    # only long-running thing this tab starts: M segmentations rather than one.
+    sweep_stop: bool = False
+    sweep_status: str = ""
     # Set when the frame segmented was not the stage on screen (segmentation
     # always runs on the corrected frame, as the pipeline does). Reported with
     # the nucleus count so a count can never be read as belonging to a picture
@@ -149,5 +160,8 @@ class PlaygroundState:
         # the sidebar plate appears to drive it.
         self.loose_image_path = None
         self.seg_labels = None
+        self.sweep_curve = None
+        self.sweep_running = False
+        self.sweep_stop = False
         self.seg_key = None
         self.seg_status = ""

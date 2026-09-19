@@ -69,6 +69,10 @@ _OPTS = {
     "qc_min_area": "10.0",
     "qc_max_area": "900.0",
     "qc_min_solidity": "0.5",
+    # Both non-default, so a hydration that drops either shows: the checkbox
+    # ships on, and the cut ships blank.
+    "measure_focus": False,
+    "focus_min": "0.083",
     "phase_token": "BF",
     "segmentation_method": "stardist_seeded_watershed_cell",
     "cytoplasm_token": "GFP",

@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import ast
 
-from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source, python_sources, rel
 
 #: Writing an archive. ``atomic_zip`` is the one publisher every well-archive
 #: path in the app goes through (ARCHITECTURE §6.5).
@@ -141,8 +141,13 @@ def repo_archive_writers() -> frozenset[str]:
     defs: dict[tuple[str, str], set[str]] = {}
     imports: dict[str, dict[str, tuple[str, str]]] = {}
     for path in python_sources():
+        # ``parse_source``, never ``ast.parse(path.read_text())``: the tree is
+        # 479 files and parsing it is 2.8 s, which roughly sixty guards in this
+        # lane each want in full. ``test_the_fast_lane_stays_fast`` is what
+        # noticed this function doing its own — and it only noticed in the
+        # whole lane, not in this file's own run.
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = parse_source(path)
         except (OSError, SyntaxError):  # pragma: no cover - the tree parses
             continue
         mod = rel(path)[:-3].replace("/", ".")

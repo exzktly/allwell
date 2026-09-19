@@ -3898,7 +3898,7 @@ none: neither has an ON cutoff of its own. The effective value comes from
 line and every statistic that divides by that cutoff read the same number
 through the same key resolution. Editing either cutoff
 replots the CDFs; a ThreshFracOn edit used to leave its own line where the old
-value was, on the panel the user was looking at to choose it. The optimizer — twelve controls answering an
+value was, on the panel the user was looking at to choose it. The optimizer — fourteen controls answering an
 occasional question — is not on the tab at all: `optimizer_view` builds it into
 its own **non-modal** window (non-modal because its answer is judged against the
 CDFs behind it), hidden, at tab-build time, so every optimizer widget handle
@@ -4139,7 +4139,7 @@ Data-layer helpers (under `review/data/`):
 
 | Module | Role |
 |--------|------|
-| `data/auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `pipeline.auto_threshold` so the pipeline and the GUI agree exactly. The Cell Gating tab's *two-well* optimizer shares its numeric core the same way, through `pipeline.threshold_optimize` — the sweep, the relative-fraction-on-gap objective and the range/steps validation live there, so the Analyze side's control-well pass and the Review side's "Optimize ThreshFracOn" button reduce to one implementation. `gating_compute` re-exports those names and keeps only what depends on the viewer: the fold-change layer (which would otherwise drag `review.domain.fold_change` into `pipeline/`) and the DataFrame/ratio plumbing. |
+| `data/auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `pipeline.auto_threshold` so the pipeline and the GUI agree exactly. The Cell Gating tab's *two-well* optimizer shares its numeric core the same way, through `pipeline.threshold_optimize` — the candidate grid, the confidence-bounded separation objective, the separability test and the range validation live there, so the Analyze side's control-well pass and the Review side's "Optimize ThreshFracOn" button reduce to one implementation. `gating_compute` re-exports those names and keeps only what depends on the viewer: the fold-change layer (which would otherwise drag `review.domain.fold_change` into `pipeline/`) and the DataFrame/ratio plumbing. |
 | `data/zipfile_cache.py` | Process-wide LRU of open `ZipFile` handles, lock-guarded so `read_member_bytes` / `scan_zip_members` share one open file across the thousands of per-member reads the Image Table / heatmap / smFISH-worker paths issue. Invalidated on dataset swap, through `ImageRepository.invalidate` together with the decoded-array LRU; it also re-opens by itself when a path's mtime changes, so a re-run pipeline cannot be read through a handle onto the old archive. Both caches hand out **shared** objects — the same decoded array to every caller that asks for an image, one serialised handle per zip — so neither is named outside the module that owns it, which `tests/test_image_cache_encapsulation.py` pins. That guard locks in a property that already held rather than repairing one that failed. |
 
 ### 5.6 The data layer
@@ -6453,16 +6453,34 @@ cut has thinned one arm to a handful of cells the interval swallows the estimate
 and the score collapses. The uncertainty in the measurement is the penalty —
 there is no separate term and no tuning constant.
 
-Three properties follow, and each one closes a hole the previous objective had.
+**Whether the two wells differ at all is a separate question, asked separately.**
+The bound above is *per candidate*, and the scan maximises it over thousands of
+candidates. A one-sided 95 % bound clearing zero on one pre-chosen candidate
+means something; the largest of ten thousand such bounds clears zero on noise
+routinely. Measured on 200 pairs drawn from one lognormal distribution, 2,000
+cells each, `max(score) > 0` on **92** of them — so reading the objective's own
+sign as a separability verdict would have applied a threshold to 46 % of
+genuinely inseparable well pairs, which is the same class of failure as the
+objective being replaced. No property of `supported_separation` fixes that,
+because the problem is the maximisation and not the bound.
 
-*The bound is signed, so an inseparable pair is refused.* `max(score) <= 0` is a
-statement about the data — no candidate threshold separates these two wells at
-this confidence level — and `optimize_between_populations` raises rather than
-returning the argmax of noise. Measured -0.0011 for two samples drawn from one
-distribution against +0.54 to +0.67 for every separable pair tested. The
-objective is also asymmetric, `TPR(a) - w·FPR(b)`, so a swapped pair of control
-wells is refused outright instead of optimised backwards and then queried in a
-warning.
+So `optimize_between_populations` runs a real test before the argmax:
+`max(TPR - FPR)` is the one-sided two-sample Kolmogorov-Smirnov statistic, whose
+null distribution is known, and `separability_critical_value` is the Smirnov
+critical value `sqrt(-ln(α)/2 · (n_a+n_b)/(n_a·n_b))`. Measured false-positive
+rate on pairs from one distribution: 6 % at n = 2,000 per well, 4.3 % at n = 200,
+3.7 % at n = 50, against the 5 % the asymptotic form targets. The statistic is
+the *unweighted* difference even when the objective is weighted — what an error
+costs is a question about what to do, and it does not change whether the two
+wells differ. Failing the test raises, so the caller skips the channel; the
+message names what the best cut achieved against what that many cells would
+produce by chance.
+
+Two further properties follow from the objective itself.
+
+*It is asymmetric,* `TPR(a) - w·FPR(b)`, so a swapped pair of control wells does
+not separate in the direction being asked about and is refused by the same test,
+instead of being optimised backwards and then queried in a warning afterwards.
 
 *The candidate grid is the data's own.* `candidate_thresholds` returns one point
 between each pair of consecutive distinct pooled values, counted with
@@ -6491,13 +6509,18 @@ was `|fa - fb| / max(|fa|, |fb|)` with both fractions Laplace-smoothed to
 `(k_a+1)/(k_b+1)`". That is scale-free in N by construction: a cut retaining ten
 positive-control cells and zero negative-control cells outranks one retaining
 sixty thousand and five thousand, and the `+1` that held it back at small N is
-noise at plate scale. Measured on synthetic lognormal controls where the correct
-gate is known: two 100,000-cell wells with overlapping tails put the cut at 1958,
-leaving 9.9 % of the positive control ON against a 60 % truth; with 1 % bright
-debris in the negative control, 1053 and 44.4 %. On the same cases the bounded
-score lands at 59.8 % and 59.7 %, does not move at all when one negative-control
-cell is relocated (the old objective moved 640 to 900), and cuts the bootstrap
-spread of the resulting fraction-on from sd 4.22 to sd 0.38.
+noise at plate scale. On synthetic lognormal controls where the correct gate is
+known, it put the cut far out in the tail and kept a fraction of the responders
+the gate exists to count.
+
+The cases that number the claim are in the tests rather than here, because a
+figure in a document is not re-measured when the code moves under it:
+`test_the_cut_is_not_pushed_into_the_tail_to_buy_a_cleaner_ratio` fixes the
+headline case (5,000 cells a side, 60 % responders) and carries the old
+objective's answer on that exact fixture in its docstring;
+`test_one_cell_in_the_negative_control_does_not_move_the_gate` fixes the
+stability claim; `test_inseparable_wells_are_refused_at_about_the_stated_rate`
+fixes the refusal rate over 120 draws rather than one.
 
 **The viewer's fold-change scan keeps the old objective, floored.**
 `gating_compute.scan_fc_fractions` adjusts each fraction through

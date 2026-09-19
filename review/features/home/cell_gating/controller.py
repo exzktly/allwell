@@ -1207,6 +1207,11 @@ def cell_gating_optimize_thresh_frac_on(ctx) -> None:
             fc_kwargs=fc_kwargs,
         )
     except Exception:
+        # Swallowed because the threshold has already been applied and a failed
+        # validation graph must not undo that. It is logged under a name a test
+        # can read, because a popup that never draws looks exactly like a popup
+        # nobody opened: every line the supported-objective re-derivation added
+        # to ``opt_curve_view`` sits behind this handler.
         swallowed("cell gating: optimizer curve popup failed")
 
 

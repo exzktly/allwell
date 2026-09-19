@@ -100,10 +100,10 @@ def build_optimizer_window(ctx, parent: QWidget) -> QDialog:
         "in Well A, in the score being maximised (TPR − w × FPR).\n\n"
         "1 is the textbook ROC cut point and treats the two errors alike. "
         "Raise it when Well B is a negative control whose background-on "
-        "contaminates every other well's fraction-on readout: on a badly "
-        "overlapping pair, w=1 left 5.0% of Well B above the cut, w=3 left "
-        "2.3% and w=10 left 0.5%, each costing a few points of Well A's "
-        "fraction-on."
+        "contaminates every other well's fraction-on readout \u2014 it buys a "
+        "cleaner floor and costs a few points of Well A: on one overlapping "
+        "pair, 1 left 0.70% of Well B above the cut, 3 left 0.50% and 10 left "
+        "0.30%, with Well A at 68.9%, 68.6% and 66.5% in turn."
     )
     opt_row_layout.addWidget(flow_group(opt_row, "Spec. weight:", opt_weight))
     opt_steps = reg.register(

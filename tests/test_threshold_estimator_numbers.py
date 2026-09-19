@@ -41,7 +41,6 @@ from pipeline.threshold_optimize import (
     read_channel_values,
     relative_gap,
     round_stored_threshold,
-    sweep_bounds,
     sweep_thresholds,
 )
 
@@ -112,7 +111,8 @@ def test_smoothing_holds_the_gate_when_the_two_populations_overlap(dtype):
 def test_the_result_reports_how_many_grid_points_tied():
     """A plateau has to be visible as a plateau, not presented as an argmax."""
     pos, neg = _populations()
-    thresholds = sweep_thresholds(*sweep_bounds(pos, neg), 512)
+    pooled = np.concatenate([pos, neg])
+    thresholds = sweep_thresholds(float(pooled.min()), float(pooled.max()), 512)
     fa, fb = frac_curve(pos, thresholds), frac_curve(neg, thresholds)
     unsupported = best_from_curves(thresholds, fa, fb, relative_gap(fa, fb),
                                    n_a=pos.size, n_b=neg.size)
@@ -529,7 +529,8 @@ def test_the_fold_changed_branch_stays_unsmoothed():
     rng = np.random.default_rng(7)
     a, b = rng.normal(600, 250, 300), rng.normal(400, 200, 300)
     ctrl = rng.normal(300, 150, 300)
-    thresholds = sweep_thresholds(*sweep_bounds(a, b), 256)
+    pooled = np.concatenate([a, b])
+    thresholds = sweep_thresholds(float(pooled.min()), float(pooled.max()), 256)
     _fa, _fb, fc_diffs = scan_fc_fractions(thresholds, a, b, ctrl_values=ctrl)
     raw_fa, raw_fb, _ = scan_fc_fractions(thresholds, a, b)
     assert not np.allclose(fc_diffs, relative_gap(raw_fa, raw_fb,

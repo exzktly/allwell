@@ -79,7 +79,15 @@ def _cell_gating_show_opt_curve_popup(
         frac_b = k_b / max(values_b.size, 1)
         diffs = supported_separation(k_a, values_a.size, k_b, values_b.size,
                                      weight=result.weight)
-        score_label = "separation, 95% lower bound"
+        # A weighted score bottoms out near ``-(1 + weight)``, and the y-limits
+        # are derived from whatever is plotted — so at weight 10 the axis opens
+        # to about [-9, 1] and the two fraction-on curves collapse into a band in
+        # the top tenth of the figure, which is the half of the plot the user
+        # opened it to read. Clipped at the bottom because the region below zero
+        # says only "worse than no separation", and how much worse is not a
+        # number anyone acts on.
+        diffs = np.maximum(diffs, -1.0)
+        score_label = "separation, 95% lower bound (clipped at −1)"
         y_label = "Fraction-on / supported separation"
     else:
         thresholds = np.linspace(lo, hi, int(steps))

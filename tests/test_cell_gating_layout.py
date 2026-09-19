@@ -316,3 +316,61 @@ def test_the_specificity_weight_field_reaches_the_scan(loaded_app, qtbot,
 
     assert strict > plain, (
         f"the Spec. weight field changed nothing: {plain} then {strict}")
+
+
+def test_the_optimizer_curve_popup_draws_without_raising(loaded_app, qtbot,
+                                                         monkeypatch, caplog):
+    """The popup is built inside a ``swallowed``, so a crash in it is silent.
+
+    Every line the confidence-bounded objective added to ``opt_curve_view`` —
+    the re-derived candidate grid, the counts, the score curve — sits behind
+    that handler, and a ``raise`` as the function's first statement left the
+    suite green. So this presses the button and then reads the log the handler
+    writes to, which is the only place the failure surfaces.
+    """
+    import logging
+
+    import numpy as np
+    import pandas as pd
+
+    from review.features.home.cell_gating import controller as ctl
+
+    ctx = loaded_app._ctx
+    _build(ctx, qtbot)
+
+    rt = ctx.runtime.cell_gating
+    channel = str(rt.opt_channel_combo.currentData()
+                  or rt.opt_channel_combo.currentText()).strip()
+    wells = [rt.opt_well_a_combo.itemText(i)
+             for i in range(rt.opt_well_a_combo.count())]
+    if len(wells) < 2:
+        pytest.skip("fixture has one well; the optimizer needs two")
+
+    rng = np.random.default_rng(2)
+    hot = np.concatenate([rng.lognormal(np.log(1500), 0.25, 700),
+                          rng.lognormal(np.log(200), 0.3, 300)])
+    cold = rng.lognormal(np.log(200), 0.3, 1000)
+
+    def _rows(_ctx, well):
+        values = hot if well == wells[0] else cold
+        return pd.DataFrame({"area_px": [100] * len(values),
+                             "Included": [1] * len(values),
+                             f"{channel}_mean_intensity": values})
+
+    monkeypatch.setattr(ctl, "get_rows", _rows)
+    rt.opt_well_a_combo.setCurrentIndex(0)
+    rt.opt_well_b_combo.setCurrentIndex(1)
+    rt.opt_min_edit.setText("0")
+    rt.opt_max_edit.setText("5000")
+
+    with caplog.at_level(logging.ERROR):
+        ctx.widgets.get("_cell_gating_opt_btn").click()
+
+    failures = [r.getMessage() for r in caplog.records
+                if "optimizer curve popup failed" in r.getMessage()]
+    assert not failures, failures
+    popup = ctx.runtime.cell_gating.opt_curve_popup
+    assert popup is not None, "the validation graph was never opened"
+    # And it drew the objective that actually ran, not the other one.
+    labels = [ln.get_label() for ln in popup._fig.axes[0].lines]
+    assert "separation, 95% lower bound" in labels

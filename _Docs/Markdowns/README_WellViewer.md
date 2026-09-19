@@ -726,23 +726,42 @@ neutralised — it is not the same as leaving it unset. Like every other value
 here it is only a default: a threshold you have already set on the Cell Gating
 tab is never overwritten by a later run.
 
-One thing the software cannot check for you: the two control wells are compared
-symmetrically, so entering them the wrong way round still produces a threshold.
-The run log warns when the positive control ends up with the *lower* fraction of
-on cells, which is the tell.
+**The order of the two wells matters, and getting it wrong is caught.** The cut
+being looked for is the one that turns the most of the positive control on while
+turning the least of the negative control on, which is not a symmetric question.
+A pair entered the wrong way round does not separate in the direction being
+asked about, so that channel is skipped with a line saying so, rather than
+thresholded backwards.
 
-**Read the control method's log line as two numbers, not one.** It reports the
-threshold it chose, the fraction of cells on either side of it, and a *supported
-gap* — how well the cut separates the two wells, weighted by how many cells are
-actually behind the claim, so a cut that only one or two positive cells clear
-scores low rather than perfect. A second line follows whenever several candidate
-thresholds scored identically: it says how many, and across how wide a range of
-intensities. Fraction-on changes in steps, so that is common and not a fault —
-but it means the reported number is the lowest of a range rather than a single
-best answer, and a range spanning a large part of the channel's intensities is
-worth a look before you trust the default.
+**Read the control method's log line as counts, not percentages.** It reports
+the cut it chose, then each well as a count over that well's total — `B02
+3,084/5,000 ON (61.7%)` — and then the separation it is confident of:
+`separation ≥ 0.537 at 95% confidence`. The counts are there because the whole
+point of the method is that a cut is only worth what the cells behind it are
+worth, and `61.7%` does not tell you whether that is 3,084 cells or three.
+
+A second line follows whenever several candidate cuts scored identically: how
+many, and across how wide a range of intensities. That is common and not a
+fault — fraction-on changes in steps, and a clean assay has a genuinely empty
+valley between the two populations where every cut classifies the same cells.
+The stored value is the middle of that run, not its edge. A run spanning a large
+part of the channel's intensities is still worth a look before you trust the
+default.
+
+**A channel can be skipped because the two wells do not differ**, which is a
+result and not an error: `no threshold separates these two populations at the
+95% level`. Two wells drawn from the same population have no cut between them,
+and the line names what the best cut achieved against what that many cells would
+produce by chance. Check the wells are the ones you meant, in the right order,
+and that the assay worked.
 
 **If the Cell Gating tab opens with no thresholds, read the end of the run log.**
+Under the control method the reason is per channel and is on the line for that
+channel — most often `no threshold separates these two populations at the 95%
+level`, or `no usable values in <well>` when a control well's CSV is missing the
+channel. Under the Otsu fallback the reasons are per well, and the table below
+is that fallback's.
+
 The Otsu pass takes its samples from the per-well output archives, pairing each
 channel's corrected image with the segmentation mask of the same field and
 timepoint — which means reading those coordinates out of the filenames using the
@@ -755,7 +774,8 @@ look for, in order of what they mean:
 | line | meaning |
 |---|---|
 | `Auto-threshold defaults written for N channel(s): …` | worked; those values are now the Cell Gating defaults |
-| `no threshold could be estimated for any of …` | nothing was computed — the lines above it say why |
+| `no threshold could be estimated for any of …` | nothing was computed — the lines above it say why, and the sentence after it says which of the two methods was running |
+| `no threshold separates these two populations at the 95% level …` | *(control method)* that channel's two wells do not differ — check the order, and the assay |
 | `none of its N image member(s) could be placed by the run's filename schema …` | the schema does not match the filenames |
 | `… holds N member(s) but no '_labels' segmentation image` | that well's archive carries no segmentation mask, so no cell could be sampled from it |
 | `produced no new defaults (every channel already has a stored value)` | nothing to do; the dataset already had thresholds |
@@ -1534,8 +1554,8 @@ Two helpers sit beside the fraction-on section:
     missed in Well A. `1`, the default, weighs the two alike — the textbook
     choice. Raise it when Well B is a negative control and background-on in it
     would contaminate every other well's readout: on a badly overlapping pair,
-    `1` left 5.0 % of Well B above the cutoff, `3` left 2.3 % and `10` left 0.5 %,
-    each costing a few points of Well A.
+    `1` left 0.70 % of Well B above the cutoff, `3` left 0.50 % and `10` left
+    0.30 %, with Well A at 68.9 %, 68.6 % and 66.5 % of its cells in turn.
   - **Max points** is a ceiling, not a resolution. The scan already tries every
     cutoff the data can tell apart — one between each pair of neighbouring cell
     values — and this only caps that list on very large wells. You will rarely

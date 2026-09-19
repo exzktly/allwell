@@ -6,6 +6,10 @@ import numpy as np
 from pipeline.threshold_optimize import floor_unsupported, relative_gap
 import pandas as pd
 
+import pytest
+
+from pipeline.threshold_optimize import DEFAULT_MAX_CANDIDATES, MAX_SWEEP_STEPS
+from review.features.home.cell_gating import gating_compute as gc
 from review.features.home.cell_gating.gating_compute import (
     _optimize_thresh_frac_on_between_wells,
     scan_fc_fractions,
@@ -82,9 +86,12 @@ def test_scan_fc_subtract_control_matches_scale_bar_value():
 
 
 def test_optimizer_accepts_fc_kwargs_and_off_is_unchanged():
-    a = _df([0, 10, 20, 30])
-    b = _df([0, 0, 0, 0])
-    base = dict(channel_key="gfp", min_threshold=0, max_threshold=30, steps=4)
+    # Two hundred cells a side rather than four: the raw branch runs a
+    # separability test now, which four cells cannot clear however cleanly they
+    # split, and this test is about the kwargs being inert — not about well size.
+    a = _df([0.0] * 50 + [10.0] * 50 + [20.0] * 50 + [30.0] * 50)
+    b = _df([0.0] * 200)
+    base = dict(channel_key="gfp", min_threshold=0, max_threshold=30, steps=31)
     raw = _optimize_thresh_frac_on_between_wells(a, b, **base)
     # Passing empty FC kwargs must reproduce the raw result exactly.
     same = _optimize_thresh_frac_on_between_wells(
@@ -157,36 +164,69 @@ def test_the_fold_change_branch_keeps_the_relative_gap_and_says_so():
     assert raw.k_a is not None
 
 
-def test_the_fold_change_branch_reports_the_floor_it_applied():
-    """Which rule produced the number has to be readable off the result.
+def test_the_fold_change_branch_actually_calls_the_floor():
+    """Not "the result says a floor was applied" — that survives never applying it.
 
-    This branch is protected from the tail by two things, and only one of them
-    is the floor. The stronger one is ``best_from_curves``' first-index
-    tie-break: the relative gap ties across a long run on real data and the
-    lowest tied threshold wins, which structurally cannot be a tail cut. The
-    floor is the backstop for the case that tie-break does not cover — a tail
-    that is the *unique* maximum — and it is measured directly, on
-    ``floor_unsupported``, in the two tests below.
-
-    What this asserts is the part that is decidable here: the branch applies the
-    floor and says on the result which one, so a reader holding a
-    ``relative-gap`` result can tell what was excluded from the scan behind it.
+    The first version of this test asserted ``support_floor == 10`` and that the
+    chosen cut cleared ten cells, and a mutation that reported the floor on the
+    result while passing the unmasked scores straight through left the whole
+    suite green. Reporting a floor and applying one are different facts and the
+    result cannot distinguish them, so the call itself is what gets pinned:
+    ``floor_unsupported`` is exercised directly by the two tests below, and this
+    one asserts the branch reaches it, with the arguments it should.
     """
+    seen = {}
+    real = gc._floor_unsupported
+
+    def _spy(scores, values_a, values_b, thresholds, **kw):
+        seen["shapes"] = (np.shape(scores), np.shape(thresholds),
+                          np.size(values_a), np.size(values_b))
+        return real(scores, values_a, values_b, thresholds, **kw)
+
     values_a = [200.0] * 990 + [5000.0] * 10
     values_b = [200.0] * 800 + [900.0] * 200
     ctrl = np.array([200.0] * 900 + [900.0] * 100)
+    gc._floor_unsupported = _spy
+    try:
+        result = _optimize_thresh_frac_on_between_wells(
+            _df(values_a), _df(values_b), channel_key="gfp",
+            min_threshold=0, max_threshold=6000, steps=2001,
+            ctrl_values=ctrl, op_ctrl="subtract")
+    finally:
+        gc._floor_unsupported = real
 
-    result = _optimize_thresh_frac_on_between_wells(
-        _df(values_a), _df(values_b), channel_key="gfp",
-        min_threshold=0, max_threshold=6000, steps=2001,
-        ctrl_values=ctrl, op_ctrl="subtract")
-
+    assert seen, "the fold-change branch never reached floor_unsupported"
+    score_shape, grid_shape, n_a, n_b = seen["shapes"]
+    # One score per scanned threshold, and both real populations — a call handed
+    # the wrong arrays would mask the wrong candidates.
+    assert score_shape == grid_shape == (2001,)
+    assert (n_a, n_b) == (1000, 1000)
     assert result.objective == "relative-gap"
     assert result.support_floor == 10
-    # And the cut it landed on does clear that floor, which is the floor's whole
-    # claim about the answer.
-    assert max((np.asarray(values_a) > result.threshold).sum(),
-               (np.asarray(values_b) > result.threshold).sum()) >= 10
+
+
+def test_the_fold_change_branch_survives_its_own_field_default():
+    """The Max points field ships at 20001 and the linspace grid caps at 10001.
+
+    Every other fold-change test passes an explicit small ``steps``, so all of
+    them missed that the field's own default made this branch raise "steps must
+    be 10,001 or fewer" — a limit the user never chose, named after a field the
+    window no longer has. ``steps`` is documented as a ceiling, so the branch
+    clamps it rather than refusing.
+    """
+    rng = np.random.default_rng(1)
+    a = _df(list(rng.normal(1500, 200, 400)))
+    b = _df(list(rng.normal(400, 120, 400)))
+    ctrl = rng.normal(700, 150, 400)
+
+    at_default = _optimize_thresh_frac_on_between_wells(
+        a, b, channel_key="gfp", min_threshold=0, max_threshold=3000,
+        steps=DEFAULT_MAX_CANDIDATES, ctrl_values=ctrl)
+    clamped = _optimize_thresh_frac_on_between_wells(
+        a, b, channel_key="gfp", min_threshold=0, max_threshold=3000,
+        steps=MAX_SWEEP_STEPS, ctrl_values=ctrl)
+
+    assert at_default.threshold == pytest.approx(clamped.threshold)
 
 
 def test_the_floor_shrinks_to_what_a_small_pair_of_wells_can_spare():

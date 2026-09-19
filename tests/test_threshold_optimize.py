@@ -20,6 +20,7 @@ from pipeline.threshold_optimize import (
     candidate_thresholds,
     counts_above,
     plateau_pick,
+    separability_critical_value,
     support_floor,
     supported_separation,
     wilson_bounds,
@@ -29,7 +30,6 @@ from pipeline.threshold_optimize import (
     optimize_between_populations,
     read_channel_values,
     relative_gap,
-    sweep_bounds,
     sweep_thresholds,
 )
 
@@ -83,32 +83,6 @@ def test_sweep_thresholds_rejects_bad_input(lo, hi, steps, match):
         sweep_thresholds(lo, hi, steps)
 
 
-def test_sweep_bounds_clips_the_top_at_a_percentile():
-    """One saturated cell must not stretch the grid past the useful region."""
-    bulk = np.linspace(100.0, 200.0, 1000)
-    outlier = np.array([1e6])
-    _lo, hi = sweep_bounds(np.concatenate([bulk, outlier]))
-    assert hi < 1e5
-
-
-def test_sweep_bounds_starts_at_the_pooled_minimum():
-    """Not 0.0 — a channel on a big background offset would waste half the grid."""
-    lo, _hi = sweep_bounds(np.linspace(500.0, 900.0, 100))
-    assert lo == pytest.approx(500.0)
-
-
-def test_sweep_bounds_of_nothing_is_degenerate():
-    assert sweep_bounds(np.array([])) == (0.0, 0.0)
-
-
-def test_sweep_bounds_falls_back_to_max_when_the_percentile_collapses():
-    """Mostly-constant data: the p99.5 equals the min, so use the true max."""
-    values = np.concatenate([np.full(1000, 10.0), np.array([99.0])])
-    lo, hi = sweep_bounds(values)
-    assert lo == pytest.approx(10.0)
-    assert hi == pytest.approx(99.0)
-
-
 # ── the confidence-bounded objective's primitives ────────────────────────────
 
 def test_wilson_keeps_a_width_where_wald_collapses_to_zero():
@@ -151,9 +125,26 @@ def test_the_score_falls_as_the_cells_behind_it_run_out():
                                 np.array([0.0]), 100_000)[0]
     thick = supported_separation(np.array([60_000.0]), 100_000,
                                  np.array([5_000.0]), 100_000)[0]
-    assert thick > 0.5
-    assert thin < 0.001
-    assert thick > 100 * thin
+    # The values, not just the ordering: the docstring quotes both, and a
+    # property like "thick > thin" is satisfied by implementations that get the
+    # magnitudes wrong by orders of magnitude.
+    assert thin == pytest.approx(4.03e-5, rel=0.02)
+    assert thick == pytest.approx(0.5467, abs=5e-4)
+
+    # And the far-tail cut the relative-gap objective actually chose on the
+    # headline fixture loses to the correct one by a factor the argmax can act
+    # on, which is the claim that matters.
+    tail = supported_separation(np.array([9811.0]), 100_000,
+                                np.array([2.0]), 100_000)[0]
+    assert tail == pytest.approx(0.0963, abs=5e-4)
+    assert thick > 5 * tail
+
+    # Most of the collapse at ten cells is the true-positive rate, not the
+    # negative arm: removing the negative arm's contribution entirely still
+    # leaves the score near zero.
+    no_neg_arm = supported_separation(np.array([10.0]), 100_000,
+                                      np.array([0.0]), 10 ** 12)[0]
+    assert no_neg_arm == pytest.approx(5.43e-5, rel=0.02)
 
 
 def test_the_score_is_a_bound_and_so_can_be_negative():
@@ -301,30 +292,81 @@ def test_a_split_tie_reports_a_point_inside_one_of_its_runs():
     The reported point must come from the run the argmax is standing on, never
     from the empty ground between two peaks.
     """
+    # The argmax's own run is three long and starts at index 1, so its midpoint
+    # is index 2 — a different answer from plain ``argmax`` (1) and from the
+    # midpoint of the whole tie set (index 4, which scored 0.2). A two-long run
+    # would have made the first two agree and measured nothing.
     grid = np.linspace(0.0, 100.0, 11)
-    scores = np.array([0.1, 0.9, 0.9, 0.2, 0.2, 0.2, 0.2, 0.9, 0.9, 0.1, 0.0])
+    scores = np.array([0.1, 0.9, 0.9, 0.9, 0.2, 0.2, 0.2, 0.9, 0.9, 0.1, 0.0])
     idx, threshold, tie_count, tie_span, contiguous = plateau_pick(grid, scores)
-    assert tie_count == 4
+    assert tie_count == 5
     assert not contiguous
     assert tie_span == pytest.approx(70.0)
+    assert idx == 2
+    assert threshold == pytest.approx(20.0)
     assert scores[idx] == 0.9
-    assert threshold in (pytest.approx(10.0), pytest.approx(20.0))
 
 
-def test_identical_populations_are_refused_not_scored_zero():
-    """Two draws from one distribution have no threshold, and it says so.
+def test_inseparable_wells_are_refused_at_about_the_stated_rate():
+    """A refusal rate is a rate, so it is measured over many draws and not one.
 
-    This used to return a result with ``difference == 0`` — a number the caller
-    then had to know to check — and on real (non-linspace) data it returned a
-    confident-looking non-zero score instead, because a ratio of small counts
-    finds a maximum in noise like anything else. The bound is signed, so
-    "nothing beats zero" is a statement about the wells.
+    The claim in the module is that two wells drawn from one distribution are
+    refused at the 95 % level. Asserting that on a single seed would pass for a
+    gate that refuses 54 % of the time — which is exactly what the first version
+    of this code did, and the seed it was written against (4) was one of the
+    ones it happened to get right. The rule is a property of the ensemble, so
+    the test is too.
+
+    The bound is not sufficient on its own and this is why: it is a per-candidate
+    95 % bound, maximised over thousands of candidates, so its maximum clears
+    zero on noise. ``separability_critical_value`` carries the multiplicity.
     """
-    rng = np.random.default_rng(4)
-    a = rng.lognormal(5.3, 0.4, 2000)
-    b = rng.lognormal(5.3, 0.4, 2000)
+    refused = 0
+    trials = 120
+    for seed in range(trials):
+        rng = np.random.default_rng(seed)
+        a = rng.lognormal(5.3, 0.4, 2000)
+        b = rng.lognormal(5.3, 0.4, 2000)
+        try:
+            optimize_between_populations(a, b)
+        except ValueError:
+            refused += 1
+    # The asymptotic Smirnov form overshoots slightly at this n; the band is
+    # wide enough for that and for binomial noise at 120 trials, and far too
+    # narrow for the unguarded bound, which refused 54 %.
+    assert 0.88 <= refused / trials <= 1.0, (
+        f"refused {refused}/{trials} inseparable pairs")
+
+
+def test_the_separability_test_is_about_cell_count_not_effect_size():
+    """The same 5 % separation, refused at n=100 and accepted at n=2000.
+
+    Which is the whole content of "no N in the objective": a difference is not
+    a finding until enough cells have voted on it, and how large the difference
+    looks is a different question from whether it is there.
+    """
+    small_a = np.array([0.0] * 95 + [500.0] * 5)
+    small_b = np.array([0.0] * 100)
     with pytest.raises(ValueError, match="no threshold separates"):
-        optimize_between_populations(a, b)
+        optimize_between_populations(small_a, small_b)
+
+    big = optimize_between_populations(
+        np.array([0.0] * 1900 + [500.0] * 100), np.array([0.0] * 2000))
+    assert big.frac_a == pytest.approx(0.05)
+    assert big.k_a == 100
+
+
+def test_the_separability_critical_value_is_the_smirnov_bound():
+    from math import log, sqrt
+
+    for n_a, n_b in ((2000, 2000), (50, 400), (1, 1)):
+        assert separability_critical_value(n_a, n_b) == pytest.approx(
+            sqrt(-0.5 * log(0.05) * (n_a + n_b) / (n_a * n_b)))
+    # A tighter alpha demands a larger observed difference.
+    assert (separability_critical_value(500, 500, 0.01)
+            > separability_critical_value(500, 500, 0.05))
+    # No cells is not "trivially separable".
+    assert separability_critical_value(0, 100) == float("inf")
 
 
 def test_the_positive_arm_is_not_interchangeable_with_the_negative():
@@ -447,10 +489,16 @@ def test_estimate_from_controls_returns_one_threshold_per_channel(tmp_path):
 
 
 def test_estimate_from_controls_skips_a_channel_it_cannot_use(tmp_path):
+    # Fifty rows, not two: the separability test is a test, so two cells
+    # against two cannot clear it however cleanly they separate, and a
+    # two-row fixture would leave this measuring the well size rather than
+    # the "channel it cannot use" rule it is named for.
     (tmp_path / "measurements_B02.csv").write_text(
-        "gfp_mean_intensity,dead_mean_intensity\n400.0,5.0\n400.0,5.0\n")
+        "gfp_mean_intensity,dead_mean_intensity\n"
+        + "\n".join("400.0,5.0" for _ in range(50)) + "\n")
     (tmp_path / "measurements_B11.csv").write_text(
-        "gfp_mean_intensity,dead_mean_intensity\n100.0,5.0\n100.0,5.0\n")
+        "gfp_mean_intensity,dead_mean_intensity\n"
+        + "\n".join("100.0,5.0" for _ in range(50)) + "\n")
     out = estimate_thresholds_from_controls(
         tmp_path, fluor_channels=["GFP", "dead", "absent"],
         csv_prefix="measurements", pos_well="B02", neg_well="B11",

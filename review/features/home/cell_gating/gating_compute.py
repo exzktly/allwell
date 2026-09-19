@@ -27,6 +27,7 @@ from util.fov import sort_key as fov_sort_key
 from pipeline.threshold_optimize import (  # noqa: F401 (re-export)
     DEFAULT_MAX_CANDIDATES,
     DEFAULT_SPECIFICITY_WEIGHT,
+    MAX_SWEEP_STEPS,
     ThreshFracOptimizationResult,
     best_from_curves as _best_from_curves,
     floor_unsupported as _floor_unsupported,
@@ -313,20 +314,18 @@ def scan_fc_fractions(
                 op_ctrl=op_ctrl, op_t0=op_t0, order=order,
             )
 
-    # Statistical support, on exactly the branch where it is defined. When no
-    # fold change is applied these fractions *are* ``k / n`` and both ``n``s are
-    # right here, so the objective is the pipeline's objective — smoothed the
-    # way ``optimize_between_populations`` smooths it, which is what makes this
-    # module's opening claim ("the two cannot give different answers on the same
-    # data") true rather than aspirational. It was unsmoothed unconditionally,
-    # and this is the *default* path: the controller leaves every fold-change
-    # array ``None`` unless the user picks one. Measured on two overlapping
-    # 300-cell populations the two objectives chose grid points 1104 and 1209;
-    # on a skewed lognormal pair, 1231 and 2366.
+    # The fold-changed branch is unsmoothed, and not by omission: its fractions
+    # have been through ``scale_bar_value`` and are no longer ``k / n`` — they
+    # exceed 1 and go negative — so there is no ``k`` to add one to.
     #
-    # The fold-changed branch stays unsmoothed, and not by omission: its
-    # fractions have been through ``scale_bar_value`` and are no longer ``k / n``
-    # — they exceed 1 and go negative — so there is no ``k`` to add one to.
+    # The ``not fc_on`` branch below is smoothed, and is reached only from tests
+    # now: ``_optimize_thresh_frac_on_between_wells`` returns to
+    # ``optimize_between_populations`` before calling this when no fold change is
+    # set, and ``opt_curve_view`` re-derives that path's own curve. It is kept
+    # because the function is a public scan over two populations and answering
+    # "what is the relative gap here" differently depending on whether a caller
+    # happened to pass a control array would be a trap; the smoothing is what
+    # makes the raw answer match what the pipeline used to compute.
     if not fc_on:
         return fa, fb, _relative_gap(fa, fb,
                                      n_a=int(values_a.size), n_b=int(values_b.size))
@@ -528,7 +527,15 @@ def _optimize_thresh_frac_on_between_wells(
             max_candidates=int(steps), weight=weight,
         )
 
-    thresholds = _sweep_thresholds(min_threshold, max_threshold, int(steps))
+    # ``steps`` is a CEILING on the candidate count, and this branch's grid is a
+    # linspace with its own hard cap, so the ceiling is clamped rather than
+    # rejected. Without the clamp the field's own default (DEFAULT_MAX_CANDIDATES,
+    # 20001) exceeded MAX_SWEEP_STEPS and every fold-change optimise raised
+    # "steps must be 10,001 or fewer" — a limit the user never chose, named after
+    # a field the window no longer has. Every fold-change test passed an explicit
+    # small ``steps``, so none of them saw it.
+    thresholds = _sweep_thresholds(
+        min_threshold, max_threshold, min(int(steps), MAX_SWEEP_STEPS))
     fa, fb, diffs = scan_fc_fractions(
         thresholds, values_a, values_b,
         ctrl_values=ctrl_values,
@@ -579,9 +586,15 @@ def format_optimizer_result(result, well_a: str, well_b: str) -> str:
         shape = ("a contiguous run spanning"
                  if result.tie_contiguous else
                  "scattered, not adjacent on the grid, across")
+        # Which point of the run was taken differs by objective, and saying the
+        # wrong one is worse than saying nothing: the bounded path reports the
+        # midpoint of the run (``plateau_pick``) while the fold-change path
+        # reports ``np.argmax``'s first index, which is the run's bottom edge.
+        picked = ("the midpoint of the run around the best is what was applied"
+                  if result.objective == OBJECTIVE_SUPPORTED else
+                  "the lowest of them is what was applied")
         line += (f" {result.tie_count:,} cuts scored that same best, {shape} "
-                 f"{result.tie_span:.4g} intensity unit(s); the midpoint of the "
-                 f"run around the best is what was applied.")
+                 f"{result.tie_span:.4g} intensity unit(s); {picked}.")
     return line
 
 

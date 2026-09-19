@@ -97,22 +97,31 @@ def test_a_thin_but_real_responder_population_is_still_found():
     The complaint the new objective answers is "a cut backed by almost nothing
     wins", and the crude reading of that complaint is a minimum cell count. It
     is the wrong rule: a positive control with a 5% transfection efficiency is a
-    real experiment, and a ten-cell floor would refuse the channel outright. The
-    confidence bound scores this cut a barely-positive number instead — which is
-    both an answer and an accurate description of how much is behind it.
+    real experiment, and a hundred responders is plenty to see. The confidence
+    bound scores the cut a barely-positive number — both an answer and an
+    accurate description of how much is behind it — rather than refusing it.
     """
-    a = _df([0.0] * 95 + [500.0] * 5)
-    b = _df([0.0] * 90 + [50.0] * 10)
+    a = _df([0.0] * 1900 + [500.0] * 100)
+    b = _df([0.0] * 1800 + [50.0] * 200)
 
     result = _optimize_thresh_frac_on_between_wells(
         a, b, channel_key="gfp", min_threshold=0, max_threshold=500,
     )
 
     assert result.threshold > 50.0
-    assert result.k_a == 5 and result.k_b == 0
+    assert result.k_a == 100 and result.k_b == 0
     assert result.support_floor == 0
     assert 0.0 < result.difference < 0.05
     assert result.difference == pytest.approx(_newcombe_floor(result))
+
+    # Same 5 %, a twentieth of the cells: now it is not a thin real population,
+    # it is noise, and the separability test says so. Which is the rule — the
+    # objective has no opinion about the *fraction* of responders, only about
+    # how many cells are standing behind the claim.
+    with pytest.raises(ValueError, match="no threshold separates"):
+        _optimize_thresh_frac_on_between_wells(
+            _df([0.0] * 95 + [500.0] * 5), _df([0.0] * 90 + [50.0] * 10),
+            channel_key="gfp", min_threshold=0, max_threshold=500)
 
 
 def test_two_wells_that_do_not_separate_are_refused_not_answered():

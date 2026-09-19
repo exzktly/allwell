@@ -421,10 +421,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help=(
                        "Well label of the positive control (e.g. B02). With "
                        "--neg_control_well, the end-of-run threshold pass picks "
-                       "each non-segmentation channel's default by sweeping for "
-                       "the cut that maximises the relative fraction-on gap "
-                       "between these two wells, instead of Otsu-splitting cell "
-                       "signal from background. Both or neither."
+                       "each non-segmentation channel's default by scanning for "
+                       "the cut whose separation between these two wells best "
+                       "survives its own 95%% confidence interval, instead of "
+                       "Otsu-splitting cell signal from background. The order "
+                       "matters: a channel whose two wells do not differ at the "
+                       "95%% level, including a pair given the wrong way round, "
+                       "is skipped with a reason in the log rather than "
+                       "thresholded. Both or neither."
                    ))
     p.add_argument("--neg_control_well", default="",
                    help=(

@@ -84,3 +84,90 @@ def test_result_dataclass_shape():
     r = ThreshFracOptimizationResult(
         threshold=3.0, frac_a=0.5, frac_b=0.0, difference=1.0, n_a=4, n_b=4)
     assert r.threshold == 3.0 and r.n_a == 4
+
+
+# ── the optimizer's one-line readout ─────────────────────────────────────────
+#
+# Untested until now, which is how its relative-gap branch came to claim that
+# "the midpoint of the run around the best is what was applied" for an answer
+# that ``np.argmax`` had taken off the bottom edge of the run.
+
+def _result(**over):
+    from pipeline.threshold_optimize import ThreshFracOptimizationResult
+
+    base = dict(threshold=250.0, frac_a=0.7, frac_b=0.01, difference=0.66,
+                n_a=1000, n_b=1000, objective="supported-separation",
+                k_a=700, k_b=10, youden=0.69, weight=1.0)
+    base.update(over)
+    return ThreshFracOptimizationResult(**base)
+
+
+def test_the_readout_states_both_arms_as_counts_over_their_totals():
+    from review.features.home.cell_gating.gating_compute import (
+        format_optimizer_result,
+    )
+
+    line = format_optimizer_result(_result(), "A01", "H12")
+    assert "threshold = 250" in line
+    # The counts, not only the percentages: a reader cannot tell a gate resting
+    # on thirty cells from one resting on sixty thousand from "70.0%".
+    assert "A01 700/1,000 ON (70.0%)" in line
+    assert "H12 10/1,000 ON (1.00%)" in line
+    assert "separation ≥ 0.660 at 95% confidence" in line
+    assert "Youden J = 0.690" in line
+    # No weight is named when it is the default, and it is named when it is not.
+    assert "weight" not in line
+    assert "weight 3" in format_optimizer_result(
+        _result(weight=3.0), "A01", "H12")
+
+
+def test_the_readout_names_which_objective_produced_the_score():
+    from review.features.home.cell_gating.gating_compute import (
+        format_optimizer_result,
+    )
+
+    folded = format_optimizer_result(
+        _result(objective="relative-gap", k_a=None, k_b=None, youden=None,
+                difference=0.98), "A01", "H12")
+    assert "relative gap 0.980 (fold-change scan)" in folded
+    assert "confidence" not in folded
+    # The count fields are None on that branch, so the line must not reach for
+    # them — formatting them would raise, and inventing them would lie.
+    assert "/1,000 ON" not in folded
+    assert "adjusted fraction-on" in folded
+
+
+def test_the_readout_says_which_point_of_a_tied_run_was_applied():
+    """The two objectives take different points, and the line said "midpoint"
+    for both. On the fold-change branch the value comes from ``np.argmax``,
+    which is the run's bottom edge — 201.0 out of a run spanning 201 to 897,
+    reported as though it were the 549 in the middle."""
+    from review.features.home.cell_gating.gating_compute import (
+        format_optimizer_result,
+    )
+
+    bounded = format_optimizer_result(
+        _result(tie_count=233, tie_span=696.0), "A01", "H12")
+    assert "233 cuts scored that same best" in bounded
+    assert "a contiguous run spanning 696 intensity unit(s)" in bounded
+    assert "the midpoint of the run around the best is what was applied" in bounded
+
+    folded = format_optimizer_result(
+        _result(objective="relative-gap", k_a=None, k_b=None, youden=None,
+                tie_count=233, tie_span=696.0), "A01", "H12")
+    assert "the lowest of them is what was applied" in folded
+    assert "midpoint" not in folded
+
+    scattered = format_optimizer_result(
+        _result(tie_count=2, tie_span=696.0, tie_contiguous=False), "A01", "H12")
+    assert "scattered, not adjacent on the grid, across" in scattered
+    assert "contiguous" not in scattered
+
+
+def test_the_readout_says_nothing_about_a_run_of_one():
+    from review.features.home.cell_gating.gating_compute import (
+        format_optimizer_result,
+    )
+
+    assert "scored that same best" not in format_optimizer_result(
+        _result(tie_count=1), "A01", "H12")

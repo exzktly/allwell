@@ -1033,6 +1033,93 @@ of what that cut keeps and drops. A user looking at the plot can see whether
 their threshold sits in a valley or in the middle of one population, which is
 better evidence than a number they would have to trust.
 
+### D.2e The absolute-comparability claim is FALSE, and it was measured on a
+fixture that could not see the confounder
+
+**This section retracts the claim the rest of section D is built on.** An
+adversarial scientific review found it and it reproduces on an independently
+written fixture.
+
+`edge_focus` is claimed "absolutely comparable between cells, fields, wells and
+plates". It is comparable across **gain and pedestal (exactly)**, across
+**nucleus size (1.16×, the design's central goal, achieved)** and across
+**orientation (1.08×)**. It is **not** comparable across **brightness**, and
+fluorescence microscopy is photon-limited, so brightness and noise are the same
+axis.
+
+Measured, identical geometry and identical σ_def = 1, Poisson shot noise,
+varying only the nucleus amplitude:
+
+| amplitude | 200 | 500 | 1000 | 2000 | 4000 | 8000 | 16000 |
+|---|---|---|---|---|---|---|---|
+| `edge_focus` | 0.5131 | 0.3715 | 0.3393 | 0.2964 | 0.2668 | 0.2485 | 0.2433 |
+
+**2.1× at constant focus**, and the noise-free control is *exactly flat*
+(0.2337 at amplitude 200, 2000 and 16000), so every bit of that spread is the
+noise term the quadrature floor exists to remove. Dim reads **sharper**, which
+is the false-negative direction.
+
+And it crosses over, which is the fatal form:
+
+| | σ_def = 1 | σ_def = 2 |
+|---|---|---|
+| amplitude 400 | 0.4274 | **0.3000** |
+| amplitude 10000 | **0.2489** | 0.1014 |
+
+A dim cell at two stops of defocus reads **0.3000**; a bright cell at one stop
+reads **0.2489**. Any absolute cut between them keeps the badly defocused cell
+and discards the better one. Stain brightness varies well to well for entirely
+ordinary reasons — DNA content, apoptotic condensation, uptake, bleaching
+across the read order, illumination roll-off — so this is a *directional* bias
+correlated with treatment. It is the same class of defect
+`review/domain/field_quality_scores.py` is proud of avoiding by keeping
+`nuc_count` out of plate-wide scoring, reintroduced through `focus`.
+
+**Why the quadrature noise floor does not fix it.** `far` is a 3 px ring only
+3 px outside the dilated mask, so it sits on near-zero background while `band`
+straddles the bright interior where shot noise scales as √signal. Measured, the
+`far` p95 underestimates the band's real noise by **8–10×**. It is also
+contaminated by *signal*: on a noise-free image the floor is 41–89 rather than
+0, peaking at σ≈2, so the subtraction removes edge signal in a
+defocus-dependent way.
+
+**Why no test caught it.** `tests/test_field_quality.py::_discs` — the fixture
+behind every `edge_focus` test — adds **only spatially uniform additive
+Gaussian noise** and gives **every disc the same amplitude**. In that one
+regime the far ring really is a valid floor, and the 1.31×/1.86× numbers in
+§D.2-1b reproduce. Swap to shot noise and the same experiment gives 2–3×. This
+is §7.5 #8 exactly: my own differential, on my own fixtures, reporting the one
+noise model under which the design is sound.
+
+**What this invalidates**: `Focus_Pass` as an absolute per-cell cut (D12, D13),
+the well composite's median-against-cut rule (D14), the Analyze threshold field
+as "a number about a microscope, stable across every plate on that instrument"
+(D10, D11), and the Playground's premise that a user can choose one number for
+their scope. **What survives**: the per-cell measurement as *evidence*, the
+size-confounder improvement over the frame-level Tenengrad, the gain/pedestal
+invariance, and the undefined-is-not-zero discipline throughout.
+
+Four further confirmed findings, each measured:
+
+* **A hole in the measurable range.** Equivalent radius 4.41–4.78 px (area
+  ≈ 62–78) returns `None` unconditionally, while both smaller (49–61) and
+  larger (≥ 81) measure fine — `round(r·0.34)` reaches 2 before `erode(m, w+1)`
+  can clear `_EDGE_MIN_PX`. The docstring claims every nucleus at or above
+  `min_nucleus_area_px = 50` is measurable; it is false, and
+  `test_every_nucleus_the_pipeline_keeps_is_measurable`'s radius grid
+  (4, 5, 6, 8, 16) steps straight over the gap.
+* **`score_well` mis-counts a generator**: `total=0, unmeasurable=-2`, and a
+  well that is half unmeasurable is silently not flagged. Its own docstring
+  says an iterable is acceptable.
+* **The composite's median rule is strictly dominated** by its share rule:
+  `median < cut` implies >50 % soft, which always exceeds `SOFT_FRACTION` of
+  10 %. The pooled statistic §D.2c cites as the justification is never the
+  thing that fires.
+* **Non-monotonicity is far worse than documented** — it recovers 84 % from its
+  minimum and at σ=7 reads *above* the σ=2 value, on isolated cells with no
+  neighbour contamination. The cause is the contrast denominator collapsing
+  faster than the numerator, not the ring width the docstring blames.
+
 ### D.3 What it hangs off
 
 The machinery already exists and it is the machinery the user named.

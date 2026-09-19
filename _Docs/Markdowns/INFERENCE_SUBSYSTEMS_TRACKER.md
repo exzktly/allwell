@@ -707,6 +707,96 @@ one synthetic fixture is not a calibration (§0.10). The subsystem's existing
 rule applies unchanged: **report the map, propose the region, let the user
 confirm.** Nothing is excluded that the user has not seen.
 
+### D.2-0 The score may not be frame-relative — and may not be the raw Tenengrad either
+
+A frame-relative score cannot see a frame that is *uniformly* soft: every cell
+deviates from its neighbours by nothing. Measured, relative-to-field median is
+exactly **1.000** at σ 0, 1.5 and 3.0. So the verdict has to be on an
+absolutely comparable number.
+
+**And the shipped statistic is not absolutely comparable.** Measured on sharp
+frames, varying only nucleus radius:
+
+| | span | |
+|---|---|---|
+| defocus σ 0 → 3 (the signal) | 27.4 → 7.4 | **3.7×** |
+| nucleus radius 0.9 → 3.6 px (a confounder) | 34.9 → 4.5 | **7.8×** |
+
+The confounder is **2.08×** the signal. With seed, density and radius all
+varied, sharp frames span 4.66–35.38 and σ=2 frames span 3.61–16.28 —
+complete overlap. A plate-wide cut on the raw normalised Tenengrad reads a
+bigger nucleus as a softer one.
+
+A two-scale band ratio (Tenengrad after a small pre-blur over Tenengrad after
+a larger one) tests the right idea — defocus attenuates *high* frequencies
+specifically while a larger object shifts all scales together — and halves the
+problem (confounder/signal 2.08 → **1.33**) without solving it: sharp 1.544–4.121
+against soft 1.423–2.432, still overlapping.
+
+**The blind image statistic cannot do this.** A small defocused nucleus and a
+large sharp one genuinely produce similar gradient statistics.
+
+### D.2-1 The mask is the missing information
+
+Defocus is a property of the **optics**: it sets the width of the intensity
+transition at an edge, and that width is the same whatever the object's size.
+The pipeline already computes a nuclear mask, so the edge is known.
+
+> **edge sharpness** = mean \|∇I\| on the nuclear boundary ÷ (inside − outside contrast)
+
+Size-independent by construction (a property of the edge, not the area) and
+gain/pedestal-independent (the contrast normalises both away). Measured:
+
+| | span |
+|---|---|
+| defocus σ 0 → 3 | 2.745 → 1.368, **2.01×** |
+| nucleus radius 3 → 13 px (4.3× size range) | 2.566 → 2.807, **1.10×** |
+| confounder / signal | **0.55** (against 2.08 blind, 1.33 two-scale) |
+
+And the overlap test, with nucleus size, cell count and seed all varied:
+
+| population | range |
+|---|---|
+| sharp | 2.564 – 2.808 |
+| σ = 2 | 1.518 – 1.763 |
+| **overlap** | **none — a 1.45× gap** |
+
+Nuisance parameters do not move it: gain ×0.25 and ×4 and pedestal 1000 give
+2.7445 against a baseline of 2.7445; 20 vs 80 cells give 2.7465 / 2.7462; 3×
+noise gives 2.7542.
+
+So the score **is** absolutely comparable, needs no frame-relative
+normalisation, and therefore sees a uniformly soft frame — which is what the
+whole objection asked for.
+
+**It is computable only per cell**, because it needs the mask. Recording focus
+per cell is not a convenience or an optimisation: it is the only place a
+trustworthy focus number exists. Cost measured: **323 ms for 400 nuclei on a
+2048² frame** (807 µs/cell), against seconds for the StarDist inference on the
+same frame.
+
+**Two caveats, both real.** The fixtures are discs with hard edges; real nuclei
+have soft, textured chromatin edges, so the separation above is an upper bound
+until it is measured on real plates — that is A1, and this sharpens its
+question from "does focus separate" to "does *edge sharpness* separate, and by
+how much against nucleus-to-nucleus scatter". And the mask comes from StarDist
+run on the possibly-soft image, so at severe defocus segmentation degrades and
+the metric is **undefined exactly where defocus is worst**. That is
+self-reporting rather than silent (no cells → nothing measured → the
+field-level metric is what covers that case), and it is why the two layers stay
+complementary.
+
+### D.2-2 What this says about the metric already built
+
+Section A's `focus_score` is the frame-level single-scale Tenengrad, so it
+carries the same 2.08 confounder. It is mitigated rather than absent: a plate
+is normally one cell line, and the score is a robust z **within a timepoint
+across the plate**, so a confounder roughly constant across the plate largely
+cancels. It is not mitigated on a plate with two cell lines, or where
+confluence changes nuclear size between conditions. Recorded here rather than
+in a commit message because A1 is the gate that can answer it, and this is now
+part of what A1 has to measure.
+
 ### D.2a Per cell as well as per field — measured
 
 **Yes, and it makes the rest simpler.** One column, `focus`, beside the
@@ -798,8 +888,10 @@ the plate marker and the persistence are unchanged.
 | D1 | `focus_map(image, tiles)` — the self-normalised tiled statistic, undefined where a tile holds no signal | `todo` | `pipeline/field_quality.py` | the D.1 table, re-measured against the shipped function rather than against the probe |
 | D2 | **The density confound must not come back.** A guard that a uniformly sharp frame's map is flat across a thirty-fold range of cell count | `todo` | `tests/` | mutation: normalise by the frame variance and the guard fails at 0.02 |
 | D3 | An undefined tile is `None`, never 0.0, and the region proposal skips it rather than treating it as soft | `todo` | `pipeline/field_quality.py` | §7 #3 |
-| D3a | **One per-cell `focus` column**, raw and self-normalised, written beside the shape features. Not a "Focused" score: the relative form is derivable from the raw plus the centroids, the raw is not recoverable from the relative, and a uniformly soft frame is invisible in the relative form (§D.2a) | `todo` | `pipeline/shape_features.py` + `process_microscopy._quantify_image_group` | the §D.2a size table re-measured on a real well; a fixture blurred uniformly must move the raw column and leave the relative one at 1.000 |
-| D3b | **Nothing gates on a single cell.** A guard that the per-cell value is pooled before any verdict is taken | `todo` | `review/` | §D.2b: p5 of sharp cells is 0.619 against a defocused median of 0.604. Mutation: threshold per cell and the guard fails |
+| D3a | **One per-cell `focus` column** — the **boundary** statistic of §D.2-1, not the self-normalised Tenengrad. Absolutely comparable, so nothing is normalised at write time and a uniformly soft frame stays visible | `todo` | `pipeline/shape_features.py` + `process_microscopy._quantify_image_group` | the §D.2-1 tables re-measured against the shipped function; a uniformly blurred fixture must move the column, which is the case every earlier candidate failed |
+| D3b | The metric is **undefined** where the boundary cannot be measured — no contrast, too few interior or exterior pixels, a mask that failed — never 0.0 | `todo` | `pipeline/field_quality.py` | §7 #3. Severe defocus degrades the segmentation, so this is undefined exactly where defocus is worst; the field-level metric is what covers that case |
+| D3c | **No frame-relative normalisation anywhere in the decision path.** A guard that the verdict reads the absolute value | `todo` | `review/` | mutation: normalise per field and a uniformly blurred plate stops being flagged — measured, relative median is 1.000 at σ 0, 1.5 and 3.0 |
+| D3d | Pooling still applies for **noise**, not for the confounder: a single cell's number is noisy even when unbiased | `todo` | `review/` | to be measured on the boundary statistic; the 0.619/0.604 overlap in §D.2b was the Tenengrad's, and does not transfer |
 | D4 | Per-cell verdict from a tile map + the cell's centroid, replacing the per-field one where a map exists | `todo` | `review/data/field_quality_cache.py` | the existing `Field_Pass` tests must still pass — this narrows the rule, it does not add a layer |
 | D5 | The proposal surface: the flagged field on Segmentation with its soft tiles outlined and the numbers shown | `todo` | `review/features/image_browser/` | driven through the real control (§7.6) |
 | D6 | Confirming writes a **per-field** region, needing a crop cardinality this app does not have | `declined` | — | Retired by D3a before it was written. With a per-cell `focus` column the exclusion is per cell by centroid, which is what "remove only the soft sections" means and needs no rectangle at all — a focus gradient or a coverslip tilt is not a box, so a rectangle was always the wrong shape for it. The crop tool keeps its single region for the manual case it already serves |

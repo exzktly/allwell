@@ -173,6 +173,7 @@ class AnalyzeInputMixin:
             self._set_schema_detection(
                 "That folder could not be read, so no layout was detected.",
                 problem=True)
+            self._report_scan_guess(None)
             return
         if guess is None:
             # Nothing recognisable, which is not the same as nothing found: the
@@ -184,6 +185,14 @@ class AnalyzeInputMixin:
             self._set_schema_detection(
                 "No filename layout could be detected in that folder — the "
                 "schema below is unchanged.", problem=True)
+            # The dashboard has to be told too. Both refusals used to return
+            # before this, so a scan that found nothing left the previous
+            # scan's line standing — and once the picker gained a readout of
+            # its own, the two surfaces openly contradicted each other: the
+            # dashboard naming a schema it had applied, the readout saying
+            # none was detected. Visible in the rendered audit, not in any
+            # test, because no test reads two widgets at once.
+            self._report_scan_guess(None)
             return
         # Sidecar-shaped keys, because that is what `_apply_pipeline_info` takes
         # and what `guess.channel_tokens().as_pipeline_info()` below already

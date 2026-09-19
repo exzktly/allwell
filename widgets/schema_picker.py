@@ -31,6 +31,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
+from widgets._support import set_variant
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
     QWidget,
@@ -158,7 +159,7 @@ class SchemaPicker(QWidget):
         if detect_label:
             cell = self._row(self, "")
             self._detect_btn = QPushButton(detect_label, cell)
-            self._detect_btn.setObjectName("Secondary")
+            set_variant(self._detect_btn, "secondary")
             self._detect_btn.clicked.connect(lambda: self.detectRequested.emit())
             cell.layout().addWidget(self._detect_btn)
             cell.layout().addStretch(1)

@@ -225,7 +225,18 @@ def capture_review(app) -> None:
     rev._central_pane_stack.setCurrentIndex(0)
     settle(app)
 
-    # 11) Help drawer dialog.
+    # 11) Datasets mode — every tool page.
+    print("[datasets mode]")
+    _capture_datasets(app, w, rev)
+
+    # 12) Schema detection, on both pages that offer it. Rendered with a real
+    # result on screen rather than in its resting state: the readout is the
+    # whole of this feature, and an empty-state grab of the control shows
+    # nothing that a grab taken before it existed would not.
+    print("[schema detection]")
+    _capture_schema_detection(app, w, rev)
+
+    # 13) Help drawer dialog.
     print("[dialogs]")
     try:
         w._toggle_help_drawer()
@@ -235,6 +246,87 @@ def capture_review(app) -> None:
         print(f"  help drawer skipped: {exc}")
 
     w.close()
+
+
+def _build_detect_corpus(root: Path, *, parses: bool) -> Path:
+    """A folder of filenames for the detection grabs.
+
+    *parses* picks between a plate the inference reads cleanly — with one name
+    it cannot, so the readout has an exception to quote — and a folder of names
+    that share no layout at all, which is the refusal.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    if not parses:
+        for i in range(8):
+            (root / f"scan{i}.tif").write_bytes(b"")
+        return root
+    for well in ("A01", "A02", "A03", "B01", "B02", "B03"):
+        for fov in ("f0", "f1"):
+            for chan in ("DAPI", "GFP"):
+                (root / f"Exp01_{chan}_{well}_{fov}_t0.tif").write_bytes(b"")
+    (root / "Exp01_GFP_ZZ9_f0_t0.tif").write_bytes(b"")
+    return root
+
+
+def _capture_datasets(app, w, rev) -> None:
+    """Grab every Datasets tool page.
+
+    The audit had never entered this pane at all — it switched the centre stack
+    between Review (0) and Analyze (1) and stopped — so a third of the
+    application's pages had no rendering to review against.
+    """
+    tab = getattr(w, "_datasets", None)
+    if tab is None:
+        print("  datasets pane absent (profiled out?)")
+        return
+    rev._central_pane_stack.setCurrentIndex(2)
+    settle(app, 400)
+    for i, name in enumerate(tab._pages.pageNames()):
+        tab._show_page(name)
+        settle(app, 250)
+        grab(w, f"91-datasets-{i}-{_slug(name)}", f"Datasets → {name}")
+    rev._central_pane_stack.setCurrentIndex(0)
+    settle(app)
+
+
+def _capture_schema_detection(app, w, rev) -> None:
+    """Grab the Filename Schema control on both hosts, holding a real result."""
+    root = Path(tempfile.mkdtemp()) / "detect"
+    good = _build_detect_corpus(root / "plate", parses=True)
+    bad = _build_detect_corpus(root / "junk", parses=False)
+
+    analyze = getattr(w, "_analyze", None)
+    if analyze is not None and getattr(analyze, "_schema_picker", None) is not None:
+        rev._central_pane_stack.setCurrentIndex(1)
+        settle(app, 300)
+        for slug, folder, desc in (
+            ("ok", good, "a layout it reads, with one name it cannot"),
+            ("refused", bad, "a folder with no detectable layout"),
+        ):
+            analyze._input_edit.setText(str(folder))
+            analyze._schema_picker.detectButton().click()
+            settle(app, 250)
+            grab(w, f"92-analyze-detect-{slug}",
+                 f"Analyze → Filename Schema, detection: {desc}")
+        rev._central_pane_stack.setCurrentIndex(0)
+        settle(app)
+
+    tab = getattr(w, "_datasets", None)
+    if tab is None:
+        return
+    rev._central_pane_stack.setCurrentIndex(2)
+    tab._show_page("Zip Loose Folder")
+    settle(app, 300)
+    page = tab._pages.currentWidget()
+    picker = getattr(page, "_schema_picker", None)
+    if picker is not None and picker.detectButton() is not None:
+        page._src_field.set_path(str(good))
+        picker.detectButton().click()
+        settle(app, 250)
+        grab(w, "93-loose-detect-ok",
+             "Zip Loose Folder → Filename Schema, detection applied")
+    rev._central_pane_stack.setCurrentIndex(0)
+    settle(app)
 
 
 def _current_page(rev) -> QWidget:

@@ -981,6 +981,14 @@ QWidget#ActiveGroupBanner {{
     border-radius: {r.sm}px;
 }}
 QLabel#Danger  {{ color: {c.danger}; }}
+/* A refusal, a validation failure, a scan that declined. Same colour as
+   Danger because the palette has one "this did not work" tone and two names
+   for it would be two tones within a release; the names differ in what they
+   describe, not in how loud they are -- Danger warns about what an action
+   WILL do, Error reports what something DID. Unstyled until now, which meant
+   the schema-validation labels in the Analyze form and the Zip Loose Folder
+   page rendered their errors in ordinary body colour. */
+QLabel#Error   {{ color: {c.danger}; }}
 QLabel#Success {{ color: {c.success}; }}
 QLabel#Warn    {{ color: {c.warn}; }}
 

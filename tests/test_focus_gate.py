@@ -630,3 +630,115 @@ def test_a_well_with_no_column_reaches_the_composite_as_empty():
 
     plain = pd.DataFrame({"nucleus_id": [1], "area_px": [50]})
     assert per_well_focus(_live_ctx({"A01": plain}, QCParams())) == {"A01": []}
+
+
+# ── the absolute-value guard ────────────────────────────────────────────────
+#
+# **The one property the whole layer rests on, and the one a later change is
+# most likely to undo while making everything look better.** Normalising a
+# per-cell score by its own frame is an obvious-seeming improvement — it makes
+# the numbers dimensionless and comparable-looking — and it silently destroys
+# the only case the metric exists for: a frame that is *uniformly* soft, where
+# every cell deviates from its neighbours by nothing. Measured on the
+# frame-relative estimator this replaced, the relative median is exactly 1.000
+# at sigma 0, 1.5 and 3.0.
+#
+# These are behavioural rather than an AST scan, deliberately. A scan for a
+# division has to name the shapes it knows about and is blind to the next one;
+# driving a uniformly-soft frame through the real decision path cannot be
+# evaded by spelling, because the wrong answer is the same whatever produced
+# it.
+
+def _uniform(value, n=40):
+    """A frame whose every cell reads the same — the case a relative score
+    cannot see, because there is nothing to be relative to."""
+    df = _frame([value] * n)
+    df["Included"] = 1
+    return df
+
+
+def test_a_uniformly_soft_frame_is_still_excluded():
+    """Excludes any normalisation by a per-frame statistic. Under one, every
+    cell here scores 1.0 (or 0.0 deviation) and **nothing** is dropped, which
+    is the exact failure the estimator was replaced to fix."""
+    from review.data.data_loading import df_included_mask
+    from review.features.qc.controller import set_qc_params
+
+    ctx = _live_ctx({"A01": _uniform(0.02)}, QCParams())
+    set_qc_params(ctx, QCParams(exclude_soft_cells=True, focus_min=0.10))
+    got = ctx.state.dataset.cache["A01"]
+    assert list(got["Focus_Pass"]) == [0] * 40
+    assert not df_included_mask(got).any()
+
+
+def test_a_uniformly_sharp_frame_is_still_kept():
+    """The other half — without it the test above passes against a gate that
+    excludes everything unconditionally."""
+    from review.features.qc.controller import set_qc_params
+
+    ctx = _live_ctx({"A01": _uniform(0.40)}, QCParams())
+    set_qc_params(ctx, QCParams(exclude_soft_cells=True, focus_min=0.10))
+    assert list(ctx.state.dataset.cache["A01"]["Focus_Pass"]) == [1] * 40
+
+
+def test_two_wells_at_different_focus_get_different_verdicts():
+    """A per-*well* normalisation is the same defect one pooling up, and it is
+    invisible to a single-well fixture: normalise within each well and these
+    two frames — internally uniform, an order of magnitude apart — come out
+    identical."""
+    from review.features.qc.controller import set_qc_params
+
+    ctx = _live_ctx({"A01": _uniform(0.40), "A02": _uniform(0.02)}, QCParams())
+    set_qc_params(ctx, QCParams(exclude_soft_cells=True, focus_min=0.10))
+    cache = ctx.state.dataset.cache
+    assert list(cache["A01"]["Focus_Pass"]) == [1] * 40
+    assert list(cache["A02"]["Focus_Pass"]) == [0] * 40
+
+
+def test_a_uniformly_soft_plate_marks_every_well_rather_than_none():
+    """The composite has the same exposure one level up: a rule keyed on how a
+    well compares with the rest of the plate marks nothing on a plate where
+    every well is equally bad — which is the worst plate it could be shown."""
+    from review.data.focus_gate import wells_needing_review
+
+    cache = {w: _uniform(0.02) for w in ("A01", "A02", "A03", "A04")}
+    marked = wells_needing_review(_live_ctx(cache, QCParams(focus_min=0.10)))
+    assert set(marked) == set(cache)
+    assert all("the whole well is soft" in text for text in marked.values())
+
+
+def test_a_uniformly_sharp_plate_marks_nothing():
+    """And its complement, so the test above cannot pass against a composite
+    that marks every well it is given."""
+    from review.data.focus_gate import wells_needing_review
+
+    cache = {w: _uniform(0.40) for w in ("A01", "A02", "A03", "A04")}
+    assert wells_needing_review(_live_ctx(cache, QCParams(focus_min=0.10))) == {}
+
+
+def test_the_plot_marks_the_cut_where_the_user_put_it():
+    """The third surface, and the one where a relative axis would be most
+    tempting: a distribution drawn on a normalised x-axis would put the cut in
+    a different place on every frame, and a user comparing two frames would be
+    comparing two different rulers."""
+    from review.features.image_browser.playground.focus_curve_view import (
+        draw_focus_distribution,
+    )
+    from review.domain.focus_distribution import distribution_from_values
+
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    for values in ([0.02] * 20, [0.40] * 20, [0.02] * 10 + [0.40] * 10):
+        fig = Figure(figsize=(6, 4))
+        draw_focus_distribution(fig, distribution_from_values(values, cut=0.10))
+        ax = fig.axes[0]
+        # By label, not by "is it vertical": on a uniform frame the
+        # cumulative curve is *itself* a vertical line, which is correct and
+        # which made the geometric filter ambiguous on exactly the fixtures
+        # this test needs.
+        cut_line = [ln for ln in ax.lines
+                    if str(ln.get_label()).startswith("your cut")]
+        assert len(cut_line) == 1, values
+        assert cut_line[0].get_xdata()[0] == pytest.approx(0.10), values

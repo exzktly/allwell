@@ -1530,6 +1530,81 @@ def playground_hover(ctx, event) -> None:
 # ── the other threshold this tab helps choose ───────────────────────────────
 
 
+def _correction_subject(ctx) -> str:
+    """The correction the measured pixels went through, for the figure's title.
+
+    The subject already named the channel, well, FOV, timepoint and mask
+    provenance — and **not** the corrections, which change the value. Measured
+    against the raw frame, five of the seven correction methods move
+    ``edge_focus`` by 2.6 % or less, but ``fft_bandpass`` moves it **1.27x**.
+    So a saved figure could not be told from one measured on a
+    differently-corrected frame, in the one case where that matters most.
+    """
+    st = _st(ctx)
+    flat = str(st.flatfield_mode or "none")
+    back = str(st.background_method or "none")
+    return f"flat-field {flat} · background {back}"
+
+
+def _nuclear_token(ctx) -> str:
+    """The channel the pipeline measured focus on, lowercased, or ``""``."""
+    info = getattr(ctx.state.dataset, "pipeline_info", None) or {}
+    return str(info.get("nuclear_token") or "").strip().lower()
+
+
+def _focus_caveats(ctx) -> tuple[str, ...]:
+    """What is true of this curve and would mislead a reader who did not know.
+
+    **The channel.** This tab measures whatever channel is selected here, with
+    this tab's own Correction dropdowns — which is the tab's whole purpose,
+    tuning a channel's corrections and seeing the result. The ``qc_edge_focus``
+    column that Cell Gating's cut applies to is always the **nuclear** channel
+    with the run's settings. Measured on identical optics, geometry and mask,
+    a dim textured reporter reads 1.78x the nuclear channel's median with an
+    eightfold p5-p95 spread, so a cut read off the wrong channel's curve and
+    typed into Cell Gating can exclude every cell in the nuclear population.
+    Nothing on the figure said so; the channel appeared in the title, where it
+    reads as provenance rather than as a warning.
+
+    **The column.** This measurement comes from pixels, not from the CSV, so
+    the curve draws perfectly well for a dataset that carries no focus column
+    at all — cut marked, counts live — and the number a user takes from it
+    cannot be applied to anything without re-running the plate. Cell Gating
+    says that; this did not, which is the "a number with no way to act on it"
+    the user asked about.
+
+    Neither is a refusal. Both curves are real measurements, and the tab is
+    entitled to draw them; what is qualified is what may be concluded.
+    """
+    from pipeline.field_quality_record import FOCUS_COLUMN
+
+    st = _st(ctx)
+    out: list[str] = []
+
+    nuclear = _nuclear_token(ctx)
+    shown = str(st.channel or "").strip().lower()
+    if nuclear and shown and shown != nuclear:
+        out.append(
+            f"Measured on {shown.upper()}. The cut in Cell Gating applies to "
+            f"the {nuclear.upper()} channel the run measured, whose values "
+            f"differ — do not carry this number across without checking it "
+            f"against {nuclear.upper()}.")
+
+    # Read off any cached well: the column is written for every row or for
+    # none, so one frame answers it. ``None`` (nothing cached yet) says
+    # nothing rather than guessing, the same three-answer rule the Cell
+    # Gating panel follows.
+    cache = getattr(ctx.state.dataset, "cache", None) or {}
+    frames = [df for df in cache.values() if df is not None and len(df)]
+    if frames and not any(FOCUS_COLUMN in getattr(df, "columns", ())
+                          for df in frames):
+        out.append(
+            "This dataset carries no per-cell focus column, so a cut chosen "
+            "here cannot be applied to it. Re-run with Analyze ▸ Quality "
+            "Control ▸ Measure per-cell focus to record one.")
+    return tuple(out)
+
+
 def playground_focus_now(ctx) -> None:
     """Draw the per-cell focus distribution for the frame on screen.
 
@@ -1590,7 +1665,9 @@ def playground_focus_now(ctx) -> None:
     # Which mask, in the title: a pipeline mask and a live segmentation are
     # different evidence and the plot is savable.
     subject = f"{subject} · {provenance}" if subject else provenance
-    dist = distribution_from_values(values, cut=cut, subject=subject)
+    subject = f"{subject} · {_correction_subject(ctx)}"
+    dist = distribution_from_values(values, cut=cut, subject=subject,
+                                    caveats=_focus_caveats(ctx))
     st.focus_distribution = dist
     _focus_view.show_focus_distribution(ctx, dist)
     _set_status(win, dist.describe())

@@ -10026,6 +10026,24 @@ its rows excluded while the panel said they were kept.
   than on the plate, clipping aside — and is **not** seeded on, because a
   recorded threshold is the user saying "this is my instrument's number", not
   "drop those cells from every plot without telling me".
+* **The Playground's curve carries its own qualification.**
+  `FocusDistribution.caveats` is drawn on the figure in `warn` ink, above the
+  no-recommendation line, and is distinct from `declined`: a caveat does not
+  stop the curve being drawn, because the measurement is real and only what
+  may be concluded from it is in question. Two are supplied
+  (`playground/controller._focus_caveats`). The tab measures whichever channel
+  is selected there with that tab's own Correction dropdowns — which is what
+  the tab is for — while the `qc_edge_focus` column a cut applies to is always
+  the nuclear channel with the run's settings; measured on identical optics,
+  geometry and mask, a dim textured reporter reads 1.78× the nuclear median
+  with an eightfold p5–p95 spread, so a cut read off the wrong curve can
+  exclude the entire nuclear population. And the curve is computed from pixels
+  rather than from the CSV, so it draws for a dataset carrying no column at
+  all, where the number cannot be applied without re-running the plate. The
+  figure's subject also records the correction modes: five of the seven methods
+  move the value by ≤2.6 %, but `fft_bandpass` moves it 1.27×, and this window
+  has a Save button. A declined curve carries no caveats — a refusal already
+  occupies the whole figure and states its reason.
 * **The threshold field is bounded by the estimator's own ceiling.**
   `pipeline.field_quality_record.FOCUS_SCORE_CEILING` is 0.8333 — one over
   1.2 px, because the score is the reciprocal of a width measured on a profile

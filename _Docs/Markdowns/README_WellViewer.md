@@ -1547,7 +1547,17 @@ buttons — you pick one or the other, because choosing the scatter option
   cut, and says live how many cells it keeps and how many it drops.
   **Image Browser ▸ Playground ▸ Focus distribution…** draws the same curve for
   the single frame in front of you, which is the one to use while you are
-  tuning that frame's corrections. Find a value once for your microscope and
+  tuning that frame's corrections. That one measures whichever channel is
+  selected on the Playground, with the Playground's own correction settings —
+  so if you are looking at a channel other than the nuclear stain, the figure
+  says so in amber. The cut you type into Cell Gating applies to the nuclear
+  channel the run measured, and the two can differ by a good deal, so a number
+  read off another channel's curve is not one to carry across without
+  checking. The figure also says when the dataset carries no focus column at
+  all, since the curve will draw from the pixels either way and the number
+  could not be applied without re-running the plate. The correction settings go
+  into the figure's title, so a saved plot can be told from one measured
+  differently. Find a value once for your microscope and
   magnification and it will carry between plates taken the same way, exposure
   permitting.
   Type it into **Analyze ▸ Quality Control ▸ Out of focus below** so future

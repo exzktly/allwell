@@ -855,3 +855,4 @@ def test_a_sweep_with_no_frame_declines_and_leaves_the_buttons_usable(playground
     assert app._playground_sweep_btn.isEnabled() is True
     assert app._playground_sweep_stop_btn.isHidden()
     assert pc._st(app._ctx).sweep_running is False
+

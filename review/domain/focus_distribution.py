@@ -91,6 +91,16 @@ class FocusDistribution:
     subject: str = ""
     #: Why there is nothing to draw. Empty when there is something.
     declined: str = ""
+    #: Things that are true of this curve and would mislead a reader who did
+    #: not know them — drawn ON the figure rather than left to a tooltip,
+    #: because the window has a Save button and these travel with the picture.
+    #:
+    #: Distinct from ``declined``: a caveat does not stop the curve being
+    #: drawn. The measurement is real; what is qualified is what may be
+    #: concluded from it. The case this exists for is a curve measured on a
+    #: channel the cut does not apply to, which is a correct plot of the wrong
+    #: population and the most dangerous thing this window can show.
+    caveats: tuple[str, ...] = ()
 
     @property
     def measurable(self) -> int:
@@ -166,7 +176,8 @@ class FocusDistribution:
 
 def distribution_from_values(values, *, cut: float | None = None,
                              subject: str = "",
-                             declined: str = "") -> FocusDistribution:
+                             declined: str = "",
+                             caveats=()) -> FocusDistribution:
     """Build a :class:`FocusDistribution`, or decline with the reason.
 
     *values* is one frame's per-cell focus column, with ``None`` (or a NaN)
@@ -177,6 +188,10 @@ def distribution_from_values(values, *, cut: float | None = None,
     say — taken in preference to anything derived here, because the caller
     knows why it did not run and this module can only see that nothing
     arrived.
+
+    *caveats* qualify a curve that WAS drawn. They are the caller's too: only
+    it knows which channel and which corrections produced these pixels, and
+    whether the dataset the cut would be applied to even carries the column.
     """
     measured: list[float] = []
     unmeasurable = 0
@@ -201,6 +216,10 @@ def distribution_from_values(values, *, cut: float | None = None,
     if not measured:
         return FocusDistribution(unmeasurable=unmeasurable, cut=cut,
                                  subject=subject, declined=NOTHING_MEASURED)
+    # Carried only onto a curve that is actually drawn. A refusal already
+    # occupies the whole figure and says its own reason; stacking a caveat
+    # under it would qualify a plot that does not exist.
     return FocusDistribution(values=tuple(sorted(measured)),
                              unmeasurable=unmeasurable, cut=cut,
-                             subject=subject)
+                             subject=subject,
+                             caveats=tuple(c for c in (caveats or ()) if c))

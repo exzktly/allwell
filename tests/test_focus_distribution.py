@@ -308,3 +308,79 @@ def test_the_axis_spans_the_whole_measured_range_without_a_nan():
     lo, hi = fig.axes[0].get_xlim()
     assert not math.isnan(lo) and not math.isnan(hi)
     assert lo <= 0.1 and hi >= 0.9
+
+
+# ── caveats: a correct plot of the wrong population ─────────────────────────
+#
+# An adversarial review found the Playground measuring the channel currently
+# on screen, with the Playground's own Correction dropdowns, while the column
+# the cut applies to is always the nuclear channel with the RUN's settings.
+# Measured on identical optics, geometry and mask, a dim textured reporter
+# reads 1.78x the nuclear channel's median with an eightfold p5-p95 spread, so
+# a cut read off the wrong curve excludes the whole nuclear population. The
+# plot was right; what it licensed was not.
+
+def test_a_caveat_rides_with_a_curve_that_is_still_drawn():
+    """Not a refusal. The measurement is real, and the tab is entitled to
+    draw it — what is qualified is what may be concluded from it."""
+    from review.domain.focus_distribution import distribution_from_values
+
+    dist = distribution_from_values(
+        [0.3, 0.4, 0.5], cut=0.35, caveats=("Measured on GFP.",))
+    assert dist.values, "the curve was declined instead of qualified"
+    assert dist.caveats == ("Measured on GFP.",)
+    assert not dist.declined
+
+
+def test_a_refusal_carries_no_caveats():
+    """A refusal already occupies the whole figure and states its reason.
+    Stacking a caveat under it would qualify a plot that does not exist."""
+    from review.domain.focus_distribution import distribution_from_values
+
+    dist = distribution_from_values([], caveats=("Measured on GFP.",))
+    assert dist.declined
+    assert dist.caveats == ()
+
+
+def test_the_caveat_is_drawn_on_the_figure_not_left_to_a_tooltip():
+    """**Asserted on what was drawn** (CLAUDE.md §7.4 #1). This window has a
+    Save button and its own docstring worries about figures leaving for a lab
+    notebook; a caveat that lives in a status line does not travel with the
+    picture, and a saved plot that does not carry its own qualification is the
+    silent substitution §7 names.
+
+    Name the wrong implementation this excludes: storing `caveats` on the
+    dataclass and never rendering them passes every test above.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    from review.core.focus_curve_view import draw_focus_distribution
+    from review.domain.focus_distribution import distribution_from_values
+
+    fig = Figure()
+    draw_focus_distribution(fig, distribution_from_values(
+        [0.3, 0.4, 0.5], cut=0.35,
+        caveats=("Measured on GFP, not the nuclear channel.",)))
+    drawn = " ".join(t.get_text() for ax in fig.axes for t in ax.texts)
+    assert "Measured on GFP" in drawn, drawn
+
+
+def test_the_caveat_is_not_painted_in_the_same_ink_as_the_ordinary_note():
+    """The no-recommendation line is muted and permanent; a caveat is neither.
+    Rendering both alike would make the one that matters invisible."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    from review.core.focus_curve_view import draw_focus_distribution
+    from review.domain.focus_distribution import distribution_from_values
+    from ui import theme
+
+    fig = Figure()
+    draw_focus_distribution(fig, distribution_from_values(
+        [0.3, 0.4, 0.5], caveats=("Measured on GFP.",)))
+    inks = {t.get_text(): t.get_color() for ax in fig.axes for t in ax.texts}
+    caveat_ink = next(c for text, c in inks.items() if "GFP" in text)
+    assert caveat_ink == theme.Colors.warn, caveat_ink

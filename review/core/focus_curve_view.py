@@ -148,7 +148,20 @@ def draw_focus_distribution(fig, dist) -> None:
     # ``wrap=True`` wraps to the **figure** width, not to the axes, so a
     # centred string overflowed both edges of the panel -- the first words of
     # two of its three lines were off the picture entirely.
-    ax.text(0.5, -0.16, "\n".join(textwrap.wrap(NO_RECOMMENDATION, _NOTE_WRAP)),
+    note_y = -0.16
+    # **Caveats go ABOVE the no-recommendation line and in warning ink**, so a
+    # curve measured on a channel the cut does not apply to cannot be read as
+    # one that does. They ride on the figure rather than in the status line
+    # because this window has a Save button and its own docstring worries
+    # about figures leaving for a lab notebook -- a saved plot that does not
+    # carry its own qualification is the silent substitution CLAUDE.md §7
+    # names, arriving through a correct picture of the wrong population.
+    for text in dist.caveats:
+        ax.text(0.5, note_y, "\n".join(textwrap.wrap(text, _NOTE_WRAP)),
+                transform=ax.transAxes, ha="center", va="top", fontsize=8.5,
+                color=theme.Colors.warn)
+        note_y -= 0.075 * (1 + text.count(" ") // 14)
+    ax.text(0.5, note_y, "\n".join(textwrap.wrap(NO_RECOMMENDATION, _NOTE_WRAP)),
             transform=ax.transAxes, ha="center", va="top", fontsize=8.5,
             color=txt_mut)
     leg = ax.legend(loc="best", framealpha=0.85,

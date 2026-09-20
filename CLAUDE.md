@@ -541,6 +541,33 @@ PR still open silently drops the commit under review; it survived only because
 it had already been pushed. Check the PR's state first, and while it is still
 open, stack onto the branch and update the PR description instead.
 
+**A stacked PR needs its retargeting condition stated when it is opened.**
+Basing a PR on the branch below it keeps each diff to its own section, which is
+worth having — and it only lands correctly if every PR above the one that
+merges is then **retargeted to `main`**. GitHub retargets automatically *only
+when the base branch is deleted*; a base branch that merges and survives leaves
+the PR above it pointing at a branch `main` no longer tracks. Three PRs merged
+that way here in one minute, and two of them — an entire feature each — landed
+on intermediate branches rather than on `main`. Nothing was lost, because
+everything was pushed, but recovering it took a fourth PR and a hand-resolved
+conflict against work that had reached `main` in the meantime.
+
+So when opening a stacked PR, write the condition into its own body: *this
+targets X rather than `main`; once X merges, retarget this to `main` before
+merging it.* Then check the base before merging, not after. The cheaper
+alternative is worth weighing each time — basing on `main` and accepting that
+the diff includes the branch below.
+
+Two things that make the failure quiet, both worth checking directly. The merge
+event says "merged" either way, so the notification is no evidence the work
+arrived; verify with `git cat-file -e origin/main:<a file the PR added>` rather
+than trusting the event. And `scripts/preflight.sh` compares `version.py`
+against `origin/main` unconditionally, so on any stacked branch it reports more
+increments than the PR contains and fails — which is a property of the check,
+not of the branch. Measured against its real base the bump is one. Do not
+"correct" a stacked version to satisfy it; doing so collides with the number
+the PR below already took.
+
 **A failing test may be asserting the bug.** Two tests broke in one session
 because the behaviour they pinned *was* the defect being reported — a dial that
 reverted to "computed" the moment a download finished, and a dial shaded

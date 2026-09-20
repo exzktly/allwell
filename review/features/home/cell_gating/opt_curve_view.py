@@ -31,6 +31,16 @@ from review.features.home.cell_gating.gating_compute import (
 )
 
 
+#: The legend label for each objective's score curve, named rather than
+#: written inline because a test asserts **which objective ran** by reading
+#: the labels off the drawn lines. Spelling either one out a second time in
+#: the test is how the two came apart: the clipping note was appended here
+#: and the assertion went on looking for the label without it, and the slow
+#: lane is not a pull-request gate, so it merged failing.
+SEPARATION_SCORE_LABEL = "separation, 95% lower bound (clipped at −1)"
+FOLD_CHANGE_SCORE_LABEL = "|Δ| / max(|fa|, |fb|)"
+
+
 def _cell_gating_show_opt_curve_popup(
     ctx,
     *,
@@ -87,7 +97,7 @@ def _cell_gating_show_opt_curve_popup(
         # says only "worse than no separation", and how much worse is not a
         # number anyone acts on.
         diffs = np.maximum(diffs, -1.0)
-        score_label = "separation, 95% lower bound (clipped at −1)"
+        score_label = SEPARATION_SCORE_LABEL
         y_label = "Fraction-on / supported separation"
     else:
         thresholds = np.linspace(lo, hi, int(steps))
@@ -98,7 +108,7 @@ def _cell_gating_show_opt_curve_popup(
         # The mask is -inf, which no axis can scale to. Zero is this score's own
         # "no separation worth having", which is what an unsupported cut has.
         diffs = np.where(np.isfinite(diffs), diffs, 0.0)
-        score_label = "|Δ| / max(|fa|, |fb|)"
+        score_label = FOLD_CHANGE_SCORE_LABEL
         y_label = "Fraction-on / relative gap"
 
     popup = ctx.runtime.cell_gating.opt_curve_popup

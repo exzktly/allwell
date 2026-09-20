@@ -405,5 +405,20 @@ def test_the_optimizer_curve_popup_draws_without_raising(loaded_app, qtbot,
     popup = ctx.runtime.cell_gating.opt_curve_popup
     assert popup is not None, "the validation graph was never opened"
     # And it drew the objective that actually ran, not the other one.
+    #
+    # Asserted against the labels THEMSELVES rather than against copies of
+    # them, so the two cannot drift apart again: this line held
+    # "separation, 95% lower bound" while the drawn label had gained a
+    # "(clipped at -1)" note in the same commit, and the slow lane is not a
+    # pull-request gate, so it merged failing and stayed failing.
+    #
+    # Both directions, because "not the other one" is half the claim and was
+    # never checked -- a popup drawing BOTH curves satisfied the old
+    # assertion.
+    from review.features.home.cell_gating.opt_curve_view import (
+        FOLD_CHANGE_SCORE_LABEL, SEPARATION_SCORE_LABEL,
+    )
+
     labels = [ln.get_label() for ln in popup._fig.axes[0].lines]
-    assert "separation, 95% lower bound" in labels
+    assert SEPARATION_SCORE_LABEL in labels, labels
+    assert FOLD_CHANGE_SCORE_LABEL not in labels, labels

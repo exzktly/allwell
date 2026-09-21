@@ -11,7 +11,10 @@ bug sits between.
 
 from __future__ import annotations
 
+import builtins
 import os
+import threading
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -64,9 +67,50 @@ def _bare_czi(tmp_path, positions=4):
                                  channels=1))
 
 
+def _all_scans_delivered(page, timeout_s: float = 20.0):
+    """Spin until every scan the page ever started has called back.
+
+    Stronger than :func:`_settle`, which only waits for the page to stop
+    considering itself busy — and a *stale* scan landing later is exactly the
+    thing that is not covered by that. Without this, the test below asserted
+    before the slow scan had returned at all and passed against a page with no
+    staleness check whatsoever.
+    """
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        if set(page._scan_bridges) <= page._scan_delivered:
+            break
+        time.sleep(0.002)
+    QApplication.processEvents()
+    assert set(page._scan_bridges) <= page._scan_delivered, (
+        "a scan never called back")
+    return page
+
+
+def _settle(page, timeout_s: float = 20.0):
+    """Spin the event loop until the page's background source scan has landed.
+
+    The page reads its files off the UI thread — a plate on a network share is
+    one round trip per file and freezing the window for it is the thing that
+    change exists to prevent — so a test that sets a source and reads the
+    verdict in the next statement is reading the "Reading…" state. Waiting on
+    the page's own predicate rather than on a duration is what keeps that from
+    being either a flake or a fixed delay in every one of these.
+    """
+    deadline = time.monotonic() + timeout_s
+    while page.is_scanning() and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.002)
+    QApplication.processEvents()
+    assert not page.is_scanning(), "the source scan never finished"
+    return page
+
+
 def _set_source(page, path, tmp_path):
     page.set_source_path(str(path))
     page.set_destination_path(str(tmp_path / "dest"))
+    _settle(page)
 
 
 # ── the page builds, and its controls do something ───────────────────────────
@@ -128,6 +172,7 @@ def test_the_grid_fields_turn_an_unnamed_plate_into_a_runnable_plan(
     page._well_source_cb.setCurrentIndex(page._well_source_cb.findData("grid"))
     page._rows_edit.setText("2")
     page._cols_edit.setText("2")
+    _settle(page)
 
     assert "A01→B01" in page._verdict.text()   # 2×2 serpentine ends at B01
     assert "from the plate grid" in page._verdict.text()
@@ -141,6 +186,7 @@ def test_a_grid_that_does_not_divide_the_file_blocks_the_run(controller,
     page._well_source_cb.setCurrentIndex(page._well_source_cb.findData("grid"))
     page._rows_edit.setText("2")
     page._cols_edit.setText("2")
+    _settle(page)
 
     assert "not divisible by the well grid" in page._verdict.text()
     assert not page._run_btn.isEnabled()
@@ -232,6 +278,7 @@ def test_the_spec_a_queued_job_carries_round_trips_into_a_fresh_page(
     page._well_source_cb.setCurrentIndex(page._well_source_cb.findData("grid"))
     page._rows_edit.setText("2")
     page._cols_edit.setText("2")
+    _settle(page)
     page._origin_edit.setText("B03")
     page._serpentine_cb.setChecked(False)
     page._direction_cb.setCurrentIndex(page._direction_cb.findData("col"))
@@ -388,6 +435,7 @@ def test_a_changed_mapping_does_reset_the_plate(controller, tmp_path):
 
     page.set_source_path(str(_named_czi(tmp_path / "second",
                                         wells=("H11", "B05"))))
+    _settle(page)
 
     assert sorted(page._dashboard._fraction) == ["B05", "H11"]
 
@@ -413,6 +461,7 @@ def _browse(page, path):
     """
     page._src_field.set_path(str(path))
     page._on_source_changed()
+    _settle(page)
 
 
 def test_picking_one_file_of_a_split_export_offers_the_whole_folder(
@@ -437,6 +486,7 @@ def test_unticking_it_converts_the_one_file(controller, tmp_path):
     _browse(page, folder / "Exp7_A02.czi")
 
     page._folder_cb.setChecked(False)
+    _settle(page)
 
     assert page.use_folder() is False
     assert sorted(page._dashboard._fraction) == ["A02"]
@@ -452,6 +502,7 @@ def test_the_box_follows_a_new_source_until_the_user_touches_it(
     first = _split_folder(tmp_path)
     _browse(page, first / "Exp7_A02.czi")
     page._folder_cb.setChecked(False)
+    _settle(page)
 
     page.refresh_readout()                      # any other keystroke
     assert page.use_folder() is False           # their answer stands
@@ -490,7 +541,7 @@ def test_the_destination_default_names_the_plate_not_one_scene(controller,
 
     _browse(page, folder / "Exp7_A02.czi")
 
-    assert page.destination_path() == str(tmp_path / "Exp7_split")
+    assert page.destination_path() == str(tmp_path / "Exp7_split_dataset")
 
 
 def test_a_split_export_converts_end_to_end_from_the_page(controller, tmp_path):
@@ -535,3 +586,198 @@ def test_a_folder_holding_no_czi_files_says_so(controller, tmp_path):
 
     assert "no .czi files" in page._src_field.message()
     assert not page._run_btn.isEnabled()
+
+
+# ── the plate arrives before the plate has been read ─────────────────────────
+
+def test_the_plate_is_painted_from_the_headers_before_the_full_read_lands(
+        controller, tmp_path, monkeypatch):
+    """The whole point of the two-stage scan.
+
+    The full read is held open here, so what is asserted is the state of the
+    page *while* it is still running: the wells are already on the plate, from
+    the file headers, and the verdict says the answer is provisional. Without
+    the peek stage this plate would be empty until every file had been round-
+    tripped, which on a network share is the wait the stage exists to remove.
+    """
+    import datasets.czi_import.view as view_module
+
+    released = threading.Event()
+    real_read = view_module.read_source
+
+    def _slow_read(src, params):
+        released.wait(20)
+        return real_read(src, params)
+
+    monkeypatch.setattr(view_module, "read_source", _slow_read)
+    page = controller.page
+    folder = _split_folder(tmp_path, wells=("C07", "A02", "H11"))
+
+    page._src_field.set_path(str(folder))
+    page._on_source_changed()
+
+    deadline = time.monotonic() + 20
+    while not page._dashboard._fraction and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.002)
+
+    assert sorted(page._dashboard._fraction) == ["A02", "C07", "H11"]
+    assert page.is_scanning() is True
+    assert "named in the file headers" in page._verdict.text()
+    assert "not yet checked" in page._verdict.text()
+    # Provisional means provisional: nothing may be converted on the strength
+    # of headers alone.
+    assert not page._run_btn.isEnabled()
+
+    released.set()
+    _settle(page)
+    assert "across 3 file(s)" in page._verdict.text()
+    assert page._run_btn.isEnabled()
+
+
+def test_a_keystroke_after_the_scan_reads_no_files(controller, tmp_path):
+    """The readout runs on every keystroke in the grid and experiment fields.
+    Re-reading the plate there is what made a network share unusable: those
+    keystrokes cannot change which files a run reads, so they must not cost a
+    round trip each."""
+    page = controller.page
+    _browse(page, _split_folder(tmp_path))
+    page._well_source_cb.setCurrentIndex(page._well_source_cb.findData("grid"))
+    _settle(page)
+
+    folder = str(page.source_path())
+    touched: list[str] = []
+    real = {"open": builtins.open, "stat": os.stat,
+            "scandir": os.scandir, "listdir": os.listdir}
+
+    def _watching(name):
+        def _watch(path, *args, **kwargs):
+            text = str(path)
+            # Every kind of round trip a share would charge for, not just the
+            # reads. The resume signature stats each file; the source
+            # validator and the folder tick-box *list* the folder, which is a
+            # scandir and costs nothing locally — so a test counting only
+            # stats and opens passed against a readout that re-listed a
+            # 96-file plate on every character typed.
+            if text.endswith(".czi") or text == folder:
+                touched.append(f"{name} {text}")
+            return real[name](path, *args, **kwargs)
+        return _watch
+
+    builtins.open = _watching("open")
+    os.stat, os.scandir, os.listdir = (
+        _watching("stat"), _watching("scandir"), _watching("listdir"))
+    try:
+        page._rows_edit.setText("1")
+        page._cols_edit.setText("3")
+        page._experiment_edit.setText("Run9")
+    finally:
+        builtins.open = real["open"]
+        os.stat, os.scandir, os.listdir = (
+            real["stat"], real["scandir"], real["listdir"])
+
+    assert touched == [], (
+        f"three keystrokes cost {len(touched)} filesystem call(s): "
+        f"{touched[:4]}")
+    assert page.is_scanning() is False
+
+
+def _pump_until(predicate, timeout_s: float = 20.0):
+    """Spin the event loop until *predicate* holds, or fail saying it did not."""
+    deadline = time.monotonic() + timeout_s
+    while not predicate() and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.002)
+    QApplication.processEvents()
+    assert predicate(), "the condition never became true"
+
+
+@pytest.mark.parametrize("slow_stage", ["peek", "full"])
+def test_a_scan_of_the_previous_source_never_lands_on_the_new_one(
+        controller, tmp_path, monkeypatch, slow_stage):
+    """A slow share and an impatient user.
+
+    The first source's scan must not land on a page that has moved on: it
+    would paint the previous plate over the current one and leave the readout
+    describing a file nobody selected. Both stages are held in turn, because
+    each has its own staleness check and a test that only overlapped one left
+    the other free to be deleted.
+
+    The release is deliberately **after** the second scan has settled. An
+    earlier version set it before pumping any events, so the "slow" call never
+    blocked, the two scans never overlapped, and deleting either check left
+    the test green.
+    """
+    import datasets.czi_import.view as view_module
+
+    started = threading.Event()
+    released = threading.Event()
+    first = _split_folder(tmp_path / "first", wells=("C07", "A02"))
+    second = _named_czi(tmp_path / "second", wells=("H11", "B05"))
+    #: The view calls these two by name; the parametrisation picks which one
+    #: to hold open.
+    names = {"peek": "peek_source", "full": "read_source"}
+    real = {"peek": view_module.peek_source, "full": view_module.read_source}
+
+    def _hold(src, params):
+        if str(src) == str(first):
+            started.set()
+            released.wait(20)
+        return real[slow_stage](src, params)
+
+    monkeypatch.setattr(view_module, names[slow_stage], _hold)
+    page = controller.page
+
+    page._src_field.set_path(str(first))
+    page._on_source_changed()
+    _pump_until(started.is_set)
+
+    page._src_field.set_path(str(second))
+    page._on_source_changed()
+    _settle(page)
+    assert sorted(page._dashboard._fraction) == ["B05", "H11"]
+
+    released.set()
+    _all_scans_delivered(page)
+
+    assert sorted(page._dashboard._fraction) == ["B05", "H11"]
+    assert "2 scene(s)" in page._readout.text()
+    assert "across" not in page._verdict.text()
+
+
+def test_a_scan_that_lands_after_teardown_touches_nothing(qapp, tmp_path,
+                                                          monkeypatch):
+    """``stop_scanning`` bumps the generation and *keeps* the bridge.
+
+    Dropping the bridge is what a first attempt did, and a result queued from
+    the worker then fired on a collected ``QObject`` — a segmentation fault
+    with no Python traceback, which is the failure the Datasets shutdown path
+    exists to avoid.
+    """
+    import datasets.czi_import.view as view_module
+    from datasets.czi_import.controller import CziImportController
+
+    released = threading.Event()
+    real_read = view_module.read_source
+
+    def _slow_read(src, params):
+        released.wait(20)
+        return real_read(src, params)
+
+    monkeypatch.setattr(view_module, "read_source", _slow_read)
+    ctrl = CziImportController()
+    ctrl.page._src_field.set_path(str(_split_folder(tmp_path)))
+    ctrl.page._on_source_changed()
+
+    ctrl.shutdown()                 # drops the generation the scan was started on
+    released.set()
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.005)
+        if not ctrl.page._scanning:
+            break
+    QApplication.processEvents()
+
+    assert ctrl.page.is_scanning() is False
+    ctrl.page.deleteLater()

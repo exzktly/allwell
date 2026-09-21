@@ -29,7 +29,9 @@ from pipeline.czi_explode import WELL_SOURCES, resolve_well_map
 from pipeline.czi_read import CziReadError
 from pipeline.czi_set import (
     CziSet,
+    PlatePeek,
     discover_czi_files,
+    peek_wells,
     read_czi_set_safely,
     siblings_of,
 )
@@ -228,18 +230,23 @@ def default_dest(src: Path | str, params: ConversionParams | None = None) -> Pat
     """The folder a conversion of *src* writes into unless the user says otherwise.
 
     Beside the source and named after it, which is what makes the destination
-    field a confirmation rather than a second thing to go and find. For a
-    **set** the source is the folder, so the destination goes beside *that* and
-    takes its name: writing into a folder named after whichever member sorted
-    first would bury a whole plate under one scene's name, and writing inside
-    the source folder would put a dataset among the files it was made from.
+    field a confirmation rather than a second thing to go and find. A single
+    file drops its ``.czi``, which is what keeps it beside rather than on top
+    of itself.
+
+    For a **set** the source is the folder, which has no extension to drop —
+    so it takes the folder's name plus ``_dataset``. Naming it after whichever
+    member sorted first would bury a whole plate under one scene's name, and
+    the folder's bare name *is the folder*: this returned the source folder
+    itself, which would have written ``in/`` in among the very ``.czi`` files
+    the plate was being read from.
     """
     src = Path(src)
     if src.is_dir():
-        return src.parent / src.name
+        return src.parent / f"{src.name}_dataset"
     if params is not None and params.use_folder and len(source_files(src, params)) > 1:
         folder = src.parent
-        return folder.parent / folder.name
+        return folder.parent / f"{folder.name}_dataset"
     return src.parent / strip_czi_suffix(src.name)
 
 
@@ -258,6 +265,19 @@ def source_files(src: Path | str, params: ConversionParams) -> list[Path]:
     if not src.is_file():
         return []
     return siblings_of(src) if params.use_folder else [src]
+
+
+def peek_source(src: Path | str, params: ConversionParams) -> PlatePeek:
+    """The wells *params*'s files claim, from their headers alone.
+
+    What the page draws its plate from while the full read is still running.
+    A few hundred bytes to a few kilobytes per file against the ~1 MB of
+    subblock directory a full read walks, and no pixels either way — which on a
+    plate held on a network share is the difference between a plate map
+    appearing at once and one appearing after every file has been round-tripped.
+    Provisional by construction; see :class:`~pipeline.czi_set.PlatePeek`.
+    """
+    return peek_wells(src, files=source_files(src, params))
 
 
 def read_source(src: Path | str, params: ConversionParams) -> CziSet:
@@ -357,14 +377,36 @@ def converted_wells(dest: Path | str) -> list[str]:
     return marker.converted_wells(dest)
 
 
+def _signature_if_resumable(dest: Path | str, src: Path | str,
+                            params: ConversionParams | None) -> dict | None:
+    """This run's signature, but only when *dest* holds a marker to compare it to.
+
+    Building the signature stats **every file in the set**, which is the right
+    cost when there is an interrupted run to match and pure waste when there is
+    not. Both callers below run on the page's readout path, which fires on
+    every keystroke, and a destination with no marker is the ordinary case —
+    so on a 96-file plate held on a network share this was ninety-six round
+    trips per character typed. The marker's own existence is one stat.
+    """
+    if params is None:
+        return None
+    if marker.read_run_marker(dest, IN_PROGRESS_MARKER) is None:
+        return None
+    return _signature(src or dest, params)
+
+
 def resume_state(dest: Path | str, src: Path | str,
                  params: ConversionParams) -> ResumeState:
     """Read *dest* as a place to continue this conversion in."""
-    return marker.resume_state(dest, IN_PROGRESS_MARKER, _signature(src, params))
+    signature = _signature_if_resumable(dest, src, params)
+    if signature is None:
+        return ResumeState()
+    return marker.resume_state(dest, IN_PROGRESS_MARKER, signature)
 
 
 def destination_problem(dest: Path | str, src: Path | str = "",
                         params: ConversionParams | None = None) -> str:
     """``""`` if *dest* is usable, else a short reason, for the field's hint."""
-    signature = None if params is None else _signature(src or dest, params)
-    return marker.destination_problem(dest, IN_PROGRESS_MARKER, signature)
+    return marker.destination_problem(
+        dest, IN_PROGRESS_MARKER,
+        _signature_if_resumable(dest, src, params))

@@ -404,6 +404,142 @@ def _scene_wells(root) -> dict[int, str]:
     return wells
 
 
+def _declared_scene_indices(root) -> list[int]:
+    """The scene indices the metadata lists, ascending, or ``[]``.
+
+    Read from the ``<Scenes>`` list rather than from the subblock directory,
+    which is what makes it answerable from the file's header alone. A file that
+    lists no scenes and declares no ``SizeS`` has one scene — that is what a
+    CZI with no S axis is — so the empty list here and "one unnamed scene" are
+    told apart by the caller, which knows whether any metadata was read at all.
+    """
+    indices: list[int] = []
+    for scene in _find_all(root, "Scene"):
+        try:
+            indices.append(int(scene.get("Index", "")))
+        except (TypeError, ValueError):
+            continue
+    if indices:
+        return sorted(set(indices))
+    for element in _find_all(root, "SizeS"):
+        try:
+            count = int((element.text or "").strip())
+        except (TypeError, ValueError):
+            continue
+        if count > 0:
+            return list(range(count))
+    return [0]
+
+
+def wells_from_scenes(path: Path, scene_wells: dict[int, str],
+                      scenes: list[int]) -> list[str]:
+    """One well per scene of *path*, in scene order; ``""`` where unknown.
+
+    The scene's own metadata first, because that is the acquisition saying
+    which well it scanned. Failing that, and **only for a file holding exactly
+    one scene**, the filename: ZEN's split-scene export names each file after
+    the scene it holds (``Exp7_A1.czi``), and a file that *is* a scene may
+    legitimately be identified by its name. The one-scene condition is what
+    keeps that from misreading a whole-plate file that happens to be called
+    ``Exp_A1.czi`` as a single well of ninety-six fields.
+
+    One function for both routes into this question — the full layout read and
+    the header-only peek — because the peek exists to paint a plate that the
+    full read then confirms, and two derivations of one rule would eventually
+    paint a plate the run contradicts.
+    """
+    labels = [scene_wells.get(scene, "") for scene in scenes]
+    if len(labels) == 1 and not labels[0]:
+        labels = [well_from_scene_name(path.stem)]
+    return labels
+
+
+class _CountingReader:
+    """A read-only view of a file handle that tallies the bytes taken from it.
+
+    Wrapping rather than counting by arithmetic: the tally is the number a page
+    shows a user, and one computed from what the reads *should* have been stops
+    being true the moment a read changes without the sum being updated — which
+    is the kind of number nobody re-derives and everybody quotes.
+    """
+
+    __slots__ = ("_fh", "bytes_read")
+
+    def __init__(self, fh: BinaryIO) -> None:
+        self._fh = fh
+        self.bytes_read = 0
+
+    def read(self, size: int = -1) -> bytes:
+        data = self._fh.read(size)
+        self.bytes_read += len(data)
+        return data
+
+    def seek(self, *args, **kwargs):
+        return self._fh.seek(*args, **kwargs)
+
+    def tell(self) -> int:
+        return self._fh.tell()
+
+
+@dataclass(frozen=True)
+class ScenePeek:
+    """What a CZI's *header* says about its scenes, with nothing else read.
+
+    The answer to "which wells does this file hold?" costs the 112-byte file
+    header and the metadata segment it points at — a few kilobytes — against
+    the ~1 MB subblock directory a full layout read walks, and neither touches
+    a pixel. On a plate held on a network share that is the difference between
+    painting a plate map at once and waiting on the directory of every file.
+
+    ``wells`` is one entry per scene in scene order, ``""`` where the file does
+    not say. ``has_metadata`` is False when the file carries no readable
+    metadata at all, which is **not** the same as carrying metadata that names
+    no wells. The difference decides whether the filename may stand in for a
+    scene name: that is only allowed for a file holding exactly one scene, and
+    with no metadata a peek cannot tell one scene from ninety-six. So such a
+    file contributes nothing here and waits for the full read, rather than
+    being painted onto a plate the run would then contradict.
+
+    ``bytes_read`` is what it cost — **counted**, not derived from the sizes of
+    the structures involved. A figure worked out by adding up what the reads
+    ought to have been is a number that drifts silently the first time a read
+    changes, and its whole job is to be the honest answer to "what did this
+    cost?".
+    """
+
+    path: Path
+    wells: list[str] = field(default_factory=list)
+    has_metadata: bool = True
+    bytes_read: int = 0
+
+
+def peek_scene_wells(path: Path | str) -> ScenePeek:
+    """Read *path*'s scene-to-well mapping from its header alone.
+
+    Reads the file header and the metadata segment it points at, and **never**
+    the subblock directory. So it cannot say whether the file is sound, how
+    many tiles it holds, or what its pixel format is — only what its metadata
+    claims about its scenes. :func:`read_czi_layout` answers the rest, and a
+    caller that needs an answer it can convert against has to ask it.
+    """
+    path = Path(path)
+    with open(path, "rb") as raw:
+        fh = _CountingReader(raw)
+        directory_position, metadata_position = _read_file_header(fh)
+        del directory_position                      # deliberately not read
+        xml = _read_metadata_xml(fh, metadata_position)
+        read = fh.bytes_read
+    if not xml:
+        return ScenePeek(path=path, has_metadata=False, bytes_read=read)
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return ScenePeek(path=path, has_metadata=False, bytes_read=read)
+    wells = wells_from_scenes(path, _scene_wells(root),
+                              _declared_scene_indices(root))
+    return ScenePeek(path=path, wells=wells, bytes_read=read)
+
+
 def _channel_names(root) -> list[str]:
     """Channel display names in channel-index order, or ``[]``.
 

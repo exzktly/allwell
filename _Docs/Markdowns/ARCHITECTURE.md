@@ -296,7 +296,9 @@ allwell/
 │   │                              compressed file)
 │   ├── czi_set.py              ← one *or more* .czi files read as one plate:
 │   │                              ZEN saves a scan as one file of every scene, or
-│   │                              one file per scene, and the second is a folder
+│   │                              one file per scene, and the second is a folder.
+│   │                              Also the header-only peek the page paints from
+│   │                              before the plate has been read
 │   ├── czi_explode.py          ← the CZI's per-well explode — scenes/tiles → wells,
 │   │                              Z max-projected, one atomic archive per well
 │   ├── explode_common.py       ← what both exploders do identically: the member-name
@@ -6691,6 +6693,63 @@ back up. This is where the CZI converter gives less than the OME-TIFF one, whose
 `DeltaT` handling is described above — the manual says so too, because a user
 expecting hours on a Review axis needs to know where they went.
 
+**The plate is drawn before the plate has been read, and the reading happens
+off the UI thread.** A full `read_czi_set` walks every file's subblock
+directory — measured at about 1 MB for a 96-well plate, and the same 1 MB
+whether the images weigh three megabytes or forty gigabytes, because neither
+path touches a pixel. On a share that is one round trip per file, and doing it
+in `refresh_readout` froze the window for the duration, on a page whose whole
+job is to be looked at before a long run.
+
+So the page scans in two stages, both on a worker thread through
+`core.worker_bridge.run_off_thread`. The **peek**
+(`czi_read.peek_scene_wells` → `czi_set.peek_wells`) reads the 112-byte file
+header and the metadata segment it points at — measured at 6 KB for a
+whole-plate file against 997 KB for the full read, and 46 KB against 1.05 MB
+for a 96-file split export — and names the wells. The plate is painted from it
+at once, with the verdict saying so and the Run button still shut, because a
+peek cannot know whether the file is sound, whether the files agree, or how
+many tiles a scene holds. The **full read** follows and replaces it.
+
+Both derive wells through the one `czi_read.wells_from_scenes`, so the plate a
+peek paints and the plate a run converts cannot be derived two different ways.
+A peek is allowed to be *incomplete* and not to be *wrong*: a file carrying no
+readable metadata contributes nothing, because the filename may only stand in
+for a scene name on a file holding exactly one scene and a peek cannot count
+scenes without metadata. `PlatePeek.complete` says which case it is and the
+page's note says it on screen.
+
+Three things make the rest of the readout free, and all three were measured by
+counting syscalls rather than reasoned about. `refresh_readout` reads no files
+at all: a new source (or a widened folder) starts a scan, and everything else
+renders from the scan in hand, keyed on `(source, use_folder)` — deliberately
+not on the resolved file list and its mtimes, because building *that* key is a
+stat per file on the path a keystroke takes. The source field's verdict and the
+tick-box's sibling count are cached from when the source last changed, since
+answering either means listing the folder. And the resume marker's signature,
+which fingerprints every file in the set, is built only once the marker is
+known to exist — one stat instead of ninety-six, on a destination that usually
+has no marker at all. `test_a_keystroke_after_the_scan_reads_no_files` counts
+`open`, `stat`, `scandir` and `listdir` against the source, and each of those
+three, undone, fails it.
+
+`czi_set.discover_czi_files` lists through `util.dir_scan.files_in` for the
+reason that module exists: `iterdir()` plus `is_file()` is one `stat` per
+entry, which on Windows is a file handle opened and closed and against a share
+is a round trip each.
+
+**A scan bridge is held until its handler has run.** `run_off_thread`'s worker
+keeps the bridge alive only until it emits; dropped between that queued emit
+and the GUI thread's handling of it, the `QObject` is collected and the queued
+event fires on freed memory — a segfault with no Python traceback, which is
+what a single shared `_scan_bridge` attribute produced twice over (once by the
+line that starts the full read from inside the peek's own callback, once by
+`stop_scanning` clearing the slot at teardown). The page keeps them in a dict
+keyed `(generation, stage)`, releases only what has already called back, and
+does so only from `_begin_scan`, which runs outside any handler. `stop_scanning`
+bumps the generation and keeps the references: a result that arrives after
+teardown has to be free to arrive and be ignored.
+
 **The page's tick-box is where "one file or the folder" is decided.** Picking a
 folder converts all of it — the folder *is* the set. Picking a *file* that has
 `.czi` siblings offers *Convert all N .czi files in this folder as one plate*,
@@ -6705,9 +6764,11 @@ the set**, because the shared helper fingerprints the selected path alone and
 that is identical whether a sibling was added between two runs or not.
 
 The destination default follows the same rule: a set writes beside its *folder*
-and is named for it. Naming it after whichever member sorted first would bury a
-whole plate under one scene's name, and writing inside the source folder would
-put a dataset among the files it was made from. `explode_czi` picks the
+and takes its name plus `_dataset`. Naming it after whichever member sorted
+first would bury a whole plate under one scene's name — and the folder's bare
+name *is the folder*, which is what "beside it, named after it" degenerates to
+without an extension to drop, and is what it did until a test asserted the two
+paths were different rather than merely that the name was right. `explode_czi` picks the
 experiment token the same way, and for the same reason: `Exp7_A02` as a token
 would stamp one scene's well into every archive on the plate, H11's included.
 

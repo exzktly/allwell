@@ -310,14 +310,19 @@ def test_the_plan_says_how_many_files_it_reads(tmp_path):
 
 def test_a_set_writes_beside_its_folder_and_is_named_for_it(tmp_path):
     """Not for whichever member sorted first, which would bury a whole plate
-    under one scene's name — and not *inside* the source folder, which would
-    put a dataset among the files it was made from."""
+    under one scene's name — and **not the source folder itself**, which is
+    what "beside it, named after it" degenerates to for a folder and would
+    have written ``in/`` in among the .czi files the plate was read from.
+    Asserted against the source path, not just against a name."""
     folder = _split_plate(tmp_path)
     picked = folder / "Exp7_A02.czi"
 
-    assert default_dest(folder) == tmp_path / "Exp7_split"
-    assert default_dest(picked, ConversionParams(use_folder=True)) == (
-        tmp_path / "Exp7_split")
+    for dest in (default_dest(folder),
+                 default_dest(picked, ConversionParams(use_folder=True))):
+        assert dest == tmp_path / "Exp7_split_dataset"
+        assert dest != folder
+        assert folder not in dest.parents and dest != folder
+    # A single file still drops its suffix, which is already beside itself.
     assert default_dest(picked, ConversionParams()) == folder / "Exp7_A02"
 
 

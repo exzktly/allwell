@@ -5137,11 +5137,29 @@ scanned, so here the mapping is read straight out of the file and you confirm it
 on the plate rather than supplying it.
 
 1. **CZI file or folder** — pick the `.czi`, or the folder a split export was
-   written to. All-Well reads the subblock directory and metadata immediately —
-   no images, so it costs nothing however large the plate is — and suggests a
-   **Destination folder**. The readout then describes what it holds: files,
-   scenes, tiles each, timepoints, channels, pixel size and type, and whether
-   the wells are named by the files or will come from a grid you set.
+   written to. All-Well never reads a single image to work out what a plate
+   holds, so none of this depends on how large the plate is; it also never
+   reads it on the window's thread, so nothing freezes while a slow disk or a
+   network share answers.
+
+   **The plate map fills in first, from the file headers alone.** Naming the
+   wells costs the 112-byte header of each file plus the small metadata block
+   it points at — a few kilobytes for a whole plate — so the wells appear
+   essentially at once even over a NAS, and the line beneath the plate says so:
+   *"96 well(s) named in the file headers (69 KB read) — not yet checked."*
+   That is your chance to see a wrong well before anything has been converted.
+
+   **Then the rest is read**, which is what can actually say the plate is
+   sound: how many tiles each scene holds, what the pixel format is, whether
+   the files agree with each other. That walks each file's index — about a
+   megabyte for a 96-well plate, still no images — and when it lands the
+   readout describes the whole plate and **Convert** becomes available. Until
+   then the button stays off: headers alone are not enough to convert on.
+
+   A **Destination folder** is suggested beside the source, named after it. For
+   a folder of per-scene files the suggestion is that folder's name with
+   `_dataset` on the end, so the dataset never lands among the `.czi` files it
+   was read from.
 2. **Convert all N .czi files in this folder as one plate** — *shown only when
    you picked a single file that has `.czi` neighbours*. It is **ticked by
    default**, because a folder of per-scene files is one plate and converting

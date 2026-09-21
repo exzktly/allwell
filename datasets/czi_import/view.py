@@ -51,11 +51,12 @@ from datasets.czi_import.czi_import_compute import (
     default_channel_roles,
     default_dest,
     destination_problem,
+    peek_source,
     plan_conversion,
     read_source,
     resume_state,
-    source_files,
 )
+from core.worker_bridge import run_off_thread
 from pipeline.czi_explode import WELL_SOURCES
 from pipeline.czi_set import CZI_SUFFIXES, CziSet, siblings_of
 from ui import theme
@@ -111,15 +112,49 @@ class CziImportPage(LogPanelMixin, QWidget):
         #: typing in a grid field does not re-read a multi-gigabyte file on
         #: every keystroke. Keyed on mtime as well as path because a re-export
         #: saved over the same name is a different file.
-        #: The last set read, keyed on the exact files and their mtimes, so
-        #: typing in a grid field does not re-read a multi-gigabyte plate on
-        #: every keystroke. Keyed on mtimes as well as paths because a
-        #: re-export saved over the same name is a different file, and on the
-        #: whole list because a sibling appearing changes the plate.
-        self._source_cache: dict[tuple, CziSet] = {}
+        #: What the last scan was of — the source path and whether the folder
+        #: was widened. Deliberately **not** the resolved file list or their
+        #: mtimes: building that key is itself a stat of every file, and this
+        #: is consulted on every keystroke in the grid and experiment fields.
+        #: Those keystrokes cannot change which files a run reads, so they must
+        #: not cost a round trip each on a network share.
+        self._scan_key: tuple | None = None
+        #: The last completed full read, rendered from until the key changes.
+        self._czi_set: CziSet | None = None
+        #: Bumped by every new scan and by teardown. A scan that lands holding
+        #: a stale number drops its result without touching a widget — which is
+        #: what makes a slow share safe to type over, and what stops a result
+        #: arriving after the page has gone.
+        self._scan_generation = 0
+        #: Every scan bridge still owed a delivery, keyed ``(generation,
+        #: stage)``. A bridge that is dropped between its worker's queued emit
+        #: and the GUI thread's handling of it is collected, and the queued
+        #: event then fires on a freed ``QObject`` — a segfault with no Python
+        #: traceback. The worker thread keeps the bridge alive only until it
+        #: emits, so the reference that covers the rest of that gap has to be
+        #: this one. Entries are released by :meth:`_begin_scan`, which runs on
+        #: the GUI thread outside any handler, and never by a handler itself
+        #: (releasing one from inside its own callback frees it underneath the
+        #: ``disconnect`` that follows).
+        self._scan_bridges: dict[tuple[int, str], object] = {}
+        self._scan_delivered: set[tuple[int, str]] = set()
+        self._scanning = False
         #: Whether the user has touched the "convert the whole folder" box.
         #: Until they do it follows the folder; after, their answer stands.
         self._folder_touched = False
+        #: What the selected path turned out to be, and how many ``.czi`` files
+        #: sit beside it. Cached because establishing it is a stat of the path
+        #: and a listing of its folder — one round trip per file on a network
+        #: share — and only a change of *source* can change the answer. It was
+        #: recomputed on every keystroke in the grid and experiment fields,
+        #: which is three listings of a 96-file folder per character typed.
+        self._source_is_dir = False
+        self._sibling_count = 0
+        #: The source field's own verdict, and the path it was reached for.
+        #: The validator runs on every ``revalidate``, which the readout calls
+        #: on every keystroke, and answering it means listing the folder.
+        self._source_problem = ""
+        self._source_facts_for = None
         self._channel_rows: list[tuple[str, QComboBox]] = []
         self._channel_names_shown: list[str] = []
         self._build_ui()
@@ -167,7 +202,7 @@ class CziImportPage(LogPanelMixin, QWidget):
         outer.addWidget(blurb)
 
         self._src_field = PathField("CZI file or folder", pick=self._pick_source,
-                                    validator=_czi_source_problem)
+                                    validator=self._source_rule)
         self._src_field.changed.connect(self._on_source_changed)
         outer.addWidget(self._src_field)
 
@@ -460,11 +495,26 @@ class CziImportPage(LogPanelMixin, QWidget):
         *is* the set — whatever the box says, so this answers True for one
         without consulting it. The box only ever widens a single **file** to
         its folder, which is the case where widening is a choice.
+
+        Reads the cached verdict on what the source is rather than asking the
+        filesystem: this is called from ``params()``, which the readout calls
+        several times per keystroke.
         """
-        source = Path(self.source_path())
-        if source.is_dir():
+        if self._source_is_dir:
             return True
         return self._folder_cb.isChecked()
+
+    def _source_rule(self, root) -> str:
+        """The source field's verdict, from facts gathered when it last changed.
+
+        :func:`_czi_source_problem` is still the rule; this is the page's cache
+        of its answer. The field revalidates on every readout refresh, and the
+        rule has to list the folder to answer — so unbound, a keystroke in the
+        grid box listed a 96-file plate over the wire.
+        """
+        if str(root) == str(self._source_facts_for):
+            return self._source_problem
+        return _czi_source_problem(root)
 
     def _refresh_folder_box(self) -> None:
         """Offer — and by default take — the rest of the folder, when there is one.
@@ -478,10 +528,15 @@ class CziImportPage(LogPanelMixin, QWidget):
         changed.
         """
         source = Path(self.source_path())
-        if source.is_dir():
+        self._source_facts_for = str(source)
+        self._source_problem = _czi_source_problem(source)
+        self._source_is_dir = source.is_dir()
+        if self._source_is_dir:
+            self._sibling_count = 0
             self._folder_cb.setVisible(False)
             return
         siblings = siblings_of(source) if source.is_file() else []
+        self._sibling_count = len(siblings)
         if len(siblings) < 2:
             self._folder_cb.setVisible(False)
             if not self._folder_touched:
@@ -503,6 +558,9 @@ class CziImportPage(LogPanelMixin, QWidget):
 
     def set_source_path(self, path: str) -> None:
         self._src_field.set_path(path or "")
+        # What the source *is* can only change here and in the browse handler,
+        # which is why the readout no longer asks.
+        self._refresh_folder_box()
         self.refresh_readout()
 
     def set_destination_path(self, path: str) -> None:
@@ -548,6 +606,7 @@ class CziImportPage(LogPanelMixin, QWidget):
         self._folder_touched = True
         with QSignalBlocker(self._folder_cb):
             self._folder_cb.setChecked(bool(params.use_folder))
+        self._refresh_folder_box()
         self._grid_host.setVisible(self.well_source() == "grid")
         self.refresh_readout()
 
@@ -617,24 +676,121 @@ class CziImportPage(LogPanelMixin, QWidget):
             return destination_problem(root)
         return destination_problem(root, src, self.params())
 
-    def _read_source(self, src: str) -> CziSet:
-        """The selected files as one plate, cached on their paths and mtimes."""
+    def is_scanning(self) -> bool:
+        """True while a background source scan has yet to land.
+
+        Public because a caller that drives this page — a test, or anything
+        that wants to know whether the readout is settled — otherwise has to
+        guess at a duration, and a guess is either a flake or a delay.
+        """
+        return self._scanning
+
+    def stop_scanning(self) -> None:
+        """Make any scan in flight land on the floor instead of on a widget.
+
+        Bumps the generation, which every handler checks before it touches
+        anything, and **keeps** the bridges: dropping them here is what the
+        dict above exists to prevent, and a result that arrives after teardown
+        must be free to arrive and be ignored rather than free the object it
+        arrives on.
+        """
+        self._scan_generation += 1
+        self._scanning = False
+
+    def _begin_scan(self, src: str) -> None:
+        """Read the plate off the UI thread, drawing what the headers say first.
+
+        Two stages, because they cost very different amounts and only the first
+        is needed to draw a plate. The **peek** reads each file's header and
+        metadata — a few hundred bytes to a few kilobytes — and names the wells.
+        The **full read** walks every file's subblock directory, about a
+        megabyte for a 96-well plate however large the images are, and is what
+        can say the plate is sound and convertible.
+
+        Both run on a worker thread. They are file reads, and on a network
+        share a 96-file plate is ninety-six round trips: doing that in
+        ``refresh_readout`` froze the window for as long as it took, on a page
+        whose whole job is to be looked at before a long run.
+        """
+        self._scan_generation += 1
+        generation = self._scan_generation
+        self._scanning = True
+        # Release what has already been delivered. Safe here and nowhere else:
+        # this runs from a GUI event, never from inside a handler.
+        for key in list(self._scan_delivered):
+            self._scan_bridges.pop(key, None)
+            self._scan_delivered.discard(key)
         params = self.params()
-        try:
-            key = tuple((str(p), p.stat().st_mtime)
-                        for p in source_files(src, params))
-        except OSError:
-            key = ()
-        if key and key in self._source_cache:
-            return self._source_cache[key]
-        czi_set = read_source(src, params)
-        if key and not czi_set.problem:
-            # Only a readable set is cached. A problem is usually something the
-            # user is in the middle of fixing, and a cached one keeps being
-            # reported after the fix.
-            self._source_cache.clear()
-            self._source_cache[key] = czi_set
-        return czi_set
+        self._readout.setText("Reading the file headers…")
+        self._set_verdict("", "muted")
+        self._update_run_gate(False)
+
+        def _peek():
+            return peek_source(src, params)
+
+        self._scan_bridges[(generation, "peek")] = run_off_thread(
+            _peek,
+            on_done=lambda peek: self._on_peeked(generation, src, params, peek),
+            on_failed=lambda message: self._on_scan_failed(
+                generation, "peek", message),
+        )
+
+    def _delivered(self, generation: int, stage: str) -> None:
+        """Note that this bridge has called back, so it may be released later.
+
+        Recorded before the staleness check, because delivery is a fact about
+        the bridge and happens whether or not the page still wants the answer.
+        """
+        self._scan_delivered.add((generation, stage))
+
+    def _on_peeked(self, generation: int, src: str, params, peek) -> None:
+        self._delivered(generation, "peek")
+        if generation != self._scan_generation:
+            return
+        # The plate, from the headers alone and said to be provisional. A well
+        # the file names wrongly is visible here, which is the whole reason the
+        # plate is drawn before the run rather than during it.
+        if peek.wells and not self._running:
+            self._dashboard.set_wells(peek.wells)
+        self._readout.setText("Reading the rest of the plate…")
+        self._set_verdict(peek.note(), "muted")
+
+        def _full():
+            return read_source(src, params)
+
+        # Its own key: this line runs inside the peek bridge's completion
+        # handler, and reusing that bridge's slot would free it underneath the
+        # ``disconnect`` that follows this call's return.
+        self._scan_bridges[(generation, "full")] = run_off_thread(
+            _full,
+            on_done=lambda czi_set: self._on_scanned(generation, czi_set),
+            on_failed=lambda message: self._on_scan_failed(
+                generation, "full", message),
+        )
+
+    def _on_scanned(self, generation: int, czi_set: CziSet) -> None:
+        self._delivered(generation, "full")
+        if generation != self._scan_generation:
+            return
+        self._scanning = False
+        self._czi_set = czi_set
+        self._render(czi_set)
+
+    def _on_scan_failed(self, generation: int, stage: str,
+                        message: str) -> None:
+        """A scan that raised. ``read_source`` reports rather than raises, so
+        reaching here means something below it did — an unreadable share, a
+        permission error — and answering "nothing to report" would be the
+        fail-open the OME guard was fixed against."""
+        self._delivered(generation, stage)
+        if generation != self._scan_generation:
+            return
+        self._scanning = False
+        self._czi_set = None
+        self._readout.setText("")
+        self._set_verdict(f"Could not read the source: {message}", "error")
+        self._dashboard.set_wells([])
+        self._update_run_gate(False)
 
     def _set_verdict(self, text: str, tone: str) -> None:
         self._verdict.setText(text)
@@ -647,12 +803,20 @@ class CziImportPage(LogPanelMixin, QWidget):
             self._verdict.style().polish(self._verdict)
 
     def refresh_readout(self) -> None:
-        """Recompute the readout, the plate preview and the Run gate."""
+        """Recompute the readout, the plate preview and the Run gate.
+
+        Reads no files itself. A new source (or a widened folder) starts a
+        background scan; everything else renders from the scan already in hand,
+        which is what lets a keystroke in the grid fields cost nothing on a
+        network share.
+        """
         self._src_field.revalidate()
         self._dest_field.revalidate()
-        self._refresh_folder_box()
         src = self.source_path()
         if not src:
+            self._scan_key = None
+            self._czi_set = None
+            self.stop_scanning()
             self._readout.setText(
                 "Choose a CZI file, or a folder of them, to see what it holds.")
             self._set_verdict("", "muted")
@@ -661,8 +825,20 @@ class CziImportPage(LogPanelMixin, QWidget):
             self._update_run_gate(False)
             return
 
+        key = (src, self.use_folder())
+        if key != self._scan_key:
+            self._scan_key = key
+            self._czi_set = None
+            self._begin_scan(src)
+            return
+        if self._czi_set is None:
+            return          # a scan is in flight; it will render when it lands
+        self._render(self._czi_set)
+
+    def _render(self, czi_set: CziSet) -> None:
+        """Draw everything that follows from a plate already read."""
+        src = self.source_path()
         problems = self.raw_fields().problems()
-        czi_set = self._read_source(src)
         if czi_set.problem:
             self._readout.setText("")
             self._set_verdict(czi_set.problem, "error")

@@ -28,6 +28,25 @@ class CziImportController(DatasetToolController):
 
     _shutdown_label = "czi-import"
 
+    def _teardown(self) -> None:
+        """Drop any background source scan before the widgets go.
+
+        The page scans a plate off the UI thread to draw its plate map, and a
+        scan that lands after the page has gone would be a queued call into a
+        deleted widget — the shape that ends in a native crash with no Python
+        traceback. Stopping it is one counter bump; the thread itself is a
+        daemon doing file reads and is left to finish into nothing.
+
+        The page is read defensively because the lifecycle guard
+        (``tests/test_datasets_controller_lifecycle``) builds controllers with
+        ``cls.__new__`` on purpose, to exercise stop/shutdown without the cost
+        of a real Qt page. A tool whose teardown assumed one turned that guard
+        into an ``AttributeError``.
+        """
+        page = getattr(self, "page", None)
+        if page is not None:
+            page.stop_scanning()
+
     def __init__(
         self,
         *,

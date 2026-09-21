@@ -34,11 +34,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from util.dir_scan import files_in
 from pipeline.czi_read import (
     CziLayout,
     CziReadError,
+    ScenePeek,
+    peek_scene_wells,
     read_czi_layout,
-    well_from_scene_name,
+    wells_from_scenes,
 )
 
 #: The extension a CZI carries. A tuple for the same reason ``_OME_SUFFIXES``
@@ -159,13 +162,20 @@ def discover_czi_files(source: Path | str) -> list[Path]:
     the order a grid mapping is laid over. Nothing recursive: a folder of
     folders is a different thing, and walking into one would silently sweep up
     a nested export.
+
+    Through :func:`util.dir_scan.files_in` rather than ``iterdir()`` plus
+    ``is_file()``. That pair is one ``stat`` per entry, which on Windows is a
+    file handle opened and closed, which against a network share is a round
+    trip each — a 96-file plate on a NAS being exactly the case this function
+    exists for. ``scandir`` answers the same question from the listing the
+    enumeration already paid for.
     """
     source = Path(source)
     if source.is_file():
         return [source] if source.suffix.lower() in CZI_SUFFIXES else []
     if source.is_dir():
-        return sorted((p for p in source.iterdir()
-                       if p.is_file() and p.suffix.lower() in CZI_SUFFIXES),
+        return sorted((p for p in files_in(source)
+                       if p.suffix.lower() in CZI_SUFFIXES),
                       key=lambda p: p.name)
     return []
 
@@ -215,18 +225,11 @@ def _disagreement(first: CziLayout, first_path: Path,
 def _wells_for(path: Path, layout: CziLayout) -> list[str]:
     """One well per scene in *path*, in scene order; ``""`` where unknown.
 
-    The scene's own metadata first, because that is the acquisition saying
-    which well it scanned. Failing that, and **only for a file holding exactly
-    one scene**, the filename: ZEN's split-scene export names each file after
-    the scene it holds (``Exp7_A1.czi``), and a file that *is* a scene may
-    legitimately be identified by its name. The one-scene condition is what
-    keeps that from misreading a whole-plate file that happens to be called
-    ``Exp_A1.czi`` as a single well of ninety-six fields.
+    Through :func:`~pipeline.czi_read.wells_from_scenes`, which the header-only
+    peek below also goes through, so the plate a peek paints and the plate the
+    run converts cannot be derived two different ways.
     """
-    labels = [layout.scene_wells.get(scene, "") for scene in layout.scenes]
-    if len(labels) == 1 and not labels[0]:
-        labels = [well_from_scene_name(path.stem)]
-    return labels
+    return wells_from_scenes(path, layout.scene_wells, layout.scenes)
 
 
 def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None) -> CziSet:
@@ -292,3 +295,91 @@ def read_czi_set_safely(source: Path | str, *,
         return read_czi_set(source, files=files)
     except CziReadError as exc:
         return CziSet(files=list(files or ()), problem=str(exc))
+
+
+# ── peeking, for a plate that has not been read yet ─────────────────────────
+
+@dataclass
+class PlatePeek:
+    """What a plate's files claim about their wells, read from headers alone.
+
+    The point of it is a plate map drawn *before* the plate has been read. A
+    full :func:`read_czi_set` walks every file's subblock directory — about a
+    megabyte for a 96-well plate, whatever the images weigh — and on a network
+    share that is the difference between a plate map appearing at once and one
+    appearing after every file has been round-tripped. A peek reads the
+    112-byte file header and the metadata segment it points at: a few hundred
+    bytes to a few kilobytes per file, and no pixels either way.
+
+    It is **provisional**, and the page that draws it has to say so. A peek
+    cannot know whether a file is sound, whether the files agree with each
+    other, or how many tiles a scene holds — all of which can still refuse the
+    conversion. :attr:`complete` is False when some file carries no readable
+    metadata, because the filename may only stand in for a scene name on a file
+    holding exactly one scene and a peek cannot count scenes without metadata.
+    """
+
+    files: list[Path] = field(default_factory=list)
+    peeks: list[ScenePeek] = field(default_factory=list)
+    #: Every well the headers named, de-duplicated, in the order first seen.
+    wells: list[str] = field(default_factory=list)
+    #: Files whose headers named nothing, so the plate below is short of them.
+    unnamed: list[Path] = field(default_factory=list)
+    bytes_read: int = 0
+    problem: str = ""
+
+    @property
+    def complete(self) -> bool:
+        """True when every file named a well, so the plate is the whole plate."""
+        return bool(self.files) and not self.unnamed and not self.problem
+
+    def note(self) -> str:
+        """One line for the page, or ``""`` when there is nothing to qualify."""
+        if self.problem:
+            return self.problem
+        if not self.wells:
+            return ""
+        read = (f"{self.bytes_read / 1024:.0f} KB" if self.bytes_read >= 1024
+                else f"{self.bytes_read} bytes")
+        head = (f"{len(self.wells)} well(s) named in the file headers "
+                f"({read} read)")
+        if self.unnamed:
+            return (f"{head}; {len(self.unnamed)} file(s) name none, so the "
+                    f"plate is not the whole plate until they are read.")
+        return f"{head} — not yet checked."
+
+
+def peek_wells(source: Path | str, *,
+               files: "list[Path] | None" = None) -> PlatePeek:
+    """Read the wells *source*'s files claim, from their headers alone.
+
+    Never raises: a file that cannot be peeked is simply one the plate does not
+    know about yet, and this is called to draw something quickly rather than to
+    decide anything. :func:`read_czi_set` is what a caller asks when it needs
+    an answer it can convert against.
+    """
+    paths = list(files) if files is not None else discover_czi_files(source)
+    peek = PlatePeek(files=paths)
+    if not paths:
+        peek.problem = f"No .czi files in {Path(source).name or source}."
+        return peek
+    seen: set[str] = set()
+    for path in paths:
+        try:
+            scene = peek_scene_wells(path)
+        except (CziReadError, OSError):
+            # Not reported as a problem: the full read is the authority on a
+            # file being broken, and saying so from here would put a refusal on
+            # screen that a peek is not entitled to make.
+            peek.unnamed.append(path)
+            continue
+        peek.peeks.append(scene)
+        peek.bytes_read += scene.bytes_read
+        named = [w for w in scene.wells if w]
+        if not named:
+            peek.unnamed.append(path)
+        for well in named:
+            if well not in seen:
+                seen.add(well)
+                peek.wells.append(well)
+    return peek

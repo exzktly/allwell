@@ -8,6 +8,11 @@ check, against real ZISRAW bytes rather than a mocked reader.
 
 from __future__ import annotations
 
+import builtins
+import contextlib
+import io
+import os
+
 import pytest
 
 from tests._czi_fixture import (
@@ -19,6 +24,7 @@ from tests._czi_fixture import (
 from pipeline.czi_read import CziReadError
 from pipeline.czi_set import (
     discover_czi_files,
+    peek_wells,
     read_czi_set,
     read_czi_set_safely,
     siblings_of,
@@ -267,3 +273,188 @@ def test_a_multi_file_czi_is_refused_by_name(tmp_path):
 
     assert "multi-file CZI" in problem
     assert "one file per scene" in problem
+
+
+# ── peeking: the plate before the plate has been read ────────────────────────
+
+class _CountingFile(io.FileIO):
+    """A file object that records how many bytes were actually read from it."""
+
+    total = 0
+
+    def read(self, size=-1):
+        data = super().read(size)
+        _CountingFile.total += len(data)
+        return data
+
+
+@contextlib.contextmanager
+def _counting_reads():
+    """Count bytes read from every ``.czi`` opened inside the block."""
+    real_open = builtins.open
+
+    def _open(path, mode="r", *args, **kwargs):
+        if "b" in mode and str(path).endswith(".czi"):
+            return _CountingFile(path, "rb")
+        return real_open(path, mode, *args, **kwargs)
+
+    _CountingFile.total = 0
+    builtins.open = _open
+    try:
+        yield lambda: _CountingFile.total
+    finally:
+        builtins.open = real_open
+
+
+def _big_plate(tmp_path, scenes=96):
+    """A plate whose subblock directory is worth not reading: 96 scenes x 4
+    tiles x 3 channels x 5 Z is 5,760 directory entries."""
+    wells = [f"{'ABCDEFGH'[i // 12]}{i % 12 + 1:02d}" for i in range(scenes)]
+    return write_czi(
+        tmp_path / "Plate.czi",
+        plate_tiles(wells=scenes, fovs=4, timepoints=1, channels=3, z=5,
+                    shape=(8, 8)),
+        xml=plate_metadata_xml(scene_wells=dict(enumerate(wells)),
+                               channels=["DAPI", "GFP", "Cy5"])), wells
+
+
+def test_a_peek_reads_a_fraction_of_what_a_full_read_does(tmp_path):
+    """The number the feature rests on.
+
+    A peek reads the 112-byte file header and the metadata segment it points
+    at. A full read additionally walks the subblock directory, which is one
+    entry per stored tile and about a megabyte for a plate this size — and
+    neither reads a pixel, so the gap is the same whether the images weigh
+    three megabytes or forty gigabytes. Asserted as a ratio rather than an
+    absolute, because the fixture's own sizes are not the point.
+    """
+    path, wells = _big_plate(tmp_path)
+
+    with _counting_reads() as counted:
+        peek = peek_wells(path)
+        peek_bytes = counted()
+    with _counting_reads() as counted:
+        read_czi_set(path)
+        full_bytes = counted()
+
+    assert peek.wells == wells
+    assert peek_bytes < full_bytes / 20, (
+        f"the peek read {peek_bytes:,} bytes against the full read's "
+        f"{full_bytes:,} — it is walking the subblock directory")
+    assert peek.bytes_read == peek_bytes, (
+        "PlatePeek.bytes_read is what the page reports; it has to be what was "
+        "read and not, say, the offset the reads ended at")
+
+
+def test_a_peek_and_a_full_read_name_the_same_wells(tmp_path):
+    """The peek paints a plate the full read then confirms, so the two must
+    not be able to disagree — they derive the wells through one function."""
+    folder = _split_plate(tmp_path, wells=("C07", "A02", "H11"))
+    assert peek_wells(folder).wells == read_czi_set(folder).wells_from_files()
+
+
+def test_a_split_export_is_peeked_for_a_few_kilobytes(tmp_path):
+    folder = _split_plate(tmp_path, wells=("C07", "A02", "H11"))
+    with _counting_reads() as counted:
+        peek = peek_wells(folder)
+        peek_bytes = counted()
+    with _counting_reads() as counted:
+        read_czi_set(folder)
+        full_bytes = counted()
+
+    assert peek.wells == ["A02", "C07", "H11"]
+    assert peek.complete is True
+    assert peek_bytes < full_bytes
+
+
+def test_a_file_named_only_by_its_filename_is_peeked_from_it(tmp_path):
+    """A split member whose metadata lists channels but names no scene. The
+    peek can see it holds one scene, so the filename may stand in — and it has
+    to give the same answer the full read does, or the plate it paints is one
+    the run contradicts."""
+    folder = tmp_path / "unnamed_scenes"
+    _scene_file(folder, "Exp7_A01.czi", None)
+    _scene_file(folder, "Exp7_B02.czi", None)
+    peek = peek_wells(folder)
+
+    assert peek.wells == ["A01", "B02"]
+    assert peek.complete is True
+    assert peek.wells == read_czi_set(folder).wells_from_files()
+
+
+def test_a_file_with_no_metadata_at_all_is_left_out_rather_than_guessed(
+        tmp_path):
+    """The filename may stand in for a scene name only on a file holding one
+    scene, and with no metadata a peek cannot tell one scene from ninety-six.
+    Painting it from the filename anyway would put a well on the plate that the
+    full read could contradict — a provisional answer may be incomplete, and
+    may not be wrong.
+    """
+    folder = tmp_path / "mixed"
+    _scene_file(folder, "Exp7_A01.czi", "A01")
+    write_czi(folder / "Exp7_B02.czi",
+              plate_tiles(wells=1, fovs=1, timepoints=1, channels=2))
+    peek = peek_wells(folder)
+
+    assert peek.wells == ["A01"]
+    assert [p.name for p in peek.unnamed] == ["Exp7_B02.czi"]
+    assert peek.complete is False
+    assert "not the whole plate" in peek.note()
+    # And this particular set is refused outright once really read, because a
+    # file carrying no metadata carries no channel names either: it reports
+    # `c0, c1` against its sibling's `DAPI, GFP`. Worth pinning, because it is
+    # why the case above — metadata without scene names — is the realistic one
+    # and this is the damaged one.
+    assert "channel names" in read_czi_set(folder).problem
+
+
+def test_a_peek_never_raises_on_a_broken_member(tmp_path):
+    """It is called to draw something quickly, not to decide anything; the
+    full read is the authority on a file being unusable."""
+    folder = tmp_path / "junk"
+    _scene_file(folder, "a_A01.czi", "A01")
+    (folder / "b.czi").write_bytes(b"II*\0" + b"\0" * 200)
+    peek = peek_wells(folder)
+
+    assert peek.wells == ["A01"]
+    assert [p.name for p in peek.unnamed] == ["b.czi"]
+
+
+def test_an_empty_folder_peek_says_so(tmp_path):
+    (tmp_path / "nothing").mkdir()
+    assert "No .czi files" in peek_wells(tmp_path / "nothing").problem
+
+
+def test_discovering_a_folder_does_not_stat_every_entry(tmp_path):
+    """``iterdir()`` plus ``is_file()`` is one ``stat`` per entry, which on
+    Windows is a file handle opened and closed and against a network share is a
+    round trip each — the case ``util.dir_scan`` exists for, and the case a
+    96-file plate on a NAS is. ``scandir`` answers from the listing it already
+    paid for."""
+    folder = _split_plate(tmp_path, wells=("A01", "B02", "C03"))
+    with _counting_stats(folder) as counted:
+        found = discover_czi_files(folder)
+
+    assert [p.name for p in found] == [
+        "Exp7_A01.czi", "Exp7_B02.czi", "Exp7_C03.czi"]
+    assert counted() == 0, (
+        f"{counted()} stat(s) for a three-file folder — the listing is being "
+        f"re-asked about every entry it already described")
+
+
+@contextlib.contextmanager
+def _counting_stats(folder):
+    """Count ``os.stat`` calls on the ``.czi`` files inside *folder*."""
+    calls: list[str] = []
+    real_stat = os.stat
+
+    def _watch(path, *args, **kwargs):
+        if str(path).endswith(".czi"):
+            calls.append(str(path))
+        return real_stat(path, *args, **kwargs)
+
+    os.stat = _watch
+    try:
+        yield lambda: len(calls)
+    finally:
+        os.stat = real_stat

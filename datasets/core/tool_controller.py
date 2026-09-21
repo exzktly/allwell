@@ -55,6 +55,22 @@ class DatasetToolController(QObject):
         """
         worker.requestInterruption()
 
+    def _teardown(self) -> None:
+        """Extra work a tool needs done on app close, before its worker is stopped.
+
+        A no-op here, and overridden by a tool whose *page* owns background
+        work of its own — Convert CZI reads a plate off the UI thread to draw
+        its plate map, and a scan landing after the widgets have gone is a
+        queued call into a deleted widget. It exists as a hook rather than as
+        an overridden ``shutdown`` because the whole point of this base is that
+        the lifecycle has one implementation:
+        ``test_datasets_controller_lifecycle`` fails a controller that restates
+        ``shutdown``, ``stop`` or ``is_busy``, and it is right to.
+
+        Called before the early return below, since a tool can have nothing to
+        stop and still have something to tear down.
+        """
+
     def stop(self) -> None:
         """QueueableController hook: cancel the run in flight, if any."""
         if self._worker is not None and self._worker.isRunning():
@@ -90,6 +106,7 @@ class DatasetToolController(QObject):
         traceback, and this line is the only thing that will name it in the
         boot log afterwards.
         """
+        self._teardown()
         worker = self._worker
         if worker is None or not worker.isRunning():
             return

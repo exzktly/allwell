@@ -26,6 +26,8 @@ from tests._czi_fixture import (
 from pipeline.czi_read import (
     CziReader,
     CziReadError,
+    _read_file_header,
+    _read_metadata_xml,
     read_czi_layout,
     well_from_scene_name,
 )
@@ -114,7 +116,7 @@ def test_pyramid_subblocks_are_not_mistaken_for_acquisition_tiles(tmp_path, tell
     layout = read_czi_layout(path)
 
     assert layout.n_blocks == 1
-    assert layout.total_planes == 1
+    assert layout.total_images == 1
     assert layout.validation_report("pyramid.czi") == ""
 
 
@@ -215,10 +217,11 @@ def test_a_missing_plane_is_named_rather_than_converted_as_a_blank(tmp_path):
     path = write_czi(tmp_path / "short.czi", tiles)
     layout = read_czi_layout(path)
 
-    assert layout.total_planes == 4
-    assert layout.missing_planes == 1
+    assert layout.total_images == 4
+    assert layout.missing_images == 1
     report = layout.validation_report("short.czi")
-    assert "incomplete" in report and "only 3" in report
+    assert "incomplete" in report
+    assert "describe 4 image(s)" in report and "1 of them" in report
 
 
 def test_reading_a_plane_the_file_lacks_raises_rather_than_returning_zeros(
@@ -336,3 +339,91 @@ def test_an_unknown_compression_method_is_refused_by_number(tmp_path):
 def test_a_file_with_no_tiles_at_all_says_so(tmp_path):
     path = write_czi(tmp_path / "empty.czi", [])
     assert "no image tiles" in read_czi_layout(path).validation_report("empty.czi")
+
+
+def test_a_sound_file_is_read_through_its_directory_in_two_seeks(tmp_path):
+    """The fast path, asserted because its absence is silent.
+
+    The two offsets in the file header were once read one field late — the
+    directory offset came back as the metadata offset — and nothing broke:
+    the directory read failed, ``read_czi_layout`` fell back to walking every
+    segment, and the walk recovers the same layout. So every file took the
+    damaged-file recovery path, carried its "interrupted acquisition" warning,
+    and paid a whole pass over itself, while the suite stayed green because the
+    only assertion about ``from_directory`` was the one below that wants it
+    False.
+    """
+    path = write_czi(
+        tmp_path / "sound.czi",
+        plate_tiles(wells=2, fovs=1, timepoints=1, channels=1),
+        xml=plate_metadata_xml(scene_wells={0: "A01", 1: "A02"},
+                               channels=["GFP"]),
+    )
+    layout = read_czi_layout(path)
+
+    assert layout.from_directory is True
+    assert layout.warnings == []
+    assert layout.wells_from_metadata() == ["A01", "A02"]
+
+
+def test_the_metadata_is_found_through_the_header_not_only_by_walking(tmp_path):
+    """The other half of the same slip: with the offsets read one field late,
+    the metadata offset came back as ``UpdatePending`` — zero — and the XML was
+    recovered only because the segment walk went looking for it. A file the
+    walk declines to scan would have lost its channel and well names."""
+    path = write_czi(
+        tmp_path / "meta.czi",
+        plate_tiles(wells=1, fovs=1, timepoints=1, channels=1),
+        xml=plate_metadata_xml(scene_wells={0: "D06"}, channels=["Cy5"]),
+    )
+    with open(path, "rb") as fh:
+        directory_position, metadata_position = _read_file_header(fh)
+        assert directory_position > 0
+        assert metadata_position > 0
+        assert _read_metadata_xml(fh, metadata_position).startswith(
+            "<ImageDocument>")
+
+
+def test_channels_may_have_different_stack_depths(tmp_path):
+    """A 3-plane fluorescent stack beside a single brightfield plane is an
+    ordinary Zeiss acquisition. Counting stored tiles against
+    positions x T x C x max(Z) called it two thirds incomplete and told the
+    user to re-export a file that was never truncated — and no re-export
+    satisfies it, so the plate was simply unconvertible."""
+    tiles = [t for t in plate_tiles(wells=2, fovs=1, timepoints=1, channels=2,
+                                    z=3)
+             if not (t.c == 1 and t.z > 0)]
+    path = write_czi(tmp_path / "mixed_z.czi", tiles)
+    layout = read_czi_layout(path)
+
+    assert layout.size_z == 3
+    assert layout.total_images == 4          # 2 scenes x 1 tile x 1 T x 2 C
+    assert layout.missing_images == 0
+    assert layout.validation_report("mixed_z.czi") == ""
+
+
+def test_a_shallower_channel_still_projects(tmp_path):
+    """The reader must not ask for Z planes a coordinate does not have.
+    ``range(size_z)`` raised on the single-plane channel of the file above."""
+    tiles = [t for t in plate_tiles(wells=1, fovs=1, timepoints=1, channels=2,
+                                    z=3)
+             if not (t.c == 1 and t.z > 0)]
+    path = write_czi(tmp_path / "mixed_z.czi", tiles)
+    with CziReader(path) as reader:
+        deep = reader.read_projection(0, 0, 0, 0)
+        shallow = reader.read_projection(0, 0, 0, 1)
+
+    assert deep[0, 0] == _expected(0, 0, 0, 0, 2)    # the brightest Z
+    assert shallow[0, 0] == _expected(0, 0, 0, 1, 0)
+
+
+def test_a_coordinate_with_no_planes_at_all_is_still_missing(tmp_path):
+    """The relaxation above must not become "nothing is ever missing"."""
+    tiles = plate_tiles(wells=2, fovs=1, timepoints=1, channels=2, z=2)
+    tiles = [t for t in tiles if not (t.scene == 1 and t.c == 1)]
+    path = write_czi(tmp_path / "gone.czi", tiles)
+    layout = read_czi_layout(path)
+
+    assert layout.total_images == 4
+    assert layout.missing_images == 1
+    assert "incomplete" in layout.validation_report("gone.czi")

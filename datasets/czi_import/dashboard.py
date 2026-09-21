@@ -61,8 +61,22 @@ class CziImportDashboard(PlateProgress):
         Sorted and de-duplicated, because this is a picture of a plate rather
         than of an acquisition order — the order is what the readout states in
         words, and two wells cannot occupy one cell.
+
+        **An unchanged well set leaves the plate alone.** The page redraws its
+        readout whenever anything it depends on changes, and one of those
+        moments is the end of a run: the controller drops the running flag and
+        refreshes, the plan resolves to the same wells it always did, and a
+        version of this method that reset unconditionally wiped every dial and
+        every ✓ a second after the run finished — a conversion that had just
+        reported "Wrote 2 image(s) for 2 well(s)" above a plate reading
+        "Pending: 2" and a bar back at zero. Making the no-op a property of the
+        dashboard rather than a flag on the page keeps the other direction
+        working: a mapping that really did change is a different well set, and
+        resetting is then exactly right.
         """
         wells = sorted({canon_well(w) for w in well_ids} - {""})
+        if wells == self._wells:
+            return
         self._wells = wells
         self._fraction = dict.fromkeys(wells, 0.0)
         # Empty rather than a full 96-well plate: an "enabled but uncoloured"

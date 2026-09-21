@@ -121,7 +121,7 @@ def test_the_typed_fields_become_the_params_the_run_uses(plate):
     assert params == ConversionParams(
         well_source="grid", grid_rows=2, grid_cols=3, origin="b3",
         direction="col", serpentine=False, fovs_per_well=4,
-        experiment="Run9", workers=6, well_order=())
+        experiment="Run9", workers=6)
 
 
 @pytest.mark.parametrize("name,expected", [
@@ -171,7 +171,6 @@ def test_every_declared_mapping_field_alone_declines_the_resume(
         "well_source": "grid", "grid_rows": 4, "grid_cols": 6,
         "origin": "B03", "direction": "col", "serpentine": False,
         "fovs_per_well": 3, "experiment": "Other",
-        "well_order": ("A01", "A02"),
     }[field]
     other = dataclasses.replace(params, **{field: changed})
 

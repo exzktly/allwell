@@ -49,6 +49,7 @@ def _named_czi(tmp_path, wells=("C07", "A02"), channels=("DAPI", "GFP"),
                fovs=1, timepoints=1):
     tiles = plate_tiles(wells=len(wells), fovs=fovs, timepoints=timepoints,
                         channels=len(channels))
+    tmp_path.mkdir(parents=True, exist_ok=True)
     return write_czi(
         tmp_path / "Plate7.czi", tiles,
         xml=plate_metadata_xml(
@@ -347,3 +348,45 @@ def test_analyze_redirects_a_raw_czi_to_this_page(qapp, tmp_path):
         assert "Convert CZI" in tab._layout_lbl.text()
     finally:
         tab.deleteLater()
+
+
+def test_the_plate_still_shows_the_finished_run_after_it_ends(controller,
+                                                              tmp_path):
+    """The readout refresh that follows a run must not wipe the run.
+
+    ``_on_finished`` drops the running flag and refreshes the readout, which
+    re-resolves the same plan and re-seeds the plate — so a conversion that had
+    just reported "Wrote 2 image(s) for 2 well(s)" sat above a plate reading
+    "Pending: 2, Converted: 0" with the bar back at zero. Asserted as the
+    counts and the bar, not as the outcome, because the outcome was `done`
+    throughout and is what the existing run test already checks.
+    """
+    page = controller.page
+    _set_source(page, _named_czi(tmp_path, wells=("C07", "A02")), tmp_path)
+
+    controller._launch()
+    controller._worker.wait(30_000)
+    QApplication.processEvents()
+
+    dashboard = page._dashboard
+    assert dashboard.outcome() == "done"
+    assert dict((state, n) for state, _label, n in dashboard._counts()) == {
+        "pending": 0, "converting": 0, "converted": 2}
+    # The bar counts wells, which is what the plate and the rail count; the
+    # worker's plane count is reported as text beside it, because two units on
+    # one bar is what "2 / 4" at the end of a finished run looked like.
+    assert dashboard._bar.value() == dashboard._bar.maximum() == 2
+    assert dashboard._status.text() == "4 of 4 image(s)"
+
+
+def test_a_changed_mapping_does_reset_the_plate(controller, tmp_path):
+    """The other direction: the no-op above must not freeze the preview.
+    A different well set is a different conversion and resets."""
+    page = controller.page
+    _set_source(page, _named_czi(tmp_path, wells=("C07", "A02")), tmp_path)
+    assert sorted(page._dashboard._fraction) == ["A02", "C07"]
+
+    page.set_source_path(str(_named_czi(tmp_path / "second",
+                                        wells=("H11", "B05"))))
+
+    assert sorted(page._dashboard._fraction) == ["B05", "H11"]

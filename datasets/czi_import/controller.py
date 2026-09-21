@@ -89,12 +89,10 @@ class CziImportController(DatasetToolController):
 
     # ── job queue ────────────────────────────────────────────────────────────
     def collect_spec(self) -> dict:
-        params = asdict(self.page.params())
-        params["well_order"] = list(params["well_order"])
         return {
             "source": self.page.source_path(),
             "destination": self.page.destination_path(),
-            "params": params,
+            "params": asdict(self.page.params()),
         }
 
     def _on_queue_requested(self) -> None:
@@ -106,9 +104,7 @@ class CziImportController(DatasetToolController):
         self.page.set_destination_path(spec.get("destination", ""))
         params = spec.get("params") or {}
         if params:
-            self.page.set_params(ConversionParams(**{
-                **params, "well_order": tuple(params.get("well_order") or ()),
-            }))
+            self.page.set_params(ConversionParams(**params))
 
     def start_from_queue(self, spec: dict) -> None:
         self.show_job(spec)

@@ -52,7 +52,7 @@ from pipeline.explode_common import (
     worker_groups,
 )
 from util.filename_token import safe_token
-from util.plate_grid import block_well_labels, normalize_well_order
+from util.plate_grid import block_well_labels
 from util.zip_write import atomic_zip
 
 #: Where the well label of each scene comes from. ``"file"`` reads the names
@@ -113,10 +113,16 @@ def resolve_well_map(
     direction: str = "row",
     serpentine: bool = True,
     fovs_per_well: int | None = None,
-    well_order: "list[str] | None" = None,
     name: str = "This file",
 ) -> WellMap:
     """Resolve *layout*'s scenes and tiles onto well labels.
+
+    Two sources, and only two: the scene names in the file, or a rectangular
+    block of the plate. There is deliberately no third — the OME-TIFF importer
+    additionally accepts an explicit click-defined visit order because its page
+    has an editor that produces one, and a parameter with no producer is a
+    branch the application never takes however well it is written (CLAUDE.md
+    §7.7). Adding it back alongside such an editor is four lines.
 
     Raises ``ValueError`` — before anything is written — when the settings
     cannot produce a whole mapping: a grid that does not divide the positions,
@@ -162,16 +168,13 @@ def resolve_well_map(
             from_file=True,
         )
 
-    if well_order:
-        wells = normalize_well_order(well_order)
-    else:
-        if grid_rows <= 0 or grid_cols <= 0:
-            raise ValueError(
-                "Enter the imaged well-grid dimensions (rows × columns) as "
-                "positive whole numbers."
-            )
-        wells = block_well_labels(grid_rows, grid_cols, origin=origin or "A01",
-                                  direction=direction, serpentine=serpentine)
+    if grid_rows <= 0 or grid_cols <= 0:
+        raise ValueError(
+            "Enter the imaged well-grid dimensions (rows × columns) as "
+            "positive whole numbers."
+        )
+    wells = block_well_labels(grid_rows, grid_cols, origin=origin or "A01",
+                              direction=direction, serpentine=serpentine)
     fovs = resolve_positions(len(positions), len(wells), fovs_per_well,
                              what="stage position(s)", name=name)
     return WellMap(
@@ -194,7 +197,6 @@ def explode_czi(
     serpentine: bool = True,
     experiment: str = "",
     fovs_per_well: "int | None" = None,
-    well_order: "list[str] | None" = None,
     workers: int = 0,
     log_fn: "Callable[[str], None] | None" = None,
     progress_fn: "Callable[[int, int], None] | None" = None,
@@ -250,7 +252,7 @@ def explode_czi(
         layout, well_source=well_source, grid_rows=grid_rows,
         grid_cols=grid_cols, origin=origin_well, direction=direction,
         serpentine=serpentine, fovs_per_well=fovs_per_well,
-        well_order=well_order, name=czi_path.name,
+        name=czi_path.name,
     )
     # Blank means the file names itself. A constant default ("czi") would
     # give every plate converted through this function the same experiment

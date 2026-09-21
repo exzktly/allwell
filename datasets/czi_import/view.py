@@ -479,10 +479,21 @@ class CziImportPage(LogPanelMixin, QWidget):
         self._dashboard.clear_outcome()
 
     def set_progress(self, done: int, total: int) -> None:
+        """Report the run's plane count — as text, deliberately not as the bar.
+
+        The dashboard's bar counts **wells**: that is what its plate draws and
+        what its rail tallies, and it is what every other Datasets dashboard
+        puts there. The worker reports *planes*, which is a finer and more
+        useful number but a different unit, and writing both to one bar is two
+        writers with two denominators on one widget — it read "2 / 4" at the
+        end of a two-well run that wrote four images, which is either number
+        being wrong depending on which label you assumed. Both numbers are worth
+        having, so each goes where it means something.
+        """
         if total <= 0:
+            self._dashboard.set_status("")
             return
-        self._dashboard.set_overall_range(total)
-        self._dashboard.set_overall(done)
+        self._dashboard.set_status(f"{done:,} of {total:,} image(s)")
 
     def set_running(self, running: bool) -> None:
         self._running = bool(running)

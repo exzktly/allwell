@@ -110,7 +110,6 @@ REUSE_CONTRACTS = {
         "serpentine": "snake or raster",
         "fovs_per_well": "how many tiles each well takes",
         "experiment": "the first token of every member name",
-        "well_order": "an explicit acquisition path, which replaces the grid",
     },
     "parquet_cache.read_cached": {
         "st_size": (

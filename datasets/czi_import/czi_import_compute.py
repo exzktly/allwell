@@ -32,7 +32,6 @@ from util.channel_roles import (  # noqa: F401 (re-export for the view)
     channel_tokens_from_roles,
     default_channel_roles,
 )
-from util.plate_grid import normalize_well_order
 
 _CZI_SUFFIXES = (".czi",)
 
@@ -48,8 +47,7 @@ IN_PROGRESS_MARKER = ".aw_czi_in_progress"
 #: stitch together. ``workers`` is deliberately absent — it changes how fast the
 #: conversion goes and nothing about what it writes.
 _MAPPING_FIELDS = ("well_source", "grid_rows", "grid_cols", "origin",
-                   "direction", "serpentine", "fovs_per_well", "experiment",
-                   "well_order")
+                   "direction", "serpentine", "fovs_per_well", "experiment")
 
 
 class CziImportError(Exception):
@@ -76,9 +74,6 @@ class ConversionParams:
     fovs_per_well: int | None = None      # None = take it from the file
     experiment: str = ""                  # blank = derive from the filename
     workers: int = 0                      # 0 = auto (per-well thread pool)
-    # An explicit acquisition ordering, for a grid-mapped file whose wells were
-    # not visited as a rectangle. Empty means the grid fields decide.
-    well_order: tuple[str, ...] = ()
 
 
 @dataclass
@@ -158,14 +153,13 @@ class RawFields:
     direction: str = "row"
     serpentine: bool = True
     experiment: str = ""
-    well_order: tuple[str, ...] = ()
 
     def problems(self) -> list[str]:
         """Everything wrong with the fields as they stand, in reading order."""
         out: list[str] = []
         if self.well_source not in WELL_SOURCES:
             out.append(f"Unknown well source {self.well_source!r}.")
-        if self.well_source == "grid" and not self.well_order:
+        if self.well_source == "grid":
             rows, rows_ok = parse_count(self.rows)
             cols, cols_ok = parse_count(self.cols)
             if not rows_ok or not cols_ok:
@@ -178,11 +172,6 @@ class RawFields:
         if not parse_count(self.workers)[1]:
             out.append("Worker threads must be a positive whole number, or "
                        "blank for automatic.")
-        if self.well_order:
-            try:
-                normalize_well_order(self.well_order)
-            except ValueError as exc:
-                out.append(str(exc))
         return out
 
     def to_params(self) -> ConversionParams:
@@ -201,7 +190,6 @@ class RawFields:
             fovs_per_well=fovs,
             experiment=self.experiment.strip(),
             workers=workers or 0,
-            well_order=tuple(self.well_order),
         )
 
 
@@ -262,7 +250,6 @@ def plan_conversion(layout: CziLayout, params: ConversionParams) -> ConversionPl
             direction=params.direction,
             serpentine=params.serpentine,
             fovs_per_well=params.fovs_per_well,
-            well_order=list(params.well_order) or None,
         )
     except ValueError as exc:
         raise CziImportError(str(exc)) from exc

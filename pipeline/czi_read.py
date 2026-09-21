@@ -220,10 +220,18 @@ def _read_file_header(fh: BinaryIO) -> tuple[int, int]:
             "segment. Check that the file is a Zeiss .czi and not, say, an "
             "exported TIFF that was renamed."
         )
-    fields = _FILE_HEADER.unpack(
+    (_major, _minor, _r1, _r2, _primary_guid, _guid, _file_part,
+     directory_position, metadata_position, _update_pending,
+     _attachment_dir) = _FILE_HEADER.unpack(
         _read_exactly(fh, _FILE_HEADER.size, "file header"))
-    directory_position = fields[8]
-    metadata_position = fields[9]
+    # Unpacked by name rather than by index. Reading the two offsets as
+    # ``fields[8]`` and ``fields[9]`` was off by one — it took MetadataPosition
+    # as the directory and UpdatePending as the metadata — and *nothing broke*,
+    # because the directory read then failed, ``read_czi_layout`` fell back to
+    # walking the segments, and the walk recovers both. Every file took the
+    # damaged-file recovery path, carried its warning, and paid a whole pass
+    # over itself; the suite stayed green throughout. A name cannot be off by
+    # one.
     return directory_position, metadata_position
 
 
@@ -463,8 +471,20 @@ class CziLayout:
     #: Tiles the directory holds twice for one coordinate. Non-zero means the
     #: index cannot say which of them is the plane, so the file is refused.
     duplicate_blocks: int = 0
-    total_planes: int = 0
-    missing_planes: int = 0
+    #: Images a conversion of this file will write: one per
+    #: (scene, tile, timepoint, channel), because Z is collapsed into each.
+    #: Counted as images rather than as stored tiles on purpose — see
+    #: :attr:`missing_images`.
+    total_images: int = 0
+    #: Of those, the ones the file holds no Z plane at all for. The count is
+    #: **not** ``total - stored_tiles``: that arithmetic treats the per-axis
+    #: maxima as a rectangle, so a perfectly ordinary acquisition with a
+    #: 3-plane stack on the fluorescent channel and a single brightfield plane
+    #: reads as missing two thirds of its brightfield. Every plane is present;
+    #: only the *stack depths* differ, and Z is projected anyway. The same
+    #: reasoning keeps Z out of :meth:`_ragged_scenes`, and
+    #: :mod:`pipeline.ome_explode` excludes Z from its own ragged check for it.
+    missing_images: int = 0
     has_metadata: bool = True
     #: Whether the directory segment was readable, or the file had to be walked
     #: segment by segment to find its tiles.
@@ -637,15 +657,15 @@ class CziLayout:
                 f"ZEN so they differ by more than punctuation or spacing, and "
                 f"export again."
             )
-        if self.missing_planes > 0:
+        if self.missing_images > 0:
             return (
-                f"{subject} is incomplete: its scenes, tiles, timepoints, "
-                f"channels and Z-planes describe {self.total_planes} image(s) "
-                f"but the file stores only {self.total_planes - self.missing_planes}. "
-                f"Converting would leave {self.missing_planes} image(s) missing "
-                f"from wells that otherwise look complete. That usually means "
-                f"the acquisition was stopped before it finished — re-export it "
-                f"with the dimensions it actually holds."
+                f"{subject} is incomplete: its scenes, tiles, timepoints and "
+                f"channels describe {self.total_images} image(s), but "
+                f"{self.missing_images} of them have no image data at all. "
+                f"Converting would leave those missing from wells that "
+                f"otherwise look complete. That usually means the acquisition "
+                f"was stopped before it finished — re-export it with the "
+                f"dimensions it actually holds."
             )
         return ""
 
@@ -707,9 +727,14 @@ def _build_layout(blocks: list[SubBlock], xml: str, *,
     keys = {(b.start("S"), b.start("M"), b.start("T"), b.start("C"), b.start("Z"))
             for b in acquisition}
     layout.duplicate_blocks = len(acquisition) - len(keys)
-    layout.total_planes = (layout.n_positions * layout.size_t
-                           * layout.size_c * layout.size_z)
-    layout.missing_planes = max(0, layout.total_planes - len(keys))
+    # One image per (scene, tile, timepoint, channel) — Z collapses into it —
+    # and an image is missing only when the file holds *no* plane for it. A
+    # stack that is three deep on one channel and one deep on another is not
+    # an incomplete file, and counting stored tiles against a rectangle said
+    # it was.
+    projections = {key[:4] for key in keys}
+    layout.total_images = (layout.n_positions * layout.size_t * layout.size_c)
+    layout.missing_images = max(0, layout.total_images - len(projections))
 
     if xml:
         try:
@@ -914,6 +939,11 @@ class CziReader:
         self._fh: BinaryIO | None = None
         self._layout = layout if layout is not None else read_czi_layout(self._path)
         self._index: dict[tuple[int, int, int, int, int], SubBlock] = {}
+        #: ``(scene, tile, t, c)`` → the Z indices that coordinate really has,
+        #: ascending. Read rather than assumed: asking for ``range(size_z)``
+        #: raises on the shallower channel of a file whose stack depths differ
+        #: per channel, which is an ordinary acquisition rather than a fault.
+        self._z_planes: dict[tuple[int, int, int, int], list[int]] = {}
 
     def __enter__(self) -> "CziReader":
         self._fh = open(self._path, "rb")
@@ -937,6 +967,8 @@ class CziReader:
             # the first keeps the choice the same on every worker thread rather
             # than varying with directory order.
             self._index.setdefault(key, block)
+        for scene, tile, t, c, z in sorted(self._index):
+            self._z_planes.setdefault((scene, tile, t, c), []).append(z)
         return self
 
     def __exit__(self, *exc_info) -> None:
@@ -1011,9 +1043,19 @@ class CziReader:
         The standard reduction for fluorescence quantification, and the same one
         :mod:`pipeline.ome_explode` applies — so a plate converted from a CZI
         and one converted from an OME-TIFF are measuring the same thing.
+
+        Projects the Z planes this coordinate *has*, which need not be every
+        one the file's deepest stack has: a fluorescent channel imaged as a
+        stack beside a single brightfield plane is routine, and both project
+        correctly.
         """
-        planes = [self.read_plane(scene, tile, t, c, z)
-                  for z in range(max(1, self._layout.size_z))]
+        depths = self._z_planes.get((scene, tile, t, c), [])
+        if not depths:
+            raise CziReadError(
+                f"{self._path.name} holds no image for scene {scene}, tile "
+                f"{tile}, timepoint {t}, channel {c}."
+            )
+        planes = [self.read_plane(scene, tile, t, c, z) for z in depths]
         if len(planes) == 1:
             return planes[0]
         stack = np.stack(planes, axis=0)

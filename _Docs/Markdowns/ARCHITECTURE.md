@@ -6506,6 +6506,16 @@ other input, so every well is on disk before the pre-run checks that look for
 one. It exists so a plate that was acquired in ZEN does not have to be exported
 a second time as an OME-TIFF to get here.
 
+**The file header's two offsets are unpacked by name.** They were read as
+`fields[8]` and `fields[9]` of an eleven-field struct whose `DirectoryPosition`
+and `MetadataPosition` are 7 and 8 — and nothing broke. The directory read
+failed, `read_czi_layout` fell back to `_walk_segments`, and the walk recovers
+the same layout: so every CZI took the damaged-file recovery path, carried its
+"interrupted acquisition" warning, and paid a whole pass over itself, while a
+hundred and fifty tests stayed green. A fallback that is good enough to hide
+the bug it is compensating for is the shape to watch for; the test that pins it
+asserts `from_directory is True` on a sound file, which nothing had.
+
 **`pipeline/czi_read.py` is a ZISRAW parser, written rather than depended on.**
 A CZI is a flat sequence of length-prefixed segments; four of them matter — the
 file header, the subblock directory (one entry per stored tile, carrying that
@@ -6576,7 +6586,15 @@ acquisition order, and per well the `(scene, tile)` pairs that become its FOV 0,
 1, … . Keeping the pairs rather than a start offset is what lets the two sources
 produce one structure: a file-named mapping groups by scene, a grid mapping chops
 one scene-major flat list through `explode_common.resolve_positions`, and the
-exploder below does not have to know which it was given. `WellMap.from_file`
+exploder below does not have to know which it was given. There are deliberately
+only those two: the OME-TIFF importer additionally accepts an explicit
+click-defined visit order because its page has an editor that produces one, and
+a parameter with no producer is a branch the application never takes however
+well it is written (§7.7's defect class). It was carried here through
+`ConversionParams`, `_MAPPING_FIELDS` and `resolve_well_map` before a review
+found that `raw_fields()` never populated it and `set_params()` never restored
+it, so a queued job's ordering was dropped in silence and the run used the
+grid. `WellMap.from_file`
 records which it was, because the counts are identical either way and only one of
 them is a mapping the user is entitled to trust without checking — the page's
 readout says so in words and the plan carries it rather than re-deriving it from
@@ -6592,8 +6610,21 @@ are not the ones the camera measured; a compression method the reader does not
 know; an extra axis as above; a duplicated coordinate, which is what a file
 concatenated from two acquisitions looks like; scenes with different tile counts;
 two channel names reducing to one filename token, compared case-insensitively
-because every consumer of a channel token downstream folds case; and a file
-storing fewer tiles than its own coordinates describe.
+because every consumer of a channel token downstream folds case; and a
+coordinate the file holds no image data for at all.
+
+**Completeness is counted in images, not in stored tiles.** `total_images` is
+one per (scene, tile, timepoint, channel) — Z collapses into each — and
+`missing_images` counts the ones with *no* Z plane behind them.
+`n_positions × T × C × max(Z)` was the obvious arithmetic and it is wrong: a
+3-plane fluorescent stack beside a single brightfield plane is an ordinary
+Zeiss acquisition, and measured against that rectangle it reads as two thirds
+of the brightfield channel missing. The converter then told the user to
+re-export a file that was never truncated, and no re-export would have
+satisfied it. The same reasoning keeps Z out of `_ragged_scenes`, and is why
+`ome_explode._ragged_positions` covers only T and C. `CziReader` reads the Z
+indices each coordinate actually has rather than asking for `range(size_z)`,
+which raised on the shallower channel of exactly that file.
 
 **Zstandard high/low byte packing is refused rather than guessed.** Unpacking it
 means interleaving a plane of high bytes with a plane of low bytes, and getting

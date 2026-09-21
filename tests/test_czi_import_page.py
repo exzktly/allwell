@@ -325,3 +325,25 @@ def test_a_second_run_into_the_same_folder_is_refused_rather_than_merged(
     assert "Already holds converted wells" in page._dashboard.headline_text()
     assert sorted(p.name for p in (tmp_path / "dest" / "in").glob("*.zip")) == [
         "A02.zip", "C07.zip"]
+
+
+def test_analyze_redirects_a_raw_czi_to_this_page(qapp, tmp_path):
+    """Analyze processes folders, so a `.czi` dropped into its input field has
+    to send the user here. Without it the refusal reads "Not a directory",
+    which names neither the problem nor the page that solves it."""
+    from analyze.tab import AnalyzeTab
+
+    path = _named_czi(tmp_path)
+    tab = AnalyzeTab()
+    try:
+        tab._input_edit.setText(str(path))
+        hint = tab._packed_input_hint()
+
+        assert hint is not None
+        assert "Convert CZI" in hint
+        # Not the other converter's page: it would refuse the file.
+        assert "Convert OME-TIFF" not in hint
+        assert tab._output_lbl.text() == "—"
+        assert "Convert CZI" in tab._layout_lbl.text()
+    finally:
+        tab.deleteLater()

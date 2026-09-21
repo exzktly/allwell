@@ -515,9 +515,9 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         if not self._input_edit.text().strip():
             QMessageBox.critical(self, "Input Error", "No input folder selected.")
             return None
-        ome_hint = self._ome_input_hint()
-        if ome_hint is not None:
-            QMessageBox.critical(self, "OME-TIFF Input", ome_hint)
+        packed_hint = self._packed_input_hint()
+        if packed_hint is not None:
+            QMessageBox.critical(self, "Packed File Input", packed_hint)
             return None
         schema_errors = self._schema_errors()
         if schema_errors:

@@ -5989,11 +5989,16 @@ input. Keeping the two apart is deliberate — when the explode ran *inside* an
 Analyze run the wells only existed mid-run, so pre-run checks that look for a
 well (an `empty_well` background, control-well auto-threshold, both via
 `well_present_in_input`) failed against the raw `.ome.tif`. Analyze now only ever
-processes **folders**; `plan_input_layout` classifies a raw OME-TIFF as
-`packed_ome` and carries `PACKED_OME_MESSAGE`, so the readout under the input
-field and the run-time refusal (`analyze.domain.input.AnalyzeInputMixin._ome_input_hint`,
-which the pre-run validation reads) redirect the user to the converter in the
-same words instead of trying to run it. `_ome_input_hint` returns a message for a
+processes **folders**; `plan_input_layout` classifies a raw packed file through
+`detect_packed_input`, which returns the plan action (`packed_ome` /
+`packed_czi`) *and* the message naming the Datasets page that converts it. The
+message travels with the detection rather than being chosen by the caller
+because which converter to send the user to is decided by the suffix, and
+naming the wrong one sends them to a page that will refuse their file. So the
+readout under the input field and the run-time refusal
+(`analyze.domain.input.AnalyzeInputMixin._packed_input_hint`, which the pre-run
+validation reads) redirect the user to the right converter in the same words
+instead of trying to run it. `_packed_input_hint` returns a message for a
 check it could not *make*, too, rather than `None`: `None` is the answer that
 means "this input is fine, start the run", so answering it for a permission error
 part-way through the walk turned the guard off silently and let the run go ahead

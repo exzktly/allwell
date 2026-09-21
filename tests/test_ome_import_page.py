@@ -273,7 +273,7 @@ def test_analyze_redirects_a_raw_ome_tiff(qapp, tmp_path):
     p = _write_packed(tmp_path / "plate.ome.tif", n_frames=4, channel_names=("GFP",))
     tab = AnalyzeTab()
     tab._input_edit.setText(str(p))
-    hint = tab._ome_input_hint()
+    hint = tab._packed_input_hint()
     assert hint is not None and "Convert OME-TIFF" in hint
     # The output/layout labels carry the redirect, not a run plan.
     assert tab._output_lbl.text() == "—"

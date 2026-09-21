@@ -429,7 +429,10 @@ companion XML, an acquisition log, a stray `.DS_Store`.
 If your plate arrived as a **single packed OME-TIFF** (one `.ome.tif` holding
 every well, channel, Z-plane and timepoint), Analyze can't process it directly —
 convert it to a dataset folder first in the **Datasets tab → Convert OME-TIFF**
-(see [Convert OME-TIFF](#convert-ome-tiff)), then open that folder here. Pointing
+(see [Convert OME-TIFF](#convert-ome-tiff)), then open that folder here. A Zeiss
+`.czi` is refused the same way and points at
+[Convert CZI](#convert-czi) instead — each message names the page that converts
+*that* file, because the other one would refuse it. Pointing
 Analyze at a raw `.ome.tif` just shows a reminder to convert it.
 
 You can also explicitly override the output folder.

@@ -6,11 +6,12 @@ belong in the tab's run/log core:
 * ``_resolve_run_dirs_for_runner`` — the adapter handed to
   :class:`services.pipeline_runner.PipelineRunner`, which resolves the selected
   folder into ``(input_dir, output_dir, on_success)`` and streams grouping
-  progress. Analyze only ever processes **folders**: a packed OME-TIFF is
-  converted to a dataset folder first, in the Datasets → *Convert OME-TIFF* page,
-  so no de-interleave happens here.
-* ``_ome_input_hint`` — a guard that spots a raw ``.ome.tif`` selected as input
-  and points the user at that converter instead of trying to process it.
+  progress. Analyze only ever processes **folders**: a packed acquisition file
+  is converted to a dataset folder first, in the Datasets → *Convert OME-TIFF*
+  or *Convert CZI* page, so no de-interleave happens here.
+* ``_packed_input_hint`` — a guard that spots a raw ``.ome.tif`` or ``.czi``
+  selected as input and points the user at the converter for it instead of
+  trying to process the file.
 * ``_set_fluor_rows`` — repopulates the fluorescent-channel rows, shared with the
   form's "load previous run" restore.
 * ``_autofill_from_input_scan`` / ``_report_scan_guess`` — the browse-time guess
@@ -26,8 +27,7 @@ import queue
 from pathlib import Path
 
 from services.input_resolution_service import (
-    PACKED_OME_MESSAGE,
-    detect_ome_input,
+    detect_packed_input,
     resolve_input_output,
     select_incremental_scope,
 )
@@ -36,14 +36,17 @@ from core.safe import swallowed
 
 
 class AnalyzeInputMixin:
-    """Input-folder resolution + the OME-TIFF redirect for the Analyze pane."""
+    """Input-folder resolution + the packed-file redirect for the Analyze pane."""
 
-    def _ome_input_hint(self) -> str | None:
+    def _packed_input_hint(self) -> str | None:
         """Return a message that must block the run, or ``None`` to let it start.
 
-        Analyze processes folders; a packed OME-TIFF must be de-interleaved in
-        the Datasets converter first, so one selected here earns
-        :data:`PACKED_OME_MESSAGE`.
+        Analyze processes folders; a packed acquisition file — a packed
+        OME-TIFF or a Zeiss CZI — must be converted in the Datasets pane first,
+        so one selected here earns that converter's own message. The message
+        comes back from :func:`detect_packed_input` rather than being chosen
+        here: which page to send the user to is decided by the suffix, and
+        naming the wrong converter sends them to one that will refuse the file.
 
         A check that could not be *made* is reported too, rather than read as a
         pass. The guard used to answer ``None`` for any exception — a permission
@@ -57,7 +60,7 @@ class AnalyzeInputMixin:
         if not raw_str:
             return None
         try:
-            detected = detect_ome_input(Path(raw_str))
+            detected = detect_packed_input(Path(raw_str))
         except Exception as exc:
             # Deliberately broad, and deliberately not silent: this runs from
             # the Run button's own slot, so a type not listed here would kill
@@ -66,9 +69,10 @@ class AnalyzeInputMixin:
             return (f"Could not inspect the selected input:\n{raw_str}\n\n"
                     f"{type(exc).__name__}: {exc}\n\n"
                     "Analyze checks here whether the folder holds a packed "
-                    "OME-TIFF, which has to be converted in Datasets first. "
-                    "The check did not complete, so the run is not started.")
-        return PACKED_OME_MESSAGE if detected is not None else None
+                    "acquisition file, which has to be converted in Datasets "
+                    "first. The check did not complete, so the run is not "
+                    "started.")
+        return detected.message if detected is not None else None
 
     def _resolve_run_dirs_for_runner(self, opts: dict, log_q: queue.Queue,
                                      *, proc_hook=None) -> tuple | None:

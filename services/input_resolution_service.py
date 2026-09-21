@@ -8,6 +8,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
+from typing import NamedTuple
 from services.subprocess_kill import signal_subprocess
 from services.subprocess_text import TEXT_UTF8
 from util.aw_safe import swallow, swallowed
@@ -308,6 +309,8 @@ def dir_has_entries(folder: Path) -> bool:
 
 #: The selected path is a packed OME-TIFF, which Analyze cannot read.
 PACKED_OME = "packed_ome"
+#: The selected path is a Zeiss CZI, which Analyze cannot read either.
+PACKED_CZI = "packed_czi"
 #: The selected path is not a directory at all.
 NOT_A_DIR = "not_a_dir"
 #: The grouped root already holds per-well zips / folders; nothing to prepare.
@@ -334,6 +337,14 @@ PACKED_OME_MESSAGE = (
     "⚠ This is a packed OME-TIFF. Convert it to a dataset folder first in the "
     "Datasets tab → “Convert OME-TIFF”, then open that folder here "
     "to process it."
+)
+
+#: The same for a Zeiss CZI. Two messages rather than one generic sentence,
+#: because the remedy is a *different page* and naming the wrong one sends the
+#: user to a converter that will refuse their file.
+PACKED_CZI_MESSAGE = (
+    "⚠ This is a Zeiss CZI. Convert it to a dataset folder first in the "
+    "Datasets tab → “Convert CZI”, then open that folder here to process it."
 )
 
 
@@ -552,8 +563,9 @@ def plan_input_layout(raw: Path, *, filename_schema: str = "",
     nothing recognisable in it: that is a fresh drop next to a folder a previous
     interrupted run created, and it must still reach well_plate_zipper.
     """
-    if detect_ome_input(raw) is not None:
-        return InputPlan(PACKED_OME, None, None, 0, PACKED_OME_MESSAGE)
+    packed = detect_packed_input(raw)
+    if packed is not None:
+        return InputPlan(packed.action, None, None, 0, packed.message)
     if not raw.is_dir():
         return InputPlan(NOT_A_DIR, None, None, 0, "Not a directory.")
 
@@ -612,7 +624,10 @@ def _layout_error(plan: InputPlan, raw: Path) -> str:
     The readout has room for one line; a failed run has room to explain. Both
     describe the same verdict, so they are built from the same plan.
     """
-    if plan.action == PACKED_OME:
+    if plan.action in (PACKED_OME, PACKED_CZI):
+        # Each already carries the message naming its own converter — derived
+        # from the file's suffix in `detect_packed_input`, which is the only
+        # place that decides which page converts what.
         return plan.message
     if plan.action == NOT_A_DIR:
         return f"Not a directory:\n{raw}"
@@ -1739,26 +1754,58 @@ def _group_loose_tifs_in_place(
 
 
 _OME_SUFFIXES = (".ome.tif", ".ome.tiff")
+_CZI_SUFFIXES = (".czi",)
+
+#: The packed acquisition files Analyze cannot read, each with the plan action
+#: and the message naming the Datasets page that converts it. Ordered, and
+#: OME-TIFF first, because a ``.ome.tif`` also ends in ``.tif`` and nothing
+#: else here does — a table rather than a chain of ``if``s so adding a third
+#: converter cannot add a fourth place to state the same fact.
+_PACKED_KINDS: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (_OME_SUFFIXES, PACKED_OME, PACKED_OME_MESSAGE),
+    (_CZI_SUFFIXES, PACKED_CZI, PACKED_CZI_MESSAGE),
+)
 
 
-def detect_ome_input(raw: Path) -> Path | None:
-    """Return a packed OME-TIFF at *raw*, or ``None`` if it isn't one.
+class PackedInput(NamedTuple):
+    """A packed acquisition file found at the selected path.
 
-    Accepts either the ``.ome.tif`` / ``.ome.tiff`` file selected directly, or a
-    directory containing exactly one such file at its top level. Analyze uses this
-    to spot a raw OME-TIFF and redirect the user to the Datasets converter; the
-    converter itself does the de-interleave (``datasets.ome_import``).
+    Carries the plan *action* and the *message* as well as the path, because
+    which converter to send the user to is decided here — by the suffix — and a
+    caller re-deriving it would be a second place that has to learn about the
+    next file format.
     """
-    if raw.is_file() and raw.name.lower().endswith(_OME_SUFFIXES):
-        return raw
+
+    path: Path
+    action: str
+    message: str
+
+
+def detect_packed_input(raw: Path) -> PackedInput | None:
+    """Return the packed acquisition file at *raw*, or ``None`` if there is none.
+
+    Accepts either the file selected directly, or a directory containing
+    exactly one such file at its top level — one, because two is ambiguous and
+    picking either would convert a plate the user did not name. Analyze uses
+    this to spot a packed file and redirect the user to the Datasets converter
+    for it; the converters themselves do the work
+    (``datasets.ome_import``, ``datasets.czi_import``).
+    """
+    if raw.is_file():
+        name = raw.name.lower()
+        for suffixes, action, message in _PACKED_KINDS:
+            if name.endswith(suffixes):
+                return PackedInput(raw, action, message)
+        return None
     if raw.is_dir():
         try:
-            hits = [p for p in files_in(raw)
-                    if p.name.lower().endswith(_OME_SUFFIXES)]
+            entries = list(files_in(raw))
         except OSError:
             return None
-        if len(hits) == 1:
-            return hits[0]
+        for suffixes, action, message in _PACKED_KINDS:
+            hits = [p for p in entries if p.name.lower().endswith(suffixes)]
+            if len(hits) == 1:
+                return PackedInput(hits[0], action, message)
     return None
 
 

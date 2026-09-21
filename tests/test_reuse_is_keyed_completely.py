@@ -69,6 +69,49 @@ REUSE_CONTRACTS = {
     # a second copy would be a second definition of what makes two runs
     # interchangeable, and the reason each key is in it is written there.
     "settings_record.well_settings_allow_reuse": dict(KEYED_ON),
+    # The two packed-file converters' resume markers. A conversion publishes
+    # each `<dest>/in/<WELL>.zip` atomically, so a cancelled run leaves whole,
+    # correct wells and only the rest to do — worth hours on a plate. What
+    # makes finishing them dangerous is that two *different* mappings of one
+    # source write identical filenames: nothing on disk distinguishes an
+    # A01.zip made from scene 0 from one made from scene 7, so only the marker
+    # can tell a run that may carry on from one that must refuse. The keys are
+    # named per converter rather than shared, because the two resolve wells
+    # from different inputs and a field that decides the mapping for one is
+    # absent from the other.
+    "ome_import.resume_state": {
+        "grid_rows": "the imaged block's height; a different one re-labels "
+                     "every position after the first row",
+        "grid_cols": "the imaged block's width, for the same reason",
+        "origin": "which well position 0 is. Off by one well here shifts the "
+                  "whole plate and the well count stays right",
+        "direction": "whether the stage swept rows or columns; the same "
+                     "positions land on a transposed set of wells",
+        "serpentine": "snake or raster. A raster read as a snake labels every "
+                      "second line backwards, again with the right count",
+        "fovs_per_well": "how many positions each well takes, which decides "
+                         "where every well after the first begins",
+        "frame_order": "how a packed file's flat frame axis splits into "
+                       "positions and timepoints — the same frames become "
+                       "different images under each reading",
+        "experiment": "the first token of every member name, so two values "
+                      "produce two disjoint sets of filenames in one archive",
+        "well_order": "an explicit click-defined acquisition path, which "
+                      "replaces the grid outright when it is set",
+    },
+    "czi_import.resume_state": {
+        "well_source": "whether the wells came from the file's scene names or "
+                       "from the grid. The same file yields two entirely "
+                       "different plates under the two",
+        "grid_rows": "the imaged block's height, when the grid is what maps",
+        "grid_cols": "the imaged block's width, for the same reason",
+        "origin": "which well position 0 is",
+        "direction": "whether the stage swept rows or columns",
+        "serpentine": "snake or raster",
+        "fovs_per_well": "how many tiles each well takes",
+        "experiment": "the first token of every member name",
+        "well_order": "an explicit acquisition path, which replaces the grid",
+    },
     "parquet_cache.read_cached": {
         "st_size": (
             "the CSV's byte count. The pipeline rewrites these files — an "
@@ -133,6 +176,8 @@ def test_every_reuse_decision_is_registered():
     assert "run_journal.stored_remote_address" in REUSE_CONTRACTS
     assert "settings_record.well_settings_allow_reuse" in REUSE_CONTRACTS
     assert "parquet_cache.read_cached" in REUSE_CONTRACTS
+    assert "ome_import.resume_state" in REUSE_CONTRACTS
+    assert "czi_import.resume_state" in REUSE_CONTRACTS
 
 
 def test_the_roster_names_every_key_the_decision_actually_takes():
@@ -710,3 +755,60 @@ def test_a_changed_parser_version_declines(tmp_path, monkeypatch):
     monkeypatch.setattr(pc, "PARSER_VERSION", pc.PARSER_VERSION + 1)
     assert pc.read_cached(plate) is None, (
         REUSE_CONTRACTS[_CACHE_KEY]["PARSER_VERSION"])
+
+
+# ── the two converters' resume markers ──────────────────────────────────────
+#
+# Each converter's own test file proves that changing one declared key alone
+# declines the resume (``test_ome_import_compute``,
+# ``test_czi_import_compute``). What those cannot prove is the *reverse*
+# direction, because they parametrise over the roster itself: delete a field
+# from ``_MAPPING_FIELDS`` and the parametrize simply stops generating a case
+# for it, the lane stays green, and a setting that changes the mapping is no
+# longer part of the key. That is the roster-against-a-roster problem
+# CLAUDE.md §7.5 #10 names, and this is where it is held against the thing it
+# is a list of: the converter's own settings dataclass.
+
+#: Settings a converter carries that deliberately do not key its resume, with
+#: the reason. An exemption is a row with a written reason, never an absence —
+#: a field left out on purpose and one nobody remembered look identical in code
+#: six months later.
+MAPPING_EXEMPTIONS = {
+    "workers": ("the size of the per-well thread pool. It changes how fast "
+                "the conversion goes and nothing about what it writes, so "
+                "refusing a resume over it would refuse one that was safe"),
+}
+
+
+@pytest.mark.parametrize("decision,module_path", [
+    ("ome_import.resume_state", "datasets.ome_import.ome_import_compute"),
+    ("czi_import.resume_state", "datasets.czi_import.czi_import_compute"),
+])
+def test_the_roster_names_every_setting_that_decides_the_mapping(
+        decision, module_path):
+    """Read off the settings dataclass, so a new setting fails here by default.
+
+    A converter setting is either part of the key or exempted in writing.
+    Adding one and forgetting both is how a resume comes to accept a folder it
+    should refuse, and the symptom is a plate that looks complete.
+    """
+    import dataclasses
+    import importlib
+
+    module = importlib.import_module(module_path)
+    fields = {f.name for f in dataclasses.fields(module.ConversionParams)}
+    keyed = set(module._MAPPING_FIELDS)
+    listed = set(REUSE_CONTRACTS[decision])
+
+    assert keyed == listed, (
+        f"{module_path} keys on {sorted(keyed)} but the roster names "
+        f"{sorted(listed)}. Every key needs its written reason beside it.")
+    unaccounted = fields - keyed - set(MAPPING_EXEMPTIONS)
+    assert not unaccounted, (
+        f"{module_path}.ConversionParams carries {sorted(unaccounted)}, which "
+        f"neither keys the resume nor appears in MAPPING_EXEMPTIONS. If the "
+        f"setting changes which image lands under which filename it belongs in "
+        f"_MAPPING_FIELDS; if it does not, say so in MAPPING_EXEMPTIONS.")
+    assert set(MAPPING_EXEMPTIONS) <= fields, (
+        "MAPPING_EXEMPTIONS names a setting no converter has any more — an "
+        "exemption that stopped describing a real decision.")

@@ -56,6 +56,7 @@ from datasets.czi_import.czi_import_compute import (
     resume_state,
 )
 from pipeline.czi_explode import WELL_SOURCES
+from pipeline.czi_read import CziLayout
 from ui import theme
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
@@ -109,7 +110,7 @@ class CziImportPage(LogPanelMixin, QWidget):
         #: typing in a grid field does not re-read a multi-gigabyte file on
         #: every keystroke. Keyed on mtime as well as path because a re-export
         #: saved over the same name is a different file.
-        self._layout_cache: dict[tuple[str, float], object] = {}
+        self._layout_cache: dict[tuple[str, float], CziLayout] = {}
         self._channel_rows: list[tuple[str, QComboBox]] = []
         self._channel_names_shown: list[str] = []
         self._build_ui()
@@ -252,6 +253,10 @@ class CziImportPage(LogPanelMixin, QWidget):
         grid.addStretch(1)
         grid_outer.addWidget(self._grid_row)
         outer.addWidget(self._grid_host)
+        # Hidden from the first paint, not only once the choice changes:
+        # the well source starts at "file", so a visible grid on a fresh
+        # page offers settings that do not apply to the run it would start.
+        self._grid_host.setVisible(self.well_source() == "grid")
 
         self._sub_heading("Conversion options", outer)
         options = QWidget(self)
@@ -509,7 +514,7 @@ class CziImportPage(LogPanelMixin, QWidget):
             return destination_problem(root)
         return destination_problem(root, src, self.params())
 
-    def _read_layout(self, src: str):
+    def _read_layout(self, src: str) -> CziLayout | None:
         """The source's layout, cached on ``(path, mtime)``, or ``None``."""
         path = Path(src)
         try:

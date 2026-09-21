@@ -1997,6 +1997,9 @@ def test_required_files_list_is_what_we_promised():
         "util/dir_scan.py",
         # Rebinds sys.stdout / sys.stderr when a frozen windowed build nulls them;
         # imported by process_microscopy at module load (and by well_plate_zipper).
+        # Reduces a metadata label to a filename token; both packed-file
+        # converters name their images through it.
+        "util/filename_token.py",
         "util/frozen_io.py",
         # The retry-with-backoff shield every pipeline write on the output
         # volume goes through (util.retry_io), imported by pipeline.io.
@@ -2075,6 +2078,13 @@ def test_required_files_list_is_what_we_promised():
     "pipeline/incremental_keys.py",
         "pipeline/well_skip.py",
         "pipeline/io.py",
+        # The Zeiss CZI reader and its per-well explode; client-side for the
+        # same reason, listed for the same manifest completeness.
+        "pipeline/czi_read.py",
+        "pipeline/czi_explode.py",
+        # What both exploders share: the member-name rule, the resume check,
+        # the worker split and the in-memory TIFF encode.
+        "pipeline/explode_common.py",
         # Packed OME-TIFF de-interleave; client-side, listed for manifest
         # completeness (mirrors every ``pipeline/`` file).
         "pipeline/ome_explode.py",

@@ -70,20 +70,41 @@ def _make_tab(tmp_path, *, analyze=True):
     return tab, fake_analyze
 
 
-def test_builds_seven_pages_including_job_queue(qapp, tmp_path):
+def test_builds_a_page_for_every_declared_feature(qapp, tmp_path):
+    """One built page per ``_FEATURES`` entry, derived rather than counted.
+
+    This asserted a hand-written 7, which is a roster of one number: it had to
+    be edited by whoever added the eighth page, and the only thing telling them
+    so was a failure that reads like their page is broken. Taken from the
+    feature list, a page that fails to build is still caught and a page that is
+    merely *new* is covered by having been declared.
+    """
+    from datasets.tab import _FEATURES
+
     tab, _ = _make_tab(tmp_path)
     try:
-        names = [tab._pages.widget(i) is not None for i in range(tab._pages.count())]
-        assert len(names) == 7
+        assert tab._pages.count() == len(_FEATURES)
+        built = [tab._pages.widget(i) for i in range(tab._pages.count())]
+        assert all(page is not None for page in built)
     finally:
         tab.shutdown()
 
 
 def test_job_queue_controller_has_all_kinds_registered(qapp, tmp_path):
+    """Every queueable feature reaches the bridge, plus the injected Analyze.
+
+    Derived from ``_FEATURES`` for the same reason as the count above: a tool
+    whose page builds but whose kind never registers is a Run button that
+    works and a Queue button that silently does nothing.
+    """
+    from datasets.tab import _FEATURES
+
     tab, fake_analyze = _make_tab(tmp_path)
     try:
         jq = tab._controllers["job_queue"]
-        for kind in ("concatenate", "validate", "subset", "import_loose", "merge_plates", "analyze"):
+        kinds = [feat.kind for feat in _FEATURES if feat.kind] + ["analyze"]
+        assert "czi_import" in kinds      # the roster is not empty by accident
+        for kind in kinds:
             assert kind in jq.bridge._runners
     finally:
         tab.shutdown()

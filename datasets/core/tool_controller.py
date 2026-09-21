@@ -1,19 +1,20 @@
 """The worker lifecycle every Datasets tool controller shares.
 
-Six controllers each declared the same ``jobFinished`` signal and the same three
-methods for owning a background worker: ``stop``, ``is_busy``, and a ``shutdown``
-that races the worker to a halt before the app tears down. The bodies were
-identical bar two things — which method asks the worker to stop, and which label
+The Datasets tool controllers each declared the same ``jobFinished`` signal and
+the same three methods for owning a background worker: ``stop``, ``is_busy``,
+and a ``shutdown`` that races the worker to a halt before the app tears down.
+The bodies were identical bar two things — which method asks the worker to stop, and which label
 a swallowed teardown error is logged under — so they lived as six copies of one
 decision, which is the shape §6b describes the log furniture having before
 ``LogPanelMixin``.
 
 **What is deliberately *not* here.** ``_on_run``, ``_on_queue_requested``,
 ``_on_succeeded``, ``_on_failed`` and ``_on_finished`` look like siblings and are
-not: measured across the six, ``_on_queue_requested`` has six distinct bodies,
-``_on_finished`` five, and ``_on_succeeded``'s signature diverges outright
-(Validate's takes a ``DatasetReport``). Pulling them up would mean a base full of
-flags and overrides that says less than the six plain methods do. The three
+not. Measured across the seven by hashing each one's normalised body,
+``_on_queue_requested`` has seven distinct bodies and ``_on_finished`` five,
+while ``_on_succeeded``'s signature diverges outright (Validate's takes a
+``DatasetReport``). Pulling them up would mean a base full of flags and
+overrides that says less than the seven plain methods do. The three
 copy-into-a-destination tools do share a run-and-confirm-restart cluster; that
 belongs to those three (see :class:`DestinationToolController`), not to all six.
 """

@@ -192,7 +192,7 @@ def explode_czi(
     origin_well: str = "A01",
     direction: str = "row",
     serpentine: bool = True,
-    experiment: str = "czi",
+    experiment: str = "",
     fovs_per_well: "int | None" = None,
     well_order: "list[str] | None" = None,
     workers: int = 0,
@@ -209,6 +209,7 @@ def explode_czi(
     ``<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif`` inside that well's
     archive — the default filename schema, which is the layout the pipeline
     reads directly, so no ``well_plate_zipper`` pass is needed afterwards.
+    A blank *experiment* takes the token from the source filename.
 
     Wells are converted in parallel across *workers* threads (0 = auto), each
     with its own read handle and its own disjoint set of wells, so no two
@@ -251,7 +252,11 @@ def explode_czi(
         serpentine=serpentine, fovs_per_well=fovs_per_well,
         well_order=well_order, name=czi_path.name,
     )
-    exp_tok = safe_token(experiment, "czi")
+    # Blank means the file names itself. A constant default ("czi") would
+    # give every plate converted through this function the same experiment
+    # token, so two of them concatenated later would be indistinguishable
+    # — and the source filename is right there.
+    exp_tok = safe_token(experiment or czi_path.stem, "czi")
     tp_tokens = layout.timepoint_tokens
     fovs = well_map.fovs_per_well
     n_wells = well_map.n_wells

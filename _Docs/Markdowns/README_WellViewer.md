@@ -49,7 +49,8 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Saved Plots](#saved-plots) · [Batch export](#batch-export)
    - [Starting over](#starting-over)
 6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
-   - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets) ·
+   - [Convert OME-TIFF](#convert-ome-tiff) · [Convert CZI](#convert-czi) ·
+     [Concatenate datasets](#concatenate-datasets) ·
      [Validate & Repair Dataset](#validate--repair-dataset) ·
      [Subset / Split Dataset](#subset--split-dataset) ·
      [Zip Loose Folder](#zip-loose-folder) ·
@@ -78,7 +79,9 @@ to add features, how to debug, and build / environment troubleshooting), see
   to CSV + figures.
 - **Datasets tab.** Dataset-level operations that work on whole folders rather
   than one plate at a time: **Convert OME-TIFF** de-interleaves a single packed
-  OME-TIFF into a dataset folder; **Concatenate datasets** appends one
+  OME-TIFF into a dataset folder and **Convert CZI** does the same for a Zeiss
+  `.czi` plate scan, reading the well of each scene out of the file itself;
+  **Concatenate datasets** appends one
   dataset's timepoints after another's — for when the same plate was imaged in
   two separate sessions and you want one continuous timelapse; and
   **Validate & Repair Dataset** checks whether an Analyze run actually
@@ -5101,6 +5104,149 @@ think, that the snake turns the way you think, and that the fields inside each
 well were taken in the order you expect. It is anchored at whichever well
 position 1 will land in: the **Origin** you typed, or the first well of a
 hand-drawn path.
+
+### Convert CZI
+
+Turns a Zeiss `.czi` plate scan — one file holding every scene, mosaic tile,
+channel, Z-plane and timepoint of the run — into an ordinary dataset folder of
+per-well images, the layout Analyze processes. Do this first, then open the
+result in Analyze.
+
+It is the same job [Convert OME-TIFF](#convert-ome-tiff) does for a packed
+OME-TIFF, and it exists so you do not have to export the plate a second time to
+get there. Z stacks are **maximum-intensity projected** and mosaic tiles are
+kept as **separate fields of view**, never stitched — stitching is a decision
+about overlap and blending that belongs in ZEN, and a silently stitched image is
+not the image the microscope took.
+
+**Where the wells come from is the one thing this page asks that the OME-TIFF
+page asks differently.** A packed OME-TIFF records stage coordinates and leaves
+the plate layout to be reconstructed from them, which is why that page is mostly
+about a grid. Zeiss software normally names each scene after the well it
+scanned, so here the mapping is read straight out of the file and you confirm it
+on the plate rather than supplying it.
+
+1. **CZI file** — pick the `.czi`. All-Well reads its subblock directory and
+   metadata immediately — no images, so it costs nothing however large the plate
+   is — and suggests a **Destination folder** beside the file, named after it.
+   The readout then describes what the file holds: scenes, tiles each,
+   timepoints, channels, pixel size and type, and whether the wells are named by
+   the file or will come from a grid you set.
+2. **Well labels from** — **The file's own scene names** (the default) or
+   **A plate grid I set below**. On the first, each scene's well is read from
+   its metadata: a `<Shape>` naming the plate well, an `ArrayName`, or the
+   scene's own name, which is commonly `A1`, `P1-A1` or `Scene-1-B07`. Choosing
+   the grid reveals the grid fields and ignores the names entirely.
+3. **The grid fields** — *shown only when you choose the grid*. **Rows** and
+   **Columns** are the block you imaged, **Origin well** is its top-left well
+   (default `A01`), **Order** is the axis the stage swept along, and
+   **Serpentine** is what it did at the end of each line. Ticked, alternate
+   lines run backwards — the stage never travels back across the plate empty.
+   Unticked, every line runs the same way. Get this wrong and every second line
+   is labelled *backwards* while the well count stays right, which is why it is
+   a setting rather than an assumption.
+4. **Experiment name** — the first token of every output filename. Blank takes
+   it from the source filename.
+5. **FOVs per well** — blank uses the tiles the file holds per scene, which is
+   what you want for a file whose scenes name their wells. A grid-mapped file
+   needs it only when its positions do not divide evenly by themselves. Setting
+   it to something the file contradicts is refused rather than silently
+   preferring one of the two.
+6. **Worker threads** — how many wells to convert in parallel (blank = auto,
+   capped at the number of wells). It changes only how fast the run goes and
+   nothing about what comes out, which is also why changing it never blocks a
+   resume. Lower it if converting to a single spinning disk feels slower rather
+   than faster.
+7. **Channel roles** — one row per channel read from the CZI metadata, each with
+   a role: **Nuclear / segmentation**, **Fluorescent**, **Phase / brightfield**,
+   or **Skip**, seeded from the channel names exactly as on the OME-TIFF page.
+   The channel names are always what goes into the output filenames; the roles
+   **pre-fill Analyze's channel-token fields** when you open the dataset there,
+   so you do not retype them.
+
+**The plate below the settings shows the mapping before you run it.** Every well
+the conversion is about to write is filled in, so a well the file named wrongly
+is visible while it is still cheap to fix — and on this page that is the only
+place you can see what the file said. A line above it states the plan in words:
+the wells at both ends of the order, which source produced them, and how many
+images the run will write — `2 well(s) C07→A02 (named by the file) × 2 FOV(s) ×
+2 timepoint(s) × 2 channel(s) (DAPI, GFP) — 16 image(s)`. The order matters as
+much as the count, because a count alone reads the same whether the mapping
+starts where you meant it to or one well earlier.
+
+A line in red says why **Convert** is unavailable — a grid that does not divide
+the file's positions, a box that is not a whole number, a destination that
+already holds a converted plate, or anything the file check below turns up.
+Press **Convert** and the plate becomes the progress view: each well fills
+clockwise as its images are written, the same dial every other plate map in the
+app uses. When the run ends, the headline above the plate says how it went in
+green or red, so you never have to open **Show raw log** to find out whether it
+worked. The output is one per-well `<WELL>.zip` in `<destination>/in/`, which
+Analyze reads directly with no regrouping step. Then **Open dataset in
+Analyze** — the channel tokens arrive pre-filled from the roles you set.
+
+**If a conversion is interrupted, running it again finishes it.** Each well is
+written in one piece, so whatever completed before the interruption is already
+correct on disk. Point the same source at the same destination with the same
+settings and the readout says *"Resuming an interrupted run: 12 well(s) are
+already converted and will be kept"*; only the missing wells are converted.
+Change anything that alters which image becomes which well — the well source,
+the grid, origin, sweep direction, serpentine, FOVs per well, the experiment
+name, or the source file itself — and it is refused instead, because the two
+runs would write files with the same names from different images. Empty the
+folder and start again in that case.
+
+**The file is checked as soon as you pick it**, and one that cannot be converted
+honestly is refused there rather than part-way through a run. What it catches:
+
+- **"does not name a distinct well for every one of its scenes"** — some scenes
+  are named and some are not, or two claim the same well. A mapping that is half
+  from the file and half from a grid is right exactly where you are most likely
+  to spot-check it, so it is all or nothing: switch to the plate grid.
+- **"stores its images as Bgr24"** (or another colour or complex format) — there
+  is no single intensity per pixel to quantify, and picking one of the samples
+  would be an unannounced decision about which. Export the acquisition channels
+  as greyscale from ZEN.
+- **"stores its tiles as JPEG, which is lossy"** — the intensities in the file
+  are not the ones the camera measured. Re-export uncompressed or with
+  Zstandard compression.
+- **"stores its tiles with Zstandard high/low byte packing"** — All-Well cannot
+  decode that variant. Unpacking it means interleaving a plane of high bytes
+  with a plane of low bytes, and getting the order the wrong way round produces
+  a complete, plausible image of entirely wrong intensities, so it refuses
+  rather than guessing. Re-export uncompressed or with plain Zstandard.
+- **"uses the H dimension with 3 positions"** (or R, I or V) — a dimension the
+  filename schema has no field for, whose planes would all be written to one
+  name with only the last surviving. Split it in ZEN and convert each part.
+- **"holds scenes with different numbers of tiles"** — every well has to carry
+  the same fields of view for the plate to line up.
+- **"has 2 channels whose names all reduce to the filename token …"** — two
+  channels differing only by spacing or punctuation, such as `488 nm` and
+  `488nm`. Both would be written to the same filename inside a well's archive
+  and only one would be readable afterwards, while the conversion reported
+  writing both. Rename them in ZEN.
+- **"is incomplete: … stores only …"** — the file's own coordinates describe
+  more images than it holds, usually an acquisition stopped before it finished.
+  Converting would leave images missing from wells that otherwise look
+  complete.
+- **"stores … tile(s) twice under the same … coordinates"** — which of each pair
+  is the image cannot be decided. This is what a file concatenated from two
+  acquisitions looks like; convert them separately.
+
+**Timepoints are named by position** — `t0`, `t1`, … — and not in clock time.
+This is the one place the CZI converter gives you less than the OME-TIFF one,
+which reads elapsed hours from each frame's `DeltaT`. A CZI records a plane's
+acquisition time in each individual tile's own metadata, which would mean
+reading every tile in the plate to learn it, and the interval recorded at the
+file level is an acquisition *plan* rather than what happened. Positional tokens
+order correctly and state no elapsed time the file cannot back up. If you need a
+real time axis in Review, set the interval there
+([Interval per timepoint](#interval-per-timepoint-and-offset)).
+
+**Lower-resolution copies are discarded.** A CZI written for viewing carries
+downsampled pyramid tiles alongside the acquisition ones. They are the same
+pixels at the wrong scale, so they are dropped and never counted — a plate whose
+readout says 2 scenes of 2 tiles means two wells of two real fields.
 
 ### Concatenate datasets
 

@@ -54,8 +54,11 @@ class Tile:
     #: the tests that check an axis this importer has no filename field for.
     extra: dict[str, tuple[int, int]] = field(default_factory=dict)
     #: Emit this tile as a downsampled pyramid copy rather than an acquisition
-    #: tile: the reader must discard it.
-    pyramid: bool = False
+    #: tile: the reader must discard it. ``True`` sets both of the tells a CZI
+    #: can carry; ``"type"`` sets only the ``PyramidType`` field and
+    #: ``"stored"`` only the reduced ``StoredSize``, because a writer may emit
+    #: either on its own and a reader that needs both would keep the copies.
+    pyramid: bool | str = False
     compression: int = 0
 
 
@@ -67,9 +70,11 @@ def _segment(name: str, data: bytes) -> bytes:
 def _directory_entry(tile: Tile, *, position: int) -> bytes:
     """The ``DirectoryEntryDV`` describing *tile*, pointing at *position*."""
     height, width = tile.pixels.shape
+    stored_reduced = tile.pyramid in (True, "stored")
+    type_set = tile.pyramid in (True, "type")
     dims: list[tuple[str, int, int, int]] = [
-        ("X", 0, width, width // 2 if tile.pyramid else width),
-        ("Y", 0, height, height // 2 if tile.pyramid else height),
+        ("X", 0, width, width // 2 if stored_reduced else width),
+        ("Y", 0, height, height // 2 if stored_reduced else height),
     ]
     dims.append(("C", tile.c, 1, 1))
     dims.append(("T", tile.t, 1, 1))
@@ -81,7 +86,7 @@ def _directory_entry(tile: Tile, *, position: int) -> bytes:
     pixel_type = PIXEL_TYPE_FOR[str(tile.pixels.dtype)]
     out = _DIRECTORY_ENTRY.pack(
         b"DV", pixel_type, position, 0, tile.compression,
-        1 if tile.pyramid else 0, 0, b"\0\0\0\0", len(dims),
+        1 if type_set else 0, 0, b"\0\0\0\0", len(dims),
     )
     for axis, start, size, stored in dims:
         out += _DIMENSION_ENTRY.pack(

@@ -32,6 +32,7 @@ KIND_LABEL = {
     "analyze": "Analyze",
     "concatenate": "Concatenate",
     "ome_import": "Convert OME-TIFF",
+    "czi_import": "Convert CZI",
     "validate": "Validate",
     "subset": "Subset",
     "import_loose": "Zip loose",
@@ -73,6 +74,7 @@ CHAIN_TARGET = {
     "analyze": "opts.raw",
     "concatenate": "dataset1",
     "ome_import": "source",
+    "czi_import": "source",
     "validate": "dataset",
     "subset": "source",
     "import_loose": "source",
@@ -85,6 +87,7 @@ CHAIN_TARGET = {
 _DESCRIBE_KEYS = {
     "concatenate": (("dataset1", "dataset2"), "destination"),
     "ome_import": (("source",), "destination"),
+    "czi_import": (("source",), "destination"),
     "validate": (("dataset",), None),
     "subset": (("source",), "destination"),
     "import_loose": (("source",), "destination"),

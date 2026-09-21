@@ -4,8 +4,11 @@ The Datasets pane is the third top-level mode of the app. Unlike Review it
 carries no well picker; its left sidebar is a plain page navigator, one entry
 per feature. Each feature is a standalone package registered in
 ``datasets/tab.py::_FEATURES``: *Convert OME-TIFF* (:mod:`datasets.ome_import`)
-de-interleaves a packed OME-TIFF into a dataset folder; *Concatenate datasets*
-(:mod:`datasets.concatenate`) appends one dataset's timepoints after another's;
+de-interleaves a packed OME-TIFF into a dataset folder; *Convert CZI*
+(:mod:`datasets.czi_import`) does the same for a Zeiss ``.czi`` plate scan,
+reading the well of each scene out of the file's own metadata; *Concatenate
+datasets* (:mod:`datasets.concatenate`) appends one dataset's timepoints after
+another's;
 *Validate & Repair* (:mod:`datasets.validate`) reports and fixes a dataset's
 metadata after a partial or crashed Analyze run; *Subset / Split*
 (:mod:`datasets.subset`) copies a filtered slice of a dataset to a new folder;

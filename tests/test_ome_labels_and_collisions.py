@@ -2,7 +2,7 @@
 
 Two audit findings, both about a *name* rather than a pixel:
 
-* **C6** — ``_safe_token`` keeps alphanumerics only, so ``"488 nm"`` and
+* **C6** — ``util.filename_token.safe_token`` keeps alphanumerics only, so ``"488 nm"`` and
   ``"488nm"`` (or ``"GFP-1"`` and ``"GFP_1"``, or two channels simply both named
   ``GFP``) reduce to one filename token. Every image is written as
   ``<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif``, so both channels are

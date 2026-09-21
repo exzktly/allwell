@@ -51,6 +51,7 @@ KIND_ICON = {
     "analyze": "sliders-horizontal",
     "concatenate": "copy",
     "ome_import": "folder-open",
+    "czi_import": "microscope",
     "validate": "scan-line",
     "subset": "boxes",
     "import_loose": "download",

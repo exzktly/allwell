@@ -6355,7 +6355,7 @@ compared against the series that actually came out, since that is the axis the
 converter splits into positions. The other two are collected for a caller that
 wants them and are not themselves a refusal.
 **Two labels that reduce to one filename token:** every image is published as
-`<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif`, and `_safe_token` keeps
+`<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif`, and `util.filename_token.safe_token` keeps
 alphanumerics only, so `"488 nm"` and `"488nm"` — or `"GFP-1"` and `"GFP_1"`, or
 two channels a file simply names alike — become one token and write the same
 member name into one archive. `zipfile` keeps both copies of the bytes under one

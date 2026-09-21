@@ -40,7 +40,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from pipeline.czi_read import CziLayout, CziReader, read_czi_layout
+from pipeline.czi_read import CziReader
+from pipeline.czi_set import CziSet, ScenePosition, read_czi_set
 from pipeline.explode_common import (
     ExplodeCancelled,
     ExplodeResult,
@@ -70,15 +71,15 @@ class CziExplodeCancelled(ExplodeCancelled):
 class WellMap:
     """Which stage positions belong to which well, and where that was decided.
 
-    ``positions[i]`` is the ``(scene, tile)`` pairs making up ``wells[i]``, in
-    the order they become FOV 0, 1, … of that well. Keeping the pairs rather
-    than a start offset is what lets the two sources produce the same structure:
-    a file-named mapping groups by scene, a grid mapping chops one flat list,
-    and the exploder below does not have to know which it was given.
+    ``positions[i]`` is the stage positions making up ``wells[i]``, in the
+    order they become FOV 0, 1, … of that well. Each carries the file it is in,
+    so a plate split into one file per scene and a plate held in a single file
+    produce the same structure and the exploder below does not have to know
+    which it was given — nor which of the two well sources produced the labels.
     """
 
     wells: list[str] = field(default_factory=list)
-    positions: list[list[tuple[int, int]]] = field(default_factory=list)
+    positions: list[list[ScenePosition]] = field(default_factory=list)
     fovs_per_well: int = 0
     #: True when ``wells`` came from the CZI's own scene names. Reported rather
     #: than inferred from the settings, because the page's readout has to say
@@ -91,20 +92,59 @@ class WellMap:
         return len(self.wells)
 
 
-def flat_positions(layout: CziLayout) -> list[tuple[int, int]]:
-    """Every ``(scene, tile)`` pair in acquisition order: scene-major.
+def _default_experiment(selected: Path, czi_set: CziSet) -> str:
+    """The experiment token a conversion uses when the user names none.
 
-    Scene-major because that is the order a plate scan visits them — a stage
-    finishes the tiles of one well before moving to the next — so this is the
-    sequence a grid mapping lays its well labels over.
+    The *folder* for a set of several files, the file's own stem for one. A
+    split-scene export is a folder of ``Exp7_A1.czi``, ``Exp7_A2.czi``, … and
+    taking the stem of whichever member sorted first would stamp that one
+    scene's well into every archive on the plate:
+    ``Exp7_A1_DAPI_H11_f0_t0.tif``. The folder is the thing they are all part
+    of, which is what the token is for.
     """
-    return [(scene, tile)
-            for scene in layout.scenes
-            for tile in layout.tiles.get(scene, [0])]
+    if czi_set.n_files > 1:
+        folder = selected if selected.is_dir() else selected.parent
+        return folder.name or selected.stem
+    return selected.stem
+
+
+class _ReaderPool:
+    """The :class:`~pipeline.czi_read.CziReader` handles one worker thread holds.
+
+    Opened lazily, one per file that thread's wells actually read from, and all
+    closed together on exit. Lazily because a split-scene plate has one file
+    per well: opening every file in every thread would be ninety-six handles
+    per thread to read one well, and closing them only at the end of the run
+    would hold all of them open at once.
+
+    Not shared between threads. A reader owns a file position, so two threads
+    reading through one would interleave seeks — which is the same reason
+    ``explode_ome_tiff`` gives every worker its own ``TiffFile``.
+    """
+
+    def __init__(self, layouts: "dict[Path, object]") -> None:
+        self._layouts = layouts
+        self._open: dict[Path, CziReader] = {}
+
+    def __enter__(self) -> "_ReaderPool":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        for reader in self._open.values():
+            reader.__exit__(*exc_info)
+        self._open.clear()
+
+    def for_path(self, path: Path) -> CziReader:
+        reader = self._open.get(path)
+        if reader is None:
+            reader = CziReader(path, self._layouts.get(path))
+            reader.__enter__()
+            self._open[path] = reader
+        return reader
 
 
 def resolve_well_map(
-    layout: CziLayout,
+    source: CziSet,
     *,
     well_source: str = "file",
     grid_rows: int = 0,
@@ -133,22 +173,26 @@ def resolve_well_map(
         raise ValueError(
             f"Unknown well source {well_source!r}; expected one of {WELL_SOURCES}."
         )
-    positions = flat_positions(layout)
+    if source.problem:
+        raise ValueError(source.problem)
+    positions = list(source.positions)
     if not positions:
         raise ValueError(f"{name} holds no image tiles to convert.")
 
     if well_source == "file":
-        wells = layout.wells_from_metadata()
+        wells = source.wells_from_files()
         if not wells:
-            named = sum(1 for s in layout.scenes if layout.scene_wells.get(s))
+            named = sum(1 for label in source.scene_wells if label)
+            subject = (f"{name}'s {source.n_files} file(s)" if source.n_files > 1
+                       else name)
             raise ValueError(
-                f"{name} does not name a distinct well for every one of its "
-                f"{layout.n_scenes} scene(s) — {named} of them resolve to a "
+                f"{subject} do not name a distinct well for every one of their "
+                f"{source.n_scenes} scene(s) — {named} of them resolve to a "
                 f"well. Switch the well source to the plate grid and set the "
                 f"imaged rows and columns, which lays the acquisition order "
                 f"over the plate instead."
             )
-        fovs = layout.fovs_per_scene
+        fovs = source.fovs_per_scene
         if fovs <= 0:
             raise ValueError(
                 f"{name}'s scenes hold different numbers of tiles, so there is "
@@ -160,13 +204,14 @@ def resolve_well_map(
                 f"set to {fovs_per_well}. Clear it to use the file's own "
                 f"count, or switch the well source to the plate grid."
             )
-        return WellMap(
-            wells=wells,
-            positions=[[(scene, tile) for tile in layout.tiles.get(scene, [0])]
-                       for scene in layout.scenes],
-            fovs_per_well=fovs,
-            from_file=True,
-        )
+        # Grouped by scene, in the order the scenes appear across the set —
+        # the same order ``wells`` is in, because both come from walking
+        # ``source.positions``.
+        grouped: list[list[ScenePosition]] = []
+        for index in range(0, len(positions), fovs):
+            grouped.append(positions[index:index + fovs])
+        return WellMap(wells=wells, positions=grouped, fovs_per_well=fovs,
+                       from_file=True)
 
     if grid_rows <= 0 or grid_cols <= 0:
         raise ValueError(
@@ -197,6 +242,7 @@ def explode_czi(
     serpentine: bool = True,
     experiment: str = "",
     fovs_per_well: "int | None" = None,
+    files: "list[Path] | None" = None,
     workers: int = 0,
     log_fn: "Callable[[str], None] | None" = None,
     progress_fn: "Callable[[int, int], None] | None" = None,
@@ -205,6 +251,12 @@ def explode_czi(
     resume: bool = False,
 ) -> ExplodeResult:
     """Explode *czi_path* into per-well ``<WELL>.zip`` archives in *out_in_dir*.
+
+    *czi_path* is a single ``.czi`` or a folder of them; *files* names the
+    exact set to convert when a caller has already decided (the converter
+    page, whose tick-box widens one file to its folder). One file per scene is
+    ZEN's *Split Scenes* export and is as ordinary an input as a single file
+    holding the whole plate — see :mod:`pipeline.czi_set`.
 
     For every (scene, tile, timepoint, channel) the Z stack is max-projected to
     a 2-D plane and stored as a member named
@@ -239,17 +291,18 @@ def explode_czi(
     def _abort() -> bool:
         return bool(should_abort and should_abort())
 
-    layout = read_czi_layout(czi_path)
+    czi_set = read_czi_set(czi_path, files=files)
     # Refuse an unsound source before a single archive is written. Everything
     # this catches would otherwise reach the dataset as images that look like
     # data: a well short of a timepoint, two channels under one filename, a
-    # dimension whose planes overwrite each other.
-    unsound = layout.validation_report(czi_path.name)
-    if unsound:
-        raise ValueError(unsound)
+    # dimension whose planes overwrite each other, or — across a split-scene
+    # set — two files that disagree about what a channel token means.
+    if czi_set.problem:
+        raise ValueError(czi_set.problem)
+    layout = czi_set.layout
 
     well_map = resolve_well_map(
-        layout, well_source=well_source, grid_rows=grid_rows,
+        czi_set, well_source=well_source, grid_rows=grid_rows,
         grid_cols=grid_cols, origin=origin_well, direction=direction,
         serpentine=serpentine, fovs_per_well=fovs_per_well,
         name=czi_path.name,
@@ -258,17 +311,23 @@ def explode_czi(
     # give every plate converted through this function the same experiment
     # token, so two of them concatenated later would be indistinguishable
     # — and the source filename is right there.
-    exp_tok = safe_token(experiment or czi_path.stem, "czi")
+    # A folder names the plate; a file names itself. Taking the stem of a
+    # split-scene member would put that one scene's well into every archive's
+    # filenames — ``Exp7_A1_DAPI_H11_f0_t0.tif``.
+    exp_tok = safe_token(experiment or _default_experiment(czi_path, czi_set),
+                         "czi")
     tp_tokens = layout.timepoint_tokens
     fovs = well_map.fovs_per_well
     n_wells = well_map.n_wells
 
     out_in_dir.mkdir(parents=True, exist_ok=True)
-    total = layout.n_positions * layout.size_t * layout.size_c
+    total = czi_set.n_positions * layout.size_t * layout.size_c
     n_workers = pick_workers(workers, n_wells)
     source = "the file's scene names" if well_map.from_file else "the plate grid"
+    held_in = (f"{czi_set.n_files} file(s)" if czi_set.n_files > 1
+               else czi_path.name)
     _log(
-        f"[czi] {czi_path.name}: {layout.n_scenes} scene(s) -> {n_wells} "
+        f"[czi] {held_in}: {czi_set.n_scenes} scene(s) -> {n_wells} "
         f"well(s) x {fovs} FOV(s) x {layout.size_t} timepoint(s), "
         f"{layout.size_c} channel(s)"
         f"{f', {layout.size_z} Z-plane(s) max-projected' if layout.size_z > 1 else ''}"
@@ -318,7 +377,12 @@ def explode_czi(
         converted: list[str] = []
         resumed: list[str] = []
         read_s = write_s = 0.0
-        with CziReader(czi_path, layout) as reader:
+        # One reader per file this thread actually touches, opened on first
+        # use and closed together at the end. A split-scene plate has one file
+        # per well, so opening every file per thread would be N handles for
+        # one well's worth of reading; a single-file plate opens exactly one,
+        # as it always did.
+        with _ReaderPool(dict(zip(czi_set.files, czi_set.layouts))) as readers:
             for index in well_indices:
                 if _abort():
                     raise CziExplodeCancelled()
@@ -336,14 +400,16 @@ def explode_czi(
                 well_written = 0
                 with atomic_zip(out_in_dir / f"{label}.zip",
                                 compression=zipfile.ZIP_STORED) as archive:
-                    for fov, (scene, tile) in enumerate(well_map.positions[index]):
+                    for fov, position in enumerate(well_map.positions[index]):
+                        reader = readers.for_path(position.path)
                         for t_index in range(layout.size_t):
                             for channel in range(layout.size_c):
                                 if _abort():
                                     raise CziExplodeCancelled()
                                 started = time.perf_counter()
                                 plane = reader.read_projection(
-                                    scene, tile, t_index, channel)
+                                    position.scene, position.tile,
+                                    t_index, channel)
                                 read_s += time.perf_counter() - started
                                 started = time.perf_counter()
                                 member = (

@@ -60,6 +60,9 @@ class Tile:
     #: either on its own and a reader that needs both would keep the copies.
     pyramid: bool | str = False
     compression: int = 0
+    #: Claim this tile's pixels live in a numbered companion file, as ZEN does
+    #: when it splits a very large acquisition into parts.
+    file_part: int = 0
 
 
 def _segment(name: str, data: bytes) -> bytes:
@@ -85,7 +88,7 @@ def _directory_entry(tile: Tile, *, position: int) -> bytes:
         dims.append((axis, start, size, size))
     pixel_type = PIXEL_TYPE_FOR[str(tile.pixels.dtype)]
     out = _DIRECTORY_ENTRY.pack(
-        b"DV", pixel_type, position, 0, tile.compression,
+        b"DV", pixel_type, position, tile.file_part, tile.compression,
         1 if type_set else 0, 0, b"\0\0\0\0", len(dims),
     )
     for axis, start, size, stored in dims:

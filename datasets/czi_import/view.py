@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -52,11 +52,12 @@ from datasets.czi_import.czi_import_compute import (
     default_dest,
     destination_problem,
     plan_conversion,
-    read_layout,
+    read_source,
     resume_state,
+    source_files,
 )
 from pipeline.czi_explode import WELL_SOURCES
-from pipeline.czi_read import CziLayout
+from pipeline.czi_set import CZI_SUFFIXES, CziSet, siblings_of
 from ui import theme
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
@@ -110,7 +111,15 @@ class CziImportPage(LogPanelMixin, QWidget):
         #: typing in a grid field does not re-read a multi-gigabyte file on
         #: every keystroke. Keyed on mtime as well as path because a re-export
         #: saved over the same name is a different file.
-        self._layout_cache: dict[tuple[str, float], CziLayout] = {}
+        #: The last set read, keyed on the exact files and their mtimes, so
+        #: typing in a grid field does not re-read a multi-gigabyte plate on
+        #: every keystroke. Keyed on mtimes as well as paths because a
+        #: re-export saved over the same name is a different file, and on the
+        #: whole list because a sibling appearing changes the plate.
+        self._source_cache: dict[tuple, CziSet] = {}
+        #: Whether the user has touched the "convert the whole folder" box.
+        #: Until they do it follows the folder; after, their answer stands.
+        self._folder_touched = False
         self._channel_rows: list[tuple[str, QComboBox]] = []
         self._channel_names_shown: list[str] = []
         self._build_ui()
@@ -147,7 +156,9 @@ class CziImportPage(LogPanelMixin, QWidget):
             "max-projected and mosaic tiles are kept as separate fields, never "
             "stitched. Wells normally come from the scene names inside the "
             "file; a file that does not name its scenes can be laid over a "
-            "plate grid instead.",
+            "plate grid instead. ZEN saves a plate either as one file holding "
+            "every scene or as one file per scene — pick either the file or "
+            "the folder.",
             self,
         )
         blurb.setTextFormat(Qt.RichText)
@@ -155,8 +166,8 @@ class CziImportPage(LogPanelMixin, QWidget):
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
-        self._src_field = PathField("CZI file", pick=self._pick_source,
-                                    validator=_czi_file_problem)
+        self._src_field = PathField("CZI file or folder", pick=self._pick_source,
+                                    validator=_czi_source_problem)
         self._src_field.changed.connect(self._on_source_changed)
         outer.addWidget(self._src_field)
 
@@ -165,6 +176,14 @@ class CziImportPage(LogPanelMixin, QWidget):
             validator=self._dest_rule)
         self._dest_field.changed.connect(self._on_dest_changed)
         outer.addWidget(self._dest_field)
+
+        self._folder_cb = QCheckBox("", self)
+        self._folder_cb.setToolTip(
+            "ZEN's Split Scenes export writes one .czi per scene. Ticked, "
+            "every .czi in this folder is converted as a single plate.")
+        self._folder_cb.setVisible(False)
+        self._folder_cb.toggled.connect(self._on_folder_box_toggled)
+        outer.addWidget(self._folder_cb)
 
         self._build_params(outer)
         self._build_channels(outer)
@@ -378,20 +397,42 @@ class CziImportPage(LogPanelMixin, QWidget):
 
     # ── pickers ──────────────────────────────────────────────────────────────
     def _pick_source(self, current: str, parent: QWidget | None = None) -> str:
-        chosen, _ = QFileDialog.getOpenFileName(
-            parent or self, "Select CZI file", current or "",
-            "Zeiss CZI (*.czi);;All files (*)",
-        )
-        return chosen or ""
+        """Pick a ``.czi``, or the folder a split-scene export was written to.
+
+        One dialog rather than two buttons, in ``Directory`` mode with files
+        shown: a folder is chosen by opening it and accepting, a file by
+        selecting it. ZEN writes a plate either way and the user should not
+        have to know which kind of thing they are looking for before they open
+        the dialog.
+
+        Qt's own file dialog is forced here (``DontUseNativeDialog``). The
+        native macOS panel in Directory mode hides files outright, so a folder
+        of ninety-six ``.czi`` files looked empty and there was no way to pick
+        one of them.
+        """
+        dialog = QFileDialog(parent or self, "Select a CZI file, or a folder of them",
+                             current or "")
+        dialog.setFileMode(QFileDialog.Directory)
+        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
+        dialog.setOption(QFileDialog.ShowDirsOnly, False)
+        if dialog.exec() != QFileDialog.Accepted:
+            return ""
+        chosen = dialog.selectedFiles()
+        return chosen[0] if chosen else ""
 
     # ── field plumbing ───────────────────────────────────────────────────────
     def _on_source_changed(self) -> None:
         src = self._src_field.path()
+        # A new source is a new question about the folder, so the box goes
+        # back to following it. Without this, unticking it once made every
+        # later plate convert one file of its folder.
+        self._folder_touched = False
+        self._refresh_folder_box()
         # Fill the destination in beside the source unless the user has
         # already chosen one — a default that overwrote their answer would be
         # worse than no default at all.
         if src and not self._dest_user_set:
-            self._dest_field.set_path(str(default_dest(src)))
+            self._dest_field.set_path(str(default_dest(src, self.params())))
         self.refresh_readout()
 
     def _on_dest_changed(self) -> None:
@@ -401,12 +442,58 @@ class CziImportPage(LogPanelMixin, QWidget):
     def _on_readout_input_changed(self, *_args) -> None:
         self.refresh_readout()
 
+    def _on_folder_box_toggled(self, _checked: bool) -> None:
+        self._folder_touched = True
+        self.refresh_readout()
+
     def _on_well_source_changed(self, *_args) -> None:
         self._grid_host.setVisible(self.well_source() == "grid")
         self.refresh_readout()
 
     def well_source(self) -> str:
         return str(self._well_source_cb.currentData() or "file")
+
+    def use_folder(self) -> bool:
+        """Whether the run converts every ``.czi`` beside the selected one.
+
+        A folder selected outright always converts all of them — the folder
+        *is* the set — whatever the box says, so this answers True for one
+        without consulting it. The box only ever widens a single **file** to
+        its folder, which is the case where widening is a choice.
+        """
+        source = Path(self.source_path())
+        if source.is_dir():
+            return True
+        return self._folder_cb.isChecked()
+
+    def _refresh_folder_box(self) -> None:
+        """Offer — and by default take — the rest of the folder, when there is one.
+
+        Shown only for a lone **file** with ``.czi`` siblings. Ticked by
+        default, because a folder of per-scene files is a plate and converting
+        one well of ninety-six while reporting success is the worse answer; the
+        label names the count so the default is never silent. Once the user
+        touches it, their answer stands — a default that re-asserted itself on
+        the next keystroke is not a default, it is a setting that cannot be
+        changed.
+        """
+        source = Path(self.source_path())
+        if source.is_dir():
+            self._folder_cb.setVisible(False)
+            return
+        siblings = siblings_of(source) if source.is_file() else []
+        if len(siblings) < 2:
+            self._folder_cb.setVisible(False)
+            if not self._folder_touched:
+                self._folder_cb.setChecked(False)
+            return
+        self._folder_cb.setText(
+            f"Convert all {len(siblings)} .czi files in this folder as one "
+            f"plate (ZEN writes one file per scene)")
+        self._folder_cb.setVisible(True)
+        if not self._folder_touched:
+            with QSignalBlocker(self._folder_cb):
+                self._folder_cb.setChecked(True)
 
     def source_path(self) -> str:
         return self._src_field.path().strip()
@@ -435,6 +522,7 @@ class CziImportPage(LogPanelMixin, QWidget):
             direction=str(self._direction_cb.currentData() or "row"),
             serpentine=self._serpentine_cb.isChecked(),
             experiment=self._experiment_edit.text(),
+            use_folder=self.use_folder(),
         )
 
     def params(self) -> ConversionParams:
@@ -456,6 +544,10 @@ class CziImportPage(LogPanelMixin, QWidget):
             self._direction_cb.setCurrentIndex(direction)
         self._serpentine_cb.setChecked(bool(params.serpentine))
         self._experiment_edit.setText(params.experiment or "")
+        # A spec's answer is an answer, so it sticks the way a click does.
+        self._folder_touched = True
+        with QSignalBlocker(self._folder_cb):
+            self._folder_cb.setChecked(bool(params.use_folder))
         self._grid_host.setVisible(self.well_source() == "grid")
         self.refresh_readout()
 
@@ -503,7 +595,7 @@ class CziImportPage(LogPanelMixin, QWidget):
         if running:
             self._open_btn.setVisible(False)
             set_variant(self._run_btn, "primary")
-        for widget in (self._well_source_cb, self._grid_host,
+        for widget in (self._well_source_cb, self._grid_host, self._folder_cb,
                        self._experiment_edit, self._fovs_edit,
                        self._workers_edit):
             widget.setEnabled(not running)
@@ -525,25 +617,24 @@ class CziImportPage(LogPanelMixin, QWidget):
             return destination_problem(root)
         return destination_problem(root, src, self.params())
 
-    def _read_layout(self, src: str) -> CziLayout | None:
-        """The source's layout, cached on ``(path, mtime)``, or ``None``."""
-        path = Path(src)
+    def _read_source(self, src: str) -> CziSet:
+        """The selected files as one plate, cached on their paths and mtimes."""
+        params = self.params()
         try:
-            mtime = path.stat().st_mtime
+            key = tuple((str(p), p.stat().st_mtime)
+                        for p in source_files(src, params))
         except OSError:
-            return None
-        key = (str(path), mtime)
-        if key in self._layout_cache:
-            return self._layout_cache[key]
-        try:
-            layout = read_layout(path)
-        except CziImportError:
-            # The readout says what is wrong through ``plan_conversion`` below;
-            # caching the failure would keep saying it after the file is fixed.
-            return None
-        self._layout_cache.clear()
-        self._layout_cache[key] = layout
-        return layout
+            key = ()
+        if key and key in self._source_cache:
+            return self._source_cache[key]
+        czi_set = read_source(src, params)
+        if key and not czi_set.problem:
+            # Only a readable set is cached. A problem is usually something the
+            # user is in the middle of fixing, and a cached one keeps being
+            # reported after the fix.
+            self._source_cache.clear()
+            self._source_cache[key] = czi_set
+        return czi_set
 
     def _set_verdict(self, text: str, tone: str) -> None:
         self._verdict.setText(text)
@@ -559,9 +650,11 @@ class CziImportPage(LogPanelMixin, QWidget):
         """Recompute the readout, the plate preview and the Run gate."""
         self._src_field.revalidate()
         self._dest_field.revalidate()
+        self._refresh_folder_box()
         src = self.source_path()
         if not src:
-            self._readout.setText("Choose a CZI file to see what it holds.")
+            self._readout.setText(
+                "Choose a CZI file, or a folder of them, to see what it holds.")
             self._set_verdict("", "muted")
             self._rebuild_channels([])
             self._dashboard.set_wells([])
@@ -569,30 +662,24 @@ class CziImportPage(LogPanelMixin, QWidget):
             return
 
         problems = self.raw_fields().problems()
-        layout = self._read_layout(src)
-        if layout is None:
-            try:
-                read_layout(src)
-            except CziImportError as exc:
-                self._readout.setText("")
-                self._set_verdict(str(exc), "error")
-            else:  # pragma: no cover — a file readable now but not a moment ago
-                self._readout.setText("")
-                self._set_verdict("Could not read this file.", "error")
+        czi_set = self._read_source(src)
+        if czi_set.problem:
+            self._readout.setText("")
+            self._set_verdict(czi_set.problem, "error")
             self._rebuild_channels([])
             self._dashboard.set_wells([])
             self._update_run_gate(False)
             return
 
-        self._readout.setText(layout.describe())
-        self._rebuild_channels(list(layout.channel_names))
+        self._readout.setText(czi_set.describe())
+        self._rebuild_channels(list(czi_set.layout.channel_names))
         if problems:
             self._set_verdict(" ".join(problems), "error")
             self._dashboard.set_wells([])
             self._update_run_gate(False)
             return
         try:
-            plan = plan_conversion(layout, self.params())
+            plan = plan_conversion(czi_set, self.params())
         except CziImportError as exc:
             self._set_verdict(str(exc), "error")
             self._dashboard.set_wells([])
@@ -623,15 +710,16 @@ class CziImportPage(LogPanelMixin, QWidget):
         return bool(getattr(self, "_ready", False))
 
 
-def _czi_file_problem(path) -> str:
-    """``""`` if *path* looks like a readable ``.czi``, else a short reason."""
+def _czi_source_problem(path) -> str:
+    """``""`` if *path* is a ``.czi`` or a folder holding some, else a reason."""
     candidate = Path(str(path or "").strip())
     if not str(candidate).strip():
         return ""
     if not candidate.exists():
-        return "No such file."
-    if not candidate.is_file():
-        return "Not a file — choose a .czi."
-    if candidate.suffix.lower() != ".czi":
+        return "No such file or folder."
+    if candidate.is_dir():
+        return ("" if siblings_of(candidate)
+                else "This folder holds no .czi files.")
+    if candidate.suffix.lower() not in CZI_SUFFIXES:
         return "Not a .czi file."
     return ""

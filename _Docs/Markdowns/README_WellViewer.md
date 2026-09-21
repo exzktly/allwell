@@ -80,7 +80,8 @@ to add features, how to debug, and build / environment troubleshooting), see
 - **Datasets tab.** Dataset-level operations that work on whole folders rather
   than one plate at a time: **Convert OME-TIFF** de-interleaves a single packed
   OME-TIFF into a dataset folder and **Convert CZI** does the same for a Zeiss
-  `.czi` plate scan, reading the well of each scene out of the file itself;
+  `.czi` plate scan — one file holding every scene, or a folder of one file per
+  scene — reading the well of each scene out of the files themselves;
   **Concatenate datasets** appends one
   dataset's timepoints after another's — for when the same plate was imaged in
   two separate sessions and you want one continuous timelapse; and
@@ -5110,10 +5111,16 @@ hand-drawn path.
 
 ### Convert CZI
 
-Turns a Zeiss `.czi` plate scan — one file holding every scene, mosaic tile,
-channel, Z-plane and timepoint of the run — into an ordinary dataset folder of
-per-well images, the layout Analyze processes. Do this first, then open the
-result in Analyze.
+Turns a Zeiss `.czi` plate scan into an ordinary dataset folder of per-well
+images, the layout Analyze processes. Do this first, then open the result in
+Analyze.
+
+**ZEN saves a plate two ways, and this page reads both.** The ordinary raw save
+is one file holding every scene, mosaic tile, channel, Z-plane and timepoint of
+the run. The *Split Scenes* export — which is how a long acquisition is usually
+saved — is a folder of one file per scene, `Exp7_A1.czi`, `Exp7_A2.czi`, and so
+on. Nothing inside any one of those files says it is part of a plate: the plate
+is the folder, which is why the page asks about it (step 2 below).
 
 It is the same job [Convert OME-TIFF](#convert-ome-tiff) does for a packed
 OME-TIFF, and it exists so you do not have to export the plate a second time to
@@ -5129,18 +5136,29 @@ about a grid. Zeiss software normally names each scene after the well it
 scanned, so here the mapping is read straight out of the file and you confirm it
 on the plate rather than supplying it.
 
-1. **CZI file** — pick the `.czi`. All-Well reads its subblock directory and
-   metadata immediately — no images, so it costs nothing however large the plate
-   is — and suggests a **Destination folder** beside the file, named after it.
-   The readout then describes what the file holds: scenes, tiles each,
-   timepoints, channels, pixel size and type, and whether the wells are named by
-   the file or will come from a grid you set.
-2. **Well labels from** — **The file's own scene names** (the default) or
+1. **CZI file or folder** — pick the `.czi`, or the folder a split export was
+   written to. All-Well reads the subblock directory and metadata immediately —
+   no images, so it costs nothing however large the plate is — and suggests a
+   **Destination folder**. The readout then describes what it holds: files,
+   scenes, tiles each, timepoints, channels, pixel size and type, and whether
+   the wells are named by the files or will come from a grid you set.
+2. **Convert all N .czi files in this folder as one plate** — *shown only when
+   you picked a single file that has `.czi` neighbours*. It is **ticked by
+   default**, because a folder of per-scene files is one plate and converting
+   one well of ninety-six while reporting success is the worse answer. Untick it
+   to convert only the file you picked. Picking the *folder* instead converts
+   all of it and the box does not appear, since the folder already is the plate.
+
+   The destination is named after the **folder**, not after the file you
+   happened to click, and it sits beside that folder rather than inside it. So
+   is the experiment name in the output filenames: naming a whole plate `Exp7_A1`
+   would put one scene's well into every image on it.
+3. **Well labels from** — **The file's own scene names** (the default) or
    **A plate grid I set below**. On the first, each scene's well is read from
    its metadata: a `<Shape>` naming the plate well, an `ArrayName`, or the
    scene's own name, which is commonly `A1`, `P1-A1` or `Scene-1-B07`. Choosing
    the grid reveals the grid fields and ignores the names entirely.
-3. **The grid fields** — *shown only when you choose the grid*. **Rows** and
+4. **The grid fields** — *shown only when you choose the grid*. **Rows** and
    **Columns** are the block you imaged, **Origin well** is its top-left well
    (default `A01`), **Order** is the axis the stage swept along, and
    **Serpentine** is what it did at the end of each line. Ticked, alternate
@@ -5148,19 +5166,20 @@ on the plate rather than supplying it.
    Unticked, every line runs the same way. Get this wrong and every second line
    is labelled *backwards* while the well count stays right, which is why it is
    a setting rather than an assumption.
-4. **Experiment name** — the first token of every output filename. Blank takes
-   it from the source filename.
-5. **FOVs per well** — blank uses the tiles the file holds per scene, which is
+5. **Experiment name** — the first token of every output filename. Blank takes
+   it from the source — the file's name for a single file, the folder's for a
+   set.
+6. **FOVs per well** — blank uses the tiles the file holds per scene, which is
    what you want for a file whose scenes name their wells. A grid-mapped file
    needs it only when its positions do not divide evenly by themselves. Setting
    it to something the file contradicts is refused rather than silently
    preferring one of the two.
-6. **Worker threads** — how many wells to convert in parallel (blank = auto,
+7. **Worker threads** — how many wells to convert in parallel (blank = auto,
    capped at the number of wells). It changes only how fast the run goes and
    nothing about what comes out, which is also why changing it never blocks a
    resume. Lower it if converting to a single spinning disk feels slower rather
    than faster.
-7. **Channel roles** — one row per channel read from the CZI metadata, each with
+8. **Channel roles** — one row per channel read from the CZI metadata, each with
    a role: **Nuclear / segmentation**, **Fluorescent**, **Phase / brightfield**,
    or **Skip**, seeded from the channel names exactly as on the OME-TIFF page.
    The channel names are always what goes into the output filenames; the roles
@@ -5205,7 +5224,21 @@ honestly is refused there rather than part-way through a run. What it catches:
 - **"does not name a distinct well for every one of its scenes"** — some scenes
   are named and some are not, or two claim the same well. A mapping that is half
   from the file and half from a grid is right exactly where you are most likely
-  to spot-check it, so it is all or nothing: switch to the plate grid.
+  to spot-check it, so it is all or nothing: switch to the plate grid. For a
+  split export each file's well comes from its scene metadata first and from
+  its **filename** second — `Exp7_A1.czi` is well A01 — but only for a file
+  holding a single scene, so a whole-plate file that happens to be called
+  `Exp_A1.czi` is never read as one well of ninety-six fields.
+- **"… and … disagree about the number of channels"** (or the channel names,
+  timepoints, pixel format or image size) — two files you asked to convert
+  together. They become one dataset, so a difference here would mean the same
+  filename means different things in different wells. Convert them separately,
+  or re-export with matching settings. Stack *depth* is allowed to differ: Z is
+  projected away, so those files produce the same images.
+- **"is one part of a multi-file CZI"** — ZEN splits a very large single
+  acquisition into numbered companion files that share one index. This
+  converter does not follow them. Re-export as a single file, or with the
+  scenes split into one file per scene; it reads either.
 - **"stores its images as Bgr24"** (or another colour or complex format) — there
   is no single intensity per pixel to quantify, and picking one of the samples
   would be an unannounced decision about which. Export the acquisition channels
@@ -5245,6 +5278,12 @@ file level is an acquisition *plan* rather than what happened. Positional tokens
 order correctly and state no elapsed time the file cannot back up. If you need a
 real time axis in Review, set the interval there
 ([Interval per timepoint](#interval-per-timepoint-and-offset)).
+
+**A split export is checked as a set, not just file by file.** Each file has to
+be sound on its own, and then they all have to agree about everything the output
+filenames depend on. A file that is short of an image is reported as itself
+rather than as a disagreement, because "these two disagree about the channel
+names" names the wrong remedy for a file that was cut short.
 
 **Lower-resolution copies are discarded.** A CZI written for viewing carries
 downsampled pyramid tiles alongside the acquisition ones. They are the same

@@ -268,8 +268,9 @@ allwell/
 │   ├── validate/               ← Validate & Repair an existing dataset
 │   ├── job_queue/              ← the queue the seven tools (and Analyze) submit runs to
 │   ├── ome_import/             ← Convert OME-TIFF (de-interleave a packed OME-TIFF → dataset folder)
-│   └── czi_import/             ← Convert CZI (a Zeiss .czi plate scan → dataset folder;
-│                                  wells read from the file's scene names, grid as fallback)
+│   └── czi_import/             ← Convert CZI (a Zeiss .czi plate scan, or a folder of
+│                                  per-scene ones → dataset folder; wells read from the
+│                                  files' scene names, grid as fallback)
 ├── pipeline/                    ← Qt-free analysis-pipeline modules (re-exported by pm)
 │   ├── well_plate_zipper.py    ← the loose-TIF grouping pre-pass that produces the
 │   │                              per-well input layout the rest of the pipeline reads.
@@ -293,6 +294,9 @@ allwell/
 │   ├── czi_read.py             ← the ZISRAW parser: a CZI's layout, and one 2-D tile
 │   │                              at a time (stdlib + numpy; imagecodecs only for a
 │   │                              compressed file)
+│   ├── czi_set.py              ← one *or more* .czi files read as one plate:
+│   │                              ZEN saves a scan as one file of every scene, or
+│   │                              one file per scene, and the second is a folder
 │   ├── czi_explode.py          ← the CZI's per-well explode — scenes/tiles → wells,
 │   │                              Z max-projected, one atomic archive per well
 │   ├── explode_common.py       ← what both exploders do identically: the member-name
@@ -6581,12 +6585,49 @@ would overwrite the first's archive while the run reported writing both. Either
 condition yields `[]`, and `resolve_well_map` then refuses with a message
 pointing at the grid, which is the other `well_source`. The two are never mixed.
 
+**ZEN saves a plate two ways, and `pipeline/czi_set.py` is what makes them one
+input.** The ordinary raw save is a single file holding every scene. The *Split
+Scenes* export — what a long acquisition is usually saved as — is a folder of
+`Exp7_A1.czi`, `Exp7_A2.czi`, … each holding one scene, and **nothing inside any
+one of them says it is part of a plate**: the plate is the folder. A `CziSet` is
+therefore the unit the converter works on, with a single file being a set of
+one, so the exploder has no branch for the two shapes.
+
+A set's files become one dataset, so they are held to agreeing about everything
+the output filenames depend on — channel count and names, timepoint count,
+pixel format, tile size — and every mismatch is refused naming both files. Two
+files whose channel lists differ would write images whose channel token means
+one thing in one well and another in the next, which is §7's silent
+substitution. **Z is deliberately not on that list**: it is projected away, so
+files whose stacks are different depths produce the same images, and
+`ome_explode` leaves Z out of its own ragged check for the same reason.
+
+Each member's well comes from its scene metadata first, and failing that from
+its **filename** — but only for a file holding exactly one scene. ZEN's split
+export names each file after the scene it holds and does not always keep the
+scene's own name inside it, so a file that *is* a scene may be identified by its
+name; the one-scene condition is what stops a whole-plate file that happens to
+be called `Exp_A1.czi` being read as one well of ninety-six fields.
+All-or-nothing and distinct applies across the set exactly as it does within one
+file.
+
+A third shape is refused rather than read: a single logical CZI split into
+numbered **file parts** that share one subblock directory, which ZEN produces
+for very large acquisitions. Those tiles carry a non-zero `FilePart` and their
+offsets are into a sibling file, so reading them through one handle lands at an
+arbitrary position in the wrong one. `CziLayout.foreign_part_blocks` counts them
+and `validation_report` names the condition and the two exports that do work.
+
 **`pipeline/czi_explode.py` resolves that into a `WellMap`** — the well labels in
-acquisition order, and per well the `(scene, tile)` pairs that become its FOV 0,
-1, … . Keeping the pairs rather than a start offset is what lets the two sources
-produce one structure: a file-named mapping groups by scene, a grid mapping chops
-one scene-major flat list through `explode_common.resolve_positions`, and the
-exploder below does not have to know which it was given. There are deliberately
+acquisition order, and per well the `ScenePosition`s that become its FOV 0,
+1, … . A position carries **the file it is in**, which is what lets a
+split-scene plate and a single-file plate produce one structure: a file-named
+mapping groups by scene, a grid mapping chops one flat list through
+`explode_common.resolve_positions`, and the exploder below does not have to know
+which it was given. Each worker thread holds a `_ReaderPool` — one
+`CziReader` per file that thread's own wells read from, opened on first use, so
+a ninety-six-file plate does not open ninety-six handles per thread to read one
+well and a single-file plate opens exactly one. There are deliberately
 only those two: the OME-TIFF importer additionally accepts an explicit
 click-defined visit order because its page has an editor that produces one, and
 a parameter with no producer is a branch the application never takes however
@@ -6649,6 +6690,33 @@ happened. Positional tokens order correctly and state no number the file cannot
 back up. This is where the CZI converter gives less than the OME-TIFF one, whose
 `DeltaT` handling is described above — the manual says so too, because a user
 expecting hours on a Review axis needs to know where they went.
+
+**The page's tick-box is where "one file or the folder" is decided.** Picking a
+folder converts all of it — the folder *is* the set. Picking a *file* that has
+`.czi` siblings offers *Convert all N .czi files in this folder as one plate*,
+ticked by default and naming the count, because a folder of per-scene files is a
+plate and converting one well of ninety-six while reporting success is the worse
+answer. Once the user touches the box their answer stands; a new source asks
+afresh, so unticking it once does not make every later plate convert one file of
+its folder. `use_folder` is a mapping field for the obvious reason — it is the
+difference between a one-well dataset and a ninety-six-well one from the same
+selection — and the marker's signature additionally fingerprints **every file in
+the set**, because the shared helper fingerprints the selected path alone and
+that is identical whether a sibling was added between two runs or not.
+
+The destination default follows the same rule: a set writes beside its *folder*
+and is named for it. Naming it after whichever member sorted first would bury a
+whole plate under one scene's name, and writing inside the source folder would
+put a dataset among the files it was made from. `explode_czi` picks the
+experiment token the same way, and for the same reason: `Exp7_A02` as a token
+would stamp one scene's well into every archive on the plate, H11's included.
+
+Analyze's redirect knows about the folder shape too. `_PACKED_KINDS` carries a
+column saying whether *several* of a kind in one folder are one plate: false for
+OME-TIFF, where two files are two plates and picking either would convert one
+the user did not name, and true for CZI, where a folder of them is the split
+export. A folder of several returns the folder rather than a member, because
+several of them are the plate and naming one would describe a scene.
 
 Resume works exactly as it does for the OME-TIFF converter, through the shared
 `datasets/core/convert_marker.py` with `.aw_czi_in_progress` and this tool's own

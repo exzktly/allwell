@@ -26,7 +26,13 @@ from pathlib import Path
 from datasets.core import convert_marker as marker
 from datasets.core.convert_marker import ResumeState  # noqa: F401 (re-export)
 from pipeline.czi_explode import WELL_SOURCES, resolve_well_map
-from pipeline.czi_read import CziLayout, CziReadError, read_czi_layout
+from pipeline.czi_read import CziReadError
+from pipeline.czi_set import (
+    CziSet,
+    discover_czi_files,
+    read_czi_set_safely,
+    siblings_of,
+)
 from util.channel_roles import (  # noqa: F401 (re-export for the view)
     CHANNEL_ROLES,
     channel_tokens_from_roles,
@@ -46,8 +52,9 @@ IN_PROGRESS_MARKER = ".aw_czi_in_progress"
 #: files from different images, which is the one thing a resume must never
 #: stitch together. ``workers`` is deliberately absent — it changes how fast the
 #: conversion goes and nothing about what it writes.
-_MAPPING_FIELDS = ("well_source", "grid_rows", "grid_cols", "origin",
-                   "direction", "serpentine", "fovs_per_well", "experiment")
+_MAPPING_FIELDS = ("well_source", "use_folder", "grid_rows", "grid_cols",
+                   "origin", "direction", "serpentine", "fovs_per_well",
+                   "experiment")
 
 
 class CziImportError(Exception):
@@ -74,6 +81,14 @@ class ConversionParams:
     fovs_per_well: int | None = None      # None = take it from the file
     experiment: str = ""                  # blank = derive from the filename
     workers: int = 0                      # 0 = auto (per-well thread pool)
+    #: Convert every ``.czi`` beside the selected one as a single plate. This
+    #: is ZEN's *Split Scenes* export: one file per well, with nothing inside
+    #: any of them saying it is part of a plate. Off for a lone file, so
+    #: picking one file and converting its neighbours is never a surprise; the
+    #: page turns it on when the folder really does look like one plate, and
+    #: says so where the user can see it. Irrelevant when the selected path is
+    #: itself a folder, which *is* the set.
+    use_folder: bool = False
 
 
 @dataclass
@@ -83,6 +98,10 @@ class ConversionPlan:
     n_scenes: int
     n_timepoints: int
     fovs_per_well: int
+    #: How many ``.czi`` files this conversion reads. More than one is a
+    #: split-scene export, and the readout says so — the same well count from
+    #: one file and from ninety-six is two very different things to check.
+    n_files: int = 1
     well_labels: list[str] = field(default_factory=list)
     channels: list[str] = field(default_factory=list)
     #: True when ``well_labels`` came from the file's own scene names.
@@ -107,11 +126,12 @@ class ConversionPlan:
             first, last = self.well_labels[0], self.well_labels[-1]
             span = f" {first}" if first == last else f" {first}→{last}"
         source = ("named by the file" if self.from_file else "from the plate grid")
+        held = f" across {self.n_files} file(s)" if self.n_files > 1 else ""
         images = (self.n_wells * self.fovs_per_well * self.n_timepoints
                   * max(1, len(self.channels)))
         return (
-            f"{self.n_wells} well(s){span} ({source}) × {self.fovs_per_well} "
-            f"FOV(s) × {self.n_timepoints} timepoint(s) × "
+            f"{self.n_wells} well(s){span} ({source}){held} × "
+            f"{self.fovs_per_well} FOV(s) × {self.n_timepoints} timepoint(s) × "
             f"{len(self.channels)} channel(s) ({channels}) — {images} image(s)."
         )
 
@@ -145,6 +165,7 @@ class RawFields:
     """
 
     well_source: str = "file"
+    use_folder: bool = False
     rows: str = ""
     cols: str = ""
     fovs: str = ""
@@ -182,6 +203,7 @@ class RawFields:
         workers, _ = parse_count(self.workers)
         return ConversionParams(
             well_source=self.well_source,
+            use_folder=self.use_folder,
             grid_rows=rows or 0,
             grid_cols=cols or 0,
             origin=(self.origin or "A01").strip() or "A01",
@@ -202,47 +224,72 @@ def strip_czi_suffix(name: str) -> str:
     return Path(name).stem or name
 
 
-def default_dest(src: Path | str) -> Path:
+def default_dest(src: Path | str, params: ConversionParams | None = None) -> Path:
     """The folder a conversion of *src* writes into unless the user says otherwise.
 
     Beside the source and named after it, which is what makes the destination
-    field a confirmation rather than a second thing to go and find.
+    field a confirmation rather than a second thing to go and find. For a
+    **set** the source is the folder, so the destination goes beside *that* and
+    takes its name: writing into a folder named after whichever member sorted
+    first would bury a whole plate under one scene's name, and writing inside
+    the source folder would put a dataset among the files it was made from.
     """
     src = Path(src)
+    if src.is_dir():
+        return src.parent / src.name
+    if params is not None and params.use_folder and len(source_files(src, params)) > 1:
+        folder = src.parent
+        return folder.parent / folder.name
     return src.parent / strip_czi_suffix(src.name)
 
 
-def read_layout(src: Path | str) -> CziLayout:
-    """Read the CZI layout, converting any failure into a :class:`CziImportError`."""
-    try:
-        return read_czi_layout(src)
-    except CziReadError as exc:
-        raise CziImportError(str(exc)) from exc
-    except OSError as exc:
-        raise CziImportError(
-            f"Could not open {Path(src).name}: {exc}"
-        ) from exc
-    except Exception as exc:
-        raise CziImportError(
-            f"Could not read {Path(src).name} as a CZI: {exc}"
-        ) from exc
+def source_files(src: Path | str, params: ConversionParams) -> list[Path]:
+    """Exactly the ``.czi`` files a run with these settings converts.
 
-
-def plan_conversion(layout: CziLayout, params: ConversionParams) -> ConversionPlan:
-    """Resolve *params* against *layout* into a :class:`ConversionPlan`.
-
-    Raises :class:`CziImportError` when the file is unsound, when the well
-    source cannot produce a mapping, or when the grid and the file disagree
-    about how many positions there are. The soundness check comes first: no
-    grid can make an incomplete file convertible, so the readout should say
-    *that* rather than a divisibility error derived from it.
+    One definition, consulted by the page's readout, by the executor and by the
+    resume marker — because a run that converts a different set of files from
+    the one the readout described, or resumes against a set the marker never
+    saw, is the same defect wearing three hats.
     """
-    unsound = layout.validation_report()
-    if unsound:
-        raise CziImportError(unsound)
+    src = Path(src)
+    if src.is_dir():
+        # A folder *is* the set; the tick-box only ever widens a lone file.
+        return discover_czi_files(src)
+    if not src.is_file():
+        return []
+    return siblings_of(src) if params.use_folder else [src]
+
+
+def read_source(src: Path | str, params: ConversionParams) -> CziSet:
+    """Read the files *params* selects as one plate.
+
+    Never raises for a source that cannot be used — the page calls this on
+    every keystroke, and a traceback in a readout helps nobody. An unreadable
+    or mismatched set comes back with :attr:`~pipeline.czi_set.CziSet.problem`
+    set; :func:`plan_conversion` is what turns that into a
+    :class:`CziImportError` at the point a caller is entitled to one.
+    """
+    try:
+        return read_czi_set_safely(src, files=source_files(src, params))
+    except (CziReadError, OSError) as exc:      # pragma: no cover — defensive
+        return CziSet(problem=str(exc))
+
+
+def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
+    """Resolve *params* against *source* into a :class:`ConversionPlan`.
+
+    Raises :class:`CziImportError` when a file is unsound, when two files of a
+    set disagree about something the filenames depend on, when the well source
+    cannot produce a mapping, or when the grid and the files disagree about how
+    many positions there are. Soundness comes first: no grid can make an
+    incomplete file convertible, so the readout should say *that* rather than a
+    divisibility error derived from it.
+    """
+    if source.problem:
+        raise CziImportError(source.problem)
     try:
         well_map = resolve_well_map(
-            layout,
+            source,
             well_source=params.well_source,
             grid_rows=params.grid_rows,
             grid_cols=params.grid_cols,
@@ -254,11 +301,12 @@ def plan_conversion(layout: CziLayout, params: ConversionParams) -> ConversionPl
     except ValueError as exc:
         raise CziImportError(str(exc)) from exc
     return ConversionPlan(
-        n_scenes=layout.n_scenes,
-        n_timepoints=layout.size_t,
+        n_scenes=source.n_scenes,
+        n_timepoints=source.layout.size_t,
         fovs_per_well=well_map.fovs_per_well,
+        n_files=source.n_files,
         well_labels=list(well_map.wells),
-        channels=list(layout.channel_names),
+        channels=list(source.layout.channel_names),
         from_file=well_map.from_file,
     )
 
@@ -266,7 +314,26 @@ def plan_conversion(layout: CziLayout, params: ConversionParams) -> ConversionPl
 # ── Resume marker (shared with the OME converter — datasets.core.convert_marker)
 
 def _signature(src: Path | str, params: ConversionParams) -> dict:
-    return marker.mapping_signature(src, params, _MAPPING_FIELDS)
+    """The mapping signature, plus the identity of *every* file in the set.
+
+    The shared helper fingerprints one source path, which is the whole story
+    for a single-file conversion and only the first line of it for a
+    split-scene one: a sibling added, removed or re-exported between two runs
+    changes which images land in which wells while the selected file's own
+    path, size and mtime are untouched. Resuming across that stitches one
+    folder out of two acquisitions, which is exactly what the marker exists to
+    refuse.
+    """
+    values = marker.mapping_signature(src, params, _MAPPING_FIELDS)
+    fingerprints = []
+    for path in source_files(src, params):
+        try:
+            stat = path.stat()
+            fingerprints.append([path.name, stat.st_size, stat.st_mtime_ns])
+        except OSError:
+            fingerprints.append([path.name, None, None])
+    values["source_set"] = fingerprints
+    return values
 
 
 def write_run_marker(dest: Path | str, src: Path | str,

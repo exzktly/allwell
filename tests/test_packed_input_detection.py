@@ -75,9 +75,30 @@ def test_a_lone_czi_in_a_directory_is_detected(tmp_path):
     assert found is not None and found.path == p
 
 
-def test_two_czis_in_one_directory_are_ambiguous(tmp_path):
+def test_several_czis_in_one_directory_are_one_split_plate(tmp_path):
+    """The one place the two formats are treated differently, and the reason
+    the kinds table carries a column for it.
+
+    Two OME-TIFFs in a folder are two plates and picking either would convert
+    one the user did not name. Several ``.czi`` files are ZEN's *Split Scenes*
+    export — one file per scene, one plate — which the CZI converter reads as a
+    set, so the folder is a recognised input. The *folder* comes back rather
+    than a member, because several of these are the plate and naming one of
+    them would describe a scene.
+    """
     _write_czi(tmp_path / "a.czi")
     _write_czi(tmp_path / "b.czi")
+    found = detect_packed_input(tmp_path)
+
+    assert found is not None
+    assert (found.path, found.action) == (tmp_path, PACKED_CZI)
+
+
+def test_two_ome_tiffs_in_one_directory_are_still_ambiguous(tmp_path):
+    """The contrast that makes the column above mean something: nothing has
+    changed for OME-TIFF, where two files really are two plates."""
+    _write_ome(tmp_path / "a.ome.tif")
+    _write_ome(tmp_path / "b.ome.tif")
     assert detect_packed_input(tmp_path) is None
 
 

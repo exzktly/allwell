@@ -25,8 +25,9 @@ from datasets.czi_import.czi_import_compute import (
     default_dest,
     destination_problem,
     plan_conversion,
-    read_layout,
+    read_source,
     resume_state,
+    source_files,
     strip_czi_suffix,
     write_run_marker,
 )
@@ -45,7 +46,7 @@ def plate(tmp_path):
 # ── the plan ─────────────────────────────────────────────────────────────────
 
 def test_the_plan_states_the_mapping_and_where_it_came_from(plate):
-    plan = plan_conversion(read_layout(plate), ConversionParams())
+    plan = plan_conversion(read_source(plate, ConversionParams()), ConversionParams())
 
     assert plan.well_labels == ["C07", "A02"]
     assert plan.from_file is True
@@ -62,9 +63,8 @@ def test_the_plan_states_the_mapping_and_where_it_came_from(plate):
 def test_a_grid_plan_says_it_came_from_the_grid(tmp_path):
     path = write_czi(tmp_path / "bare.czi",
                      plate_tiles(wells=4, fovs=1, timepoints=1, channels=1))
-    plan = plan_conversion(read_layout(path),
-                           ConversionParams(well_source="grid", grid_rows=2,
-                                            grid_cols=2))
+    params = ConversionParams(well_source="grid", grid_rows=2, grid_cols=2)
+    plan = plan_conversion(read_source(path, params), params)
 
     assert plan.well_labels == ["A01", "A02", "B02", "B01"]
     assert plan.from_file is False
@@ -78,17 +78,23 @@ def test_an_unsound_file_is_reported_as_unsound_not_as_a_bad_grid(tmp_path):
     del tiles[1]
     path = write_czi(tmp_path / "short.czi", tiles)
 
+    params = ConversionParams(well_source="grid", grid_rows=1, grid_cols=3)
     with pytest.raises(CziImportError, match="incomplete"):
-        plan_conversion(read_layout(path),
-                        ConversionParams(well_source="grid", grid_rows=1,
-                                         grid_cols=3))
+        plan_conversion(read_source(path, params), params)
 
 
-def test_reading_something_that_is_not_a_czi_is_a_tool_error(tmp_path):
+def test_reading_something_that_is_not_a_czi_is_reported_not_raised(tmp_path):
+    """The page asks this on every keystroke, so a broken file is a *problem*
+    on the set rather than an exception in a readout. ``plan_conversion`` is
+    what turns it into a ``CziImportError`` at the point a caller wants one."""
     path = tmp_path / "nope.czi"
     path.write_bytes(b"II*\0" + b"\0" * 200)
+    params = ConversionParams()
+
+    czi_set = read_source(path, params)
+    assert "not a CZI file" in czi_set.problem
     with pytest.raises(CziImportError, match="not a CZI file"):
-        read_layout(path)
+        plan_conversion(czi_set, params)
 
 
 # ── the fields as typed ──────────────────────────────────────────────────────
@@ -121,7 +127,7 @@ def test_the_typed_fields_become_the_params_the_run_uses(plate):
     assert params == ConversionParams(
         well_source="grid", grid_rows=2, grid_cols=3, origin="b3",
         direction="col", serpentine=False, fovs_per_well=4,
-        experiment="Run9", workers=6)
+        experiment="Run9", workers=6, use_folder=False)
 
 
 @pytest.mark.parametrize("name,expected", [
@@ -170,7 +176,7 @@ def test_every_declared_mapping_field_alone_declines_the_resume(
     changed = {
         "well_source": "grid", "grid_rows": 4, "grid_cols": 6,
         "origin": "B03", "direction": "col", "serpentine": False,
-        "fovs_per_well": 3, "experiment": "Other",
+        "fovs_per_well": 3, "experiment": "Other", "use_folder": True,
     }[field]
     other = dataclasses.replace(params, **{field: changed})
 
@@ -251,3 +257,86 @@ def test_the_two_converters_do_not_share_a_marker_filename(plate):
 
     assert IN_PROGRESS_MARKER == ".aw_czi_in_progress"
     assert IN_PROGRESS_MARKER != OME_MARKER
+
+
+# ── split-scene sets ─────────────────────────────────────────────────────────
+
+def _split_plate(tmp_path, wells=("C07", "A02", "H11")):
+    folder = tmp_path / "Exp7_split"
+    folder.mkdir(parents=True, exist_ok=True)
+    for well in wells:
+        write_czi(folder / f"Exp7_{well}.czi",
+                  plate_tiles(wells=1, fovs=1, timepoints=1, channels=2),
+                  xml=plate_metadata_xml(scene_wells={0: well},
+                                         channels=["DAPI", "GFP"]))
+    return folder
+
+
+def test_a_lone_file_converts_itself_unless_the_folder_is_asked_for(tmp_path):
+    """The tick-box is the whole difference between a one-well dataset and a
+    three-well one from the same selection — which is why it keys the resume."""
+    folder = _split_plate(tmp_path)
+    picked = folder / "Exp7_A02.czi"
+
+    alone = ConversionParams()
+    together = ConversionParams(use_folder=True)
+
+    assert source_files(picked, alone) == [picked]
+    assert [p.name for p in source_files(picked, together)] == [
+        "Exp7_A02.czi", "Exp7_C07.czi", "Exp7_H11.czi"]
+    assert plan_conversion(read_source(picked, alone), alone).well_labels == ["A02"]
+    assert plan_conversion(read_source(picked, together),
+                           together).well_labels == ["A02", "C07", "H11"]
+
+
+def test_a_folder_is_the_set_whatever_use_folder_says(tmp_path):
+    """The box only ever widens a lone *file*; a folder already is the plate,
+    so an unticked box must not silently convert one scene of it."""
+    folder = _split_plate(tmp_path)
+    for params in (ConversionParams(), ConversionParams(use_folder=True)):
+        assert len(source_files(folder, params)) == 3
+
+
+def test_the_plan_says_how_many_files_it_reads(tmp_path):
+    """Ninety-six wells from one file and from ninety-six are two very
+    different things to check before pressing Convert."""
+    folder = _split_plate(tmp_path)
+    params = ConversionParams(use_folder=True)
+    plan = plan_conversion(read_source(folder, params), params)
+
+    assert plan.n_files == 3
+    assert "across 3 file(s)" in plan.summary()
+
+
+def test_a_set_writes_beside_its_folder_and_is_named_for_it(tmp_path):
+    """Not for whichever member sorted first, which would bury a whole plate
+    under one scene's name — and not *inside* the source folder, which would
+    put a dataset among the files it was made from."""
+    folder = _split_plate(tmp_path)
+    picked = folder / "Exp7_A02.czi"
+
+    assert default_dest(folder) == tmp_path / "Exp7_split"
+    assert default_dest(picked, ConversionParams(use_folder=True)) == (
+        tmp_path / "Exp7_split")
+    assert default_dest(picked, ConversionParams()) == folder / "Exp7_A02"
+
+
+def test_a_sibling_appearing_between_runs_declines_the_resume(tmp_path):
+    """The shared marker fingerprints the *selected* path, which is identical
+    either way; only the set's own fingerprint sees a fourth file arrive, and
+    resuming across it stitches one folder out of two acquisitions."""
+    folder = _split_plate(tmp_path)
+    picked = folder / "Exp7_A02.czi"
+    params = ConversionParams(use_folder=True)
+    dest = tmp_path / "dest"
+    write_run_marker(dest, picked, params)
+    (dest / "in").mkdir(parents=True)
+    (dest / "in" / "A02.zip").write_bytes(b"")
+    assert resume_state(dest, picked, params).resumable is True
+
+    write_czi(folder / "Exp7_D04.czi",
+              plate_tiles(wells=1, fovs=1, timepoints=1, channels=2),
+              xml=plate_metadata_xml(scene_wells={0: "D04"},
+                                     channels=["DAPI", "GFP"]))
+
+    assert resume_state(dest, picked, params).mismatched is True

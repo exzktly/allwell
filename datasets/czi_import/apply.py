@@ -27,6 +27,7 @@ from datasets.czi_import.czi_import_compute import (
     clear_run_marker,
     destination_problem,
     resume_state,
+    source_files,
     strip_czi_suffix,
     write_run_marker,
 )
@@ -70,7 +71,14 @@ def convert(
     if problem:
         raise CziImportError(f"{dest}: {problem}")
 
-    experiment = params.experiment or strip_czi_suffix(src.name)
+    files = source_files(src, params)
+    # Blank means the source names the experiment, and for a split-scene set
+    # that is the *folder* — ``explode_czi`` decides it the same way. Naming a
+    # multi-file plate after whichever member sorted first would stamp one
+    # scene's well into every archive on the plate.
+    experiment = params.experiment
+    if not experiment and len(files) == 1:
+        experiment = strip_czi_suffix(src.name)
 
     # A conversion that stopped part-way leaves whole wells behind — each
     # archive is published atomically, so what is there is finished and correct.
@@ -96,6 +104,7 @@ def convert(
     result = explode_czi(
         src,
         dest / "in",
+        files=files,
         well_source=params.well_source,
         grid_rows=params.grid_rows,
         grid_cols=params.grid_cols,

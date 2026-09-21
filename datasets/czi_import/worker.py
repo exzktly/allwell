@@ -20,7 +20,7 @@ from datasets.czi_import.czi_import_compute import (
     ConversionParams,
     CziImportError,
     plan_conversion,
-    read_layout,
+    read_source,
 )
 from pipeline.czi_explode import CziExplodeCancelled
 
@@ -48,8 +48,8 @@ class CziImportWorker(QThread):
     def run(self) -> None:  # noqa: D401 — QThread entry point
         try:
             self.logLine.emit("Reading CZI metadata…")
-            layout = read_layout(self._src)
-            plan_conversion(layout, self._params)  # validate before writing
+            source = read_source(self._src, self._params)
+            plan_conversion(source, self._params)  # validate before writing
         except CziImportError as exc:
             self.failed.emit(str(exc))
             return

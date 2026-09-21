@@ -103,6 +103,15 @@ REUSE_CONTRACTS = {
         "well_source": "whether the wells came from the file's scene names or "
                        "from the grid. The same file yields two entirely "
                        "different plates under the two",
+        "use_folder": "whether the run converts the selected file alone or "
+                      "every .czi beside it as one plate. It is the difference "
+                      "between a one-well dataset and a ninety-six-well one "
+                      "from the same selection, and the marker's own source "
+                      "fingerprint cannot see it — that names the file the "
+                      "user picked, which is identical either way. The "
+                      "converter's signature carries a fingerprint of the "
+                      "whole set for the same reason, so a sibling added or "
+                      "re-exported between two runs declines the resume too",
         "grid_rows": "the imaged block's height, when the grid is what maps",
         "grid_cols": "the imaged block's width, for the same reason",
         "origin": "which well position 0 is",

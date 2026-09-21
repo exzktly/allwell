@@ -1,8 +1,9 @@
 """Convert CZI — turn a Zeiss ``.czi`` plate scan into a dataset folder.
 
-Zeiss acquisition software saves a whole plate scan as one ``.czi`` holding
-every scene (well), mosaic tile (field of view), channel, Z-plane and
-timepoint. The pipeline wants the opposite: one 2-D TIFF per
+Zeiss acquisition software saves a whole plate scan either as one ``.czi``
+holding every scene (well), mosaic tile (field of view), channel, Z-plane and
+timepoint, or — its *Split Scenes* export — as a folder of one file per scene.
+This page reads both; :mod:`pipeline.czi_set` is what makes a folder one plate. The pipeline wants the opposite: one 2-D TIFF per
 (channel, well, FOV, timepoint), grouped per well. This feature is the
 standalone converter that bridges the two — it reads the CZI's subblock
 directory and metadata, maps each scene to a 96-well label, max-projects Z, and
@@ -26,6 +27,8 @@ Module split (CLAUDE.md §3 suffixes):
 * :mod:`pipeline.czi_read` — the ZISRAW parser: the layout, and one 2-D plane
   at a time. Qt-free and in ``pipeline/`` because it is pixel work with no GUI
   knowledge, like ``pipeline.ome_explode``.
+* :mod:`pipeline.czi_set` — one or more files read as one plate, and the
+  uniformity checks that let them be one.
 * :mod:`pipeline.czi_explode` — the per-well explode: scenes and tiles onto
   well labels, Z max-projected, one atomic archive per well.
 * :mod:`~datasets.czi_import.czi_import_compute` — Qt-free planning: resolve
@@ -38,8 +41,9 @@ Module split (CLAUDE.md §3 suffixes):
 * :mod:`~datasets.czi_import.worker` — a thin ``QThread`` that runs planning +
   conversion off the UI thread, emitting progress.
 * :mod:`~datasets.czi_import.dashboard` — the per-well plate map.
-* :mod:`~datasets.czi_import.view` — the Qt builder (source/destination
-  pickers, well-source choice, grid controls, live readout, status section).
+* :mod:`~datasets.czi_import.view` — the Qt builder (a source picker that takes
+  a file or a folder, the "convert the whole folder" tick-box, the well-source
+  choice, grid controls, live readout, status section).
 * :mod:`~datasets.czi_import.controller` — wires the view to the worker and the
   "open in Analyze" hand-off.
 """

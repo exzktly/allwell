@@ -2081,6 +2081,7 @@ def test_required_files_list_is_what_we_promised():
         # The Zeiss CZI reader and its per-well explode; client-side for the
         # same reason, listed for the same manifest completeness.
         "pipeline/czi_read.py",
+        "pipeline/czi_set.py",
         "pipeline/czi_explode.py",
         # What both exploders share: the member-name rule, the resume check,
         # the worker split and the in-memory TIFF encode.

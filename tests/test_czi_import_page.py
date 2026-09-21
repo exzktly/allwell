@@ -104,7 +104,7 @@ def test_a_named_plate_reads_its_wells_out_of_the_file(controller, tmp_path):
     _set_source(page, _named_czi(tmp_path), tmp_path)
 
     assert "2 scene(s)" in page._readout.text()
-    assert "wells named by the file (2)" in page._readout.text()
+    assert "wells named by the file(s) (2)" in page._readout.text()
     verdict = page._verdict.text()
     assert "C07→A02" in verdict            # scene order, not plate order
     assert "named by the file" in verdict
@@ -390,3 +390,148 @@ def test_a_changed_mapping_does_reset_the_plate(controller, tmp_path):
                                         wells=("H11", "B05"))))
 
     assert sorted(page._dashboard._fraction) == ["B05", "H11"]
+
+
+# ── a plate split into one file per scene ────────────────────────────────────
+
+def _split_folder(tmp_path, wells=("C07", "A02", "H11")):
+    folder = tmp_path / "Exp7_split"
+    folder.mkdir(parents=True, exist_ok=True)
+    for well in wells:
+        write_czi(folder / f"Exp7_{well}.czi",
+                  plate_tiles(wells=1, fovs=1, timepoints=1, channels=2),
+                  xml=plate_metadata_xml(scene_wells={0: well},
+                                         channels=["DAPI", "GFP"]))
+    return folder
+
+
+def _browse(page, path):
+    """What the Browse button does — ``set_path`` plus the changed signal.
+
+    ``set_source_path`` deliberately does not fire it, because that is the Job
+    Queue's repopulate path and a spec carries its own destination.
+    """
+    page._src_field.set_path(str(path))
+    page._on_source_changed()
+
+
+def test_picking_one_file_of_a_split_export_offers_the_whole_folder(
+        controller, tmp_path):
+    folder = _split_folder(tmp_path)
+    page = controller.page
+
+    _browse(page, folder / "Exp7_A02.czi")
+
+    assert page._folder_cb.isVisibleTo(page) is True
+    assert "all 3 .czi files" in page._folder_cb.text()
+    # Ticked by default: a folder of per-scene files is a plate, and converting
+    # one well of three while reporting success is the worse answer.
+    assert page.use_folder() is True
+    assert sorted(page._dashboard._fraction) == ["A02", "C07", "H11"]
+    assert "across 3 file(s)" in page._verdict.text()
+
+
+def test_unticking_it_converts_the_one_file(controller, tmp_path):
+    folder = _split_folder(tmp_path)
+    page = controller.page
+    _browse(page, folder / "Exp7_A02.czi")
+
+    page._folder_cb.setChecked(False)
+
+    assert page.use_folder() is False
+    assert sorted(page._dashboard._fraction) == ["A02"]
+    assert "across" not in page._verdict.text()
+
+
+def test_the_box_follows_a_new_source_until_the_user_touches_it(
+        controller, tmp_path):
+    """Unticking it once must not make every later plate convert one file of
+    its folder — but an answer the user gave about *this* source has to stick
+    while they go on editing the grid and the experiment name."""
+    page = controller.page
+    first = _split_folder(tmp_path)
+    _browse(page, first / "Exp7_A02.czi")
+    page._folder_cb.setChecked(False)
+
+    page.refresh_readout()                      # any other keystroke
+    assert page.use_folder() is False           # their answer stands
+
+    second = _split_folder(tmp_path / "later", wells=("B05", "D04"))
+    _browse(page, second / "Exp7_B05.czi")
+    assert page.use_folder() is True            # a new source, asked afresh
+
+
+def test_a_lone_czi_is_not_offered_a_folder_it_has_no_siblings_in(
+        controller, tmp_path):
+    page = controller.page
+    _browse(page, _named_czi(tmp_path))
+
+    assert page._folder_cb.isVisibleTo(page) is False
+    assert page.use_folder() is False
+
+
+def test_selecting_the_folder_itself_converts_all_of_it(controller, tmp_path):
+    """The folder *is* the set, so there is nothing to offer and nothing the
+    box could usefully say — an unticked box must not convert one scene of it."""
+    folder = _split_folder(tmp_path)
+    page = controller.page
+
+    _browse(page, folder)
+
+    assert page._folder_cb.isVisibleTo(page) is False
+    assert page.use_folder() is True
+    assert sorted(page._dashboard._fraction) == ["A02", "C07", "H11"]
+
+
+def test_the_destination_default_names_the_plate_not_one_scene(controller,
+                                                               tmp_path):
+    folder = _split_folder(tmp_path)
+    page = controller.page
+
+    _browse(page, folder / "Exp7_A02.czi")
+
+    assert page.destination_path() == str(tmp_path / "Exp7_split")
+
+
+def test_a_split_export_converts_end_to_end_from_the_page(controller, tmp_path):
+    folder = _split_folder(tmp_path)
+    page = controller.page
+    _browse(page, folder / "Exp7_A02.czi")
+    page.set_destination_path(str(tmp_path / "dest"))
+
+    controller._launch()
+    controller._worker.wait(30_000)
+    QApplication.processEvents()
+
+    assert page._dashboard.outcome() == "done"
+    assert sorted(p.name for p in (tmp_path / "dest" / "in").glob("*.zip")) == [
+        "A02.zip", "C07.zip", "H11.zip"]
+
+
+def test_files_that_disagree_are_reported_on_the_page(controller, tmp_path):
+    folder = tmp_path / "mixed"
+    folder.mkdir()
+    write_czi(folder / "a_A01.czi",
+              plate_tiles(wells=1, fovs=1, timepoints=1, channels=2),
+              xml=plate_metadata_xml(scene_wells={0: "A01"},
+                                     channels=["DAPI", "GFP"]))
+    write_czi(folder / "b_A02.czi",
+              plate_tiles(wells=1, fovs=1, timepoints=1, channels=1),
+              xml=plate_metadata_xml(scene_wells={0: "A02"}, channels=["DAPI"]))
+    page = controller.page
+
+    _browse(page, folder)
+
+    assert "number of channels" in page._verdict.text()
+    assert not page._run_btn.isEnabled()
+
+
+def test_a_folder_holding_no_czi_files_says_so(controller, tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    page = controller.page
+
+    _browse(page, empty)
+
+    assert "no .czi files" in page._src_field.message()
+    assert not page._run_btn.isEnabled()

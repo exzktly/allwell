@@ -143,6 +143,10 @@ class SubBlock:
     pyramid_type: int
     #: axis → ``(start, size, stored_size)``, exactly as the directory states it.
     dims: dict[str, tuple[int, int, int]]
+    #: Which file of a multi-file CZI holds this tile's pixels. ``0`` is the
+    #: file the directory is in; anything else is a *sibling* file, and
+    #: ``file_position`` is then an offset into that one rather than this one.
+    file_part: int = 0
 
     def start(self, axis: str, default: int = 0) -> int:
         entry = self.dims.get(axis)
@@ -183,7 +187,7 @@ def _parse_directory_entry(data: bytes, offset: int) -> tuple[SubBlock, int]:
     if offset + _DIRECTORY_ENTRY.size > len(data):
         raise CziReadError("The subblock directory ends mid-entry; the file is "
                            "truncated.")
-    (schema, pixel_type, file_position, _part, compression, pyramid_type,
+    (schema, pixel_type, file_position, file_part, compression, pyramid_type,
      _r1, _r2, n_dims) = _DIRECTORY_ENTRY.unpack_from(data, offset)
     if _token(schema) != "DV":
         raise CziReadError(
@@ -205,7 +209,8 @@ def _parse_directory_entry(data: bytes, offset: int) -> tuple[SubBlock, int]:
         dims[_token(axis).upper()] = (start, size, stored)
         pos += _DIMENSION_ENTRY.size
     block = SubBlock(file_position=file_position, pixel_type=pixel_type,
-                     compression=compression, pyramid_type=pyramid_type, dims=dims)
+                     compression=compression, pyramid_type=pyramid_type,
+                     file_part=file_part, dims=dims)
     return block, pos
 
 
@@ -319,7 +324,8 @@ def _walk_segments(fh: BinaryIO) -> tuple[list[SubBlock], int]:
                     blocks.append(SubBlock(
                         file_position=position, pixel_type=block.pixel_type,
                         compression=block.compression,
-                        pyramid_type=block.pyramid_type, dims=block.dims))
+                        pyramid_type=block.pyramid_type,
+                        file_part=block.file_part, dims=block.dims))
         elif name == "ZISRAWMETADATA":
             metadata_position = position
         position += _SEGMENT_HEADER.size + allocated
@@ -471,6 +477,11 @@ class CziLayout:
     #: Tiles the directory holds twice for one coordinate. Non-zero means the
     #: index cannot say which of them is the plane, so the file is refused.
     duplicate_blocks: int = 0
+    #: Tiles whose pixels live in a *sibling* file — ZEN splits a very large
+    #: acquisition into numbered parts that share one subblock directory. This
+    #: reader opens one file, so their offsets would land at arbitrary
+    #: positions in the wrong file; refused rather than read.
+    foreign_part_blocks: int = 0
     #: Images a conversion of this file will write: one per
     #: (scene, tile, timepoint, channel), because Z is collapsed into each.
     #: Counted as images rather than as stored tiles on purpose — see
@@ -626,6 +637,16 @@ class CziLayout:
                 f"Split the {axis} dimension in ZEN and convert each part "
                 f"separately."
             )
+        if self.foreign_part_blocks:
+            return (
+                f"{subject} is one part of a multi-file CZI: "
+                f"{self.foreign_part_blocks} of its tiles have their pixels in "
+                f"companion files beside it, which this reader does not follow. "
+                f"Re-export it from ZEN as a single file, or with the scenes "
+                f"split into one file per scene — this converter reads either. "
+                f"(A split-scene export is a folder of .czi files, and picking "
+                f"any one of them offers the whole folder.)"
+            )
         if self.duplicate_blocks:
             return (
                 f"{subject} stores {self.duplicate_blocks} tile(s) twice under "
@@ -694,6 +715,7 @@ def _build_layout(blocks: list[SubBlock], xml: str, *,
     if not acquisition:
         return layout
 
+    layout.foreign_part_blocks = sum(1 for b in acquisition if b.file_part)
     layout.pixel_types = {b.pixel_type for b in acquisition}
     layout.compressions = {b.compression for b in acquisition}
     layout.width = max(b.size("X") for b in acquisition)

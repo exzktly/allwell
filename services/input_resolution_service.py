@@ -343,8 +343,9 @@ PACKED_OME_MESSAGE = (
 #: because the remedy is a *different page* and naming the wrong one sends the
 #: user to a converter that will refuse their file.
 PACKED_CZI_MESSAGE = (
-    "⚠ This is a Zeiss CZI. Convert it to a dataset folder first in the "
-    "Datasets tab → “Convert CZI”, then open that folder here to process it."
+    "⚠ This is a Zeiss CZI (or a folder of them, as ZEN writes when it splits "
+    "scenes). Convert it to a dataset folder first in the Datasets tab → "
+    "“Convert CZI”, then open that folder here to process it."
 )
 
 
@@ -1756,14 +1757,21 @@ def _group_loose_tifs_in_place(
 _OME_SUFFIXES = (".ome.tif", ".ome.tiff")
 _CZI_SUFFIXES = (".czi",)
 
-#: The packed acquisition files Analyze cannot read, each with the plan action
-#: and the message naming the Datasets page that converts it. Ordered, and
+#: The packed acquisition files Analyze cannot read, each with the plan action,
+#: the message naming the Datasets page that converts it, and whether *several*
+#: of them in one folder are one plate rather than an ambiguity. Ordered, and
 #: OME-TIFF first, because a ``.ome.tif`` also ends in ``.tif`` and nothing
 #: else here does — a table rather than a chain of ``if``s so adding a third
 #: converter cannot add a fourth place to state the same fact.
-_PACKED_KINDS: tuple[tuple[tuple[str, ...], str, str], ...] = (
-    (_OME_SUFFIXES, PACKED_OME, PACKED_OME_MESSAGE),
-    (_CZI_SUFFIXES, PACKED_CZI, PACKED_CZI_MESSAGE),
+#:
+#: The last column is the difference between the two formats. Two OME-TIFFs in
+#: a folder are two plates and picking either would convert one the user did
+#: not name. Several ``.czi`` files in a folder are ZEN's *Split Scenes*
+#: export — one file per scene, one plate — which the CZI converter reads as a
+#: set, so a folder of them is a recognised input rather than an ambiguity.
+_PACKED_KINDS: tuple[tuple[tuple[str, ...], str, str, bool], ...] = (
+    (_OME_SUFFIXES, PACKED_OME, PACKED_OME_MESSAGE, False),
+    (_CZI_SUFFIXES, PACKED_CZI, PACKED_CZI_MESSAGE, True),
 )
 
 
@@ -1784,16 +1792,18 @@ class PackedInput(NamedTuple):
 def detect_packed_input(raw: Path) -> PackedInput | None:
     """Return the packed acquisition file at *raw*, or ``None`` if there is none.
 
-    Accepts either the file selected directly, or a directory containing
-    exactly one such file at its top level — one, because two is ambiguous and
-    picking either would convert a plate the user did not name. Analyze uses
-    this to spot a packed file and redirect the user to the Datasets converter
+    Accepts either the file selected directly, or a directory holding them.
+    A directory with exactly one is that file. A directory with *several* is
+    ambiguous for an OME-TIFF — picking either would convert a plate the user
+    did not name — and is not for a CZI, where a folder of them is ZEN's
+    *Split Scenes* export of one plate; see :data:`_PACKED_KINDS`. Analyze uses
+    this to spot a packed input and redirect the user to the Datasets converter
     for it; the converters themselves do the work
     (``datasets.ome_import``, ``datasets.czi_import``).
     """
     if raw.is_file():
         name = raw.name.lower()
-        for suffixes, action, message in _PACKED_KINDS:
+        for suffixes, action, message, _many in _PACKED_KINDS:
             if name.endswith(suffixes):
                 return PackedInput(raw, action, message)
         return None
@@ -1802,10 +1812,15 @@ def detect_packed_input(raw: Path) -> PackedInput | None:
             entries = list(files_in(raw))
         except OSError:
             return None
-        for suffixes, action, message in _PACKED_KINDS:
+        for suffixes, action, message, many_is_one_plate in _PACKED_KINDS:
             hits = [p for p in entries if p.name.lower().endswith(suffixes)]
             if len(hits) == 1:
                 return PackedInput(hits[0], action, message)
+            if hits and many_is_one_plate:
+                # The folder, not a member: several of these *are* the plate,
+                # and naming one of them would describe a scene rather than
+                # the thing Analyze was pointed at.
+                return PackedInput(raw, action, message)
     return None
 
 

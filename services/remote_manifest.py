@@ -140,6 +140,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # already converted — but the manifest mirrors every ``pipeline/`` file,
     # so they are listed rather than made exceptions nobody can see.
     "pipeline/czi_read.py",
+    "pipeline/czi_set.py",
     "pipeline/czi_explode.py",
     # What both exploders share: the member-name rule, the resume check,
     # the worker split and the in-memory TIFF encode.

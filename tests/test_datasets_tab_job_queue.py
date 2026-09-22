@@ -1,6 +1,7 @@
-"""Smoke tests for DatasetsTab's Job Queue wiring: the page builds with all
-six tool controllers plus a fake Analyze registered, and "+ Queue" on a
-tool's page lands a job the Job Queue page can see.
+"""Smoke tests for DatasetsTab's wiring: the page builds with every tool
+controller plus a fake Analyze registered, "+ Queue" on a tool's page lands a
+job the Job Queue page can see, and the left rail carries the tools and
+nothing else.
 
 Offscreen, no real pipeline or worker execution — this only checks the
 registration/wiring datasets/tab.py and datasets/job_queue/controller.py do,
@@ -493,3 +494,55 @@ def test_current_help_page_is_safe_before_the_rail_exists(qapp, tmp_path):
 
     stub = types.SimpleNamespace()
     assert _DT.current_help_page(stub) == ""
+
+
+# ── the left rail ────────────────────────────────────────────────────────────
+
+def test_the_rail_lists_the_tools_and_carries_no_caption_above_them(qapp,
+                                                                    tmp_path):
+    """The left column is the tool list, with nothing restating the pane.
+
+    It carried a "DATASETS" caption above the rail, under a comment claiming
+    it matched Review's sidebar. Review has no such thing — its rail head is
+    the *dataset control*, and its own comment records why: "the rail's items
+    are self-evidently sections". The same is true of these, the pane is
+    already named by the title bar's mode switcher, and Analyze has no caption
+    either, so the label restated the one thing on screen that was never in
+    doubt while taking a row from the list it sat above.
+
+    Asserted as the exact set of label texts rather than as "no label says
+    DATASETS", because the second passes for a caption reading anything else.
+    """
+    from PySide6.QtWidgets import QLabel
+
+    from datasets.tab import _FEATURES
+
+    tab, _fake = _make_tab(tmp_path)
+    try:
+        texts = [w.text().strip()
+                 for w in tab._left_sidebar.findChildren(QLabel)
+                 if w.text().strip()]
+        assert texts == [feat.name for feat in _FEATURES]
+    finally:
+        tab.shutdown()
+
+
+def test_no_pane_rail_carries_a_caption_naming_its_own_pane(qapp, tmp_path):
+    """The rule, rather than the one instance of it.
+
+    A caption naming the pane is redundant in every pane for the same reason,
+    so this is stated against all of them instead of against Datasets alone —
+    the shape CLAUDE.md asks for when a roster would otherwise be written by
+    hand and go stale on the next pane.
+    """
+    from PySide6.QtWidgets import QLabel
+
+    tab, _fake = _make_tab(tmp_path)
+    try:
+        shouting = [w.text().strip()
+                    for w in tab._left_sidebar.findChildren(QLabel)
+                    if w.text().strip().upper() in {"DATASETS", "ANALYZE",
+                                                    "REVIEW"}]
+        assert not shouting, f"the rail restates its own pane: {shouting}"
+    finally:
+        tab.shutdown()

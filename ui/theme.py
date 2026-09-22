@@ -971,12 +971,6 @@ QPlainTextEdit#HomeNotes:focus {{
     background: {c.panel_elevated};
     border-color: {c.border};
 }}
-QLabel#RailHead {{
-    font-size: {t.caption_size}px;
-    font-weight: {t.semibold};
-    color: {c.text_muted};
-    letter-spacing: 0.08em;
-}}
 QWidget#ActiveGroupBanner {{
     background-color: {c.panel};
     border-radius: {r.sm}px;

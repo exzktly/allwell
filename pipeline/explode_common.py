@@ -74,6 +74,32 @@ def resolve_positions(
     return fovs_per_well
 
 
+@dataclass(frozen=True)
+class TimeScan:
+    """Elapsed hours per timepoint index, and why any are missing.
+
+    What a reader hands :func:`elapsed_hour_tokens` after sampling one
+    position's acquisition stamps. Both packed readers produce one — a CZI's
+    come from each subblock's own metadata, an ND2's from its frame-times
+    cache — and both measure from the first timepoint's reading, so index 0 is
+    ``0.0`` whenever it is present at all.
+
+    ``reasons`` is empty on a clean scan and otherwise says, in the run log's
+    words, what stopped it. An empty scan with nothing said about it would
+    leave a positionally-named plate indistinguishable from one whose writer
+    recorded no times.
+    """
+
+    hours_by_index: dict = field(default_factory=dict)
+    reasons: list = field(default_factory=list)
+    #: The position every reading was taken from. A plate scan visits its
+    #: wells in turn, so one round's readings span the time it takes to cross
+    #: the plate — measured at 31 minutes across 96 scenes — and mixing
+    #: positions would fold that spread into the elapsed times.
+    scene: int = -1
+    bytes_read: int = 0
+
+
 def hours_token(hours: float) -> str:
     """``"<hours>h"`` in a spelling ``util.timepoint`` can read, or ``""``.
 

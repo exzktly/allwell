@@ -142,8 +142,14 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/czi_read.py",
     "pipeline/czi_set.py",
     "pipeline/czi_explode.py",
-    # What both exploders share: the member-name rule, the resume check,
-    # the worker split and the in-memory TIFF encode.
+    # The Nikon ND2 adapter. Unlike the CZI reader this is a thin layer over
+    # the `nd2` package rather than a parser; like the other two it runs
+    # client-side, and is listed because the manifest mirrors every
+    # ``pipeline/`` file rather than carrying exceptions nobody can see.
+    "pipeline/nd2_read.py",
+    # What the exploders share: the member-name rule, the resume check, the
+    # worker split, the timepoint plan, the elapsed-hour rendering and the
+    # in-memory TIFF encode.
     "pipeline/explode_common.py",
     "pipeline/ome_explode.py",
     # The loose-TIF grouping pre-pass, spawned as a subprocess. Like

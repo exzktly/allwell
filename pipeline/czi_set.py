@@ -31,8 +31,10 @@ stdlib, so it stays inside the pipeline self-sufficiency contract
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable, TypeVar
 
 from util.dir_scan import files_in
 from pipeline.czi_read import (
@@ -47,6 +49,24 @@ from pipeline.czi_read import (
 #: The extension a CZI carries. A tuple for the same reason ``_OME_SUFFIXES``
 #: is one: the membership test reads the same whether there is one or three.
 CZI_SUFFIXES = (".czi",)
+
+#: How many files a scan reads at once, at most.
+#:
+#: Deliberately **not** ``explode_common.pick_workers``, which caps at the CPU
+#: count because the work it sizes is decoding and re-encoding pixels. Reading a
+#: file's header or its subblock directory decodes nothing: it is a couple of
+#: seeks and a few kilobytes, and on a share every one of them is a round trip
+#: with the thread parked doing nothing. Sizing that to the cores would leave a
+#: four-core laptop reading a 96-file plate four at a time for no reason.
+#:
+#: The cap is about the *share*, not the machine — enough requests in flight to
+#: cover the latency, few enough not to hammer a filer or exhaust a mount's
+#: connection pool. Eight is a common default for that and is what this is: a
+#: defensible constant, **not** a measured optimum, because the only hardware it
+#: could be measured against is the user's own.
+_MAX_SCAN_WORKERS = 8
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
@@ -146,6 +166,33 @@ class CziSet:
             f"{layout.size_c} channel(s) ({channels}){z_note}, "
             f"{layout.width}×{layout.height} {layout.dtype}{source}."
         )
+
+
+def scan_workers(n_files: int) -> int:
+    """How many files to read at once for a scan of *n_files*."""
+    return max(1, min(_MAX_SCAN_WORKERS, n_files))
+
+
+def _per_file(fn: "Callable[[Path], _T]", paths: list[Path]) -> list[_T]:
+    """Run *fn* over *paths* concurrently, **in order**.
+
+    The order is load-bearing and not a nicety: it is the order ZEN wrote a
+    split export in, the order a grid mapping lays its well labels over, and the
+    order ``CziSet.positions`` is walked in. Collecting results as they finish
+    would make a plate's well mapping depend on which file the filer answered
+    first. ``Executor.map`` yields by argument order however the work completes,
+    which is exactly that guarantee — and it re-raises each call's exception at
+    its own position, so a set whose third file is broken still fails on the
+    third file.
+
+    One file is done on the calling thread: a pool for a single header read is
+    two context switches to save nothing.
+    """
+    if len(paths) < 2:
+        return [fn(path) for path in paths]
+    with ThreadPoolExecutor(max_workers=scan_workers(len(paths)),
+                            thread_name_prefix="czi-scan") as pool:
+        return list(pool.map(fn, paths))
 
 
 def discover_czi_files(source: Path | str) -> list[Path]:
@@ -255,8 +302,9 @@ def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None) -> Cz
         )
         return result
 
-    for path in paths:
-        result.layouts.append(read_czi_layout(path))
+    # Read concurrently: each file is its own handle and its own layout, and
+    # the cost is round trips rather than cycles.
+    result.layouts = _per_file(read_czi_layout, paths)
 
     first, first_path = result.layouts[0], paths[0]
     # Each file has to be sound in its own right before the set is compared:
@@ -363,14 +411,20 @@ def peek_wells(source: Path | str, *,
     if not paths:
         peek.problem = f"No .czi files in {Path(source).name or source}."
         return peek
-    seen: set[str] = set()
-    for path in paths:
+    def _peek_one(path: Path) -> "ScenePeek | None":
         try:
-            scene = peek_scene_wells(path)
+            return peek_scene_wells(path)
         except (CziReadError, OSError):
-            # Not reported as a problem: the full read is the authority on a
-            # file being broken, and saying so from here would put a refusal on
-            # screen that a peek is not entitled to make.
+            # Caught **inside** the worker rather than around the whole batch,
+            # so one unreadable file costs that one file and not the rest of
+            # the plate. Not reported as a problem either: the full read is the
+            # authority on a file being broken, and saying so from here would
+            # put a refusal on screen that a peek is not entitled to make.
+            return None
+
+    seen: set[str] = set()
+    for path, scene in zip(paths, _per_file(_peek_one, paths)):
+        if scene is None:
             peek.unnamed.append(path)
             continue
         peek.peeks.append(scene)

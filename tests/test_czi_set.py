@@ -12,6 +12,8 @@ import builtins
 import contextlib
 import io
 import os
+import threading
+import time
 
 import pytest
 
@@ -21,12 +23,14 @@ from tests._czi_fixture import (
     plate_tiles,
     write_czi,
 )
+from pipeline import czi_set
 from pipeline.czi_read import CziReadError
 from pipeline.czi_set import (
     discover_czi_files,
     peek_wells,
     read_czi_set,
     read_czi_set_safely,
+    scan_workers,
     siblings_of,
 )
 
@@ -458,3 +462,118 @@ def _counting_stats(folder):
         yield lambda: len(calls)
     finally:
         os.stat = real_stat
+
+
+# ── reading the files at once ────────────────────────────────────────────────
+
+def test_a_multi_file_scan_reads_on_more_than_one_thread(tmp_path,
+                                                         monkeypatch):
+    """A scan is round trips, not cycles: eight files in flight cover eight
+    latencies instead of paying them end to end. Asserted as the thread count
+    rather than as a duration, because a timing assertion on a build machine is
+    a flake with a schedule."""
+    folder = _split_plate(tmp_path, wells=tuple(
+        f"A{i + 1:02d}" for i in range(8)))
+    threads: set[int] = set()
+    real = czi_set.peek_scene_wells
+
+    def _record(path):
+        threads.add(threading.get_ident())
+        return real(path)
+
+    monkeypatch.setattr(czi_set, "peek_scene_wells", _record)
+    peek = peek_wells(folder)
+
+    assert len(peek.wells) == 8
+    assert len(threads) > 1, "the eight files were read one after another"
+
+
+def test_a_full_read_of_several_files_is_concurrent_too(tmp_path, monkeypatch):
+    folder = _split_plate(tmp_path, wells=("A01", "A02", "A03", "A04"))
+    threads: set[int] = set()
+    real = czi_set.read_czi_layout
+
+    def _record(path):
+        threads.add(threading.get_ident())
+        return real(path)
+
+    monkeypatch.setattr(czi_set, "read_czi_layout", _record)
+    read_czi_set(folder)
+
+    assert len(threads) > 1
+
+
+@pytest.mark.parametrize("stage", ["peek", "full"])
+def test_the_order_is_the_file_order_however_the_reads_finish(
+        tmp_path, monkeypatch, stage):
+    """The order is not a nicety. It is the order ZEN wrote a split export in,
+    the order a grid mapping lays its well labels over, and the order
+    ``positions`` is walked in — so collecting results as they complete would
+    make a plate's well mapping depend on which file the filer answered first.
+
+    The first file is held back so it finishes *last*, which is the case that
+    tells ``map``'s by-argument ordering apart from as-completed.
+    """
+    folder = _split_plate(tmp_path, wells=("C07", "A02", "H11"))
+    first = sorted(folder.glob("*.czi"))[0]           # Exp7_A02.czi
+    name = {"peek": "peek_scene_wells", "full": "read_czi_layout"}[stage]
+    real = getattr(czi_set, name)
+
+    def _slow_first(path):
+        if path == first:
+            time.sleep(0.05)
+        return real(path)
+
+    monkeypatch.setattr(czi_set, name, _slow_first)
+
+    if stage == "peek":
+        assert peek_wells(folder).wells == ["A02", "C07", "H11"]
+    else:
+        assert read_czi_set(folder).wells_from_files() == ["A02", "C07", "H11"]
+
+
+@pytest.mark.parametrize("stage", ["peek", "full"])
+def test_a_single_file_is_read_on_the_calling_thread(tmp_path, monkeypatch,
+                                                     stage):
+    """No pool for one file: two context switches to save nothing, and every
+    single-file conversion in the app takes this path."""
+    path = write_czi(tmp_path / "Solo.czi",
+                     plate_tiles(wells=1, fovs=1, timepoints=1, channels=1),
+                     xml=plate_metadata_xml(scene_wells={0: "A01"},
+                                            channels=["DAPI"]))
+    name = {"peek": "peek_scene_wells", "full": "read_czi_layout"}[stage]
+    real = getattr(czi_set, name)
+    seen: list[int] = []
+
+    def _record(p):
+        seen.append(threading.get_ident())
+        return real(p)
+
+    monkeypatch.setattr(czi_set, name, _record)
+    (peek_wells if stage == "peek" else read_czi_set)(path)
+
+    assert seen == [threading.get_ident()]
+
+
+def test_one_unreadable_file_costs_only_that_file(tmp_path):
+    """The per-file catch lives inside the worker, so a broken member does not
+    take the rest of the plate's peek down with it."""
+    folder = tmp_path / "one_bad"
+    for well in ("A01", "A02", "A03"):
+        _scene_file(folder, f"Exp7_{well}.czi", well)
+    (folder / "Exp7_B01.czi").write_bytes(b"II*\0" + b"\0" * 200)
+    peek = peek_wells(folder)
+
+    assert peek.wells == ["A01", "A02", "A03"]
+    assert [p.name for p in peek.unnamed] == ["Exp7_B01.czi"]
+
+
+@pytest.mark.parametrize("n_files,expected", [
+    (0, 1), (1, 1), (3, 3), (8, 8), (96, 8), (1000, 8),
+])
+def test_the_worker_count_is_capped_by_the_share_not_the_cpu(n_files, expected):
+    """Capped at the file count below the ceiling and at the ceiling above it —
+    and never at the CPU count, because no CPU work happens. Sizing a
+    latency-bound read to the cores would leave a four-core laptop reading a
+    96-file plate four at a time for no reason."""
+    assert scan_workers(n_files) == expected

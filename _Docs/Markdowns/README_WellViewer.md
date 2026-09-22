@@ -5144,8 +5144,10 @@ on the plate rather than supplying it.
 
    **The plate map fills in first, from the file headers alone.** Naming the
    wells costs the 112-byte header of each file plus the small metadata block
-   it points at — a few kilobytes for a whole plate — so the wells appear
-   essentially at once even over a NAS, and the line beneath the plate says so:
+   it points at — a few kilobytes for a whole plate — and for a folder of
+   per-scene files they are read several at a time rather than one after
+   another, so the wells appear essentially at once even over a NAS. The line
+   beneath the plate says so:
    *"96 well(s) named in the file headers (69 KB read) — not yet checked."*
    That is your chance to see a wrong well before anything has been converted.
 

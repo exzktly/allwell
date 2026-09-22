@@ -6719,6 +6719,29 @@ for a scene name on a file holding exactly one scene and a peek cannot count
 scenes without metadata. `PlatePeek.complete` says which case it is and the
 page's note says it on screen.
 
+**A scan reads its files at once.** Both stages walk a list of files doing
+nothing but waiting on them, so `czi_set._per_file` runs them across a
+`ThreadPoolExecutor` — measured on a 96-file split export with 8 ms of
+simulated per-file latency, the peek goes from 797 ms to 104 ms and the full
+read from 879 ms to 118 ms. `scan_workers` caps at eight and at the file count,
+and deliberately **not** at the CPU count the way
+`explode_common.pick_workers` does: that sizes pixel work, and this decodes
+nothing. A cap against the cores would leave a four-core laptop reading a
+96-file plate four at a time to cover a latency no core is involved in. Eight
+is about the share rather than the machine — enough requests in flight to cover
+the round trips, few enough not to hammer a filer — and it is a defensible
+constant, not a measured optimum, because the only hardware it could be
+measured against is the user's.
+
+Through `Executor.map`, which yields **by argument order** however the work
+completes. The order is load-bearing: it is the order ZEN wrote a split export
+in, the order a grid mapping lays its well labels over, and the order
+`CziSet.positions` is walked in, so collecting as-completed would make a
+plate's well mapping depend on which file the filer answered first. A single
+file skips the pool entirely. The peek's per-file `except` sits *inside* the
+worker, so one unreadable member costs that member and not the rest of the
+plate.
+
 Three things make the rest of the readout free, and all three were measured by
 counting syscalls rather than reasoned about. `refresh_readout` reads no files
 at all: a new source (or a widened folder) starts a scan, and everything else

@@ -40,6 +40,7 @@ without imagecodecs can still exercise every uncompressed path.
 
 from __future__ import annotations
 
+import copy
 import os
 import re
 import struct
@@ -491,11 +492,50 @@ def remember_plate_metadata(path: Path, meta: _PlateMetadata) -> None:
             _METADATA_CACHE.popitem(last=False)
 
 
+_LAYOUT_CACHE: "OrderedDict[tuple, CziLayout]" = OrderedDict()
+
+
+def cached_layout(path: Path, read_times: bool) -> "CziLayout | None":
+    """*path*'s layout if it has been read already, else ``None``.
+
+    Handed back as a **copy**. A layout is aggregate data — a few lists and
+    counts, never the subblocks themselves — so copying it is cheap, and it
+    makes it impossible for a caller that mutates what it was given to poison
+    the next caller's answer. Nothing in the tree does that today; the copy is
+    so that nothing has to keep not doing it.
+
+    *read_times* is part of the key because it changes the answer: a layout
+    read without it carries no ``time_scan`` at all, and serving one to a
+    caller that asked for the times would report a plate as having none.
+    """
+    stamp = _file_stamp(path)
+    if stamp is None:
+        return None
+    with _METADATA_LOCK:
+        found = _LAYOUT_CACHE.get((stamp, read_times))
+        if found is not None:
+            _LAYOUT_CACHE.move_to_end((stamp, read_times))
+    return copy.deepcopy(found) if found is not None else None
+
+
+def remember_layout(path: Path, read_times: bool, layout: "CziLayout") -> None:
+    """Keep *layout* as *path*'s until the file changes underneath it."""
+    stamp = _file_stamp(path)
+    if stamp is None:
+        return
+    with _METADATA_LOCK:
+        _LAYOUT_CACHE[(stamp, read_times)] = copy.deepcopy(layout)
+        _LAYOUT_CACHE.move_to_end((stamp, read_times))
+        while len(_LAYOUT_CACHE) > _METADATA_CACHE_MAX:
+            _LAYOUT_CACHE.popitem(last=False)
+
+
 def forget_plate_metadata() -> None:
     """Drop every remembered document. For tests, and for a caller that wants
     to prove a read really happened rather than trust that it did."""
     with _METADATA_LOCK:
         _METADATA_CACHE.clear()
+        _LAYOUT_CACHE.clear()
 
 
 #: A scene name that carries a well inside a longer label — ``P1-A1``,
@@ -1329,6 +1369,13 @@ def read_czi_layout(path: Path | str, *,
     ninety-six times the round trips for the same answer.
     """
     path = Path(path)
+    # The plate is read more than once before an archive is written — the page
+    # describes it, then the worker validates it, then ``explode_czi`` reads
+    # it again — and on a network share each of those is a round trip and a
+    # megabyte of subblock directory per file.
+    already = cached_layout(path, read_times)
+    if already is not None:
+        return already
     with open(path, "rb") as fh:
         directory_position, metadata_position = _read_file_header(fh)
         blocks: list[SubBlock] = []
@@ -1367,6 +1414,7 @@ def read_czi_layout(path: Path | str, *,
             "the subblock directory was unreadable, so the file was scanned "
             "tile by tile; this is what an interrupted acquisition leaves"
         )
+    remember_layout(path, read_times, layout)
     return layout
 
 

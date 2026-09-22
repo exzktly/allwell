@@ -236,3 +236,77 @@ def test_the_filename_fallback_is_applied_after_the_cache(tmp_path, parses):
     assert parses["n"] == 1
     assert named.wells == ["D06"], named.wells
     assert unnamed.wells == [""], unnamed.wells
+
+
+# ── the plate's layout, likewise ─────────────────────────────────────────────
+
+def test_the_three_full_reads_open_the_file_once(tmp_path, monkeypatch):
+    """After the page has read the plate, the worker reads it again to
+    validate and ``explode_czi`` reads it once more. Each of those walks every
+    file's subblock directory — about a megabyte per file, and a round trip
+    per file on a share — for an answer that has not changed.
+
+    Counted as **file opens**, which is what a network share charges for,
+    rather than as elapsed time.
+    """
+    import builtins
+    path = _one_file(tmp_path, _plate_xml(n_scenes=4, tiles_per_scene=5))
+
+    opens = {"n": 0}
+    real_open = builtins.open
+
+    def _counting(file, *args, **kwargs):
+        if str(file) == str(path):
+            opens["n"] += 1
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", _counting)
+    layouts = [czi_read.read_czi_layout(path) for _ in range(3)]
+
+    assert opens["n"] == 1, f"{opens['n']} opens for three reads of one file"
+    # Same answer each time, which is the whole claim being made (§7.8).
+    assert [layout.scene_wells for layout in layouts] == [
+        {0: "A01", 1: "A02", 2: "A03", 3: "A04"}] * 3
+    assert all(layout.n_blocks == layouts[0].n_blocks for layout in layouts)
+
+
+def test_a_layout_read_without_the_times_is_not_served_to_one_that_wants_them(
+        tmp_path):
+    """``read_times`` changes the answer — a layout read without it carries no
+    ``time_scan`` at all — so it is part of the key.
+
+    Ordered cheap-read-first, which is the order that catches a key missing
+    it: serving the cheap layout to the caller that asked for the times would
+    report a plate as having no timing, and §7's whole point is that "not
+    computed" and "computed as nothing" are different answers.
+    """
+    path = _one_file(tmp_path, _plate_xml(n_scenes=2, tiles_per_scene=3))
+
+    without = czi_read.read_czi_layout(path)
+    with_times = czi_read.read_czi_layout(path, read_times=True)
+
+    assert without.time_scan is None
+    assert with_times.time_scan is not None, (
+        "the cheap read was served to the caller that asked for the times")
+
+
+def test_a_caller_cannot_poison_the_next_one_s_layout(tmp_path):
+    """The cache hands back a copy. Nothing in the tree mutates a layout it
+    was given, and the copy is so that nothing has to keep not doing it.
+
+    Three reads, not two, and the scribble goes on the **second**. The store
+    copies as well, so the first read holds the freshly built layout and never
+    the cached one — writing on that would leave the cache untouched however
+    the cache hands its answers out, and the test would pass against a version
+    that hands out the stored object itself. Measured: it did.
+    """
+    path = _one_file(tmp_path, _plate_xml(n_scenes=2, tiles_per_scene=3))
+
+    czi_read.read_czi_layout(path)                  # fills the cache
+    served = czi_read.read_czi_layout(path)         # served *from* the cache
+    served.warnings.append("scribbled on by its caller")
+    served.scene_wells[0] = "H12"
+    after = czi_read.read_czi_layout(path)
+
+    assert "scribbled on by its caller" not in after.warnings
+    assert after.scene_wells[0] == "A01"

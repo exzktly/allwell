@@ -432,7 +432,8 @@ def _declared_scene_indices(root) -> list[int]:
 
 
 def wells_from_scenes(path: Path, scene_wells: dict[int, str],
-                      scenes: list[int]) -> list[str]:
+                      scenes: list[int], *,
+                      from_filename: bool = True) -> list[str]:
     """One well per scene of *path*, in scene order; ``""`` where unknown.
 
     The scene's own metadata first, because that is the acquisition saying
@@ -443,13 +444,17 @@ def wells_from_scenes(path: Path, scene_wells: dict[int, str],
     keeps that from misreading a whole-plate file that happens to be called
     ``Exp_A1.czi`` as a single well of ninety-six fields.
 
+    *from_filename* is what the caller sets to False for a **lone** file: the
+    rule exists for ZEN's split export, where each member is named after the
+    scene it holds, and a single file gives it nothing to corroborate it with.
+
     One function for both routes into this question — the full layout read and
     the header-only peek — because the peek exists to paint a plate that the
     full read then confirms, and two derivations of one rule would eventually
     paint a plate the run contradicts.
     """
     labels = [scene_wells.get(scene, "") for scene in scenes]
-    if len(labels) == 1 and not labels[0]:
+    if from_filename and len(labels) == 1 and not labels[0]:
         labels = [well_from_scene_name(path.stem)]
     return labels
 
@@ -513,7 +518,8 @@ class ScenePeek:
     bytes_read: int = 0
 
 
-def peek_scene_wells(path: Path | str) -> ScenePeek:
+def peek_scene_wells(path: Path | str, *,
+                     from_filename: bool = True) -> ScenePeek:
     """Read *path*'s scene-to-well mapping from its header alone.
 
     Reads the file header and the metadata segment it points at, and **never**
@@ -536,7 +542,8 @@ def peek_scene_wells(path: Path | str) -> ScenePeek:
     except ET.ParseError:
         return ScenePeek(path=path, has_metadata=False, bytes_read=read)
     wells = wells_from_scenes(path, _scene_wells(root),
-                              _declared_scene_indices(root))
+                              _declared_scene_indices(root),
+                              from_filename=from_filename)
     return ScenePeek(path=path, wells=wells, bytes_read=read)
 
 

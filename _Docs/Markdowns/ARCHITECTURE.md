@@ -6597,7 +6597,7 @@ one, so the exploder has no branch for the two shapes.
 
 A set's files become one dataset, so they are held to agreeing about everything
 the output filenames depend on — channel count and names, timepoint count,
-pixel format, tile size — and every mismatch is refused naming both files. Two
+pixel format, tile size, **tiles per scene** — and every mismatch is refused naming both files. Two
 files whose channel lists differ would write images whose channel token means
 one thing in one well and another in the next, which is §7's silent
 substitution. **Z is deliberately not on that list**: it is projected away, so
@@ -6605,7 +6605,14 @@ files whose stacks are different depths produce the same images, and
 `ome_explode` leaves Z out of its own ragged check for the same reason.
 
 Each member's well comes from its scene metadata first, and failing that from
-its **filename** — but only for a file holding exactly one scene. ZEN's split
+its **filename** — but only for a file holding exactly one scene *and* only
+when the set holds more than one file. The rule exists for the split export,
+where each member is named after the scene it holds; turned on a lone file it
+reads any well-shaped fragment of any name as a well, and
+`20240612_Plate_D1_60x.czi` — one scene, nine tiles, no scene metadata —
+became well D01 where it had been refused and pointed at the grid. `D1` there
+is far likelier to be a condition than a plate position, and a single file
+gives the rule nothing to corroborate it with. ZEN's split
 export names each file after the scene it holds and does not always keep the
 scene's own name inside it, so a file that *is* a scene may be identified by its
 name; the one-scene condition is what stops a whole-plate file that happens to
@@ -6737,7 +6744,11 @@ Through `Executor.map`, which yields **by argument order** however the work
 completes. The order is load-bearing: it is the order ZEN wrote a split export
 in, the order a grid mapping lays its well labels over, and the order
 `CziSet.positions` is walked in, so collecting as-completed would make a
-plate's well mapping depend on which file the filer answered first. A single
+plate's well mapping depend on which file the filer answered first. That list
+is sorted by `czi_set.natural_key`, not lexicographically — ZEN does not
+zero-pad its scene numbers, and plain string order puts `scan_s10` between
+`scan_s1` and `scan_s2`, which on a 3×4 grid put scene 2 in B01 and scene 10 in
+A02 with the run reporting success. A single
 file skips the pool entirely. The peek's per-file `except` sits *inside* the
 worker, so one unreadable member costs that member and not the rest of the
 plate.
@@ -6747,7 +6758,13 @@ counting syscalls rather than reasoned about. `refresh_readout` reads no files
 at all: a new source (or a widened folder) starts a scan, and everything else
 renders from the scan in hand, keyed on `(source, use_folder)` — deliberately
 not on the resolved file list and its mtimes, because building *that* key is a
-stat per file on the path a keystroke takes. The source field's verdict and the
+stat per file on the path a keystroke takes. **Picking a source always
+rescans**, even onto the same path, since without an mtime in the key that is
+the one moment a plate re-exported in place is noticed. A *failed* scan keeps
+its key, which reads like the wedge it once was and is the lesser of the two:
+clearing it means a keystroke refreshes the readout, which starts another scan,
+which fails — one scan per character against a share that just refused.
+Recovery is re-picking the source. The source field's verdict and the
 tick-box's sibling count are cached from when the source last changed, since
 answering either means listing the folder. And the resume marker's signature,
 which fingerprints every file in the set, is built only once the marker is
@@ -6772,6 +6789,13 @@ keyed `(generation, stage)`, releases only what has already called back, and
 does so only from `_begin_scan`, which runs outside any handler. `stop_scanning`
 bumps the generation and keeps the references: a result that arrives after
 teardown has to be free to arrive and be ignored.
+
+**Two buttons pick the source, because one dialog cannot.** `QFileDialog` in
+`Directory` mode shows files when asked but will not *accept* one: `accept()`
+leaves `result() == 0` with a `.czi` selected. `PathField`'s edit is read-only,
+so a single dialog in that mode made the single-file workflow unreachable while
+the docstring and the manual both described it. Browse is an ordinary file
+dialog now and a second button picks a folder.
 
 **The page's tick-box is where "one file or the folder" is decided.** Picking a
 folder converts all of it — the folder *is* the set. Picking a *file* that has

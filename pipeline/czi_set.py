@@ -31,6 +31,7 @@ stdlib, so it stays inside the pipeline self-sufficiency contract
 
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -168,6 +169,31 @@ class CziSet:
         )
 
 
+#: Splits a filename into text and number runs, so ``s2`` sorts before ``s10``.
+_DIGITS = re.compile(r"(\d+)")
+
+
+def natural_key(name: str) -> tuple:
+    """A sort key that reads runs of digits as numbers.
+
+    Plain lexicographic order puts ``scan_s10`` between ``scan_s1`` and
+    ``scan_s2``, and for a split export the file order **is** the acquisition
+    order a grid mapping lays its well labels over — so on a 3x4 grid that put
+    scene 2 in B01 and scene 10 in A02, with the run reporting success and the
+    plate wrong in a way only someone who knew the scan could spot. ZEN does not
+    zero-pad its scene numbers, and every test here happened to use labels that
+    did.
+
+    Digits are ASCII-only — Python's ``\\d`` is Unicode by default and would
+    read a fullwidth digit as a number — and case is folded on the text runs so
+    ``Exp_a2`` and ``Exp_A10`` order together.
+    """
+    parts = _DIGITS.split(name)
+    return tuple(int(part) if part.isdigit() and part.isascii()
+                 else part.lower()
+                 for part in parts)
+
+
 def scan_workers(n_files: int) -> int:
     """How many files to read at once for a scan of *n_files*."""
     return max(1, min(_MAX_SCAN_WORKERS, n_files))
@@ -205,10 +231,11 @@ def discover_czi_files(source: Path | str) -> list[Path]:
     (the converter page offers that as a tick-box, because the same folder can
     hold one plate or several unrelated exports and only the user knows which).
 
-    Sorted by name because that is the order ZEN writes a split export in and
-    the order a grid mapping is laid over. Nothing recursive: a folder of
-    folders is a different thing, and walking into one would silently sweep up
-    a nested export.
+    Sorted by :func:`natural_key`, not lexicographically, because that is the
+    order ZEN writes a split export in and the order a grid mapping is laid
+    over — and ZEN does not zero-pad its scene numbers. Nothing recursive: a
+    folder of folders is a different thing, and walking into one would silently
+    sweep up a nested export.
 
     Through :func:`util.dir_scan.files_in` rather than ``iterdir()`` plus
     ``is_file()``. That pair is one ``stat`` per entry, which on Windows is a
@@ -223,7 +250,7 @@ def discover_czi_files(source: Path | str) -> list[Path]:
     if source.is_dir():
         return sorted((p for p in files_in(source)
                        if p.suffix.lower() in CZI_SUFFIXES),
-                      key=lambda p: p.name)
+                      key=lambda p: natural_key(p.name))
     return []
 
 
@@ -239,10 +266,28 @@ def siblings_of(source: Path | str) -> list[Path]:
 #: depend on: two files with different channel lists write images whose channel
 #: token means one thing in one well and another thing in the next, and two
 #: with different timepoint counts leave a well short of a timepoint that every
-#: other well has. Z is absent on purpose — it is projected away, so two files
-#: whose stacks are different depths produce the same images, and
-#: ``pipeline.ome_explode`` leaves Z out of its own ragged check for it.
+#: other well has.
+#:
+#: ``fovs_per_scene`` is never 0 by the time it is compared, so this needs no
+#: companion "is it knowable?" check: a one-scene file has exactly one tile
+#: count, and a multi-scene file whose scenes disagree is refused by
+#: ``validation_report`` on the line above. One was written here anyway and was
+#: unreachable — the branch class §7.7 is about — and a mutation of it left the
+#: whole suite green, which is how it was found.
+#:
+#: ``fovs_per_scene`` is here because a set is chopped into wells by a *count*:
+#: ``resolve_well_map``'s grid arm divides the flat position list evenly, so
+#: files holding 1, 2 and 1 tiles put the second file's two tiles either side
+#: of a well boundary — one well ends up with tiles from two different files and
+#: the run reports success. ``CziLayout._ragged_scenes`` catches this inside one
+#: file and is blind to it across a set, because a split member has a single
+#: scene and there is nothing for it to compare.
+#:
+#: Z is absent on purpose — it is projected away, so two files whose stacks are
+#: different depths produce the same images, and ``pipeline.ome_explode`` leaves
+#: Z out of its own ragged check for it.
 _MUST_AGREE: tuple[tuple[str, str], ...] = (
+    ("fovs_per_scene", "number of tiles per scene"),
     ("size_c", "number of channels"),
     ("size_t", "number of timepoints"),
     ("channel_names", "channel names"),
@@ -269,14 +314,24 @@ def _disagreement(first: CziLayout, first_path: Path,
     return ""
 
 
-def _wells_for(path: Path, layout: CziLayout) -> list[str]:
+def _wells_for(path: Path, layout: CziLayout, *,
+               from_filename: bool) -> list[str]:
     """One well per scene in *path*, in scene order; ``""`` where unknown.
 
     Through :func:`~pipeline.czi_read.wells_from_scenes`, which the header-only
     peek below also goes through, so the plate a peek paints and the plate the
     run converts cannot be derived two different ways.
+
+    *from_filename* is False for a **lone** file. The filename rule exists for
+    ZEN's split export, where each member is named after the scene it holds;
+    applied to a single file it reads any well-shaped fragment of any name as a
+    well, so ``20240612_Plate_D1_60x.czi`` — one scene, nine tiles, no scene
+    metadata — became well D01 where it used to be refused and pointed at the
+    grid. ``D1`` there is far likelier to be a condition than a plate position,
+    and a single file gives the rule nothing to corroborate it with.
     """
-    return wells_from_scenes(path, layout.scene_wells, layout.scenes)
+    return wells_from_scenes(path, layout.scene_wells, layout.scenes,
+                             from_filename=from_filename)
 
 
 def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None) -> CziSet:
@@ -322,8 +377,9 @@ def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None) -> Cz
             return result
 
     wells: list[str] = []
+    from_filename = len(paths) > 1
     for path, layout in zip(paths, result.layouts):
-        wells.extend(_wells_for(path, layout))
+        wells.extend(_wells_for(path, layout, from_filename=from_filename))
         for scene in layout.scenes:
             for tile in layout.tiles.get(scene, [0]):
                 result.positions.append(ScenePosition(path, scene, tile))
@@ -411,9 +467,11 @@ def peek_wells(source: Path | str, *,
     if not paths:
         peek.problem = f"No .czi files in {Path(source).name or source}."
         return peek
+    from_filename = len(paths) > 1
+
     def _peek_one(path: Path) -> "ScenePeek | None":
         try:
-            return peek_scene_wells(path)
+            return peek_scene_wells(path, from_filename=from_filename)
         except (CziReadError, OSError):
             # Caught **inside** the worker rather than around the whole batch,
             # so one unreadable file costs that one file and not the rest of

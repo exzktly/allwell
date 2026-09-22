@@ -5136,8 +5136,10 @@ about a grid. Zeiss software normally names each scene after the well it
 scanned, so here the mapping is read straight out of the file and you confirm it
 on the plate rather than supplying it.
 
-1. **CZI file or folder** — pick the `.czi`, or the folder a split export was
-   written to. All-Well never reads a single image to work out what a plate
+1. **CZI file or folder** — **Browse** picks a single `.czi`; the
+   **Choose a folder of .czi files instead…** button below it picks the folder
+   a split export was written to. Two buttons rather than one dialog, because
+   a file dialog that can open a folder cannot also accept a file. All-Well never reads a single image to work out what a plate
    holds, so none of this depends on how large the plate is; it also never
    reads it on the window's thread, so nothing freezes while a slow disk or a
    network share answers.

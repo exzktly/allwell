@@ -781,3 +781,128 @@ def test_a_scan_that_lands_after_teardown_touches_nothing(qapp, tmp_path,
 
     assert ctrl.page.is_scanning() is False
     ctrl.page.deleteLater()
+
+
+# ── the two ways a source is picked ──────────────────────────────────────────
+
+def test_browse_picks_a_file_and_the_second_button_picks_a_folder(
+        controller, tmp_path, monkeypatch):
+    """One dialog cannot do both, and the version that tried could do neither.
+
+    ``QFileDialog`` in ``Directory`` mode shows files when asked but will not
+    *accept* one — ``accept()`` leaves ``result() == 0`` with a ``.czi``
+    selected — and ``PathField``'s edit is read-only, so Browse was the only
+    way in and the single-file workflow was unreachable while the docstring and
+    the manual both said otherwise. Nothing in thirty-three page tests pressed
+    Browse (CLAUDE.md §7.6).
+
+    Both routes are driven here through the dialogs they really call, so a
+    change to either one's mode has to come past this.
+    """
+    from PySide6.QtWidgets import QFileDialog
+
+    page = controller.page
+    solo = _named_czi(tmp_path / "solo", wells=("C07", "A02"))
+    folder = _split_folder(tmp_path / "split")
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                        staticmethod(lambda *a, **k: (str(solo), "")))
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory",
+                        staticmethod(lambda *a, **k: str(folder)))
+
+    assert page._pick_source("") == str(solo)
+
+    # Clicked, not called: a method that works behind a button connected to
+    # nothing is the other half of what this test exists for.
+    page._pick_folder_btn.click()
+    _settle(page)
+    assert page.source_path() == str(folder)
+    assert sorted(page._dashboard._fraction) == ["A02", "C07", "H11"]
+
+
+def test_the_directory_dialog_would_not_have_accepted_a_file(qapp, tmp_path):
+    """The mechanism behind the bug, pinned so it cannot be reintroduced by
+    someone reaching for one dialog again. Nothing in the page under test —
+    this is a statement about Qt that the page's design depends on."""
+    from PySide6.QtWidgets import QFileDialog
+
+    solo = _named_czi(tmp_path / "solo", wells=("A01",))
+    dialog = QFileDialog(None, "t", str(solo.parent))
+    dialog.setFileMode(QFileDialog.Directory)
+    dialog.setOption(QFileDialog.DontUseNativeDialog, True)
+    dialog.setOption(QFileDialog.ShowDirsOnly, False)
+    dialog.selectFile(str(solo))
+    dialog.accept()
+
+    assert dialog.result() == 0, (
+        "a Directory-mode dialog now accepts a file; the page could go back "
+        "to one dialog for both kinds")
+
+
+# ── a source that changed on disk, and a share that blinked ──────────────────
+
+def test_re_picking_a_source_re_reads_it(controller, tmp_path):
+    """The scan key is ``(source, use_folder)`` and carries no mtime on
+    purpose — building one is a stat per file, on the path a keystroke takes.
+    Re-picking the source is therefore the one moment a plate re-exported in
+    place gets noticed, and without this the readout described 48 wells while
+    the run converted 96."""
+    folder = _split_folder(tmp_path, wells=("A01", "A02"))
+    page = controller.page
+    _browse(page, folder)
+    assert sorted(page._dashboard._fraction) == ["A01", "A02"]
+
+    for well in ("A03", "A04"):             # re-exported in place
+        write_czi(folder / f"Exp7_{well}.czi",
+                  plate_tiles(wells=1, fovs=1, timepoints=1, channels=2),
+                  xml=plate_metadata_xml(scene_wells={0: well},
+                                         channels=["DAPI", "GFP"]))
+    _browse(page, folder)
+
+    assert sorted(page._dashboard._fraction) == ["A01", "A02", "A03", "A04"]
+
+
+def test_a_failed_scan_is_recovered_by_re_picking_and_not_by_typing(
+        controller, tmp_path, monkeypatch):
+    """A share that blinked once left the page unable to read anything again,
+    because the key was kept and ``refresh_readout`` matched it, found no set,
+    and returned at "a scan is in flight".
+
+    The fix is that re-picking the source always rescans — **not** clearing the
+    key on failure, which was tried first and is a retry storm: a keystroke
+    refreshes the readout, so every character typed would start another scan
+    against a filer that just refused. Both halves are asserted here, because
+    the wrong fix passes a test that only checks the recovery.
+    """
+    import datasets.czi_import.view as view_module
+
+    folder = _split_folder(tmp_path)
+    page = controller.page
+
+    calls: list[int] = []
+
+    def _boom(src, params):
+        calls.append(1)
+        raise RuntimeError("share went away")
+
+    monkeypatch.setattr(view_module, "peek_source", _boom)
+    _browse(page, folder)
+    assert "Could not read the source" in page._verdict.text()
+    assert not page._run_btn.isEnabled()
+
+    # A keystroke must **not** retry. Clearing the scan key on failure looks
+    # like the fix and is a worse bug: every character typed starts another
+    # scan against a share that just refused.
+    scans = len(calls)
+    page._rows_edit.setText("2")
+    _settle(page)
+    assert len(calls) == scans, (
+        f"{len(calls) - scans} extra scan(s) from one keystroke after a "
+        f"failure — a dead share would be re-asked per character")
+
+    # Re-picking the source is what retries, and it always rescans.
+    monkeypatch.undo()
+    _browse(page, folder)
+
+    assert sorted(page._dashboard._fraction) == ["A02", "C07", "H11"]
+    assert page._run_btn.isEnabled()

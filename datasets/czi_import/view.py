@@ -206,6 +206,21 @@ class CziImportPage(LogPanelMixin, QWidget):
         self._src_field.changed.connect(self._on_source_changed)
         outer.addWidget(self._src_field)
 
+        # The second way in. ZEN writes a plate as one file or as a folder of
+        # them, and one dialog cannot accept both kinds — see ``_pick_source``.
+        folder_row = QWidget(self)
+        folder_layout = QHBoxLayout(folder_row)
+        folder_layout.setContentsMargins(0, 0, 0, 0)
+        self._pick_folder_btn = QPushButton(
+            "Choose a folder of .czi files instead…", folder_row)
+        set_variant(self._pick_folder_btn, "secondary")
+        self._pick_folder_btn.setToolTip(
+            "For ZEN's Split Scenes export, which writes one .czi per scene")
+        self._pick_folder_btn.clicked.connect(self._pick_source_folder)
+        folder_layout.addWidget(self._pick_folder_btn)
+        folder_layout.addStretch(1)
+        outer.addWidget(folder_row)
+
         self._dest_field = PathField(
             "Destination folder", pick=folder_picker("Select destination folder"),
             validator=self._dest_rule)
@@ -432,32 +447,43 @@ class CziImportPage(LogPanelMixin, QWidget):
 
     # ── pickers ──────────────────────────────────────────────────────────────
     def _pick_source(self, current: str, parent: QWidget | None = None) -> str:
-        """Pick a ``.czi``, or the folder a split-scene export was written to.
+        """Pick a ``.czi`` file — the Browse button beside the source field.
 
-        One dialog rather than two buttons, in ``Directory`` mode with files
-        shown: a folder is chosen by opening it and accepting, a file by
-        selecting it. ZEN writes a plate either way and the user should not
-        have to know which kind of thing they are looking for before they open
-        the dialog.
-
-        Qt's own file dialog is forced here (``DontUseNativeDialog``). The
-        native macOS panel in Directory mode hides files outright, so a folder
-        of ninety-six ``.czi`` files looked empty and there was no way to pick
-        one of them.
+        A plain file dialog, and a **second button** picks a folder, because
+        one dialog cannot do both. ``QFileDialog`` in ``Directory`` mode shows
+        files when asked but will not *accept* one — ``accept()`` leaves
+        ``result() == 0`` with a ``.czi`` selected — and ``PathField``'s edit is
+        read-only, so that was the only way in and the single-file workflow was
+        unreachable through the UI while the docstring and the manual both said
+        otherwise. Nothing in thirty-three page tests pressed Browse
+        (CLAUDE.md §7.6: asserting a control is offered is not asserting it
+        works).
         """
-        dialog = QFileDialog(parent or self, "Select a CZI file, or a folder of them",
-                             current or "")
-        dialog.setFileMode(QFileDialog.Directory)
-        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
-        dialog.setOption(QFileDialog.ShowDirsOnly, False)
-        if dialog.exec() != QFileDialog.Accepted:
-            return ""
-        chosen = dialog.selectedFiles()
-        return chosen[0] if chosen else ""
+        chosen, _ = QFileDialog.getOpenFileName(
+            parent or self, "Select CZI file", current or "",
+            "Zeiss CZI (*.czi);;All files (*)",
+        )
+        return chosen or ""
+
+    def _pick_source_folder(self) -> None:
+        """Pick the folder a split-scene export was written to, into the same field."""
+        chosen = folder_picker("Select a folder of CZI files")(
+            self.source_path(), self)
+        if chosen:
+            self._src_field.set_path(chosen)
+            self._on_source_changed()
 
     # ── field plumbing ───────────────────────────────────────────────────────
     def _on_source_changed(self) -> None:
         src = self._src_field.path()
+        # Always rescan, even onto the same path. The scan key is
+        # ``(source, use_folder)`` and carries no mtime on purpose — building
+        # one is a stat per file, on the path a keystroke takes — so re-picking
+        # the source is the one moment a plate re-exported in place gets
+        # noticed. Without this the readout could describe 48 wells while the
+        # run converted 96, which the key it replaced (path + mtime) could not
+        # do.
+        self._scan_key = None
         # A new source is a new question about the folder, so the box goes
         # back to following it. Without this, unticking it once made every
         # later plate convert one file of its folder.
@@ -558,6 +584,7 @@ class CziImportPage(LogPanelMixin, QWidget):
 
     def set_source_path(self, path: str) -> None:
         self._src_field.set_path(path or "")
+        self._scan_key = None
         # What the source *is* can only change here and in the browse handler,
         # which is why the readout no longer asks.
         self._refresh_folder_box()
@@ -661,6 +688,7 @@ class CziImportPage(LogPanelMixin, QWidget):
         # Path fields lock rather than disable: ``setEnabled(False)`` dims the
         # path text too, which is the one piece of context someone watching a
         # long run most wants to read (see ``widgets/path_field.py``).
+        self._pick_folder_btn.setEnabled(not running)
         self._src_field.setLocked(running)
         self._dest_field.setLocked(running)
 
@@ -787,6 +815,14 @@ class CziImportPage(LogPanelMixin, QWidget):
             return
         self._scanning = False
         self._czi_set = None
+        # The key is deliberately **kept**. Clearing it here looks like the fix
+        # for "a share that blinked leaves the page stuck", and it is a worse
+        # bug: with no key, the next ``refresh_readout`` — which a keystroke in
+        # the grid or experiment box triggers — starts another scan, which
+        # fails, which clears it again. Measured against a dead share: one scan
+        # per character typed. Recovery is re-picking the source, which always
+        # rescans (see ``_on_source_changed``); a keystroke is not a request to
+        # go back to a filer that just refused.
         self._readout.setText("")
         self._set_verdict(f"Could not read the source: {message}", "error")
         self._dashboard.set_wells([])

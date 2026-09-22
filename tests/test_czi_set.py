@@ -477,9 +477,9 @@ def test_a_multi_file_scan_reads_on_more_than_one_thread(tmp_path,
     threads: set[int] = set()
     real = czi_set.peek_scene_wells
 
-    def _record(path):
+    def _record(path, **kwargs):
         threads.add(threading.get_ident())
-        return real(path)
+        return real(path, **kwargs)
 
     monkeypatch.setattr(czi_set, "peek_scene_wells", _record)
     peek = peek_wells(folder)
@@ -519,10 +519,10 @@ def test_the_order_is_the_file_order_however_the_reads_finish(
     name = {"peek": "peek_scene_wells", "full": "read_czi_layout"}[stage]
     real = getattr(czi_set, name)
 
-    def _slow_first(path):
+    def _slow_first(path, **kwargs):
         if path == first:
             time.sleep(0.05)
-        return real(path)
+        return real(path, **kwargs)
 
     monkeypatch.setattr(czi_set, name, _slow_first)
 
@@ -545,9 +545,9 @@ def test_a_single_file_is_read_on_the_calling_thread(tmp_path, monkeypatch,
     real = getattr(czi_set, name)
     seen: list[int] = []
 
-    def _record(p):
+    def _record(p, **kwargs):
         seen.append(threading.get_ident())
-        return real(p)
+        return real(p, **kwargs)
 
     monkeypatch.setattr(czi_set, name, _record)
     (peek_wells if stage == "peek" else read_czi_set)(path)
@@ -577,3 +577,120 @@ def test_the_worker_count_is_capped_by_the_share_not_the_cpu(n_files, expected):
     latency-bound read to the cores would leave a four-core laptop reading a
     96-file plate four at a time for no reason."""
     assert scan_workers(n_files) == expected
+
+
+# ── the order a grid is laid over ────────────────────────────────────────────
+
+@pytest.mark.parametrize("names,expected", [
+    # ZEN does not zero-pad its scene numbers, which is the whole case.
+    ([f"scan_s{i}.czi" for i in (1, 2, 10, 11)],
+     ["scan_s1", "scan_s2", "scan_s10", "scan_s11"]),
+    # Zero-padded names must not change, or every existing plate moves.
+    (["Exp_A01.czi", "Exp_A02.czi", "Exp_A10.czi"],
+     ["Exp_A01", "Exp_A02", "Exp_A10"]),
+    # Case folded on the text runs, so a stray capital does not sort apart.
+    (["Exp_a2.czi", "Exp_A10.czi"], ["Exp_a2", "Exp_A10"]),
+])
+def test_files_sort_by_their_numbers_not_by_their_text(tmp_path, names,
+                                                       expected):
+    """Lexicographic order puts ``scan_s10`` between ``scan_s1`` and
+    ``scan_s2``. For a split export the file order **is** the acquisition order
+    a grid mapping lays its well labels over, so on a 3x4 grid that put scene 2
+    in B01 and scene 10 in A02 — a wrong plate, reported as a success."""
+    folder = tmp_path / "unpadded"
+    folder.mkdir()
+    for name in names:
+        write_czi(folder / name,
+                  plate_tiles(wells=1, fovs=1, timepoints=1, channels=1))
+
+    assert [p.stem for p in discover_czi_files(folder)] == expected
+
+
+def test_a_grid_lays_its_labels_over_the_numeric_order(tmp_path):
+    """The consequence, asserted where a user would see it."""
+    from pipeline.czi_explode import resolve_well_map
+
+    folder = tmp_path / "unpadded"
+    folder.mkdir()
+    for index in range(1, 13):
+        write_czi(folder / f"scan_s{index}.czi",
+                  plate_tiles(wells=1, fovs=1, timepoints=1, channels=1))
+    well_map = resolve_well_map(read_czi_set(folder), well_source="grid",
+                                grid_rows=3, grid_cols=4)
+    placed = {p.path.stem: well
+              for well, group in zip(well_map.wells, well_map.positions)
+              for p in group}
+
+    assert placed["scan_s1"] == "A01"
+    assert placed["scan_s2"] == "A02"
+    assert placed["scan_s10"] == "C02"        # 3x4 serpentine, position 10
+
+
+# ── tiles per scene across a set ─────────────────────────────────────────────
+
+def test_files_holding_different_tile_counts_are_refused(tmp_path):
+    """A set is chopped into wells by a *count*: the grid arm divides the flat
+    position list evenly, so files of 1, 2 and 1 tiles put the middle file's
+    two tiles either side of a well boundary — one well ends up holding tiles
+    from two different files, and the run reports success.
+
+    ``CziLayout._ragged_scenes`` catches this inside one file and is blind to
+    it across a set, because a split member has a single scene and there is
+    nothing for it to compare.
+    """
+    folder = tmp_path / "ragged"
+    folder.mkdir()
+    for name, fovs in (("a.czi", 1), ("b.czi", 2), ("c.czi", 1)):
+        write_czi(folder / name,
+                  plate_tiles(wells=1, fovs=fovs, timepoints=1, channels=1))
+    problem = read_czi_set(folder).problem
+
+    assert "number of tiles per scene" in problem
+    assert "a.czi" in problem and "b.czi" in problem
+
+
+def test_a_member_whose_own_scenes_disagree_is_named(tmp_path):
+    """A member that is ragged *inside itself* is refused as itself.
+
+    Not by the set comparison — ``validation_report`` gets there first, on the
+    line above it. Worth pinning anyway, because the reading that says the set
+    check needs a companion "is this knowable?" guard is wrong and produced an
+    unreachable branch here once already.
+    """
+    folder = tmp_path / "inner"
+    folder.mkdir()
+    _scene_file(folder, "ok.czi", "A01")
+    ragged = [t for t in plate_tiles(wells=2, fovs=2, timepoints=1, channels=2)
+              if not (t.scene == 1 and t.tile == 1)]
+    write_czi(folder / "uneven.czi", ragged,
+              xml=plate_metadata_xml(scene_wells={0: "A02", 1: "A03"},
+                                     channels=["DAPI", "GFP"]))
+
+    assert "uneven.czi" in read_czi_set(folder).problem
+
+
+# ── the filename rule belongs to a split export ──────────────────────────────
+
+def test_a_lone_file_is_not_named_by_a_well_shaped_fragment_of_its_name(
+        tmp_path):
+    """``20240612_Plate_D1_60x.czi`` — one scene, nine tiles, no scene metadata
+    — became well D01. ``D1`` there is far likelier to be a condition than a
+    plate position, and a single file gives the rule nothing to corroborate it
+    with. The split export it was written for is unaffected."""
+    lone = write_czi(tmp_path / "20240612_Plate_D1_60x.czi",
+                     plate_tiles(wells=1, fovs=9, timepoints=1, channels=2),
+                     xml=plate_metadata_xml(channels=["DAPI", "GFP"]))
+
+    assert read_czi_set(lone).wells_from_files() == []
+    assert peek_wells(lone).wells == []
+
+
+def test_a_split_member_is_still_named_by_its_filename(tmp_path):
+    """The control. Removing the rule outright would be the other defect."""
+    folder = tmp_path / "split"
+    folder.mkdir()
+    for well in ("A01", "B02"):
+        _scene_file(folder, f"Exp7_{well}.czi", None)
+
+    assert read_czi_set(folder).wells_from_files() == ["A01", "B02"]
+    assert peek_wells(folder).wells == ["A01", "B02"]

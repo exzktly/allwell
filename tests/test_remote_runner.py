@@ -2083,8 +2083,13 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/czi_read.py",
         "pipeline/czi_set.py",
         "pipeline/czi_explode.py",
-        # What both exploders share: the member-name rule, the resume check,
-        # the worker split and the in-memory TIFF encode.
+        # The Nikon ND2 adapter and its per-well explode; client-side for the
+        # same reason, listed for the same manifest completeness.
+        "pipeline/nd2_read.py",
+        "pipeline/nd2_explode.py",
+        # What the exploders share: the member-name rule, the resume check,
+        # the worker split, the timepoint plan, the elapsed-hour rendering and
+        # the in-memory TIFF encode.
         "pipeline/explode_common.py",
         # Packed OME-TIFF de-interleave; client-side, listed for manifest
         # completeness (mirrors every ``pipeline/`` file).

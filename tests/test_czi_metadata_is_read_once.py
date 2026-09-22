@@ -16,6 +16,7 @@ proxy for them.
 
 from __future__ import annotations
 
+import time
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -135,3 +136,103 @@ def test_a_scene_named_only_by_an_array_name_is_still_read(counted):
     # Shape beats ArrayName beats the scene's own Name, and all three name a
     # different well here, so each wrong order picks a different answer.
     assert wells[1] == "B02"
+
+
+# ── the document is parsed once per file, not once per pass ──────────────────
+
+@pytest.fixture(autouse=True)
+def _cold_cache():
+    """Every test here starts with nothing remembered, and leaves nothing
+    behind for the next one."""
+    czi_read.forget_plate_metadata()
+    yield
+    czi_read.forget_plate_metadata()
+
+
+@pytest.fixture
+def parses(monkeypatch):
+    """Count the times a metadata document is parsed."""
+    seen = {"n": 0}
+    real = ET.fromstring
+
+    def _counting(text, *args, **kwargs):
+        seen["n"] += 1
+        return real(text, *args, **kwargs)
+
+    monkeypatch.setattr(czi_read.ET, "fromstring", _counting)
+    return seen
+
+
+def _one_file(tmp_path, xml, name="plate.czi"):
+    from tests._czi_fixture import plate_tiles, write_czi
+    return write_czi(tmp_path / name,
+                     plate_tiles(wells=1, fovs=1, timepoints=1, channels=1),
+                     xml=xml)
+
+
+def test_four_passes_over_a_plate_parse_its_document_once(tmp_path, parses):
+    """A plate is read four times before an archive is written: the page
+    peeks, the page reads in full, the worker reads again to validate, and
+    ``explode_czi`` reads once more. A split-scene export puts the whole
+    plate's document in every file, so that is four parses of the same
+    megabytes per file — 2,644 of them on the 661-file export reported here.
+    """
+    path = _one_file(tmp_path, _plate_xml(n_scenes=8, tiles_per_scene=20))
+
+    first = czi_read.peek_scene_wells(path)
+    layouts = [czi_read.read_czi_layout(path) for _ in range(3)]
+
+    assert parses["n"] == 1, (
+        f"{parses['n']} parses of one document across four passes")
+    # The answers are the answers, parsed once or four times (§7.8: "it parsed
+    # once" is satisfied by a reader that returns nothing).
+    assert first.wells[0] == "A01"
+    assert all(layout.scene_wells[0] == "A01" for layout in layouts)
+    assert all(layout.channel_names == ["DAPI"] for layout in layouts)
+
+
+def test_a_file_rewritten_under_the_cache_is_read_again(tmp_path, parses):
+    """The reuse key has to change whenever the answer could have. A plate
+    re-exported in place, with no setting touched, is the case: the page would
+    otherwise convert the new images against the old file's scene mapping and
+    report success — a complete, correctly named archive of the wrong thing.
+
+    Rewritten to the **same length** on purpose, so that the size alone cannot
+    be what notices; only the modification time can.
+    """
+    before = _plate_xml(n_scenes=2, tiles_per_scene=3)
+    path = _one_file(tmp_path, before)
+    assert czi_read.peek_scene_wells(path).wells == ["A01", "A02"]
+    parses["n"] = 0
+
+    # Same document shape, different wells, byte-for-byte the same length.
+    after = before.replace('Name="A1"', 'Name="G9"').replace(
+        'Name="A2"', 'Name="G8"')
+    assert len(after) == len(before), "the fixture must not change the size"
+    size_before = path.stat().st_size
+    time.sleep(0.01)                  # so the modification time can differ
+    _one_file(tmp_path, after)
+    assert path.stat().st_size == size_before, (
+        "the rewrite changed the file's length, so the size alone would "
+        "notice it and this test would not be measuring the timestamp")
+
+    assert czi_read.peek_scene_wells(path).wells == ["G09", "G08"]
+    assert parses["n"] == 1, "the rewritten file was served from the cache"
+
+
+def test_the_filename_fallback_is_applied_after_the_cache(tmp_path, parses):
+    """``from_filename`` decides whether a one-scene file may be named by its
+    own filename. It is a property of the *question*, not of the document, so
+    it is applied to the cached answer rather than baked into it — otherwise
+    one call would poison the other's result.
+    """
+    xml = ('<ImageDocument><Scenes><Scene Index="0" Name="Position 1"/>'
+           "</Scenes></ImageDocument>")
+    path = _one_file(tmp_path, xml, name="D06.czi")
+
+    named = czi_read.peek_scene_wells(path, from_filename=True)
+    unnamed = czi_read.peek_scene_wells(path, from_filename=False)
+
+    assert parses["n"] == 1
+    assert named.wells == ["D06"], named.wells
+    assert unnamed.wells == [""], unnamed.wells

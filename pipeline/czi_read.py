@@ -40,9 +40,12 @@ without imagecodecs can still exercise every uncompressed path.
 
 from __future__ import annotations
 
+import os
 import re
 import struct
+import threading
 import xml.etree.ElementTree as ET
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -386,6 +389,115 @@ class _DocIndex:
         return self._by_name.get(name, [])
 
 
+@dataclass(frozen=True)
+class _PlateMetadata:
+    """Everything this module asks of a CZI's plate metadata document.
+
+    A value object rather than the parsed tree, because it is what gets
+    cached and the tree is the expensive thing being avoided: a ZEN plate
+    document runs to tens of megabytes and ``ET.fromstring`` is four fifths of
+    a header read's cost, while these few lists are kilobytes.
+    """
+
+    has_metadata: bool = False
+    #: ``{scene index: well label}`` — see :func:`_scene_wells`.
+    scene_wells: dict = field(default_factory=dict)
+    declared_scene_indices: tuple = ()
+    channel_names: tuple = ()
+    #: Why the document could not be parsed, for the layout to warn with.
+    parse_error: str = ""
+    #: What reading the document cost, counted at the read that took it.
+    bytes_read: int = 0
+
+
+def parse_plate_metadata(xml: str, *, bytes_read: int = 0) -> _PlateMetadata:
+    """Answer every question this module asks of *xml*, in one parse."""
+    if not xml:
+        return _PlateMetadata(has_metadata=False, bytes_read=bytes_read)
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError as exc:
+        return _PlateMetadata(has_metadata=False, parse_error=str(exc),
+                              bytes_read=bytes_read)
+    index = _DocIndex(root)
+    return _PlateMetadata(
+        has_metadata=True,
+        scene_wells=_scene_wells(index),
+        declared_scene_indices=tuple(_declared_scene_indices(index)),
+        channel_names=tuple(_channel_names(index)),
+        bytes_read=bytes_read,
+    )
+
+
+#: How many files' metadata to remember. A plate is at most a few hundred
+#: files and the entries are kilobytes each, so this is sized to hold several
+#: plates rather than to be a constraint anybody meets.
+_METADATA_CACHE_MAX = 4096
+
+_METADATA_CACHE: "OrderedDict[tuple, _PlateMetadata]" = OrderedDict()
+#: The pool that reads a plate is eight threads wide, and ``OrderedDict``'s
+#: move-to-end and evict are each several operations. Guarded rather than
+#: trusted to the GIL, which does not make a read-modify-write atomic.
+_METADATA_LOCK = threading.Lock()
+
+
+def _file_stamp(path: Path) -> "tuple | None":
+    """A key that changes whenever *path*'s contents could have, or ``None``.
+
+    Three parts, each because of what it invalidates, since a reuse decision
+    keyed on less than everything that makes the old answer wrong is how a
+    stale number gets reported as a fresh one (CLAUDE.md §7.7 #3):
+
+    * the **path**, because a different file is a different document;
+    * the **size**, because a re-export is almost never the same length; and
+    * the **modification time in nanoseconds**, which catches the re-export
+      that is. Nanoseconds because a whole second is long enough for a writer
+      to replace a file within one, and both platforms this ships to record
+      finer than that — NTFS to 100 ns, APFS to 1 ns.
+
+    Deliberately **not** a hash of the contents: reading the file is the cost
+    this exists to avoid, so a key that reads it would be self-defeating.
+    ``None`` when the file cannot be stat'd at all, which is not an error here
+    — it means this read is simply not cached, and the caller reads on.
+    """
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (str(path), stat.st_size, stat.st_mtime_ns)
+
+
+def cached_plate_metadata(path: Path) -> "_PlateMetadata | None":
+    """*path*'s parsed metadata if it has been read already, else ``None``."""
+    stamp = _file_stamp(path)
+    if stamp is None:
+        return None
+    with _METADATA_LOCK:
+        found = _METADATA_CACHE.get(stamp)
+        if found is not None:
+            _METADATA_CACHE.move_to_end(stamp)
+        return found
+
+
+def remember_plate_metadata(path: Path, meta: _PlateMetadata) -> None:
+    """Keep *meta* as *path*'s metadata until the file changes underneath it."""
+    stamp = _file_stamp(path)
+    if stamp is None:
+        return
+    with _METADATA_LOCK:
+        _METADATA_CACHE[stamp] = meta
+        _METADATA_CACHE.move_to_end(stamp)
+        while len(_METADATA_CACHE) > _METADATA_CACHE_MAX:
+            _METADATA_CACHE.popitem(last=False)
+
+
+def forget_plate_metadata() -> None:
+    """Drop every remembered document. For tests, and for a caller that wants
+    to prove a read really happened rather than trust that it did."""
+    with _METADATA_LOCK:
+        _METADATA_CACHE.clear()
+
+
 #: A scene name that carries a well inside a longer label — ``P1-A1``,
 #: ``Scene-3-B07``, ``A1-01``. Anchored on a separator so ``H12`` is read as a
 #: well but the ``C1`` inside ``SPECIMENC12`` is not.
@@ -570,25 +682,33 @@ def peek_scene_wells(path: Path | str, *,
     many tiles it holds, or what its pixel format is — only what its metadata
     claims about its scenes. :func:`read_czi_layout` answers the rest, and a
     caller that needs an answer it can convert against has to ask it.
+
+    The document is read and parsed once per file and then remembered against
+    that file's size and modification time, because the plate is read more
+    than once before a single archive is written — the page peeks, then reads
+    in full, and the run reads again — and a split-scene export puts the whole
+    plate's document in every one of its files. *from_filename* is applied
+    after the cache rather than baked into it, since it changes what the
+    scenes are *called* and not what the document says.
     """
     path = Path(path)
-    with open(path, "rb") as raw:
-        fh = _CountingReader(raw)
-        directory_position, metadata_position = _read_file_header(fh)
-        del directory_position                      # deliberately not read
-        xml = _read_metadata_xml(fh, metadata_position)
-        read = fh.bytes_read
-    if not xml:
-        return ScenePeek(path=path, has_metadata=False, bytes_read=read)
-    try:
-        root = ET.fromstring(xml)
-    except ET.ParseError:
-        return ScenePeek(path=path, has_metadata=False, bytes_read=read)
-    index = _DocIndex(root)
-    wells = wells_from_scenes(path, _scene_wells(index),
-                              _declared_scene_indices(index),
+    meta = cached_plate_metadata(path)
+    if meta is None:
+        with open(path, "rb") as raw:
+            fh = _CountingReader(raw)
+            directory_position, metadata_position = _read_file_header(fh)
+            del directory_position                  # deliberately not read
+            xml = _read_metadata_xml(fh, metadata_position)
+            read = fh.bytes_read
+        meta = parse_plate_metadata(xml, bytes_read=read)
+        remember_plate_metadata(path, meta)
+    if not meta.has_metadata:
+        return ScenePeek(path=path, has_metadata=False,
+                         bytes_read=meta.bytes_read)
+    wells = wells_from_scenes(path, dict(meta.scene_wells),
+                              list(meta.declared_scene_indices),
                               from_filename=from_filename)
-    return ScenePeek(path=path, wells=wells, bytes_read=read)
+    return ScenePeek(path=path, wells=wells, bytes_read=meta.bytes_read)
 
 
 #: The subblock-metadata tag ZEN stamps a plane's wall-clock acquisition time
@@ -1118,10 +1238,11 @@ class CziLayout:
         )
 
 
-def _build_layout(blocks: list[SubBlock], xml: str, *,
+def _build_layout(blocks: list[SubBlock], meta: _PlateMetadata, *,
                   from_directory: bool) -> CziLayout:
     """Turn the directory entries (and the metadata, if any) into a layout."""
-    layout = CziLayout(has_metadata=bool(xml), from_directory=from_directory)
+    layout = CziLayout(has_metadata=meta.has_metadata,
+                       from_directory=from_directory)
     acquisition = [b for b in blocks if not b.is_pyramid]
     layout.n_blocks = len(acquisition)
     if not acquisition:
@@ -1170,16 +1291,12 @@ def _build_layout(blocks: list[SubBlock], xml: str, *,
     layout.total_images = (layout.n_positions * layout.size_t * layout.size_c)
     layout.missing_images = max(0, layout.total_images - len(projections))
 
-    if xml:
-        try:
-            root = ET.fromstring(xml)
-        except ET.ParseError as exc:
-            layout.warnings.append(f"metadata XML could not be parsed: {exc}")
-            root = None
-        if root is not None:
-            index = _DocIndex(root)
-            layout.scene_wells = _scene_wells(index)
-            layout.raw_channel_names = _channel_names(index)
+    if meta.parse_error:
+        layout.warnings.append(
+            f"metadata XML could not be parsed: {meta.parse_error}")
+    elif meta.has_metadata:
+        layout.scene_wells = dict(meta.scene_wells)
+        layout.raw_channel_names = list(meta.channel_names)
     names = list(layout.raw_channel_names)
     layout.channel_names = [
         safe_token(names[i] if i < len(names) else "", f"c{i}")
@@ -1226,7 +1343,15 @@ def read_czi_layout(path: Path | str, *,
             blocks, walked_metadata = _walk_segments(fh)
             if metadata_position <= 0:
                 metadata_position = walked_metadata
-        xml = _read_metadata_xml(fh, metadata_position)
+        # Only when this file's document has not been parsed already. On a
+        # hit this skips the read as well as the parse, which on a network
+        # share is the larger half: the page's peek has normally just taken
+        # it, and the document is the same bytes either way.
+        meta = cached_plate_metadata(path)
+        if meta is None:
+            xml = _read_metadata_xml(fh, metadata_position)
+            meta = parse_plate_metadata(xml, bytes_read=0)
+            remember_plate_metadata(path, meta)
         layout_blocks = [b for b in blocks if not b.is_pyramid]
         scan = None
         if read_times:
@@ -1235,7 +1360,7 @@ def read_czi_layout(path: Path | str, *,
             scan = scan_timepoint_hours(
                 fh, layout_blocks,
                 max((b.start("T") for b in layout_blocks), default=-1) + 1)
-    layout = _build_layout(blocks, xml, from_directory=from_directory)
+    layout = _build_layout(blocks, meta, from_directory=from_directory)
     layout.time_scan = scan
     if not from_directory and layout.n_blocks:
         layout.warnings.append(

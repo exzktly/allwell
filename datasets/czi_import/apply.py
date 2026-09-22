@@ -29,6 +29,7 @@ from datasets.czi_import.czi_import_compute import (
     resume_state,
     source_files,
     strip_czi_suffix,
+    write_done_marker,
     write_run_marker,
 )
 from pipeline.czi_explode import explode_czi
@@ -114,6 +115,7 @@ def convert(
         experiment=experiment,
         fovs_per_well=params.fovs_per_well,
         timepoint_stride=params.timepoint_stride,
+        well_subset=params.well_subset,
         workers=params.workers,
         log_fn=log,
         progress_fn=progress,
@@ -121,6 +123,10 @@ def convert(
         should_abort=is_cancelled,
         resume=resuming,
     )
+    # Record what built this folder before dropping the in-progress
+    # marker, so a later run adding the wells this one skipped can tell
+    # its own dataset from a stranger's plate.
+    write_done_marker(dest, src, params)
     clear_run_marker(dest)
     channels = ", ".join(result.channels) if result.channels else "?"
     kept = (f" ({len(result.wells_resumed)} kept from an interrupted run)"

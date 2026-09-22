@@ -38,8 +38,10 @@ from pipeline.explode_common import (
     pick_workers,
     resolve_positions,
     stride_note,
+    subset_note,
     timepoint_plan,
     well_is_complete,
+    wells_to_convert,
     worker_groups,
 )
 from pipeline.nd2_read import Nd2Layout, Nd2Reader, read_nd2_layout
@@ -157,6 +159,7 @@ def explode_nd2(
     progress_fn: "Callable[[int, int], None] | None" = None,
     well_progress_fn: "Callable[[str, int, int], None] | None" = None,
     should_abort: "Callable[[], bool] | None" = None,
+    well_subset: "tuple[str, ...]" = (),
     resume: bool = False,
 ) -> ExplodeResult:
     """Explode *nd2_path* into per-well ``<WELL>.zip`` archives in *out_in_dir*.
@@ -220,14 +223,20 @@ def explode_nd2(
     n_kept_t = len(tp_plan)
     fovs = well_map.fovs_per_well
     n_wells = well_map.n_wells
+    selected = wells_to_convert(well_map.wells, well_subset)
 
     out_in_dir.mkdir(parents=True, exist_ok=True)
-    total = n_wells * fovs * n_kept_t * layout.size_c
-    n_workers = pick_workers(workers, n_wells)
+    # Counted over the wells this run writes, not over the plate. A subset
+    # run denominated by the whole plate would report a complete conversion as
+    # a fraction of one.
+    n_selected = len(selected)
+    total = n_selected * fovs * n_kept_t * layout.size_c
+    n_workers = pick_workers(workers, n_selected)
     source = "the file's position names" if well_map.from_file else "the plate grid"
     _log(
-        f"[nd2] {nd2_path.name}: {layout.n_positions} position(s) -> {n_wells} "
-        f"well(s) x {fovs} FOV(s) x {n_kept_t} timepoint(s)"
+        f"[nd2] {nd2_path.name}: {layout.n_positions} position(s) -> "
+        f"{subset_note(n_selected, n_wells)} x {fovs} FOV(s) x "
+        f"{n_kept_t} timepoint(s)"
         f"{stride_note(timepoint_stride, layout.size_t, tp_tokens)}, "
         f"{layout.size_c} channel(s)"
         f"{f', {layout.size_z} Z-plane(s) max-projected' if layout.size_z > 1 else ''}"
@@ -243,15 +252,16 @@ def explode_nd2(
     # conversion's interrupted output.
     resumable: set[str] = set()
     if resume:
+        chosen = {well_map.wells[i] for i in selected}
         resumable = {
-            label for label in well_map.wells
+            label for label in well_map.wells if label in chosen
             if well_is_complete(
                 out_in_dir / f"{label}.zip",
                 expected_members(exp_tok, layout.channel_names, label, fovs,
                                  tp_tokens))
         }
         if resumable:
-            _log(f"[nd2] Resuming: {len(resumable)} of {n_wells} well(s) are "
+            _log(f"[nd2] Resuming: {len(resumable)} of {n_selected} well(s) are "
                  f"already converted and will be left alone.\n")
 
     lock = threading.Lock()
@@ -329,7 +339,7 @@ def explode_nd2(
     started_at = time.perf_counter()
     with ThreadPoolExecutor(max_workers=n_workers) as pool:
         futures = [pool.submit(_convert_wells, group)
-                   for group in worker_groups(n_wells, n_workers)]
+                   for group in worker_groups(selected, n_workers)]
         for future in as_completed(futures):
             count, wells, read_time, write_time, resumed = future.result()
             result.images_written += count

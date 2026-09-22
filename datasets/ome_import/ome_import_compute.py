@@ -81,6 +81,17 @@ class ConversionParams:
     timepoint_stride: int = 1
     frame_order: str = "single"           # single-image files only
     experiment: str = ""                  # blank = derive from the filename
+    #: Convert only these wells, leaving the rest of the plate alone; empty
+    #: converts all of them. Canonical labels (``A01``), matched case- and
+    #: padding-insensitively against the mapping the other settings resolve.
+    #:
+    #: **Deliberately not part of the resume signature below.** A well's
+    #: archive holds exactly the same images whether or not the wells beside
+    #: it were converted in the same run, so the selection changes nothing
+    #: about which image lands under which filename — the one question that
+    #: signature answers. Keying on it would refuse the workflow a subset
+    #: exists for: convert six wells today, the rest next week, one dataset.
+    well_subset: tuple[str, ...] = ()
     workers: int = 0                      # 0 = auto (per-well thread pool)
     # An explicit acquisition ordering (click-defined on the plate mockup). When
     # non-empty it replaces the rectangular serpentine: wells are visited in this
@@ -609,6 +620,18 @@ def write_run_marker(dest: Path | str, src: Path | str,
     """Record that a conversion is under way in *dest*, and with what settings."""
     marker.write_run_marker(dest, IN_PROGRESS_MARKER,
                             _mapping_signature(src, params))
+
+
+def write_done_marker(dest: Path | str, src: Path | str,
+                      params: ConversionParams) -> None:
+    """Record the mapping this finished conversion used.
+
+    What lets a later run add the wells this one did not convert: without it a
+    top-up is indistinguishable from a stranger's plate pointed at the same
+    folder, which the destination check refuses outright.
+    """
+    marker.write_done_marker(
+        dest, marker.mapping_signature(src, params, _MAPPING_FIELDS))
 
 
 def clear_run_marker(dest: Path | str) -> None:

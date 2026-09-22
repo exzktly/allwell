@@ -58,8 +58,10 @@ from pipeline.explode_common import (
     pick_workers,
     resolve_positions,
     stride_note,
+    subset_note,
     timepoint_plan,
     well_is_complete,
+    wells_to_convert,
     worker_groups,
 )
 from util.filename_token import safe_token
@@ -1330,6 +1332,7 @@ def explode_ome_tiff(
     progress_fn: "Callable[[int, int], None] | None" = None,
     well_progress_fn: "Callable[[str, int, int], None] | None" = None,
     should_abort: "Callable[[], bool] | None" = None,
+    well_subset: "tuple[str, ...]" = (),
     resume: bool = False,
 ) -> ExplodeResult:
     """Explode a packed OME-TIFF into per-well ``<WELL>.zip`` archives in *out_in_dir*.
@@ -1412,6 +1415,7 @@ def explode_ome_tiff(
             serpentine=serpentine,
         )
     n_wells = len(well_labels)
+    selected = wells_to_convert(well_labels, well_subset)
 
     if layout.single_image:
         n_positions, n_timepoints, fovs = _resolve_single_image(
@@ -1439,10 +1443,15 @@ def explode_ome_tiff(
     n_kept_t = len(tp_plan)
 
     out_in_dir.mkdir(parents=True, exist_ok=True)
-    total = n_positions * n_kept_t * layout.size_c
-    n_workers = pick_workers(workers, n_wells)
+    # Counted over the wells this run writes, not over the plate: a subset run
+    # denominated by the whole plate reports a complete conversion as a
+    # fraction of one.
+    n_selected = len(selected)
+    total = n_selected * fovs * n_kept_t * layout.size_c
+    n_workers = pick_workers(workers, n_selected)
     _log(
-        f"[ome] {ome_path.name}: {head} -> {n_wells} well(s) x {fovs} FOV(s) x "
+        f"[ome] {ome_path.name}: {head} -> "
+        f"{subset_note(n_selected, n_wells)} x {fovs} FOV(s) x "
         f"{n_kept_t} timepoint(s)"
         f"{stride_note(timepoint_stride, n_timepoints, tp_tokens)}"
         f", {layout.size_c} channel(s)"
@@ -1457,15 +1466,16 @@ def explode_ome_tiff(
     # has established that the folder holds *this* run's interrupted output.
     resumable: set[str] = set()
     if resume:
+        chosen = {well_labels[i] for i in selected}
         resumable = {
             label for label in well_labels
-            if well_is_complete(
+            if label in chosen and well_is_complete(
                 out_in_dir / f"{label}.zip",
                 expected_members(exp_tok, layout.channel_names, label,
                                   fovs, tp_tokens))
         }
         if resumable:
-            _log(f"[ome] Resuming: {len(resumable)} of {n_wells} well(s) are "
+            _log(f"[ome] Resuming: {len(resumable)} of {n_selected} well(s) are "
                  f"already converted and will be left alone.\n")
 
     lock = threading.Lock()
@@ -1550,7 +1560,7 @@ def explode_ome_tiff(
                 wells.append(label)
         return written, wells, read_s, write_s, resumed
 
-    groups = worker_groups(n_wells, n_workers)
+    groups = worker_groups(selected, n_workers)
     result = ExplodeResult(
         channels=list(layout.channel_names),
         timepoints=tp_tokens,

@@ -80,10 +80,45 @@ def write_run_marker(dest: Path | str, marker: str, signature: dict) -> None:
     write_json_atomic(root / marker, signature)
 
 
+#: What a *finished* run leaves behind, so a later one can add the wells it did
+#: not convert. Named apart from the in-progress marker because the two answer
+#: different questions: that one says "a run died here, finish it", this one
+#: says "a completed run made this dataset, and these were its settings".
+#:
+#: It exists for subset conversions. Converting six wells today and the rest
+#: next week is one dataset built in two sittings, and without a record of the
+#: first sitting's mapping the second is indistinguishable from someone
+#: pointing a different plate at the same folder — which is what the
+#: "Already holds converted wells" refusal is there to stop.
+DONE_MARKER = ".aw_converted"
+
+
 def clear_run_marker(dest: Path | str, marker: str, label: str) -> None:
-    """Drop the marker — the run finished, so the folder is a dataset now."""
+    """Drop the in-progress marker — the run finished.
+
+    Does **not** leave the folder unmarked: :func:`write_done_marker` records
+    the settings that built it, so a later run adding the remaining wells can
+    tell this is its own dataset to extend rather than a stranger's plate.
+    """
     with swallow(f"{label} marker"):
         (Path(dest) / marker).unlink(missing_ok=True)
+
+
+def write_done_marker(dest: Path | str, signature: dict) -> None:
+    """Record the mapping a completed conversion used, for a later top-up."""
+    write_json_atomic(Path(dest) / DONE_MARKER, dict(signature))
+
+
+def read_done_marker(dest: Path | str) -> dict | None:
+    """The settings of the completed conversion in *dest*, or ``None``."""
+    path = Path(dest) / DONE_MARKER
+    if not path.is_file():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
 
 
 def read_run_marker(dest: Path | str, marker: str) -> dict | None:
@@ -176,5 +211,13 @@ def destination_problem(dest: Path | str, marker: str,
         return "Already holds a finished dataset — choose an empty folder."
     in_dir = root / "in"
     if in_dir.is_dir() and any(in_dir.glob("*.zip")):
+        # A dataset this converter built with *these* settings is not a
+        # stranger's plate: it is a subset conversion being topped up, which
+        # is the workflow converting part of a plate implies. Compared on the
+        # mapping alone — the well selection is deliberately not part of the
+        # signature (see `mapping_signature`), because which *other* wells a
+        # run wrote changes nothing about the one in front of you.
+        if signature is not None and read_done_marker(root) == signature:
+            return ""
         return "Already holds converted wells — choose an empty folder."
     return ""

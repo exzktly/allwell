@@ -88,6 +88,17 @@ class ConversionParams:
     #: would notice the plate had gone ragged.
     timepoint_stride: int = 1
     experiment: str = ""                  # blank = derive from the filename
+    #: Convert only these wells, leaving the rest of the plate alone; empty
+    #: converts all of them. Canonical labels (``A01``), matched case- and
+    #: padding-insensitively against the mapping the other settings resolve.
+    #:
+    #: **Deliberately not part of the resume signature below.** A well's
+    #: archive holds exactly the same images whether or not the wells beside
+    #: it were converted in the same run, so the selection changes nothing
+    #: about which image lands under which filename — the one question that
+    #: signature answers. Keying on it would refuse the workflow a subset
+    #: exists for: convert six wells today, the rest next week, one dataset.
+    well_subset: tuple[str, ...] = ()
     workers: int = 0                      # 0 = auto (per-well thread pool)
 
 
@@ -348,6 +359,18 @@ def write_run_marker(dest: Path | str, src: Path | str,
                             marker.mapping_signature(src, params, _MAPPING_FIELDS))
 
 
+def write_done_marker(dest: Path | str, src: Path | str,
+                      params: ConversionParams) -> None:
+    """Record the mapping this finished conversion used.
+
+    What lets a later run add the wells this one did not convert: without it a
+    top-up is indistinguishable from a stranger's plate pointed at the same
+    folder, which the destination check refuses outright.
+    """
+    marker.write_done_marker(
+        dest, marker.mapping_signature(src, params, _MAPPING_FIELDS))
+
+
 def clear_run_marker(dest: Path | str) -> None:
     """Drop the marker — the run finished, so the folder is a dataset now."""
     marker.clear_run_marker(dest, IN_PROGRESS_MARKER, "nd2-import")
@@ -381,8 +404,17 @@ def destination_problem(dest: Path | str, src: Path | str = "",
     ``out/`` measurements beside them then describe inputs that are no longer
     there.
     """
+    # The signature is built only when the folder carries one of this tool's
+    # markers, because building it fingerprints the source — a stat per file,
+    # which on a split export is ninety-six of them, on a path a keystroke
+    # takes. Both markers are checked: the in-progress one says "finish this
+    # run", and the completed one says "this is the dataset you built, add the
+    # wells you skipped". Consulting only the first was a real gap — a
+    # finished run leaves no in-progress marker, so a subset top-up was
+    # refused as a stranger's plate.
     signature = None
-    if params is not None and marker.read_run_marker(
-            dest, IN_PROGRESS_MARKER) is not None:
+    if params is not None and (
+            marker.read_run_marker(dest, IN_PROGRESS_MARKER) is not None
+            or marker.read_done_marker(dest) is not None):
         signature = marker.mapping_signature(src or dest, params, _MAPPING_FIELDS)
     return marker.destination_problem(dest, IN_PROGRESS_MARKER, signature)

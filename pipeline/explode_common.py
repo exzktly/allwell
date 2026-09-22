@@ -29,6 +29,8 @@ from pathlib import Path
 import numpy as np
 import tifffile
 
+from util.well_token import canonical_well_label
+
 
 class ExplodeCancelled(Exception):
     """Raised when a ``should_abort`` callback stops an explode mid-run."""
@@ -537,15 +539,75 @@ def encode_tiff(plane: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
-def worker_groups(n_wells: int, n_workers: int) -> list[list[int]]:
-    """Split ``range(n_wells)`` into *n_workers* disjoint, non-empty groups.
+def worker_groups(n_wells: "int | list[int]",
+                  n_workers: int) -> list[list[int]]:
+    """Split the wells to convert into *n_workers* disjoint, non-empty groups.
+
+    Takes either a count — ``range(n_wells)``, the whole plate — or an explicit
+    list of **well indices**, which is how a subset conversion is expressed.
 
     Strided rather than contiguous, so a plate whose later wells are heavier
     than its earlier ones does not leave one thread finishing alone. Each group
     is one thread's wells and no two groups share one, which is what lets each
     thread own its archive handles without a lock.
     """
-    if n_wells <= 0 or n_workers <= 0:
+    indices = (list(range(n_wells)) if isinstance(n_wells, int)
+               else list(n_wells))
+    if not indices or n_workers <= 0:
         return []
-    return [g for g in (list(range(i, n_wells, n_workers))
+    return [g for g in ([indices[j] for j in range(i, len(indices), n_workers)]
                         for i in range(n_workers)) if g]
+
+
+def subset_note(n_selected: int, n_wells: int) -> str:
+    """``"3 of 96 well(s) (subset)"`` when a run covers part of the plate.
+
+    A subset conversion writes a complete, correct dataset that holds a
+    fraction of the acquisition, and a plain well count reads identically to a
+    plate that only ever had that many wells (CLAUDE.md §7: degraded output
+    must never be indistinguishable from good output). Both numbers, always,
+    where a whole-plate run prints the count it always did.
+    """
+    if n_selected >= n_wells:
+        return f"{n_wells} well(s)"
+    return f"{n_selected} of {n_wells} well(s) (subset)"
+
+
+def wells_to_convert(well_labels, subset) -> list[int]:
+    """The **indices** of the wells a run should write, in plate order.
+
+    Empty *subset* means the whole plate, which is the default and the case
+    every caller had before subsets existed.
+
+    Indices, deliberately, and this is the whole reason the helper exists.
+    A well's index is what maps it back to its source: well ``i`` takes stage
+    positions ``i * fovs`` onward in all three converters. Filtering the label
+    *list* would renumber every well after the first one dropped, so a
+    conversion of B01 alone would read A01's images and write them under B01's
+    name — a complete, correctly named archive of the wrong well, which is the
+    failure CLAUDE.md §7 is written against. The mapping therefore stays whole
+    and only the set of indices walked changes, which is also why a subset
+    cannot alter what any converted well contains.
+
+    Matching is by canonical label, so ``a1`` and ``A01`` name the same well.
+    A subset naming a well the plate does not have raises rather than silently
+    converting fewer wells than asked for: a run that quietly drops half a
+    request looks exactly like one that was asked for half.
+    """
+    labels = list(well_labels)
+    if not subset:
+        return list(range(len(labels)))
+    wanted = {canonical_well_label(w) or str(w).strip().upper()
+              for w in subset}
+    wanted.discard("")
+    index_of: dict[str, int] = {}
+    for i, label in enumerate(labels):
+        index_of.setdefault(canonical_well_label(label) or str(label), i)
+    missing = sorted(w for w in wanted if w not in index_of)
+    if missing:
+        raise ValueError(
+            f"The wells to convert include {', '.join(missing)}, which this "
+            f"source does not hold. It has "
+            f"{', '.join(labels[:8])}{' …' if len(labels) > 8 else ''}. "
+            f"Clear the selection to convert the whole plate.")
+    return sorted(index_of[w] for w in wanted)

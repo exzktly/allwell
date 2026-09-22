@@ -27,6 +27,7 @@ from datasets.ome_import.ome_import_compute import (
     destination_problem,
     resume_state,
     strip_ome_suffix,
+    write_done_marker,
     write_run_marker,
 )
 from pipeline.ome_explode import explode_ome_tiff
@@ -101,6 +102,7 @@ def convert(
         experiment=experiment,
         fovs_per_well=params.fovs_per_well,
         timepoint_stride=params.timepoint_stride,
+        well_subset=params.well_subset,
         frame_order=params.frame_order,
         well_order=list(params.well_order) or None,
         workers=params.workers,
@@ -110,6 +112,10 @@ def convert(
         should_abort=is_cancelled,
         resume=resuming,
     )
+    # Record what built this folder before dropping the in-progress
+    # marker, so a later run adding the wells this one skipped can tell
+    # its own dataset from a stranger's plate.
+    write_done_marker(dest, src, params)
     clear_run_marker(dest)
     channels = ", ".join(result.channels) if result.channels else "?"
     kept = (f" ({len(result.wells_resumed)} kept from an interrupted run)"

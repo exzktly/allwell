@@ -147,6 +147,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # client-side, and is listed because the manifest mirrors every
     # ``pipeline/`` file rather than carrying exceptions nobody can see.
     "pipeline/nd2_read.py",
+    "pipeline/nd2_explode.py",
     # What the exploders share: the member-name rule, the resume check, the
     # worker split, the timepoint plan, the elapsed-hour rendering and the
     # in-memory TIFF encode.

@@ -23,6 +23,7 @@ docstring and its object name.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from ui import theme
@@ -35,16 +36,52 @@ _STARTED = 0.0
 
 
 class ConverterDashboard(PlateProgress):
-    """Wells of a conversion: planned, in flight, and finished."""
+    """Wells of a conversion: planned, in flight, and finished.
+
+    The plate is also where a **subset** of the wells is chosen. It already
+    shows the mapping the settings resolve to, so picking on it means picking
+    from the wells the source actually has — a selection cannot name a well
+    that is not there, which a typed list can. Nothing selected means the
+    whole plate, which is the default and what every run did before subsets
+    existed.
+    """
+
+    #: The wells the user has picked, or ``[]`` for the whole plate.
+    wellsSelected = Signal(list)
 
     def __init__(self, parent: QWidget | None = None, *,
                  object_name: str = "ConverterDashboard") -> None:
         self._wells: list[str] = []
         self._fraction: dict[str, float] = {}
         super().__init__("Convert Progress", parent)
+        # A rim rather than a fill, because the same cells carry the run's
+        # progress colours: a selection drawn as a fill would be repainted by
+        # the first well that started converting.
+        self._plate.setSelectionRim(True)
+        self._plate.selectionChanged.connect(self._on_selection_changed)
         # Named per converter so a QSS rule or a test can address one
         # page's plate without reaching every converter's at once.
         self.setObjectName(object_name)
+
+    def _on_selection_changed(self, ids) -> None:
+        self.wellsSelected.emit(list(ids))
+
+    def selected_wells(self) -> list[str]:
+        """The picked wells, or ``[]`` meaning the whole plate."""
+        return list(self._plate.selectedWellIds())
+
+    def set_selected_wells(self, ids) -> None:
+        """Restore a selection — the Job Queue's edit path."""
+        self._plate.setSelectedWellIds(list(ids or []))
+
+    def set_selection_enabled(self, on: bool) -> None:
+        """Allow or forbid picking wells.
+
+        Forbidden while a run is in flight: the plate is the progress display
+        then, and a selection changed mid-run would describe a conversion
+        other than the one being reported on.
+        """
+        self._plate.setSelectionMode("select" if on else "passive")
 
     def reset(self) -> None:
         """Back to idle, keeping no trace of the previous run's dials."""

@@ -223,6 +223,11 @@ class RawFields:
     serpentine: bool = True
     frame_order: str = "single"
     experiment: str = ""
+    #: Wells the user picked on the plate; empty converts all of them. Kept as
+    #: given rather than validated here — a well the source does not hold is
+    #: refused by `explode_common.wells_to_convert` with a message naming it,
+    #: which is where the plate's real labels are known.
+    well_subset: tuple[str, ...] = ()
     well_order: tuple[str, ...] = ()
 
     @property
@@ -284,6 +289,7 @@ class RawFields:
             experiment=self.experiment,
             workers=max(0, workers or 0),
             well_order=tuple(self.well_order),
+            well_subset=tuple(self.well_subset),
         )
 
 

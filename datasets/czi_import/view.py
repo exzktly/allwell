@@ -403,6 +403,11 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         self.build_log_header(outer, "Convert CZI Output")
         self._dashboard = CziImportDashboard(self)
+        # Picking wells on the plate is how a subset conversion is chosen. It
+        # already shows the mapping the settings resolve to, so a selection
+        # cannot name a well the source does not have. Nothing selected is the
+        # whole plate.
+        self._dashboard.wellsSelected.connect(self._on_readout_input_changed)
         outer.addWidget(self._dashboard)
         self.build_log_tail(outer, placeholder="Status will appear here.")
 
@@ -569,6 +574,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             direction=str(self._direction_cb.currentData() or "row"),
             serpentine=self._serpentine_cb.isChecked(),
             experiment=self._experiment_edit.text(),
+            well_subset=tuple(self._dashboard.selected_wells()),
             use_folder=self.use_folder(),
         )
 
@@ -594,6 +600,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._direction_cb.setCurrentIndex(direction)
         self._serpentine_cb.setChecked(bool(params.serpentine))
         self._experiment_edit.setText(params.experiment or "")
+        self._dashboard.set_selected_wells(params.well_subset)
         # A spec's answer is an answer, so it sticks the way a click does.
         self._folder_touched = True
         with QSignalBlocker(self._folder_cb):
@@ -654,6 +661,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # path text too, which is the one piece of context someone watching a
         # long run most wants to read (see ``widgets/path_field.py``).
         self._pick_folder_btn.setEnabled(not running)
+        self._dashboard.set_selection_enabled(not running)
         self._src_field.setLocked(running)
         self._dest_field.setLocked(running)
 

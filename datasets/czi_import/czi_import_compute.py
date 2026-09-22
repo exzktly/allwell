@@ -27,7 +27,7 @@ from datasets.core import convert_marker as marker
 from datasets.core.convert_marker import ResumeState  # noqa: F401 (re-export)
 from pipeline.czi_explode import WELL_SOURCES, resolve_well_map
 from pipeline.czi_read import CziReadError
-from pipeline.explode_common import timepoint_plan
+from pipeline.explode_common import timepoint_plan, wells_to_convert
 from pipeline.czi_set import (
     CziSet,
     PlatePeek,
@@ -139,6 +139,11 @@ class ConversionPlan:
     n_files: int = 1
     well_labels: list[str] = field(default_factory=list)
     channels: list[str] = field(default_factory=list)
+    #: The wells this run will actually write, when a subset was chosen; empty
+    #: means the whole mapping. Kept beside ``well_labels`` rather than
+    #: replacing it, because the readout has to state both: which wells the
+    #: *source* holds, and which of them this run covers.
+    selected_wells: list[str] = field(default_factory=list)
     #: True when ``well_labels`` came from the file's own scene names.
     from_file: bool = False
 
@@ -162,10 +167,17 @@ class ConversionPlan:
             span = f" {first}" if first == last else f" {first}→{last}"
         source = ("named by the file" if self.from_file else "from the plate grid")
         held = f" across {self.n_files} file(s)" if self.n_files > 1 else ""
-        images = (self.n_wells * self.fovs_per_well * self.n_timepoints
+        # Counted over the wells this run writes. Denominating by the whole
+        # mapping described a subset conversion as the plate it was taken from,
+        # on the surface the user reads before pressing Convert.
+        n_writing = len(self.selected_wells) or self.n_wells
+        images = (n_writing * self.fovs_per_well * self.n_timepoints
                   * max(1, len(self.channels)))
+        wells_phrase = (f"{self.n_wells} well(s){span}" if not self.selected_wells
+                        else f"{n_writing} of {self.n_wells} well(s){span}, "
+                             f"selected")
         return (
-            f"{self.n_wells} well(s){span} ({source}){held} × "
+            f"{wells_phrase} ({source}){held} × "
             f"{self.fovs_per_well} FOV(s) × {self.timepoint_phrase} × "
             f"{len(self.channels)} channel(s) ({channels}) — {images} image(s)."
         )
@@ -241,6 +253,11 @@ class RawFields:
     direction: str = "row"
     serpentine: bool = True
     experiment: str = ""
+    #: Wells the user picked on the plate; empty converts all of them. Kept as
+    #: given rather than validated here — a well the source does not hold is
+    #: refused by `explode_common.wells_to_convert` with a message naming it,
+    #: which is where the plate's real labels are known.
+    well_subset: tuple[str, ...] = ()
 
     def problems(self) -> list[str]:
         """Everything wrong with the fields as they stand, in reading order."""
@@ -282,6 +299,7 @@ class RawFields:
             serpentine=self.serpentine,
             fovs_per_well=fovs,
             experiment=self.experiment.strip(),
+            well_subset=tuple(self.well_subset),
             timepoint_stride=stride or 1,
             workers=workers or 0,
         )
@@ -390,6 +408,15 @@ def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
         )
     except ValueError as exc:
         raise CziImportError(str(exc)) from exc
+    # Resolved here rather than at run time so a well the source does not hold
+    # is refused on the page, where the plate showing the real labels is two
+    # inches away — not after the run has started.
+    try:
+        chosen = wells_to_convert(well_map.wells, params.well_subset)
+    except ValueError as exc:
+        raise CziImportError(str(exc)) from exc
+    selected_labels = ([] if not params.well_subset
+                       else [well_map.wells[i] for i in chosen])
     try:
         kept = timepoint_plan(source.timepoint_tokens,
                               params.timepoint_stride)
@@ -405,6 +432,7 @@ def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
         n_files=source.n_files,
         well_labels=list(well_map.wells),
         channels=list(source.layout.channel_names),
+        selected_wells=selected_labels,
         from_file=well_map.from_file,
     )
 

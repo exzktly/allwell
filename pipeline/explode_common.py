@@ -20,6 +20,7 @@ a half-finished well as complete.
 from __future__ import annotations
 
 import io
+import math
 import os
 import zipfile
 from dataclasses import dataclass, field
@@ -71,6 +72,99 @@ def resolve_positions(
             f"Check the grid dimensions and the FOVs-per-well value."
         )
     return fovs_per_well
+
+
+def hours_token(hours: float) -> str:
+    """``"<hours>h"`` in a spelling ``util.timepoint`` can read, or ``""``.
+
+    Six significant figures in **fixed** notation. ``f"{v:g}"`` switches to
+    exponent form below 1e-4, which was rare while every OME ``DeltaT`` was
+    read as seconds and became routine once milliseconds, microseconds and
+    nanoseconds were added: a six-frame time-lapse 100 ms apart rendered
+    ``2.77778e-05h``, and ``util.timepoint._UNIT_RE`` matches no exponent, so
+    ``parse_hours`` answered ``None`` and ``sort_key`` fell back to sorting
+    those tokens as text — putting frames 5 and 6 before frames 2 to 4. A
+    number the parser cannot read is worse than the wrong number it replaced,
+    because the wrong one at least ordered correctly.
+
+    Answers ``""`` for a value the parser cannot represent at all: not finite,
+    or negative (``_UNIT_RE`` accepts no sign, and a writer stamping a
+    pre-treatment frame at a negative elapsed time is the case that produces
+    one). The caller reads that as a reason to name every timepoint by
+    position, and says so.
+
+    Shared by both importers so that one acquisition exported twice — once as
+    an OME-TIFF and once as a CZI — cannot produce two different spellings of
+    the same elapsed hour. A plate concatenated from the two would then hold
+    ``4h`` and ``4.0h`` as separate timepoints.
+    """
+    if not math.isfinite(hours) or hours < 0.0:
+        return ""
+    if hours == 0.0:
+        return "0h"
+    # Decimal places chosen so six significant figures survive, capped: below
+    # a microsecond in hours the label is more zeros than number, and two such
+    # timepoints colliding is caught by the duplicate check either way.
+    places = min(12, max(0, 5 - int(math.floor(math.log10(hours)))))
+    text = f"{hours:.{places}f}".rstrip("0").rstrip(".")
+    return f"{text}h" if text and text != "0" else "0h"
+
+
+@dataclass(frozen=True)
+class ElapsedTokens:
+    """Elapsed-time timepoint tokens, or the reasons there are none.
+
+    ``tokens`` is ``None`` whenever the caller must keep its positional
+    ``t0``/``t1`` names, and ``reasons`` then says why in the run log's words.
+    Both are always populated together: a fallback with nothing said about it
+    leaves a positionally-named plate indistinguishable from one whose writer
+    recorded no times at all.
+    """
+
+    tokens: "list[str] | None"
+    reasons: list[str] = field(default_factory=list)
+
+
+def elapsed_hour_tokens(hours_by_index: "dict[int, float]", size_t: int,
+                        *, source_reasons=()) -> ElapsedTokens:
+    """Render elapsed hours into one token per timepoint, or decline.
+
+    Declines — ``tokens=None`` — unless *every* timepoint has a reading, every
+    reading renders, and the renderings are distinct. The distinctness check is
+    the load-bearing one: two timepoints sharing a token write the same member
+    name into one archive, ``zipfile`` stores both copies and a reader returns
+    only the last, so one timepoint becomes unreachable while the run reports
+    having written both.
+
+    *source_reasons* are the caller's own — an unreadable unit, a coordinate
+    outside the file's own axis — which this function cannot know about and
+    which belong in the same sentence as the ones it can see.
+    """
+    reasons = list(source_reasons)
+    complete = size_t > 0 and len(hours_by_index) >= size_t
+    tokens = ([hours_token(hours_by_index[i]) for i in range(size_t)]
+              if complete else [])
+    collided = sorted({t for t in tokens if t and tokens.count(t) > 1})
+    unrenderable = [i for i, t in enumerate(tokens) if not t]
+
+    if complete and not collided and not unrenderable:
+        return ElapsedTokens(tokens, [])
+
+    if collided:
+        reasons.append(
+            f"the elapsed times render to {len(set(tokens))} distinct label(s) "
+            f"for {len(tokens)} timepoint(s) — {', '.join(collided)} repeat(s), "
+            f"and two timepoints sharing a label would write every image of the "
+            f"second over the first")
+    if unrenderable:
+        reasons.append(
+            f"{len(unrenderable)} elapsed time(s) are not finite or not "
+            f"positive, and the app's timepoint parser reads neither")
+    if not reasons:
+        reasons.append(
+            f"only {len(hours_by_index)} of {size_t} timepoint(s) carry a "
+            f"readable acquisition time")
+    return ElapsedTokens(None, reasons)
 
 
 def timepoint_plan(timepoints, stride: int = 1) -> list[tuple[int, str]]:

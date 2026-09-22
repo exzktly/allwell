@@ -343,11 +343,18 @@ def explode_czi(
     # Index *and* token together: the index reads the plane and the token
     # names it, and a stride that filtered one list without the other would
     # write the right image under the wrong timepoint.
-    tp_plan = timepoint_plan(layout.timepoint_tokens, timepoint_stride)
+    # The set's tokens, not the layout's: elapsed hours where the files'
+    # acquisition stamps supported them, positional otherwise. Resolved once
+    # for the plate in ``czi_set``, so the page's readout and the archives
+    # cannot be named two different ways.
+    tp_plan = timepoint_plan(czi_set.timepoint_tokens, timepoint_stride)
     tp_tokens = [token for _index, token in tp_plan]
     n_kept_t = len(tp_plan)
     fovs = well_map.fovs_per_well
     n_wells = well_map.n_wells
+    if czi_set.timepoint_note:
+        _log(f"[czi] Timepoints are named by position (t0, t1, ...) rather "
+             f"than by elapsed time -- {czi_set.timepoint_note}.\n")
 
     out_in_dir.mkdir(parents=True, exist_ok=True)
     total = czi_set.n_positions * n_kept_t * layout.size_c

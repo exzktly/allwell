@@ -5201,19 +5201,21 @@ on the plate rather than supplying it.
    after it, which is how you take a densely-sampled acquisition into a
    dataset at a coarser time resolution without re-exporting it from ZEN.
 
-   **The kept timepoints keep their own names.** Every third point of a
-   twelve-point run is written as `t0`, `t3`, `t6`, `t9` — not renumbered to
-   `t0 … t3` — so they stay three units apart and Review's *Interval per
-   timepoint* rescales them exactly as it would a complete run. Renumbering
-   them would quietly tell Review the plate was imaged four times in a row at
-   the original spacing.
+   **The kept timepoints keep their own names.** On a plate whose file
+   records acquisition times, every third point of a four-hourly run is
+   written `0h`, `12h`, `24h`, `36h` — the real elapsed hours of the images
+   that were kept. On a plate named by position it is `t0`, `t3`, `t6`, `t9`,
+   not renumbered to `t0 … t3`, so the four stay three units apart and
+   Review's *Interval per timepoint* rescales them exactly as it would a
+   complete run. Renumbering would quietly tell Review the plate was imaged
+   four times in a row at the original spacing.
 
    The first timepoint is always kept, since on a treatment timecourse that is
    the reading everything else is measured against. A stride larger than the
    run simply keeps that first point. Because a dataset converted this way
    otherwise looks exactly like a plate that was only imaged that many times,
-   the readout says both numbers — *"4 of 12 timepoint(s) (t0, t3, t6, t9)"* —
-   and the run log repeats it.
+   the readout says both numbers — *"4 of 12 timepoint(s) (0h, 12h, 24h,
+   36h)"* — and the run log repeats it.
 8. **Worker threads** — how many wells to convert in parallel (blank = auto,
    capped at the number of wells). It changes only how fast the run goes and
    nothing about what comes out, which is also why changing it never blocks a
@@ -5310,15 +5312,35 @@ honestly is refused there rather than part-way through a run. What it catches:
   is the image cannot be decided. This is what a file concatenated from two
   acquisitions looks like; convert them separately.
 
-**Timepoints are named by position** — `t0`, `t1`, … — and not in clock time.
-This is the one place the CZI converter gives you less than the OME-TIFF one,
-which reads elapsed hours from each frame's `DeltaT`. A CZI records a plane's
-acquisition time in each individual tile's own metadata, which would mean
-reading every tile in the plate to learn it, and the interval recorded at the
-file level is an acquisition *plan* rather than what happened. Positional tokens
-order correctly and state no elapsed time the file cannot back up. If you need a
-real time axis in Review, set the interval there
-([Interval per timepoint](#interval-per-timepoint-and-offset)).
+**Timepoints are named by elapsed time when the file records it** — `0h`,
+`4h`, `8h`, the same names the OME-TIFF converter writes. A CZI stamps each
+plane's acquisition time into that plane's own metadata rather than anywhere
+central, so the converter reads one well's series and measures the rest from
+its first image.
+
+It reads **the first well the scan visited**, and only that one. A plate scan
+crosses its wells in turn, so the last well of a round can be half an hour
+behind the first, and mixing them would fold the time it takes to cross the
+plate into the numbers on your axis. Every well's images therefore carry the
+timepoint names taken from that first well's clock, which is what makes them
+comparable. For a Split Scenes folder the first file is that well, and it is
+the only file read for timing.
+
+**When the times cannot be used, timepoints are named by position** — `t0`,
+`t1`, … — and the page says so before you run, in the line under the settings,
+rather than leaving you to notice afterwards. That happens when the file
+records no acquisition times at all, when some timepoints have one and others
+do not, when two of them work out to the same label, or when the first
+timepoint is missing its stamp so there is nothing to measure from. Positional
+tokens still order correctly and still state no elapsed time the file cannot
+back up; if you need a real time axis on such a plate, set the spacing in
+Review ([Interval per timepoint](#interval-per-timepoint-and-offset)).
+
+One caveat worth knowing. The tag this reads is the one Zeiss's format
+documentation describes, and it has not been checked against a file written by
+your copy of ZEN. If a plate you know carries times converts to `t0`, `t1`, …
+anyway, that is the thing to report — the converter is designed so that a tag
+it cannot find costs you the hours and never gives you wrong ones.
 
 **A split export is checked as a set, not just file by file.** Each file has to
 be sound on its own, and then they all have to agree about everything the output

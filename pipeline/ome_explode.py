@@ -33,7 +33,6 @@ inside the pipeline self-sufficiency contract (ARCHITECTURE §6.2).
 
 from __future__ import annotations
 
-import math
 import logging
 import re
 import threading
@@ -53,7 +52,9 @@ from pipeline.explode_common import (
     ExplodeCancelled,
     ExplodeResult,
     encode_tiff,
+    elapsed_hour_tokens,
     expected_members,
+    hours_token,
     pick_workers,
     resolve_positions,
     well_is_complete,
@@ -465,35 +466,10 @@ def _localname(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
-def _hours_token(hours: float) -> str:
-    """``"<hours>h"`` in a spelling ``util.timepoint`` can read, or ``""``.
-
-    Six significant figures in **fixed** notation. ``f"{v:g}"`` switches to
-    exponent form below 1e-4, which was rare while every DeltaT was read as
-    seconds and became routine once milliseconds, microseconds and nanoseconds
-    were added: a six-frame time-lapse 100 ms apart rendered
-    ``2.77778e-05h``, and ``util.timepoint._UNIT_RE`` matches no exponent, so
-    ``parse_hours`` answered ``None`` and ``sort_key`` fell back to sorting
-    those tokens as text — putting frames 5 and 6 before frames 2 to 4. A
-    number the parser cannot read is worse than the wrong number it replaced,
-    because the wrong one at least ordered correctly.
-
-    Answers ``""`` for a value the parser cannot represent at all: not finite,
-    or negative (``_UNIT_RE`` accepts no sign, and a writer stamping a
-    pre-treatment frame at a negative elapsed time is the case that produces
-    one). The caller reads that as a reason to name every timepoint by
-    position, and says so.
-    """
-    if not math.isfinite(hours) or hours < 0.0:
-        return ""
-    if hours == 0.0:
-        return "0h"
-    # Decimal places chosen so six significant figures survive, capped: below
-    # a microsecond in hours the label is more zeros than number, and two such
-    # timepoints colliding is caught by the duplicate check either way.
-    places = min(12, max(0, 5 - int(math.floor(math.log10(hours)))))
-    text = f"{hours:.{places}f}".rstrip("0").rstrip(".")
-    return f"{text}h" if text and text != "0" else "0h"
+#: Rendering an elapsed hour into a filename token is shared with the CZI
+#: converter — see :func:`pipeline.explode_common.hours_token` for why the two
+#: must not have separate definitions of it.
+_hours_token = hours_token
 
 
 @dataclass(frozen=True)
@@ -568,9 +544,15 @@ def _hours_per_unit(unit: str) -> float | None:
     return _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
 
 
-def _fallback_reasons(scan: _DeltaTScan, size_t: int, tokens: list[str],
-                      collided: list[str], unrenderable: list[int]) -> list[str]:
-    """Why the timepoints cannot be named by elapsed time, in the log's words."""
+def _source_reasons(scan: _DeltaTScan, size_t: int) -> list[str]:
+    """The reasons only OME-XML can produce, for the shared decision to carry.
+
+    The generic ones — an incomplete set, a collision, a value the timepoint
+    parser cannot read — belong to
+    :func:`pipeline.explode_common.elapsed_hour_tokens`, because they are true
+    of any source of elapsed times. These two are about how *this* file spelled
+    them.
+    """
     why: list[str] = []
     if scan.unreadable_units:
         why.append(
@@ -581,20 +563,6 @@ def _fallback_reasons(scan: _DeltaTScan, size_t: int, tokens: list[str],
             f"{scan.out_of_range} plane(s) carry a TheT outside "
             f"0..{size_t - 1}, so the file's T indexing is not this "
             f"converter's")
-    if collided:
-        why.append(
-            f"the elapsed times render to {len(set(tokens))} distinct label(s) "
-            f"for {len(tokens)} timepoint(s) — {', '.join(collided)} repeat(s), "
-            f"and two timepoints sharing a label would write every image of the "
-            f"second over the first")
-    if unrenderable:
-        why.append(
-            f"{len(unrenderable)} elapsed time(s) are not finite or not "
-            f"positive, and the app's timepoint parser reads neither")
-    if not why:
-        why.append(
-            f"only {len(scan.hours_by_index)} of {size_t} timepoint(s) carry a "
-            f"readable DeltaT")
     return why
 
 
@@ -619,24 +587,16 @@ def _timepoint_tokens(pixels, size_t: int) -> list[str] | None:
     if not size_t:
         return None
 
-    complete = len(scan.hours_by_index) >= size_t
-    tokens = ([_hours_token(scan.hours_by_index[i]) for i in range(size_t)]
-              if complete else [])
-    # ``%g`` renders six significant figures, so two deltas that differ by less
-    # than that — or a writer that stamps the same placeholder on every plane —
-    # produce one token for two timepoints, and every image of the second would
-    # be written over the first's member name. Positional tokens name them all
-    # distinctly and lose only a number the file did not really state.
-    collided = sorted({t for t in tokens if tokens.count(t) > 1})
-    unrenderable = [i for i, t in enumerate(tokens) if not t]
-
-    if complete and not collided and not unrenderable:
-        return tokens
+    # The rendering, the completeness test and the collision test are shared
+    # with the CZI converter; only the reasons peculiar to OME-XML are built
+    # here (an unreadable DeltaTUnit, a TheT outside the file's own T axis).
+    resolved = elapsed_hour_tokens(scan.hours_by_index, size_t,
+                                   source_reasons=_source_reasons(scan, size_t))
+    if resolved.tokens is not None:
+        return resolved.tokens
     _log.warning(
         "OME timepoints: naming by position (t0, t1, …) rather than by "
-        "elapsed time — %s.",
-        "; ".join(_fallback_reasons(scan, size_t, tokens, collided,
-                                    unrenderable)),
+        "elapsed time — %s.", "; ".join(resolved.reasons),
     )
     return None
 

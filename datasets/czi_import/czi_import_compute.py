@@ -114,8 +114,14 @@ class ConversionPlan:
     #: is dropping some, and kept apart from it so the readout can say which
     #: of the two a number is.
     n_source_timepoints: int = 0
-    #: The kept timepoints' own tokens, in order — never renumbered.
+    #: The kept timepoints' own tokens, in order — never renumbered. Elapsed
+    #: hours (``0h``, ``4h``, …) when the CZI's acquisition stamps supported
+    #: them, positional (``t0``, ``t1``, …) otherwise.
     timepoint_tokens: list[str] = field(default_factory=list)
+    #: Why those tokens are positional, where something readable was expected.
+    #: Surfaced so a plate that lost its elapsed times says so before the run
+    #: rather than only in the log afterwards.
+    timepoint_note: str = ""
     #: How many ``.czi`` files this conversion reads. More than one is a
     #: split-scene export, and the readout says so — the same well count from
     #: one file and from ninety-six is two very different things to check.
@@ -171,6 +177,20 @@ class ConversionPlan:
             shown += f", … {self.timepoint_tokens[-1]}"
         return (f"{self.n_timepoints} of {self.n_source_timepoints} "
                 f"timepoint(s) ({shown})")
+
+    @property
+    def timepoint_warning(self) -> str:
+        """The sentence the page shows when the elapsed times were unusable.
+
+        Said *before* the run rather than only in the log afterwards, because a
+        plate whose timepoints lost their hours is a dataset with no time axis
+        in Review, and the moment to find that out is while the source can
+        still be re-exported.
+        """
+        if not self.timepoint_note:
+            return ""
+        return (f"Timepoints are named by position (t0, t1, …) rather than by "
+                f"elapsed time — {self.timepoint_note}.")
 
 
 def parse_count(text: object) -> tuple[int | None, bool]:
@@ -362,7 +382,7 @@ def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
     except ValueError as exc:
         raise CziImportError(str(exc)) from exc
     try:
-        kept = timepoint_plan(source.layout.timepoint_tokens,
+        kept = timepoint_plan(source.timepoint_tokens,
                               params.timepoint_stride)
     except ValueError as exc:
         raise CziImportError(str(exc)) from exc
@@ -371,6 +391,7 @@ def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
         n_timepoints=len(kept),
         n_source_timepoints=source.layout.size_t,
         timepoint_tokens=[token for _index, token in kept],
+        timepoint_note=source.timepoint_note,
         fovs_per_well=well_map.fovs_per_well,
         n_files=source.n_files,
         well_labels=list(well_map.wells),

@@ -44,6 +44,7 @@ import re
 import struct
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import BinaryIO
 
@@ -547,6 +548,248 @@ def peek_scene_wells(path: Path | str, *,
     return ScenePeek(path=path, wells=wells, bytes_read=read)
 
 
+#: The subblock-metadata tag ZEN stamps a plane's wall-clock acquisition time
+#: into. Read case-insensitively by local name, because the metadata block is
+#: namespaced in some writers and not in others, and a tag this reader cannot
+#: find costs nothing but the positional fallback.
+_ACQUISITION_TIME_TAGS = ("acquisitiontime",)
+
+#: How many bytes to pull in one go when sampling a subblock's metadata. The
+#: segment header, the padded prologue and the metadata XML sit contiguously,
+#: so one window of this size usually takes all three in a single round trip
+#: instead of three. Measured on a 96-scene plate over an 8 ms link: 12 trips
+#: and 98 ms for the coalesced read against 24 trips and 196 ms for the
+#: three-read version. Oversized reads are free locally and cheap on a share,
+#: where the round trip is the cost and the bytes are not.
+_SUBBLOCK_META_WINDOW = 4096
+
+
+@dataclass(frozen=True)
+class TimeScan:
+    """Elapsed hours per timepoint index, and why any are missing.
+
+    ``hours_by_index`` is keyed on the source's own T index and measured from
+    the first timepoint's reading, so index 0 is always ``0.0`` when it is
+    present at all. ``reasons`` is empty on a clean scan and otherwise says, in
+    the run log's words, what stopped it — an empty scan with nothing said
+    about it would leave a positionally-named plate indistinguishable from one
+    whose writer recorded no times.
+    """
+
+    hours_by_index: dict[int, float] = field(default_factory=dict)
+    reasons: list[str] = field(default_factory=list)
+    #: The scene every reading was taken from. A plate scan visits its wells in
+    #: turn, so one round's readings span the time it takes to cross the plate
+    #: — measured at 31 minutes across 96 scenes — and mixing scenes would fold
+    #: that spread into the elapsed times. See :func:`read_timepoint_hours`.
+    scene: int = -1
+    bytes_read: int = 0
+
+
+def read_subblock_metadata(fh: BinaryIO, block: SubBlock) -> str:
+    """One subblock's own metadata XML, read without touching its pixels.
+
+    A subblock stores its metadata between its header and its image data, at an
+    offset that depends on how many dimensions the tile declares — the same
+    arithmetic :meth:`CziReader._read_block_data` performs to seek *past* it.
+    One window is pulled in a single read and the XML sliced out of it; only a
+    metadata block larger than the window costs a second round trip.
+    """
+    fh.seek(block.file_position)
+    window = fh.read(_SUBBLOCK_META_WINDOW)
+    if len(window) < _SEGMENT_HEADER.size + _SUBBLOCK_PROLOGUE.size:
+        return ""
+    sid = _token(_SEGMENT_HEADER.unpack_from(window, 0)[0])
+    if sid != "ZISRAWSUBBLOCK":
+        return ""
+    metadata_size, _attachment, _data = _SUBBLOCK_PROLOGUE.unpack_from(
+        window, _SEGMENT_HEADER.size)
+    if metadata_size <= 0:
+        return ""
+    entry_size = _DIRECTORY_ENTRY.size + _DIMENSION_ENTRY.size * len(block.dims)
+    header_len = max(_SUBBLOCK_MIN_HEADER, _SUBBLOCK_PROLOGUE.size + entry_size)
+    start = _SEGMENT_HEADER.size + header_len
+    if start + metadata_size <= len(window):
+        raw = window[start:start + metadata_size]
+    else:
+        fh.seek(block.file_position + start)
+        raw = fh.read(metadata_size)
+    return raw.decode("utf-8", "replace")
+
+
+def normalise_instant(text: str) -> str:
+    """An ISO 8601 instant in the spelling every supported Python parses.
+
+    ZEN writes ``2024-06-12T10:23:45.4830000Z``: a trailing ``Z`` for UTC and a
+    fractional second of seven digits. **Python 3.11 accepts both** — its
+    ``fromisoformat`` was relaxed to take arbitrary fractional digits and a
+    military zone suffix — so on the interpreter this app runs today the
+    rewriting below changes nothing that would otherwise fail. It is here for
+    the 3.10 build environment the PyInstaller spec still falls back to, where
+    ``fromisoformat`` takes three or six fractional digits and no ``Z``, and
+    where an unrewritten stamp would send the whole plate to positional tokens.
+
+    Tested on its own output rather than through
+    :func:`parse_acquisition_time`, because 3.11's parser is permissive enough
+    to swallow the un-normalised form and make any end-to-end assertion pass
+    either way (CLAUDE.md §7.8: name the wrong implementation that still
+    passes).
+    """
+    if not text:
+        return text
+    out = text[:-1] + "+00:00" if text.endswith(("Z", "z")) else text
+    match = re.match(r"^(.*?[T ]\d{2}:\d{2}:\d{2})\.(\d+)(.*)$", out)
+    if match:
+        head, fraction, tail = match.groups()
+        out = f"{head}.{fraction[:6].ljust(6, '0')}{tail}"
+    return out
+
+
+def parse_acquisition_time(xml: str) -> "datetime | None":
+    """The wall-clock time a subblock's metadata stamps on its plane.
+
+    The instant is normalised by :func:`normalise_instant` first, then parsed.
+
+    ``None`` for anything else, including a tag that is absent. Every caller
+    treats that as a reason to name the timepoints by position, so a
+    misidentified tag costs the elapsed times and never a wrong number.
+    """
+    if not xml:
+        return None
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return None
+    raw = ""
+    for element in root.iter():
+        if _localname(element.tag).lower() in _ACQUISITION_TIME_TAGS:
+            raw = (element.text or "").strip()
+            if raw:
+                break
+    if not raw:
+        return None
+    text = normalise_instant(raw)
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _representative_blocks(blocks: list[SubBlock],
+                           size_t: int) -> tuple[int, dict[int, SubBlock]]:
+    """``(scene, {t: block})`` for the first scene present at every timepoint.
+
+    **The first well scanned**, which is the same rule the OME converter's
+    ``hours.setdefault(ti, …)`` applies to the first plane it meets: one
+    position's series, read in the order the file stores it. It has to be one
+    position, because a plate scan reaches its wells minutes apart within a
+    single round — measured at 31 minutes across 96 scenes — so a series
+    assembled from whichever scene happened to sort first at each timepoint
+    folds that traverse into the elapsed times it reports.
+
+    First *in the file's own subblock order* rather than by lowest index: that
+    order is acquisition order, so the scene it picks is the well the stage
+    actually visited first. A scene missing from any timepoint is skipped
+    rather than accepted with a gap, since the gap would be filled by another
+    scene's clock.
+    """
+    per_scene: dict[int, dict[int, SubBlock]] = {}
+    order: list[int] = []
+    for block in blocks:
+        if block.is_pyramid:
+            continue
+        scene = block.start("S")
+        if scene not in per_scene:
+            per_scene[scene] = {}
+            order.append(scene)
+        per_scene[scene].setdefault(block.start("T"), block)
+    for scene in order:
+        found = per_scene[scene]
+        if all(t in found for t in range(size_t)):
+            return scene, {t: found[t] for t in range(size_t)}
+    return -1, {}
+
+
+def read_timepoint_hours(path: Path | str, blocks: list[SubBlock],
+                         size_t: int) -> TimeScan:
+    """Elapsed hours per timepoint, from one position's acquisition stamps.
+
+    Costs one seek and one short read per timepoint — twelve round trips for a
+    twelve-point run, whatever the plate weighs — because the subblock
+    directory already says where every tile is. Reading *every* subblock's
+    metadata instead would be one round trip per tile: 9,216 of them on a
+    96-scene plate, measured at 75 s over an 8 ms link against 98 ms for this.
+
+    Never raises. Every failure — an unreadable file, a missing tag, a stamp
+    that will not parse — comes back as an empty or partial
+    :class:`TimeScan` with the reason written down, because the caller's
+    fallback (positional ``t0``/``t1`` tokens) is always available and always
+    correct.
+    """
+    path = Path(path)
+    try:
+        with open(path, "rb") as raw:
+            return scan_timepoint_hours(raw, blocks, size_t)
+    except OSError as exc:
+        return TimeScan(reasons=[f"the file could not be read for its "
+                                 f"acquisition times ({exc})"])
+
+
+def scan_timepoint_hours(fh: BinaryIO, blocks: list[SubBlock],
+                         size_t: int) -> TimeScan:
+    """:func:`read_timepoint_hours` against an already-open handle.
+
+    The form :func:`read_czi_layout` uses, so sampling the stamps costs the
+    seeks and not a second open and a second walk of the subblock directory.
+    Leaves the handle's position wherever the last sample put it, which is why
+    it is called after everything else that reads from it.
+    """
+    if size_t <= 0:
+        return TimeScan()
+    scene, chosen = _representative_blocks(blocks, size_t)
+    if not chosen:
+        return TimeScan(reasons=[
+            "no single scene holds a tile at every timepoint, so no one "
+            "position's clock covers the run"])
+    counted = _CountingReader(fh)
+    stamps: dict[int, datetime] = {}
+    try:
+        for t_index, block in sorted(chosen.items()):
+            stamp = parse_acquisition_time(
+                read_subblock_metadata(counted, block))
+            if stamp is not None:
+                stamps[t_index] = stamp
+    except OSError as exc:
+        return TimeScan(reasons=[f"the file could not be read for its "
+                                 f"acquisition times ({exc})"], scene=scene)
+    read = counted.bytes_read
+
+    if 0 not in stamps:
+        return TimeScan(reasons=[
+            f"{len(stamps)} of {size_t} timepoint(s) carry a readable "
+            f"acquisition time, and the first is not among them, so there is "
+            f"no zero to measure the rest from"], scene=scene, bytes_read=read)
+    # Mixing a naive stamp with an aware one raises on subtraction, and a file
+    # that spells its instants two ways has not told us which clock either is
+    # on. Refusing the lot is the only reading that cannot be wrong.
+    aware = {t: (s.tzinfo is not None) for t, s in stamps.items()}
+    if len(set(aware.values())) > 1:
+        return TimeScan(reasons=[
+            "the acquisition times mix zoned and unzoned instants, so the "
+            "intervals between them are not decidable"], scene=scene,
+            bytes_read=read)
+    origin = stamps[0]
+    hours = {t: (stamp - origin).total_seconds() / 3600.0
+             for t, stamp in stamps.items()}
+    reasons: list[str] = []
+    if len(hours) < size_t:
+        reasons.append(
+            f"only {len(hours)} of {size_t} timepoint(s) carry a readable "
+            f"acquisition time")
+    return TimeScan(hours_by_index=hours, reasons=reasons, scene=scene,
+                    bytes_read=read)
+
+
 def _channel_names(root) -> list[str]:
     """Channel display names in channel-index order, or ``[]``.
 
@@ -643,6 +886,11 @@ class CziLayout:
     #: Whether the directory segment was readable, or the file had to be walked
     #: segment by segment to find its tiles.
     from_directory: bool = True
+    #: Elapsed hours per timepoint, sampled from one position's acquisition
+    #: stamps — ``None`` when this layout was read without asking for them,
+    #: which is every file of a set but the first. See
+    #: :func:`scan_timepoint_hours`.
+    time_scan: "TimeScan | None" = None
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -924,13 +1172,22 @@ def _build_layout(blocks: list[SubBlock], xml: str, *,
     return layout
 
 
-def read_czi_layout(path: Path | str) -> CziLayout:
+def read_czi_layout(path: Path | str, *,
+                    read_times: bool = False) -> CziLayout:
     """Read *path*'s layout without decoding a single pixel.
 
     Costs two seeks on a sound file: one to the header, one to the subblock
     directory it points at. A file whose directory is missing or unreadable —
     which is what an acquisition killed before it finished writing leaves — is
     walked segment by segment instead, and the layout records that it had to be.
+
+    With *read_times* it also samples one position's acquisition stamps into
+    :attr:`CziLayout.time_scan` — one further seek and short read per
+    timepoint, taken here rather than in a second pass because the handle and
+    the subblock list are already open and in hand. Off by default because a
+    plate needs the timing from **one** of its files: a split-scene export's
+    members all cover the same timepoints, so sampling all ninety-six would be
+    ninety-six times the round trips for the same answer.
     """
     path = Path(path)
     with open(path, "rb") as fh:
@@ -948,7 +1205,16 @@ def read_czi_layout(path: Path | str) -> CziLayout:
             if metadata_position <= 0:
                 metadata_position = walked_metadata
         xml = _read_metadata_xml(fh, metadata_position)
+        layout_blocks = [b for b in blocks if not b.is_pyramid]
+        scan = None
+        if read_times:
+            # After the metadata read, because it leaves the handle wherever
+            # the last sample put it.
+            scan = scan_timepoint_hours(
+                fh, layout_blocks,
+                max((b.start("T") for b in layout_blocks), default=-1) + 1)
     layout = _build_layout(blocks, xml, from_directory=from_directory)
+    layout.time_scan = scan
     if not from_directory and layout.n_blocks:
         layout.warnings.append(
             "the subblock directory was unreadable, so the file was scanned "

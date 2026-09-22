@@ -493,9 +493,9 @@ def test_a_full_read_of_several_files_is_concurrent_too(tmp_path, monkeypatch):
     threads: set[int] = set()
     real = czi_set.read_czi_layout
 
-    def _record(path):
+    def _record(path, **kwargs):
         threads.add(threading.get_ident())
-        return real(path)
+        return real(path, **kwargs)
 
     monkeypatch.setattr(czi_set, "read_czi_layout", _record)
     read_czi_set(folder)

@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Callable, TypeVar
 
 from util.dir_scan import files_in
+from pipeline.explode_common import elapsed_hour_tokens
 from pipeline.czi_read import (
     CziLayout,
     CziReadError,
@@ -102,6 +103,15 @@ class CziSet:
     scene_wells: list[str] = field(default_factory=list)
     #: A problem that makes the set unconvertible, or ``""``.
     problem: str = ""
+    #: The timepoint token each image is named with — elapsed hours (``0h``,
+    #: ``4h``, …) when the files' acquisition stamps yield a complete, distinct
+    #: series, and the positional ``t0``, ``t1``, … otherwise.
+    timepoint_tokens: list[str] = field(default_factory=list)
+    #: Why the tokens are positional, in the run log's words. Empty when they
+    #: are elapsed times, and never empty when they are positional *because*
+    #: something was unreadable — a plate named by position with nothing said
+    #: about it is indistinguishable from one whose writer recorded no times.
+    timepoint_note: str = ""
 
     @property
     def layout(self) -> CziLayout:
@@ -359,7 +369,20 @@ def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None) -> Cz
 
     # Read concurrently: each file is its own handle and its own layout, and
     # the cost is round trips rather than cycles.
-    result.layouts = _per_file(read_czi_layout, paths)
+    #
+    # Only the first file is asked for its acquisition stamps. Every member of
+    # a split-scene export covers the same timepoints, so the others would pay
+    # a round trip per timepoint each to re-derive one answer — and the first
+    # file is the right one to take it from for a second reason: the files are
+    # in acquisition order, so it holds the well the stage visited first, which
+    # is the position whose clock names the run (CLAUDE.md, ARCHITECTURE
+    # §6.2a).
+    first_path_for_times = paths[0]
+
+    def _layout_of(path: Path) -> CziLayout:
+        return read_czi_layout(path, read_times=path == first_path_for_times)
+
+    result.layouts = _per_file(_layout_of, paths)
 
     first, first_path = result.layouts[0], paths[0]
     # Each file has to be sound in its own right before the set is compared:
@@ -384,7 +407,34 @@ def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None) -> Cz
             for tile in layout.tiles.get(scene, [0]):
                 result.positions.append(ScenePosition(path, scene, tile))
     result.scene_wells = wells
+    result.timepoint_tokens, result.timepoint_note = _timepoint_tokens(first)
     return result
+
+
+def _timepoint_tokens(layout: CziLayout) -> tuple[list[str], str]:
+    """``(tokens, note)`` — elapsed hours where the file supports them.
+
+    Every route to the positional fallback is a *degradation*: the acquisition
+    recorded when each plane was taken and the archives will not carry it, so
+    Review can order the timepoints and put no number on an axis. Each one
+    therefore comes back with a note the run log prints, because a plate named
+    ``t0``/``t1`` because a tag could not be read looks exactly like one whose
+    writer recorded no times at all.
+
+    The rendering and the completeness, collision and parseability tests are
+    :func:`pipeline.explode_common.elapsed_hour_tokens`, shared with the
+    OME-TIFF converter so that one acquisition exported both ways cannot end up
+    with two spellings of the same elapsed hour.
+    """
+    positional = list(layout.timepoint_tokens)
+    scan = layout.time_scan
+    if scan is None:
+        return positional, ""
+    resolved = elapsed_hour_tokens(scan.hours_by_index, layout.size_t,
+                                   source_reasons=scan.reasons)
+    if resolved.tokens is not None:
+        return resolved.tokens, ""
+    return positional, "; ".join(resolved.reasons)
 
 
 def read_czi_set_safely(source: Path | str, *,

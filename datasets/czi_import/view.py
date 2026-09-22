@@ -916,8 +916,12 @@ class CziImportPage(LogPanelMixin, QWidget):
         if dest:
             state = resume_state(dest, src, self.params())
             note = state.hint()
-        self._set_verdict(f"{plan.summary()}{f'  {note}' if note else ''}",
-                          "muted")
+        # The timepoint warning goes in the same line rather than a log the
+        # user reads afterwards: a plate that lost its elapsed hours has no
+        # time axis in Review, and now is when the source can still be
+        # re-exported.
+        parts = [plan.summary(), plan.timepoint_warning, note]
+        self._set_verdict("  ".join(p for p in parts if p), "muted")
         # The plate shows the mapping *before* the run, which is the whole
         # point of drawing it: a well the file named wrongly is visible here
         # and nowhere else.

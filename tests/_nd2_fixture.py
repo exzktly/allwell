@@ -51,6 +51,12 @@ QQ = struct.Struct("QQ")
 #: Where a frame's pixels sit, measured from its chunk's own start.
 _FRAME_DATA_OFFSET = 4096
 
+#: ``nd2.structures.LoopType`` codes for the three axes a plate scan varies.
+#: Named here rather than imported so the fixture writes the number the format
+#: uses and the reader is left to parse it, which is the whole point of laying
+#: the bytes down by hand.
+_LOOP_TYPE = {"P": 2, "T": 1, "Z": 4}       # XYPosLoop, TimeLoop, ZStackLoop
+
 # ── CLX-lite encoding ────────────────────────────────────────────────────────
 BOOL, INT32, UINT32, INT64, UINT64, DOUBLE, VOIDP, STRING, BYTEARRAY, LEVEL = (
     1, 2, 3, 4, 5, 6, 7, 8, 9, 11)
@@ -95,19 +101,31 @@ def clx(mapping: dict) -> bytes:
 def chunk(name: bytes, data: bytes) -> bytes:
     return CHUNK_HEADER.pack(CHUNK_MAGIC, len(name), len(data)) + name + data
 
-def plate_value(pos: int, t: int, c: int) -> int:
+def plate_value(pos: int, t: int, c: int, z: int = 0) -> int:
     """The value every pixel of one plane carries.
 
-    Derived from all three coordinates, so a plane read or written to the
+    Derived from **all four** coordinates, so a plane read or written to the
     wrong place is a *different number* rather than a different-looking image
     — which is what lets a test assert the mapping rather than the pixel count.
+
+    Z is in here because leaving it out is what hid a real defect. The suite
+    could not write a Z stack at all, so every plane's value was a function of
+    the three coordinates the code happened to handle, and a converter that
+    silently dropped the Z axis produced exactly the numbers the tests
+    expected. A coordinate the fixture cannot vary is a coordinate no
+    assertion can measure.
+
+    Z varies in the **units digit** and the others above it, so a plane taken
+    from the wrong Z is a near-miss rather than a wildly different number —
+    which is the shape a max-projection bug really has, and which an assertion
+    on the exact value still catches.
     """
-    return (pos * 10 + t) * 10 + c
+    return ((pos * 10 + t) * 10 + c) * 10 + z
 
 
-def write_nd2(path, *, n_pos=2, n_t=2, n_c=1, width=8, height=8,
+def write_nd2(path, *, n_pos=2, n_t=2, n_c=1, n_z=1, width=8, height=8,
               dtype="uint16", well_names=None, channel_names=None,
-              times_ms=None, drop_probe=False):
+              times_ms=None, drop_probe=False, loop_order="PT"):
     """Write a plate scan at *path* and return it.
 
     *times_ms* gives the elapsed milliseconds for each timepoint, written into
@@ -115,9 +133,40 @@ def write_nd2(path, *, n_pos=2, n_t=2, n_c=1, width=8, height=8,
     all, which is the case the converter must fall back from. *drop_probe*
     omits the fluorescent-probe block, which is the shape that makes ``nd2``
     0.9.0's ``metadata`` raise.
+
+    *loop_order* is the experiment's **loop nesting order**, outermost first,
+    as a string over ``P`` (stage position), ``T`` (time) and ``Z``. It is the
+    parameter this fixture most needed and did not have. ``nd2`` builds its
+    sequence index from the loops in the file's own order, so a reader that
+    assumes one order reads every plane from the wrong place on a file written
+    in another — and the suite could previously write only ``"PT"``, which is
+    the order the reader assumed, so no assertion could catch it.
+
+    ``"PT"`` is a plate scanned position by position, each position's whole
+    time series before moving on. ``"TP"`` is a multipoint time-course, where
+    the stage visits every position within each round and comes back — which
+    is the physically ordinary shape for a live plate, and the one the reader
+    got wrong. An axis left out of *loop_order* is not written as a loop at
+    all; an axis in it whose count is 1 still is, because a one-plane Z stack
+    is a real file.
+
+    *n_z* is the Z-stack depth. Z is a **coordinate** axis in ND2, never a
+    component of a frame — ``nd2``'s own ``AXIS.frame_coords()`` is
+    ``{S, C, X, Y}`` — so a Z stack multiplies the sequence count and each
+    plane is fetched by its own index. A converter is expected to
+    max-project it.
     """
     path = Path(path)
-    n_seq = n_pos * n_t
+    axes = [a for a in loop_order.upper() if a in _LOOP_TYPE]
+    if not axes:
+        raise ValueError(f"loop_order {loop_order!r} names no loop axis")
+    counts = {"P": n_pos, "T": n_t, "Z": n_z}
+    # The sequence index is a row-major ravel over the loop axes in *this*
+    # order, which is exactly what ``nd2`` reconstructs from the experiment.
+    shape = [counts[a] for a in axes]
+    n_seq = 1
+    for extent in shape:
+        n_seq *= extent
     comp = n_c
     bpc = 16 if dtype == "uint16" else 8
     width_bytes = width * comp * (bpc // 8)
@@ -146,26 +195,51 @@ def write_nd2(path, *, n_pos=2, n_t=2, n_c=1, width=8, height=8,
         if i < len(names):
             pt["dPosName"] = names[i]
         points[f"a{i}"] = pt
-    # Positions on the outside, a time loop nested under them — the shape a
-    # plate time-course has. ``ppNextLevelEx`` is how ND2 nests its loops, and
-    # each value is an experiment dict in its own right.
-    experiment = {
-        "eType": 2,
-        "uLoopPars": {"uiCount": n_pos, "Points": points, "bUseZ": False,
-                      "bRelativeXY": False},
-        "ppNextLevelEx": {"a0": {
-            "eType": 1,
-            "uLoopPars": {"uiCount": n_t, "dStart": 0.0,
-                          "dPeriod": 3600_000.0,
-                          "dDuration": 3600_000.0 * n_t},
-        }},
-    }
+
+    def _loop(axis: str) -> dict:
+        """One experiment level for *axis*, with the loop parameters nd2 parses."""
+        if axis == "P":
+            return {"eType": _LOOP_TYPE["P"],
+                    "uLoopPars": {"uiCount": n_pos, "Points": points,
+                                  "bUseZ": False, "bRelativeXY": False}}
+        if axis == "T":
+            return {"eType": _LOOP_TYPE["T"],
+                    "uLoopPars": {"uiCount": n_t, "dStart": 0.0,
+                                  "dPeriod": 3600_000.0,
+                                  "dDuration": 3600_000.0 * n_t}}
+        return {"eType": _LOOP_TYPE["Z"],
+                "uLoopPars": {"uiCount": n_z, "dZLow": 0.0,
+                              "dZHigh": float(max(0, n_z - 1)),
+                              "dZStep": 1.0, "dZHome": 0.0,
+                              "bZInverted": False, "iType": 0}}
+
+    # ``ppNextLevelEx`` is how ND2 nests its loops, and each value is an
+    # experiment dict in its own right. The nesting order is *the* thing this
+    # parameter exists to vary: ``nd2`` builds its sequence index from the
+    # loops in the file's own order, so a reader that assumes one order reads
+    # every plane from the wrong place on a file written in another — and
+    # until this fixture could write both, no assertion could say so.
+    experiment = _loop(axes[0])
+    node = experiment
+    for axis in axes[1:]:
+        child = _loop(axis)
+        node["ppNextLevelEx"] = {"a0": child}
+        node = child
     put(b"ImageMetadataLV!", clx({"SLxExperiment": experiment}))
     put(b"ImageTextInfoLV!", clx({"SLxImageTextInfo": {"TextInfoItem_5": "fixture"}}))
 
+    def _coords(seq: int) -> dict:
+        """``{'P': p, 'T': t, 'Z': z}`` for a sequence index, in *this* file's order."""
+        out_coords = {"P": 0, "T": 0, "Z": 0}
+        remainder = seq
+        for axis, extent in zip(reversed(axes), reversed(shape)):
+            remainder, out_coords[axis] = divmod(remainder, extent)
+        return out_coords
+
     chan_names = list(channel_names or [f"C{i}" for i in range(n_c)])
     for seq in range(n_seq):
-        pos, t = divmod(seq, n_t)
+        coords = _coords(seq)
+        pos, t = coords["P"], coords["T"]
         planes = {f"a{i}": _plane_meta(chan_names[i], i, drop_probe=drop_probe)
                   for i in range(n_c)}
         meta = {"SLxPictureMetadata": {
@@ -181,12 +255,13 @@ def write_nd2(path, *, n_pos=2, n_t=2, n_c=1, width=8, height=8,
         put(f"ImageMetadataSeqLV|{seq}!".encode(), clx(meta))
 
     for seq in range(n_seq):
-        pos, t = divmod(seq, n_t)
+        coords = _coords(seq)
+        pos, t, z = coords["P"], coords["T"], coords["Z"]
         # One interleaved plane per sequence: the channels sit side by side
         # along the row, which is what ``uiWidthBytes`` describes.
         rows = np.zeros((height, width * comp), dtype=dtype)
         for c in range(n_c):
-            rows[:, c::comp] = plate_value(pos, t, c)
+            rows[:, c::comp] = plate_value(pos, t, c, z)
         # The reader locates a frame's pixels at a *fixed* 4096 bytes from the
         # chunk's own start (``24 + 4072`` in its source), not straight after
         # the chunk header — so the header, the name and a pad have to fill
@@ -202,8 +277,12 @@ def write_nd2(path, *, n_pos=2, n_t=2, n_c=1, width=8, height=8,
         # metadata: ``_cached_frame_times`` reads it as a flat array of
         # float64 milliseconds, one per sequence, and ``frame_metadata``
         # indexes straight into it.
-        stamps = np.array([float(times_ms[seq % n_t]) for seq in range(n_seq)],
-                          dtype="<f8")
+        # One stamp per *sequence*, and the timepoint each sequence carries is
+        # decoded through this file's own loop order. Keying it on ``seq % n_t``
+        # was right only for a position-outer file and silently wrong for
+        # every other — the same assumption the reader made.
+        stamps = np.array([float(times_ms[_coords(seq)["T"]])
+                           for seq in range(n_seq)], dtype="<f8")
         put(b"CustomData|AcqTimesCache!", stamps.tobytes())
 
     cm = bytearray()

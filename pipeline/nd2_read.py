@@ -43,6 +43,15 @@ from util.filename_token import safe_token
 from util.well_token import canonical_well_label
 
 
+#: The axes an ND2 *loops* over, as opposed to the ones that live inside a
+#: frame. ``nd2.AXIS.frame_coords()`` is ``{S, C, X, Y}``: a channel is part of
+#: a frame, and **Z is not** — it is a coordinate like position and time, so a
+#: Z stack multiplies the sequence count and each plane is fetched by its own
+#: index. Reading one frame and projecting "whatever leads" collapses nothing,
+#: because a frame never holds a stack.
+_LOOP_AXES = ("P", "T", "Z")
+
+
 class Nd2ReadError(Exception):
     """A user-facing reason an ND2 cannot be read or converted."""
 
@@ -103,6 +112,26 @@ class Nd2Layout:
     #: does not name one. A *list* rather than a mapping because every position
     #: has an entry and the order is the acquisition order.
     position_wells: list[str] = field(default_factory=list)
+    #: The experiment's **loop axes, outermost first**, as they are nested in
+    #: this file — some ordering of ``"P"``, ``"T"`` and ``"Z"``. This is the
+    #: one fact that decides which sequence index holds which image, and it is
+    #: a property of the file rather than of the format: ``nd2`` builds its
+    #: index from ``self.experiment`` in order, and a plate scanned position
+    #: by position (``["P", "T"]``) and a multipoint time-course that visits
+    #: every position within each round (``["T", "P"]``) are both ordinary,
+    #: both written by NIS-Elements, and indistinguishable once the order is
+    #: discarded. A reader that assumed one of them read every plane of the
+    #: other from the wrong place, with the archive complete, correctly named
+    #: and reported as a success.
+    #:
+    #: An axis the file does not loop over is simply absent, which is why this
+    #: is a list rather than a fixed triple.
+    axis_order: list[str] = field(default_factory=list)
+    #: True when each pixel carries several samples rather than one intensity.
+    #: A fact, not a sentence, because ``validation_report`` has to refuse on
+    #: it and a refusal keyed on the wording of a warning is a refusal waiting
+    #: to be broken by an edit to that wording.
+    is_rgb: bool = False
     #: Elapsed hours per timepoint, sampled from one position — ``None`` when
     #: this layout was read without asking for them.
     time_scan: "TimeScan | None" = None
@@ -117,6 +146,11 @@ class Nd2Layout:
         where the frame-times cache supports it.
         """
         return [f"t{t}" for t in range(self.size_t)]
+
+    def axis_extent(self, axis: str) -> int:
+        """How many values one loop axis takes — the stride source for an index."""
+        return {"P": self.n_positions, "T": self.size_t,
+                "Z": self.size_z}.get(axis, 1)
 
     @property
     def total_images(self) -> int:
@@ -174,6 +208,12 @@ class Nd2Layout:
                     f"channel(s).")
         if not self.width or not self.height:
             return f"{name} reports a zero-sized image ({self.width}×{self.height})."
+        if self.is_rgb:
+            return (f"{name} is RGB, so each pixel carries three samples "
+                    f"rather than one intensity. There is no single value to "
+                    f"quantify and picking one of the samples would be an "
+                    f"unannounced decision about which. Export the "
+                    f"acquisition channels as greyscale from NIS-Elements.")
         if self.dtype not in ("uint8", "uint16", "int32", "float32", "float64"):
             return (f"{name} stores pixel type {self.dtype!r}, which is not a "
                     f"single-intensity greyscale format this converter can "
@@ -263,6 +303,12 @@ def read_nd2_layout(path: Path | str, *, read_times: bool = False) -> Nd2Layout:
         try:
             sizes = dict(getattr(handle, "sizes", {}) or {})
             layout = Nd2Layout(
+                # ``sizes`` is ordered to match ``shape`` (the library
+                # documents it so, and builds both from ``self.experiment``
+                # in order), so the loop axes in order are simply the keys
+                # that are loop axes. Taking the counts with ``.get`` and
+                # dropping the order is what made every index a guess.
+                axis_order=[a for a in sizes if a in _LOOP_AXES],
                 n_positions=int(sizes.get("P", 1)),
                 size_t=int(sizes.get("T", 1)),
                 size_c=int(sizes.get("C", 1)),
@@ -280,13 +326,26 @@ def read_nd2_layout(path: Path | str, *, read_times: bool = False) -> Nd2Layout:
             raise Nd2ReadError(
                 f"{path.name} could not be read as an ND2 file ({exc})."
             ) from exc
-        if getattr(handle, "is_rgb", False):
-            layout.warnings.append(
-                "the file is RGB, so each pixel carries three samples rather "
-                "than one intensity")
+        layout.is_rgb = bool(getattr(handle, "is_rgb", False))
         if read_times:
             layout.time_scan = scan_timepoint_hours(handle, layout)
     return layout
+
+
+def frame_index_for(layout: Nd2Layout, position: int, t: int, z: int = 0) -> int:
+    """The sequence index of one coordinate, from the file's own loop order.
+
+    Free function as well as :meth:`Nd2Reader.frame_index` because the time
+    scan runs against a bare handle during :func:`read_nd2_layout`, before any
+    reader exists, and the two must not be two implementations of one rule —
+    that is exactly how the scan came to sample a different set of frames from
+    the one a conversion writes.
+    """
+    coords = {"P": position, "T": t, "Z": z}
+    index = 0
+    for axis in (layout.axis_order or ["P", "T"]):
+        index = index * max(1, layout.axis_extent(axis)) + coords[axis]
+    return index
 
 
 def scan_timepoint_hours(handle, layout: Nd2Layout) -> TimeScan:
@@ -302,6 +361,15 @@ def scan_timepoint_hours(handle, layout: Nd2Layout) -> TimeScan:
     :class:`~pipeline.explode_common.TimeScan` with the reason written down,
     because the caller's fallback — positional ``t0``/``t1`` tokens — is always
     available and always correct.
+
+    The frames are located through :func:`frame_index_for`, the same function
+    a conversion writes through, so the two cannot disagree about which
+    sequence is "position 0 at timepoint t". Indexing ``frame_metadata`` by
+    ``t`` alone was right only for a position-outer file; on a multipoint
+    time-course it walked *positions* instead, and reported the stage's
+    traverse across the plate as the experiment's whole duration — a
+    twelve-hour timecourse named as a ninety-second one, with no reason
+    recorded, so nothing anywhere said the times were not the file's.
     """
     size_t = layout.size_t
     if size_t <= 0:
@@ -309,9 +377,10 @@ def scan_timepoint_hours(handle, layout: Nd2Layout) -> TimeScan:
     stamps: dict[int, float] = {}
     try:
         for t in range(size_t):
-            # Frame index for (position 0, timepoint t): the position loop is
-            # outermost, so one position's series is contiguous.
-            meta = handle.frame_metadata(t)
+            # Position 0, timepoint t, and the first Z plane of its stack —
+            # every Z of one coordinate is acquired within the same instant
+            # for this purpose, and the first is the one that exists.
+            meta = handle.frame_metadata(frame_index_for(layout, 0, t, 0))
             channels = getattr(meta, "channels", None) or []
             if not channels:
                 continue
@@ -386,26 +455,66 @@ class Nd2Reader:
         """
         if self._handle is None:      # pragma: no cover — guarded by callers
             raise Nd2ReadError("read_projection on a reader that is not open")
-        index = self.frame_index(position, t)
-        try:
-            frame = self._handle.read_frame(index)
-        except Exception as exc:
+        # One frame per Z index, reduced as they arrive. Z is a *coordinate*
+        # axis in ND2 (``AXIS.frame_coords()`` is ``{S, C, X, Y}``), so a
+        # frame never holds a stack and there is nothing inside one to
+        # project: the stack has to be gathered across sequence indices, the
+        # way ``ome_explode`` and ``czi_read`` gather theirs. Reduced in the
+        # loop rather than stacked and maxed at the end, so peak memory is two
+        # planes however deep the stack is.
+        out: np.ndarray | None = None
+        for z in range(max(1, self._layout.size_z)):
+            index = self.frame_index(position, t, z)
+            try:
+                frame = self._handle.read_frame(index)
+            except Exception as exc:
+                raise Nd2ReadError(
+                    f"{self._path.name}: could not read the image at position "
+                    f"{position}, timepoint {t}, Z {z}, channel {channel} "
+                    f"({exc})."
+                ) from exc
+            plane = _plane_from_frame(frame, channel, self._layout.size_c)
+            if out is None:
+                # **Copied, not referenced.** ``read_frame`` hands back a view
+                # into the file's memory map, so a plane returned as-is dies
+                # when the handle closes — a segfault with no Python
+                # traceback, in a caller that did nothing wrong. A stack
+                # happened to be safe because ``np.maximum`` allocates, which
+                # made the single-plane case (the common one) the only one
+                # that could crash. Found by a test reading the plane after
+                # the ``with`` block, which is what any caller may do.
+                out = np.array(plane, copy=True)
+            else:
+                np.maximum(out, plane, out=out)
+        if out is None:      # pragma: no cover — the range is never empty
             raise Nd2ReadError(
-                f"{self._path.name}: could not read the image at position "
-                f"{position}, timepoint {t}, channel {channel} ({exc})."
-            ) from exc
-        return _plane_from_frame(frame, channel, self._layout.size_c)
+                f"{self._path.name}: no Z plane at position {position}, "
+                f"timepoint {t}, channel {channel}.")
+        return out
 
-    def frame_index(self, position: int, t: int) -> int:
-        """The sequence index of one position's timepoint.
+    def frame_index(self, position: int, t: int, z: int = 0) -> int:
+        """The sequence index of one ``(position, timepoint, Z)`` coordinate.
 
-        The position loop is the outer one and the time loop nests inside it,
-        which is the order a plate time-course is written in, so one position's
-        series is contiguous. Named rather than inlined because
-        :func:`scan_timepoint_hours` samples the *first* position's series and
-        has to agree with this about what that means.
+        Built from **the file's own loop order** (:attr:`Nd2Layout.axis_order`)
+        rather than from an assumed one. ``nd2`` numbers its sequences by a
+        row-major walk of the experiment's loops as they are nested, so the
+        index of a coordinate is only knowable once you know that nesting.
+
+        The version this replaces was ``position * size_t + t``, which is
+        correct for a file scanned position by position and wrong for every
+        other. A multipoint time-course — the stage visiting each position
+        within a round and coming back — is nested the other way, and on one
+        of those it returned a sequence holding a different well at a
+        different time. Nothing downstream could notice: the archive came out
+        complete, correctly named, correctly counted, and reported as a
+        success, which is the failure CLAUDE.md §7 is written against. It also
+        omitted the Z stride, so a stack corrupted position and timepoint too.
+
+        :func:`scan_timepoint_hours` samples through this same function, so
+        the frames it reads and the frames a conversion writes cannot disagree
+        about what a coordinate means.
         """
-        return position * max(1, self._layout.size_t) + t
+        return frame_index_for(self._layout, position, t, z)
 
 
 def _plane_from_frame(frame: np.ndarray, channel: int, size_c: int) -> np.ndarray:
@@ -420,16 +529,31 @@ def _plane_from_frame(frame: np.ndarray, channel: int, size_c: int) -> np.ndarra
     channel 1's name.
 
     The channel axis is therefore identified by its *length*: a leading axis
-    matching the channel count is the channels, and anything else leading is a
-    Z stack to project.
+    matching the channel count is the channels.
+
+    **Nothing here projects a Z stack**, because a frame never holds one — Z
+    is a coordinate axis (``AXIS.frame_coords()`` is ``{S, C, X, Y}``), so the
+    stack is gathered across sequence indices by
+    :meth:`Nd2Reader.read_projection` instead. A previous version ended with
+    ``while plane.ndim > 2: plane.max(axis=0)`` under a comment calling it
+    "the max projection every converter applies". It was unreachable for any
+    real ND2, so no projection happened at all — and on an RGB frame, whose
+    sample axis is not a channel axis either, it was a predicate applied
+    outside its domain and maxed an 8×8 image down to 8×3.
+
+    A frame that is still not 2-D once the channel has been taken is therefore
+    a shape this reader does not understand, and it says so rather than
+    reducing an axis it cannot name.
     """
     plane = np.asarray(frame)
     while plane.ndim > 2 and plane.shape[-1] == 1:
         plane = plane[..., 0]
     if plane.ndim > 2 and size_c > 1 and plane.shape[0] == size_c:
-        plane = plane[min(channel, plane.shape[0] - 1)]
-    while plane.ndim > 2:
-        # Whatever leads now is a Z stack: the max projection every converter
-        # applies, so an ND2 plate and a CZI one measure the same thing.
-        plane = plane.max(axis=0)
+        plane = plane[channel]
+    if plane.ndim != 2:
+        raise Nd2ReadError(
+            f"a frame came back with shape {tuple(np.shape(frame))}, which "
+            f"does not resolve to one 2-D plane for channel {channel} of "
+            f"{size_c}. Reducing an axis this reader cannot name would "
+            f"produce a plausible image of the wrong pixels.")
     return plane

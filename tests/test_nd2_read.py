@@ -26,6 +26,7 @@ pytest.importorskip("nd2")
 from pipeline.nd2_read import (  # noqa: E402
     Nd2ReadError,
     Nd2Reader,
+    frame_index_for,
     read_nd2_layout,
 )
 from tests._nd2_fixture import plate_value, write_nd2  # noqa: E402
@@ -219,3 +220,224 @@ def test_a_file_that_only_looks_like_an_nd2_is_refused_as_one(tmp_path):
         read_nd2_layout(broken)
 
     assert "broken.nd2" in str(caught.value)
+
+
+# ── the file's own loop order ────────────────────────────────────────────────
+#
+# An ND2 numbers its sequences by a row-major walk of the experiment's loops
+# **as they are nested in that file**, and NIS-Elements writes both nestings:
+# a plate scanned position by position is ``["P", "T"]``, and a multipoint
+# time-course that visits every position within a round is ``["T", "P"]``.
+# A reader that assumes one reads every plane of the other from the wrong
+# place, with the archive complete, correctly named and reported as a success.
+#
+# These are parametrised over the orders rather than written once, because the
+# fixture could previously emit only ``"PT"`` — the order the code assumed —
+# so every assertion in this file agreed with the bug by construction
+# (CLAUDE.md §7.8 rule 2: build the fixture so the right and wrong answers
+# differ).
+
+_ORDERS = ["PT", "TP", "PTZ", "TPZ", "PZT"]
+
+
+@pytest.mark.parametrize("order", _ORDERS)
+def test_the_layout_records_the_loop_order_the_file_was_written_in(tmp_path, order):
+    layout = read_nd2_layout(write_nd2(tmp_path / f"{order}.nd2", n_pos=2, n_t=3,
+                                       n_c=1, n_z=2, loop_order=order))
+    assert layout.axis_order == list(order)
+
+
+@pytest.mark.parametrize("order", _ORDERS)
+def test_every_coordinate_reads_its_own_plane_whatever_the_loop_order(
+        tmp_path, order):
+    """The assertion the old suite could not make.
+
+    Each plane carries a value derived from all four of its coordinates, so a
+    plane fetched from the wrong sequence is a *different number* rather than
+    a different-looking image. Asserted as the value, never as "a plane came
+    back" — an implementation reading one fixed frame for everything would
+    satisfy the latter.
+    """
+    n_pos, n_t, n_c, n_z = 2, 3, 2, (2 if "Z" in order else 1)
+    path = write_nd2(tmp_path / f"{order}.nd2", n_pos=n_pos, n_t=n_t, n_c=n_c,
+                     n_z=n_z, loop_order=order, channel_names=["DAPI", "GFP"])
+    layout = read_nd2_layout(path)
+
+    with Nd2Reader(path, layout) as reader:
+        for pos in range(n_pos):
+            for t in range(n_t):
+                for c in range(n_c):
+                    plane = reader.read_projection(pos, t, c)
+                    # read_projection max-projects, so the expected value is
+                    # the brightest Z of that coordinate.
+                    want = max(plate_value(pos, t, c, z) for z in range(n_z))
+                    assert int(np.unique(plane)[0]) == want, (
+                        f"{order}: position {pos}, timepoint {t}, channel {c}")
+
+
+@pytest.mark.parametrize("order,extents,coord,expected", [
+    # (loop order, (P, T, Z), (position, t, z), the sequence index)
+    ("PT", (4, 3, 1), (2, 1, 0), 2 * 3 + 1),
+    ("TP", (4, 3, 1), (2, 1, 0), 1 * 4 + 2),        # time is the outer loop
+    ("PTZ", (4, 3, 2), (2, 1, 1), ((2 * 3) + 1) * 2 + 1),
+    ("TPZ", (4, 3, 2), (2, 1, 1), ((1 * 4) + 2) * 2 + 1),
+    ("PZT", (4, 3, 2), (2, 1, 1), ((2 * 2) + 1) * 3 + 1),
+])
+def test_the_sequence_index_is_built_from_the_order_not_from_an_assumption(
+        tmp_path, order, extents, coord, expected):
+    """Asserted against arithmetic done by hand from the loop order.
+
+    Deliberately **not** against the reader's own formula, which is what the
+    test this replaces did: it asserted ``position * size_t + t`` on a fixture
+    built to that same rule, so it passed for the broken implementation on
+    every file the fixture could not write.
+    """
+    n_pos, n_t, n_z = extents
+    path = write_nd2(tmp_path / f"{order}.nd2", n_pos=n_pos, n_t=n_t, n_c=1,
+                     n_z=n_z, loop_order=order)
+    layout = read_nd2_layout(path)
+
+    assert frame_index_for(layout, *coord) == expected
+    with Nd2Reader(path, layout) as reader:
+        assert reader.frame_index(*coord) == expected
+
+
+# ── Z is a coordinate axis, so the stack has to be gathered ──────────────────
+
+def test_a_z_stack_is_max_projected_across_its_own_sequences(tmp_path):
+    """``AXIS.frame_coords()`` is ``{S, C, X, Y}`` — Z is never inside a frame.
+
+    An implementation that read one frame and projected "whatever leads" was
+    unreachable for any real ND2, so no projection happened at all: the plane
+    returned was Z=0's. The fixture writes each Z a distinct value, so the
+    brightest and the first are different numbers.
+    """
+    n_z = 4
+    path = write_nd2(tmp_path / "z.nd2", n_pos=2, n_t=2, n_c=1, n_z=n_z,
+                     loop_order="PTZ")
+    layout = read_nd2_layout(path)
+    assert layout.size_z == n_z
+
+    with Nd2Reader(path, layout) as reader:
+        plane = reader.read_projection(1, 1, 0)
+
+    brightest = max(plate_value(1, 1, 0, z) for z in range(n_z))
+    first = plate_value(1, 1, 0, 0)
+    assert brightest != first, "fixture does not distinguish the two answers"
+    assert int(np.unique(plane)[0]) == brightest
+
+
+def test_the_projection_reads_one_frame_per_z_and_no_more(tmp_path):
+    """A stack costs its own depth in reads, not the whole acquisition.
+
+    Guards the shape as well as the value: an implementation calling
+    ``asarray()`` would return the right pixels and read the entire file into
+    memory once per plane.
+    """
+    path = write_nd2(tmp_path / "z.nd2", n_pos=3, n_t=2, n_c=1, n_z=3,
+                     loop_order="PTZ")
+    layout = read_nd2_layout(path)
+
+    with Nd2Reader(path, layout) as reader:
+        handle = reader._handle
+        reads: list[int] = []
+        real = handle.read_frame
+        handle.read_frame = lambda i: (reads.append(i), real(i))[1]
+        called = []
+        handle.asarray = lambda *a, **k: called.append(1)
+        reader.read_projection(2, 1, 0)
+
+    assert len(reads) == 3, f"expected one read per Z plane, got {reads}"
+    assert called == [], "read_projection must not call asarray()"
+
+
+# ── the elapsed-hour scan uses the same index as the conversion ──────────────
+
+@pytest.mark.parametrize("order", ["PT", "TP"])
+def test_the_frame_times_are_the_timepoints_own_whatever_the_loop_order(
+        tmp_path, order):
+    """Sampling by ``t`` alone walked *positions* on a multipoint time-course.
+
+    It then reported the stage's traverse across the plate as the experiment's
+    whole duration — a twelve-hour timecourse named as a ninety-second one —
+    with ``reasons`` empty, so nothing said the times were not the file's.
+    """
+    hours = [0.0, 4.0, 8.0, 12.0]
+    path = write_nd2(tmp_path / f"{order}.nd2", n_pos=8, n_t=len(hours), n_c=1,
+                     loop_order=order,
+                     times_ms=[h * 3_600_000.0 for h in hours])
+
+    scan = read_nd2_layout(path, read_times=True).time_scan
+
+    assert scan is not None
+    assert scan.reasons == []
+    assert scan.hours_by_index == {i: h for i, h in enumerate(hours)}
+
+
+# ── an RGB file is refused, not warned about ─────────────────────────────────
+
+def test_an_rgb_file_is_refused_rather_than_written_as_nonsense():
+    """Three samples per pixel is not one intensity to quantify.
+
+    It used to be a warning only, so the plan stayed runnable — and
+    ``_plane_from_frame`` then asked "is the leading axis a Z stack?" of the
+    RGB sample axis, a predicate outside its domain, turning an 8x8 image into
+    an 8x3 one. Asserted on the layout rather than through a file because the
+    fixture ties its component count to the channel count and cannot write one.
+    """
+    from pipeline.nd2_read import Nd2Layout
+
+    layout = Nd2Layout(n_positions=2, size_t=1, size_c=1, width=8, height=8,
+                       dtype="uint8", channel_names=["C0"],
+                       raw_channel_names=["C0"], is_rgb=True)
+
+    report = layout.validation_report("plate.nd2")
+    assert "RGB" in report
+    assert "greyscale" in report
+
+
+def test_a_frame_that_does_not_resolve_to_one_plane_is_refused(tmp_path):
+    """Rather than reducing an axis the reader cannot name.
+
+    The shape that reached this was an RGB frame, but the rule is general: a
+    plausible image of the wrong pixels is the one output this converter must
+    not be able to produce.
+    """
+    from pipeline.nd2_read import _plane_from_frame
+
+    with pytest.raises(Nd2ReadError) as caught:
+        _plane_from_frame(np.zeros((8, 8, 3), dtype="uint8"), 0, 1)
+
+    assert "2-D plane" in str(caught.value)
+
+
+@pytest.mark.parametrize("n_z", [1, 3])
+def test_a_plane_outlives_the_handle_it_was_read_through(tmp_path, n_z):
+    """``read_frame`` returns a view into the file's memory map.
+
+    A plane handed back as-is therefore dies when the reader closes, and a
+    caller that keeps one — which nothing forbids — segfaults with no Python
+    traceback (CLAUDE.md §7.9's hardest class to diagnose). Parametrised over
+    both depths on purpose: projecting a *stack* allocates a new array through
+    ``np.maximum`` and was accidentally safe, so a single-plane file was the
+    only one that could crash, which is the common case.
+
+    Asserted as ``owndata`` **and** as the value read after the close, because
+    the flag alone would pass for an array that owns the wrong pixels.
+    """
+    path = write_nd2(tmp_path / "z.nd2", n_pos=2, n_t=2, n_c=1, n_z=n_z,
+                     loop_order="PTZ")
+    layout = read_nd2_layout(path)
+
+    with Nd2Reader(path, layout) as reader:
+        plane = reader.read_projection(1, 1, 0)
+
+    # Bound to a plain bool *before* asserting, and asserted before any pixel
+    # is read. Against a regressed implementation the array is a dangling
+    # view, so letting pytest build its failure message from the array itself
+    # segfaults inside the reporting — which CI's JUnit gate can swallow, and
+    # a guard that crashes instead of failing is a guard that reports nothing.
+    owns_its_memory = bool(plane.flags.owndata)
+    assert owns_its_memory, "the plane is a view into the closed file"
+    want = max(plate_value(1, 1, 0, z) for z in range(n_z))
+    assert int(np.unique(plane)[0]) == want

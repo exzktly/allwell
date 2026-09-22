@@ -723,8 +723,11 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._scan_delivered.discard(key)
         params = self.params()
         self._readout.setText("Reading the file headers…")
-        self._set_verdict("", "muted")
-        self._update_run_gate(False)
+        # Convert stays available while the plate is read. The scan describes
+        # the plate; it does not permit it — see ``_ready_before_the_scan``.
+        self._set_verdict(_UNREAD_NOTE if self._ready_before_the_scan() else "",
+                          "muted")
+        self._update_run_gate(self._ready_before_the_scan())
 
         def _peek(report):
             return peek_source(src, params, report=report)
@@ -777,6 +780,10 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._dashboard.set_wells(peek.wells)
         self._readout.setText("Reading the rest of the plate…")
         self._set_verdict(peek.note(), "muted")
+        # Still available, and now with the wells drawn to judge it by. The
+        # peek's own note ends "not yet checked", which is the honest label
+        # for a plate the page has described from headers alone.
+        self._update_run_gate(self._ready_before_the_scan())
 
         def _full(report):
             return read_source(src, params, report=report)
@@ -865,7 +872,13 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._begin_scan(src)
             return
         if self._czi_set is None:
-            return          # a scan is in flight; it will render when it lands
+            # A scan is in flight; it will render when it lands. The gate is
+            # still re-evaluated, because Convert is now available during the
+            # scan and the fields it depends on are live: a grid typed into
+            # while the plate is being read would otherwise keep whatever
+            # verdict the gate had when the scan started.
+            self._update_run_gate(self._ready_before_the_scan())
+            return
         self._render(self._czi_set)
 
     def _render(self, czi_set: CziSet) -> None:
@@ -925,6 +938,31 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._dashboard.set_wells(plan.well_labels)
         self._update_run_gate(True)
 
+    def _ready_before_the_scan(self) -> bool:
+        """Whether **Convert** may be pressed before the plate has been read.
+
+        It may. The run reads and checks the plate itself and writes nothing
+        until it has: ``PackedConverterWorker.run`` plans before converting,
+        and ``explode_czi`` raises for an unsound source or an unresolvable
+        mapping with no archive created. So the page's scan is what
+        *describes* the plate, not what permits it, and gating the button on a
+        description is what made a 661-file export on a network share an hour
+        of a window that could not be used for anything.
+
+        What is checked here is what can be checked without reading a file:
+        that a source is named and resolves to at least one ``.czi``, that the
+        form's own fields parse, and — inside ``_update_run_gate`` — that the
+        destination is usable. All three are answered from a directory listing
+        and the widgets.
+
+        The plate is still read, and what it finds still lands: an unsound
+        plate takes the button back and says why. The difference is that the
+        wait is now the user's to spend rather than the page's to impose.
+        """
+        if not self.source_path() or self._source_problem:
+            return False
+        return not self.raw_fields().problems()
+
     def _update_run_gate(self, ready: bool) -> None:
         # The destination is part of "can this run", not merely a hint under
         # its own field. Without this the buttons stayed live for a folder
@@ -941,6 +979,13 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
 
     def _can_convert(self) -> bool:
         return bool(getattr(self, "_ready", False))
+
+
+#: What the verdict says while the plate is being read and Convert is already
+#: available. The plate has not been checked, and a page that offered the
+#: button without saying so would be offering a judgement it has not made.
+_UNREAD_NOTE = ("The plate has not been read yet — Convert reads and checks "
+                "it before writing anything.")
 
 
 def _czi_source_problem(path) -> str:

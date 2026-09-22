@@ -6919,9 +6919,23 @@ So the page scans in two stages, both on a worker thread through
 header and the metadata segment it points at — measured at 6 KB for a
 whole-plate file against 997 KB for the full read, and 46 KB against 1.05 MB
 for a 96-file split export — and names the wells. The plate is painted from it
-at once, with the verdict saying so and the Run button still shut, because a
-peek cannot know whether the file is sound, whether the files agree, or how
-many tiles a scene holds. The **full read** follows and replaces it.
+at once, with the verdict saying so, because a peek cannot know whether the
+file is sound, whether the files agree, or how many tiles a scene holds. The
+**full read** follows and replaces it.
+
+**Neither of them gates the Run button.** `_ready_before_the_scan` decides
+that, from what a directory listing and the widgets can answer: a source that
+resolves to at least one `.czi`, a form whose own fields parse, and a usable
+destination. Reading a file is not among them, because reading a file is not
+what makes the run safe — `PackedConverterWorker.run` plans before it
+converts, and `explode_czi` refuses an unsound source or an unresolvable
+mapping with no archive written. The scan *describes* the plate; it does not
+permit it, and a description that a split export of several hundred files on
+a network share takes an hour to produce is an hour of a window nobody can
+use. What the scan finds still lands: an unsound plate takes the button back
+and says why, and while the plate is unread the verdict says so in as many
+words, because a button offered beside a silent verdict is the page asserting
+a judgement it has not made.
 
 Both derive wells through the one `czi_read.wells_from_scenes`, so the plate a
 peek paints and the plate a run converts cannot be derived two different ways.
@@ -6944,6 +6958,40 @@ is about the share rather than the machine — enough requests in flight to cove
 the round trips, few enough not to hammer a filer — and it is a defensible
 constant, not a measured optimum, because the only hardware it could be
 measured against is the user's.
+
+**That rationale is about waiting, and the reader does not only wait.**
+`pipeline/czi_read.py` is a parser written in Python, so the work between the
+reads is bytecode and holds the interpreter lock; eight threads of it do not
+go eight times faster, they contend, and one of the threads they contend with
+is the one drawing the window. Measured on 96 local files, where there is no
+latency to cover and the cost is therefore all parsing: one worker took 3.48 s
+and never kept the event loop waiting, while eight took 4.22 s and starved it
+for 65.6% of the run, with single pauses of 266 ms. Slower *and* unusable,
+from threads added to make it faster.
+
+So the pool **reads wide and parses narrow**: the reads stay as wide as
+`scan_workers` says, and every stretch of pure computation on bytes already
+read — the subblock directory's entries, the plate document, `_build_layout`'s
+passes over the blocks, and the per-plane acquisition stamps — is serialised
+behind `czi_read._PARSE_LOCK`. A thread waiting on a share still overlaps with
+every other thread's wait, which is the whole of what the pool was for; what
+no longer overlaps is the part that could never overlap anyway. The same
+96-file scan then starves the window for 19.2% of the run rather than 65.6%,
+with the peek's latency gain intact at 809 ms on one thread against 107 ms on
+eight.
+
+The lock must never be held across a read. Taken around the IO it would put
+the round trips back end to end and undo the pool completely, which is why
+`tests/test_czi_scan_leaves_the_window_alive.py` asserts **both** halves —
+that no two files are parsed at once, and that the files are still opened at
+once. Each is what catches the opposite mistake, and the second one is green
+for any amount of over-locking the first would allow.
+
+What remains is not fixed: at eight workers the window still sees pauses of
+about 227 ms, and the measurements above put the residue in the contention
+between the pool's threads themselves rather than in the parsing. Getting rid
+of it means getting the work out of the interpreter's lock altogether — a
+process pool — which is a change with its own costs and has not been made.
 
 Through `Executor.map`, which yields **by argument order** however the work
 completes. The order is load-bearing: it is the order ZEN wrote a split export

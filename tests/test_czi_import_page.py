@@ -629,14 +629,20 @@ def test_the_plate_is_painted_from_the_headers_before_the_full_read_lands(
     assert sorted(page._dashboard._fraction) == ["A02", "C07", "H11"]
     assert page.is_scanning() is True
     assert "named in the file headers" in page._verdict.text()
+    # Provisional, and **said** to be provisional. Convert is available on the
+    # strength of headers alone, because the run reads and checks the plate
+    # itself before it writes anything and the page's scan only describes it —
+    # on a 661-file export over a share, gating the button on that description
+    # was an hour of an unusable window. The pair is the rule: offering the
+    # button while claiming the plate had been checked would be the silent
+    # substitution, and offering nothing was the bug.
     assert "not yet checked" in page._verdict.text()
-    # Provisional means provisional: nothing may be converted on the strength
-    # of headers alone.
-    assert not page._run_btn.isEnabled()
+    assert page._run_btn.isEnabled()
 
     released.set()
     _settle(page)
     assert "across 3 file(s)" in page._verdict.text()
+    assert "not yet checked" not in page._verdict.text()
     assert page._run_btn.isEnabled()
 
 
@@ -982,3 +988,96 @@ def test_the_page_says_nothing_extra_when_the_elapsed_times_are_usable(
     _settle(page)
     assert "named by position" not in page._verdict.text(), page._verdict.text()
     assert "3 timepoint(s)" in page._verdict.text()
+
+
+# ── Convert does not wait on the description ─────────────────────────────────
+
+def test_convert_is_available_before_a_single_file_has_been_read(
+        controller, tmp_path, monkeypatch):
+    """The reported case: 661 files of about 450 MB on a network share, where
+    naming the wells alone took hours, and for all of them the button was off.
+
+    Nothing about that wait is a permission. The run reads and checks the
+    plate itself and writes nothing until it has, so the page's scan is a
+    description — and a description is not what a Convert button is waiting
+    for. Here even the *peek* is held open, so the page has read no file at
+    all, and Convert is still available.
+    """
+    import datasets.czi_import.view as view_module
+
+    released = threading.Event()
+    real_peek = view_module.peek_source
+
+    def _held(src, params, **kwargs):
+        released.wait(20)
+        return real_peek(src, params, **kwargs)
+
+    monkeypatch.setattr(view_module, "peek_source", _held)
+    page = controller.page
+    folder = _split_folder(tmp_path)
+
+    page._src_field.set_path(str(folder))
+    page._on_source_changed()
+    QApplication.processEvents()
+
+    try:
+        assert page.is_scanning() is True
+        assert not page._dashboard.well_ids(), "no file has been read yet"
+        assert page._run_btn.isEnabled()
+        assert page._queue_btn.isEnabled()
+        # Available is not the same as checked, and the page has to say which
+        # it means — a button offered beside a silent verdict would be the
+        # page asserting a judgement it has not made.
+        assert "has not been read yet" in page._verdict.text()
+    finally:
+        released.set()
+        _settle(page)
+
+
+def test_a_folder_with_no_czi_files_still_has_convert_off(controller, tmp_path):
+    """The cheap checks are still checks. What can be answered from a
+    directory listing is answered before the button is offered; it is only the
+    reading of files that the button no longer waits for."""
+    empty = tmp_path / "nothing"
+    empty.mkdir()
+    page = controller.page
+
+    page._src_field.set_path(str(empty))
+    page._on_source_changed()
+    QApplication.processEvents()
+
+    assert not page._run_btn.isEnabled()
+    assert not page._queue_btn.isEnabled()
+
+
+def test_a_malformed_grid_still_has_convert_off(controller, tmp_path,
+                                                monkeypatch):
+    """The form's own fields are the other thing answerable without reading:
+    a grid the page cannot parse cannot be converted against, scan or no
+    scan."""
+    import datasets.czi_import.view as view_module
+
+    released = threading.Event()
+    real_peek = view_module.peek_source
+
+    def _held(src, params, **kwargs):
+        released.wait(20)
+        return real_peek(src, params, **kwargs)
+
+    monkeypatch.setattr(view_module, "peek_source", _held)
+    page = controller.page
+    page._src_field.set_path(str(_split_folder(tmp_path)))
+    page._on_source_changed()
+    QApplication.processEvents()
+    assert page._run_btn.isEnabled(), "the premise: it is on before the edit"
+
+    page._well_source_cb.setCurrentIndex(page._well_source_cb.findData("grid"))
+    page._rows_edit.setText("0")
+    page.refresh_readout()
+    QApplication.processEvents()
+
+    try:
+        assert not page._run_btn.isEnabled()
+    finally:
+        released.set()
+        _settle(page)

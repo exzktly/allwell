@@ -33,7 +33,6 @@ inside the pipeline self-sufficiency contract (ARCHITECTURE §6.2).
 
 from __future__ import annotations
 
-import math
 import logging
 import re
 import threading
@@ -53,9 +52,13 @@ from pipeline.explode_common import (
     ExplodeCancelled,
     ExplodeResult,
     encode_tiff,
+    elapsed_hour_tokens,
     expected_members,
+    hours_token,
     pick_workers,
     resolve_positions,
+    stride_note,
+    timepoint_plan,
     well_is_complete,
     worker_groups,
 )
@@ -116,6 +119,12 @@ class OmeLayout:
     # one well does not. Recorded so `validation_report` can say so before a
     # single archive is written.
     sizes_per_series: list[dict[str, int]] = field(default_factory=list)
+    #: What the user should be told about the timepoint names — a whole
+    #: sentence, or ``""``. Never empty when they are positional *because*
+    #: something was unreadable, since a plate named by position with nothing
+    #: said about it is indistinguishable from one whose writer recorded no
+    #: ``DeltaT`` at all.
+    timepoint_note: str = ""
     single_image: bool = False
     n_frames: int = 0             # single-image: the T-axis frame count
     total_planes: int = 0         # image planes the metadata declares, all series
@@ -465,35 +474,10 @@ def _localname(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
-def _hours_token(hours: float) -> str:
-    """``"<hours>h"`` in a spelling ``util.timepoint`` can read, or ``""``.
-
-    Six significant figures in **fixed** notation. ``f"{v:g}"`` switches to
-    exponent form below 1e-4, which was rare while every DeltaT was read as
-    seconds and became routine once milliseconds, microseconds and nanoseconds
-    were added: a six-frame time-lapse 100 ms apart rendered
-    ``2.77778e-05h``, and ``util.timepoint._UNIT_RE`` matches no exponent, so
-    ``parse_hours`` answered ``None`` and ``sort_key`` fell back to sorting
-    those tokens as text — putting frames 5 and 6 before frames 2 to 4. A
-    number the parser cannot read is worse than the wrong number it replaced,
-    because the wrong one at least ordered correctly.
-
-    Answers ``""`` for a value the parser cannot represent at all: not finite,
-    or negative (``_UNIT_RE`` accepts no sign, and a writer stamping a
-    pre-treatment frame at a negative elapsed time is the case that produces
-    one). The caller reads that as a reason to name every timepoint by
-    position, and says so.
-    """
-    if not math.isfinite(hours) or hours < 0.0:
-        return ""
-    if hours == 0.0:
-        return "0h"
-    # Decimal places chosen so six significant figures survive, capped: below
-    # a microsecond in hours the label is more zeros than number, and two such
-    # timepoints colliding is caught by the duplicate check either way.
-    places = min(12, max(0, 5 - int(math.floor(math.log10(hours)))))
-    text = f"{hours:.{places}f}".rstrip("0").rstrip(".")
-    return f"{text}h" if text and text != "0" else "0h"
+#: Rendering an elapsed hour into a filename token is shared with the CZI
+#: converter — see :func:`pipeline.explode_common.hours_token` for why the two
+#: must not have separate definitions of it.
+_hours_token = hours_token
 
 
 @dataclass(frozen=True)
@@ -568,9 +552,15 @@ def _hours_per_unit(unit: str) -> float | None:
     return _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
 
 
-def _fallback_reasons(scan: _DeltaTScan, size_t: int, tokens: list[str],
-                      collided: list[str], unrenderable: list[int]) -> list[str]:
-    """Why the timepoints cannot be named by elapsed time, in the log's words."""
+def _source_reasons(scan: _DeltaTScan, size_t: int) -> list[str]:
+    """The reasons only OME-XML can produce, for the shared decision to carry.
+
+    The generic ones — an incomplete set, a collision, a value the timepoint
+    parser cannot read — belong to
+    :func:`pipeline.explode_common.elapsed_hour_tokens`, because they are true
+    of any source of elapsed times. These two are about how *this* file spelled
+    them.
+    """
     why: list[str] = []
     if scan.unreadable_units:
         why.append(
@@ -581,28 +571,16 @@ def _fallback_reasons(scan: _DeltaTScan, size_t: int, tokens: list[str],
             f"{scan.out_of_range} plane(s) carry a TheT outside "
             f"0..{size_t - 1}, so the file's T indexing is not this "
             f"converter's")
-    if collided:
-        why.append(
-            f"the elapsed times render to {len(set(tokens))} distinct label(s) "
-            f"for {len(tokens)} timepoint(s) — {', '.join(collided)} repeat(s), "
-            f"and two timepoints sharing a label would write every image of the "
-            f"second over the first")
-    if unrenderable:
-        why.append(
-            f"{len(unrenderable)} elapsed time(s) are not finite or not "
-            f"positive, and the app's timepoint parser reads neither")
-    if not why:
-        why.append(
-            f"only {len(scan.hours_by_index)} of {size_t} timepoint(s) carry a "
-            f"readable DeltaT")
     return why
 
 
-def _timepoint_tokens(pixels, size_t: int) -> list[str] | None:
+def _timepoint_tokens(pixels, size_t: int) -> tuple[list[str] | None, str]:
     """``["0h", "1h", …]`` from the planes' ``DeltaT``, or ``None``.
 
-    ``None`` means the caller keeps its positional tokens, and this function has
-    already said in the run log why. Every route here is a *degradation*: the
+    Returned as ``(tokens, note)``. ``None`` tokens mean the caller keeps its
+    positional ones, and the note is the one sentence saying why — carried back
+    rather than only logged, because the converter page shows it before the run
+    starts and a log line arrives too late to re-export a plate. Every route here is a *degradation*: the
     file stated a time and the archive will not carry it, so Review orders the
     timepoints by index and can put no number on an axis. Each one says so,
     because a ``t0``/``t1`` plate is otherwise indistinguishable from one whose
@@ -617,33 +595,26 @@ def _timepoint_tokens(pixels, size_t: int) -> list[str] | None:
     """
     scan = _scan_delta_t(pixels, size_t)
     if not size_t:
-        return None
+        return None, ""
 
-    complete = len(scan.hours_by_index) >= size_t
-    tokens = ([_hours_token(scan.hours_by_index[i]) for i in range(size_t)]
-              if complete else [])
-    # ``%g`` renders six significant figures, so two deltas that differ by less
-    # than that — or a writer that stamps the same placeholder on every plane —
-    # produce one token for two timepoints, and every image of the second would
-    # be written over the first's member name. Positional tokens name them all
-    # distinctly and lose only a number the file did not really state.
-    collided = sorted({t for t in tokens if tokens.count(t) > 1})
-    unrenderable = [i for i, t in enumerate(tokens) if not t]
-
-    if complete and not collided and not unrenderable:
-        return tokens
-    _log.warning(
-        "OME timepoints: naming by position (t0, t1, …) rather than by "
-        "elapsed time — %s.",
-        "; ".join(_fallback_reasons(scan, size_t, tokens, collided,
-                                    unrenderable)),
-    )
-    return None
+    # The rendering, the completeness test and the collision test are shared
+    # with the CZI converter; only the reasons peculiar to OME-XML are built
+    # here (an unreadable DeltaTUnit, a TheT outside the file's own T axis).
+    resolved = elapsed_hour_tokens(scan.hours_by_index, size_t,
+                                   source_reasons=_source_reasons(scan, size_t))
+    if resolved.tokens is not None:
+        return resolved.tokens, (
+            f"{resolved.note[:1].upper()}{resolved.note[1:]}."
+            if resolved.note else "")
+    note = (f"Timepoints are named by position (t0, t1, …) rather than by "
+            f"elapsed time — {'; '.join(resolved.reasons)}.")
+    _log.warning("OME timepoints: %s", note)
+    return None, note
 
 
 def _parse_ome_labels(
     ome_xml: str | None, size_c: int, size_t: int
-) -> tuple[list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str], str]:
     """Return ``(channel_names, timepoint_tokens, raw_channel_names)`` from OME-XML.
 
     Channel names come from the first ``Image``'s ``Channel`` elements (channels
@@ -663,22 +634,22 @@ def _parse_ome_labels(
     timepoint_tokens = [f"t{i}" for i in range(size_t)]
     raw_names: list[str] = []
     if not ome_xml:
-        return channel_names, timepoint_tokens, raw_names
+        return channel_names, timepoint_tokens, raw_names, ""
 
     try:
         root = ET.fromstring(ome_xml)
     except ET.ParseError:
-        return channel_names, timepoint_tokens, raw_names
+        return channel_names, timepoint_tokens, raw_names, ""
 
     image = next((el for el in root.iter() if _localname(el.tag) == "Image"), None)
     if image is None:
-        return channel_names, timepoint_tokens, raw_names
+        return channel_names, timepoint_tokens, raw_names, ""
 
     pixels = next(
         (el for el in image.iter() if _localname(el.tag) == "Pixels"), None
     )
     if pixels is None:
-        return channel_names, timepoint_tokens, raw_names
+        return channel_names, timepoint_tokens, raw_names, ""
 
     # Channel names, in channel order.
     names: list[str] = []
@@ -692,9 +663,10 @@ def _parse_ome_labels(
             for i in range(size_c)
         ]
 
-    timepoint_tokens = _timepoint_tokens(pixels, size_t) or timepoint_tokens
+    elapsed, note = _timepoint_tokens(pixels, size_t)
+    timepoint_tokens = elapsed or timepoint_tokens
 
-    return channel_names, timepoint_tokens, raw_names
+    return channel_names, timepoint_tokens, raw_names, note
 
 
 # ``tifffile`` sizes a series' page list from the dimensions the *metadata*
@@ -1160,9 +1132,8 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
     single_image = len(series) == 1
     # For a single-image file the T axis is the frame sequence, not timepoints, so
     # don't manufacture size_t timepoint tokens (there could be thousands).
-    channel_names, timepoint_tokens, raw_channel_names = _parse_ome_labels(
-        ome_xml, size_c, 0 if single_image else size_t
-    )
+    channel_names, timepoint_tokens, raw_channel_names, timepoint_note = (
+        _parse_ome_labels(ome_xml, size_c, 0 if single_image else size_t))
     ome_positions, positions_in_um = _stage_positions(ome_xml)
     return OmeLayout(
         n_positions=len(series),
@@ -1171,6 +1142,7 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
         size_z=size_z,
         channel_names=channel_names,
         timepoint_tokens=timepoint_tokens,
+        timepoint_note=timepoint_note,
         axes_per_series=axes_per_series,
         sizes_per_series=sizes_per_series,
         single_image=single_image,
@@ -1348,6 +1320,7 @@ def explode_ome_tiff(
     serpentine: bool = True,
     experiment: str = "ome",
     fovs_per_well: "int | None" = None,
+    timepoint_stride: int = 1,
     frame_order: str = "single",
     well_order: "list[str] | None" = None,
     workers: int = 0,
@@ -1374,6 +1347,11 @@ def explode_ome_tiff(
     into one series' ``T`` axis; *frame_order* says how that flat frame sequence
     splits into positions x timepoints (see :data:`FRAME_ORDERS`), and planes are
     read one page at a time (the whole array can be far too large to load).
+
+    *timepoint_stride* converts every N-th timepoint instead of all of them,
+    counting from the first and keeping the source's own tokens -- see
+    :func:`pipeline.explode_common.timepoint_plan`. The default of 1 converts
+    everything.
 
     Wells are converted in parallel: *workers* threads (0 = auto), each with its
     own read handle, each owning a disjoint set of wells and writing that well's
@@ -1436,21 +1414,36 @@ def explode_ome_tiff(
     if layout.single_image:
         n_positions, n_timepoints, fovs = _resolve_single_image(
             layout, n_wells, fovs_per_well, frame_order, ome_path.name)
-        tp_tokens = [f"t{t}" for t in range(n_timepoints)]
+        source_tokens = [f"t{t}" for t in range(n_timepoints)]
         head = f"single image, {layout.n_frames} frame(s) ({frame_order})"
     else:
         fovs = resolve_positions(layout.n_positions, n_wells, fovs_per_well,
                                   what="stage position(s)", name=ome_path.name)
         n_positions, n_timepoints = layout.n_positions, layout.size_t
-        tp_tokens = list(layout.timepoint_tokens)
+        source_tokens = list(layout.timepoint_tokens)
         head = f"{layout.n_positions} position(s)"
 
+    # Index *and* token together: the index reads the plane and the token
+    # names it, so a stride that filtered one list without the other would
+    # write the right image under the wrong timepoint's name.
+    #
+    # ``n_timepoints`` stays the *source* count on purpose. A single-image
+    # file's frames are one flat sequence and ``_frame_index`` locates a plane
+    # with ``pos * n_timepoints + t``, so that arithmetic is over the
+    # timepoints the file holds, not the ones this run keeps. Rebinding it to
+    # the kept count reads the wrong frame for every position after the first.
+    tp_plan = timepoint_plan(source_tokens, timepoint_stride)
+    tp_tokens = [token for _index, token in tp_plan]
+    n_kept_t = len(tp_plan)
+
     out_in_dir.mkdir(parents=True, exist_ok=True)
-    total = n_positions * n_timepoints * layout.size_c
+    total = n_positions * n_kept_t * layout.size_c
     n_workers = pick_workers(workers, n_wells)
     _log(
         f"[ome] {ome_path.name}: {head} -> {n_wells} well(s) x {fovs} FOV(s) x "
-        f"{n_timepoints} timepoint(s), {layout.size_c} channel(s)"
+        f"{n_kept_t} timepoint(s)"
+        f"{stride_note(timepoint_stride, n_timepoints, tp_tokens)}"
+        f", {layout.size_c} channel(s)"
         f"{f', {layout.size_z} Z-plane(s) max-projected' if layout.size_z > 1 else ''}"
         f" -- {n_workers} worker(s).\n"
     )
@@ -1477,7 +1470,7 @@ def explode_ome_tiff(
     done = 0
     # Planes one well accounts for: its FOVs x timepoints x channels. Every well
     # writes the same number, so this is the denominator of each well's share.
-    planes_per_well = max(1, fovs * n_timepoints * layout.size_c)
+    planes_per_well = max(1, fovs * n_kept_t * layout.size_c)
 
     def _bump(well: "str | None" = None, well_done: int = 0) -> None:
         nonlocal done
@@ -1529,7 +1522,7 @@ def explode_ome_tiff(
                             arr = tf.series[pos].asarray()
                             axes = str(tf.series[pos].axes).upper()
                             read_s += time.perf_counter() - r0
-                        for ti in range(n_timepoints):
+                        for ti, tp_token in tp_plan:
                             for c in range(layout.size_c):
                                 if _abort():
                                     raise OmeExplodeCancelled()
@@ -1543,7 +1536,7 @@ def explode_ome_tiff(
                                 read_s += time.perf_counter() - r0
                                 w0 = time.perf_counter()
                                 member = (f"{exp_tok}_{layout.channel_names[c]}_"
-                                          f"{label}_f{local_fov}_{tp_tokens[ti]}.tif")
+                                          f"{label}_f{local_fov}_{tp_token}.tif")
                                 zf.writestr(member, encode_tiff(plane))
                                 write_s += time.perf_counter() - w0
                                 written += 1

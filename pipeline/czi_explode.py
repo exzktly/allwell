@@ -49,6 +49,8 @@ from pipeline.explode_common import (
     expected_members,
     pick_workers,
     resolve_positions,
+    stride_note,
+    timepoint_plan,
     well_is_complete,
     worker_groups,
 )
@@ -242,6 +244,7 @@ def explode_czi(
     serpentine: bool = True,
     experiment: str = "",
     fovs_per_well: "int | None" = None,
+    timepoint_stride: int = 1,
     files: "list[Path] | None" = None,
     workers: int = 0,
     log_fn: "Callable[[str], None] | None" = None,
@@ -258,7 +261,12 @@ def explode_czi(
     ZEN's *Split Scenes* export and is as ordinary an input as a single file
     holding the whole plate — see :mod:`pipeline.czi_set`.
 
-    For every (scene, tile, timepoint, channel) the Z stack is max-projected to
+    *timepoint_stride* converts every N-th timepoint instead of all of them,
+    counting from the first and keeping the source's own tokens — see
+    :func:`pipeline.explode_common.timepoint_plan`. The default of 1 converts
+    everything.
+
+    For every (scene, tile, kept timepoint, channel) the Z stack is max-projected to
     a 2-D plane and stored as a member named
     ``<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif`` inside that well's
     archive — the default filename schema, which is the layout the pipeline
@@ -316,19 +324,31 @@ def explode_czi(
     # filenames — ``Exp7_A1_DAPI_H11_f0_t0.tif``.
     exp_tok = safe_token(experiment or _default_experiment(czi_path, czi_set),
                          "czi")
-    tp_tokens = layout.timepoint_tokens
+    # Index *and* token together: the index reads the plane and the token
+    # names it, and a stride that filtered one list without the other would
+    # write the right image under the wrong timepoint.
+    # The set's tokens, not the layout's: elapsed hours where the files'
+    # acquisition stamps supported them, positional otherwise. Resolved once
+    # for the plate in ``czi_set``, so the page's readout and the archives
+    # cannot be named two different ways.
+    tp_plan = timepoint_plan(czi_set.timepoint_tokens, timepoint_stride)
+    tp_tokens = [token for _index, token in tp_plan]
+    n_kept_t = len(tp_plan)
     fovs = well_map.fovs_per_well
     n_wells = well_map.n_wells
+    if czi_set.timepoint_note:
+        _log(f"[czi] {czi_set.timepoint_note}\n")
 
     out_in_dir.mkdir(parents=True, exist_ok=True)
-    total = czi_set.n_positions * layout.size_t * layout.size_c
+    total = czi_set.n_positions * n_kept_t * layout.size_c
     n_workers = pick_workers(workers, n_wells)
     source = "the file's scene names" if well_map.from_file else "the plate grid"
     held_in = (f"{czi_set.n_files} file(s)" if czi_set.n_files > 1
                else czi_path.name)
     _log(
         f"[czi] {held_in}: {czi_set.n_scenes} scene(s) -> {n_wells} "
-        f"well(s) x {fovs} FOV(s) x {layout.size_t} timepoint(s), "
+        f"well(s) x {fovs} FOV(s) x {n_kept_t} timepoint(s)"
+        f"{stride_note(timepoint_stride, layout.size_t, tp_tokens)}, "
         f"{layout.size_c} channel(s)"
         f"{f', {layout.size_z} Z-plane(s) max-projected' if layout.size_z > 1 else ''}"
         f" -- wells from {source}, {n_workers} worker(s).\n"
@@ -354,7 +374,7 @@ def explode_czi(
 
     lock = threading.Lock()
     done = 0
-    planes_per_well = max(1, fovs * layout.size_t * layout.size_c)
+    planes_per_well = max(1, fovs * n_kept_t * layout.size_c)
 
     def _bump(well: "str | None" = None, well_done: int = 0) -> None:
         nonlocal done
@@ -402,7 +422,7 @@ def explode_czi(
                                 compression=zipfile.ZIP_STORED) as archive:
                     for fov, position in enumerate(well_map.positions[index]):
                         reader = readers.for_path(position.path)
-                        for t_index in range(layout.size_t):
+                        for t_index, tp_token in tp_plan:
                             for channel in range(layout.size_c):
                                 if _abort():
                                     raise CziExplodeCancelled()
@@ -414,7 +434,7 @@ def explode_czi(
                                 started = time.perf_counter()
                                 member = (
                                     f"{exp_tok}_{layout.channel_names[channel]}_"
-                                    f"{label}_f{fov}_{tp_tokens[t_index]}.tif")
+                                    f"{label}_f{fov}_{tp_token}.tif")
                                 archive.writestr(member, encode_tiff(plane))
                                 write_s += time.perf_counter() - started
                                 written += 1

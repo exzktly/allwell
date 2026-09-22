@@ -98,6 +98,15 @@ REUSE_CONTRACTS = {
                       "produce two disjoint sets of filenames in one archive",
         "well_order": "an explicit click-defined acquisition path, which "
                       "replaces the grid outright when it is set",
+        "timepoint_stride": (
+            "how many of the timelapse's timepoints are written. The "
+            "dangerous direction is the quiet one: a stride-3 run's member "
+            "set is a strict SUBSET of a stride-1 run's, and "
+            "``well_is_complete`` tests ``issubset``, so without this key a "
+            "well already filled by a complete run would be judged done and "
+            "left alone while every freshly-converted well beside it held a "
+            "third as many timepoints. The plate would go ragged with nothing "
+            "raising"),
     },
     "czi_import.resume_state": {
         "well_source": "whether the wells came from the file's scene names or "
@@ -119,6 +128,15 @@ REUSE_CONTRACTS = {
         "serpentine": "snake or raster",
         "fovs_per_well": "how many tiles each well takes",
         "experiment": "the first token of every member name",
+        "timepoint_stride": (
+            "how many of the timelapse's timepoints are written. The "
+            "dangerous direction is the quiet one: a stride-3 run's member "
+            "set is a strict SUBSET of a stride-1 run's, and "
+            "``well_is_complete`` tests ``issubset``, so without this key a "
+            "well already filled by a complete run would be judged done and "
+            "left alone while every freshly-converted well beside it held a "
+            "third as many timepoints. The plate would go ragged with nothing "
+            "raising"),
     },
     "parquet_cache.read_cached": {
         "st_size": (

@@ -108,7 +108,7 @@ def test_timepoints_that_would_render_alike_fall_back_to_positional(deltas):
     did not really state."""
     xml = _ome_xml(size_c=1, size_t=2,
                    planes=[(0, deltas[0], "s"), (1, deltas[1], "s")])
-    _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+    _channels, tokens, _raw, _note = _parse_ome_labels(xml, 1, 2)
     assert tokens == ["t0", "t1"]
 
 
@@ -168,7 +168,7 @@ def _ome_xml(*, size_c=1, size_t=2, planes):
 ])
 def test_every_delta_t_unit_converts_to_hours(unit, delta, want):
     xml = _ome_xml(planes=[(0, 0, unit), (1, delta, unit)])
-    _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+    _channels, tokens, _raw, _note = _parse_ome_labels(xml, 1, 2)
     assert tokens == ["0h", want]
 
 
@@ -181,7 +181,7 @@ def test_every_delta_t_unit_converts_to_hours(unit, delta, want):
 def test_an_unreadable_unit_falls_back_to_positional_tokens(unit):
     """Unknown is not a synonym for seconds; a positional token states nothing."""
     xml = _ome_xml(planes=[(0, 0, unit), (1, 3600, unit)])
-    _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+    _channels, tokens, _raw, _note = _parse_ome_labels(xml, 1, 2)
     assert tokens == ["t0", "t1"], (
         f"an unreadable DeltaTUnit {unit!r} produced {tokens!r}"
     )
@@ -197,27 +197,27 @@ def test_an_unreadable_unit_says_so_in_the_run_log(caplog):
     """
     xml = _ome_xml(planes=[(0, 0, "furlong"), (1, 3600, "furlong")])
     with caplog.at_level(logging.WARNING, logger="pipeline.ome_explode"):
-        _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+        _channels, tokens, _raw, _note = _parse_ome_labels(xml, 1, 2)
     assert tokens == ["t0", "t1"]
     assert "cannot read" in caplog.text
     assert "furlong" in caplog.text
-    assert "naming by position" in caplog.text
+    assert "named by position" in caplog.text
 
 
 def test_labels_that_collide_say_which_label_repeated(caplog):
     """Two timepoints rendering to one label is silent data loss without this."""
     xml = _ome_xml(planes=[(0, 3600, "s"), (1, 3600, "s")])
     with caplog.at_level(logging.WARNING, logger="pipeline.ome_explode"):
-        _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+        _channels, tokens, _raw, _note = _parse_ome_labels(xml, 1, 2)
     assert tokens == ["t0", "t1"]
     assert "1h" in caplog.text, caplog.text
-    assert "naming by position" in caplog.text
+    assert "named by position" in caplog.text
 
 
 def test_a_file_with_readable_units_logs_no_warning(caplog):
     xml = _ome_xml(planes=[(0, 0, "s"), (1, 3600, "s")])
     with caplog.at_level(logging.WARNING, logger="pipeline.ome_explode"):
-        _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+        _channels, tokens, _raw, _note = _parse_ome_labels(xml, 1, 2)
     assert tokens == ["0h", "1h"]
     assert caplog.text.strip() == ""
 
@@ -231,19 +231,19 @@ def test_an_empty_unit_attribute_is_read_as_the_schema_default():
     should not drift silently.
     """
     xml = _ome_xml(planes=[(0, 0, ""), (1, 3600, "")])
-    _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+    _channels, tokens, _raw, _note = _parse_ome_labels(xml, 1, 2)
     assert tokens == ["0h", "1h"]
 
 
 def test_one_unreadable_plane_drops_the_whole_file_to_positional():
     xml = _ome_xml(planes=[(0, 0, "s"), (1, 3600, "furlong")])
-    _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+    _channels, tokens, _raw, _note = _parse_ome_labels(xml, 1, 2)
     assert tokens == ["t0", "t1"]
 
 
 def test_the_raw_channel_names_survive_tokenisation():
     xml = _ome_xml(planes=[(0, 0, "s"), (1, 3600, "s")])
-    _channels, _tokens, raw = _parse_ome_labels(xml, 1, 2)
+    _channels, _tokens, raw, _note = _parse_ome_labels(xml, 1, 2)
     assert raw == ["GFP"]
 
 
@@ -269,7 +269,7 @@ def test_every_rendered_timepoint_parses_and_sorts(unit, step, frames):
     from util.timepoint import parse_hours, sort_key
 
     xml = _ome_xml(planes=[(i, i * step, unit) for i in range(frames)])
-    _channels, tokens, _raw = _parse_ome_labels(xml, 1, frames)
+    _channels, tokens, _raw, _note = _parse_ome_labels(xml, 1, frames)
     assert all(not t.startswith("t") for t in tokens), (
         f"{unit} at {step} fell back to positional tokens: {tokens}")
     unread = [t for t in tokens if parse_hours(t) is None]
@@ -288,7 +288,7 @@ def test_a_one_based_thet_does_not_mix_the_two_vocabularies():
     as 0 h, so two distinct timepoints shared one reading.
     """
     xml = _ome_xml(planes=[(1, 0, "s"), (2, 3600, "s"), (3, 7200, "s")])
-    _channels, tokens, _raw = _parse_ome_labels(xml, 1, 3)
+    _channels, tokens, _raw, _note = _parse_ome_labels(xml, 1, 3)
     assert tokens == ["t0", "t1", "t2"], tokens
 
 
@@ -305,14 +305,14 @@ def test_an_unreadable_unit_on_a_file_that_resolved_says_nothing(caplog):
     The unreadable-unit line fired wherever a bad unit was seen, which is not
     the same as the file falling back — one channel's planes carrying a bad
     unit while another's carry seconds leaves every timepoint resolved. Saying
-    "naming by position" about a file whose timepoints are named by elapsed
+    "named by position" about a file whose timepoints are named by elapsed
     time sends a user to re-export a plate for nothing.
     """
     planes = [(0, 0, "s"), (1, 3600, "s"),         # channel 0: readable
               (0, 0, "furlong"), (1, 3600, "furlong")]   # channel 1: not
     xml = _ome_xml(planes=planes)
     with caplog.at_level(logging.WARNING, logger="pipeline.ome_explode"):
-        _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+        _channels, tokens, _raw, _note = _parse_ome_labels(xml, 1, 2)
     assert tokens == ["0h", "1h"], tokens
     assert caplog.text.strip() == "", (
         f"warned about a fallback that did not happen: {caplog.text!r}")

@@ -27,6 +27,7 @@ from datasets.core import convert_marker as marker
 from datasets.core.convert_marker import ResumeState  # noqa: F401 (re-export)
 from pipeline.czi_explode import WELL_SOURCES, resolve_well_map
 from pipeline.czi_read import CziReadError
+from pipeline.explode_common import timepoint_plan
 from pipeline.czi_set import (
     CziSet,
     PlatePeek,
@@ -56,7 +57,7 @@ IN_PROGRESS_MARKER = ".aw_czi_in_progress"
 #: conversion goes and nothing about what it writes.
 _MAPPING_FIELDS = ("well_source", "use_folder", "grid_rows", "grid_cols",
                    "origin", "direction", "serpentine", "fovs_per_well",
-                   "experiment")
+                   "experiment", "timepoint_stride")
 
 
 class CziImportError(Exception):
@@ -81,6 +82,14 @@ class ConversionParams:
     # assumption.
     serpentine: bool = True
     fovs_per_well: int | None = None      # None = take it from the file
+    #: Convert every N-th timepoint instead of all of them, counting from the
+    #: first. 1 — the default — converts the whole timelapse. Part of the
+    #: mapping signature above and not merely a speed setting: a well left
+    #: alone by a resume because a previous run at stride 1 already filled it
+    #: would hold every timepoint while the wells beside it held a third of
+    #: them, and ``well_is_complete`` tests a *subset*, so nothing downstream
+    #: would notice the plate had gone ragged.
+    timepoint_stride: int = 1
     experiment: str = ""                  # blank = derive from the filename
     workers: int = 0                      # 0 = auto (per-well thread pool)
     #: Convert every ``.czi`` beside the selected one as a single plate. This
@@ -98,8 +107,21 @@ class ConversionPlan:
     """The resolved shape of a conversion, for the readout and a sanity gate."""
 
     n_scenes: int
+    #: Timepoints a run would *write* — after the stride, not before it.
     n_timepoints: int
     fovs_per_well: int
+    #: Timepoints the source holds. Equal to ``n_timepoints`` unless a stride
+    #: is dropping some, and kept apart from it so the readout can say which
+    #: of the two a number is.
+    n_source_timepoints: int = 0
+    #: The kept timepoints' own tokens, in order — never renumbered. Elapsed
+    #: hours (``0h``, ``4h``, …) when the CZI's acquisition stamps supported
+    #: them, positional (``t0``, ``t1``, …) otherwise.
+    timepoint_tokens: list[str] = field(default_factory=list)
+    #: Why those tokens are positional, where something readable was expected.
+    #: Surfaced so a plate that lost its elapsed times says so before the run
+    #: rather than only in the log afterwards.
+    timepoint_note: str = ""
     #: How many ``.czi`` files this conversion reads. More than one is a
     #: split-scene export, and the readout says so — the same well count from
     #: one file and from ninety-six is two very different things to check.
@@ -133,9 +155,40 @@ class ConversionPlan:
                   * max(1, len(self.channels)))
         return (
             f"{self.n_wells} well(s){span} ({source}){held} × "
-            f"{self.fovs_per_well} FOV(s) × {self.n_timepoints} timepoint(s) × "
+            f"{self.fovs_per_well} FOV(s) × {self.timepoint_phrase} × "
             f"{len(self.channels)} channel(s) ({channels}) — {images} image(s)."
         )
+
+    @property
+    def timepoint_phrase(self) -> str:
+        """``"12 timepoint(s)"``, or ``"4 of 12 timepoint(s) (t0, t3, t6, t9)"``.
+
+        A stride makes the plain count a half-truth: the run writes a complete
+        dataset that silently holds a third of the acquisition, and the number
+        it would otherwise print is indistinguishable from a plate that only
+        ever had four timepoints. So when some are being dropped the readout
+        names both counts and the tokens it kept (CLAUDE.md §7).
+        """
+        if (not self.n_source_timepoints
+                or self.n_timepoints >= self.n_source_timepoints):
+            return f"{self.n_timepoints} timepoint(s)"
+        shown = ", ".join(self.timepoint_tokens[:4])
+        if len(self.timepoint_tokens) > 4:
+            shown += f", … {self.timepoint_tokens[-1]}"
+        return (f"{self.n_timepoints} of {self.n_source_timepoints} "
+                f"timepoint(s) ({shown})")
+
+    @property
+    def timepoint_warning(self) -> str:
+        """The sentence the page shows about how the timepoints were named.
+
+        Said *before* the run rather than only in the log afterwards. A plate
+        whose timepoints lost their hours is a dataset with no time axis in
+        Review, and the moment to find that out is while the source can still
+        be re-exported; an unevenly-spaced one is fine but worth knowing about
+        before the filenames are read as a regular series.
+        """
+        return self.timepoint_note
 
 
 def parse_count(text: object) -> tuple[int | None, bool]:
@@ -173,6 +226,7 @@ class RawFields:
     fovs: str = ""
     origin: str = ""
     workers: str = ""
+    timepoint_stride: str = ""
     direction: str = "row"
     serpentine: bool = True
     experiment: str = ""
@@ -195,6 +249,9 @@ class RawFields:
         if not parse_count(self.workers)[1]:
             out.append("Worker threads must be a positive whole number, or "
                        "blank for automatic.")
+        if not parse_count(self.timepoint_stride)[1]:
+            out.append("Keep every Nth timepoint must be a positive whole "
+                       "number, or blank to convert every timepoint.")
         return out
 
     def to_params(self) -> ConversionParams:
@@ -203,6 +260,7 @@ class RawFields:
         cols, _ = parse_count(self.cols)
         fovs, _ = parse_count(self.fovs)
         workers, _ = parse_count(self.workers)
+        stride, _ = parse_count(self.timepoint_stride)
         return ConversionParams(
             well_source=self.well_source,
             use_folder=self.use_folder,
@@ -213,6 +271,7 @@ class RawFields:
             serpentine=self.serpentine,
             fovs_per_well=fovs,
             experiment=self.experiment.strip(),
+            timepoint_stride=stride or 1,
             workers=workers or 0,
         )
 
@@ -320,9 +379,17 @@ def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
         )
     except ValueError as exc:
         raise CziImportError(str(exc)) from exc
+    try:
+        kept = timepoint_plan(source.timepoint_tokens,
+                              params.timepoint_stride)
+    except ValueError as exc:
+        raise CziImportError(str(exc)) from exc
     return ConversionPlan(
         n_scenes=source.n_scenes,
-        n_timepoints=source.layout.size_t,
+        n_timepoints=len(kept),
+        n_source_timepoints=source.layout.size_t,
+        timepoint_tokens=[token for _index, token in kept],
+        timepoint_note=source.timepoint_note,
         fovs_per_well=well_map.fovs_per_well,
         n_files=source.n_files,
         well_labels=list(well_map.wells),

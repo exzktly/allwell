@@ -344,6 +344,15 @@ class CziImportPage(LogPanelMixin, QWidget):
             "grid-mapped file needs this set, and then only when its positions "
             "do not divide evenly by themselves.")
         options_layout.addWidget(self._fovs_edit)
+        options_layout.addWidget(QLabel("Keep every Nth timepoint", options))
+        self._stride_edit = self._small("", placeholder="all")
+        self._stride_edit.setToolTip(
+            "Leave blank to convert every timepoint. Set 3 to convert the "
+            "first and then every third one after it, which is how a "
+            "densely-sampled timelapse is converted at a coarser resolution "
+            "without re-exporting it. The kept timepoints keep their own "
+            "names, so t0, t3, t6 stay three hours apart in Review.")
+        options_layout.addWidget(self._stride_edit)
         options_layout.addWidget(QLabel("Worker threads", options))
         self._workers_edit = self._small("", placeholder="auto")
         options_layout.addWidget(self._workers_edit)
@@ -604,6 +613,7 @@ class CziImportPage(LogPanelMixin, QWidget):
             fovs=self._fovs_edit.text(),
             origin=self._origin_edit.text(),
             workers=self._workers_edit.text(),
+            timepoint_stride=self._stride_edit.text(),
             direction=str(self._direction_cb.currentData() or "row"),
             serpentine=self._serpentine_cb.isChecked(),
             experiment=self._experiment_edit.text(),
@@ -624,6 +634,9 @@ class CziImportPage(LogPanelMixin, QWidget):
         self._fovs_edit.setText("" if params.fovs_per_well is None
                                 else str(params.fovs_per_well))
         self._workers_edit.setText(str(params.workers or ""))
+        self._stride_edit.setText(
+            "" if params.timepoint_stride in (0, 1)
+            else str(params.timepoint_stride))
         direction = self._direction_cb.findData(params.direction)
         if direction >= 0:
             self._direction_cb.setCurrentIndex(direction)
@@ -683,7 +696,7 @@ class CziImportPage(LogPanelMixin, QWidget):
             set_variant(self._run_btn, "primary")
         for widget in (self._well_source_cb, self._grid_host, self._folder_cb,
                        self._experiment_edit, self._fovs_edit,
-                       self._workers_edit):
+                       self._stride_edit, self._workers_edit):
             widget.setEnabled(not running)
         # Path fields lock rather than disable: ``setEnabled(False)`` dims the
         # path text too, which is the one piece of context someone watching a
@@ -903,8 +916,12 @@ class CziImportPage(LogPanelMixin, QWidget):
         if dest:
             state = resume_state(dest, src, self.params())
             note = state.hint()
-        self._set_verdict(f"{plan.summary()}{f'  {note}' if note else ''}",
-                          "muted")
+        # The timepoint warning goes in the same line rather than a log the
+        # user reads afterwards: a plate that lost its elapsed hours has no
+        # time axis in Review, and now is when the source can still be
+        # re-exported.
+        parts = [plan.summary(), plan.timepoint_warning, note]
+        self._set_verdict("  ".join(p for p in parts if p), "muted")
         # The plate shows the mapping *before* the run, which is the whole
         # point of drawing it: a well the file named wrongly is visible here
         # and nowhere else.

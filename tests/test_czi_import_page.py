@@ -284,6 +284,7 @@ def test_the_spec_a_queued_job_carries_round_trips_into_a_fresh_page(
     page._direction_cb.setCurrentIndex(page._direction_cb.findData("col"))
     page._experiment_edit.setText("Run9")
     page._workers_edit.setText("3")
+    page._stride_edit.setText("4")
     spec = controller.collect_spec()
 
     assert spec["params"]["origin"] == "B03"
@@ -291,6 +292,9 @@ def test_the_spec_a_queued_job_carries_round_trips_into_a_fresh_page(
     assert spec["params"]["direction"] == "col"
     assert spec["params"]["workers"] == 3
     assert spec["params"]["experiment"] == "Run9"
+    # 4 rather than the default 1, so a ``set_params`` that skipped the line
+    # would leave the fresh page's blank box reading 1 and be caught below.
+    assert spec["params"]["timepoint_stride"] == 4
 
     other = CziImportController()
     try:
@@ -298,6 +302,7 @@ def test_the_spec_a_queued_job_carries_round_trips_into_a_fresh_page(
         other.show_job(spec)
         assert other.collect_spec() == spec
         assert other.page._origin_edit.text() == "B03"
+        assert other.page._stride_edit.text() == "4"
     finally:
         other.shutdown()
         other.page.deleteLater()
@@ -906,3 +911,74 @@ def test_a_failed_scan_is_recovered_by_re_picking_and_not_by_typing(
 
     assert sorted(page._dashboard._fraction) == ["A02", "C07", "H11"]
     assert page._run_btn.isEnabled()
+
+
+def test_typing_a_stride_into_the_box_reaches_the_params_a_run_uses(
+        controller, tmp_path):
+    """Driven through the widget, not through ``RawFields``. The box is the
+    only way a user can reach this setting, and a box wired to nothing looks
+    identical to one wired correctly until something reads it (§7.6)."""
+    page = controller.page
+    _set_source(page, _bare_czi(tmp_path), tmp_path)
+
+    assert page.params().timepoint_stride == 1, "blank must mean every timepoint"
+    page._stride_edit.setText("3")
+    assert page.params().timepoint_stride == 3
+    page._stride_edit.setText("")
+    assert page.params().timepoint_stride == 1
+
+
+def test_a_stride_of_zero_is_refused_with_a_reason_the_page_can_show(
+        controller, tmp_path):
+    page = controller.page
+    _set_source(page, _bare_czi(tmp_path), tmp_path)
+    page._stride_edit.setText("0")
+    problems = page.raw_fields().problems()
+    assert any("Keep every Nth timepoint" in p for p in problems), problems
+
+
+def test_the_readout_says_how_many_timepoints_a_stride_keeps(
+        controller, tmp_path):
+    """The page's own words, not the plan's — this is the sentence a user
+    reads before pressing Convert on a run that drops two thirds of a
+    timelapse."""
+    page = controller.page
+    _set_source(page, _named_czi(tmp_path / "src", timepoints=6), tmp_path)
+    page._stride_edit.setText("3")
+    _settle(page)
+    # The verdict line, which is where ``plan.summary()`` lands: ``_readout``
+    # above it describes the *source* and rightly still says 6.
+    assert "2 of 6 timepoint(s) (t0, t3)" in page._verdict.text(), \
+        page._verdict.text()
+    assert "6 timepoint(s)" in page._readout.text()
+
+
+def test_the_page_warns_when_the_timepoints_lost_their_elapsed_times(
+        controller, tmp_path):
+    """A CZI whose subblocks carry no acquisition stamps converts to a dataset
+    with no time axis in Review. The page says so before the run, while the
+    source can still be re-exported — not only in the log afterwards."""
+    page = controller.page
+    _set_source(page, _named_czi(tmp_path / "src", timepoints=3), tmp_path)
+    _settle(page)
+    assert "named by position" in page._verdict.text(), page._verdict.text()
+
+
+def test_the_page_says_nothing_extra_when_the_elapsed_times_are_usable(
+        controller, tmp_path):
+    from tests._czi_fixture import Tile, plate_metadata_xml, write_czi
+    import numpy as np
+
+    src = tmp_path / "src"
+    src.mkdir(parents=True, exist_ok=True)
+    tiles = [Tile(pixels=np.full((4, 6), t, dtype="uint16"), scene=0, t=t,
+                  acquired=f"2024-06-12T{10 + 4 * t:02d}:00:00.0000000Z")
+             for t in range(3)]
+    path = write_czi(src / "Timed.czi", tiles,
+                     xml=plate_metadata_xml(scene_wells={0: "C07"},
+                                            channels=["DAPI"]))
+    page = controller.page
+    _set_source(page, path, tmp_path)
+    _settle(page)
+    assert "named by position" not in page._verdict.text(), page._verdict.text()
+    assert "3 timepoint(s)" in page._verdict.text()

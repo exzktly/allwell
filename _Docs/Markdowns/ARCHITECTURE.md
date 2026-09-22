@@ -6062,7 +6062,22 @@ actually happens: one channel's planes carrying a bad unit while another's carry
 seconds leaves every timepoint resolved, and a log line asserting data loss that
 did not occur sends a user to re-export a plate for nothing.
 
-`_hours_token` does the rendering, in **fixed** notation at six significant
+**The rendering, and the decision to use the readings at all, are shared with
+the CZI converter.** `explode_common.hours_token` and
+`explode_common.elapsed_hour_tokens` are the single definitions; `ome_explode`
+keeps only `_source_reasons`, which builds the two reasons peculiar to OME-XML
+(an unreadable `DeltaTUnit`, a `TheT` outside the file's own T axis). Two
+definitions of "render an elapsed hour into a filename token" would answer
+differently the day one of them changed, and a plate concatenated from an
+OME-TIFF export and a CZI export of one acquisition would then hold `4h` and
+`4.0h` as separate timepoints.
+
+`_parse_ome_labels` returns the resulting one-sentence verdict alongside the
+tokens rather than only logging it, and `OmeLayout.timepoint_note` carries it to
+the converter page, which shows it in the verdict line **before** the run. A log
+line arrives after the conversion, which is too late to re-export a plate.
+
+`hours_token` does the rendering, in **fixed** notation at six significant
 figures. `f"{v:g}"` switches to exponent form below 1e-4, which was rare while
 every `DeltaT` was read as seconds and became routine once the sub-second units
 were added: a six-frame time-lapse 100 ms apart rendered `2.77778e-05h`, and
@@ -6070,6 +6085,50 @@ were added: a six-frame time-lapse 100 ms apart rendered `2.77778e-05h`, and
 `None`, `sort_key` sorted those tokens as text, and frames 5 and 6 landed ahead
 of frames 2 to 4. A number the app cannot read back is worse than a wrong one,
 which at least orders correctly.
+
+**A measured series is snapped onto its own interval.**
+`explode_common.regularise_hours` runs before the rendering, for both
+converters. An acquisition that ran every four hours does not produce readings
+exactly four hours apart — the stage takes as long as it takes — so a real
+series reads 0, 4.00139, 8.00278 and would render as `0h`, `4.00139h`,
+`8.00278h`: numbers that are true, unhelpful in a filename, and different on
+the next plate of the same experiment. The gaps are measured, their median
+taken as *the* interval, and each timepoint named at `first + index ×
+interval`.
+
+Three constraints on that, each of which a mutation showed a test had to pin:
+
+- **Only where the series really is regular.** A plate imaged at 0, 4, 8 and
+  then 24 hours — a final overnight point, an ordinary design — has no single
+  interval, and forcing one would state three spacings the acquisition never
+  used. Such a series keeps its measured times and carries a note saying so;
+  the tokens are still correct and only the tidying was declined.
+- **Only at a granularity the series can carry.** Rounding to the minute is
+  jitter-removal on an hourly run and total destruction on a time-lapse 100 ms
+  apart, where every timepoint lands on `0h`, collides, and sends the whole run
+  to positional names — and OME-TIFFs carry millisecond `DeltaT` values
+  routinely. `_rounder` therefore rounds nothing below a ten-minute interval.
+  This is a domain predicate applied outside its domain (§7.1), caught by the
+  existing sub-second tests rather than by review.
+- **From the series' own first reading, never from zero.** A CZI's stamps are
+  already elapsed-from-the-first-plane so its origin is 0 either way, but an
+  OME `DeltaT` is elapsed from the *acquisition's* start and a file whose first
+  frame sits at 3600 s legitimately begins at `1h`. Re-basing at zero would
+  move every timepoint by that offset invisibly, since the spacing it is
+  checked against stays right — and would defeat the collision check the offset
+  was hiding behind, turning two frames a picosecond apart at 1 h from a
+  correct positional fallback into `0h` and `0.000000000028h`.
+
+**Both converters take a timepoint stride.** *Keep every Nth timepoint* is the
+same field, the same `explode_common.timepoint_plan`, the same mapping-signature
+key and the same `4 of 12 timepoint(s)` readout on each page; §6.2a states the
+rules in full. The OME side carries one trap the CZI side does not: a
+single-image file's frames are one flat sequence and `_frame_index` locates a
+plane with `position × n_timepoints + t`, where `n_timepoints` is what the
+*file* holds. `explode_ome_tiff` therefore keeps that name bound to the source
+count and counts kept timepoints separately — rebinding it reads the wrong frame
+for every position after the first, with the member names and the archive sizes
+all still right.
 
 **The file already knows most of the layout.** An OME-TIFF's `<Plane>`
 elements carry `PositionX`/`PositionY` — where on the stage each image was taken
@@ -6691,14 +6750,106 @@ repeats its own directory entry — so `_walk_segments` recovers the plate at th
 cost of one pass over the file instead of one seek, and `CziLayout.from_directory`
 records that it had to, which the page reports rather than keeping to itself.
 
-**Timepoints are positional (`t0`, `t1`, …), and that is a stated limitation
-rather than an oversight.** A CZI records a plane's acquisition time in each
-*subblock's* own metadata, so learning it means reading every tile's XML in the
-plate, and the file-level `<T>` interval is an acquisition plan rather than what
-happened. Positional tokens order correctly and state no number the file cannot
-back up. This is where the CZI converter gives less than the OME-TIFF one, whose
-`DeltaT` handling is described above — the manual says so too, because a user
-expecting hours on a Review axis needs to know where they went.
+**Timepoints are named by elapsed time where the file supports it, and by
+position otherwise.** A CZI records a plane's acquisition time in each
+*subblock's* own metadata rather than anywhere central, so the converter
+samples **one position's series** — `czi_read.read_timepoint_hours` — and
+measures the rest from its first reading. The file-level `<T>` interval is
+deliberately not used: it is the acquisition *plan* the operator entered, not
+what the microscope did, so a run that stalled still carries the planned
+spacing.
+
+Three properties of that sampling, each measured rather than assumed:
+
+- **One subblock per timepoint, not one per tile.** The subblock directory
+  already says where every tile is, so a stamp costs a seek and one short read.
+  Measured on a 96-scene plate of 9,216 subblocks over an 8 ms link: 12 round
+  trips and 98 ms for one position's twelve-point series against 9,216 trips
+  and 75 s for every tile's. The read is coalesced into a single window
+  (`_SUBBLOCK_META_WINDOW`) covering the segment header, the padded prologue
+  and the XML, which halves the trips again — the three-read version measured
+  24 trips and 196 ms.
+- **One position, and it is the first well scanned.** A plate scan reaches its
+  wells minutes apart inside a single round — measured at 31 minutes between
+  scene 0 and scene 95 at one timepoint — so a series assembled from whichever
+  scene sorted first at each timepoint folds the stage's traverse into the
+  elapsed times. `_representative_blocks` takes the first scene *in the file's
+  own subblock order*, which is acquisition order, and skips a scene missing
+  from any timepoint rather than filling its gap from another scene's clock.
+  That is the same rule the OME converter's `hours.setdefault(ti, …)` applies
+  to the first plane it meets.
+- **One file per plate.** Every member of a split-scene export covers the same
+  timepoints, so `czi_set.read_czi_set` asks only `paths[0]` for its stamps
+  (`read_czi_layout(..., read_times=True)`). Sampling all ninety-six would be
+  ninety-six times the round trips for one answer, and the first file is the
+  right one anyway: the files are in acquisition order, so it holds the well
+  the stage visited first.
+
+Rendering and the decision to use the readings at all are
+`explode_common.hours_token` and `explode_common.elapsed_hour_tokens`, **shared
+with the OME-TIFF converter**, so one acquisition exported both ways cannot end
+up with two spellings of the same elapsed hour — a plate concatenated from the
+two would otherwise hold `4h` and `4.0h` as separate timepoints. The decision
+declines unless every timepoint has a reading, every reading renders, and the
+renderings are distinct; the distinctness test is the load-bearing one, since
+two timepoints sharing a token write one member name and `zipfile` returns only
+the last of the two copies.
+
+Every route back to positional tokens is a *degradation* — the acquisition
+recorded when each plane was taken and the archives will not carry it — so each
+carries a reason, printed in the run log and shown in the page's verdict before
+the run starts. A plate named `t0`/`t1` because a tag could not be read would
+otherwise look exactly like one whose writer recorded no times at all.
+
+**The tag name is taken from the format's documentation, not from a file this
+repository can check against.** There is no ZEN-written CZI here and no library
+installed that knows one, so `_ACQUISITION_TIME_TAGS` is a hypothesis about
+what real files carry. It is safe to be wrong about — an unfound tag produces
+the positional fallback with its reason stated, never a wrong number — but a
+plate that ought to carry hours and does not is the symptom to expect, and one
+real file would settle it.
+
+**A conversion may keep every N-th timepoint instead of all of them.**
+`explode_common.timepoint_plan` resolves the page's *Keep every Nth timepoint*
+field into `(source index, token)` pairs — over the **plate's** tokens
+(`CziSet.timepoint_tokens`), so the stride selects from elapsed hours where the
+file supplied them and from positional names where it did not — and
+`explode_czi` iterates those pairs rather than `range(size_t)`. A densely-sampled timelapse is converted at
+a coarser resolution without re-exporting it from ZEN and without writing the
+images that will not be looked at.
+
+Three properties of that selection, each with a reason it is not the obvious
+alternative:
+
+- **The kept tokens are the source's own, never renumbered.** On a timed
+  plate that is the real elapsed hours of the kept images — stride 3 over a
+  four-hourly run writes `0h, 12h, 24h, 36h`. On a positional one, stride 3
+  over `t0 … t11` writes `t0, t3, t6, t9`; renumbering them `t0 … t3` would
+  look tidier and would state a spacing the acquisition never had, because
+  `util.timepoint.parse_hours` reads `t3` as three hours. Review's *Interval
+  per timepoint* then rescales a kept set exactly as it rescales a complete
+  one.
+- **The first timepoint is always kept.** On a treatment timecourse that is
+  the pre-treatment reading every later point is normalised against.
+- **Index and token travel together.** `timepoint_plan` returns pairs rather
+  than two lists because the index reads the plane and the token names it, and
+  a stride that filtered one without the other would write a complete,
+  correctly sized archive holding the wrong image under every name.
+
+The stride is part of the resume marker's mapping signature
+(`czi_import_compute._MAPPING_FIELDS`), and the reason is the subtler half of
+that rule. A strided run's member set is a strict *subset* of a complete run's,
+and `explode_common.well_is_complete` tests `issubset` — so without the key, a
+well an earlier complete run had already filled would be judged done and left
+alone while every freshly converted well beside it held a third as many
+timepoints. The plate would go ragged with nothing raising.
+`tests/test_reuse_is_keyed_completely.py` carries that reason beside the key.
+
+Because a strided dataset is otherwise indistinguishable from a plate that was
+only imaged that many times, both surfaces say so: the run log's opening line
+reads `4 timepoint(s) (every 3rd of 12: t0, t3, t6, ... t9)`, and the page's
+verdict reads `4 of 12 timepoint(s) (t0, t3, t6, t9)` where an unstrided run
+reads a plain count.
 
 **The plate is drawn before the plate has been read, and the reading happens
 off the UI thread.** A full `read_czi_set` walks every file's subblock

@@ -113,6 +113,7 @@ def convert(
         serpentine=params.serpentine,
         experiment=experiment,
         fovs_per_well=params.fovs_per_well,
+        timepoint_stride=params.timepoint_stride,
         workers=params.workers,
         log_fn=log,
         progress_fn=progress,

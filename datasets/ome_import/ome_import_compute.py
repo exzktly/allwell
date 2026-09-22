@@ -18,6 +18,7 @@ from pathlib import Path
 from datasets.core import convert_marker as marker
 from datasets.core.convert_marker import ResumeState  # noqa: F401 (re-export)
 
+from pipeline.explode_common import timepoint_plan
 from pipeline.ome_explode import (
     FRAME_ORDERS,
     OmeLayout,
@@ -70,6 +71,14 @@ class ConversionParams:
     # assumption.
     serpentine: bool = True
     fovs_per_well: int | None = None      # None = derive
+    #: Convert every N-th timepoint instead of all of them, counting from the
+    #: first. 1 — the default — converts the whole timelapse. Part of the
+    #: mapping signature below and not merely a speed setting: a well left
+    #: alone by a resume because a previous run at stride 1 already filled it
+    #: would hold every timepoint while the wells beside it held a third of
+    #: them, and ``well_is_complete`` tests a *subset*, so nothing downstream
+    #: would notice the plate had gone ragged.
+    timepoint_stride: int = 1
     frame_order: str = "single"           # single-image files only
     experiment: str = ""                  # blank = derive from the filename
     workers: int = 0                      # 0 = auto (per-well thread pool)
@@ -85,8 +94,19 @@ class ConversionPlan:
 
     single_image: bool
     n_positions: int
+    #: Timepoints a run would *write* — after the stride, not before it.
     n_timepoints: int
     fovs_per_well: int
+    #: Timepoints the source holds. Equal to ``n_timepoints`` unless a stride
+    #: is dropping some, and kept apart from it so the readout can say which
+    #: of the two a number is.
+    n_source_timepoints: int = 0
+    #: The kept timepoints' own tokens, in order — never renumbered.
+    timepoint_tokens: list[str] = field(default_factory=list)
+    #: What the user should be told about the timepoint names — a whole
+    #: sentence, or ``""``. Never empty when they are positional *because*
+    #: something was unreadable.
+    timepoint_note: str = ""
     well_labels: list[str] = field(default_factory=list)
     channels: list[str] = field(default_factory=list)
     # Which of the two well-ordering inputs produced ``well_labels``. The two
@@ -118,8 +138,37 @@ class ConversionPlan:
         source = " (explicit path)" if self.hand_drawn else " (from the grid)"
         return (
             f"{self.n_wells} well(s){span}{source} × {self.fovs_per_well} FOV(s) × "
-            f"{self.n_timepoints} timepoint(s) · channels: {chans}"
+            f"{self.timepoint_phrase} · channels: {chans}"
         )
+
+    @property
+    def timepoint_phrase(self) -> str:
+        """``"12 timepoint(s)"``, or ``"4 of 12 timepoint(s) (0h, 12h, …)"``.
+
+        A stride makes the plain count a half-truth: the run writes a complete
+        dataset that silently holds a third of the acquisition, and the number
+        it would otherwise print is indistinguishable from a plate that only
+        ever had four timepoints (CLAUDE.md §7).
+        """
+        if (not self.n_source_timepoints
+                or self.n_timepoints >= self.n_source_timepoints):
+            return f"{self.n_timepoints} timepoint(s)"
+        shown = ", ".join(self.timepoint_tokens[:4])
+        if len(self.timepoint_tokens) > 4:
+            shown += f", … {self.timepoint_tokens[-1]}"
+        return (f"{self.n_timepoints} of {self.n_source_timepoints} "
+                f"timepoint(s) ({shown})")
+
+    @property
+    def timepoint_warning(self) -> str:
+        """The sentence the page shows about how the timepoints were named.
+
+        Said *before* the run rather than only in the log afterwards. A plate
+        whose timepoints lost their elapsed hours is a dataset with no time
+        axis in Review, and the moment to find that out is while the source can
+        still be re-exported.
+        """
+        return self.timepoint_note
 
 
 def parse_count(text: object) -> tuple[int | None, bool]:
@@ -158,6 +207,7 @@ class RawFields:
     fovs: str = ""
     origin: str = ""
     workers: str = ""
+    timepoint_stride: str = ""
     direction: str = "row"
     serpentine: bool = True
     frame_order: str = "single"
@@ -193,6 +243,10 @@ class RawFields:
             out.append("Workers must be a whole number, or blank for auto.")
         elif workers is not None and workers <= 0:
             out.append("Workers must be 1 or more, or blank for auto.")
+        stride, ok = parse_count(self.timepoint_stride)
+        if not ok or (stride is not None and stride <= 0):
+            out.append("Keep every Nth timepoint must be a positive whole "
+                       "number, or blank to convert every timepoint.")
         return out
 
     def to_params(self) -> ConversionParams:
@@ -206,6 +260,7 @@ class RawFields:
         cols, _ = parse_count(self.cols)
         fovs, _ = parse_count(self.fovs)
         workers, _ = parse_count(self.workers)
+        stride, _ = parse_count(self.timepoint_stride)
         return ConversionParams(
             grid_rows=max(0, rows or 0),
             grid_cols=max(0, cols or 0),
@@ -213,6 +268,7 @@ class RawFields:
             direction=self.direction or "row",
             serpentine=self.serpentine,
             fovs_per_well=fovs if (fovs or 0) > 0 else None,
+            timepoint_stride=stride if (stride or 0) > 0 else 1,
             frame_order=self.frame_order or "single",
             experiment=self.experiment,
             workers=max(0, workers or 0),
@@ -539,7 +595,8 @@ IN_PROGRESS_MARKER = ".aw_ome_in_progress"
 # *filenames* from different images, which is why a resume has to compare them
 # rather than trusting the names on disk.
 _MAPPING_FIELDS = ("grid_rows", "grid_cols", "origin", "direction", "serpentine",
-                   "fovs_per_well", "frame_order", "experiment", "well_order")
+                   "fovs_per_well", "frame_order", "experiment", "well_order",
+                   "timepoint_stride")
 
 
 def _mapping_signature(src: Path | str, params: ConversionParams) -> dict:
@@ -646,10 +703,19 @@ def plan_conversion(layout: OmeLayout, params: ConversionParams) -> ConversionPl
         n_positions, n_timepoints, fovs = _split_multi_image(
             layout.n_positions, n_wells, fovs, layout.size_t, wells_desc,
         )
+    source_tokens = (list(layout.timepoint_tokens) if not layout.single_image
+                     else [f"t{t}" for t in range(n_timepoints)])
+    try:
+        kept = timepoint_plan(source_tokens, params.timepoint_stride)
+    except ValueError as exc:
+        raise OmeImportError(str(exc)) from exc
     return ConversionPlan(
         single_image=layout.single_image,
         n_positions=n_positions,
-        n_timepoints=n_timepoints,
+        n_timepoints=len(kept),
+        n_source_timepoints=n_timepoints,
+        timepoint_tokens=[token for _index, token in kept],
+        timepoint_note=layout.timepoint_note,
         fovs_per_well=fovs,
         well_labels=well_labels,
         channels=list(layout.channel_names),

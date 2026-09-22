@@ -20,6 +20,7 @@ a half-finished well as complete.
 from __future__ import annotations
 
 import io
+import math
 import os
 import zipfile
 from dataclasses import dataclass, field
@@ -71,6 +72,250 @@ def resolve_positions(
             f"Check the grid dimensions and the FOVs-per-well value."
         )
     return fovs_per_well
+
+
+def hours_token(hours: float) -> str:
+    """``"<hours>h"`` in a spelling ``util.timepoint`` can read, or ``""``.
+
+    Six significant figures in **fixed** notation. ``f"{v:g}"`` switches to
+    exponent form below 1e-4, which was rare while every OME ``DeltaT`` was
+    read as seconds and became routine once milliseconds, microseconds and
+    nanoseconds were added: a six-frame time-lapse 100 ms apart rendered
+    ``2.77778e-05h``, and ``util.timepoint._UNIT_RE`` matches no exponent, so
+    ``parse_hours`` answered ``None`` and ``sort_key`` fell back to sorting
+    those tokens as text — putting frames 5 and 6 before frames 2 to 4. A
+    number the parser cannot read is worse than the wrong number it replaced,
+    because the wrong one at least ordered correctly.
+
+    Answers ``""`` for a value the parser cannot represent at all: not finite,
+    or negative (``_UNIT_RE`` accepts no sign, and a writer stamping a
+    pre-treatment frame at a negative elapsed time is the case that produces
+    one). The caller reads that as a reason to name every timepoint by
+    position, and says so.
+
+    Shared by both importers so that one acquisition exported twice — once as
+    an OME-TIFF and once as a CZI — cannot produce two different spellings of
+    the same elapsed hour. A plate concatenated from the two would then hold
+    ``4h`` and ``4.0h`` as separate timepoints.
+    """
+    if not math.isfinite(hours) or hours < 0.0:
+        return ""
+    if hours == 0.0:
+        return "0h"
+    # Decimal places chosen so six significant figures survive, capped: below
+    # a microsecond in hours the label is more zeros than number, and two such
+    # timepoints colliding is caught by the duplicate check either way.
+    places = min(12, max(0, 5 - int(math.floor(math.log10(hours)))))
+    text = f"{hours:.{places}f}".rstrip("0").rstrip(".")
+    return f"{text}h" if text and text != "0" else "0h"
+
+
+@dataclass(frozen=True)
+class ElapsedTokens:
+    """Elapsed-time timepoint tokens, or the reasons there are none.
+
+    ``tokens`` is ``None`` whenever the caller must keep its positional
+    ``t0``/``t1`` names, and ``reasons`` then says why in the run log's words.
+    Both are always populated together: a fallback with nothing said about it
+    leaves a positionally-named plate indistinguishable from one whose writer
+    recorded no times at all.
+    """
+
+    tokens: "list[str] | None"
+    reasons: list[str] = field(default_factory=list)
+    #: What :func:`regularise_hours` did, where it is worth saying — currently
+    #: only the uneven-spacing case, where the measured times were kept rather
+    #: than forced onto one interval. Not a failure: the tokens are good.
+    note: str = ""
+
+
+#: The coarsest unit a measured time is ever rounded to. A four-hour interval
+#: measured across a real run comes back as 4.00139 h, and rendering that
+#: literally puts ``4.00139h`` in a filename — true, unhelpful, and different
+#: on the next plate of the same experiment.
+_ROUND_TO_H = 1.0 / 60.0
+
+#: …and the interval below which nothing is rounded at all. Rounding is a
+#: *domain* predicate: a minute is jitter on a four-hour interval and the whole
+#: signal on a six-frame time-lapse 100 ms apart, where it collapses every
+#: timepoint onto ``0h`` and the collision check then sends the run to
+#: positional tokens. OME-TIFF files carry millisecond ``DeltaT`` values
+#: routinely, so this is an ordinary input rather than a corner.
+_ROUND_ABOVE_H = 10.0 / 60.0
+
+#: A measured gap this far from the series' own interval is acquisition jitter
+#: rather than a different spacing. 2% of the interval, floored at one minute
+#: so a multi-hour interval whose stage waits vary is not called irregular —
+#: but that floor is itself capped at a quarter of the interval, or a
+#: sub-minute series would have every gap inside tolerance by construction.
+_JITTER_FRACTION = 0.02
+_JITTER_FLOOR_H = 1.0 / 60.0
+_JITTER_FLOOR_FRACTION = 0.25
+
+
+def _rounder(interval: float):
+    """The rounding to apply to a series whose gaps are about *interval*."""
+    if abs(interval) < _ROUND_ABOVE_H:
+        return lambda hours: hours
+    return lambda hours: round(hours / _ROUND_TO_H) * _ROUND_TO_H
+
+
+def regularise_hours(hours_by_index: "dict[int, float]",
+                     size_t: int) -> tuple["dict[int, float]", str]:
+    """Snap a measured series onto its own interval, where it has one.
+
+    An acquisition that ran every four hours does not produce readings exactly
+    four hours apart: the stage takes as long as it takes, so a real series
+    reads 0, 4.00139, 8.00278 and renders as ``0h``, ``4.00139h``,
+    ``8.00278h`` — numbers that are true, unhelpful in a filename, and
+    different on the next plate of the same experiment. So the gaps are
+    measured, their median taken as *the* interval, and every timepoint named
+    at ``index × interval``.
+
+    **Only where the series really is regular.** A plate imaged at 0, 4, 8 and
+    then 24 hours — a final overnight point, which is an ordinary design — has
+    no single interval, and forcing one would state three spacings the
+    acquisition never used. Such a series keeps its measured times and comes
+    back with a note saying so, because the tokens are still correct and only
+    the tidying was declined.
+
+    **And only at a granularity the series can carry.** Rounding to the minute
+    is jitter-removal on an hourly run and total destruction on a time-lapse
+    100 ms apart, where every timepoint would land on ``0h``, collide, and send
+    the whole run to positional tokens — OME-TIFF files carry millisecond
+    ``DeltaT`` values routinely. ``_rounder`` therefore rounds nothing below a
+    ten-minute interval.
+
+    Returns ``(hours, note)``. The note is empty whenever nothing needs saying,
+    which includes the ordinary regular case and a series too short to have a
+    gap at all.
+    """
+    if size_t < 2 or len(hours_by_index) < size_t:
+        return dict(hours_by_index), ""
+    raw = [hours_by_index[i] for i in range(size_t)]
+    raw_gaps = sorted(raw[i + 1] - raw[i] for i in range(size_t - 1))
+    to_unit = _rounder(raw_gaps[len(raw_gaps) // 2])
+    measured = [to_unit(value) for value in raw]
+    gaps = [measured[i + 1] - measured[i] for i in range(size_t - 1)]
+    interval = sorted(gaps)[len(gaps) // 2]
+    tolerance = max(abs(interval) * _JITTER_FRACTION,
+                    min(_JITTER_FLOOR_H, abs(interval) * _JITTER_FLOOR_FRACTION))
+    if any(abs(gap - interval) > tolerance for gap in gaps):
+        spread = f"{min(gaps):g}–{max(gaps):g} h"
+        return ({i: measured[i] for i in range(size_t)},
+                f"the timepoints are not evenly spaced ({spread} apart), so "
+                f"they are named at the times actually recorded rather than "
+                f"at one interval")
+    # Measured from the series' own first reading, not from zero. A CZI's
+    # stamps are already elapsed-from-the-first-plane so its origin is 0 either
+    # way, but an OME-TIFF's ``DeltaT`` is elapsed from the *acquisition's*
+    # start and a file whose first frame sits at 3600 s legitimately begins at
+    # 1 h. Re-basing at zero would move every timepoint by that offset — and
+    # would do it invisibly, since the spacing it is checked against stays
+    # right. It also defeats the collision check the offset was hiding behind:
+    # two frames a picosecond apart at 1 h both render ``1h`` and correctly
+    # send the run to positional tokens, where ``i × interval`` renders them
+    # ``0h`` and ``0.000000000028h`` and writes both.
+    return {i: measured[0] + interval * i for i in range(size_t)}, ""
+
+
+def elapsed_hour_tokens(hours_by_index: "dict[int, float]", size_t: int,
+                        *, source_reasons=()) -> ElapsedTokens:
+    """Render elapsed hours into one token per timepoint, or decline.
+
+    Declines — ``tokens=None`` — unless *every* timepoint has a reading, every
+    reading renders, and the renderings are distinct. The distinctness check is
+    the load-bearing one: two timepoints sharing a token write the same member
+    name into one archive, ``zipfile`` stores both copies and a reader returns
+    only the last, so one timepoint becomes unreachable while the run reports
+    having written both.
+
+    The readings are put through :func:`regularise_hours` first, so a run whose
+    stage jitter makes every gap 4.00139 h is named ``0h``, ``4h``, ``8h``
+    rather than at six significant figures of that jitter.
+
+    *source_reasons* are the caller's own — an unreadable unit, a coordinate
+    outside the file's own axis — which this function cannot know about and
+    which belong in the same sentence as the ones it can see.
+    """
+    reasons = list(source_reasons)
+    complete = size_t > 0 and len(hours_by_index) >= size_t
+    regular, note = (regularise_hours(hours_by_index, size_t) if complete
+                     else (hours_by_index, ""))
+    tokens = ([hours_token(regular[i]) for i in range(size_t)]
+              if complete else [])
+    collided = sorted({t for t in tokens if t and tokens.count(t) > 1})
+    unrenderable = [i for i, t in enumerate(tokens) if not t]
+
+    if complete and not collided and not unrenderable:
+        return ElapsedTokens(tokens, [], note)
+
+    if collided:
+        reasons.append(
+            f"the elapsed times render to {len(set(tokens))} distinct label(s) "
+            f"for {len(tokens)} timepoint(s) — {', '.join(collided)} repeat(s), "
+            f"and two timepoints sharing a label would write every image of the "
+            f"second over the first")
+    if unrenderable:
+        reasons.append(
+            f"{len(unrenderable)} elapsed time(s) are not finite or not "
+            f"positive, and the app's timepoint parser reads neither")
+    if not reasons:
+        reasons.append(
+            f"only {len(hours_by_index)} of {size_t} timepoint(s) carry a "
+            f"readable acquisition time")
+    return ElapsedTokens(None, reasons)
+
+
+def stride_note(stride: int, size_t: int, kept_tokens: list[str]) -> str:
+    """" (every 3rd of 12: t0, t3, t6, t9)" — or "" when nothing was dropped.
+
+    Spelled out in the run log rather than left to arithmetic on the totals.
+    A plate converted at a stride writes a complete-looking dataset holding a
+    third of its timelapse, and the one place a reader would otherwise notice
+    is a timepoint count they have no reason to be counting (CLAUDE.md §7).
+    """
+    if stride <= 1 or size_t <= 1:
+        return ""
+    shown = ", ".join(kept_tokens[:4])
+    if len(kept_tokens) > 4:
+        shown += f", ... {kept_tokens[-1]}"
+    ordinal = {2: "2nd", 3: "3rd"}.get(stride, f"{stride}th")
+    return f" (every {ordinal} of {size_t}: {shown})"
+
+
+def timepoint_plan(timepoints, stride: int = 1) -> list[tuple[int, str]]:
+    """The timepoints a conversion keeps, as ``(source index, token)`` pairs.
+
+    *stride* of 1 keeps everything, which is the default and the only value
+    that produces a complete dataset. A larger one keeps every *stride*-th
+    timepoint counting from the first: a twelve-point timelapse at stride 3
+    converts four of them, the source's 0, 3, 6 and 9.
+
+    **The tokens are the source's own, never renumbered.** Stride 3 over
+    ``t0 … t11`` yields ``t0, t3, t6, t9`` and not ``t0, t1, t2, t3``, because
+    :func:`util.timepoint.parse_hours` reads ``t3`` as three hours and a
+    renumbered set would state a spacing the acquisition never had — the whole
+    point of dropping timepoints is to convert fewer images, not to rewrite
+    when they were taken. Review's *Interval per timepoint* then rescales a
+    kept set as correctly as it rescales a complete one.
+
+    **It always keeps the first.** On a treatment timecourse that is the
+    pre-treatment reading every later point is normalised against, so it is
+    the one timepoint no stride may drop.
+
+    Index and token are returned together rather than separately because the
+    caller needs both — the index to read the plane, the token to name it —
+    and two lists that must stay in step are a desynchronisation waiting to
+    happen.
+    """
+    tokens = list(timepoints)
+    if stride < 1:
+        raise ValueError(
+            f"A timepoint stride must be 1 or more; got {stride}. Use 1 to "
+            f"convert every timepoint."
+        )
+    return [(index, tokens[index]) for index in range(0, len(tokens), stride)]
 
 
 def expected_members(experiment: str, channels, well: str, fovs: int,

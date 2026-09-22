@@ -63,6 +63,12 @@ class Tile:
     #: Claim this tile's pixels live in a numbered companion file, as ZEN does
     #: when it splits a very large acquisition into parts.
     file_part: int = 0
+    #: The wall-clock instant to stamp into this tile's *own* metadata, as ZEN
+    #: does — an ISO 8601 string written verbatim, so a test can emit the
+    #: seven-digit fractional second real files carry as easily as a malformed
+    #: one. ``None`` writes the bare ``<METADATA/>`` a tile with no timing
+    #: carries, which is the fixture's default and the positional-token case.
+    acquired: "str | None" = None
 
 
 def _segment(name: str, data: bytes) -> bytes:
@@ -97,11 +103,32 @@ def _directory_entry(tile: Tile, *, position: int) -> bytes:
     return out
 
 
+def _subblock_metadata(tile: Tile) -> bytes:
+    """The per-tile metadata block, with the tags ZEN puts in it.
+
+    A tile with no ``acquired`` gets the bare ``<METADATA/>`` — the shape a
+    reader has to fall back from. One with it gets the surrounding tags too,
+    because a scanner that found the timestamp only when it was the sole
+    element would find nothing in a real file.
+    """
+    if tile.acquired is None:
+        return b"<METADATA/>"
+    return (
+        "<METADATA><Tags>"
+        f"<AcquisitionTime>{tile.acquired}</AcquisitionTime>"
+        f"<StageXPosition>{tile.scene * 9000.0:.4f}</StageXPosition>"
+        f"<StageYPosition>{tile.tile * 700.0:.4f}</StageYPosition>"
+        "<FocusPosition>-12.3456</FocusPosition>"
+        "</Tags><DataSchema><ValidBitsPerPixel>16</ValidBitsPerPixel>"
+        "</DataSchema><AttachmentSchema/></METADATA>"
+    ).encode("utf-8")
+
+
 def _subblock_segment(tile: Tile, *, position: int) -> bytes:
     """A whole ``ZISRAWSUBBLOCK`` segment holding *tile*'s pixels."""
     entry = _directory_entry(tile, position=position)
     pixels = tile.pixels.tobytes()
-    metadata = b"<METADATA/>"
+    metadata = _subblock_metadata(tile)
     header = _SUBBLOCK_PROLOGUE.pack(len(metadata), 0, len(pixels)) + entry
     pad = max(_SUBBLOCK_MIN_HEADER, len(header)) - len(header)
     return _segment("ZISRAWSUBBLOCK", header + b"\0" * pad + metadata + pixels)

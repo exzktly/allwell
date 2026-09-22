@@ -24,6 +24,7 @@ import pytest
 pytest.importorskip("nd2")
 
 from pipeline.nd2_read import (  # noqa: E402
+    Nd2ReadError,
     Nd2Reader,
     read_nd2_layout,
 )
@@ -200,3 +201,21 @@ def test_a_file_whose_planes_carry_no_probe_still_reads(tmp_path):
     assert layout.size_c == 2
     assert layout.channel_names == ["c0", "c1"]
     assert layout.validation_report("p.nd2") == ""
+
+
+def test_a_file_that_only_looks_like_an_nd2_is_refused_as_one(tmp_path):
+    """``nd2`` parses lazily, so this is not covered by guarding the open.
+
+    ``ND2File(path)`` succeeds on anything carrying the right magic bytes and
+    the ``ValueError`` for a broken header comes out of the first attribute
+    read instead — past a caller that catches this module's own error, which
+    is the boundary this module exists to hold. A truncated or half-written
+    file is exactly the shape that hits it.
+    """
+    broken = tmp_path / "broken.nd2"
+    broken.write_bytes(b"\xda\xce\xbe\x0a" + b"\0" * 200)
+
+    with pytest.raises(Nd2ReadError) as caught:
+        read_nd2_layout(broken)
+
+    assert "broken.nd2" in str(caught.value)

@@ -252,19 +252,34 @@ def read_nd2_layout(path: Path | str, *, read_times: bool = False) -> Nd2Layout:
     """
     path = Path(path)
     with _open(path) as handle:
-        sizes = dict(getattr(handle, "sizes", {}) or {})
-        layout = Nd2Layout(
-            n_positions=int(sizes.get("P", 1)),
-            size_t=int(sizes.get("T", 1)),
-            size_c=int(sizes.get("C", 1)),
-            size_z=int(sizes.get("Z", 1)),
-            width=int(sizes.get("X", 0)),
-            height=int(sizes.get("Y", 0)),
-            dtype=str(np.dtype(handle.dtype)),
-            position_wells=_position_names(handle),
-        )
-        layout.channel_names, layout.raw_channel_names = _channel_names(
-            handle, layout.size_c)
+        # Wrapped as a whole, not only around ``_open``. ``nd2`` parses
+        # lazily: ``ND2File(path)`` succeeds on a file with the right magic
+        # and a broken header, and the ``ValueError`` comes out of the first
+        # attribute read instead. Without this, a truncated or half-written
+        # file escaped as a bare ``ValueError`` past a caller that catches
+        # this module's own error — which is the boundary this module exists
+        # to hold, since everything above it is meant to see only
+        # ``Nd2Layout``, ``Nd2Reader`` and ``Nd2ReadError``.
+        try:
+            sizes = dict(getattr(handle, "sizes", {}) or {})
+            layout = Nd2Layout(
+                n_positions=int(sizes.get("P", 1)),
+                size_t=int(sizes.get("T", 1)),
+                size_c=int(sizes.get("C", 1)),
+                size_z=int(sizes.get("Z", 1)),
+                width=int(sizes.get("X", 0)),
+                height=int(sizes.get("Y", 0)),
+                dtype=str(np.dtype(handle.dtype)),
+                position_wells=_position_names(handle),
+            )
+            layout.channel_names, layout.raw_channel_names = _channel_names(
+                handle, layout.size_c)
+        except Nd2ReadError:
+            raise
+        except Exception as exc:
+            raise Nd2ReadError(
+                f"{path.name} could not be read as an ND2 file ({exc})."
+            ) from exc
         if getattr(handle, "is_rgb", False):
             layout.warnings.append(
                 "the file is RGB, so each pixel carries three samples rather "

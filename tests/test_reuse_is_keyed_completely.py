@@ -69,16 +69,18 @@ REUSE_CONTRACTS = {
     # a second copy would be a second definition of what makes two runs
     # interchangeable, and the reason each key is in it is written there.
     "settings_record.well_settings_allow_reuse": dict(KEYED_ON),
-    # The two packed-file converters' resume markers. A conversion publishes
+    # The packed-file converters' resume markers. A conversion publishes
     # each `<dest>/in/<WELL>.zip` atomically, so a cancelled run leaves whole,
     # correct wells and only the rest to do — worth hours on a plate. What
     # makes finishing them dangerous is that two *different* mappings of one
     # source write identical filenames: nothing on disk distinguishes an
     # A01.zip made from scene 0 from one made from scene 7, so only the marker
     # can tell a run that may carry on from one that must refuse. The keys are
-    # named per converter rather than shared, because the two resolve wells
-    # from different inputs and a field that decides the mapping for one is
-    # absent from the other.
+    # named per converter rather than shared, because they resolve wells from
+    # different inputs and a field that decides the mapping for one is absent
+    # from another: only the CZI converter can widen a file to its folder, and
+    # only the OME-TIFF one splits a flat frame axis or takes a clicked well
+    # order.
     "ome_import.resume_state": {
         "grid_rows": "the imaged block's height; a different one re-labels "
                      "every position after the first row",
@@ -127,6 +129,31 @@ REUSE_CONTRACTS = {
         "direction": "whether the stage swept rows or columns",
         "serpentine": "snake or raster",
         "fovs_per_well": "how many tiles each well takes",
+        "experiment": "the first token of every member name",
+        "timepoint_stride": (
+            "how many of the timelapse's timepoints are written. The "
+            "dangerous direction is the quiet one: a stride-3 run's member "
+            "set is a strict SUBSET of a stride-1 run's, and "
+            "``well_is_complete`` tests ``issubset``, so without this key a "
+            "well already filled by a complete run would be judged done and "
+            "left alone while every freshly-converted well beside it held a "
+            "third as many timepoints. The plate would go ragged with nothing "
+            "raising"),
+    },
+    "nd2_import.resume_state": {
+        "well_source": "whether the wells came from the positions' own names "
+                       "or from the grid. The same file yields two entirely "
+                       "different plates under the two",
+        "grid_rows": "the imaged block's height, when the grid is what maps",
+        "grid_cols": "the imaged block's width, for the same reason",
+        "origin": "which well position 0 is",
+        "direction": "whether the stage swept rows or columns",
+        "serpentine": "snake or raster",
+        "fovs_per_well": "how many positions each well takes. Only a "
+                         "grid-mapped file takes it from here — when the "
+                         "positions name their wells the file has already "
+                         "said — but it decides where every well after the "
+                         "first begins whenever it does apply",
         "experiment": "the first token of every member name",
         "timepoint_stride": (
             "how many of the timelapse's timepoints are written. The "
@@ -204,6 +231,7 @@ def test_every_reuse_decision_is_registered():
     assert "parquet_cache.read_cached" in REUSE_CONTRACTS
     assert "ome_import.resume_state" in REUSE_CONTRACTS
     assert "czi_import.resume_state" in REUSE_CONTRACTS
+    assert "nd2_import.resume_state" in REUSE_CONTRACTS
 
 
 def test_the_roster_names_every_key_the_decision_actually_takes():
@@ -783,11 +811,11 @@ def test_a_changed_parser_version_declines(tmp_path, monkeypatch):
         REUSE_CONTRACTS[_CACHE_KEY]["PARSER_VERSION"])
 
 
-# ── the two converters' resume markers ──────────────────────────────────────
+# ── the converters' resume markers ─────────────────────────────────────────
 #
 # Each converter's own test file proves that changing one declared key alone
-# declines the resume (``test_ome_import_compute``,
-# ``test_czi_import_compute``). What those cannot prove is the *reverse*
+# declines the resume (``test_ome_import_compute``, ``test_czi_import_compute``,
+# ``test_nd2_import_compute``). What those cannot prove is the *reverse*
 # direction, because they parametrise over the roster itself: delete a field
 # from ``_MAPPING_FIELDS`` and the parametrize simply stops generating a case
 # for it, the lane stays green, and a setting that changes the mapping is no
@@ -809,6 +837,7 @@ MAPPING_EXEMPTIONS = {
 @pytest.mark.parametrize("decision,module_path", [
     ("ome_import.resume_state", "datasets.ome_import.ome_import_compute"),
     ("czi_import.resume_state", "datasets.czi_import.czi_import_compute"),
+    ("nd2_import.resume_state", "datasets.nd2_import.nd2_import_compute"),
 ])
 def test_the_roster_names_every_setting_that_decides_the_mapping(
         decision, module_path):

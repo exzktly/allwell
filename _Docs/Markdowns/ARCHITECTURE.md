@@ -7275,6 +7275,65 @@ ones — `_build_params`, `_build_ui`, `refresh_readout` — diverge substantial
 A common view base would be a base full of flags, which is the shape
 `datasets/core/tool_controller.py`'s own docstring warns against.
 
+### 6.2c Converting part of a plate
+
+All three packed-file converters take a **well subset**: convert some of the
+plate now, the rest later, into the same dataset folder. The setting is one
+field (`ConversionParams.well_subset`, empty meaning the whole plate) and the
+whole design rests on one sentence.
+
+**It filters the well *indices* a run walks, never the mapping.** A well's
+index is what maps it back to its source — well `i` takes stage positions
+`i * fovs` onward in every converter — so filtering the *label list* would
+renumber every well after the first one dropped, and a conversion of B01 alone
+would read A01's images and write them under B01's name. That is a complete,
+correctly named, correctly counted archive of the wrong well, which is §7's
+cardinal failure. `explode_common.wells_to_convert` therefore returns indices,
+`worker_groups` accepts them in place of a count, and the mapping arithmetic
+above is untouched. `tests/test_convert_a_well_subset.py` asserts the
+*pixels* of a subset run against a whole-plate run's rather than the archive
+names, because a shifted mapping produces exactly the right names.
+
+**Which is also why the subset is not part of the resume signature.** A
+converted well's archive is byte-identical whether or not the wells beside it
+were converted in the same run, so the selection cannot change which image
+lands under which filename — the only question that signature answers. Keying
+on it would refuse the workflow the setting exists for.
+`tests/test_reuse_is_keyed_completely.py` carries that reasoning as a written
+exemption, and demanded it before it would pass: adding the field without one
+failed the guard in all three converters at once.
+
+**Topping up is permitted by a second marker.** `convert_marker.DONE_MARKER`
+records the mapping a *completed* run used, so a later run adding the wells it
+skipped can tell its own dataset from a stranger's plate pointed at the same
+folder. The destination check accepts a folder whose completed signature
+matches and refuses everything else — a different experiment name, stride,
+origin or well source is still two plates in one folder. The two markers
+answer different questions and are kept apart: a finished conversion is
+something to add to, never an interrupted run to resume, and `resume_state`
+consults only the in-progress one.
+
+**Both surfaces state both numbers.** A subset run writes a complete, correct
+dataset holding a fraction of the acquisition, so the run log prints
+`3 of 96 well(s) (subset)` and the page's readout `2 of 3 well(s), selected`
+with the image count denominated by the selection. A plain count reads
+identically to a plate that only ever had that many wells — the same untruth
+the stride's readout was fixed against, and it shipped here first on the page
+while the log line was already right.
+
+**Where the wells are picked differs by page, for a reason.** The CZI and ND2
+pages pick on the status dashboard's plate, which already draws the resolved
+mapping: a selection cannot name a well the source does not have, which a
+typed list can. It is drawn as a rim rather than a fill, because those cells
+also carry the run's progress colours. The OME-TIFF page has no dashboard — it
+reports on the acquisition plate it already draws — and that plate's clicks
+already mean *acquisition order*, which must account for every position the
+file holds. So OME carries a second, smaller plate for the subset, and the two
+questions stay on two surfaces. All three lock the selection while a run is in
+flight; OME's is disabled outright rather than made passive, because a passive
+plate keeps its own "All 96" and "Invert" buttons live — which the page's
+existing lock guard caught.
+
 ### 6.2 `process_microscopy.py`
 
 The pipeline. **Self-sufficient by design** — no import from `review/`,

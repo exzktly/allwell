@@ -905,3 +905,93 @@ def test_a_finished_run_reports_the_job_as_finished(controller, tmp_path):
     assert ok is True
     assert dest_root == str(tmp_path / "dest")
     assert "image(s)" in message
+
+
+# ── picking a subset on the plate ────────────────────────────────────────────
+
+def test_picking_wells_on_the_plate_converts_only_those(controller, tmp_path):
+    """Driven through the dashboard's own plate, not through ``params()``.
+
+    The plate is the control a user touches, and selecting on it is what has
+    to reach the run — a test that set ``well_subset`` directly would pass for
+    a plate wired to nothing.
+    """
+    page = controller.page
+    _set_source(page, _named_nd2(tmp_path, wells=("C07", "C07", "A02", "A02"),
+                                 channels=("DAPI",)), tmp_path)
+    assert page.params().well_subset == (), "a fresh page converts everything"
+
+    page._dashboard.set_selected_wells(["A02"])
+    QApplication.processEvents()
+
+    assert page.params().well_subset == ("A02",)
+
+    controller._launch()
+    controller._worker.wait(60_000)
+    QApplication.processEvents()
+
+    assert sorted(p.name for p in (tmp_path / "dest" / "in").glob("*.zip")) == [
+        "A02.zip"]
+
+
+def test_the_readout_counts_the_selected_wells_not_the_plate(controller,
+                                                             tmp_path):
+    """The surface the user reads before pressing Convert.
+
+    Picking two of three wells still printed the plate's own count and image
+    total — the same untruth the run log's count was fixed against, one screen
+    earlier. Asserted as both numbers, because "2" alone appears in the
+    unselected line too.
+    """
+    page = controller.page
+    _set_source(page, _named_nd2(tmp_path,
+                                 wells=("C07", "C07", "A02", "A02"),
+                                 channels=("DAPI",), timepoints=2), tmp_path)
+    whole = page._verdict.text()
+    assert "2 well(s)" in whole and "8 image(s)" in whole
+
+    page._dashboard.set_selected_wells(["A02"])
+    QApplication.processEvents()
+
+    picked = page._verdict.text()
+    assert "1 of 2 well(s)" in picked, picked
+    assert "selected" in picked
+    assert "4 image(s)" in picked, picked
+
+
+def test_a_selection_survives_the_job_queue_round_trip(controller, tmp_path):
+    """A setting the user edits and the queued run ignores is the shape this
+    round-trip test exists for."""
+    from datasets.nd2_import.controller import Nd2ImportController
+
+    page = controller.page
+    _set_source(page, _named_nd2(tmp_path, wells=("C07", "C07", "A02", "A02")),
+                tmp_path)
+    page._dashboard.set_selected_wells(["A02"])
+    QApplication.processEvents()
+    spec = controller.collect_spec()
+    assert spec["params"]["well_subset"] == ["A02"]
+
+    other = Nd2ImportController()
+    try:
+        other.show_job(spec)
+        assert other.page.params().well_subset == ("A02",)
+        assert other.page._dashboard.selected_wells() == ["A02"]
+    finally:
+        other.shutdown()
+        other.page.deleteLater()
+
+
+def test_the_plate_selection_is_locked_while_a_run_is_in_flight(controller,
+                                                                tmp_path):
+    """The plate is the progress display during a run, so a selection changed
+    then would describe a conversion other than the one being reported on."""
+    page = controller.page
+    _set_source(page, _named_nd2(tmp_path), tmp_path)
+
+    page.set_running(True)
+    try:
+        assert page._dashboard._plate.selectionMode() == "passive"
+    finally:
+        page.set_running(False)
+    assert page._dashboard._plate.selectionMode() == "select"

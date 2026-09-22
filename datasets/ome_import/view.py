@@ -53,6 +53,7 @@ from widgets.plate_geometry import (
     apply_plate_geometry,
 )
 from widgets.plate_order_editor import PlateOrderEditor
+from widgets.well_plate_selector import WellPlateSelector
 from widgets.stage_path_view import StagePathView
 from widgets.plate_progress import apply_outcome, fraction_or_none
 from datasets.ome_import.ome_import_compute import (
@@ -491,6 +492,44 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         bl.addWidget(self._clear_path_btn)
         bl.addStretch(1)
         outer.addWidget(btn_row)
+        self._build_subset_plate(outer)
+
+    def _build_subset_plate(self, outer: QVBoxLayout) -> None:
+        """A **second** plate, for choosing which of the mapped wells to write.
+
+        Separate from the order editor above rather than a mode on it, because
+        the two answer different questions and a click cannot mean both. The
+        editor's plate defines *which stage position is which well* — an
+        ordering that must account for every position the file holds, so
+        leaving wells out of it changes the mapping and fails the
+        divisibility check. This one leaves the mapping untouched and only
+        says which of the resolved wells this run writes.
+
+        The CZI and ND2 pages need no equivalent: their status dashboard
+        already draws the resolved mapping, so the subset is picked there.
+        This page has no dashboard — it reports on the acquisition plate it
+        already draws — which is exactly why the subset needs a surface of its
+        own here.
+        """
+        caption = QLabel(
+            "Wells to convert — click to convert only part of the plate, or "
+            "leave empty to convert all of it. The wells shown are the ones "
+            "the mapping above resolves to. Converting the rest later into "
+            "the same folder tops it up rather than starting again.", self)
+        caption.setObjectName("Muted")
+        caption.setWordWrap(True)
+        outer.addWidget(caption)
+
+        self._subset_plate = WellPlateSelector(self)
+        apply_plate_geometry(self._subset_plate, role="picker")
+        self._subset_plate.setSelectionRim(True)
+        self._subset_plate.selectionChanged.connect(
+            lambda _=None: self.refresh_readout())
+        outer.addWidget(self._subset_plate, 0, PLATE_ALIGNMENT)
+
+    def selected_wells(self) -> list[str]:
+        """The wells picked for conversion, or ``[]`` for the whole plate."""
+        return list(self._subset_plate.selectedWellIds())
 
     def _on_plate_order_changed(self, _order=None) -> None:
         """A click on the plate makes the order the user's, not the file's."""
@@ -640,6 +679,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             serpentine=self._snake_cb.isChecked(),
             frame_order=str(self._frame_order_cb.currentData() or "single"),
             well_order=tuple(plate.order()) if hand_drawn else (),
+            well_subset=tuple(self.selected_wells()),
         )
 
     def params(self) -> ConversionParams:
@@ -667,6 +707,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._plate.set_order(list(params.well_order))
         else:
             self._plate.clear()
+        self._subset_plate.setSelectedWellIds(list(params.well_subset))
         self.refresh_readout()
 
     def set_well_fraction(self, well_id: str, done: int, total: int) -> None:
@@ -754,6 +795,16 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # Path fields lock rather than disable: `setEnabled(False)` dims the
         # path text too, which is the one piece of context someone watching a
         # long run most wants to read (see `widgets/path_field.py`).
+        # Locked while running for the same reason the other two pages lock
+        # theirs: a selection changed mid-run would describe a conversion
+        # other than the one in flight.
+        #
+        # ``setEnabled`` rather than a passive selection mode, which leaves the
+        # plate's own "All 96" and "Invert" buttons live — the existing lock
+        # guard caught exactly that. Dimming is right here and wrong for the
+        # plate above, because this one is not the progress display: nothing on
+        # it needs reading while a run is in flight.
+        self._subset_plate.setEnabled(not running)
         self._src_field.setLocked(running)
         self._dest_field.setLocked(running)
 
@@ -776,6 +827,13 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._apply_order_source(fields.hand_drawn)
         if not self._plate.is_dirty():
             self._plate.set_preview(self._serpentine_seed())
+        # The subset plate offers exactly the wells the mapping resolves to, so
+        # a selection cannot name one the run will not produce. Enabling only
+        # those also makes the plate a second statement of the mapping, which
+        # is the check the CZI and ND2 dashboards give for free.
+        mapped = (list(fields.well_order) if fields.hand_drawn
+                  else self._serpentine_seed())
+        self._subset_plate.setEnabledWells(mapped)
         src = self._src_field.path() if hasattr(self, "_src_field") else ""
         single = False
         head = ""

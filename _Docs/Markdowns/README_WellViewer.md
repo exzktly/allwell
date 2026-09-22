@@ -4958,6 +4958,26 @@ open **Show raw log** to find out whether it worked. The output is one
 per-well `<WELL>.zip` in `<destination>/in/`, the layout Analyze reads directly
 (no regrouping step).
 
+**Converting only part of a plate.** Click wells on the plate to convert just
+those; leave nothing selected and the whole plate is converted, which is the
+default. The wells offered are the ones this file actually holds, so a
+selection can never name a well that is not there.
+
+The readout says both numbers — *"2 of 3 well(s), selected"* — and so does the
+run log, because a dataset converted this way otherwise looks exactly like a
+plate that only ever had that many wells.
+
+**You can convert the rest later into the same folder.** Point the same source
+at the same destination with the same settings, pick the wells you skipped,
+and they are added alongside the ones already there. Change anything that
+decides which image becomes which well — the well source, the grid, the
+experiment name, the timepoint stride — and it is refused instead, the same
+way a resume is, because the two runs would write files with the same names
+from different images. A folder holding a plate this converter did not write
+is refused as before.
+
+The selection is locked while a conversion is running.
+
 **If a conversion is interrupted, running it again finishes it.** Each well is
 written in one piece, so whatever was completed before the interruption is
 already correct on disk. Point the same source at the same destination with the
@@ -5279,6 +5299,26 @@ worked. The output is one per-well `<WELL>.zip` in `<destination>/in/`, which
 Analyze reads directly with no regrouping step. Then **Open dataset in
 Analyze** — the channel tokens arrive pre-filled from the roles you set.
 
+**Converting only part of a plate.** Click wells on the plate to convert just
+those; leave nothing selected and the whole plate is converted, which is the
+default. The wells offered are the ones this file actually holds, so a
+selection can never name a well that is not there.
+
+The readout says both numbers — *"2 of 3 well(s), selected"* — and so does the
+run log, because a dataset converted this way otherwise looks exactly like a
+plate that only ever had that many wells.
+
+**You can convert the rest later into the same folder.** Point the same source
+at the same destination with the same settings, pick the wells you skipped,
+and they are added alongside the ones already there. Change anything that
+decides which image becomes which well — the well source, the grid, the
+experiment name, the timepoint stride — and it is refused instead, the same
+way a resume is, because the two runs would write files with the same names
+from different images. A folder holding a plate this converter did not write
+is refused as before.
+
+The selection is locked while a conversion is running.
+
 **If a conversion is interrupted, running it again finishes it.** Each well is
 written in one piece, so whatever completed before the interruption is already
 correct on disk. Point the same source at the same destination with the same
@@ -5478,6 +5518,26 @@ plate says how it went in green or red, so you never have to open
 `<WELL>.zip` in `<destination>/in/`, which Analyze reads directly with no
 regrouping step. Then **Open dataset in Analyze** — the channel tokens arrive
 pre-filled from the roles you set.
+
+**Converting only part of a plate.** Click wells on the plate to convert just
+those; leave nothing selected and the whole plate is converted, which is the
+default. The wells offered are the ones this file actually holds, so a
+selection can never name a well that is not there.
+
+The readout says both numbers — *"2 of 3 well(s), selected"* — and so does the
+run log, because a dataset converted this way otherwise looks exactly like a
+plate that only ever had that many wells.
+
+**You can convert the rest later into the same folder.** Point the same source
+at the same destination with the same settings, pick the wells you skipped,
+and they are added alongside the ones already there. Change anything that
+decides which image becomes which well — the well source, the grid, the
+experiment name, the timepoint stride — and it is refused instead, the same
+way a resume is, because the two runs would write files with the same names
+from different images. A folder holding a plate this converter did not write
+is refused as before.
+
+The selection is locked while a conversion is running.
 
 **If a conversion is interrupted, running it again finishes it.** Each well is
 written in one piece, so whatever completed before the interruption is already

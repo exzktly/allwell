@@ -115,6 +115,7 @@ DATASETS_PAGE_HELP: dict[str, str] = {
     "Concatenate Datasets": "Concatenate datasets",
     "Convert OME-TIFF": "Convert OME-TIFF",
     "Convert CZI": "Convert CZI",
+    "Convert ND2": "Convert ND2",
     "Validate & Repair": "Validate & Repair Dataset",
     "Subset / Split": "Subset / Split Dataset",
     "Zip Loose Folder": "Zip Loose Folder",

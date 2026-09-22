@@ -266,11 +266,15 @@ allwell/
 │   ├── subset/                 ← Subset / Split a dataset by well, FOV or timepoint
 │   ├── import_loose/           ← Zip a loose image folder into per-well archives
 │   ├── validate/               ← Validate & Repair an existing dataset
-│   ├── job_queue/              ← the queue the seven tools (and Analyze) submit runs to
+│   ├── job_queue/              ← the queue the eight tools (and Analyze) submit runs to
 │   ├── ome_import/             ← Convert OME-TIFF (de-interleave a packed OME-TIFF → dataset folder)
-│   └── czi_import/             ← Convert CZI (a Zeiss .czi plate scan, or a folder of
-│                                  per-scene ones → dataset folder; wells read from the
-│                                  files' scene names, grid as fallback)
+│   ├── czi_import/             ← Convert CZI (a Zeiss .czi plate scan, or a folder of
+│   │                              per-scene ones → dataset folder; wells read from the
+│   │                              files' scene names, grid as fallback)
+│   └── nd2_import/             ← Convert ND2 (a Nikon .nd2 plate scan → dataset
+│                                  folder; wells read from the stage positions' own
+│                                  names, grid as fallback). Always one file — Nikon
+│                                  has no split export — so there is no set to find
 ├── pipeline/                    ← Qt-free analysis-pipeline modules (re-exported by pm)
 │   ├── well_plate_zipper.py    ← the loose-TIF grouping pre-pass that produces the
 │   │                              per-well input layout the rest of the pipeline reads.
@@ -301,9 +305,17 @@ allwell/
 │   │                              before the plate has been read
 │   ├── czi_explode.py          ← the CZI's per-well explode — scenes/tiles → wells,
 │   │                              Z max-projected, one atomic archive per well
-│   ├── explode_common.py       ← what both exploders do identically: the member-name
-│   │                              set, the resume check over it, the worker split and
-│   │                              count, the in-memory TIFF encode, the cancellation
+│   ├── nd2_read.py             ← the Nikon ND2 adapter: a file's layout, its frame
+│   │                              times, and one 2-D plane at a time. Reads through
+│   │                              the third-party `nd2` package, imported lazily so
+│   │                              the pipeline still imports without it installed
+│   ├── nd2_explode.py          ← the ND2's per-well explode — stage positions →
+│   │                              wells, Z max-projected, one archive per well
+│   ├── explode_common.py       ← what all three exploders do identically: the
+│   │                              member-name set, the resume check over it, the
+│   │                              worker split and count, the in-memory TIFF encode,
+│   │                              the cancellation, and the elapsed-hour timepoint
+│   │                              naming with its stride
 │   ├── fov_checkpoint.py       ← one well's staging dir, whose run owns it, and
 │   │                              the sweep that drops a superseded run's
 │   ├── incremental_keys.py     ← what an incremental run considers already done
@@ -362,7 +374,7 @@ allwell/
 │   │                              prefixed token ("f10") orders numerically, not
 │   │                              lexicographically (pipeline, services, viewer)
 │   ├── channel_roles.py        ← channel-name → role heuristic (nuclear/fluor/
-│   │                              phase), shared by both converters + Analyze;
+│   │                              phase), shared by all three converters + Analyze;
 │   │                              also the quantified-channel list order and the
 │   │                              phase/segmentation exclusivity rule, shared with
 │   │                              the pipeline and the remote runner
@@ -6131,10 +6143,11 @@ Three constraints on that, each of which a mutation showed a test had to pin:
   was hiding behind, turning two frames a picosecond apart at 1 h from a
   correct positional fallback into `0h` and `0.000000000028h`.
 
-**Both converters take a timepoint stride.** *Keep every Nth timepoint* is the
-same field, the same `explode_common.timepoint_plan`, the same mapping-signature
-key and the same `4 of 12 timepoint(s)` readout on each page; §6.2a states the
-rules in full. The OME side carries one trap the CZI side does not: a
+**All three converters take a timepoint stride.** *Keep every Nth timepoint* is
+the same field, the same `explode_common.timepoint_plan`, the same
+mapping-signature key and the same `4 of 12 timepoint(s)` readout on each page;
+§6.2a states the rules in full. The OME side carries one trap the other two do
+not: a
 single-image file's frames are one flat sequence and `_frame_index` locates a
 plane with `position × n_timepoints + t`, where `n_timepoints` is what the
 *file* holds. `explode_ome_tiff` therefore keeps that name bound to the source
@@ -6555,15 +6568,17 @@ Channel Tokens section on the converted folder. `pipeline/ome_explode.py` and
 `util/plate_grid.py` are in the remote manifest so it stays a complete mirror of
 `pipeline/` + `util/` (`test_remote_manifest.py`).
 
-**What both converters share lives in `pipeline/explode_common.py`.** The two
+**What the converters share lives in `pipeline/explode_common.py`.** The three
 exploders differ entirely in how they *read* their source and not at all in what
 they produce: the same member names, the same atomic per-well archive, the same
 rule for deciding whether a well an interrupted run left behind is finished, the
 same worker-count policy and strided well split, the same in-memory TIFF encode,
-the same `ExplodeResult` and the same `ExplodeCancelled`. `OmeExplodeCancelled`
-is that exception itself rather than a subclass — the two stop for the same
-reason and a caller catching one means to catch the other — kept under its old
-name because that is the name `datasets.ome_import` raises and catches.
+the same elapsed-hour timepoint naming and stride, the same `ExplodeResult` and
+the same `ExplodeCancelled`. `OmeExplodeCancelled` and `Nd2ExplodeCancelled`
+are that exception itself rather than subclasses — they stop for the same
+reason and a caller catching one means to catch the others — kept under their
+own names because those are the names `datasets.ome_import` and
+`datasets.nd2_import` raise and catch.
 `util/filename_token.py::safe_token`, which reduces a metadata label to a token
 that survives a filename, came out of the same drawer: with it private to one
 exploder the second one's only choices were to import a private name or to write
@@ -6996,6 +7011,189 @@ mapping fields. Both converters' key rosters are registered in
 file holds each roster against its own `ConversionParams` dataclass: a setting
 that is neither keyed nor exempted in writing fails there, which is the half a
 parametrize over the roster itself cannot see.
+
+### 6.2b The ND2 converter
+
+A Nikon plate scan arrives as one `.nd2` holding every stage position, channel,
+Z-plane and timepoint of the run. *Convert ND2* (`datasets/nd2_import/`, §6b)
+is the standalone converter for it, structured exactly like the other two and
+for the same reason: it writes an ordinary dataset folder, which the user then
+opens in Analyze and runs like any other input, so every well is on disk before
+the pre-run checks that look for one. It exists so a plate acquired in
+NIS-Elements does not have to be exported a second time as an OME-TIFF to get
+here.
+
+**This one depends on a library where the CZI reader was written.** The
+trade-off runs the opposite way for the two formats. ZISRAW is a flat sequence
+of length-prefixed segments and the maintained readers for it ship binary
+wheels the PyInstaller bundle would have to carry, so writing the parser was
+cheaper than depending on one. ND2's own container is similar in spirit — a
+chunk map and CLX-lite metadata records — but the metadata that matters is
+deeply nested and the format has changed several times across NIS versions;
+`nd2` is pure Python over numpy, is compatible with the numpy this app pins,
+and keeps its dask path lazy so the bundle excludes `dask` and
+`resource_backed_dask_array` without breaking the reads. `pipeline/nd2_read.py`
+is the adapter over it, and the dependency stops there: everything above sees
+only `Nd2Layout`, `Nd2Reader` and `Nd2ReadError`.
+
+The import is **lazy**, inside `_open`, rather than at module scope. The
+pipeline's self-sufficiency contract (§6.2) is checked by walking every module
+under `pipeline/`, and a module-scope import of an optional reader would make
+every one of those checks depend on the package being installed. A missing
+`nd2` therefore surfaces as this converter's own refusal, naming the install
+command and the OME-TIFF converter as the way round it, rather than as an
+`ImportError` at startup.
+
+**The adapter's boundary is the whole layout read, not just the open.** `nd2`
+parses lazily: `ND2File(path)` succeeds on a file carrying the right magic
+bytes and a broken header, and the `ValueError` for that header comes out of
+the first attribute read instead. Guarding only the open let a truncated or
+half-written file escape as a bare `ValueError` past callers that catch this
+module's own error — the exact thing a boundary module exists to prevent — so
+`read_nd2_layout` wraps the attribute reads as a whole.
+
+Its tests are written against **real ND2 bytes** laid down by
+`tests/_nd2_fixture.py`, from the chunk and CLX-lite struct definitions the
+format uses, and read back through the real library. That is what makes the
+tests measure the understanding of the format and not a stub agreeing with the
+code that calls it, and it caught the one defect reading the library's source
+could not have prevented: `_actual_frame_shape` documents
+`(height, width, channels, components)`, and `read_frame` returns the channels
+**leading**, so indexing the last axis gave a plane of the right shape and
+dtype holding channel 0's pixels under channel 1's name. Each plane the fixture
+writes carries a value derived from all three of its coordinates, so a plane
+read from the wrong place is a *different number* rather than a
+different-looking image. Two further sharp edges are pinned the same way: an
+ND2's frame pixels sit at a fixed 4096-byte offset from the start of their
+chunk rather than immediately after the chunk header, and the pinned `nd2`'s
+`_get_excitation` binds its `excitation` local only inside `if probe:` and then
+reads it unconditionally, so `ND2File.metadata` raises `UnboundLocalError` on a
+plane carrying no fluorescent-probe block — which a user's file is not obliged
+to carry, and refusing such a plate would turn a library bug into a file that
+cannot be converted. The channel *names* are what is lost there, and positional
+tokens are names a run can carry.
+
+**The axes, and what is done with each.** `P` is the stage position. `T`/`C`/`Z`
+are as usual, with Z collapsed by **maximum-intensity projection**, the same
+reduction `ome_explode` and `czi_explode` apply, so a plate converted from any
+of the three sources is measuring the same thing. There is **no mosaic-tile
+axis**: where a CZI distinguishes the scene from the tiles within it, an ND2
+has only positions, and several positions naming one well simply *are* that
+well's fields of view. That is why this converter has no "FOVs per well"
+division to do when the file names its wells — the file has already said — and
+why a value contradicting it is refused rather than silently preferred.
+
+**Where the wells come from is the same decision the CZI converter makes.**
+NIS-Elements normally names each stage position after the well it scanned, so
+`nd2_read._position_names` reads `dPosName` out of the experiment's
+`XYPosLoop`, and the page's plate shows the mapping for the user to confirm
+rather than to supply. The grid is the fallback for a file whose positions are
+unnamed, and the two are never mixed.
+
+`Nd2Layout.wells_from_positions` is **all or nothing, and distinct**, for
+exactly the reasons §6.2a gives — a partial mapping lands the named positions
+on their real wells and the rest wherever the grid put them, which is right in
+the places a user is most likely to spot-check. It differs from the CZI version
+in one way that is a property of the format rather than a choice: it groups
+over **runs** of equal names in acquisition order rather than over the set of
+names. A plate that returns to a well later in the run is two visits to one
+well and not eight fields of it, and the difference decides whether the second
+visit's images overwrite the first's. Repeated wells and uneven field counts
+both yield `([], 0)`, and `resolve_well_map` then refuses with a message
+pointing at the grid.
+
+**What the converter refuses.** `Nd2Layout.validation_report` runs before a
+single archive is written, ordered by how far upstream the fault is: a file
+holding no images; a zero-sized image; a pixel type that is not a single
+greyscale intensity; and two channel names reducing to one filename token,
+compared case-insensitively because every consumer of a channel token
+downstream folds case. An RGB file is *warned* about rather than refused, since
+its warning reaches the page alongside a plan the user can still judge.
+
+**Timepoints are named by elapsed time where the file supports it, and by
+position otherwise** — the same rule, through the same shared renderer, so one
+acquisition exported as an ND2 and as a CZI converts to the same timepoint
+names. `nd2_read.scan_timepoint_hours` samples **one position's series, the
+first one scanned**, for the reason §6.2a measured on the CZI side: a plate
+scan reaches its wells minutes apart inside a single round, so a series
+assembled from whichever position answered first at each timepoint folds the
+stage's traverse into the elapsed times it reports. It never raises — every
+failure comes back as an empty or partial `TimeScan` with the reason written
+down, because the positional fallback is always available and always correct.
+A file with no `CustomData|AcqTimesCache!` chunk is the case named explicitly:
+the library warns, returns an empty list and then indexes it, and "list index
+out of range" tells a user nothing they can act on.
+
+Reading the times costs nothing extra here, unlike on the CZI side where each
+stamp is a seek into a subblock's own metadata. An ND2 keeps them in one chunk
+the library has already read by the time the file is open. `read_nd2_layout`
+still takes a `read_times` flag so the two readers present the same shape to
+their converters.
+
+**A conversion may keep every N-th timepoint**, through the same
+`explode_common.timepoint_plan` over the same tokens, with the same three
+properties §6.2a states: the kept tokens are the source's own and never
+renumbered, the first timepoint is always kept, and index and token travel
+together. The stride is part of the resume marker's mapping signature
+(`nd2_import_compute._MAPPING_FIELDS`) for the same subtle reason — a strided
+run's member set is a strict *subset* of a complete run's and
+`explode_common.well_is_complete` tests `issubset`, so without the key a well
+an earlier complete run had filled would be judged done and left alone while
+every freshly converted well beside it held a third as many timepoints.
+
+**The page scans in one stage, not the CZI page's two.** There is no cheap half
+worth drawing a provisional plate from: an ND2 states its whole layout in its
+metadata chunks, and the elapsed hours come from one position's frame times, so
+the cost is bounded by the timepoint count rather than by the plate size. The
+read still goes to a worker thread through `core.worker_bridge.run_off_thread`,
+because it is a file read and a large file's chunk map is not free on a share,
+and the page keeps the same generation counter and bridge-lifetime discipline
+§6.2a describes: a scan that lands holding a stale generation drops its result
+without touching a widget, and the bridge is held until its handler has run,
+released only from `_begin_scan` — which runs outside any handler — because a
+bridge collected between its worker's queued emit and the GUI thread's handling
+of it segfaults with no Python traceback.
+
+The scan key is the **source path alone**, so a keystroke in the grid or
+experiment fields costs nothing; picking a source always rescans, even onto the
+same path, since without an mtime in the key that is the one moment a file
+re-exported in place is noticed; and a failed scan keeps its key, because
+clearing it means one scan per character typed against a filer that just
+refused.
+
+**One file, one dialog, no tick-box.** Nikon has no equivalent of ZEN's *Split
+Scenes* export, so there is no folder of per-position files to discover, no
+second Browse button and no "convert the whole folder" question. Analyze's
+`_PACKED_KINDS` records that in its last column: several `.nd2` files in one
+folder are several plates and picking either would convert one the user did not
+name, which is the OME-TIFF answer rather than the CZI one. That table also now
+derives `PACKED_ACTIONS` from itself — `_layout_error` listed the packed
+actions by hand, and a hand-written roster one converter short does not fail,
+it falls through to the generic layout error and tells the user their file
+holds no images.
+
+Resume works exactly as it does for the other two, through the shared
+`datasets/core/convert_marker.py` with `.aw_nd2_in_progress` and this tool's
+own mapping fields. All three converters' key rosters are registered in
+`tests/test_reuse_is_keyed_completely.py` with a written reason per key, held
+against their own `ConversionParams` dataclasses.
+
+**What the three converters share, and what they deliberately do not.** Three
+pieces are common code, each measured before it was extracted (CLAUDE.md §7.5
+#9): `datasets/core/packed_convert.py` holds the background `QThread` and the
+controller — the run, the queue round-trip, the worker results and the "open in
+Analyze" hand-off — parameterised by a per-tool `ConverterSpec`;
+`datasets/core/channel_roles_row.py` holds the per-channel role picker, as a
+mixin rather than a widget so each page places the rows in its own layout; and
+`datasets/core/converter_dashboard.py` holds the plate map, which was already
+identical bar a class name and an object name.
+
+The **pages** are not shared, and that is a measurement rather than an
+oversight. Hashing each view method's normalised AST across the CZI and ND2
+pages put only five of thirty-one shared names byte-identical, and the large
+ones — `_build_params`, `_build_ui`, `refresh_readout` — diverge substantially.
+A common view base would be a base full of flags, which is the shape
+`datasets/core/tool_controller.py`'s own docstring warns against.
 
 ### 6.2 `process_microscopy.py`
 
@@ -8501,11 +8699,11 @@ deletable:
 | `datasets/core/containers.py` | `copy_container_members` — the one path every Datasets tool moves image bytes through — plus `container_dest` (where a container belongs in a destination directory: `<WELL>.zip` for a zipped well, `<WELL>/` for a folder-mode one, always named for the **well token** rather than for the source file, because a source plate written with unpadded tokens otherwise produced `in/A1.zip` beside an `out/A01_out.zip` from the same run and nothing downstream matched the two up), `read_members` / `write_zip` (collision-safe, first-write-wins), `clear_destination`, `restamp_overrides` / `unstamped_note` (below), and the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. **It moves bytes rather than reconstructing them.** No Datasets tool alters image data: Subset filters, Concatenate offsets a name's timepoint field, Merge plates rewrites a name's well token, and in every case the member's compressed payload is identical on both sides — a name lives in a member's headers, not in its data. So the helper publishes one destination archive from one or more source containers, taking a `rename(container, member_name)` callback that returns the destination name or `None` to leave the member out, in three tiers. **Whole-file copy:** a single zip source with every member kept under its own name is copied byte-for-byte and never opened for reading — staged beside the destination and renamed into place, like the other two tiers, so an interrupted copy leaves no partial `<WELL>.zip` behind. That is a wells-only Subset, and it is the case a user would otherwise do by hand in Finder, so it has to cost what Finder costs. **Raw member passthrough:** otherwise each kept member's already-compressed bytes are streamed across by `datasets/core/zip_passthrough.py` — no inflate, no deflate, no CRC recomputation — and a dropped member is never read at all, so a filter that keeps a quarter of an archive costs about a quarter of it. **Fallback:** a folder source, or a member the passthrough declines (a directory entry, an encrypted member), goes through `read_members`/`write_zip`'s ordinary decompress-and-recompress, one member at a time. The tier is chosen from member *lists* only — for a zip that is the central directory, a footer, so planning costs a couple of seeks however large the archive is and however slow the volume holding it — and peak memory is one chunk or one member rather than a whole uncompressed archive per thread. **Tiers 2 and 3 publish through `util/zip_write.atomic_zip`**, the same staged-then-verified-then-renamed writer the pipeline's own archives use (with `durable=False`, and therefore without the CRC read-back, because the source dataset is still on disk beside the destination): a plain `with ZipFile(dest, "w")` writes a central directory for whatever landed before an exception, so a member failing part-way through a well left a structurally valid archive holding fewer images than it was asked for with nothing on it saying so. The tools do write an in-progress marker and clear the destination on the next attempt, but nothing stops a user opening that half-written folder in Review first. **Two consequences of moving bytes rather than rebuilding them are worth knowing.** A whole-file copy reproduces the source exactly, so it keeps directory entries that a re-pack drops — inert either way, since `find_image_groups_in_zip`, `data/zip_members.py`, Validate and `incremental_keys` all filter by basename/extension or on a trailing slash. And a copied member keeps its source's compression method, so a subset or merge of a dataset whose `in/` archives were written `ZIP_STORED` (what `pipeline/ome_explode.py` writes) stays stored rather than being deflated on the way out; the destination can be larger on disk than the old re-packing path produced, which is the cost of not spending CPU to reproduce bytes that already exist. Returns `(written, dropped)`: *written* is what actually landed, so a caller can verify a CSV row's `filename` is really there; *dropped* is only the names lost to a **collision**, which is real data loss, never a member the `rename` callback declined. Nothing is created when nothing is kept — a zero-member zip is structurally valid but macOS Archive Utility refuses to expand it and All-Well reads it as a well whose images have vanished, the same rule `util/zip_write.atomic_zip` enforces for the pipeline's own archives. `read_members` / `write_zip` remain the tier-3 primitives and the shape a caller reaches for when it genuinely needs a member's decoded bytes in hand; both take an optional `progress(done, total)` keyword, called once per member against a total they know up front. `WellFraction` fuses per-pass counts into one dial: copying a well is several passes (the source container, then the QC `<WELL>_out.zip`), so the passes are declared up front as equal-weight *slices*, each pass reports into the slice `slice_progress()` hands it, and a pass with no work closes its slice with `skip()`. `copy_container_members` consumes exactly one slice whichever tier serves it, reporting a whole-file copy or an empty filter as a single closing step. Feeding each pass's own `(done, total)` straight to a dashboard instead would fill the same well's dial from empty once per pass, which reads as the well restarting; leaving a no-work slice unclaimed would strand a finished well short of full. `finish()` closes out whatever remains once the well's non-container work (its CSV) is done. The scale is a fixed 100 steps, deduplicated to whole steps, so a well holding thousands of files emits a bounded number of updates rather than one queued signal and one plate repaint per file. **`restamp_overrides` is the one carry-over rule for `cell_overrides.json`.** Every tool that copies that file has to re-fingerprint it — a repack changes the destination archive's mtime although the segmentation is untouched, and the fingerprint exists to catch a real re-segmentation — so it stamps each entry's `seg_fp` from the destination `<WELL>_out.zip`'s mtime and **returns how many it could not stamp**. A fingerprint that could not be computed is not a fingerprint, so the key is removed rather than left holding the source dataset's value: an entry with no `seg_fp` is the legacy unfingerprinted shape both readers already understand and keep (`review/persistence/cell_overrides.py`, `datasets/validate/apply._prune_stale_overrides`), whereas the source's stamp compared against the destination archive differs, and Validate then pruned the entry — the user's manual cell exclusions vanishing with every step reporting success. The count is returned rather than logged inside the helper so each tool states it in its own cell-override log line through `unstamped_note`: an override carried without a fingerprint survives, but it will no longer be dropped when that well really is re-segmented, and that is a fact about the artifact the run just produced. Subset, Merge Plates and Concatenate all call it, which is what stops the three copies drifting apart again. |
 | `datasets/core/zip_passthrough.py` | `copy_member_raw` / `member_is_raw_copyable` / `RawCopyUnsupported` — copying one member's already-compressed bytes from one archive into another. The destination member keeps the source's compression method, CRC and both sizes, so it decompresses to exactly the same data; only its name and its position in the file change. **This depends on four `zipfile` implementation details** — `ZipFile.fp`, `.filelist`, `.NameToInfo`, `.start_dir` (plus the `_didModify` flag) — because the standard library exposes no public API for adding a member whose bytes are already compressed. Two things keep that contained: `member_is_raw_copyable` gates every member first, so a directory entry or an encrypted member is routed to the ordinary path as an expected case rather than an error; and `RawCopyUnsupported` is raised, with the destination truncated back to its exact pre-member state, when an archive's local headers disagree with its central directory. That last case is raised on rather than worked around — the ordinary path would fail on the same member for the same reason, and an archive that quietly holds fewer images than it was asked for is the one outcome this code must never produce. Any ZIP64 record in the source's extra field is stripped before the header is rebuilt (`ZipInfo.FileHeader` appends a freshly-computed one, and the source's describes the member at its old offsets); the data-descriptor flag comes off for the same class of reason, since the copied header carries the CRC and sizes inline where the source kept them in a trailer. **A member that is being renamed also loses Info-ZIP's Unicode Path and Unicode Comment records** (`0x7075` / `0x6375`). Each embeds its own copy of the member's name alongside a CRC of the name it was derived from, so across a rename it is a second, stale name for the same member: a reader that honours it and skips the name-CRC restores the file under its *pre-rename* name, silently undoing the well remap or timepoint offset the copy existed to perform. A member keeping its own name keeps those records, which still describe it correctly. |
 | `datasets/core/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate — plus `is_os_junk_member`, the shared answer to "is this member operating-system debris rather than data?" (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `__MACOSX/`, AppleDouble `._` sidecars, the Spotlight and Trash directories). It is deliberately a *named set*, not "anything that isn't an image": a `notes.txt` a user put in an archive on purpose is real content, and a caller that refuses to reconcile two conflicting copies of a real file should keep refusing. Concatenate is its only caller — see §6b's Verification note for what carrying that debris through a merge used to do. |
-| `datasets/core/tool_controller.py` | `DatasetToolController` — the worker lifecycle every tool controller shares (`jobFinished`, `stop`, `is_busy`, `shutdown`), with the two things that differ between tools as knobs: `_shutdown_label`, and a `_request_worker_stop` hook. The hook exists for one tool. Import Loose's worker spends the run blocked inside the zipper subprocess's stdout read loop and never polls `isInterruptionRequested()`, so Qt's cooperative flag is a no-op there and `request_stop` — which also signals the tracked child — is what actually stops it; a base that hard-coded `requestInterruption()` would have left an orphan process on app close, and `shutdown` swallows the failure it would then hit. `DestinationToolController` adds the run-and-confirm-restart cluster the three copy-into-a-destination tools share (Subset, Merge Plates, Concatenate), with `_destination_has_marker` supplied per tool because a folder holding *this* tool's interrupted attempt is a resume and another tool's leftovers are not. Deliberately **not** on either base: `_on_queue_requested`, `_on_finished` and `_on_succeeded`. Measured across the seven controllers by hashing each one's normalised body, `_on_queue_requested` has seven distinct bodies and `_on_finished` five, while `_on_succeeded` diverges further up — Validate's takes `(report, result)` where the other six take `(dest_root, summary)`. Pulling them up would trade plain methods for a base full of flags. |
+| `datasets/core/tool_controller.py` | `DatasetToolController` — the worker lifecycle every tool controller shares (`jobFinished`, `stop`, `is_busy`, `shutdown`), with the two things that differ between tools as knobs: `_shutdown_label`, and a `_request_worker_stop` hook. The hook exists for one tool. Import Loose's worker spends the run blocked inside the zipper subprocess's stdout read loop and never polls `isInterruptionRequested()`, so Qt's cooperative flag is a no-op there and `request_stop` — which also signals the tracked child — is what actually stops it; a base that hard-coded `requestInterruption()` would have left an orphan process on app close, and `shutdown` swallows the failure it would then hit. `DestinationToolController` adds the run-and-confirm-restart cluster the three copy-into-a-destination tools share (Subset, Merge Plates, Concatenate), with `_destination_has_marker` supplied per tool because a folder holding *this* tool's interrupted attempt is a resume and another tool's leftovers are not. Deliberately **not** on either base: `_on_queue_requested`, `_on_finished` and `_on_succeeded`. Measured across the tool controllers by hashing each one's normalised body, `_on_queue_requested` has a distinct body in every one of them and `_on_finished` five distinct bodies across seven, while `_on_succeeded` diverges further up — Validate's takes `(report, result)` where the others take `(dest_root, summary)`. Pulling them up would trade plain methods for a base full of flags. |
 | `datasets/core/dataset_fields.py` | `is_dataset` / `is_free_destination` / `promote_open_button` — the destination-field validators and the success-state button swap the pages share. `is_free_destination` takes its two predicates as arguments for the same marker reason as above. Cross-field rules ("the destination must differ from both sources") stay on the page, since they read fields the helper cannot see. Sharing the *wording* is part of the point: a user moving between Subset and Merge Plates should not be told the same thing two different ways. |
 | `datasets/core/equation_row.py` | `build_equation_row` / `EquationRow` — the `dataset 1 + dataset 2 = destination` row, for the two tools that take two datasets and write a third. Merge Plates and Concatenate had built it twice in twenty statements each, differing only in two field labels and the name of the slot the fields report to, down to a byte-identical nested operator-glyph helper and a second copy of that column's width. What stays at the call site is what genuinely differs: the two dataset labels — Concatenate names its inputs "base" and "appended" because the operation is ordered, Merge Plates does not because its is not — and each page's own destination validator, which is bound to that tool's own in-progress marker and must **not** be shared. The builder returns the four widgets rather than assigning them, so each page keeps its own `_ds1_field` / `_ds2_field` / `_dest_field` / `_cross_hint` names, which its validation, its run spec and its reset all read. |
 | `datasets/core/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count) every tool below uses for its per-well `ThreadPoolExecutor`. It **re-exports** `pipeline.explode_common.pick_workers` rather than defining it: the exploders take it from there, and this module used to hold a second implementation of the same three lines under a comment saying it mirrored the first — which is a heuristic that will be tuned in one place and not the other. |
-| `datasets/core/convert_marker.py` | The resume marker the two **packed-file converters** share (Convert OME-TIFF, Convert CZI) — `mapping_signature`, the marker read/write/clear trio, `converted_wells`, `ResumeState`, `resume_state` and `destination_problem`. It is a different question from `dataset_paths.make_dataset_api`'s, which the copy tools use: theirs is "did I leave leftovers here?", answerable from the presence of a file and cleared by rebuilding. This one is "may I carry on from what is here?", which is a question about **settings** — two different mappings of one source write *identical* filenames, so nothing on disk distinguishes an `A01.zip` made from scene 0 from one made from scene 7, and only a marker recording the mapping can tell a run that may finish another's work from one that must refuse. Each converter passes its own marker filename (a folder carrying the *other* converter's leftovers is not a resume either) and its own list of mapping fields; the signature also carries the source's resolved path, size and mtime, so a file replaced at the same name — a re-export, a restore, the next plate saved over the last — is a different source. `workers` is deliberately not a mapping field: it changes how fast the conversion goes and nothing about what it writes, so refusing a resume over it would refuse one that was safe. |
+| `datasets/core/convert_marker.py` | The resume marker the three **packed-file converters** share (Convert OME-TIFF, Convert CZI, Convert ND2) — `mapping_signature`, the marker read/write/clear trio, `converted_wells`, `ResumeState`, `resume_state` and `destination_problem`. It is a different question from `dataset_paths.make_dataset_api`'s, which the copy tools use: theirs is "did I leave leftovers here?", answerable from the presence of a file and cleared by rebuilding. This one is "may I carry on from what is here?", which is a question about **settings** — two different mappings of one source write *identical* filenames, so nothing on disk distinguishes an `A01.zip` made from scene 0 from one made from scene 7, and only a marker recording the mapping can tell a run that may finish another's work from one that must refuse. Each converter passes its own marker filename (a folder carrying *another* converter's leftovers is not a resume either) and its own list of mapping fields; the signature also carries the source's resolved path, size and mtime, so a file replaced at the same name — a re-export, a restore, the next plate saved over the last — is a different source. `workers` is deliberately not a mapping field: it changes how fast the conversion goes and nothing about what it writes, so refusing a resume over it would refuse one that was safe. |
 
 **Every copy tool refuses a dataset that spells one well two ways.** Subset,
 Merge Plates and Concatenate each call `well_spelling_collisions` from their own
@@ -8523,7 +8721,7 @@ refusal has somewhere to go and see the rest of the plate.
 names they lifted from `core`, so their own public API (and every existing
 test against it) is unchanged.
 
-All seven tool pages share their status/log furniture through
+All eight tool pages share their status/log furniture through
 `datasets/core/log_panel.py::LogPanelMixin`. Each page ends the same way: a
 header row naming its output section with a "Show raw log" checkbox, then a
 separator and a read-only monospace log the checkbox reveals. The mixin owns
@@ -8531,7 +8729,7 @@ those two ends. The middle — a `ConcatDashboard`, a bare `QProgressBar`, a
 `ValidateDashboard` above a findings list — differs per tool and stays on the
 page, which is why the extraction stops where it does.
 
-**One implementation of the toggle serves all six, with no overrides.** It
+**One implementation of the toggle serves every page, with no overrides.** It
 checks `_status`, `_log_sep` and `_log_hdr`; Validate is the only page holding a
 log header of its own, and the rest contribute nothing there. Validate also
 passes `clear=False`, keeping its Clear in the raw-log header rather than the
@@ -8547,12 +8745,12 @@ the pane's single reader of a trailing well token on a longer stem
 `util.well_token.canonical_well_label`, which judges a whole token; it is
 equally deliberately the only place the judgement is made, since the same
 regex and zero-padding in three modules is the shape §15 warns about. A shared *view* layer matters here for a
-specific reason: without one, a fix to any of this lands on one page of six,
-and the other five keep whatever they had.
+specific reason: without one, a fix to any of this lands on one page,
+and the rest keep whatever they had.
 
 Two properties the seam makes enforceable, both swept parametrically over
 `datasets.tab._FEATURES` by `tests/test_datasets_log_panel.py` — driven off the
-registry rather than a roster written in the test, so a seventh tool is covered
+registry rather than a roster written in the test, so the next tool is covered
 from the moment it exists. No page may re-define a shared member, and every
 page needs a trailing `outer.addStretch(1)` after its last real widget — since
 `QScrollArea.setWidgetResizable(True)` grows the content widget to the viewport
@@ -11215,7 +11413,7 @@ called `setFixedHeight(1)`, so for those only the colour was wrong.
 set its shape, and pin it to `theme.Metrics.hairline`. `build_hline_separator`
 takes a `thickness` keyword for the one divider that is deliberately heavier
 (the Image Table's shelf rule, at 2 px). `datasets/core/log_panel.hrule` is
-the Datasets-side twin, one helper for the seven tool pages that build the same
+the Datasets-side twin, one helper for the tool pages that build the same
 log header. `tests/test_divider_naming.py` fails on any
 `setFrameShape(QFrame.HLine|VLine)` whose frame is never given a sanctioned
 name.

@@ -50,6 +50,7 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Starting over](#starting-over)
 6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
    - [Convert OME-TIFF](#convert-ome-tiff) · [Convert CZI](#convert-czi) ·
+     [Convert ND2](#convert-nd2) ·
      [Concatenate datasets](#concatenate-datasets) ·
      [Validate & Repair Dataset](#validate--repair-dataset) ·
      [Subset / Split Dataset](#subset--split-dataset) ·
@@ -79,9 +80,11 @@ to add features, how to debug, and build / environment troubleshooting), see
   to CSV + figures.
 - **Datasets tab.** Dataset-level operations that work on whole folders rather
   than one plate at a time: **Convert OME-TIFF** de-interleaves a single packed
-  OME-TIFF into a dataset folder and **Convert CZI** does the same for a Zeiss
+  OME-TIFF into a dataset folder, **Convert CZI** does the same for a Zeiss
   `.czi` plate scan — one file holding every scene, or a folder of one file per
-  scene — reading the well of each scene out of the files themselves;
+  scene — reading the well of each scene out of the files themselves, and
+  **Convert ND2** does it for a Nikon `.nd2`, reading each stage position's well
+  out of the name NIS-Elements saved with it;
   **Concatenate datasets** appends one
   dataset's timepoints after another's — for when the same plate was imaged in
   two separate sessions and you want one continuous timelapse; and
@@ -431,10 +434,11 @@ If your plate arrived as a **single packed OME-TIFF** (one `.ome.tif` holding
 every well, channel, Z-plane and timepoint), Analyze can't process it directly —
 convert it to a dataset folder first in the **Datasets tab → Convert OME-TIFF**
 (see [Convert OME-TIFF](#convert-ome-tiff)), then open that folder here. A Zeiss
-`.czi` is refused the same way and points at
-[Convert CZI](#convert-czi) instead — each message names the page that converts
-*that* file, because the other one would refuse it. Pointing
-Analyze at a raw `.ome.tif` just shows a reminder to convert it.
+`.czi` and a Nikon `.nd2` are refused the same way and point at
+[Convert CZI](#convert-czi) and [Convert ND2](#convert-nd2) instead — each
+message names the page that converts *that* file, because the others would
+refuse it. Pointing Analyze at a raw `.ome.tif` just shows a reminder to
+convert it.
 
 You can also explicitly override the output folder.
 
@@ -5378,6 +5382,161 @@ names" names the wrong remedy for a file that was cut short.
 downsampled pyramid tiles alongside the acquisition ones. They are the same
 pixels at the wrong scale, so they are dropped and never counted — a plate whose
 readout says 2 scenes of 2 tiles means two wells of two real fields.
+
+### Convert ND2
+
+Turns a Nikon `.nd2` plate scan into an ordinary dataset folder of per-well
+images, the layout Analyze processes. Do this first, then open the result in
+Analyze.
+
+NIS-Elements saves a plate scan as **one file** holding every stage position,
+channel, Z-plane and timepoint of the run. It is the same job
+[Convert OME-TIFF](#convert-ome-tiff) and [Convert CZI](#convert-czi) do for
+their formats, and it exists so you do not have to export the plate a second
+time to get here. Z stacks are **maximum-intensity projected** and each stage
+position is kept as its own field of view, never stitched.
+
+**Where the wells come from is the same question the CZI page asks.**
+NIS-Elements normally names each stage position after the well it scanned, so
+the mapping is read straight out of the file and you confirm it on the plate
+rather than supplying it; the grid is there for a file whose positions were
+never named.
+
+**Several positions naming one well are that well's fields of view.** A plate
+scanned four fields per well appears as four consecutive positions all called
+`C07`, and that is how the page reads it — which is why *FOVs per well* is
+normally blank here. A plate that comes back to a well later in the run is
+treated as two visits rather than as more fields of one well, and refused
+rather than having the second visit overwrite the first.
+
+1. **ND2 file** — **Browse** picks the `.nd2`. One button, unlike the CZI page:
+   Nikon writes a plate as a single file, so there is no folder of per-position
+   files to pick instead. All-Well never reads an image to work out what the
+   plate holds, so none of this depends on how large the file is; it also never
+   reads it on the window's thread, so nothing freezes while a slow disk or a
+   network share answers. When the read lands, the readout describes the file —
+   *"4 position(s) × 3 timepoint(s) × 1 Z-plane(s) × 2 channel(s) — 2048×2048
+   px, uint16."* — the plate map fills in, and **Convert** becomes available.
+
+   A **Destination folder** is suggested beside the source and named after it.
+2. **Well labels from** — **The file's own position names** (the default) or
+   **A plate grid I set below**. On the first, each position's well is read
+   from the name NIS-Elements saved with it. Choosing the grid reveals the grid
+   fields and ignores the names entirely.
+3. **The grid fields** — *shown only when you choose the grid*. **Rows** and
+   **Columns** are the block you imaged, **Origin well** is its top-left well
+   (default `A01`), **Order** is the axis the stage swept along, and
+   **Serpentine** is what it did at the end of each line. Ticked, alternate
+   lines run backwards — the stage never travels back across the plate empty.
+   Unticked, every line runs the same way. Get this wrong and every second line
+   is labelled *backwards* while the well count stays right, which is why it is
+   a setting rather than an assumption.
+4. **Experiment name** — the first token of every output filename. Blank takes
+   it from the file's name.
+5. **FOVs per well** — blank uses the positions the file holds per well, which
+   is what you want whenever the positions name their wells. A grid-mapped file
+   needs it only when its positions do not divide evenly by themselves. Setting
+   it to something the file contradicts is refused rather than silently
+   preferring one of the two.
+6. **Keep every Nth timepoint** — blank converts the whole timelapse. Set it to
+   3 and the run converts the first timepoint and then every third one after
+   it, which is how you take a densely-sampled acquisition into a dataset at a
+   coarser time resolution without re-acquiring it. It behaves exactly as it
+   does on the [Convert CZI](#convert-czi) page: the kept timepoints keep their
+   own names rather than being renumbered, the first timepoint is always kept,
+   and the readout says both numbers — *"4 of 12 timepoint(s) (0h, 12h, 24h,
+   36h)"* — because a dataset converted this way otherwise looks exactly like a
+   plate that was only imaged that many times.
+7. **Worker threads** — how many wells to convert in parallel (blank = auto,
+   capped at the number of wells). It changes only how fast the run goes and
+   nothing about what comes out, which is also why changing it never blocks a
+   resume.
+8. **Channel roles** — one row per channel read from the ND2 metadata, each with
+   a role: **Nuclear / segmentation**, **Fluorescent**, **Phase / brightfield**,
+   or **Skip**, seeded from the channel names exactly as on the other two
+   converter pages. The channel names are always what goes into the output
+   filenames; the roles **pre-fill Analyze's channel-token fields** when you
+   open the dataset there, so you do not retype them.
+
+**The plate below the settings shows the mapping before you run it.** Every well
+the conversion is about to write is filled in, so a well the file named wrongly
+is visible while it is still cheap to fix — and on this page that is the only
+place you can see what the file said. A line above it states the plan in words:
+the wells at both ends of the order, which source produced them, and how many
+images the run will write — `2 well(s) C07→A02 (named by the file) × 2 FOV(s) ×
+3 timepoint(s) × 2 channel(s) (DAPI, GFP) — 24 image(s)`. The order matters as
+much as the count, because a count alone reads the same whether the mapping
+starts where you meant it to or one well earlier.
+
+A line in red says why **Convert** is unavailable — a grid that does not divide
+the file's positions, a box that is not a whole number, a destination that
+already holds a converted plate, or anything the file check below turns up.
+Press **Convert** and the plate becomes the progress view: each well fills
+clockwise as its images are written. When the run ends, the headline above the
+plate says how it went in green or red, so you never have to open
+**Show raw log** to find out whether it worked. The output is one per-well
+`<WELL>.zip` in `<destination>/in/`, which Analyze reads directly with no
+regrouping step. Then **Open dataset in Analyze** — the channel tokens arrive
+pre-filled from the roles you set.
+
+**If a conversion is interrupted, running it again finishes it.** Each well is
+written in one piece, so whatever completed before the interruption is already
+correct on disk. Point the same source at the same destination with the same
+settings and only the missing wells are converted. Change anything that alters
+which image becomes which well — the well source, the grid, origin, sweep
+direction, serpentine, FOVs per well, the timepoint stride, the experiment
+name, or the source file itself — and it is refused instead, because the two
+runs would write files with the same names from different images. Empty the
+folder and start again in that case.
+
+**The file is checked as soon as you pick it**, and one that cannot be converted
+honestly is refused there rather than part-way through a run. What it catches:
+
+- **"does not name a well for every one of its stage positions in a way that
+  lays over a plate"** — some positions are named and some are not, the wells
+  they name take different numbers of fields each, or one well is visited
+  twice. A mapping that is half from the file and half from a grid is right
+  exactly where you are most likely to spot-check it, so it is all or nothing:
+  switch to the plate grid and set the imaged rows and columns.
+- **"stores pixel type … which is not a single-intensity greyscale format"** —
+  there is no single intensity per pixel to quantify. Export the acquisition
+  channels as greyscale from NIS-Elements.
+- **"has 2 channels whose names all reduce to the filename token …"** — two
+  channels differing only by spacing or punctuation, such as `488 nm` and
+  `488nm`. Both would be written to the same filename inside a well's archive
+  and only one would be readable afterwards, while the conversion reported
+  writing both. Rename them in NIS-Elements.
+- **"holds no images to convert"** or **"reports a zero-sized image"** — the
+  file's own metadata describes nothing readable, usually an acquisition that
+  was stopped before it wrote anything.
+- **"could not be read as an ND2 file"** — the file is truncated or was still
+  being written when it was copied. Copy it again once the acquisition has
+  finished.
+
+**Timepoints are named by elapsed time when the file records it** — `0h`, `4h`,
+`8h`, the same names the other two converters write, so a plate exported from
+one microscope as an ND2 and from another as a CZI carries comparable
+timepoints. NIS-Elements stores the frame times in the file, and the converter
+reads **the first well the scan visited**, and only that one: a plate scan
+crosses its wells in turn, so the last well of a round can be half an hour
+behind the first, and mixing them would fold the time it takes to cross the
+plate into the numbers on your axis.
+
+**When the times cannot be used, timepoints are named by position** — `t0`,
+`t1`, … — and the page says so before you run, in the line under the settings,
+rather than leaving you to notice afterwards. That happens when the file
+records no acquisition times at all, when some timepoints have one and others
+do not, when two of them work out to the same label, or when the first
+timepoint is missing its stamp so there is nothing to measure from. Positional
+tokens still order correctly and still state no elapsed time the file cannot
+back up; if you need a real time axis on such a plate, set the spacing in
+Review ([Interval per timepoint](#interval-per-timepoint-and-offset)).
+
+**Reading ND2 files needs the `nd2` package.** It ships with the packaged
+application, so nothing is needed if you installed All-Well that way. Running
+from source, `pip install -r requirements.txt` brings it in; without it this
+page says so and names the command, and points at Convert OME-TIFF as the way
+round it, rather than failing part-way through a run.
 
 ### Concatenate datasets
 

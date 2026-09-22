@@ -726,15 +726,37 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._set_verdict("", "muted")
         self._update_run_gate(False)
 
-        def _peek():
-            return peek_source(src, params)
+        def _peek(report):
+            return peek_source(src, params, report=report)
 
         self._scan_bridges[(generation, "peek")] = run_off_thread(
             _peek,
             on_done=lambda peek: self._on_peeked(generation, src, params, peek),
             on_failed=lambda message: self._on_scan_failed(
                 generation, "peek", message),
+            on_progress=lambda done, total: self._on_scan_progress(
+                generation, "Reading the file headers", done, total),
         )
+
+    def _on_scan_progress(self, generation: int, stage: str,
+                          done: int, total: int) -> None:
+        """Count the files as the scan reaches them.
+
+        A split export is up to ninety-six files, and over a share the read
+        takes long enough that one unchanging sentence reads as a page that
+        has hung. The count arrives on the GUI thread through the bridge's
+        queued signal, so the scan thread never touches a widget.
+
+        Guarded on the generation like every other scan callback: a stale
+        scan's count landing on the readout would describe a file set the page
+        has already moved off.
+        """
+        if generation != self._scan_generation or not self._scanning:
+            return
+        if total > 1:
+            self._readout.setText(f"{stage} ({done + 1} of {total})…")
+        else:
+            self._readout.setText(f"{stage}…")
 
     def _delivered(self, generation: int, stage: str) -> None:
         """Note that this bridge has called back, so it may be released later.
@@ -756,8 +778,8 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._readout.setText("Reading the rest of the plate…")
         self._set_verdict(peek.note(), "muted")
 
-        def _full():
-            return read_source(src, params)
+        def _full(report):
+            return read_source(src, params, report=report)
 
         # Its own key: this line runs inside the peek bridge's completion
         # handler, and reusing that bridge's slot would free it underneath the
@@ -767,6 +789,8 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             on_done=lambda czi_set: self._on_scanned(generation, czi_set),
             on_failed=lambda message: self._on_scan_failed(
                 generation, "full", message),
+            on_progress=lambda done, total: self._on_scan_progress(
+                generation, "Reading the rest of the plate", done, total),
         )
 
     def _on_scanned(self, generation: int, czi_set: CziSet) -> None:

@@ -304,7 +304,8 @@ def default_dest(src: Path | str) -> Path:
     return src.parent / strip_nd2_suffix(src.name)
 
 
-def read_source(src: Path | str, params: ConversionParams | None = None) -> Nd2Layout:
+def read_source(src: Path | str, params: ConversionParams | None = None,
+                report=None) -> Nd2Layout:
     """Read *src*'s layout, with the times, for the page's readout.
 
     Never raises for a source that cannot be used — the page calls this on
@@ -319,7 +320,7 @@ def read_source(src: Path | str, params: ConversionParams | None = None) -> Nd2L
     """
     del params
     try:
-        return read_nd2_layout(src, read_times=True)
+        return read_nd2_layout(src, read_times=True, report=report)
     except (Nd2ReadError, OSError) as exc:
         layout = Nd2Layout()
         layout.warnings.append(str(exc))

@@ -7334,6 +7334,54 @@ flight; OME's is disabled outright rather than made passive, because a passive
 plate keeps its own "All 96" and "Invert" buttons live — which the page's
 existing lock guard caught.
 
+### 6.2d Saying the scan is still running
+
+A source scan runs off the window's thread so the page stays usable while a
+slow disk or a network share answers, and for most of its life the page shows
+one sentence saying so. On a 96-file split export over a share that sentence
+sits there for the better part of a minute without changing, and an unchanging
+sentence is indistinguishable from a page that has hung — which is the ordinary
+reading of it, and was the reported symptom.
+
+**So a scan reports what it is doing while it does it.** The reporting rides
+`core.worker_bridge.run_off_thread`'s existing reporter: passing `on_stage` or
+`on_progress` makes the bridge hand the worker function a reporter object, and
+both arrive back on the GUI thread through queued signals, so the scan thread
+never touches a widget. The readers take the reporter as an optional `report`
+argument and are silent when it is `None`, which is how the pipeline half stays
+Qt-free and how `process_microscopy.py` and every test calling them directly is
+unaffected.
+
+**What each page counts is the thing that actually takes the time.** The CZI
+page's two stages each walk the same file list, so `czi_set._per_file` ticks
+once per file as the pool yields it and the page counts files —
+`Reading the file headers (7 of 96)…`, then
+`Reading the rest of the plate (7 of 96)…`. The ND2 page reads one file, so a
+file count would say nothing; it names the steps instead —
+`Opening Plate7.nd2…`, `Reading the channel names…`,
+`Reading the acquisition times…` — and counts only the one step with a real
+total, the per-timepoint time scan, appending the count to whichever stage is
+current rather than replacing it. Naming the file is deliberate: a step that
+says which file it is working on cannot be mistaken for a leftover from the
+source the user just moved off.
+
+**A lone file is not given a count of one.** `(1 of 1)` says nothing a plain
+sentence does not and invites the reader to wait for a second number that never
+comes, so the CZI page falls back to the bare stage sentence below two files.
+
+**The counts are guarded on the scan generation like every other scan
+callback**, and they are transient: the readout's resting state is the layout
+the scan found. A page left reading `96 of 96` is a second kind of stuck — one
+that has finished and does not say so.
+
+The OME-TIFF page has none of this because it has no such scan: it reads a
+single file's header synchronously, cached per path and modification time, and
+there is no sentence to freeze. `tests/test_a_scan_says_it_is_working.py`
+asserts all of the above at the **boundary** — the strings the readout label is
+actually given — rather than on the reporter calls behind it, because a scan
+that computes a perfect count and never writes it to the label leaves exactly
+the frozen page this fixes.
+
 ### 6.2 `process_microscopy.py`
 
 The pipeline. **Self-sufficient by design** — no import from `review/`,

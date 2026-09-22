@@ -355,7 +355,8 @@ def source_files(src: Path | str, params: ConversionParams) -> list[Path]:
     return siblings_of(src) if params.use_folder else [src]
 
 
-def peek_source(src: Path | str, params: ConversionParams) -> PlatePeek:
+def peek_source(src: Path | str, params: ConversionParams,
+                report=None) -> PlatePeek:
     """The wells *params*'s files claim, from their headers alone.
 
     What the page draws its plate from while the full read is still running.
@@ -365,10 +366,11 @@ def peek_source(src: Path | str, params: ConversionParams) -> PlatePeek:
     appearing at once and one appearing after every file has been round-tripped.
     Provisional by construction; see :class:`~pipeline.czi_set.PlatePeek`.
     """
-    return peek_wells(src, files=source_files(src, params))
+    return peek_wells(src, files=source_files(src, params), report=report)
 
 
-def read_source(src: Path | str, params: ConversionParams) -> CziSet:
+def read_source(src: Path | str, params: ConversionParams,
+                report=None) -> CziSet:
     """Read the files *params* selects as one plate.
 
     Never raises for a source that cannot be used — the page calls this on
@@ -378,7 +380,8 @@ def read_source(src: Path | str, params: ConversionParams) -> CziSet:
     :class:`CziImportError` at the point a caller is entitled to one.
     """
     try:
-        return read_czi_set_safely(src, files=source_files(src, params))
+        return read_czi_set_safely(src, files=source_files(src, params),
+                                   report=report)
     except (CziReadError, OSError) as exc:      # pragma: no cover — defensive
         return CziSet(problem=str(exc))
 

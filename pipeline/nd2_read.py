@@ -341,7 +341,8 @@ def _channel_names(handle, size_c: int) -> tuple[list[str], list[str], str]:
     return tokens, raw, reason
 
 
-def read_nd2_layout(path: Path | str, *, read_times: bool = False) -> Nd2Layout:
+def read_nd2_layout(path: Path | str, *, read_times: bool = False,
+                    report=None) -> Nd2Layout:
     """Read *path*'s layout without decoding a single pixel.
 
     With *read_times* it also samples one position's frame times into
@@ -352,6 +353,17 @@ def read_nd2_layout(path: Path | str, *, read_times: bool = False) -> Nd2Layout:
     their converters, not because it saves anything here.
     """
     path = Path(path)
+
+    # *report* is `core.worker_bridge`'s reporter, or ``None`` when the caller
+    # is not a GUI. Named steps rather than a percentage: this read has a
+    # handful of phases of very different cost and no useful total until the
+    # timepoint count is known, and a page showing one unchanging sentence for
+    # the whole read is indistinguishable from one that has hung.
+    def _say(name: str) -> None:
+        if report is not None:
+            report.stage(name)
+
+    _say(f"Opening {path.name}…")
     with _open(path) as handle:
         # Wrapped as a whole, not only around ``_open``. ``nd2`` parses
         # lazily: ``ND2File(path)`` succeeds on a file with the right magic
@@ -379,6 +391,7 @@ def read_nd2_layout(path: Path | str, *, read_times: bool = False) -> Nd2Layout:
                 dtype=str(np.dtype(handle.dtype)),
                 position_wells=_position_names(handle),
             )
+            _say("Reading the channel names…")
             (layout.channel_names, layout.raw_channel_names,
              channel_reason) = _channel_names(handle, layout.size_c)
             if channel_reason:
@@ -391,7 +404,9 @@ def read_nd2_layout(path: Path | str, *, read_times: bool = False) -> Nd2Layout:
             ) from exc
         layout.is_rgb = bool(getattr(handle, "is_rgb", False))
         if read_times:
-            layout.time_scan = scan_timepoint_hours(handle, layout)
+            _say("Reading the acquisition times…")
+            layout.time_scan = scan_timepoint_hours(handle, layout,
+                                                    report=report)
     return layout
 
 
@@ -411,7 +426,8 @@ def frame_index_for(layout: Nd2Layout, position: int, t: int, z: int = 0) -> int
     return index
 
 
-def scan_timepoint_hours(handle, layout: Nd2Layout) -> TimeScan:
+def scan_timepoint_hours(handle, layout: Nd2Layout, *,
+                         report=None) -> TimeScan:
     """Elapsed hours per timepoint, from the first position's own series.
 
     **One position, and the first one scanned**, which is the rule both other
@@ -440,6 +456,10 @@ def scan_timepoint_hours(handle, layout: Nd2Layout) -> TimeScan:
     stamps: dict[int, float] = {}
     try:
         for t in range(size_t):
+            # Reported per timepoint: this is the one phase of the read with
+            # a real total, and on a long timelapse it is also the slow one.
+            if report is not None:
+                report.progress(t, size_t)
             # Position 0, timepoint t, and the first Z plane of its stack —
             # every Z of one coordinate is acquired within the same instant
             # for this purpose, and the first is the one that exists.

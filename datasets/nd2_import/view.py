@@ -606,6 +606,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._scan_generation += 1
         generation = self._scan_generation
         self._scanning = True
+        self._scan_stage = "Reading the file…"
         # Release what has already been delivered. Safe here and nowhere else:
         # this runs from a GUI event, never from inside a handler.
         for key in list(self._scan_delivered):
@@ -615,14 +616,39 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._set_verdict("", "muted")
         self._update_run_gate(False)
 
-        def _read():
-            return read_source(src)
+        def _read(report):
+            return read_source(src, report=report)
 
         self._scan_bridges[generation] = run_off_thread(
             _read,
             on_done=lambda layout: self._on_scanned(generation, layout),
             on_failed=lambda message: self._on_scan_failed(generation, message),
+            on_stage=lambda name: self._on_scan_stage(generation, name),
+            on_progress=lambda done, total: self._on_scan_progress(
+                generation, done, total),
         )
+
+    def _on_scan_stage(self, generation: int, name: str) -> None:
+        """Say which part of the read is under way.
+
+        One unchanging sentence for the whole read is indistinguishable from a
+        page that has hung, and on a large file over a share the read is long
+        enough for that to be the natural reading. These arrive on the GUI
+        thread through the bridge's queued signal, so the worker never touches
+        a widget.
+        """
+        if generation == self._scan_generation and self._scanning:
+            self._scan_stage = name
+            self._readout.setText(name)
+
+    def _on_scan_progress(self, generation: int, done: int, total: int) -> None:
+        """Add a count to the stage that has one, rather than replacing it."""
+        if generation != self._scan_generation or not self._scanning:
+            return
+        stage = getattr(self, "_scan_stage", "Reading the file…")
+        if total > 0:
+            self._readout.setText(
+                f"{stage.rstrip('… ')} ({done + 1} of {total})…")
 
     def _delivered(self, generation: int) -> None:
         """Note that this bridge has called back, so it may be released later.

@@ -38,12 +38,16 @@ Module split (CLAUDE.md §3 suffixes):
 * :mod:`~datasets.czi_import.apply` — Qt-free executor: calls
   :func:`pipeline.czi_explode.explode_czi` into ``<dest>/in`` with progress and
   cancellation, and formats the summary.
-* :mod:`~datasets.czi_import.worker` — a thin ``QThread`` that runs planning +
-  conversion off the UI thread, emitting progress.
+* The background ``QThread`` is
+  :class:`datasets.core.packed_convert.PackedConverterWorker`, shared with
+  the other packed-file converters and parameterised by this tool's
+  :class:`~datasets.core.packed_convert.ConverterSpec`.
 * :mod:`~datasets.czi_import.dashboard` — the per-well plate map.
 * :mod:`~datasets.czi_import.view` — the Qt builder (a source picker that takes
   a file or a folder, the "convert the whole folder" tick-box, the well-source
   choice, grid controls, live readout, status section).
-* :mod:`~datasets.czi_import.controller` — wires the view to the worker and the
-  "open in Analyze" hand-off.
+* :mod:`~datasets.czi_import.controller` — declares this tool's
+  ``ConverterSpec`` and builds its page. Everything else — the run, the
+  queue round-trip, the worker results, the "open in Analyze" hand-off —
+  is :class:`~datasets.core.packed_convert.PackedConverterController`.
 """

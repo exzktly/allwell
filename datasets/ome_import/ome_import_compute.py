@@ -641,6 +641,20 @@ def destination_problem(dest: Path | str, src: Path | str = "",
     return marker.destination_problem(dest, IN_PROGRESS_MARKER, signature)
 
 
+def read_source(src: Path | str, params: "ConversionParams | None" = None):
+    """:func:`read_layout`, under the name every packed converter uses.
+
+    ``params`` is accepted and ignored: an OME-TIFF is one file and its layout
+    does not depend on the settings, where a CZI's source may be a whole
+    folder that the page's tick-box decides the membership of. The uniform
+    two-argument shape is what lets
+    :class:`datasets.core.packed_convert.ConverterSpec` name the reader as
+    data rather than each worker calling its own.
+    """
+    del params
+    return read_layout(src)
+
+
 def read_layout(src: Path | str) -> OmeLayout:
     """Read the OME layout, converting any failure into an :class:`OmeImportError`."""
     try:

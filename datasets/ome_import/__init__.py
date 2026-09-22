@@ -22,10 +22,14 @@ Module split (CLAUDE.md §3 suffixes):
 * :mod:`~datasets.ome_import.apply` — Qt-free executor: calls
   :func:`pipeline.ome_explode.explode_ome_tiff` into ``<dest>/in`` with progress
   and cancellation, and formats the summary.
-* :mod:`~datasets.ome_import.worker` — a thin ``QThread`` that runs planning +
-  conversion off the UI thread, emitting progress.
+* The background ``QThread`` is
+  :class:`datasets.core.packed_convert.PackedConverterWorker`, shared with
+  the other packed-file converters and parameterised by this tool's
+  :class:`~datasets.core.packed_convert.ConverterSpec`.
 * :mod:`~datasets.ome_import.view` — the Qt builder (source/destination pickers,
   grid controls, live readout, progress + log).
-* :mod:`~datasets.ome_import.controller` — wires the view to the worker and the
-  "open in Analyze" hand-off.
+* :mod:`~datasets.ome_import.controller` — declares this tool's
+  ``ConverterSpec`` and builds its page. Everything else — the run, the
+  queue round-trip, the worker results, the "open in Analyze" hand-off —
+  is :class:`~datasets.core.packed_convert.PackedConverterController`.
 """

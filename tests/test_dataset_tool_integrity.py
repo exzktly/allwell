@@ -626,10 +626,13 @@ def test_every_tool_reports_a_launch_it_abandoned(tool):
     is right there in front of them.
     """
     path = REPO_ROOT / "datasets" / tool / "controller.py"
-    tree = parse_source(path)
+    tree, where = _launcher_tree(path)
     launchers = [n for n in ast.walk(tree)
                  if isinstance(n, ast.FunctionDef) and n.name in ("_launch", "_run")]
-    assert launchers, f"{tool} has no _launch/_run to check"
+    assert launchers, (
+        f"{tool} has no _launch/_run, in its own controller or in the base it "
+        f"inherits from ({where}) — either it stopped launching a worker, or "
+        f"the launcher moved somewhere this guard cannot follow")
 
     unreported: list[str] = []
     for fn in launchers:
@@ -654,6 +657,39 @@ def test_every_tool_reports_a_launch_it_abandoned(tool):
         f"{tool} returns without starting a worker and without emitting "
         f"jobFinished at: {', '.join(unreported)} — a queued job on any of "
         "those paths stalls the queue for the session")
+
+
+def _launcher_tree(path):
+    """The tree holding a tool's ``_launch``/``_run``, following one base class.
+
+    The three packed-file converters share
+    :class:`datasets.core.packed_convert.PackedConverterController`, so their
+    own ``controller.py`` declares a spec and a page and nothing else. The
+    invariant this guard is about did not move when the code did — a queued job
+    that reaches a controller which returns without starting a worker still
+    stalls the queue — so the guard follows the inheritance rather than
+    exempting the tools that share an implementation. Exempting them is how a
+    guard reports a *greener* suite for covering less (CLAUDE.md §3).
+
+    One level, and the module is resolved from the file's own imports rather
+    than from a roster: a roster of "which tools inherit their launcher" is a
+    second list to keep in step with the first.
+    """
+    tree = parse_source(path)
+    if any(isinstance(n, ast.FunctionDef) and n.name in ("_launch", "_run")
+           for n in ast.walk(tree)):
+        return tree, str(path)
+    bases = [b.id for cls in ast.walk(tree) if isinstance(cls, ast.ClassDef)
+             for b in cls.bases if isinstance(b, ast.Name)]
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or not node.module:
+            continue
+        if not any(alias.name in bases for alias in node.names):
+            continue
+        base_path = REPO_ROOT.joinpath(*node.module.split(".")).with_suffix(".py")
+        if base_path.is_file():
+            return parse_source(base_path), str(base_path)
+    return tree, str(path)
 
 
 def _statement_blocks(node: ast.AST):

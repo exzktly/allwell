@@ -782,6 +782,13 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[str(_here / "hooks" / "rthook-charset_normalizer.py")],
     excludes=[
+        # Pulled in only as a hard dependency of `nd2` and never reached at
+        # runtime: nd2 imports dask lazily, for `ND2File.to_dask()` alone, and
+        # the ND2 converter reads through `read_frame`. Verified by importing
+        # nd2 with dask absent. Keeps a large array framework out of the bundle
+        # for a feature that does not use it.
+        "dask",
+        "resource_backed_dask_array",
         # Heavy third-party packages not used by this app
         "IPython",
         "jupyter",

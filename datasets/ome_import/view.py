@@ -56,12 +56,9 @@ from widgets.plate_order_editor import PlateOrderEditor
 from widgets.stage_path_view import StagePathView
 from widgets.plate_progress import apply_outcome, fraction_or_none
 from datasets.ome_import.ome_import_compute import (
-    CHANNEL_ROLES,
     ConversionParams,
     OmeImportError,
     RawFields,
-    channel_tokens_from_roles,
-    default_channel_roles,
     default_dest,
     destination_problem,
     infer_layout,
@@ -74,10 +71,11 @@ from datasets.ome_import.ome_import_compute import (
     read_layout,
     selection_target,
 )
+from datasets.core.channel_roles_row import ChannelRolesMixin
 from datasets.core.dataset_fields import promote_open_button
 
 # Channel-name column in the per-channel role picker.
-_ROLE_LABEL_MIN_W = 120
+ROLE_LABEL_MIN_W = 120
 
 # Widths of the small numeric boxes. Named, not written at the call site, both
 # because ARCHITECTURE §8 asks for it and because a literal passed through a
@@ -96,17 +94,10 @@ def _is_destination(root) -> str:
     return destination_problem(root)
 
 
-_ROLE_LABELS = {
-    "nuclear": "Nuclear / segmentation",
-    "fluor": "Fluorescent",
-    "phase": "Phase / brightfield",
-    "skip": "Skip",
-}
 
 
 
-
-class OmeImportPage(LogPanelMixin, QWidget):
+class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
     """The Convert OME-TIFF feature body."""
 
     runRequested = Signal()
@@ -532,8 +523,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
             return []
 
     def _build_channels(self, outer: QVBoxLayout) -> None:
-        self._channel_rows: list[tuple[str, QComboBox]] = []
-        self._channel_names_shown: list[str] = []
+        self.init_channel_roles()
         self._channels_caption = QLabel(
             "Channel roles — assign each channel a role (seeded from its name). "
             "These pre-fill Analyze's channel tokens when you open the dataset "
@@ -550,42 +540,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._channels_lay.setSpacing(theme.Spacing.xs)
         outer.addWidget(self._channels_host)
 
-    def _rebuild_channels(self, names) -> None:
-        """Rebuild the per-channel role rows when the channel set changes."""
-        names = list(names)
-        if names == self._channel_names_shown:
-            return
-        self._channel_names_shown = names
-        while self._channels_lay.count():
-            item = self._channels_lay.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.deleteLater()
-        self._channel_rows = []
-        defaults = default_channel_roles(names)
-        for name in names:
-            row = QWidget(self._channels_host)
-            hl = QHBoxLayout(row)
-            hl.setContentsMargins(0, 0, 0, 0)
-            hl.setSpacing(theme.Spacing.sm)
-            lbl = QLabel(name, row)
-            lbl.setMinimumWidth(_ROLE_LABEL_MIN_W)
-            hl.addWidget(lbl)
-            cb = QComboBox(row)
-            for role in CHANNEL_ROLES:
-                cb.addItem(_ROLE_LABELS[role], userData=role)
-            cb.setCurrentIndex(CHANNEL_ROLES.index(defaults.get(name, "fluor")))
-            hl.addWidget(cb)
-            hl.addStretch(1)
-            self._channels_lay.addWidget(row)
-            self._channel_rows.append((name, cb))
-        self._channels_caption.setVisible(bool(names))
 
-    def channel_tokens_dict(self) -> dict:
-        """The channel role assignment as a ``pipeline_info``-shaped dict."""
-        pairs = [(name, str(cb.currentData() or "fluor"))
-                 for name, cb in self._channel_rows]
-        return channel_tokens_from_roles(pairs).as_pipeline_info()
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         self.build_log_header(outer, "Convert Output")

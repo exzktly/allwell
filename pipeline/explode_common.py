@@ -172,30 +172,127 @@ _JITTER_FRACTION = 0.02
 _JITTER_FLOOR_H = 1.0 / 60.0
 _JITTER_FLOOR_FRACTION = 0.25
 
+#: A reading is never rounded to anything coarser than the whole minute.
+#: This is the one hard cap, and it exists because the alternative was
+#: measured: a unit chosen as "the coarsest that fits a tolerance derived from
+#: the interval" gave a 48-hour run a *five-minute* unit, because a long
+#: interval produced a large tolerance which licensed a coarse unit. The
+#: permission to distort scaled with the thing being measured, which is
+#: backwards. A minute is the unit the code this replaced used unconditionally,
+#: and nothing about a longer interval makes a coarser one more honest.
+_MAX_ROUND_UNIT_H = 60.0 / 3600.0
 
-def _rounding_unit(interval: float, n_gaps: int, tolerance: float) -> float:
-    """The coarsest ladder unit this series can be rounded to, or ``0.0``.
+#: And never coarser than this share of the interval. Half a unit is how far
+#: rounding can move one reading, so on a fine interval a whole minute is a
+#: visible fraction of a gap: a 12.5-minute run rounded to the minute names
+#: frame 19 at 238 min for a recorded 237.5. Two per cent keeps the worst
+#: displacement near one per cent of a gap at every scale, which is below what
+#: a filename's elapsed time is read to.
+#:
+#: This replaces a gate that divided the usable unit by the *number of gaps*,
+#: modelling per-reading rounding as though its error accumulated. It does not
+#: — only the snap accumulates, and the snap is checked directly. But that
+#: gate did bound the unit relative to the interval as a side effect, and
+#: removing it without putting this in its place reintroduced the drift on
+#: exactly the 12.5-minute case the branch was opened to fix.
+_ROUND_FRACTION = 0.02
 
-    Rounding an *interval* and then multiplying it by an index multiplies the
-    rounding error too. A 12.5-minute run rounded to the whole minute becomes
-    a 13-minute one, and by the twentieth frame that is nine and a half
-    minutes of elapsed time the acquisition never recorded — stated in a
-    filename, with nothing saying so. So a unit is only usable when its worst
-    case, half of it at every step, still lands the last timepoint inside
-    *tolerance*.
+#: How far a *named* timepoint may sit from the time actually recorded for it,
+#: before the naming is abandoned and the measured times are used instead.
+#:
+#: **One minute, flat.**
+#:
+#: Two rules were measured before this one and both were worse. Scaling the
+#: budget with the interval — the shape the rounding unit also had — let a
+#: 48-hour run name an image taken at 1104.94 h as ``1104h``: 56 minutes
+#: invented, with nothing saying so. Every fraction-of-the-interval rule
+#: permits the most fabrication exactly where the absolute error is largest,
+#: and "two per cent of the axis" is not what a person reads off a filename.
+#: They read an elapsed time.
+#:
+#: A fraction *capped* at ten minutes was tried next, to keep naming a plate
+#: by its schedule — a stage that takes a minute per round makes an hourly run
+#: reach frame 24 two minutes late, and ``0h … 23h`` is arguably what the
+#: experiment *was*. It did not work, and the reason generalises: any
+#: threshold is a discontinuity, so two sister plates whose overheads fall
+#: either side of it are named differently and stop matching in
+#: ``domain.tp_match``. Raising the budget moves that cliff; it does not
+#: remove it. What it does remove is the bound.
+#:
+#: So the bound stays tight and the cliff is accepted. A minute is enough for
+#: the case this rounding exists for — a few seconds of stage overhead on a
+#: timelapse of a dozen frames — and small enough to state plainly: **a
+#: timepoint's name is never more than a minute from when the image was
+#: taken.** A run whose overhead accumulates past that is named at its
+#: measured times instead: less tidy, and true.
+#:
+#: The cost is real and is not hidden. Two plates of one experiment with
+#: different per-round overheads can carry timepoints that do not match, so
+#: they cannot be concatenated without re-basing. That is a property of naming
+#: by measurement rather than by schedule, it predates this module, and the
+#: remedy is Review's *Interval per timepoint*.
+#: …and never more than this, whatever the jitter, so a loosely-spaced run
+#: cannot license an unbounded rewrite of its own clock.
+_SNAP_CAP_H = 5.0 / 60.0
 
-    ``0.0`` means no unit is safe and the readings are used as they were
-    measured, which is what a sub-second time-lapse gets.
+
+def _rounding_unit(interval: float) -> float:
+    """The coarsest ladder unit a reading may be rounded to, or ``0.0``.
+
+    Rounding is per *reading*, so the error it introduces is at most half a
+    unit on each one and **does not accumulate** — an earlier version of this
+    function divided the usable unit by the number of gaps as though it did,
+    which is the modelling error behind two opposite defects. It made a long
+    interval eligible for a coarse unit (a 48-hour run rounded to five
+    minutes) and simultaneously starved a long *run* of any unit at all, so
+    the jitter tidying this module exists for silently stopped past about
+    eleven frames on an hourly plate and archives went back to carrying
+    ``11.0153h`` in their filenames.
+
+    What does accumulate is the *snap* — naming every timepoint at
+    ``first + interval × index`` — and that is bounded by checking the result
+    against the readings in :func:`regularise_hours`, which is the only place
+    the bound can honestly be established.
+
+    ``0.0`` means no unit is usable and the readings are named as they were
+    measured, which is what a sub-second time-lapse gets: half a unit must
+    fit inside half the interval, or rounding would merge two timepoints.
     """
-    limit = abs(interval) / 2.0
-    steps = max(1, n_gaps)
+    limit = min(abs(interval) / 2.0,
+                abs(interval) * _ROUND_FRACTION,
+                _MAX_ROUND_UNIT_H)
     best = 0.0
     for unit in _ROUND_LADDER_H:
         if unit > limit:
             break
-        if (unit / 2.0) * steps <= tolerance:
-            best = unit
+        best = unit
     return best
+
+
+def _snap_budget(raw_gaps: "list[float]", unit: float) -> float:
+    """How far naming a series at one interval may move any of its readings.
+
+    **From the series' own jitter**, which is what makes the rule statable:
+    a snap that moves a timepoint further than the acquisition's own spacing
+    already varied is inventing elapsed time rather than tidying it away.
+
+    Two earlier versions derived this from the *interval* instead, and each
+    was measured doing damage. A plain fraction let a 48-hour run name an
+    image taken at 1104.94 h as ``1104h`` — 56 minutes invented. A fraction
+    capped at five minutes fixed that and still moved a **perfectly regular**
+    238.75-minute series 4.75 minutes onto a 240-minute grid, which is the
+    plainest possible case of fabricating time: the acquisition had no jitter
+    at all, so there was nothing to clean.
+
+    The floor at *unit* is what keeps the feature working. A constant
+    per-round stage overhead has zero gap jitter and is exactly what this
+    rounding exists to absorb, so a series whose readings drift by less than
+    one rounding unit is still allowed onto the grid.
+    """
+    if not raw_gaps:
+        return min(abs(unit), _SNAP_CAP_H)
+    jitter = max(raw_gaps) - min(raw_gaps)
+    return min(max(jitter, abs(unit)), _SNAP_CAP_H)
 
 
 def regularise_hours(hours_by_index: "dict[int, float]",
@@ -246,7 +343,7 @@ def regularise_hours(hours_by_index: "dict[int, float]",
     tolerance = max(abs(raw_interval) * _JITTER_FRACTION,
                     min(_JITTER_FLOOR_H,
                         abs(raw_interval) * _JITTER_FLOOR_FRACTION))
-    unit = _rounding_unit(raw_interval, n_gaps, tolerance)
+    unit = _rounding_unit(raw_interval)
     measured = ([round(value / unit) * unit for value in raw] if unit
                 else list(raw))
     gaps = [measured[i + 1] - measured[i] for i in range(n_gaps)]
@@ -257,8 +354,18 @@ def regularise_hours(hours_by_index: "dict[int, float]",
                 f"the timepoints are not evenly spaced ({spread} apart), so "
                 f"they are named at the times actually recorded rather than "
                 f"at one interval")
+    # The snap is the only step whose error accumulates, so it is the only one
+    # checked against the readings themselves rather than gap by gap. A series
+    # can be regular at every gap and still drift far from a single interval
+    # over twenty of them — a per-round stage overhead does exactly that — and
+    # the per-gap test above cannot see it.
+    #
+    # Checked against ``raw``, not against ``measured``, because the question
+    # is what the filename claims about the acquisition, and the acquisition
+    # is what was recorded.
+    budget = _snap_budget(raw_gaps, unit)
     snapped = [measured[0] + interval * i for i in range(size_t)]
-    if any(abs(snapped[i] - raw[i]) > tolerance for i in range(size_t)):
+    if any(abs(snapped[i] - raw[i]) > budget for i in range(size_t)):
         # Regular gap by gap and drifting over the run. The measured times are
         # right and the interval is a story about them, so keep the times.
         return {i: measured[i] for i in range(size_t)}, ""

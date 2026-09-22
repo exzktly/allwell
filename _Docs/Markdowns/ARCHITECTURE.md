@@ -6120,20 +6120,47 @@ Three constraints on that, each of which a mutation showed a test had to pin:
   (§7.1) and it fails in two directions at once. Too fine and nothing is
   cleaned; too coarse and a time-lapse 100 ms apart lands every timepoint on
   `0h`, collides, and goes to positional names — OME-TIFFs carry millisecond
-  `DeltaT` values routinely. Worse, rounding an *interval* and then
-  multiplying it by an index multiplies the rounding error: a 12.5-minute run
-  rounded to the whole minute becomes a 13-minute one, and by the twentieth
-  frame that is 9.5 minutes of elapsed time the acquisition never recorded,
-  written into a filename with nothing saying so. A 20.5-minute run measured
-  14.5 minutes of it. So a unit is usable only when its worst case, half of it
-  at every step, still lands the last timepoint inside tolerance.
+  `DeltaT` values routinely. The unit is capped at the whole minute, at two
+  per cent of the interval, and at half of it: half a unit is how far rounding
+  can move one reading, so on a fine interval a whole minute is a visible
+  fraction of a gap.
+
+  **Rounding each reading does not accumulate**, and a version of this that
+  assumed it did caused two opposite defects at once. It divided the usable
+  unit by the number of gaps, which made a long *interval* eligible for a
+  coarse unit — a 48-hour run rounded to five minutes — while starving a long
+  *run* of any unit at all, so the jitter tidying silently stopped past about
+  eleven frames on an hourly plate and archives went back to carrying
+  `11.0153h` in their filenames. What accumulates is the snap below.
 - **And only when the result still matches what was measured.** The per-gap
   regularity test is not sufficient on a long series: drift that stays inside
   tolerance at every single step accumulates over twenty of them. The snapped
   series is therefore checked against the readings themselves before it is
-  used, and a snap that moved any timepoint further than its own jitter is
-  declined in favour of the measured times. This is the load-bearing check —
-  it is what makes the other two safe rather than merely careful.
+  used, and a snap that moves any timepoint further than the series' **own
+  gap jitter** — or one rounding unit, whichever is larger, and never more
+  than five minutes — is declined in favour of the measured times. This is the
+  load-bearing check, and it is what makes the other two safe rather than
+  merely careful.
+
+  The bound comes from the jitter because that is the only quantity that makes
+  the rule statable: a snap that moves a timepoint further than the
+  acquisition's own spacing already varied is inventing elapsed time rather
+  than tidying it away. Two versions derived it from the *interval* instead
+  and each was measured doing damage — a plain fraction named an image taken
+  at 1104.94 h as `1104h`, inventing 56 minutes, and a fraction capped at five
+  minutes still moved a **perfectly regular** 238.75-minute series onto a
+  240-minute grid, which is fabrication in its plainest form: the acquisition
+  had no jitter, so there was nothing to clean. The floor at one rounding unit
+  is what keeps the feature working, because a constant per-round stage
+  overhead has zero gap jitter and is exactly what the rounding exists to
+  absorb.
+
+  One cost is accepted rather than hidden. Any threshold is a discontinuity,
+  so two plates of one experiment whose per-round overheads fall either side
+  of it can be named differently and stop matching in `domain/tp_match.py`.
+  Raising the budget moves that cliff without removing it, and removes the
+  bound; the remedy for a pair of plates that lands on it is Review's
+  *Interval per timepoint*.
 - **From the series' own first reading, never from zero.** A CZI's stamps are
   already elapsed-from-the-first-plane so its origin is 0 either way, but an
   OME `DeltaT` is elapsed from the *acquisition's* start and a file whose first

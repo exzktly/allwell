@@ -246,6 +246,35 @@ def _read_file_header(fh: BinaryIO) -> tuple[int, int]:
     return directory_position, metadata_position
 
 
+#: Held while a file's bytes are turned into objects, and never while they are
+#: being read.
+#:
+#: A plate scan is read across a pool of threads because the files are usually
+#: on a network share, where eight requests in flight cover eight round trips
+#: — measured at 797 ms down to 104 ms for a 96-file peek with 8 ms of
+#: per-file latency. That rationale is entirely about *waiting*, and this
+#: module does not only wait: it is a parser written in Python, so the work
+#: between the reads is bytecode and holds the interpreter lock.
+#:
+#: Eight threads of that do not go eight times faster; they contend. Measured
+#: on 96 local files, where there is no latency to cover and the cost is
+#: therefore all parsing: one worker took 3.48 s and left the window's event
+#: loop unstarved, while eight took 4.22 s and starved it for 65.6% of the
+#: run, with single pauses of 266 ms. Slower *and* unusable, from threads
+#: added to make it faster.
+#:
+#: So the reads stay as wide as the pool and the parsing is serialised behind
+#: this. A thread waiting on a share still overlaps with every other thread's
+#: wait, which is the whole of what the pool was for; what no longer overlaps
+#: is the part that could never overlap anyway, and whose attempts to were
+#: costing the window its responsiveness.
+#:
+#: It must never be held across a read. A lock taken around IO would put the
+#: round trips back end to end and undo the pool completely — which is the
+#: measurement to check whenever this moves (``tests/test_czi_scan_leaves_the_window_alive.py``).
+_PARSE_LOCK = threading.Lock()
+
+
 def _read_subblock_directory(fh: BinaryIO, position: int) -> list[SubBlock]:
     """Every directory entry, pyramid copies included (filtered by the caller)."""
     fh.seek(position)
@@ -263,9 +292,12 @@ def _read_subblock_directory(fh: BinaryIO, position: int) -> list[SubBlock]:
                            "count; the file is damaged.")
     blocks: list[SubBlock] = []
     offset = _DIRECTORY_HEADER_LEN
-    for _ in range(count):
-        block, offset = _parse_directory_entry(body, offset)
-        blocks.append(block)
+    # The bytes are in hand; what follows is pure computation, and a plate's
+    # worth of it on eight threads at once is what starves the window.
+    with _PARSE_LOCK:
+        for _ in range(count):
+            block, offset = _parse_directory_entry(body, offset)
+            blocks.append(block)
     return blocks
 
 
@@ -415,12 +447,17 @@ def parse_plate_metadata(xml: str, *, bytes_read: int = 0) -> _PlateMetadata:
     """Answer every question this module asks of *xml*, in one parse."""
     if not xml:
         return _PlateMetadata(has_metadata=False, bytes_read=bytes_read)
-    try:
-        root = ET.fromstring(xml)
-    except ET.ParseError as exc:
-        return _PlateMetadata(has_metadata=False, parse_error=str(exc),
-                              bytes_read=bytes_read)
-    index = _DocIndex(root)
+    # ``ET.fromstring`` is four fifths of what reading a header costs and it
+    # is a C call that does not hand the interpreter lock back while it runs,
+    # so eight of them at once is eight documents' worth of a window that
+    # cannot repaint. *xml* has already been read; only the parsing waits.
+    with _PARSE_LOCK:
+        try:
+            root = ET.fromstring(xml)
+        except ET.ParseError as exc:
+            return _PlateMetadata(has_metadata=False, parse_error=str(exc),
+                                  bytes_read=bytes_read)
+        index = _DocIndex(root)
     return _PlateMetadata(
         has_metadata=True,
         scene_wells=_scene_wells(index),
@@ -837,16 +874,22 @@ def parse_acquisition_time(xml: str) -> "datetime | None":
     """
     if not xml:
         return None
-    try:
-        root = ET.fromstring(xml)
-    except ET.ParseError:
-        return None
-    raw = ""
-    for element in root.iter():
-        if _localname(element.tag).lower() in _ACQUISITION_TIME_TAGS:
-            raw = (element.text or "").strip()
-            if raw:
-                break
+    # Behind the same lock as the plate document, and found by the guard that
+    # asks how many files are being parsed at once: a subblock's metadata is
+    # small, but there is one per sampled timepoint, and a scan that
+    # serialises the large documents while leaving a stream of small ones to
+    # contend has only moved where the contention is.
+    with _PARSE_LOCK:
+        try:
+            root = ET.fromstring(xml)
+        except ET.ParseError:
+            return None
+        raw = ""
+        for element in root.iter():
+            if _localname(element.tag).lower() in _ACQUISITION_TIME_TAGS:
+                raw = (element.text or "").strip()
+                if raw:
+                    break
     if not raw:
         return None
     text = normalise_instant(raw)
@@ -1407,7 +1450,10 @@ def read_czi_layout(path: Path | str, *,
             scan = scan_timepoint_hours(
                 fh, layout_blocks,
                 max((b.start("T") for b in layout_blocks), default=-1) + 1)
-    layout = _build_layout(blocks, meta, from_directory=from_directory)
+    # Also computation on bytes already read: several passes over every
+    # subblock the file declares, to reduce them to the counts a layout is.
+    with _PARSE_LOCK:
+        layout = _build_layout(blocks, meta, from_directory=from_directory)
     layout.time_scan = scan
     if not from_directory and layout.n_blocks:
         layout.warnings.append(

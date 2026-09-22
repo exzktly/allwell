@@ -6062,7 +6062,22 @@ actually happens: one channel's planes carrying a bad unit while another's carry
 seconds leaves every timepoint resolved, and a log line asserting data loss that
 did not occur sends a user to re-export a plate for nothing.
 
-`_hours_token` does the rendering, in **fixed** notation at six significant
+**The rendering, and the decision to use the readings at all, are shared with
+the CZI converter.** `explode_common.hours_token` and
+`explode_common.elapsed_hour_tokens` are the single definitions; `ome_explode`
+keeps only `_source_reasons`, which builds the two reasons peculiar to OME-XML
+(an unreadable `DeltaTUnit`, a `TheT` outside the file's own T axis). Two
+definitions of "render an elapsed hour into a filename token" would answer
+differently the day one of them changed, and a plate concatenated from an
+OME-TIFF export and a CZI export of one acquisition would then hold `4h` and
+`4.0h` as separate timepoints.
+
+`_parse_ome_labels` returns the resulting one-sentence verdict alongside the
+tokens rather than only logging it, and `OmeLayout.timepoint_note` carries it to
+the converter page, which shows it in the verdict line **before** the run. A log
+line arrives after the conversion, which is too late to re-export a plate.
+
+`hours_token` does the rendering, in **fixed** notation at six significant
 figures. `f"{v:g}"` switches to exponent form below 1e-4, which was rare while
 every `DeltaT` was read as seconds and became routine once the sub-second units
 were added: a six-frame time-lapse 100 ms apart rendered `2.77778e-05h`, and
@@ -6070,6 +6085,50 @@ were added: a six-frame time-lapse 100 ms apart rendered `2.77778e-05h`, and
 `None`, `sort_key` sorted those tokens as text, and frames 5 and 6 landed ahead
 of frames 2 to 4. A number the app cannot read back is worse than a wrong one,
 which at least orders correctly.
+
+**A measured series is snapped onto its own interval.**
+`explode_common.regularise_hours` runs before the rendering, for both
+converters. An acquisition that ran every four hours does not produce readings
+exactly four hours apart — the stage takes as long as it takes — so a real
+series reads 0, 4.00139, 8.00278 and would render as `0h`, `4.00139h`,
+`8.00278h`: numbers that are true, unhelpful in a filename, and different on
+the next plate of the same experiment. The gaps are measured, their median
+taken as *the* interval, and each timepoint named at `first + index ×
+interval`.
+
+Three constraints on that, each of which a mutation showed a test had to pin:
+
+- **Only where the series really is regular.** A plate imaged at 0, 4, 8 and
+  then 24 hours — a final overnight point, an ordinary design — has no single
+  interval, and forcing one would state three spacings the acquisition never
+  used. Such a series keeps its measured times and carries a note saying so;
+  the tokens are still correct and only the tidying was declined.
+- **Only at a granularity the series can carry.** Rounding to the minute is
+  jitter-removal on an hourly run and total destruction on a time-lapse 100 ms
+  apart, where every timepoint lands on `0h`, collides, and sends the whole run
+  to positional names — and OME-TIFFs carry millisecond `DeltaT` values
+  routinely. `_rounder` therefore rounds nothing below a ten-minute interval.
+  This is a domain predicate applied outside its domain (§7.1), caught by the
+  existing sub-second tests rather than by review.
+- **From the series' own first reading, never from zero.** A CZI's stamps are
+  already elapsed-from-the-first-plane so its origin is 0 either way, but an
+  OME `DeltaT` is elapsed from the *acquisition's* start and a file whose first
+  frame sits at 3600 s legitimately begins at `1h`. Re-basing at zero would
+  move every timepoint by that offset invisibly, since the spacing it is
+  checked against stays right — and would defeat the collision check the offset
+  was hiding behind, turning two frames a picosecond apart at 1 h from a
+  correct positional fallback into `0h` and `0.000000000028h`.
+
+**Both converters take a timepoint stride.** *Keep every Nth timepoint* is the
+same field, the same `explode_common.timepoint_plan`, the same mapping-signature
+key and the same `4 of 12 timepoint(s)` readout on each page; §6.2a states the
+rules in full. The OME side carries one trap the CZI side does not: a
+single-image file's frames are one flat sequence and `_frame_index` locates a
+plane with `position × n_timepoints + t`, where `n_timepoints` is what the
+*file* holds. `explode_ome_tiff` therefore keeps that name bound to the source
+count and counts kept timepoints separately — rebinding it reads the wrong frame
+for every position after the first, with the member names and the archive sizes
+all still right.
 
 **The file already knows most of the layout.** An OME-TIFF's `<Plane>`
 elements carry `PositionX`/`PositionY` — where on the stage each image was taken

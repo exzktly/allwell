@@ -386,6 +386,15 @@ class OmeImportPage(LogPanelMixin, QWidget):
             "count and the wells above)."
         )
         hl2.addWidget(self._fovs_edit)
+        hl2.addWidget(QLabel("Keep every Nth timepoint:", row2))
+        self._stride_edit = self._small("", placeholder="all")
+        self._stride_edit.setToolTip(
+            "Leave blank to convert every timepoint. Set 3 to convert the "
+            "first and then every third one after it, which is how a "
+            "densely-sampled timelapse is converted at a coarser resolution "
+            "without re-exporting it. The kept timepoints keep their own "
+            "names, so a four-hourly run gives 0h, 12h, 24h.")
+        hl2.addWidget(self._stride_edit)
         self._order_label = QLabel("Frame order:", row2)
         hl2.addWidget(self._order_label)
         self._frame_order_cb = QComboBox(row2)
@@ -672,6 +681,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
             rows=self._rows_edit.text(),
             cols=self._cols_edit.text(),
             fovs=self._fovs_edit.text(),
+            timepoint_stride=self._stride_edit.text(),
             origin=self._origin_edit.text(),
             workers=self._workers_edit.text(),
             direction=str(self._direction_cb.currentData() or "row"),
@@ -698,6 +708,9 @@ class OmeImportPage(LogPanelMixin, QWidget):
         if idx >= 0:
             self._frame_order_cb.setCurrentIndex(idx)
         self._workers_edit.setText(str(params.workers) if params.workers else "")
+        self._stride_edit.setText(
+            "" if params.timepoint_stride in (0, 1)
+            else str(params.timepoint_stride))
         if params.well_order:
             self._plate.set_order(list(params.well_order))
         else:
@@ -781,7 +794,8 @@ class OmeImportPage(LogPanelMixin, QWidget):
         # not being written, with their dials wiped, while the conversion
         # carries on against the order it actually started with.
         self._plate.setEnabled(not running)
-        for w in (self._grid_row, self._fovs_edit, self._frame_order_cb,
+        for w in (self._grid_row, self._fovs_edit, self._stride_edit,
+                  self._frame_order_cb,
                   self._workers_edit, self._seed_btn, self._clear_path_btn,
                   self._suggest_btn, self._mirror_row):
             w.setEnabled(not running)
@@ -849,7 +863,14 @@ class OmeImportPage(LogPanelMixin, QWidget):
                 head += "\n" + resume.hint()
             try:
                 plan = plan_conversion(layout, params)
-                verdict, tone = f"✓ {plan.summary()}", "Muted"
+                # The timing note rides with the summary rather than waiting
+                # for the run log: a plate whose timepoints lost their elapsed
+                # hours is a dataset with no time axis in Review, and the
+                # moment to find that out is while it can still be re-exported.
+                verdict = "✓ " + "  ".join(
+                    part for part in (plan.summary(), plan.timepoint_warning)
+                    if part)
+                tone = "Muted"
                 can = bool(self._dest_field.path()) and not dest_problem
             except OmeImportError as exc:
                 verdict, tone = f"⚠ {exc}", "Danger"

@@ -25,8 +25,8 @@ import zipfile
 import numpy as np
 import pytest
 
-from pipeline.czi_explode import _stride_note, explode_czi
-from pipeline.explode_common import timepoint_plan
+from pipeline.czi_explode import explode_czi
+from pipeline.explode_common import stride_note, timepoint_plan
 from tests._czi_fixture import plate_metadata_xml, plate_tiles, write_czi
 
 
@@ -68,13 +68,13 @@ def test_a_stride_below_one_is_refused_by_name(stride):
 
 def test_the_log_note_names_the_stride_the_total_and_the_kept_tokens():
     """A count alone reads the same as a plate that only had four timepoints."""
-    note = _stride_note(3, 12, ["t0", "t3", "t6", "t9"])
+    note = stride_note(3, 12, ["t0", "t3", "t6", "t9"])
     assert note == " (every 3rd of 12: t0, t3, t6, t9)"
 
 
 def test_the_log_note_is_empty_when_nothing_was_dropped():
-    assert _stride_note(1, 12, [f"t{i}" for i in range(12)]) == ""
-    assert _stride_note(4, 1, ["t0"]) == ""
+    assert stride_note(1, 12, [f"t{i}" for i in range(12)]) == ""
+    assert stride_note(4, 1, ["t0"]) == ""
 
 
 # ── the conversion ───────────────────────────────────────────────────────────

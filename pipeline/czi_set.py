@@ -107,10 +107,13 @@ class CziSet:
     #: ``4h``, …) when the files' acquisition stamps yield a complete, distinct
     #: series, and the positional ``t0``, ``t1``, … otherwise.
     timepoint_tokens: list[str] = field(default_factory=list)
-    #: Why the tokens are positional, in the run log's words. Empty when they
-    #: are elapsed times, and never empty when they are positional *because*
-    #: something was unreadable — a plate named by position with nothing said
-    #: about it is indistinguishable from one whose writer recorded no times.
+    #: What the user should be told about the timepoint names — a whole
+    #: sentence, or ``""`` when there is nothing to say. Never empty when the
+    #: tokens are positional *because* something was unreadable: a plate named
+    #: by position with nothing said about it is indistinguishable from one
+    #: whose writer recorded no times at all. Also carries the uneven-spacing
+    #: notice, which is not a failure — the tokens are the measured times and
+    #: only the tidying onto one interval was declined.
     timepoint_note: str = ""
 
     @property
@@ -433,8 +436,11 @@ def _timepoint_tokens(layout: CziLayout) -> tuple[list[str], str]:
     resolved = elapsed_hour_tokens(scan.hours_by_index, layout.size_t,
                                    source_reasons=scan.reasons)
     if resolved.tokens is not None:
-        return resolved.tokens, ""
-    return positional, "; ".join(resolved.reasons)
+        return resolved.tokens, (f"{resolved.note[:1].upper()}{resolved.note[1:]}."
+                                 if resolved.note else "")
+    return positional, (
+        f"Timepoints are named by position (t0, t1, …) rather than by elapsed "
+        f"time — {'; '.join(resolved.reasons)}.")
 
 
 def read_czi_set_safely(source: Path | str, *,

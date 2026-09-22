@@ -180,17 +180,15 @@ class ConversionPlan:
 
     @property
     def timepoint_warning(self) -> str:
-        """The sentence the page shows when the elapsed times were unusable.
+        """The sentence the page shows about how the timepoints were named.
 
-        Said *before* the run rather than only in the log afterwards, because a
-        plate whose timepoints lost their hours is a dataset with no time axis
-        in Review, and the moment to find that out is while the source can
-        still be re-exported.
+        Said *before* the run rather than only in the log afterwards. A plate
+        whose timepoints lost their hours is a dataset with no time axis in
+        Review, and the moment to find that out is while the source can still
+        be re-exported; an unevenly-spaced one is fine but worth knowing about
+        before the filenames are read as a regular series.
         """
-        if not self.timepoint_note:
-            return ""
-        return (f"Timepoints are named by position (t0, t1, …) rather than by "
-                f"elapsed time — {self.timepoint_note}.")
+        return self.timepoint_note
 
 
 def parse_count(text: object) -> tuple[int | None, bool]:

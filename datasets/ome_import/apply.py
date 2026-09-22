@@ -100,6 +100,7 @@ def convert(
         serpentine=params.serpentine,
         experiment=experiment,
         fovs_per_well=params.fovs_per_well,
+        timepoint_stride=params.timepoint_stride,
         frame_order=params.frame_order,
         well_order=list(params.well_order) or None,
         workers=params.workers,

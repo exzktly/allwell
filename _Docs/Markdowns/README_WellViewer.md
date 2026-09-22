@@ -4905,14 +4905,25 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    run goes and nothing about what comes out. How many wells to convert in
    parallel (blank = auto, capped at the number of wells). Lower it if converting
    to a single spinning disk feels slower rather than faster.
-6. **Frame order** — *shown only for a single-image file that packs every
+6. **Keep every Nth timepoint** — blank converts the whole timelapse. Set it
+   to 3 and the run converts the first timepoint and then every third one after
+   it, for taking a densely-sampled acquisition into a dataset at a coarser
+   time resolution without re-exporting it. The kept timepoints keep their own
+   names, so every third point of a four-hourly run is `0h`, `12h`, `24h`,
+   `36h` — the real elapsed hours of the images kept, never renumbered. The
+   first timepoint is always kept, since on a treatment timecourse that is the
+   reading everything else is measured against. The readout states both counts,
+   *"4 of 12 timepoint(s) (0h, 12h, 24h, 36h)"*, because a dataset converted
+   this way otherwise looks exactly like a plate that was only imaged four
+   times. The same control, with the same behaviour, is on the Convert CZI page.
+7. **Frame order** — *shown only for a single-image file that packs every
    position into its T axis*. Because an OME image has no position dimension, the
    positions live in the T axis, possibly interleaved with real timepoints. Say
    how the frames are ordered: **Single timepoint** (every frame is a distinct
    position), **Positions within timepoint** (all positions, then the set repeats
    next timepoint), or **Timepoints within position**. Positions come from your
    grid × FOVs; timepoints are then `frames ÷ positions`.
-7. **Channel roles** — one row per channel read from the OME metadata, each with a
+8. **Channel roles** — one row per channel read from the OME metadata, each with a
    role: **Nuclear / segmentation**, **Fluorescent**, **Phase / brightfield**, or
    **Skip**. The roles are seeded from the channel names: a `DAPI` / `Hoechst`-type
    stain is guessed as the nuclear/segmentation channel, or failing that a
@@ -4950,11 +4961,12 @@ same settings and the readout says *"Resuming an interrupted run: 12 well(s) are
 already converted and will be kept"*; only the missing wells are converted, and
 the summary at the end says how many were kept. Change anything that alters
 which stage position becomes which well — the grid, origin, serpentine
-direction, FOVs per well, the clicked path, or the source file — and it is
+direction, FOVs per well, the timepoint stride, the clicked path, or the source
+file — and it is
 refused instead, because the two runs would produce files with the same names
 from different images. Empty the folder and start again in that case. Then **Open dataset in Analyze** — the Segmentation /
 fluorescent channel tokens arrive pre-filled from the channel roles you set (step
-7; adjust if needed), so you can run straight away. Because the wells now exist on
+8; adjust if needed), so you can run straight away. Because the wells now exist on
 disk, background-well and control-well options work normally.
 
 **The file is checked as soon as you pick it**, and a file that can't be
@@ -4996,7 +5008,21 @@ carries a `DeltaT` for each frame, the converted filenames use it — `0h`, `1h`
 hours or days). If the file states a unit All-Well does not recognise — or
 records times that would give two timepoints the same name — the timepoints are
 named by position instead (`t0`, `t1`, …): the order is still right and nothing
-claims an elapsed time the converter could not work out.
+claims an elapsed time the converter could not work out. When that happens the
+page says so in the line under the settings, before you run, rather than leaving
+it to the log afterwards.
+
+**A run that kept one interval is named at that interval.** An acquisition set
+to four hours does not produce readings exactly four hours apart — the stage
+takes as long as it takes — so the raw numbers come out more like 0, 4.00139
+and 8.00278 hours, and using them literally would put `4.00139h` in a filename:
+true, unhelpful, and different on the next plate of the same experiment.
+All-Well measures the gaps, takes the interval the run actually kept, and names
+every timepoint at a whole multiple of it. A plate with no single interval — 0,
+4, 8 and then an overnight point at 24 — keeps the times it really recorded,
+and the page says that is what it did. The Convert CZI page does exactly the
+same thing with the times a `.czi` records, so one acquisition exported both
+ways converts to the same timepoint names.
 
 All-Well looks for those coordinates in **both** places a file keeps metadata:
 the OME block, and the original metadata the microscope wrote, which conversion

@@ -49,6 +49,7 @@ from pipeline.explode_common import (
     expected_members,
     pick_workers,
     resolve_positions,
+    stride_note,
     timepoint_plan,
     well_is_complete,
     worker_groups,
@@ -231,23 +232,6 @@ def resolve_well_map(
     )
 
 
-def _stride_note(stride: int, size_t: int, kept_tokens: list[str]) -> str:
-    """" (every 3rd of 12: t0, t3, t6, t9)" — or "" when nothing was dropped.
-
-    Spelled out in the run log rather than left to arithmetic on the totals.
-    A plate converted at a stride writes a complete-looking dataset holding a
-    third of its timelapse, and the one place a reader would otherwise notice
-    is a timepoint count they have no reason to be counting (CLAUDE.md §7).
-    """
-    if stride <= 1 or size_t <= 1:
-        return ""
-    shown = ", ".join(kept_tokens[:4])
-    if len(kept_tokens) > 4:
-        shown += f", ... {kept_tokens[-1]}"
-    ordinal = {2: "2nd", 3: "3rd"}.get(stride, f"{stride}th")
-    return f" (every {ordinal} of {size_t}: {shown})"
-
-
 def explode_czi(
     czi_path: "Path | str",
     out_in_dir: "Path | str",
@@ -353,8 +337,7 @@ def explode_czi(
     fovs = well_map.fovs_per_well
     n_wells = well_map.n_wells
     if czi_set.timepoint_note:
-        _log(f"[czi] Timepoints are named by position (t0, t1, ...) rather "
-             f"than by elapsed time -- {czi_set.timepoint_note}.\n")
+        _log(f"[czi] {czi_set.timepoint_note}\n")
 
     out_in_dir.mkdir(parents=True, exist_ok=True)
     total = czi_set.n_positions * n_kept_t * layout.size_c
@@ -365,7 +348,7 @@ def explode_czi(
     _log(
         f"[czi] {held_in}: {czi_set.n_scenes} scene(s) -> {n_wells} "
         f"well(s) x {fovs} FOV(s) x {n_kept_t} timepoint(s)"
-        f"{_stride_note(timepoint_stride, layout.size_t, tp_tokens)}, "
+        f"{stride_note(timepoint_stride, layout.size_t, tp_tokens)}, "
         f"{layout.size_c} channel(s)"
         f"{f', {layout.size_z} Z-plane(s) max-projected' if layout.size_z > 1 else ''}"
         f" -- wells from {source}, {n_workers} worker(s).\n"

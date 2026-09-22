@@ -1488,3 +1488,114 @@ def test_every_outcome_of_reading_a_file_says_something(qapp, tmp_path):
     page2._on_source_changed()
     assert page2._suggest_row.isVisibleTo(page2)
     assert "no stage coordinates" in page2._suggest_label.text()
+
+
+def _stride_page(qapp, tmp_path, *, timepoints=6, delta_s=None):
+    """A multi-image OME-TIFF on a page with a 1x2 grid entered."""
+    from datasets.ome_import.controller import OmeImportController
+
+    path = tmp_path / "plate.ome.tif"
+    with tifffile.TiffWriter(str(path), ome=True) as tw:
+        for _pos in range(2):
+            arr = np.zeros((timepoints, 2, 6, 6), np.uint16)
+            meta = {"axes": "TCYX", "Channel": {"Name": ["DAPI", "GFP"]}}
+            if delta_s is not None:
+                meta["Plane"] = [{"DeltaT": float(delta_s[t]), "DeltaTUnit": "s"}
+                                 for t in range(timepoints) for _c in range(2)]
+            tw.write(arr, photometric="minisblack", metadata=meta)
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
+    page = ctrl.page
+    page._src_field.set_path(str(path))
+    page._on_source_changed()
+    page._rows_edit.setText("1")
+    page._cols_edit.setText("2")
+    page.refresh_readout()
+    return ctrl, page
+
+
+def test_typing_a_stride_into_the_ome_box_reaches_the_params(qapp, tmp_path):
+    """Driven through the widget, not through ``RawFields``: a box wired to
+    nothing looks identical to one wired correctly until something reads it."""
+    ctrl, page = _stride_page(qapp, tmp_path)
+    try:
+        assert page.params().timepoint_stride == 1, "blank must mean every one"
+        page._stride_edit.setText("3")
+        assert page.params().timepoint_stride == 3
+        page._stride_edit.setText("")
+        assert page.params().timepoint_stride == 1
+    finally:
+        ctrl.shutdown()
+        page.deleteLater()
+
+
+def test_the_ome_readout_says_how_many_timepoints_a_stride_keeps(qapp, tmp_path):
+    ctrl, page = _stride_page(qapp, tmp_path, timepoints=6)
+    try:
+        page._stride_edit.setText("3")
+        page.refresh_readout()
+        assert "2 of 6 timepoint(s) (t0, t3)" in page._verdict.text(), \
+            page._verdict.text()
+    finally:
+        ctrl.shutdown()
+        page.deleteLater()
+
+
+def test_a_zero_stride_is_refused_with_a_reason_the_ome_page_can_show(
+        qapp, tmp_path):
+    ctrl, page = _stride_page(qapp, tmp_path)
+    try:
+        page._stride_edit.setText("0")
+        problems = page.raw_fields().problems()
+        assert any("Keep every Nth timepoint" in p for p in problems), problems
+    finally:
+        ctrl.shutdown()
+        page.deleteLater()
+
+
+def test_the_ome_page_warns_when_the_timepoints_lost_their_elapsed_times(
+        qapp, tmp_path):
+    """The file records no DeltaT at all, so the dataset reaches Review with no
+    time axis. The page says so before the run, not only in the log after it."""
+    ctrl, page = _stride_page(qapp, tmp_path, timepoints=3)
+    try:
+        assert "named by position" in page._verdict.text(), page._verdict.text()
+    finally:
+        ctrl.shutdown()
+        page.deleteLater()
+
+
+def test_the_ome_page_says_nothing_extra_when_the_times_are_usable(
+        qapp, tmp_path):
+    ctrl, page = _stride_page(qapp, tmp_path, timepoints=3,
+                              delta_s=[0.0, 4 * 3600.0, 8 * 3600.0])
+    try:
+        text = page._verdict.text()
+        assert "named by position" not in text, text
+        assert "3 timepoint(s)" in text, text
+    finally:
+        ctrl.shutdown()
+        page.deleteLater()
+
+
+def test_the_stride_round_trips_through_a_queued_job(qapp, tmp_path):
+    """``collect_spec`` → ``show_job`` is the Job Queue's edit session. Into a
+    **second, untouched** controller: wiping the first page with the defaults
+    would leave the old value sitting in the box and compare a value that was
+    never reset."""
+    from datasets.ome_import.controller import OmeImportController
+
+    ctrl, page = _stride_page(qapp, tmp_path, timepoints=6)
+    other = OmeImportController(on_open_in_analyze=lambda *_a: None)
+    try:
+        page._stride_edit.setText("3")
+        spec = ctrl.collect_spec()
+        assert spec["params"]["timepoint_stride"] == 3
+
+        assert other.collect_spec() != spec        # it really is untouched
+        other.show_job(spec)
+        assert other.collect_spec() == spec
+        assert other.page._stride_edit.text() == "3"
+    finally:
+        for c in (ctrl, other):
+            c.shutdown()
+            c.page.deleteLater()

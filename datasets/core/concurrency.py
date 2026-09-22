@@ -1,29 +1,23 @@
 """Shared worker-count heuristic for per-well thread pools.
 
-Every Datasets tool that parallelises well-scoped file work (Import Loose
-Folder, Concatenate, Subset, Merge Plates) uses the same disjoint-ownership
-shape ``pipeline.ome_explode.explode_ome_tiff`` pioneered for its own
-per-well thread pool: one thread per well, each owning that well's own
-destination file(s), with no shared mutable state beyond a callback lock
-around progress/log calls. This is the one heuristic that shape needs, kept
-in one place so every tool tunes its worker count the same way.
+Every Datasets tool that parallelises well-scoped file work (Zip Loose Folder,
+Concatenate, Subset, Merge Plates) uses the same disjoint-ownership shape the
+packed-file exploders pioneered for their own per-well thread pools: one thread
+per well, each owning that well's own destination file(s), with no shared
+mutable state beyond a callback lock around progress/log calls.
+
+The heuristic itself lives in :mod:`pipeline.explode_common`, where the
+exploders take it from, and this module re-exports it under the name the four
+tools import. It used to be a second implementation of the same three lines
+with a comment saying it mirrored the first — and a heuristic with two
+definitions is one that will be tuned in one place and not the other, leaving
+two halves of the app disagreeing about how many threads a plate deserves. The
+arrow runs the right way for a plain import: ``pipeline/`` is Qt-free and sits
+below the panes.
 """
 
 from __future__ import annotations
 
-import os
+from pipeline.explode_common import pick_workers  # noqa: F401 (re-export)
 
-
-def pick_workers(workers: int, n_units: int) -> int:
-    """Resolve a worker-thread count.
-
-    ``workers <= 0`` means auto: capped at 8 and at the CPU count, mirroring
-    ``pipeline.ome_explode._pick_workers``. An explicit ``workers > 0`` is
-    still capped at *n_units* — more threads than units of work just contend
-    for the same disk I/O with nothing left to parallelise.
-    """
-    if n_units <= 0:
-        return 1
-    if workers > 0:
-        return max(1, min(workers, n_units))
-    return max(1, min(8, os.cpu_count() or 4, n_units))
+__all__ = ["pick_workers"]

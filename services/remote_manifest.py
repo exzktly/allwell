@@ -44,6 +44,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # imported by process_microscopy at module load (and by well_plate_zipper). A
     # remote run never hits the frozen-windowed case, but the manifest must list
     # every ``util/`` file so the completeness guard (test_remote_manifest) passes.
+    # Reduces a metadata label to a filename token; both converters name
+    # their images through it.
+    "util/filename_token.py",
     "util/frozen_io.py",
     "util/retry_io.py",
     # The one atomic JSON write. ``pipeline/run_report`` and
@@ -132,6 +135,16 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # Packed OME-TIFF de-interleave. Runs client-side before remote sync (the
     # remote receives ordinary loose TIFs), but listed so the manifest stays a
     # complete mirror of ``pipeline/`` per test_remote_manifest.
+    # The Zeiss CZI reader and its per-well explode. Like ``ome_explode``
+    # both run client-side — the remote receives per-well archives that are
+    # already converted — but the manifest mirrors every ``pipeline/`` file,
+    # so they are listed rather than made exceptions nobody can see.
+    "pipeline/czi_read.py",
+    "pipeline/czi_set.py",
+    "pipeline/czi_explode.py",
+    # What both exploders share: the member-name rule, the resume check,
+    # the worker split and the in-memory TIFF encode.
+    "pipeline/explode_common.py",
     "pipeline/ome_explode.py",
     # The loose-TIF grouping pre-pass, spawned as a subprocess. Like
     # ``ome_explode`` it runs client-side — the remote is sent per-well archives

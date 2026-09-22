@@ -260,14 +260,17 @@ allwell/
 │   ├── core/                   ← what more than one tool needs: dataset_paths,
 │   │                              containers, zip_passthrough, member_names,
 │   │                              concurrency, log_panel, tool_controller,
-│   │                              dataset_fields, equation_row
+│   │                              dataset_fields, equation_row, convert_marker
 │   ├── concatenate/            ← Concatenate datasets (compute/apply/worker/view/controller/dashboard)
 │   ├── merge_plates/           ← Merge two plates into one, remapping wells
 │   ├── subset/                 ← Subset / Split a dataset by well, FOV or timepoint
 │   ├── import_loose/           ← Zip a loose image folder into per-well archives
 │   ├── validate/               ← Validate & Repair an existing dataset
-│   ├── job_queue/              ← the queue the six tools (and Analyze) submit runs to
-│   └── ome_import/             ← Convert OME-TIFF (de-interleave a packed OME-TIFF → dataset folder)
+│   ├── job_queue/              ← the queue the seven tools (and Analyze) submit runs to
+│   ├── ome_import/             ← Convert OME-TIFF (de-interleave a packed OME-TIFF → dataset folder)
+│   └── czi_import/             ← Convert CZI (a Zeiss .czi plate scan, or a folder of
+│                                  per-scene ones → dataset folder; wells read from the
+│                                  files' scene names, grid as fallback)
 ├── pipeline/                    ← Qt-free analysis-pipeline modules (re-exported by pm)
 │   ├── well_plate_zipper.py    ← the loose-TIF grouping pre-pass that produces the
 │   │                              per-well input layout the rest of the pipeline reads.
@@ -288,6 +291,19 @@ allwell/
 │   ├── stardist.py             ← StarDist segmenters + StarDistParams + per-worker model state (TF lazy)
 │   ├── ome_explode.py          ← de-interleave a packed OME-TIFF into per-well .zip
 │   │                              archives (Z max-projected; positions → wells via §OME)
+│   ├── czi_read.py             ← the ZISRAW parser: a CZI's layout, and one 2-D tile
+│   │                              at a time (stdlib + numpy; imagecodecs only for a
+│   │                              compressed file)
+│   ├── czi_set.py              ← one *or more* .czi files read as one plate:
+│   │                              ZEN saves a scan as one file of every scene, or
+│   │                              one file per scene, and the second is a folder.
+│   │                              Also the header-only peek the page paints from
+│   │                              before the plate has been read
+│   ├── czi_explode.py          ← the CZI's per-well explode — scenes/tiles → wells,
+│   │                              Z max-projected, one atomic archive per well
+│   ├── explode_common.py       ← what both exploders do identically: the member-name
+│   │                              set, the resume check over it, the worker split and
+│   │                              count, the in-memory TIFF encode, the cancellation
 │   ├── fov_checkpoint.py       ← one well's staging dir, whose run owns it, and
 │   │                              the sweep that drops a superseded run's
 │   ├── incremental_keys.py     ← what an incremental run considers already done
@@ -324,9 +340,12 @@ allwell/
 │   ├── well_token.py           ← canonical 96-well token parser (single source of truth:
 │   │                              process_microscopy, well_plate_zipper, analyze.tab and
 │   │                              input_resolution_service all parse well names through it)
+│   ├── filename_token.py       ← reduce a metadata label (a channel name, an
+│   │                              experiment) to a token that survives a filename;
+│   │                              both packed-file converters name images through it
 │   ├── plate_grid.py           ← position index → 96-well label mapping: serpentine
 │   │                              (boustrophedon) + normalize_well_order (arbitrary
-│   │                              click-defined order); used by the OME-TIFF de-interleave.
+│   │                              click-defined order); used by both de-interleaves.
 │   │                              PLATE_ROWS / PLATE_MAX_COL are the plate's geometry,
 │   │                              and well_plate_zipper.generate_wells reads them rather
 │   │                              than spelling "ABCDEFGH" a third time
@@ -343,7 +362,7 @@ allwell/
 │   │                              prefixed token ("f10") orders numerically, not
 │   │                              lexicographically (pipeline, services, viewer)
 │   ├── channel_roles.py        ← channel-name → role heuristic (nuclear/fluor/
-│   │                              phase), shared by the OME converter + Analyze;
+│   │                              phase), shared by both converters + Analyze;
 │   │                              also the quantified-channel list order and the
 │   │                              phase/segmentation exclusivity rule, shared with
 │   │                              the pipeline and the remote runner
@@ -5328,7 +5347,7 @@ it away. Several things are said in that pane and nowhere else — why a run
 refused to start, the volume that filled, the `errors/` folder a partial run
 points at, the scheduler's queue-wait breadcrumbs — and the app used to have to
 override its own closed-by-default to show them, which is the tell that the
-default was the wrong way round. The six Datasets tool pages
+default was the wrong way round. The seven Datasets tool pages
 (`datasets/core/log_panel.py`) still start theirs closed, deliberately: each
 reports a short, bounded job whose dashboard is the whole story.
 
@@ -5976,11 +5995,16 @@ input. Keeping the two apart is deliberate — when the explode ran *inside* an
 Analyze run the wells only existed mid-run, so pre-run checks that look for a
 well (an `empty_well` background, control-well auto-threshold, both via
 `well_present_in_input`) failed against the raw `.ome.tif`. Analyze now only ever
-processes **folders**; `plan_input_layout` classifies a raw OME-TIFF as
-`packed_ome` and carries `PACKED_OME_MESSAGE`, so the readout under the input
-field and the run-time refusal (`analyze.domain.input.AnalyzeInputMixin._ome_input_hint`,
-which the pre-run validation reads) redirect the user to the converter in the
-same words instead of trying to run it. `_ome_input_hint` returns a message for a
+processes **folders**; `plan_input_layout` classifies a raw packed file through
+`detect_packed_input`, which returns the plan action (`packed_ome` /
+`packed_czi`) *and* the message naming the Datasets page that converts it. The
+message travels with the detection rather than being chosen by the caller
+because which converter to send the user to is decided by the suffix, and
+naming the wrong one sends them to a page that will refuse their file. So the
+readout under the input field and the run-time refusal
+(`analyze.domain.input.AnalyzeInputMixin._packed_input_hint`, which the pre-run
+validation reads) redirect the user to the right converter in the same words
+instead of trying to run it. `_packed_input_hint` returns a message for a
 check it could not *make*, too, rather than `None`: `None` is the answer that
 means "this input is fine, start the run", so answering it for a permission error
 part-way through the walk turned the guard off silently and let the run go ahead
@@ -6355,7 +6379,7 @@ compared against the series that actually came out, since that is the axis the
 converter splits into positions. The other two are collected for a caller that
 wants them and are not themselves a refusal.
 **Two labels that reduce to one filename token:** every image is published as
-`<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif`, and `_safe_token` keeps
+`<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif`, and `util.filename_token.safe_token` keeps
 alphanumerics only, so `"488 nm"` and `"488nm"` — or `"GFP-1"` and `"GFP_1"`, or
 two channels a file simply names alike — become one token and write the same
 member name into one archive. `zipfile` keeps both copies of the bytes under one
@@ -6410,8 +6434,9 @@ published atomically (`util.zip_write.atomic_zip`), so a run that stopped
 part-way leaves whole, correct archives and no half-written one — the work
 already done is on disk and only the rest is missing. `explode_ome_tiff(...,
 resume=True)` skips a well whose archive already holds **every member name these
-settings call for** (`_expected_members` / `_well_is_complete`, read from the
-zip's central directory, so a couple of seeks each), reports it through the same
+settings call for** (`explode_common.expected_members` /
+`well_is_complete`, read from the zip's central directory, so a couple of seeks
+each), reports it through the same
 progress callbacks as a converted one — otherwise the plate map shows a finished
 well as one that never ran, and the run-wide bar never reaches its total — and
 names the count in `ExplodeResult.wells_resumed` and the closing log line.
@@ -6428,10 +6453,13 @@ current settings and answers *resumable*, *mismatched* or neither, and
 `destination_problem` reads that: a folder carrying this tool's marker for the
 same settings is not a refusal but a resume, for different settings it is
 refused in its own words, and with no marker at all the ordinary
-"already holds converted wells" rule applies. This is the same device the other
-Datasets tools use (`core.dataset_paths.make_dataset_api`), for the same
-reason: a folder holding *this* tool's interrupted attempt is a resume, while the
-same folder holding another tool's leftovers is not.
+"already holds converted wells" rule applies. The mechanism itself is
+`datasets/core/convert_marker.py`, shared with the CZI converter, which passes
+its own marker filename and its own list of mapping fields; the constant above
+is this tool's. It is the same device the other Datasets tools use
+(`core.dataset_paths.make_dataset_api`), for the same reason: a folder holding
+*this* tool's interrupted attempt is a resume, while the same folder holding
+another tool's leftovers is not.
 
 **`convert` asks that question itself**, rather than trusting the page to have
 asked it. There are two ways in and only one of them goes through a field hint:
@@ -6455,6 +6483,356 @@ Cancel. Channel roles are *not* set in the converter — it writes the OME chann
 Channel Tokens section on the converted folder. `pipeline/ome_explode.py` and
 `util/plate_grid.py` are in the remote manifest so it stays a complete mirror of
 `pipeline/` + `util/` (`test_remote_manifest.py`).
+
+**What both converters share lives in `pipeline/explode_common.py`.** The two
+exploders differ entirely in how they *read* their source and not at all in what
+they produce: the same member names, the same atomic per-well archive, the same
+rule for deciding whether a well an interrupted run left behind is finished, the
+same worker-count policy and strided well split, the same in-memory TIFF encode,
+the same `ExplodeResult` and the same `ExplodeCancelled`. `OmeExplodeCancelled`
+is that exception itself rather than a subclass — the two stop for the same
+reason and a caller catching one means to catch the other — kept under its old
+name because that is the name `datasets.ome_import` raises and catches.
+`util/filename_token.py::safe_token`, which reduces a metadata label to a token
+that survives a filename, came out of the same drawer: with it private to one
+exploder the second one's only choices were to import a private name or to write
+a second definition of the rule, and two definitions of it mean two importers
+naming the same channel two different things. `datasets/core/concurrency.py`
+re-exports `pick_workers` from here for the four copy tools, which used to carry
+a third copy of those three lines under a comment saying it mirrored the first.
+
+### 6.2a The CZI converter
+
+A Zeiss plate scan arrives as one `.czi` holding every scene, mosaic tile,
+channel, Z-plane and timepoint of the run. *Convert CZI*
+(`datasets/czi_import/`, §6b) is the standalone converter for it, structured
+exactly like the OME-TIFF one above and for the same reason: it writes an
+ordinary dataset folder, which the user then opens in Analyze and runs like any
+other input, so every well is on disk before the pre-run checks that look for
+one. It exists so a plate that was acquired in ZEN does not have to be exported
+a second time as an OME-TIFF to get here.
+
+**The file header's two offsets are unpacked by name.** They were read as
+`fields[8]` and `fields[9]` of an eleven-field struct whose `DirectoryPosition`
+and `MetadataPosition` are 7 and 8 — and nothing broke. The directory read
+failed, `read_czi_layout` fell back to `_walk_segments`, and the walk recovers
+the same layout: so every CZI took the damaged-file recovery path, carried its
+"interrupted acquisition" warning, and paid a whole pass over itself, while a
+hundred and fifty tests stayed green. A fallback that is good enough to hide
+the bug it is compensating for is the shape to watch for; the test that pins it
+asserts `from_directory is True` on a sound file, which nothing had.
+
+**`pipeline/czi_read.py` is a ZISRAW parser, written rather than depended on.**
+A CZI is a flat sequence of length-prefixed segments; four of them matter — the
+file header, the subblock directory (one entry per stored tile, carrying that
+tile's coordinate on every dimension), the metadata segment (one XML document)
+and the subblocks themselves, each holding the pixels of exactly one 2-D tile.
+There is no image array to read: the file is a bag of tiles and which tile is
+which is entirely a question of its directory entry. The parser needs the stdlib
+and numpy, with `imagecodecs` imported lazily and only for a file whose tiles
+are compressed, so it stays inside the pipeline self-sufficiency contract
+(§6.2) and the whole of its test coverage runs without imagecodecs installed.
+No third-party CZI reader is used: the maintained ones ship binary wheels that
+the PyInstaller bundle would have to carry, and the pure-Python one imports a
+dozen names `tifffile` removed years ago, so it cannot resolve against the
+version this app pins.
+
+Its tests are written against **real ZISRAW bytes** laid down by
+`tests/_czi_fixture.py`, from the same struct definitions the parser uses, so a
+change to either side that breaks the agreement between them fails a round-trip
+rather than leaving two modules quietly disagreeing about a field width. That
+fixture also emits the specific damage the parser's refusals are about — a
+pyramid copy, a missing tile, a duplicated coordinate, an extra axis — because a
+fixture that can only produce well-formed files can only confirm the happy path
+(CLAUDE.md §7.1 #4).
+
+**The coordinates, and what is done with each.** `S` is the scene, which on a
+plate scan is one well. `M` is the mosaic tile, and several within one scene are
+the fields of view imaged in that well — kept as separate FOVs and **never
+stitched**, because stitching is a decision about overlap and blending that
+belongs to the acquisition software and a silently stitched image is not the
+image the microscope took. `T`/`C`/`Z` are as usual, with Z collapsed by
+**maximum-intensity projection**, the same reduction `ome_explode` applies, so a
+plate converted from either source is measuring the same thing. Any other axis a
+file declares with a real extent (`R` rotation, `I` illumination, `H` phase, `V`
+view, `B` legacy block) is **refused** rather than collapsed: the filename schema
+has no field for it, so its planes would all be written to one name with only the
+last surviving and nothing reporting the loss.
+
+**Pyramid subblocks are discarded, on either of two tells.** A CZI written for
+viewing carries lower-resolution copies of each tile beside the real one. They
+are the same pixels at the wrong scale, so reading one as the acquisition
+produces a correctly named image of the wrong thing. A copy is identified by a
+non-zero `PyramidType` *or* by a `StoredSize` below the `Size` of the same
+dimension — either alone, because a writer may set one and not the other, and a
+reader requiring both would keep every copy.
+
+**Where the wells come from is the one thing this converter decides that the
+OME-TIFF one does not.** A packed OME-TIFF records stage coordinates and leaves
+the plate layout to be reconstructed from them, which is what
+`datasets/ome_import/stage_layout.py` is for. Zeiss software normally names each
+scene after the well it scanned, so `czi_read._scene_wells` reads the mapping
+out of the metadata — a `<Shape Name="A1">`, an `<ArrayName>`, or the scene's own
+`Name`, which is commonly `A1`, `P1-A1` or `Scene-1-B07` —
+and the page's plate shows it for the user to confirm rather than to supply.
+`well_from_scene_name` anchors its embedded-well pattern on a separator, so the
+`C1` inside `SPECIMENC12` is not read as a well.
+
+`CziLayout.wells_from_metadata` is **all or nothing, and distinct**. A partial
+mapping is the worst of the three outcomes available: the named scenes would land
+on their real wells and the rest wherever the grid put them, producing a plate
+that is right in the places a user is most likely to spot-check. Two scenes
+claiming one well is the same failure by a different route — the second's images
+would overwrite the first's archive while the run reported writing both. Either
+condition yields `[]`, and `resolve_well_map` then refuses with a message
+pointing at the grid, which is the other `well_source`. The two are never mixed.
+
+**ZEN saves a plate two ways, and `pipeline/czi_set.py` is what makes them one
+input.** The ordinary raw save is a single file holding every scene. The *Split
+Scenes* export — what a long acquisition is usually saved as — is a folder of
+`Exp7_A1.czi`, `Exp7_A2.czi`, … each holding one scene, and **nothing inside any
+one of them says it is part of a plate**: the plate is the folder. A `CziSet` is
+therefore the unit the converter works on, with a single file being a set of
+one, so the exploder has no branch for the two shapes.
+
+A set's files become one dataset, so they are held to agreeing about everything
+the output filenames depend on — channel count and names, timepoint count,
+pixel format, tile size, **tiles per scene** — and every mismatch is refused naming both files. Two
+files whose channel lists differ would write images whose channel token means
+one thing in one well and another in the next, which is §7's silent
+substitution. **Z is deliberately not on that list**: it is projected away, so
+files whose stacks are different depths produce the same images, and
+`ome_explode` leaves Z out of its own ragged check for the same reason.
+
+Each member's well comes from its scene metadata first, and failing that from
+its **filename** — but only for a file holding exactly one scene *and* only
+when the set holds more than one file. The rule exists for the split export,
+where each member is named after the scene it holds; turned on a lone file it
+reads any well-shaped fragment of any name as a well, and
+`20240612_Plate_D1_60x.czi` — one scene, nine tiles, no scene metadata —
+became well D01 where it had been refused and pointed at the grid. `D1` there
+is far likelier to be a condition than a plate position, and a single file
+gives the rule nothing to corroborate it with. ZEN's split
+export names each file after the scene it holds and does not always keep the
+scene's own name inside it, so a file that *is* a scene may be identified by its
+name; the one-scene condition is what stops a whole-plate file that happens to
+be called `Exp_A1.czi` being read as one well of ninety-six fields.
+All-or-nothing and distinct applies across the set exactly as it does within one
+file.
+
+A third shape is refused rather than read: a single logical CZI split into
+numbered **file parts** that share one subblock directory, which ZEN produces
+for very large acquisitions. Those tiles carry a non-zero `FilePart` and their
+offsets are into a sibling file, so reading them through one handle lands at an
+arbitrary position in the wrong one. `CziLayout.foreign_part_blocks` counts them
+and `validation_report` names the condition and the two exports that do work.
+
+**`pipeline/czi_explode.py` resolves that into a `WellMap`** — the well labels in
+acquisition order, and per well the `ScenePosition`s that become its FOV 0,
+1, … . A position carries **the file it is in**, which is what lets a
+split-scene plate and a single-file plate produce one structure: a file-named
+mapping groups by scene, a grid mapping chops one flat list through
+`explode_common.resolve_positions`, and the exploder below does not have to know
+which it was given. Each worker thread holds a `_ReaderPool` — one
+`CziReader` per file that thread's own wells read from, opened on first use, so
+a ninety-six-file plate does not open ninety-six handles per thread to read one
+well and a single-file plate opens exactly one. There are deliberately
+only those two: the OME-TIFF importer additionally accepts an explicit
+click-defined visit order because its page has an editor that produces one, and
+a parameter with no producer is a branch the application never takes however
+well it is written (§7.7's defect class). It was carried here through
+`ConversionParams`, `_MAPPING_FIELDS` and `resolve_well_map` before a review
+found that `raw_fields()` never populated it and `set_params()` never restored
+it, so a queued job's ordering was dropped in silence and the run used the
+grid. `WellMap.from_file`
+records which it was, because the counts are identical either way and only one of
+them is a mapping the user is entitled to trust without checking — the page's
+readout says so in words and the plan carries it rather than re-deriving it from
+the settings.
+
+**What the converter refuses, and why each would otherwise be invisible.**
+`CziLayout.validation_report` runs before a single archive is written, ordered by
+how far upstream the fault is, and every branch names a remedy: a colour or
+complex pixel type (there is no single intensity per pixel to quantify, and
+picking one sample would be an unannounced decision about which); mixed pixel
+formats across tiles; JPEG-compressed tiles, which are lossy, so the intensities
+are not the ones the camera measured; a compression method the reader does not
+know; an extra axis as above; a duplicated coordinate, which is what a file
+concatenated from two acquisitions looks like; scenes with different tile counts;
+two channel names reducing to one filename token, compared case-insensitively
+because every consumer of a channel token downstream folds case; and a
+coordinate the file holds no image data for at all.
+
+**Completeness is counted in images, not in stored tiles.** `total_images` is
+one per (scene, tile, timepoint, channel) — Z collapses into each — and
+`missing_images` counts the ones with *no* Z plane behind them.
+`n_positions × T × C × max(Z)` was the obvious arithmetic and it is wrong: a
+3-plane fluorescent stack beside a single brightfield plane is an ordinary
+Zeiss acquisition, and measured against that rectangle it reads as two thirds
+of the brightfield channel missing. The converter then told the user to
+re-export a file that was never truncated, and no re-export would have
+satisfied it. The same reasoning keeps Z out of `_ragged_scenes`, and is why
+`ome_explode._ragged_positions` covers only T and C. `CziReader` reads the Z
+indices each coordinate actually has rather than asking for `range(size_z)`,
+which raised on the shallower channel of exactly that file.
+
+**Zstandard high/low byte packing is refused rather than guessed.** Unpacking it
+means interleaving a plane of high bytes with a plane of low bytes, and getting
+that order the wrong way round produces a complete, plausible image of entirely
+wrong intensities — the one failure this importer must not be able to have. No
+file exercising it was available to establish the order against, so the reader
+says so and names the remedy instead of shipping a coin-flip. Uncompressed,
+LZW, JPEG-XR and plain Zstandard tiles all decode.
+
+**A file whose subblock directory is unreadable is still converted.** The
+directory is written last, so an acquisition killed part-way leaves every tile it
+wrote and a directory offset of zero. The subblocks are self-describing — each
+repeats its own directory entry — so `_walk_segments` recovers the plate at the
+cost of one pass over the file instead of one seek, and `CziLayout.from_directory`
+records that it had to, which the page reports rather than keeping to itself.
+
+**Timepoints are positional (`t0`, `t1`, …), and that is a stated limitation
+rather than an oversight.** A CZI records a plane's acquisition time in each
+*subblock's* own metadata, so learning it means reading every tile's XML in the
+plate, and the file-level `<T>` interval is an acquisition plan rather than what
+happened. Positional tokens order correctly and state no number the file cannot
+back up. This is where the CZI converter gives less than the OME-TIFF one, whose
+`DeltaT` handling is described above — the manual says so too, because a user
+expecting hours on a Review axis needs to know where they went.
+
+**The plate is drawn before the plate has been read, and the reading happens
+off the UI thread.** A full `read_czi_set` walks every file's subblock
+directory — measured at about 1 MB for a 96-well plate, and the same 1 MB
+whether the images weigh three megabytes or forty gigabytes, because neither
+path touches a pixel. On a share that is one round trip per file, and doing it
+in `refresh_readout` froze the window for the duration, on a page whose whole
+job is to be looked at before a long run.
+
+So the page scans in two stages, both on a worker thread through
+`core.worker_bridge.run_off_thread`. The **peek**
+(`czi_read.peek_scene_wells` → `czi_set.peek_wells`) reads the 112-byte file
+header and the metadata segment it points at — measured at 6 KB for a
+whole-plate file against 997 KB for the full read, and 46 KB against 1.05 MB
+for a 96-file split export — and names the wells. The plate is painted from it
+at once, with the verdict saying so and the Run button still shut, because a
+peek cannot know whether the file is sound, whether the files agree, or how
+many tiles a scene holds. The **full read** follows and replaces it.
+
+Both derive wells through the one `czi_read.wells_from_scenes`, so the plate a
+peek paints and the plate a run converts cannot be derived two different ways.
+A peek is allowed to be *incomplete* and not to be *wrong*: a file carrying no
+readable metadata contributes nothing, because the filename may only stand in
+for a scene name on a file holding exactly one scene and a peek cannot count
+scenes without metadata. `PlatePeek.complete` says which case it is and the
+page's note says it on screen.
+
+**A scan reads its files at once.** Both stages walk a list of files doing
+nothing but waiting on them, so `czi_set._per_file` runs them across a
+`ThreadPoolExecutor` — measured on a 96-file split export with 8 ms of
+simulated per-file latency, the peek goes from 797 ms to 104 ms and the full
+read from 879 ms to 118 ms. `scan_workers` caps at eight and at the file count,
+and deliberately **not** at the CPU count the way
+`explode_common.pick_workers` does: that sizes pixel work, and this decodes
+nothing. A cap against the cores would leave a four-core laptop reading a
+96-file plate four at a time to cover a latency no core is involved in. Eight
+is about the share rather than the machine — enough requests in flight to cover
+the round trips, few enough not to hammer a filer — and it is a defensible
+constant, not a measured optimum, because the only hardware it could be
+measured against is the user's.
+
+Through `Executor.map`, which yields **by argument order** however the work
+completes. The order is load-bearing: it is the order ZEN wrote a split export
+in, the order a grid mapping lays its well labels over, and the order
+`CziSet.positions` is walked in, so collecting as-completed would make a
+plate's well mapping depend on which file the filer answered first. That list
+is sorted by `czi_set.natural_key`, not lexicographically — ZEN does not
+zero-pad its scene numbers, and plain string order puts `scan_s10` between
+`scan_s1` and `scan_s2`, which on a 3×4 grid put scene 2 in B01 and scene 10 in
+A02 with the run reporting success. A single
+file skips the pool entirely. The peek's per-file `except` sits *inside* the
+worker, so one unreadable member costs that member and not the rest of the
+plate.
+
+Three things make the rest of the readout free, and all three were measured by
+counting syscalls rather than reasoned about. `refresh_readout` reads no files
+at all: a new source (or a widened folder) starts a scan, and everything else
+renders from the scan in hand, keyed on `(source, use_folder)` — deliberately
+not on the resolved file list and its mtimes, because building *that* key is a
+stat per file on the path a keystroke takes. **Picking a source always
+rescans**, even onto the same path, since without an mtime in the key that is
+the one moment a plate re-exported in place is noticed. A *failed* scan keeps
+its key, which reads like the wedge it once was and is the lesser of the two:
+clearing it means a keystroke refreshes the readout, which starts another scan,
+which fails — one scan per character against a share that just refused.
+Recovery is re-picking the source. The source field's verdict and the
+tick-box's sibling count are cached from when the source last changed, since
+answering either means listing the folder. And the resume marker's signature,
+which fingerprints every file in the set, is built only once the marker is
+known to exist — one stat instead of ninety-six, on a destination that usually
+has no marker at all. `test_a_keystroke_after_the_scan_reads_no_files` counts
+`open`, `stat`, `scandir` and `listdir` against the source, and each of those
+three, undone, fails it.
+
+`czi_set.discover_czi_files` lists through `util.dir_scan.files_in` for the
+reason that module exists: `iterdir()` plus `is_file()` is one `stat` per
+entry, which on Windows is a file handle opened and closed and against a share
+is a round trip each.
+
+**A scan bridge is held until its handler has run.** `run_off_thread`'s worker
+keeps the bridge alive only until it emits; dropped between that queued emit
+and the GUI thread's handling of it, the `QObject` is collected and the queued
+event fires on freed memory — a segfault with no Python traceback, which is
+what a single shared `_scan_bridge` attribute produced twice over (once by the
+line that starts the full read from inside the peek's own callback, once by
+`stop_scanning` clearing the slot at teardown). The page keeps them in a dict
+keyed `(generation, stage)`, releases only what has already called back, and
+does so only from `_begin_scan`, which runs outside any handler. `stop_scanning`
+bumps the generation and keeps the references: a result that arrives after
+teardown has to be free to arrive and be ignored.
+
+**Two buttons pick the source, because one dialog cannot.** `QFileDialog` in
+`Directory` mode shows files when asked but will not *accept* one: `accept()`
+leaves `result() == 0` with a `.czi` selected. `PathField`'s edit is read-only,
+so a single dialog in that mode made the single-file workflow unreachable while
+the docstring and the manual both described it. Browse is an ordinary file
+dialog now and a second button picks a folder.
+
+**The page's tick-box is where "one file or the folder" is decided.** Picking a
+folder converts all of it — the folder *is* the set. Picking a *file* that has
+`.czi` siblings offers *Convert all N .czi files in this folder as one plate*,
+ticked by default and naming the count, because a folder of per-scene files is a
+plate and converting one well of ninety-six while reporting success is the worse
+answer. Once the user touches the box their answer stands; a new source asks
+afresh, so unticking it once does not make every later plate convert one file of
+its folder. `use_folder` is a mapping field for the obvious reason — it is the
+difference between a one-well dataset and a ninety-six-well one from the same
+selection — and the marker's signature additionally fingerprints **every file in
+the set**, because the shared helper fingerprints the selected path alone and
+that is identical whether a sibling was added between two runs or not.
+
+The destination default follows the same rule: a set writes beside its *folder*
+and takes its name plus `_dataset`. Naming it after whichever member sorted
+first would bury a whole plate under one scene's name — and the folder's bare
+name *is the folder*, which is what "beside it, named after it" degenerates to
+without an extension to drop, and is what it did until a test asserted the two
+paths were different rather than merely that the name was right. `explode_czi` picks the
+experiment token the same way, and for the same reason: `Exp7_A02` as a token
+would stamp one scene's well into every archive on the plate, H11's included.
+
+Analyze's redirect knows about the folder shape too. `_PACKED_KINDS` carries a
+column saying whether *several* of a kind in one folder are one plate: false for
+OME-TIFF, where two files are two plates and picking either would convert one
+the user did not name, and true for CZI, where a folder of them is the split
+export. A folder of several returns the folder rather than a member, because
+several of them are the plate and naming one would describe a scene.
+
+Resume works exactly as it does for the OME-TIFF converter, through the shared
+`datasets/core/convert_marker.py` with `.aw_czi_in_progress` and this tool's own
+mapping fields. Both converters' key rosters are registered in
+`tests/test_reuse_is_keyed_completely.py` with a written reason per key, and that
+file holds each roster against its own `ConversionParams` dataclass: a setting
+that is neither keyed nor exempted in writing fails there, which is the half a
+parametrize over the roster itself cannot see.
 
 ### 6.2 `process_microscopy.py`
 
@@ -7960,10 +8338,11 @@ deletable:
 | `datasets/core/containers.py` | `copy_container_members` — the one path every Datasets tool moves image bytes through — plus `container_dest` (where a container belongs in a destination directory: `<WELL>.zip` for a zipped well, `<WELL>/` for a folder-mode one, always named for the **well token** rather than for the source file, because a source plate written with unpadded tokens otherwise produced `in/A1.zip` beside an `out/A01_out.zip` from the same run and nothing downstream matched the two up), `read_members` / `write_zip` (collision-safe, first-write-wins), `clear_destination`, `restamp_overrides` / `unstamped_note` (below), and the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. **It moves bytes rather than reconstructing them.** No Datasets tool alters image data: Subset filters, Concatenate offsets a name's timepoint field, Merge plates rewrites a name's well token, and in every case the member's compressed payload is identical on both sides — a name lives in a member's headers, not in its data. So the helper publishes one destination archive from one or more source containers, taking a `rename(container, member_name)` callback that returns the destination name or `None` to leave the member out, in three tiers. **Whole-file copy:** a single zip source with every member kept under its own name is copied byte-for-byte and never opened for reading — staged beside the destination and renamed into place, like the other two tiers, so an interrupted copy leaves no partial `<WELL>.zip` behind. That is a wells-only Subset, and it is the case a user would otherwise do by hand in Finder, so it has to cost what Finder costs. **Raw member passthrough:** otherwise each kept member's already-compressed bytes are streamed across by `datasets/core/zip_passthrough.py` — no inflate, no deflate, no CRC recomputation — and a dropped member is never read at all, so a filter that keeps a quarter of an archive costs about a quarter of it. **Fallback:** a folder source, or a member the passthrough declines (a directory entry, an encrypted member), goes through `read_members`/`write_zip`'s ordinary decompress-and-recompress, one member at a time. The tier is chosen from member *lists* only — for a zip that is the central directory, a footer, so planning costs a couple of seeks however large the archive is and however slow the volume holding it — and peak memory is one chunk or one member rather than a whole uncompressed archive per thread. **Tiers 2 and 3 publish through `util/zip_write.atomic_zip`**, the same staged-then-verified-then-renamed writer the pipeline's own archives use (with `durable=False`, and therefore without the CRC read-back, because the source dataset is still on disk beside the destination): a plain `with ZipFile(dest, "w")` writes a central directory for whatever landed before an exception, so a member failing part-way through a well left a structurally valid archive holding fewer images than it was asked for with nothing on it saying so. The tools do write an in-progress marker and clear the destination on the next attempt, but nothing stops a user opening that half-written folder in Review first. **Two consequences of moving bytes rather than rebuilding them are worth knowing.** A whole-file copy reproduces the source exactly, so it keeps directory entries that a re-pack drops — inert either way, since `find_image_groups_in_zip`, `data/zip_members.py`, Validate and `incremental_keys` all filter by basename/extension or on a trailing slash. And a copied member keeps its source's compression method, so a subset or merge of a dataset whose `in/` archives were written `ZIP_STORED` (what `pipeline/ome_explode.py` writes) stays stored rather than being deflated on the way out; the destination can be larger on disk than the old re-packing path produced, which is the cost of not spending CPU to reproduce bytes that already exist. Returns `(written, dropped)`: *written* is what actually landed, so a caller can verify a CSV row's `filename` is really there; *dropped* is only the names lost to a **collision**, which is real data loss, never a member the `rename` callback declined. Nothing is created when nothing is kept — a zero-member zip is structurally valid but macOS Archive Utility refuses to expand it and All-Well reads it as a well whose images have vanished, the same rule `util/zip_write.atomic_zip` enforces for the pipeline's own archives. `read_members` / `write_zip` remain the tier-3 primitives and the shape a caller reaches for when it genuinely needs a member's decoded bytes in hand; both take an optional `progress(done, total)` keyword, called once per member against a total they know up front. `WellFraction` fuses per-pass counts into one dial: copying a well is several passes (the source container, then the QC `<WELL>_out.zip`), so the passes are declared up front as equal-weight *slices*, each pass reports into the slice `slice_progress()` hands it, and a pass with no work closes its slice with `skip()`. `copy_container_members` consumes exactly one slice whichever tier serves it, reporting a whole-file copy or an empty filter as a single closing step. Feeding each pass's own `(done, total)` straight to a dashboard instead would fill the same well's dial from empty once per pass, which reads as the well restarting; leaving a no-work slice unclaimed would strand a finished well short of full. `finish()` closes out whatever remains once the well's non-container work (its CSV) is done. The scale is a fixed 100 steps, deduplicated to whole steps, so a well holding thousands of files emits a bounded number of updates rather than one queued signal and one plate repaint per file. **`restamp_overrides` is the one carry-over rule for `cell_overrides.json`.** Every tool that copies that file has to re-fingerprint it — a repack changes the destination archive's mtime although the segmentation is untouched, and the fingerprint exists to catch a real re-segmentation — so it stamps each entry's `seg_fp` from the destination `<WELL>_out.zip`'s mtime and **returns how many it could not stamp**. A fingerprint that could not be computed is not a fingerprint, so the key is removed rather than left holding the source dataset's value: an entry with no `seg_fp` is the legacy unfingerprinted shape both readers already understand and keep (`review/persistence/cell_overrides.py`, `datasets/validate/apply._prune_stale_overrides`), whereas the source's stamp compared against the destination archive differs, and Validate then pruned the entry — the user's manual cell exclusions vanishing with every step reporting success. The count is returned rather than logged inside the helper so each tool states it in its own cell-override log line through `unstamped_note`: an override carried without a fingerprint survives, but it will no longer be dropped when that well really is re-segmented, and that is a fact about the artifact the run just produced. Subset, Merge Plates and Concatenate all call it, which is what stops the three copies drifting apart again. |
 | `datasets/core/zip_passthrough.py` | `copy_member_raw` / `member_is_raw_copyable` / `RawCopyUnsupported` — copying one member's already-compressed bytes from one archive into another. The destination member keeps the source's compression method, CRC and both sizes, so it decompresses to exactly the same data; only its name and its position in the file change. **This depends on four `zipfile` implementation details** — `ZipFile.fp`, `.filelist`, `.NameToInfo`, `.start_dir` (plus the `_didModify` flag) — because the standard library exposes no public API for adding a member whose bytes are already compressed. Two things keep that contained: `member_is_raw_copyable` gates every member first, so a directory entry or an encrypted member is routed to the ordinary path as an expected case rather than an error; and `RawCopyUnsupported` is raised, with the destination truncated back to its exact pre-member state, when an archive's local headers disagree with its central directory. That last case is raised on rather than worked around — the ordinary path would fail on the same member for the same reason, and an archive that quietly holds fewer images than it was asked for is the one outcome this code must never produce. Any ZIP64 record in the source's extra field is stripped before the header is rebuilt (`ZipInfo.FileHeader` appends a freshly-computed one, and the source's describes the member at its old offsets); the data-descriptor flag comes off for the same class of reason, since the copied header carries the CRC and sizes inline where the source kept them in a trailer. **A member that is being renamed also loses Info-ZIP's Unicode Path and Unicode Comment records** (`0x7075` / `0x6375`). Each embeds its own copy of the member's name alongside a CRC of the name it was derived from, so across a rename it is a second, stale name for the same member: a reader that honours it and skips the name-CRC restores the file under its *pre-rename* name, silently undoing the well remap or timepoint offset the copy existed to perform. A member keeping its own name keeps those records, which still describe it correctly. |
 | `datasets/core/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate — plus `is_os_junk_member`, the shared answer to "is this member operating-system debris rather than data?" (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `__MACOSX/`, AppleDouble `._` sidecars, the Spotlight and Trash directories). It is deliberately a *named set*, not "anything that isn't an image": a `notes.txt` a user put in an archive on purpose is real content, and a caller that refuses to reconcile two conflicting copies of a real file should keep refusing. Concatenate is its only caller — see §6b's Verification note for what carrying that debris through a merge used to do. |
-| `datasets/core/tool_controller.py` | `DatasetToolController` — the worker lifecycle every tool controller shares (`jobFinished`, `stop`, `is_busy`, `shutdown`), with the two things that differ between tools as knobs: `_shutdown_label`, and a `_request_worker_stop` hook. The hook exists for one tool. Import Loose's worker spends the run blocked inside the zipper subprocess's stdout read loop and never polls `isInterruptionRequested()`, so Qt's cooperative flag is a no-op there and `request_stop` — which also signals the tracked child — is what actually stops it; a base that hard-coded `requestInterruption()` would have left an orphan process on app close, and `shutdown` swallows the failure it would then hit. `DestinationToolController` adds the run-and-confirm-restart cluster the three copy-into-a-destination tools share (Subset, Merge Plates, Concatenate), with `_destination_has_marker` supplied per tool because a folder holding *this* tool's interrupted attempt is a resume and another tool's leftovers are not. Deliberately **not** on either base: `_on_queue_requested`, `_on_finished` and `_on_succeeded`, which measured six, five and two distinct shapes across the six controllers — pulling them up would trade plain methods for a base full of flags. |
+| `datasets/core/tool_controller.py` | `DatasetToolController` — the worker lifecycle every tool controller shares (`jobFinished`, `stop`, `is_busy`, `shutdown`), with the two things that differ between tools as knobs: `_shutdown_label`, and a `_request_worker_stop` hook. The hook exists for one tool. Import Loose's worker spends the run blocked inside the zipper subprocess's stdout read loop and never polls `isInterruptionRequested()`, so Qt's cooperative flag is a no-op there and `request_stop` — which also signals the tracked child — is what actually stops it; a base that hard-coded `requestInterruption()` would have left an orphan process on app close, and `shutdown` swallows the failure it would then hit. `DestinationToolController` adds the run-and-confirm-restart cluster the three copy-into-a-destination tools share (Subset, Merge Plates, Concatenate), with `_destination_has_marker` supplied per tool because a folder holding *this* tool's interrupted attempt is a resume and another tool's leftovers are not. Deliberately **not** on either base: `_on_queue_requested`, `_on_finished` and `_on_succeeded`. Measured across the seven controllers by hashing each one's normalised body, `_on_queue_requested` has seven distinct bodies and `_on_finished` five, while `_on_succeeded` diverges further up — Validate's takes `(report, result)` where the other six take `(dest_root, summary)`. Pulling them up would trade plain methods for a base full of flags. |
 | `datasets/core/dataset_fields.py` | `is_dataset` / `is_free_destination` / `promote_open_button` — the destination-field validators and the success-state button swap the pages share. `is_free_destination` takes its two predicates as arguments for the same marker reason as above. Cross-field rules ("the destination must differ from both sources") stay on the page, since they read fields the helper cannot see. Sharing the *wording* is part of the point: a user moving between Subset and Merge Plates should not be told the same thing two different ways. |
 | `datasets/core/equation_row.py` | `build_equation_row` / `EquationRow` — the `dataset 1 + dataset 2 = destination` row, for the two tools that take two datasets and write a third. Merge Plates and Concatenate had built it twice in twenty statements each, differing only in two field labels and the name of the slot the fields report to, down to a byte-identical nested operator-glyph helper and a second copy of that column's width. What stays at the call site is what genuinely differs: the two dataset labels — Concatenate names its inputs "base" and "appended" because the operation is ordered, Merge Plates does not because its is not — and each page's own destination validator, which is bound to that tool's own in-progress marker and must **not** be shared. The builder returns the four widgets rather than assigning them, so each page keeps its own `_ds1_field` / `_ds2_field` / `_dest_field` / `_cross_hint` names, which its validation, its run spec and its reset all read. |
-| `datasets/core/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count, mirroring `pipeline.ome_explode._pick_workers`) every tool below uses for its per-well `ThreadPoolExecutor`. |
+| `datasets/core/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count) every tool below uses for its per-well `ThreadPoolExecutor`. It **re-exports** `pipeline.explode_common.pick_workers` rather than defining it: the exploders take it from there, and this module used to hold a second implementation of the same three lines under a comment saying it mirrored the first — which is a heuristic that will be tuned in one place and not the other. |
+| `datasets/core/convert_marker.py` | The resume marker the two **packed-file converters** share (Convert OME-TIFF, Convert CZI) — `mapping_signature`, the marker read/write/clear trio, `converted_wells`, `ResumeState`, `resume_state` and `destination_problem`. It is a different question from `dataset_paths.make_dataset_api`'s, which the copy tools use: theirs is "did I leave leftovers here?", answerable from the presence of a file and cleared by rebuilding. This one is "may I carry on from what is here?", which is a question about **settings** — two different mappings of one source write *identical* filenames, so nothing on disk distinguishes an `A01.zip` made from scene 0 from one made from scene 7, and only a marker recording the mapping can tell a run that may finish another's work from one that must refuse. Each converter passes its own marker filename (a folder carrying the *other* converter's leftovers is not a resume either) and its own list of mapping fields; the signature also carries the source's resolved path, size and mtime, so a file replaced at the same name — a re-export, a restore, the next plate saved over the last — is a different source. `workers` is deliberately not a mapping field: it changes how fast the conversion goes and nothing about what it writes, so refusing a resume over it would refuse one that was safe. |
 
 **Every copy tool refuses a dataset that spells one well two ways.** Subset,
 Merge Plates and Concatenate each call `well_spelling_collisions` from their own
@@ -7981,7 +8360,7 @@ refusal has somewhere to go and see the rest of the plate.
 names they lifted from `core`, so their own public API (and every existing
 test against it) is unchanged.
 
-All six tool pages share their status/log furniture through
+All seven tool pages share their status/log furniture through
 `datasets/core/log_panel.py::LogPanelMixin`. Each page ends the same way: a
 header row naming its output section with a "Show raw log" checkbox, then a
 separator and a read-only monospace log the checkbox reveals. The mixin owns
@@ -9637,7 +10016,7 @@ Qt event loop. Four layers:
   that **must** be emitted only once per run, as the true last statement of
   that run's completion handler (mirroring `AnalyzeTab.runFinished`'s
   re-entrancy rule, since a bridge slot may start the next job synchronously
-  from inside the emit). Each of the six Datasets controllers implements this
+  from inside the emit). Each of the seven Datasets controllers implements this
   directly (a `_launch()` split out of `_on_run()` so `start_from_queue` can
   skip the interactive restart/in-place confirmation a queued, unattended run
   has no one to answer); so does `AnalyzeTab`.
@@ -9656,7 +10035,7 @@ Qt event loop. Four layers:
   `ValidateController._run`'s "no dataset path" branch and
   `OmeImportController._launch`'s "no source or destination" branch all emit
   `jobFinished` directly rather than returning silently.
-  `tests/test_dataset_tool_integrity.py` checks each of the six launchers
+  `tests/test_dataset_tool_integrity.py` checks each of the seven launchers
   return by return, against the statement block it sits in rather than the
   function as a whole — one emit elsewhere in the function does not excuse a
   silent return beside it.
@@ -9729,7 +10108,7 @@ Qt event loop. Four layers:
   without a shell (tests, Datasets-only profiles) reports failure so the click
   says why rather than appearing to work.
 
-  `QueueBridge.hydrate_job` is the edit-path counterpart. For the six
+  `QueueBridge.hydrate_job` is the edit-path counterpart. For the seven
   Datasets tools `show_job` is already a complete inverse of `collect_spec` —
   the two read and write the same handful of keys — so hydration falls back
   to it. Analyze's is deliberately shallow (it sets the input folder and
@@ -9837,7 +10216,7 @@ Qt event loop. Four layers:
   fixed against — one sentence rendered as a bordered box filling the
   viewport. A trailing `outer.addStretch(1)` collects the leftover height.
 
-  Each of the six Datasets tool pages also keeps its own "+ Queue" button
+  Each of the seven Datasets tool pages also keeps its own "+ Queue" button
   beside Run, calling the controller's `collect_spec()` and handing the
   result up through an injected `on_add_to_queue(kind, spec)` callback to
   `DatasetsTab._add_to_queue`.
@@ -9850,14 +10229,14 @@ host-agnostic — it knows nothing about queues, jobs or datasets, and whoever
 shows it decides what confirming means — and it does not block the page
 beneath it, which is the point, since the user is editing that page.
 `DatasetsTab` inserts it at index 0 of the target page's own layout, which
-works uniformly because all six Datasets pages hold a single `QScrollArea`
+works uniformly because all seven Datasets pages hold a single `QScrollArea`
 there; for Analyze it goes at index 0 of `_form_layout`, where the resume
 banner already sits. Its Cancel routes through
 `JobQueueController.end_session` rather than tearing the strip down directly:
 the controller owns whether a session exists, and dropping only the strip
 would leave it believing one was live and willing to save it later.
 
-`datasets/tab.py` wires all of this: each of the six Datasets controllers is
+`datasets/tab.py` wires all of this: each of the seven Datasets controllers is
 constructed with `on_add_to_queue=tab._add_to_queue` and stashes itself in
 `tab._controllers[kind]`; the `"Job Queue"` `_Feature` entry is built **last**
 so `_build_job_queue` can register every already-built controller (plus the
@@ -10673,7 +11052,7 @@ called `setFixedHeight(1)`, so for those only the colour was wrong.
 set its shape, and pin it to `theme.Metrics.hairline`. `build_hline_separator`
 takes a `thickness` keyword for the one divider that is deliberately heavier
 (the Image Table's shelf rule, at 2 px). `datasets/core/log_panel.hrule` is
-the Datasets-side twin, one helper for the six tool pages that build the same
+the Datasets-side twin, one helper for the seven tool pages that build the same
 log header. `tests/test_divider_naming.py` fails on any
 `setFrameShape(QFrame.HLine|VLine)` whose frame is never given a sanctioned
 name.

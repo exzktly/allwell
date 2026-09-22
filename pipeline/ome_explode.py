@@ -34,9 +34,7 @@ inside the pipeline self-sufficiency contract (ARCHITECTURE §6.2).
 from __future__ import annotations
 
 import math
-import io
 import logging
-import os
 import re
 import threading
 import time
@@ -51,6 +49,17 @@ from typing import Callable
 import numpy as np
 import tifffile
 
+from pipeline.explode_common import (
+    ExplodeCancelled,
+    ExplodeResult,
+    encode_tiff,
+    expected_members,
+    pick_workers,
+    resolve_positions,
+    well_is_complete,
+    worker_groups,
+)
+from util.filename_token import safe_token
 from util.plate_grid import block_well_labels, normalize_well_order
 from util.zip_write import atomic_zip
 
@@ -61,8 +70,13 @@ from util.zip_write import atomic_zip
 FRAME_ORDERS = ("single", "pos_in_time", "time_in_pos")
 
 
-class OmeExplodeCancelled(Exception):
-    """Raised when a ``should_abort`` callback stops an explode mid-run."""
+#: The cancellation this exploder raises. It is :class:`
+#: ~pipeline.explode_common.ExplodeCancelled` itself rather than a subclass of
+#: it: the two importers stop for the same reason and a caller that catches one
+#: means to catch the other. Kept under this name because it is the name
+#: ``datasets.ome_import`` raises and catches, and renaming a module's public
+#: exception to tidy an alias is a change with no user on either end of it.
+OmeExplodeCancelled = ExplodeCancelled
 
 
 @dataclass
@@ -161,7 +175,7 @@ class OmeLayout:
     # where on the *plate*, so they are the one place a starting well can come
     # from rather than be typed.
     position_names: list[str] = field(default_factory=list)
-    # The channel names as the OME-XML spells them, before ``_safe_token``
+    # The channel names as the OME-XML spells them, before ``safe_token``
     # strips them to filename tokens. Kept only so a token collision can name
     # the two channels a user has to go and rename; nothing decides anything
     # from these.
@@ -376,32 +390,6 @@ class OmeLayout:
             f"converting would write blank images indistinguishable from real "
             f"ones.{where}{cause}"
         )
-
-
-@dataclass
-class ExplodeResult:
-    """A summary of an explode run, for logging and a pre-run preview."""
-
-    wells: list[str] = field(default_factory=list)
-    channels: list[str] = field(default_factory=list)
-    timepoints: list[str] = field(default_factory=list)
-    fovs_per_well: int = 0
-    images_written: int = 0
-    # Wells a resumed run found already complete and did not rewrite. Reported
-    # rather than merely skipped: a run that converted a tenth of a plate and
-    # one that converted all of it otherwise print the same closing line.
-    wells_resumed: list[str] = field(default_factory=list)
-
-
-def _safe_token(value: object, fallback: str) -> str:
-    """Filename-safe token: keep alphanumerics only, else *fallback*.
-
-    The exploded filenames are split on the schema separator (``_``) downstream,
-    so a channel name like ``"DAPI 405"`` or ``"GFP_2"`` must not carry spaces or
-    separators into a token slot. Strips everything but ``[0-9A-Za-z]``.
-    """
-    tok = re.sub(r"[^0-9A-Za-z]+", "", str(value if value is not None else ""))
-    return tok or fallback
 
 
 # OME's ``UnitsTime`` enumeration, as hours per unit. Only the units an
@@ -660,7 +648,7 @@ def _parse_ome_labels(
 
     Channel names come from the first ``Image``'s ``Channel`` elements (channels
     are the same across positions in a plate scan). ``raw_channel_names`` are
-    those names before ``_safe_token`` normalises them, which is what a refusal
+    those names before ``safe_token`` normalises them, which is what a refusal
     message has to quote: the user renames a channel in their acquisition
     software, not in the filename token it reduces to.
 
@@ -700,7 +688,7 @@ def _parse_ome_labels(
     if names:
         raw_names = [str(names[i]) if i < len(names) else "" for i in range(size_c)]
         channel_names = [
-            _safe_token(names[i] if i < len(names) else "", f"c{i}")
+            safe_token(names[i] if i < len(names) else "", f"c{i}")
             for i in range(size_c)
         ]
 
@@ -1312,79 +1300,13 @@ def _packed_plane(series, axes: str, frame: int, c: int) -> np.ndarray:
     return plane
 
 
-def _resolve_positions(
-    total: int, n_wells: int, fovs_per_well: int | None, *, what: str, name: str,
-) -> int:
-    """Return the validated FOVs-per-well for *total* positions/frames.
-
-    ``None`` derives it (``total`` must be an exact multiple of *n_wells*); a
-    given value is cross-checked against ``n_wells * fovs_per_well == total``.
-    """
-    if fovs_per_well is None:
-        if total % n_wells != 0:
-            raise ValueError(
-                f"{name} has {total} {what}, which is not divisible by the "
-                f"well grid ({n_wells} well(s)). Fields-of-view per well must be "
-                f"a whole number — check the grid dimensions."
-            )
-        return total // n_wells
-    if n_wells * fovs_per_well != total:
-        raise ValueError(
-            f"{name} has {total} {what}, but the {n_wells} well(s) × "
-            f"{fovs_per_well} FOV(s) per well = {n_wells * fovs_per_well}. "
-            f"Check the grid dimensions and the FOVs-per-well value."
-        )
-    return fovs_per_well
-
-
-def _expected_members(experiment: str, channels, well: str, fovs: int,
-                      timepoints) -> set[str]:
-    """Every member name a finished ``<well>.zip`` holds, for these settings.
-
-    The exact set, not a count: an archive left by a run with a different grid
-    holds the right *number* of images under the wrong names, and resuming onto
-    it would leave a dataset stitched from two different well mappings.
-    """
-    return {
-        f"{experiment}_{channel}_{well}_f{fov}_{tp}.tif"
-        for channel in channels
-        for fov in range(fovs)
-        for tp in timepoints
-    }
-
-
-def _well_is_complete(path: Path, expected: set[str]) -> bool:
-    """True when *path* is a readable archive already holding *expected*.
-
-    Reads the central directory only, so this costs a couple of seeks however
-    large the archive is. An unreadable or truncated zip is treated as absent —
-    ``atomic_zip`` cannot leave one, but a half-copied folder can.
-    """
-    if not path.is_file():
-        return False
-    try:
-        with zipfile.ZipFile(path) as zf:
-            return expected.issubset(set(zf.namelist()))
-    except (OSError, zipfile.BadZipFile):
-        return False
-
-
-def _pick_workers(workers: int, n_wells: int) -> int:
-    """Resolve the worker-thread count (0 = auto), capped at the well count."""
-    if n_wells <= 0:
-        return 1
-    if workers and workers > 0:
-        return max(1, min(workers, n_wells))
-    return max(1, min(8, os.cpu_count() or 4, n_wells))
-
-
 def _resolve_single_image(
     layout, n_wells: int, fovs_per_well: "int | None", frame_order: str, name: str,
 ) -> "tuple[int, int, int]":
     """Return ``(n_positions, n_timepoints, fovs_per_well)`` for a packed file."""
     n_frames = layout.n_frames
     if frame_order == "single":
-        fovs = _resolve_positions(n_frames, n_wells, fovs_per_well,
+        fovs = resolve_positions(n_frames, n_wells, fovs_per_well,
                                   what="frame(s)", name=name)
         return n_frames, 1, fovs
     if fovs_per_well is None:
@@ -1413,13 +1335,6 @@ def _frame_index(pos: int, t: int, n_positions: int, n_timepoints: int,
     if frame_order == "time_in_pos":
         return pos * n_timepoints + t
     return pos  # "single" -- one timepoint, frame == position
-
-
-def _encode_tiff(plane: np.ndarray) -> bytes:
-    """Encode a 2-D plane as a single-page TIFF in memory (no temp file)."""
-    buf = io.BytesIO()
-    tifffile.imwrite(buf, plane)
-    return buf.getvalue()
 
 
 def explode_ome_tiff(
@@ -1505,7 +1420,7 @@ def explode_ome_tiff(
     unsound = layout.validation_report(ome_path.name)
     if unsound:
         raise ValueError(unsound)
-    exp_tok = _safe_token(experiment, "ome")
+    exp_tok = safe_token(experiment, "ome")
     # An explicit ordering (click-defined on the plate mockup) is used verbatim;
     # it needn't be rectangular. Otherwise reconstruct the rectangular serpentine
     # from the grid — both raise before any archive is written.
@@ -1524,7 +1439,7 @@ def explode_ome_tiff(
         tp_tokens = [f"t{t}" for t in range(n_timepoints)]
         head = f"single image, {layout.n_frames} frame(s) ({frame_order})"
     else:
-        fovs = _resolve_positions(layout.n_positions, n_wells, fovs_per_well,
+        fovs = resolve_positions(layout.n_positions, n_wells, fovs_per_well,
                                   what="stage position(s)", name=ome_path.name)
         n_positions, n_timepoints = layout.n_positions, layout.size_t
         tp_tokens = list(layout.timepoint_tokens)
@@ -1532,7 +1447,7 @@ def explode_ome_tiff(
 
     out_in_dir.mkdir(parents=True, exist_ok=True)
     total = n_positions * n_timepoints * layout.size_c
-    n_workers = _pick_workers(workers, n_wells)
+    n_workers = pick_workers(workers, n_wells)
     _log(
         f"[ome] {ome_path.name}: {head} -> {n_wells} well(s) x {fovs} FOV(s) x "
         f"{n_timepoints} timepoint(s), {layout.size_c} channel(s)"
@@ -1549,9 +1464,9 @@ def explode_ome_tiff(
     if resume:
         resumable = {
             label for label in well_labels
-            if _well_is_complete(
+            if well_is_complete(
                 out_in_dir / f"{label}.zip",
-                _expected_members(exp_tok, layout.channel_names, label,
+                expected_members(exp_tok, layout.channel_names, label,
                                   fovs, tp_tokens))
         }
         if resumable:
@@ -1629,7 +1544,7 @@ def explode_ome_tiff(
                                 w0 = time.perf_counter()
                                 member = (f"{exp_tok}_{layout.channel_names[c]}_"
                                           f"{label}_f{local_fov}_{tp_tokens[ti]}.tif")
-                                zf.writestr(member, _encode_tiff(plane))
+                                zf.writestr(member, encode_tiff(plane))
                                 write_s += time.perf_counter() - w0
                                 written += 1
                                 well_written += 1
@@ -1637,8 +1552,7 @@ def explode_ome_tiff(
                 wells.append(label)
         return written, wells, read_s, write_s, resumed
 
-    groups = [g for g in (list(range(i, n_wells, n_workers))
-                          for i in range(n_workers)) if g]
+    groups = worker_groups(n_wells, n_workers)
     result = ExplodeResult(
         channels=list(layout.channel_names),
         timepoints=tp_tokens,

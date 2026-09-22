@@ -114,6 +114,7 @@ ANALYZE_SECTION_HELP: dict[str, str] = {
 DATASETS_PAGE_HELP: dict[str, str] = {
     "Concatenate Datasets": "Concatenate datasets",
     "Convert OME-TIFF": "Convert OME-TIFF",
+    "Convert CZI": "Convert CZI",
     "Validate & Repair": "Validate & Repair Dataset",
     "Subset / Split": "Subset / Split Dataset",
     "Zip Loose Folder": "Zip Loose Folder",

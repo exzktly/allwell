@@ -97,3 +97,27 @@ def test_a_failure_still_reaches_on_failed_with_a_reporter_attached(qtbot):
                    on_stage=stages.append)
     qtbot.waitUntil(lambda: failed == ["nope"], timeout=3000)
     assert stages == ["about to fail"]
+
+
+def test_a_job_with_no_reporting_disconnects_quietly(qtbot, recwarn):
+    """Disconnecting a signal nothing connected to raises *and* warns.
+
+    The ``except`` around it swallows the exception; the ``RuntimeWarning``
+    survives it, so blanket-disconnecting all four signals printed two warnings
+    per call for every caller that wanted no progress reporting — which is most
+    of them, and which a page that scans on every source change makes a stream
+    of. Only the signals that were connected are disconnected now.
+
+    Pinned as "no warnings from this module", not as a count, because the count
+    is a property of the implementation and the silence is the property that
+    matters.
+    """
+    done: list[object] = []
+    run_off_thread(lambda: "ok", on_done=done.append)
+    qtbot.waitUntil(lambda: done == ["ok"], timeout=3000)
+
+    from_bridge = [w for w in recwarn
+                   if "worker_bridge" in str(getattr(w, "filename", ""))]
+    assert from_bridge == [], (
+        f"{len(from_bridge)} warning(s) from worker_bridge: "
+        f"{[str(w.message) for w in from_bridge]}")

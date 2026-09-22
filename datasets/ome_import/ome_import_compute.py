@@ -11,13 +11,12 @@ page/worker layer stays a thin shell on top (CLAUDE.md §3/§5).
 
 from __future__ import annotations
 
-import json
 import re
-from util.json_write import write_json_atomic
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from util.aw_safe import swallow
+from datasets.core import convert_marker as marker
+from datasets.core.convert_marker import ResumeState  # noqa: F401 (re-export)
 
 from pipeline.ome_explode import (
     FRAME_ORDERS,
@@ -545,139 +544,44 @@ _MAPPING_FIELDS = ("grid_rows", "grid_cols", "origin", "direction", "serpentine"
 
 def _mapping_signature(src: Path | str, params: ConversionParams) -> dict:
     """What a resume has to match: the source, and the settings that map it."""
-    values = {name: getattr(params, name) for name in _MAPPING_FIELDS}
-    values["well_order"] = list(values["well_order"] or ())
-    source = Path(src)
-    values["source"] = str(source.resolve())
-    # Size and mtime as well as the path: a file replaced at the same name — a
-    # re-export, a restore, the next plate saved over the last — is a different
-    # source, and resuming across that leaves half of one plate and half of
-    # another under one set of filenames. Cheap: one stat, no hashing.
-    try:
-        stat = source.stat()
-        values["source_size"] = stat.st_size
-        values["source_mtime_ns"] = stat.st_mtime_ns
-    except OSError:
-        values["source_size"] = None
-        values["source_mtime_ns"] = None
-    return values
+    return marker.mapping_signature(src, params, _MAPPING_FIELDS)
 
 
 def write_run_marker(dest: Path | str, src: Path | str,
                      params: ConversionParams) -> None:
     """Record that a conversion is under way in *dest*, and with what settings."""
-    root = Path(dest)
-    root.mkdir(parents=True, exist_ok=True)
-    # Atomically, because this marker is what decides whether a later run may
-    # finish this one's work. A half-written marker reads as a *different*
-    # mapping, and the wells already on disk were written by this one — so an
-    # interrupted write turns a resumable folder into one the tool refuses,
-    # or, if it happened to truncate to something parseable, into one it
-    # resumes with the wrong settings.
-    write_json_atomic(root / IN_PROGRESS_MARKER,
-                      _mapping_signature(src, params))
+    marker.write_run_marker(dest, IN_PROGRESS_MARKER,
+                            _mapping_signature(src, params))
 
 
 def clear_run_marker(dest: Path | str) -> None:
     """Drop the marker — the run finished, so the folder is a dataset now."""
-    with swallow("ome-import marker"):
-        (Path(dest) / IN_PROGRESS_MARKER).unlink(missing_ok=True)
+    marker.clear_run_marker(dest, IN_PROGRESS_MARKER, "ome-import")
 
 
 def read_run_marker(dest: Path | str) -> dict | None:
     """The settings of the interrupted run in *dest*, or ``None`` if there is none."""
-    path = Path(dest) / IN_PROGRESS_MARKER
-    if not path.is_file():
-        return None
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return loaded if isinstance(loaded, dict) else None
+    return marker.read_run_marker(dest, IN_PROGRESS_MARKER)
 
 
 def converted_wells(dest: Path | str) -> list[str]:
     """The well archives already sitting in ``<dest>/in``."""
-    in_dir = Path(dest) / "in"
-    if not in_dir.is_dir():
-        return []
-    return sorted(p.stem for p in in_dir.glob("*.zip"))
-
-
-@dataclass(frozen=True)
-class ResumeState:
-    """Whether *dest* holds an interrupted run of this conversion to finish."""
-
-    resumable: bool = False
-    wells_done: int = 0
-    # A previous run is there but was making a different dataset — different
-    # source, grid, origin or ordering. Resuming onto it would leave a folder
-    # stitched from two mappings, with the filenames of one and the images of
-    # both, and nothing in it saying so.
-    mismatched: bool = False
-
-    def hint(self) -> str:
-        if self.mismatched:
-            return ("This folder holds an interrupted conversion made with "
-                    "different settings. Empty it, or choose another folder.")
-        if self.resumable:
-            return (f"↳ Resuming an interrupted run: {self.wells_done} well(s) "
-                    f"are already converted and will be kept.")
-        return ""
+    return marker.converted_wells(dest)
 
 
 def resume_state(dest: Path | str, src: Path | str,
                  params: ConversionParams) -> ResumeState:
     """Read *dest* as a place to continue this conversion in."""
-    marker = read_run_marker(dest)
-    if marker is None:
-        return ResumeState()
-    done = len(converted_wells(dest))
-    if marker != _mapping_signature(src, params):
-        # A marker with no wells behind it describes a run that wrote nothing —
-        # one that failed before its first archive, or was cancelled and then
-        # had its settings changed, which is the commonest reason to cancel.
-        # There is nothing on disk for a second mapping to contaminate, and the
-        # marker is a hidden file the "empty the folder" advice does not clear.
-        return ResumeState() if done == 0 else ResumeState(mismatched=True,
-                                                           wells_done=done)
-    return ResumeState(resumable=True, wells_done=done)
+    return marker.resume_state(dest, IN_PROGRESS_MARKER,
+                               _mapping_signature(src, params))
 
 
 def destination_problem(dest: Path | str, src: Path | str = "",
                         params: ConversionParams | None = None) -> str:
-    """``""`` if *dest* is usable, else a short reason, for the field's hint.
-
-    A conversion writes ``<dest>/in/<WELL>.zip`` and overwrites each archive it
-    produces, so a destination that already holds wells keeps whichever of them
-    this run does not write — a folder holding two different plates, with
-    nothing in it saying so. Every other Datasets tool validates its destination
-    field this way (``core.dataset_fields.is_free_destination``); the wording
-    differs here only because this tool writes ``in/`` and nothing else.
-
-    Given *src* and *params*, a folder carrying this tool's own in-progress
-    marker for the *same* settings is not a problem but a resume, and one
-    carrying it for different settings is refused with its own wording — the
-    filenames of two mappings are identical, so only the marker can tell them
-    apart.
-    """
-    root = Path(dest)
-    if not str(dest).strip():
-        return ""
-    if root.exists() and not root.is_dir():
-        return "Not a folder — choose a folder."
-    if params is not None:
-        state = resume_state(root, src or root, params)
-        if state.mismatched:
-            return state.hint()
-        if state.resumable:
-            return ""      # this tool's own interrupted run: finish it
-    if (root / "out" / "pipeline_info.json").exists():
-        return "Already holds a finished dataset — choose an empty folder."
-    in_dir = root / "in"
-    if in_dir.is_dir() and any(in_dir.glob("*.zip")):
-        return "Already holds converted wells — choose an empty folder."
-    return ""
+    """``""`` if *dest* is usable, else a short reason, for the field's hint."""
+    signature = (None if params is None
+                 else _mapping_signature(src or dest, params))
+    return marker.destination_problem(dest, IN_PROGRESS_MARKER, signature)
 
 
 def read_layout(src: Path | str) -> OmeLayout:

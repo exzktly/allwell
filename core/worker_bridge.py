@@ -82,12 +82,32 @@ def run_off_thread(fn, *, on_done, on_failed=None, on_progress=None,
     """
     bridge = WorkerBridge()
 
+    #: The signals this call actually connected, **by name**. ``done`` and
+    #: ``failed`` always are — ``failed`` even without an ``on_failed``, so a
+    #: raising job still disconnects. The other two only when the caller asked
+    #: to hear from them.
+    #:
+    #: Names rather than the ``SignalInstance`` objects themselves, and that is
+    #: not a style choice: a list of signal instances does not keep their
+    #: ``QObject`` alive, and ``_disconnect`` below is the only thing holding a
+    #: reference to *bridge* once the worker thread has ended. Holding the
+    #: instances instead let the bridge be collected and then disconnected
+    #: through, which segfaults — and it segfaults precisely for the callers
+    #: that follow the honest reading of this function's contract and keep no
+    #: reference of their own, which is what ``tests/test_worker_bridge.py``
+    #: does and how this was caught.
+    connected = ["done", "failed"]
+
     def _disconnect() -> None:
-        # Disconnecting a signal with no connections raises, so guard it — this
-        # also runs when a caller passed no on_failed / on_progress / on_stage.
-        for sig in (bridge.done, bridge.failed, bridge.progress, bridge.stage):
+        # Only what was connected. Disconnecting a signal with no connections
+        # raises *and* emits a RuntimeWarning, and the warning survives the
+        # except — so blanket-disconnecting all four printed two warnings per
+        # call for every caller that wanted no progress reporting, which is
+        # most of them. The guard stays for the genuinely racy case: a bridge
+        # whose C++ object has gone by the time this runs.
+        for name in connected:
             try:
-                sig.disconnect()
+                getattr(bridge, name).disconnect()
             except (TypeError, RuntimeError):
                 pass
 
@@ -108,8 +128,10 @@ def run_off_thread(fn, *, on_done, on_failed=None, on_progress=None,
     bridge.failed.connect(_handle_failed)
     if on_progress is not None:
         bridge.progress.connect(on_progress)
+        connected.append("progress")
     if on_stage is not None:
         bridge.stage.connect(on_stage)
+        connected.append("stage")
 
     reporter = (None if (on_progress is None and on_stage is None)
                 else _Reporter(bridge))

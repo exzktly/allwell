@@ -29,6 +29,15 @@ _GLYPHS: dict[str, str] = {
     # Standard Feather "copy" — two overlapping rounded rectangles.
     "copy":          ('<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>'
                       '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
+    # Lucide "microscope" — the Datasets rail's Convert CZI entry. An icon
+    # name with no glyph here falls back to "alert-triangle", which makes a
+    # perfectly ordinary page look like it is reporting a fault, so a new rail
+    # entry adds its glyph in the same commit as itself.
+    "microscope":    ('<path d="M6 18h8"/><path d="M3 22h18"/>'
+                      '<path d="M14 22a7 7 0 1 0 0-14h-1"/>'
+                      '<path d="M9 14h2"/>'
+                      '<path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z"/>'
+                      '<path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/>'),
     "chevron-down":  '<polyline points="6 9 12 15 18 9"/>',
     "chevron-right": '<polyline points="9 18 15 12 9 6"/>',
     "chevron-left":  '<polyline points="15 18 9 12 15 6"/>',

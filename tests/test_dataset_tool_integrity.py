@@ -604,7 +604,7 @@ def test_a_free_runner_still_takes_the_job_immediately(qapp, tmp_path):
 
 
 @pytest.mark.parametrize("tool", [
-    "concatenate", "import_loose", "merge_plates",
+    "concatenate", "czi_import", "import_loose", "merge_plates",
     "ome_import", "subset", "validate",
 ])
 def test_every_tool_reports_a_launch_it_abandoned(tool):
@@ -614,7 +614,7 @@ def test_every_tool_reports_a_launch_it_abandoned(tool):
 
     Checked per *return statement*, not once per function. The first version
     asked only whether the string ``jobFinished.emit`` appeared anywhere before
-    ``worker.start()``, which three of the six tools skipped entirely (they had
+    ``worker.start()``, which three of the tools skipped entirely (they had
     one bare return, so the guard `continue`d) and which the other three
     satisfied with a single emit however many silent returns sat beside it.
 

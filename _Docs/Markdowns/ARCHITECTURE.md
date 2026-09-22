@@ -6919,9 +6919,23 @@ So the page scans in two stages, both on a worker thread through
 header and the metadata segment it points at — measured at 6 KB for a
 whole-plate file against 997 KB for the full read, and 46 KB against 1.05 MB
 for a 96-file split export — and names the wells. The plate is painted from it
-at once, with the verdict saying so and the Run button still shut, because a
-peek cannot know whether the file is sound, whether the files agree, or how
-many tiles a scene holds. The **full read** follows and replaces it.
+at once, with the verdict saying so, because a peek cannot know whether the
+file is sound, whether the files agree, or how many tiles a scene holds. The
+**full read** follows and replaces it.
+
+**Neither of them gates the Run button.** `_ready_before_the_scan` decides
+that, from what a directory listing and the widgets can answer: a source that
+resolves to at least one `.czi`, a form whose own fields parse, and a usable
+destination. Reading a file is not among them, because reading a file is not
+what makes the run safe — `PackedConverterWorker.run` plans before it
+converts, and `explode_czi` refuses an unsound source or an unresolvable
+mapping with no archive written. The scan *describes* the plate; it does not
+permit it, and a description that a split export of several hundred files on
+a network share takes an hour to produce is an hour of a window nobody can
+use. What the scan finds still lands: an unsound plate takes the button back
+and says why, and while the plate is unread the verdict says so in as many
+words, because a button offered beside a silent verdict is the page asserting
+a judgement it has not made.
 
 Both derive wells through the one `czi_read.wells_from_scenes`, so the plate a
 peek paints and the plate a run converts cannot be derived two different ways.

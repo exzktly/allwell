@@ -5207,8 +5207,18 @@ on the plate rather than supplying it.
    sound: how many tiles each scene holds, what the pixel format is, whether
    the files agree with each other. That walks each file's index — about a
    megabyte for a 96-well plate, still no images — and when it lands the
-   readout describes the whole plate and **Convert** becomes available. Until
-   then the button stays off: headers alone are not enough to convert on.
+   readout describes the whole plate.
+
+   **Convert does not wait for any of it.** The button is available as soon as
+   the folder holds a `.czi` and the fields make sense, and the verdict says
+   plainly that the plate has not been read yet. The conversion reads and
+   checks the plate itself, and writes nothing until it has — an unsound
+   plate is refused with no archive created — so waiting was never what made
+   the run safe. On a split export of several hundred files held on a network
+   share, naming the wells alone can take an hour, and that hour is now yours
+   to spend on the conversion rather than on a button that cannot be pressed.
+   If the read does find something wrong, it says so and takes the button
+   back.
 
    **Both reads count the files as they go.** A split export is up to
    ninety-six files, and over a share either read takes long enough that a

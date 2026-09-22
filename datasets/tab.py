@@ -37,6 +37,7 @@ from datasets.import_loose.controller import ImportLooseController
 from datasets.job_queue.controller import JobQueueController
 from datasets.merge_plates.controller import MergePlatesController
 from datasets.czi_import.controller import CziImportController
+from datasets.nd2_import.controller import Nd2ImportController
 from datasets.ome_import.controller import OmeImportController
 from datasets.subset.controller import SubsetController
 from datasets.validate.controller import ValidateController
@@ -44,8 +45,8 @@ from datasets.validate.controller import ValidateController
 # Kinds a Datasets controller can queue itself under — registered against the
 # Job Queue page once every controller (including Analyze, injected from
 # outside) has been built.
-_QUEUEABLE_KINDS = ("concatenate", "ome_import", "czi_import", "validate", "subset",
-                    "import_loose", "merge_plates")
+_QUEUEABLE_KINDS = ("concatenate", "ome_import", "czi_import", "nd2_import",
+                    "validate", "subset", "import_loose", "merge_plates")
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,13 @@ def _build_czi_import(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] |
     controller = CziImportController(
         on_open_in_analyze=tab._open_in_analyze, on_add_to_queue=tab._add_to_queue)
     tab._controllers["czi_import"] = controller
+    return controller.page, controller.shutdown
+
+
+def _build_nd2_import(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    controller = Nd2ImportController(
+        on_open_in_analyze=tab._open_in_analyze, on_add_to_queue=tab._add_to_queue)
+    tab._controllers["nd2_import"] = controller
     return controller.page, controller.shutdown
 
 
@@ -141,6 +149,8 @@ _FEATURES: tuple[_Feature, ...] = (
              kind="ome_import"),
     _Feature(name="Convert CZI", icon="microscope", build=_build_czi_import,
              kind="czi_import"),
+    _Feature(name="Convert ND2", icon="microscope", build=_build_nd2_import,
+             kind="nd2_import"),
     _Feature(name="Validate & Repair", icon="scan-line", build=_build_validate,
              kind="validate"),
     _Feature(name="Subset / Split", icon="boxes", build=_build_subset,

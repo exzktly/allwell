@@ -311,6 +311,8 @@ def dir_has_entries(folder: Path) -> bool:
 PACKED_OME = "packed_ome"
 #: The selected path is a Zeiss CZI, which Analyze cannot read either.
 PACKED_CZI = "packed_czi"
+#: The selected path is a Nikon ND2, which Analyze cannot read either.
+PACKED_ND2 = "packed_nd2"
 #: The selected path is not a directory at all.
 NOT_A_DIR = "not_a_dir"
 #: The grouped root already holds per-well zips / folders; nothing to prepare.
@@ -347,6 +349,45 @@ PACKED_CZI_MESSAGE = (
     "scenes). Convert it to a dataset folder first in the Datasets tab → "
     "“Convert CZI”, then open that folder here to process it."
 )
+
+#: And for a Nikon ND2. It names no folder case, unlike the CZI message:
+#: NIS-Elements writes a plate as one file, so a folder holding several ND2s is
+#: several plates and Analyze has no way to know which one was meant.
+PACKED_ND2_MESSAGE = (
+    "⚠ This is a Nikon ND2. Convert it to a dataset folder first in the "
+    "Datasets tab → “Convert ND2”, then open that folder here to process it."
+)
+
+
+_OME_SUFFIXES = (".ome.tif", ".ome.tiff")
+_CZI_SUFFIXES = (".czi",)
+_ND2_SUFFIXES = (".nd2",)
+
+#: The packed acquisition files Analyze cannot read, each with the plan action,
+#: the message naming the Datasets page that converts it, and whether *several*
+#: of them in one folder are one plate rather than an ambiguity. Ordered, and
+#: OME-TIFF first, because a ``.ome.tif`` also ends in ``.tif`` and nothing
+#: else here does — a table rather than a chain of ``if``s so adding a fourth
+#: converter cannot add a fifth place to state the same fact.
+#:
+#: The last column is where the formats differ. Two OME-TIFFs in a folder are
+#: two plates and picking either would convert one the user did not name, and
+#: the same is true of two ND2s, because NIS-Elements writes a plate as one
+#: file. Several ``.czi`` files in a folder are ZEN's *Split Scenes* export —
+#: one file per scene, one plate — which the CZI converter reads as a set, so
+#: a folder of them is a recognised input rather than an ambiguity.
+_PACKED_KINDS: tuple[tuple[tuple[str, ...], str, str, bool], ...] = (
+    (_OME_SUFFIXES, PACKED_OME, PACKED_OME_MESSAGE, False),
+    (_CZI_SUFFIXES, PACKED_CZI, PACKED_CZI_MESSAGE, True),
+    (_ND2_SUFFIXES, PACKED_ND2, PACKED_ND2_MESSAGE, False),
+)
+
+#: Every action the table above can produce. Derived from it rather than
+#: written out, because the one place that lists these by hand is the one that
+#: will be a converter short: a packed kind missing from a hand-written roster
+#: does not fail, it silently falls through to the generic layout error and
+#: tells the user their file has no images in it.
+PACKED_ACTIONS = frozenset(action for _s, action, _m, _many in _PACKED_KINDS)
 
 
 #: Actions that describe input the run can proceed with.
@@ -625,7 +666,7 @@ def _layout_error(plan: InputPlan, raw: Path) -> str:
     The readout has room for one line; a failed run has room to explain. Both
     describe the same verdict, so they are built from the same plan.
     """
-    if plan.action in (PACKED_OME, PACKED_CZI):
+    if plan.action in PACKED_ACTIONS:
         # Each already carries the message naming its own converter — derived
         # from the file's suffix in `detect_packed_input`, which is the only
         # place that decides which page converts what.
@@ -1754,27 +1795,6 @@ def _group_loose_tifs_in_place(
     return folder, output_dir, _on_success
 
 
-_OME_SUFFIXES = (".ome.tif", ".ome.tiff")
-_CZI_SUFFIXES = (".czi",)
-
-#: The packed acquisition files Analyze cannot read, each with the plan action,
-#: the message naming the Datasets page that converts it, and whether *several*
-#: of them in one folder are one plate rather than an ambiguity. Ordered, and
-#: OME-TIFF first, because a ``.ome.tif`` also ends in ``.tif`` and nothing
-#: else here does — a table rather than a chain of ``if``s so adding a third
-#: converter cannot add a fourth place to state the same fact.
-#:
-#: The last column is the difference between the two formats. Two OME-TIFFs in
-#: a folder are two plates and picking either would convert one the user did
-#: not name. Several ``.czi`` files in a folder are ZEN's *Split Scenes*
-#: export — one file per scene, one plate — which the CZI converter reads as a
-#: set, so a folder of them is a recognised input rather than an ambiguity.
-_PACKED_KINDS: tuple[tuple[tuple[str, ...], str, str, bool], ...] = (
-    (_OME_SUFFIXES, PACKED_OME, PACKED_OME_MESSAGE, False),
-    (_CZI_SUFFIXES, PACKED_CZI, PACKED_CZI_MESSAGE, True),
-)
-
-
 class PackedInput(NamedTuple):
     """A packed acquisition file found at the selected path.
 
@@ -1794,12 +1814,12 @@ def detect_packed_input(raw: Path) -> PackedInput | None:
 
     Accepts either the file selected directly, or a directory holding them.
     A directory with exactly one is that file. A directory with *several* is
-    ambiguous for an OME-TIFF — picking either would convert a plate the user
-    did not name — and is not for a CZI, where a folder of them is ZEN's
-    *Split Scenes* export of one plate; see :data:`_PACKED_KINDS`. Analyze uses
-    this to spot a packed input and redirect the user to the Datasets converter
-    for it; the converters themselves do the work
-    (``datasets.ome_import``, ``datasets.czi_import``).
+    ambiguous for an OME-TIFF or an ND2 — picking either would convert a plate
+    the user did not name — and is not for a CZI, where a folder of them is
+    ZEN's *Split Scenes* export of one plate; see :data:`_PACKED_KINDS`.
+    Analyze uses this to spot a packed input and redirect the user to the
+    Datasets converter for it; the converters themselves do the work
+    (``datasets.ome_import``, ``datasets.czi_import``, ``datasets.nd2_import``).
     """
     if raw.is_file():
         name = raw.name.lower()

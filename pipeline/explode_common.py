@@ -73,6 +73,40 @@ def resolve_positions(
     return fovs_per_well
 
 
+def timepoint_plan(timepoints, stride: int = 1) -> list[tuple[int, str]]:
+    """The timepoints a conversion keeps, as ``(source index, token)`` pairs.
+
+    *stride* of 1 keeps everything, which is the default and the only value
+    that produces a complete dataset. A larger one keeps every *stride*-th
+    timepoint counting from the first: a twelve-point timelapse at stride 3
+    converts four of them, the source's 0, 3, 6 and 9.
+
+    **The tokens are the source's own, never renumbered.** Stride 3 over
+    ``t0 … t11`` yields ``t0, t3, t6, t9`` and not ``t0, t1, t2, t3``, because
+    :func:`util.timepoint.parse_hours` reads ``t3`` as three hours and a
+    renumbered set would state a spacing the acquisition never had — the whole
+    point of dropping timepoints is to convert fewer images, not to rewrite
+    when they were taken. Review's *Interval per timepoint* then rescales a
+    kept set as correctly as it rescales a complete one.
+
+    **It always keeps the first.** On a treatment timecourse that is the
+    pre-treatment reading every later point is normalised against, so it is
+    the one timepoint no stride may drop.
+
+    Index and token are returned together rather than separately because the
+    caller needs both — the index to read the plane, the token to name it —
+    and two lists that must stay in step are a desynchronisation waiting to
+    happen.
+    """
+    tokens = list(timepoints)
+    if stride < 1:
+        raise ValueError(
+            f"A timepoint stride must be 1 or more; got {stride}. Use 1 to "
+            f"convert every timepoint."
+        )
+    return [(index, tokens[index]) for index in range(0, len(tokens), stride)]
+
+
 def expected_members(experiment: str, channels, well: str, fovs: int,
                      timepoints) -> set[str]:
     """Every member name a finished ``<well>.zip`` holds, for these settings.

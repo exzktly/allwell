@@ -6700,6 +6700,44 @@ back up. This is where the CZI converter gives less than the OME-TIFF one, whose
 `DeltaT` handling is described above — the manual says so too, because a user
 expecting hours on a Review axis needs to know where they went.
 
+**A conversion may keep every N-th timepoint instead of all of them.**
+`explode_common.timepoint_plan` resolves the page's *Keep every Nth timepoint*
+field into `(source index, token)` pairs, and `explode_czi` iterates those
+pairs rather than `range(size_t)`. A densely-sampled timelapse is converted at
+a coarser resolution without re-exporting it from ZEN and without writing the
+images that will not be looked at.
+
+Three properties of that selection, each with a reason it is not the obvious
+alternative:
+
+- **The kept tokens are the source's own, never renumbered.** Stride 3 over
+  `t0 … t11` writes `t0, t3, t6, t9`. Renumbering them `t0 … t3` would look
+  tidier and would state a spacing the acquisition never had, because
+  `util.timepoint.parse_hours` reads `t3` as three hours; Review's *Interval
+  per timepoint* then rescales a kept set exactly as it rescales a complete
+  one.
+- **The first timepoint is always kept.** On a treatment timecourse that is
+  the pre-treatment reading every later point is normalised against.
+- **Index and token travel together.** `timepoint_plan` returns pairs rather
+  than two lists because the index reads the plane and the token names it, and
+  a stride that filtered one without the other would write a complete,
+  correctly sized archive holding the wrong image under every name.
+
+The stride is part of the resume marker's mapping signature
+(`czi_import_compute._MAPPING_FIELDS`), and the reason is the subtler half of
+that rule. A strided run's member set is a strict *subset* of a complete run's,
+and `explode_common.well_is_complete` tests `issubset` — so without the key, a
+well an earlier complete run had already filled would be judged done and left
+alone while every freshly converted well beside it held a third as many
+timepoints. The plate would go ragged with nothing raising.
+`tests/test_reuse_is_keyed_completely.py` carries that reason beside the key.
+
+Because a strided dataset is otherwise indistinguishable from a plate that was
+only imaged that many times, both surfaces say so: the run log's opening line
+reads `4 timepoint(s) (every 3rd of 12: t0, t3, t6, ... t9)`, and the page's
+verdict reads `4 of 12 timepoint(s) (t0, t3, t6, t9)` where an unstrided run
+reads a plain count.
+
 **The plate is drawn before the plate has been read, and the reading happens
 off the UI thread.** A full `read_czi_set` walks every file's subblock
 directory — measured at about 1 MB for a 96-well plate, and the same 1 MB

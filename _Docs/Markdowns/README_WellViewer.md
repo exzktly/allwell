@@ -5196,12 +5196,30 @@ on the plate rather than supplying it.
    needs it only when its positions do not divide evenly by themselves. Setting
    it to something the file contradicts is refused rather than silently
    preferring one of the two.
-7. **Worker threads** — how many wells to convert in parallel (blank = auto,
+7. **Keep every Nth timepoint** — blank converts the whole timelapse. Set it
+   to 3 and the run converts the first timepoint and then every third one
+   after it, which is how you take a densely-sampled acquisition into a
+   dataset at a coarser time resolution without re-exporting it from ZEN.
+
+   **The kept timepoints keep their own names.** Every third point of a
+   twelve-point run is written as `t0`, `t3`, `t6`, `t9` — not renumbered to
+   `t0 … t3` — so they stay three units apart and Review's *Interval per
+   timepoint* rescales them exactly as it would a complete run. Renumbering
+   them would quietly tell Review the plate was imaged four times in a row at
+   the original spacing.
+
+   The first timepoint is always kept, since on a treatment timecourse that is
+   the reading everything else is measured against. A stride larger than the
+   run simply keeps that first point. Because a dataset converted this way
+   otherwise looks exactly like a plate that was only imaged that many times,
+   the readout says both numbers — *"4 of 12 timepoint(s) (t0, t3, t6, t9)"* —
+   and the run log repeats it.
+8. **Worker threads** — how many wells to convert in parallel (blank = auto,
    capped at the number of wells). It changes only how fast the run goes and
    nothing about what comes out, which is also why changing it never blocks a
    resume. Lower it if converting to a single spinning disk feels slower rather
    than faster.
-8. **Channel roles** — one row per channel read from the CZI metadata, each with
+9. **Channel roles** — one row per channel read from the CZI metadata, each with
    a role: **Nuclear / segmentation**, **Fluorescent**, **Phase / brightfield**,
    or **Skip**, seeded from the channel names exactly as on the OME-TIFF page.
    The channel names are always what goes into the output filenames; the roles
@@ -5235,8 +5253,9 @@ correct on disk. Point the same source at the same destination with the same
 settings and the readout says *"Resuming an interrupted run: 12 well(s) are
 already converted and will be kept"*; only the missing wells are converted.
 Change anything that alters which image becomes which well — the well source,
-the grid, origin, sweep direction, serpentine, FOVs per well, the experiment
-name, or the source file itself — and it is refused instead, because the two
+the grid, origin, sweep direction, serpentine, FOVs per well, the timepoint
+stride, the experiment name, or the source file itself — and it is refused
+instead, because the two
 runs would write files with the same names from different images. Empty the
 folder and start again in that case.
 

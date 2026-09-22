@@ -6103,13 +6103,25 @@ Three constraints on that, each of which a mutation showed a test had to pin:
   interval, and forcing one would state three spacings the acquisition never
   used. Such a series keeps its measured times and carries a note saying so;
   the tokens are still correct and only the tidying was declined.
-- **Only at a granularity the series can carry.** Rounding to the minute is
-  jitter-removal on an hourly run and total destruction on a time-lapse 100 ms
-  apart, where every timepoint lands on `0h`, collides, and sends the whole run
-  to positional names — and OME-TIFFs carry millisecond `DeltaT` values
-  routinely. `_rounder` therefore rounds nothing below a ten-minute interval.
-  This is a domain predicate applied outside its domain (§7.1), caught by the
-  existing sub-second tests rather than by review.
+- **Only at a granularity the series can carry**, which `_rounding_unit`
+  chooses per series from a ladder of units. Rounding is a domain predicate
+  (§7.1) and it fails in two directions at once. Too fine and nothing is
+  cleaned; too coarse and a time-lapse 100 ms apart lands every timepoint on
+  `0h`, collides, and goes to positional names — OME-TIFFs carry millisecond
+  `DeltaT` values routinely. Worse, rounding an *interval* and then
+  multiplying it by an index multiplies the rounding error: a 12.5-minute run
+  rounded to the whole minute becomes a 13-minute one, and by the twentieth
+  frame that is 9.5 minutes of elapsed time the acquisition never recorded,
+  written into a filename with nothing saying so. A 20.5-minute run measured
+  14.5 minutes of it. So a unit is usable only when its worst case, half of it
+  at every step, still lands the last timepoint inside tolerance.
+- **And only when the result still matches what was measured.** The per-gap
+  regularity test is not sufficient on a long series: drift that stays inside
+  tolerance at every single step accumulates over twenty of them. The snapped
+  series is therefore checked against the readings themselves before it is
+  used, and a snap that moved any timepoint further than its own jitter is
+  declined in favour of the measured times. This is the load-bearing check —
+  it is what makes the other two safe rather than merely careful.
 - **From the series' own first reading, never from zero.** A CZI's stamps are
   already elapsed-from-the-first-plane so its origin is 0 either way, but an
   OME `DeltaT` is elapsed from the *acquisition's* start and a file whose first

@@ -21,7 +21,11 @@ import numpy as np
 import pytest
 import tifffile
 
-from pipeline.explode_common import elapsed_hour_tokens, regularise_hours
+from pipeline.explode_common import (
+    elapsed_hour_tokens,
+    regularise_hours,
+    stride_note,
+)
 from pipeline.ome_explode import explode_ome_tiff
 
 
@@ -238,3 +242,85 @@ def test_convert_passes_the_stride_through_to_the_archives(tmp_path):
     assert _names(dest / "in", "A01") == [
         "Exp_DAPI_A01_f0_t0.tif", "Exp_DAPI_A01_f0_t3.tif",
         "Exp_GFP_A01_f0_t0.tif", "Exp_GFP_A01_f0_t3.tif"]
+
+
+# ── what the adversarial review of the merged branch found ───────────────────
+
+def test_a_fully_resumed_strided_run_reports_100_percent(tmp_path):
+    """The resumed-well loop bumped the progress counter once per *source*
+    timepoint while the total counted the kept ones, so a stride-3 run that
+    resumed every well finished at 300%. The CZI exploder's equivalent line
+    already used the kept count."""
+    src = _multi(tmp_path / "p.ome.tif", positions=2, timepoints=6)
+    out = tmp_path / "out"
+    explode_ome_tiff(src, out, grid_rows=1, grid_cols=2, experiment="Exp",
+                     timepoint_stride=3)
+    seen: list[tuple[int, int]] = []
+    again = explode_ome_tiff(src, out, grid_rows=1, grid_cols=2,
+                             experiment="Exp", timepoint_stride=3, resume=True,
+                             progress_fn=lambda d, t: seen.append((d, t)))
+    assert sorted(again.wells_resumed) == ["A01", "A02"]
+    assert seen[-1] == (8, 8), f"ended at {seen[-1]}"
+
+
+def test_a_twelve_and_a_half_minute_run_is_not_rounded_into_drift():
+    """Rounding an *interval* and multiplying it by an index multiplies the
+    rounding error too. 12.5 minutes rounded to the whole minute is 13, and by
+    frame 19 that is 9.5 minutes of elapsed time the acquisition never
+    recorded — written into a filename with nothing saying so."""
+    raw = {i: i * 12.5 / 60.0 for i in range(20)}
+    hours, note = regularise_hours(raw, 20)
+    assert note == ""
+    assert hours[19] == pytest.approx(19 * 12.5 / 60.0), (
+        f"frame 19 drifted to {hours[19] * 60:.2f} min")
+    assert elapsed_hour_tokens(raw, 20).tokens[1] == "0.208333h"
+
+
+@pytest.mark.parametrize("minutes, frames", [
+    # The shape the defect really had: an interval above the old ten-minute
+    # rounding threshold *and* carrying a fractional minute. Measured against
+    # the pre-fix code these drifted 9.5, 14.5 and 5.5 minutes respectively.
+    (12.5, 20), (20.5, 30), (37.5, 12),
+    # Below the threshold, so never rounded and never drifted — here to keep
+    # them that way rather than to catch the original bug.
+    (7.5, 40), (2.5, 100), (0.5, 60),
+    # Above it but already a whole minute, so rounding was a no-op.
+    (90.0, 8), (11.0, 25),
+])
+def test_no_series_is_named_further_from_its_readings_than_its_own_jitter(
+        minutes, frames):
+    """The general property the case above is one instance of. A series with
+    no jitter at all must come back naming exactly what it recorded, whatever
+    its interval."""
+    raw = {i: i * minutes / 60.0 for i in range(frames)}
+    hours, _note = regularise_hours(raw, frames)
+    worst = max(abs(hours[i] - raw[i]) for i in range(frames))
+    assert worst == pytest.approx(0.0, abs=1e-12), (
+        f"{minutes} min x {frames}: drifted {worst * 60:.3f} min")
+
+
+def test_jitter_is_still_cleaned_off_an_hourly_run():
+    """The fix must not cost the tidying it was added for: five and ten
+    seconds of stage jitter on a four-hourly run still names 0h, 4h, 8h."""
+    raw = {0: 0.0, 1: 4.0 + 5 / 3600, 2: 8.0 + 10 / 3600}
+    assert elapsed_hour_tokens(raw, 3).tokens == ["0h", "4h", "8h"]
+
+
+def test_a_plate_imaged_once_is_not_told_it_lost_its_clock():
+    """A single-timepoint plate is not a time-lapse whose elapsed times were
+    dropped, so the page has nothing to warn about. The fallback note fired on
+    every ordinary non-timelapse plate."""
+    resolved = elapsed_hour_tokens({}, 1)
+    assert resolved.tokens is None
+    assert resolved.reasons == []
+
+
+@pytest.mark.parametrize("stride, ordinal", [
+    (2, "2nd"), (3, "3rd"), (4, "4th"), (11, "11th"), (12, "12th"),
+    (13, "13th"), (21, "21st"), (22, "22nd"), (23, "23rd"), (101, "101st"),
+])
+def test_the_stride_note_spells_its_ordinal(stride, ordinal):
+    """The teens are why this is not a table on the last digit: 11, 12 and 13
+    take `th` despite ending in 1, 2 and 3."""
+    note = stride_note(stride, 200, ["t0", f"t{stride}"])
+    assert f"every {ordinal} of 200" in note, note

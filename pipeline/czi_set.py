@@ -438,6 +438,8 @@ def _timepoint_tokens(layout: CziLayout) -> tuple[list[str], str]:
     if resolved.tokens is not None:
         return resolved.tokens, (f"{resolved.note[:1].upper()}{resolved.note[1:]}."
                                  if resolved.note else "")
+    if not resolved.reasons:
+        return positional, ""
     return positional, (
         f"Timepoints are named by position (t0, t1, …) rather than by elapsed "
         f"time — {'; '.join(resolved.reasons)}.")

@@ -606,6 +606,8 @@ def _timepoint_tokens(pixels, size_t: int) -> tuple[list[str] | None, str]:
         return resolved.tokens, (
             f"{resolved.note[:1].upper()}{resolved.note[1:]}."
             if resolved.note else "")
+    if not resolved.reasons:
+        return None, ""
     note = (f"Timepoints are named by position (t0, t1, …) rather than by "
             f"elapsed time — {'; '.join(resolved.reasons)}.")
     _log.warning("OME timepoints: %s", note)
@@ -1507,7 +1509,10 @@ def explode_ome_tiff(
                     resumed.append(label)
                     if well_progress_fn:
                         well_progress_fn(label, planes_per_well, planes_per_well)
-                    for _ in range(fovs * n_timepoints * layout.size_c):
+                    # ``planes_per_well``, not the source timepoint count:
+                    # under a stride the two differ, and bumping the larger
+                    # one drove a fully-resumed run to 300% of its total.
+                    for _ in range(planes_per_well):
                         _bump()
                     continue
                 well_written = 0

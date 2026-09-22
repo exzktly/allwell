@@ -1,7 +1,8 @@
 """The resume marker the packed-file converters share.
 
-Two Datasets tools turn one packed acquisition file into a folder of per-well
-archives: *Convert OME-TIFF* and *Convert CZI*. Both publish each well's
+Three Datasets tools turn one packed acquisition file into a folder of
+per-well archives: *Convert OME-TIFF*, *Convert CZI* and *Convert ND2*. Each
+publishes each well's
 ``<dest>/in/<WELL>.zip`` atomically, so a run that is cancelled or killed leaves
 whole, correct wells behind and only the rest to do — and finishing those is
 worth hours on a plate.

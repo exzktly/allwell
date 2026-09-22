@@ -40,7 +40,8 @@ from widgets import menu_exec
 # The order the "+ Add job" menu offers the tools in — Analyze first because
 # it is the run everything else exists to prepare for or tidy up after, then
 # the Datasets tools in the order their own rail lists them.
-ADD_KINDS = ("analyze", "concatenate", "ome_import", "czi_import", "validate",
+ADD_KINDS = ("analyze", "concatenate", "ome_import", "czi_import",
+             "nd2_import", "validate",
              "subset", "import_loose", "merge_plates")
 
 _STATE_WORD = {

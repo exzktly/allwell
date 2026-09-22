@@ -39,16 +39,14 @@ from PySide6.QtWidgets import (
 )
 
 from core.safe import swallow
+from datasets.core.channel_roles_row import ChannelRolesMixin
 from datasets.core.dataset_fields import promote_open_button
 from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
 from datasets.czi_import.dashboard import CziImportDashboard
 from datasets.czi_import.czi_import_compute import (
-    CHANNEL_ROLES,
     ConversionParams,
     CziImportError,
     RawFields,
-    channel_tokens_from_roles,
-    default_channel_roles,
     default_dest,
     destination_problem,
     peek_source,
@@ -63,21 +61,12 @@ from ui import theme
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
 
-#: Channel-name column in the per-channel role picker.
-_ROLE_LABEL_MIN_W = 120
 
 #: Widths of the small numeric boxes. Named rather than written at the call
 #: site, both because ARCHITECTURE §8 asks for it and because a literal passed
 #: through a helper's parameter is invisible to the pixel guard that enforces it.
 _FIELD_W = 48
 _ORIGIN_W = 56
-
-_ROLE_LABELS = {
-    "nuclear": "Nuclear / segmentation",
-    "fluor": "Fluorescent",
-    "phase": "Phase / brightfield",
-    "skip": "Skip",
-}
 
 _WELL_SOURCE_LABELS = {
     "file": "The file's own scene names",
@@ -96,7 +85,7 @@ def _is_destination(root) -> str:
     return destination_problem(root)
 
 
-class CziImportPage(LogPanelMixin, QWidget):
+class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
     """The Convert CZI feature body."""
 
     runRequested = Signal()
@@ -155,8 +144,7 @@ class CziImportPage(LogPanelMixin, QWidget):
         #: on every keystroke, and answering it means listing the folder.
         self._source_problem = ""
         self._source_facts_for = None
-        self._channel_rows: list[tuple[str, QComboBox]] = []
-        self._channel_names_shown: list[str] = []
+        self.init_channel_roles()
         self._build_ui()
         self.refresh_readout()
 
@@ -386,43 +374,7 @@ class CziImportPage(LogPanelMixin, QWidget):
         self._channels_lay.setSpacing(theme.Spacing.xs)
         outer.addWidget(self._channels_host)
 
-    def _rebuild_channels(self, names) -> None:
-        """Rebuild the per-channel role rows when the channel set changes."""
-        names = list(names)
-        if names == self._channel_names_shown:
-            return
-        self._channel_names_shown = names
-        while self._channels_lay.count():
-            item = self._channels_lay.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        self._channel_rows = []
-        defaults = default_channel_roles(names)
-        for name in names:
-            row = QWidget(self._channels_host)
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(theme.Spacing.sm)
-            label = QLabel(name, row)
-            label.setMinimumWidth(_ROLE_LABEL_MIN_W)
-            row_layout.addWidget(label)
-            combo = QComboBox(row)
-            for role in CHANNEL_ROLES:
-                combo.addItem(_ROLE_LABELS[role], userData=role)
-            combo.setCurrentIndex(
-                CHANNEL_ROLES.index(defaults.get(name, "fluor")))
-            row_layout.addWidget(combo)
-            row_layout.addStretch(1)
-            self._channels_lay.addWidget(row)
-            self._channel_rows.append((name, combo))
-        self._channels_caption.setVisible(bool(names))
 
-    def channel_tokens_dict(self) -> dict:
-        """The channel role assignment as a ``pipeline_info``-shaped dict."""
-        pairs = [(name, str(combo.currentData() or "fluor"))
-                 for name, combo in self._channel_rows]
-        return channel_tokens_from_roles(pairs).as_pipeline_info()
 
     def _build_actions(self, outer: QVBoxLayout) -> None:
         row = QWidget(self)
@@ -925,11 +877,31 @@ class CziImportPage(LogPanelMixin, QWidget):
         # The plate shows the mapping *before* the run, which is the whole
         # point of drawing it: a well the file named wrongly is visible here
         # and nowhere else.
-        if not self._running:
+        #
+        # Seeded mid-run too, but only onto a plate that is still **empty**.
+        # A job started from the Job Queue calls ``show_job`` and ``_launch``
+        # back to back while the source scan is still on its worker thread, so
+        # the run begins with no wells on the plate — and every well-progress
+        # signal for the whole conversion is then dropped by the dashboard,
+        # which ignores wells it does not know. The run wrote its archives and
+        # reported "done" above a plate reading "Pending: 0" with the bar at
+        # zero. Bounded to the empty case because a mid-run reseed of a
+        # *populated* plate would wipe the dials of the run in flight; settings
+        # are disabled while running, so an empty plate is the only way the
+        # mapping can arrive late.
+        if not self._running or not self._dashboard.well_ids():
             self._dashboard.set_wells(plan.well_labels)
         self._update_run_gate(True)
 
     def _update_run_gate(self, ready: bool) -> None:
+        # The destination is part of "can this run", not merely a hint under
+        # its own field. Without this the buttons stayed live for a folder
+        # already holding a converted plate, for a finished dataset, and for a
+        # resume whose settings had changed — the run then refused on the
+        # worker thread, and **+ Queue** put a job in the queue that was
+        # guaranteed to fail. The OME-TIFF page has always gated on it.
+        if ready and self._dest_rule(self.destination_path()):
+            ready = False
         self._ready = bool(ready)
         enabled = ready and not self._running
         self._run_btn.setEnabled(enabled)

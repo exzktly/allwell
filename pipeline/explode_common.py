@@ -74,6 +74,32 @@ def resolve_positions(
     return fovs_per_well
 
 
+@dataclass(frozen=True)
+class TimeScan:
+    """Elapsed hours per timepoint index, and why any are missing.
+
+    What a reader hands :func:`elapsed_hour_tokens` after sampling one
+    position's acquisition stamps. Both packed readers produce one — a CZI's
+    come from each subblock's own metadata, an ND2's from its frame-times
+    cache — and both measure from the first timepoint's reading, so index 0 is
+    ``0.0`` whenever it is present at all.
+
+    ``reasons`` is empty on a clean scan and otherwise says, in the run log's
+    words, what stopped it. An empty scan with nothing said about it would
+    leave a positionally-named plate indistinguishable from one whose writer
+    recorded no times.
+    """
+
+    hours_by_index: dict = field(default_factory=dict)
+    reasons: list = field(default_factory=list)
+    #: The position every reading was taken from. A plate scan visits its
+    #: wells in turn, so one round's readings span the time it takes to cross
+    #: the plate — measured at 31 minutes across 96 scenes — and mixing
+    #: positions would fold that spread into the elapsed times.
+    scene: int = -1
+    bytes_read: int = 0
+
+
 def hours_token(hours: float) -> str:
     """``"<hours>h"`` in a spelling ``util.timepoint`` can read, or ``""``.
 
@@ -129,19 +155,13 @@ class ElapsedTokens:
     note: str = ""
 
 
-#: The coarsest unit a measured time is ever rounded to. A four-hour interval
-#: measured across a real run comes back as 4.00139 h, and rendering that
-#: literally puts ``4.00139h`` in a filename — true, unhelpful, and different
-#: on the next plate of the same experiment.
-_ROUND_TO_H = 1.0 / 60.0
-
-#: …and the interval below which nothing is rounded at all. Rounding is a
-#: *domain* predicate: a minute is jitter on a four-hour interval and the whole
-#: signal on a six-frame time-lapse 100 ms apart, where it collapses every
-#: timepoint onto ``0h`` and the collision check then sends the run to
-#: positional tokens. OME-TIFF files carry millisecond ``DeltaT`` values
-#: routinely, so this is an ordinary input rather than a corner.
-_ROUND_ABOVE_H = 10.0 / 60.0
+#: Units a measured time may be rounded to, coarsest last. Rounding is what
+#: turns a real four-hour run's 4.00139 h into a filename that reads ``4h``
+#: instead of six significant figures of stage jitter — but which unit is
+#: safe depends on the series, so the coarsest *usable* one is chosen per
+#: series rather than fixed.
+_ROUND_LADDER_H = tuple(seconds / 3600.0
+                        for seconds in (1, 5, 15, 30, 60, 300, 900, 1800, 3600))
 
 #: A measured gap this far from the series' own interval is acquisition jitter
 #: rather than a different spacing. 2% of the interval, floored at one minute
@@ -152,12 +172,127 @@ _JITTER_FRACTION = 0.02
 _JITTER_FLOOR_H = 1.0 / 60.0
 _JITTER_FLOOR_FRACTION = 0.25
 
+#: A reading is never rounded to anything coarser than the whole minute.
+#: This is the one hard cap, and it exists because the alternative was
+#: measured: a unit chosen as "the coarsest that fits a tolerance derived from
+#: the interval" gave a 48-hour run a *five-minute* unit, because a long
+#: interval produced a large tolerance which licensed a coarse unit. The
+#: permission to distort scaled with the thing being measured, which is
+#: backwards. A minute is the unit the code this replaced used unconditionally,
+#: and nothing about a longer interval makes a coarser one more honest.
+_MAX_ROUND_UNIT_H = 60.0 / 3600.0
 
-def _rounder(interval: float):
-    """The rounding to apply to a series whose gaps are about *interval*."""
-    if abs(interval) < _ROUND_ABOVE_H:
-        return lambda hours: hours
-    return lambda hours: round(hours / _ROUND_TO_H) * _ROUND_TO_H
+#: And never coarser than this share of the interval. Half a unit is how far
+#: rounding can move one reading, so on a fine interval a whole minute is a
+#: visible fraction of a gap: a 12.5-minute run rounded to the minute names
+#: frame 19 at 238 min for a recorded 237.5. Two per cent keeps the worst
+#: displacement near one per cent of a gap at every scale, which is below what
+#: a filename's elapsed time is read to.
+#:
+#: This replaces a gate that divided the usable unit by the *number of gaps*,
+#: modelling per-reading rounding as though its error accumulated. It does not
+#: — only the snap accumulates, and the snap is checked directly. But that
+#: gate did bound the unit relative to the interval as a side effect, and
+#: removing it without putting this in its place reintroduced the drift on
+#: exactly the 12.5-minute case the branch was opened to fix.
+_ROUND_FRACTION = 0.02
+
+#: How far a *named* timepoint may sit from the time actually recorded for it,
+#: before the naming is abandoned and the measured times are used instead.
+#:
+#: **One minute, flat.**
+#:
+#: Two rules were measured before this one and both were worse. Scaling the
+#: budget with the interval — the shape the rounding unit also had — let a
+#: 48-hour run name an image taken at 1104.94 h as ``1104h``: 56 minutes
+#: invented, with nothing saying so. Every fraction-of-the-interval rule
+#: permits the most fabrication exactly where the absolute error is largest,
+#: and "two per cent of the axis" is not what a person reads off a filename.
+#: They read an elapsed time.
+#:
+#: A fraction *capped* at ten minutes was tried next, to keep naming a plate
+#: by its schedule — a stage that takes a minute per round makes an hourly run
+#: reach frame 24 two minutes late, and ``0h … 23h`` is arguably what the
+#: experiment *was*. It did not work, and the reason generalises: any
+#: threshold is a discontinuity, so two sister plates whose overheads fall
+#: either side of it are named differently and stop matching in
+#: ``domain.tp_match``. Raising the budget moves that cliff; it does not
+#: remove it. What it does remove is the bound.
+#:
+#: So the bound stays tight and the cliff is accepted. A minute is enough for
+#: the case this rounding exists for — a few seconds of stage overhead on a
+#: timelapse of a dozen frames — and small enough to state plainly: **a
+#: timepoint's name is never more than a minute from when the image was
+#: taken.** A run whose overhead accumulates past that is named at its
+#: measured times instead: less tidy, and true.
+#:
+#: The cost is real and is not hidden. Two plates of one experiment with
+#: different per-round overheads can carry timepoints that do not match, so
+#: they cannot be concatenated without re-basing. That is a property of naming
+#: by measurement rather than by schedule, it predates this module, and the
+#: remedy is Review's *Interval per timepoint*.
+#: …and never more than this, whatever the jitter, so a loosely-spaced run
+#: cannot license an unbounded rewrite of its own clock.
+_SNAP_CAP_H = 5.0 / 60.0
+
+
+def _rounding_unit(interval: float) -> float:
+    """The coarsest ladder unit a reading may be rounded to, or ``0.0``.
+
+    Rounding is per *reading*, so the error it introduces is at most half a
+    unit on each one and **does not accumulate** — an earlier version of this
+    function divided the usable unit by the number of gaps as though it did,
+    which is the modelling error behind two opposite defects. It made a long
+    interval eligible for a coarse unit (a 48-hour run rounded to five
+    minutes) and simultaneously starved a long *run* of any unit at all, so
+    the jitter tidying this module exists for silently stopped past about
+    eleven frames on an hourly plate and archives went back to carrying
+    ``11.0153h`` in their filenames.
+
+    What does accumulate is the *snap* — naming every timepoint at
+    ``first + interval × index`` — and that is bounded by checking the result
+    against the readings in :func:`regularise_hours`, which is the only place
+    the bound can honestly be established.
+
+    ``0.0`` means no unit is usable and the readings are named as they were
+    measured, which is what a sub-second time-lapse gets: half a unit must
+    fit inside half the interval, or rounding would merge two timepoints.
+    """
+    limit = min(abs(interval) / 2.0,
+                abs(interval) * _ROUND_FRACTION,
+                _MAX_ROUND_UNIT_H)
+    best = 0.0
+    for unit in _ROUND_LADDER_H:
+        if unit > limit:
+            break
+        best = unit
+    return best
+
+
+def _snap_budget(raw_gaps: "list[float]", unit: float) -> float:
+    """How far naming a series at one interval may move any of its readings.
+
+    **From the series' own jitter**, which is what makes the rule statable:
+    a snap that moves a timepoint further than the acquisition's own spacing
+    already varied is inventing elapsed time rather than tidying it away.
+
+    Two earlier versions derived this from the *interval* instead, and each
+    was measured doing damage. A plain fraction let a 48-hour run name an
+    image taken at 1104.94 h as ``1104h`` — 56 minutes invented. A fraction
+    capped at five minutes fixed that and still moved a **perfectly regular**
+    238.75-minute series 4.75 minutes onto a 240-minute grid, which is the
+    plainest possible case of fabricating time: the acquisition had no jitter
+    at all, so there was nothing to clean.
+
+    The floor at *unit* is what keeps the feature working. A constant
+    per-round stage overhead has zero gap jitter and is exactly what this
+    rounding exists to absorb, so a series whose readings drift by less than
+    one rounding unit is still allowed onto the grid.
+    """
+    if not raw_gaps:
+        return min(abs(unit), _SNAP_CAP_H)
+    jitter = max(raw_gaps) - min(raw_gaps)
+    return min(max(jitter, abs(unit)), _SNAP_CAP_H)
 
 
 def regularise_hours(hours_by_index: "dict[int, float]",
@@ -170,7 +305,9 @@ def regularise_hours(hours_by_index: "dict[int, float]",
     ``8.00278h`` — numbers that are true, unhelpful in a filename, and
     different on the next plate of the same experiment. So the gaps are
     measured, their median taken as *the* interval, and every timepoint named
-    at ``index × interval``.
+    at ``first + index × interval``.
+
+    Three things stop that tidying from inventing a time.
 
     **Only where the series really is regular.** A plate imaged at 0, 4, 8 and
     then 24 hours — a final overnight point, which is an ordinary design — has
@@ -179,44 +316,60 @@ def regularise_hours(hours_by_index: "dict[int, float]",
     back with a note saying so, because the tokens are still correct and only
     the tidying was declined.
 
-    **And only at a granularity the series can carry.** Rounding to the minute
-    is jitter-removal on an hourly run and total destruction on a time-lapse
-    100 ms apart, where every timepoint would land on ``0h``, collide, and send
-    the whole run to positional tokens — OME-TIFF files carry millisecond
-    ``DeltaT`` values routinely. ``_rounder`` therefore rounds nothing below a
-    ten-minute interval.
+    **Only at a granularity the series can carry**, which
+    :func:`_rounding_unit` decides per series. Rounding to the minute is
+    jitter-removal on an hourly run, nine minutes of fabricated drift by frame
+    20 of a 12.5-minute one, and total destruction on a time-lapse 100 ms
+    apart, where every timepoint would land on ``0h``, collide, and send the
+    whole run to positional tokens.
+
+    **And only when the result still matches what was measured.** The
+    per-gap regularity test above is not enough on a long series: drift that
+    stays inside tolerance at every single step accumulates over twenty of
+    them, so the snapped series is checked against the readings themselves
+    before it is used. This is the load-bearing check — it is what makes the
+    other two safe rather than merely careful.
 
     Returns ``(hours, note)``. The note is empty whenever nothing needs saying,
-    which includes the ordinary regular case and a series too short to have a
-    gap at all.
+    which includes the ordinary regular case, a declined snap that changed no
+    number, and a series too short to have a gap at all.
     """
     if size_t < 2 or len(hours_by_index) < size_t:
         return dict(hours_by_index), ""
     raw = [hours_by_index[i] for i in range(size_t)]
-    raw_gaps = sorted(raw[i + 1] - raw[i] for i in range(size_t - 1))
-    to_unit = _rounder(raw_gaps[len(raw_gaps) // 2])
-    measured = [to_unit(value) for value in raw]
-    gaps = [measured[i + 1] - measured[i] for i in range(size_t - 1)]
+    n_gaps = size_t - 1
+    raw_gaps = sorted(raw[i + 1] - raw[i] for i in range(n_gaps))
+    raw_interval = raw_gaps[len(raw_gaps) // 2]
+    tolerance = max(abs(raw_interval) * _JITTER_FRACTION,
+                    min(_JITTER_FLOOR_H,
+                        abs(raw_interval) * _JITTER_FLOOR_FRACTION))
+    unit = _rounding_unit(raw_interval)
+    measured = ([round(value / unit) * unit for value in raw] if unit
+                else list(raw))
+    gaps = [measured[i + 1] - measured[i] for i in range(n_gaps)]
     interval = sorted(gaps)[len(gaps) // 2]
-    tolerance = max(abs(interval) * _JITTER_FRACTION,
-                    min(_JITTER_FLOOR_H, abs(interval) * _JITTER_FLOOR_FRACTION))
     if any(abs(gap - interval) > tolerance for gap in gaps):
         spread = f"{min(gaps):g}–{max(gaps):g} h"
         return ({i: measured[i] for i in range(size_t)},
                 f"the timepoints are not evenly spaced ({spread} apart), so "
                 f"they are named at the times actually recorded rather than "
                 f"at one interval")
-    # Measured from the series' own first reading, not from zero. A CZI's
-    # stamps are already elapsed-from-the-first-plane so its origin is 0 either
-    # way, but an OME-TIFF's ``DeltaT`` is elapsed from the *acquisition's*
-    # start and a file whose first frame sits at 3600 s legitimately begins at
-    # 1 h. Re-basing at zero would move every timepoint by that offset — and
-    # would do it invisibly, since the spacing it is checked against stays
-    # right. It also defeats the collision check the offset was hiding behind:
-    # two frames a picosecond apart at 1 h both render ``1h`` and correctly
-    # send the run to positional tokens, where ``i × interval`` renders them
-    # ``0h`` and ``0.000000000028h`` and writes both.
-    return {i: measured[0] + interval * i for i in range(size_t)}, ""
+    # The snap is the only step whose error accumulates, so it is the only one
+    # checked against the readings themselves rather than gap by gap. A series
+    # can be regular at every gap and still drift far from a single interval
+    # over twenty of them — a per-round stage overhead does exactly that — and
+    # the per-gap test above cannot see it.
+    #
+    # Checked against ``raw``, not against ``measured``, because the question
+    # is what the filename claims about the acquisition, and the acquisition
+    # is what was recorded.
+    budget = _snap_budget(raw_gaps, unit)
+    snapped = [measured[0] + interval * i for i in range(size_t)]
+    if any(abs(snapped[i] - raw[i]) > budget for i in range(size_t)):
+        # Regular gap by gap and drifting over the run. The measured times are
+        # right and the interval is a story about them, so keep the times.
+        return {i: measured[i] for i in range(size_t)}, ""
+    return {i: snapped[i] for i in range(size_t)}, ""
 
 
 def elapsed_hour_tokens(hours_by_index: "dict[int, float]", size_t: int,
@@ -238,6 +391,12 @@ def elapsed_hour_tokens(hours_by_index: "dict[int, float]", size_t: int,
     outside the file's own axis — which this function cannot know about and
     which belong in the same sentence as the ones it can see.
     """
+    if size_t <= 1 and not hours_by_index:
+        # A plate imaged once is not a time-lapse that lost its clock, and
+        # telling its user the timepoints "fell back to positional names"
+        # describes a degradation that did not happen. Declining with no
+        # reason is how a caller knows to say nothing.
+        return ElapsedTokens(None, [])
     reasons = list(source_reasons)
     complete = size_t > 0 and len(hours_by_index) >= size_t
     regular, note = (regularise_hours(hours_by_index, size_t) if complete
@@ -267,6 +426,18 @@ def elapsed_hour_tokens(hours_by_index: "dict[int, float]", size_t: int,
     return ElapsedTokens(None, reasons)
 
 
+def _ordinal_suffix(n: int) -> str:
+    """``st``/``nd``/``rd``/``th`` for *n*.
+
+    The teens are the whole reason this is a function: 11, 12 and 13 take
+    ``th`` despite ending in 1, 2 and 3, and a table keyed on the last digit
+    alone prints "every 21th".
+    """
+    if n % 100 in (11, 12, 13):
+        return "th"
+    return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+
 def stride_note(stride: int, size_t: int, kept_tokens: list[str]) -> str:
     """" (every 3rd of 12: t0, t3, t6, t9)" — or "" when nothing was dropped.
 
@@ -280,7 +451,7 @@ def stride_note(stride: int, size_t: int, kept_tokens: list[str]) -> str:
     shown = ", ".join(kept_tokens[:4])
     if len(kept_tokens) > 4:
         shown += f", ... {kept_tokens[-1]}"
-    ordinal = {2: "2nd", 3: "3rd"}.get(stride, f"{stride}th")
+    ordinal = f"{stride}{_ordinal_suffix(stride)}"
     return f" (every {ordinal} of {size_t}: {shown})"
 
 

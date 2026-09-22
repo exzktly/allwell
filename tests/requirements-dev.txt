@@ -60,3 +60,11 @@ imageio>=2.30
 #
 # Pinned like the rest of this file, and to the same version the app declares.
 pyarrow==22.0.0
+
+# Reading the ND2 fixture's own bytes back. `tests/_nd2_fixture.py` writes real
+# ND2 files and the round-trip through this package is what makes them evidence
+# about the format rather than about our own assumptions — so the ND2 tests
+# `importorskip` it, and without it installed they skip rather than lie.
+#
+# Pinned to the same version the app declares, like the rest of this file.
+nd2==0.9.0

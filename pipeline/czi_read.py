@@ -50,6 +50,7 @@ from typing import BinaryIO
 
 import numpy as np
 
+from pipeline.explode_common import TimeScan  # noqa: F401 (re-export)
 from util.filename_token import safe_token
 from util.well_token import canonical_well_label
 
@@ -562,28 +563,6 @@ _ACQUISITION_TIME_TAGS = ("acquisitiontime",)
 #: three-read version. Oversized reads are free locally and cheap on a share,
 #: where the round trip is the cost and the bytes are not.
 _SUBBLOCK_META_WINDOW = 4096
-
-
-@dataclass(frozen=True)
-class TimeScan:
-    """Elapsed hours per timepoint index, and why any are missing.
-
-    ``hours_by_index`` is keyed on the source's own T index and measured from
-    the first timepoint's reading, so index 0 is always ``0.0`` when it is
-    present at all. ``reasons`` is empty on a clean scan and otherwise says, in
-    the run log's words, what stopped it — an empty scan with nothing said
-    about it would leave a positionally-named plate indistinguishable from one
-    whose writer recorded no times.
-    """
-
-    hours_by_index: dict[int, float] = field(default_factory=dict)
-    reasons: list[str] = field(default_factory=list)
-    #: The scene every reading was taken from. A plate scan visits its wells in
-    #: turn, so one round's readings span the time it takes to cross the plate
-    #: — measured at 31 minutes across 96 scenes — and mixing scenes would fold
-    #: that spread into the elapsed times. See :func:`read_timepoint_hours`.
-    scene: int = -1
-    bytes_read: int = 0
 
 
 def read_subblock_metadata(fh: BinaryIO, block: SubBlock) -> str:

@@ -177,3 +177,21 @@ pyobjc-framework-Cocoa==10.3.1 ; sys_platform == "darwin"
 
 # ── Build tooling (build only) ───────────────────────────────────────────────
 pyinstaller==6.1.0
+
+# ── Nikon ND2 reading (Convert ND2) ──────────────────────────────────────────
+# The CZI converter writes its own ZISRAW parser because every maintained CZI
+# reader on PyPI either ships binary wheels the bundle would have to carry or
+# cannot resolve against the numpy pinned above. ND2 is the opposite case, and
+# it was measured rather than assumed: nd2 0.9.0 is a `py3-none-any` wheel with
+# no compiled extension, declares an unpinned numpy, and imports cleanly
+# against numpy 1.24.4.
+#
+# Pinned at 0.9.0 deliberately. From 0.10.0 the floor is `numpy>=1.26.4`, which
+# this app cannot meet, so a range would silently resolve to a version that
+# moves numpy under the whole stack.
+#
+# `resource-backed-dask-array` is a hard dependency of the wheel and pulls
+# dask, which the converter never reaches: nd2 imports it lazily, only for
+# `ND2File.to_dask()`, and the reader here goes through `read_frame`. Verified
+# by importing nd2 with dask absent. The PyInstaller spec excludes both.
+nd2==0.9.0

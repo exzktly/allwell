@@ -26,9 +26,9 @@ independently: if the summary says two are done, two rows say `done`.
 | Area | Total | open | done | declined |
 |---|---|---|---|---|
 | Wasted passes | 2 | 2 | 0 | 0 |
-| Parse cost | 1 | 1 | 0 | 0 |
+| Parse cost | 2 | 1 | 1 | 0 |
 | Responsiveness | 1 | 1 | 0 | 0 |
-| **Total** | **4** | **4** | **0** | **0** |
+| **Total** | **5** | **4** | **1** | **0** |
 
 ## What was measured, before any of it was changed
 
@@ -60,5 +60,6 @@ totalling 158 MB: **worst gap 395 ms, 12 of 73 ticks over 100 ms**.
 |---|---|---|---|---|
 | S1 | **The run re-reads the whole plate.** `explode_czi` calls `read_czi_set(czi_path, files=files)` itself, so the set the page spent hours building is discarded and every file is opened and parsed a third time before the first archive is written. | `open` | `pipeline/czi_explode.py:305` | |
 | S2 | **Convert is gated on the full read.** The peek already names the wells; the full read is a soundness check that walks every file's subblock directory. Until it lands the button stays off, so the user waits through a pass whose result the run does not keep (S1). | `open` | `datasets/czi_import/view.py::_begin_scan`, `::_on_peeked` | |
-| S3 | **Each file's metadata is read and parsed twice per pass, and traversed twice per parse.** `peek_scene_wells` and `read_czi_layout` each open the file and each run `ET.fromstring` over the same document. Within one parse, `_find_all` is a full `root.iter()` per lookup, and `_scene_wells` and `_declared_scene_indices` each call it at root level. Nothing is cached, so re-picking the same folder pays it all again. | `open` | `pipeline/czi_read.py:344 _find_all`, `:380 _scene_wells`, `:409 _declared_scene_indices`, `:523 peek_scene_wells` | |
+| S3a | **One question of the metadata document was one complete traversal of it.** `_find_all` is a `root.iter()` per lookup; a header read asked four — the scenes, the scene list, and `Shape` and `ArrayName` within each scene. | `done` | `pipeline/czi_read._DocIndex`, `::_scene_wells` | `tests/test_czi_metadata_is_read_once.py` counts element visits through `_localname`, which every traversal calls once per element. Three mutations on HEAD: the index walking per lookup (4.0 walks of a 77,097-element document, the figure this row claimed), the two subtree walks restored (3.0), and the name-preference order reversed. The last was caught by nothing else — all 40 tests in `test_czi_read.py` passed against it. Measured: a peek of an 11.31 MB document went from 1124.3 ms to 884.9 ms. |
+| S3b | **The same document is read off disk and parsed once per pass, per file.** `peek_scene_wells` and `read_czi_layout` each open the file and each run `ET.fromstring` over the same bytes, and nothing is cached, so re-picking the same folder pays for all of it again. Measured on an 11.31 MB document: `ET.fromstring` is **80.6%** of a header read, against 9.5% to build the index and 10.0% to ask it the three questions — so this is the larger half of the parse cost by four to one. | `open` | `pipeline/czi_read.py::peek_scene_wells`, `::read_czi_layout` | |
 | S4 | **The scan pool is sized for network latency but fed GIL-bound work.** `scan_workers` caps at eight threads with a written rationale about covering round trips, and `pipeline/czi_read.py` is a pure-Python parser, so eight of those threads hold the GIL and starve the UI thread. This is the out-of-domain mistake of §7.1: a pool sized for waiting, given computing. | `open` | `pipeline/czi_set.py:212 scan_workers`, `:215 _per_file` | |

@@ -348,8 +348,42 @@ def _find_all(root, name: str) -> list:
     property of the writers rather than of the format, and an ``ElementTree``
     path match is exact: one namespaced document would silently yield no
     channels and no scenes, which reads as a file that has none.
+
+    One lookup is one complete traversal, so anything asking the same document
+    more than one question goes through :class:`_DocIndex` instead. This
+    remains for the single-question case.
     """
     return [el for el in root.iter() if _localname(el.tag) == name]
+
+
+class _DocIndex:
+    """A metadata document's elements, bucketed by local name in one pass.
+
+    A ZEN plate document is not small: it names every scene, and for a tiled
+    acquisition it records each tile's stage position under the scene that
+    holds it, so the element count scales with the acquisition rather than
+    with the plate. Reading a header costs about 100 ms per megabyte of this
+    document and nothing at all for the file's pixels — and in a split-scene
+    export every file carries the *whole plate's* document, so a 661-file
+    export parses the same thing 661 times per pass.
+
+    Against that, a lookup that walks the tree is the whole cost. Three
+    root-level questions — the scenes, the declared scene count, the channels
+    — were three complete traversals of a document already in memory. This
+    builds the buckets once and answers each of them from a dict.
+    """
+
+    __slots__ = ("_by_name",)
+
+    def __init__(self, root) -> None:
+        by_name: dict[str, list] = {}
+        for element in root.iter():
+            by_name.setdefault(_localname(element.tag), []).append(element)
+        self._by_name = by_name
+
+    def all(self, name: str) -> list:
+        """Every element whose local name is *name*, in document order."""
+        return self._by_name.get(name, [])
 
 
 #: A scene name that carries a well inside a longer label — ``P1-A1``,
@@ -377,7 +411,7 @@ def well_from_scene_name(name: str) -> str:
     return canonical_well_label(match.group(1)) if match else ""
 
 
-def _scene_wells(root) -> dict[int, str]:
+def _scene_wells(index: "_DocIndex") -> dict[int, str]:
     """``{scene index: well label}`` for the scenes whose metadata names one.
 
     Three places a writer puts it, tried in order of how specific they are:
@@ -385,28 +419,35 @@ def _scene_wells(root) -> dict[int, str]:
     ``<ArrayName>A1</ArrayName>``, and the scene's own ``Name``. The first two
     are only ever a well; the third is a free-text label that merely often is
     one, so it is consulted last.
+
+    Both of those are collected in **one** walk of the scene's subtree. Asking
+    for each separately walked it twice, and the scene subtrees are where a
+    tiled acquisition's bulk lives, so the two passes together came to rather
+    more than one traversal of the whole document.
     """
     wells: dict[int, str] = {}
-    for scene in _find_all(root, "Scene"):
+    for scene in index.all("Scene"):
         try:
-            index = int(scene.get("Index", ""))
+            scene_index = int(scene.get("Index", ""))
         except (TypeError, ValueError):
             continue
-        candidates: list[str] = []
-        for shape in _find_all(scene, "Shape"):
-            candidates.append(shape.get("Name", ""))
-        for array_name in _find_all(scene, "ArrayName"):
-            candidates.append(array_name.text or "")
-        candidates.append(scene.get("Name", ""))
-        for candidate in candidates:
+        shapes: list[str] = []
+        array_names: list[str] = []
+        for element in scene.iter():
+            local = _localname(element.tag)
+            if local == "Shape":
+                shapes.append(element.get("Name", ""))
+            elif local == "ArrayName":
+                array_names.append(element.text or "")
+        for candidate in (*shapes, *array_names, scene.get("Name", "")):
             well = well_from_scene_name(candidate)
             if well:
-                wells[index] = well
+                wells[scene_index] = well
                 break
     return wells
 
 
-def _declared_scene_indices(root) -> list[int]:
+def _declared_scene_indices(index: "_DocIndex") -> list[int]:
     """The scene indices the metadata lists, ascending, or ``[]``.
 
     Read from the ``<Scenes>`` list rather than from the subblock directory,
@@ -416,14 +457,14 @@ def _declared_scene_indices(root) -> list[int]:
     told apart by the caller, which knows whether any metadata was read at all.
     """
     indices: list[int] = []
-    for scene in _find_all(root, "Scene"):
+    for scene in index.all("Scene"):
         try:
             indices.append(int(scene.get("Index", "")))
         except (TypeError, ValueError):
             continue
     if indices:
         return sorted(set(indices))
-    for element in _find_all(root, "SizeS"):
+    for element in index.all("SizeS"):
         try:
             count = int((element.text or "").strip())
         except (TypeError, ValueError):
@@ -543,8 +584,9 @@ def peek_scene_wells(path: Path | str, *,
         root = ET.fromstring(xml)
     except ET.ParseError:
         return ScenePeek(path=path, has_metadata=False, bytes_read=read)
-    wells = wells_from_scenes(path, _scene_wells(root),
-                              _declared_scene_indices(root),
+    index = _DocIndex(root)
+    wells = wells_from_scenes(path, _scene_wells(index),
+                              _declared_scene_indices(index),
                               from_filename=from_filename)
     return ScenePeek(path=path, wells=wells, bytes_read=read)
 
@@ -769,7 +811,7 @@ def scan_timepoint_hours(fh: BinaryIO, blocks: list[SubBlock],
                     bytes_read=read)
 
 
-def _channel_names(root) -> list[str]:
+def _channel_names(index: "_DocIndex") -> list[str]:
     """Channel display names in channel-index order, or ``[]``.
 
     Read from ``<Dimensions><Channels><Channel>``, whose ``Id`` is
@@ -780,7 +822,7 @@ def _channel_names(root) -> list[str]:
     """
     named: dict[int, str] = {}
     unindexed: list[str] = []
-    for order, channel in enumerate(_find_all(root, "Channel")):
+    for order, channel in enumerate(index.all("Channel")):
         name = (channel.get("Name")
                 or (channel.findtext("Fluor") or "").strip()
                 or (channel.findtext("DyeName") or "").strip())
@@ -1135,8 +1177,9 @@ def _build_layout(blocks: list[SubBlock], xml: str, *,
             layout.warnings.append(f"metadata XML could not be parsed: {exc}")
             root = None
         if root is not None:
-            layout.scene_wells = _scene_wells(root)
-            layout.raw_channel_names = _channel_names(root)
+            index = _DocIndex(root)
+            layout.scene_wells = _scene_wells(index)
+            layout.raw_channel_names = _channel_names(index)
     names = list(layout.raw_channel_names)
     layout.channel_names = [
         safe_token(names[i] if i < len(names) else "", f"c{i}")

@@ -610,9 +610,9 @@ def test_the_plate_is_painted_from_the_headers_before_the_full_read_lands(
     released = threading.Event()
     real_read = view_module.read_source
 
-    def _slow_read(src, params):
+    def _slow_read(src, params, **kwargs):
         released.wait(20)
-        return real_read(src, params)
+        return real_read(src, params, **kwargs)
 
     monkeypatch.setattr(view_module, "read_source", _slow_read)
     page = controller.page
@@ -724,11 +724,11 @@ def test_a_scan_of_the_previous_source_never_lands_on_the_new_one(
     names = {"peek": "peek_source", "full": "read_source"}
     real = {"peek": view_module.peek_source, "full": view_module.read_source}
 
-    def _hold(src, params):
+    def _hold(src, params, **kwargs):
         if str(src) == str(first):
             started.set()
             released.wait(20)
-        return real[slow_stage](src, params)
+        return real[slow_stage](src, params, **kwargs)
 
     monkeypatch.setattr(view_module, names[slow_stage], _hold)
     page = controller.page
@@ -765,9 +765,9 @@ def test_a_scan_that_lands_after_teardown_touches_nothing(qapp, tmp_path,
     released = threading.Event()
     real_read = view_module.read_source
 
-    def _slow_read(src, params):
+    def _slow_read(src, params, **kwargs):
         released.wait(20)
-        return real_read(src, params)
+        return real_read(src, params, **kwargs)
 
     monkeypatch.setattr(view_module, "read_source", _slow_read)
     ctrl = CziImportController()
@@ -886,7 +886,7 @@ def test_a_failed_scan_is_recovered_by_re_picking_and_not_by_typing(
 
     calls: list[int] = []
 
-    def _boom(src, params):
+    def _boom(src, params, **kwargs):
         calls.append(1)
         raise RuntimeError("share went away")
 

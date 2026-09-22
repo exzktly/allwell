@@ -50,8 +50,10 @@ from pipeline.explode_common import (
     pick_workers,
     resolve_positions,
     stride_note,
+    subset_note,
     timepoint_plan,
     well_is_complete,
+    wells_to_convert,
     worker_groups,
 )
 from util.filename_token import safe_token
@@ -251,6 +253,7 @@ def explode_czi(
     progress_fn: "Callable[[int, int], None] | None" = None,
     well_progress_fn: "Callable[[str, int, int], None] | None" = None,
     should_abort: "Callable[[], bool] | None" = None,
+    well_subset: "tuple[str, ...]" = (),
     resume: bool = False,
 ) -> ExplodeResult:
     """Explode *czi_path* into per-well ``<WELL>.zip`` archives in *out_in_dir*.
@@ -336,18 +339,24 @@ def explode_czi(
     n_kept_t = len(tp_plan)
     fovs = well_map.fovs_per_well
     n_wells = well_map.n_wells
+    selected = wells_to_convert(well_map.wells, well_subset)
     if czi_set.timepoint_note:
         _log(f"[czi] {czi_set.timepoint_note}\n")
 
     out_in_dir.mkdir(parents=True, exist_ok=True)
-    total = czi_set.n_positions * n_kept_t * layout.size_c
-    n_workers = pick_workers(workers, n_wells)
+    # Counted over the wells this run writes, not over the plate: a subset run
+    # denominated by the whole plate reports a complete conversion as a
+    # fraction of one.
+    n_selected = len(selected)
+    total = n_selected * fovs * n_kept_t * layout.size_c
+    n_workers = pick_workers(workers, n_selected)
     source = "the file's scene names" if well_map.from_file else "the plate grid"
     held_in = (f"{czi_set.n_files} file(s)" if czi_set.n_files > 1
                else czi_path.name)
     _log(
-        f"[czi] {held_in}: {czi_set.n_scenes} scene(s) -> {n_wells} "
-        f"well(s) x {fovs} FOV(s) x {n_kept_t} timepoint(s)"
+        f"[czi] {held_in}: {czi_set.n_scenes} scene(s) -> "
+        f"{subset_note(n_selected, n_wells)} x {fovs} FOV(s) x "
+        f"{n_kept_t} timepoint(s)"
         f"{stride_note(timepoint_stride, layout.size_t, tp_tokens)}, "
         f"{layout.size_c} channel(s)"
         f"{f', {layout.size_z} Z-plane(s) max-projected' if layout.size_z > 1 else ''}"
@@ -361,15 +370,16 @@ def explode_czi(
     # conversion's interrupted output.
     resumable: set[str] = set()
     if resume:
+        chosen = {well_map.wells[i] for i in selected}
         resumable = {
             label for label in well_map.wells
-            if well_is_complete(
+            if label in chosen and well_is_complete(
                 out_in_dir / f"{label}.zip",
                 expected_members(exp_tok, layout.channel_names, label, fovs,
                                  tp_tokens))
         }
         if resumable:
-            _log(f"[czi] Resuming: {len(resumable)} of {n_wells} well(s) are "
+            _log(f"[czi] Resuming: {len(resumable)} of {n_selected} well(s) are "
                  f"already converted and will be left alone.\n")
 
     lock = threading.Lock()
@@ -454,7 +464,7 @@ def explode_czi(
     started_at = time.perf_counter()
     with ThreadPoolExecutor(max_workers=n_workers) as pool:
         futures = [pool.submit(_convert_wells, group)
-                   for group in worker_groups(n_wells, n_workers)]
+                   for group in worker_groups(selected, n_workers)]
         for future in as_completed(futures):
             count, wells, read_time, write_time, resumed = future.result()
             result.images_written += count

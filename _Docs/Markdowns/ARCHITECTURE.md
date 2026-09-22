@@ -7275,6 +7275,113 @@ ones — `_build_params`, `_build_ui`, `refresh_readout` — diverge substantial
 A common view base would be a base full of flags, which is the shape
 `datasets/core/tool_controller.py`'s own docstring warns against.
 
+### 6.2c Converting part of a plate
+
+All three packed-file converters take a **well subset**: convert some of the
+plate now, the rest later, into the same dataset folder. The setting is one
+field (`ConversionParams.well_subset`, empty meaning the whole plate) and the
+whole design rests on one sentence.
+
+**It filters the well *indices* a run walks, never the mapping.** A well's
+index is what maps it back to its source — well `i` takes stage positions
+`i * fovs` onward in every converter — so filtering the *label list* would
+renumber every well after the first one dropped, and a conversion of B01 alone
+would read A01's images and write them under B01's name. That is a complete,
+correctly named, correctly counted archive of the wrong well, which is §7's
+cardinal failure. `explode_common.wells_to_convert` therefore returns indices,
+`worker_groups` accepts them in place of a count, and the mapping arithmetic
+above is untouched. `tests/test_convert_a_well_subset.py` asserts the
+*pixels* of a subset run against a whole-plate run's rather than the archive
+names, because a shifted mapping produces exactly the right names.
+
+**Which is also why the subset is not part of the resume signature.** A
+converted well's archive is byte-identical whether or not the wells beside it
+were converted in the same run, so the selection cannot change which image
+lands under which filename — the only question that signature answers. Keying
+on it would refuse the workflow the setting exists for.
+`tests/test_reuse_is_keyed_completely.py` carries that reasoning as a written
+exemption, and demanded it before it would pass: adding the field without one
+failed the guard in all three converters at once.
+
+**Topping up is permitted by a second marker.** `convert_marker.DONE_MARKER`
+records the mapping a *completed* run used, so a later run adding the wells it
+skipped can tell its own dataset from a stranger's plate pointed at the same
+folder. The destination check accepts a folder whose completed signature
+matches and refuses everything else — a different experiment name, stride,
+origin or well source is still two plates in one folder. The two markers
+answer different questions and are kept apart: a finished conversion is
+something to add to, never an interrupted run to resume, and `resume_state`
+consults only the in-progress one.
+
+**Both surfaces state both numbers.** A subset run writes a complete, correct
+dataset holding a fraction of the acquisition, so the run log prints
+`3 of 96 well(s) (subset)` and the page's readout `2 of 3 well(s), selected`
+with the image count denominated by the selection. A plain count reads
+identically to a plate that only ever had that many wells — the same untruth
+the stride's readout was fixed against, and it shipped here first on the page
+while the log line was already right.
+
+**Where the wells are picked differs by page, for a reason.** The CZI and ND2
+pages pick on the status dashboard's plate, which already draws the resolved
+mapping: a selection cannot name a well the source does not have, which a
+typed list can. It is drawn as a rim rather than a fill, because those cells
+also carry the run's progress colours. The OME-TIFF page has no dashboard — it
+reports on the acquisition plate it already draws — and that plate's clicks
+already mean *acquisition order*, which must account for every position the
+file holds. So OME carries a second, smaller plate for the subset, and the two
+questions stay on two surfaces. All three lock the selection while a run is in
+flight; OME's is disabled outright rather than made passive, because a passive
+plate keeps its own "All 96" and "Invert" buttons live — which the page's
+existing lock guard caught.
+
+### 6.2d Saying the scan is still running
+
+A source scan runs off the window's thread so the page stays usable while a
+slow disk or a network share answers, and for most of its life the page shows
+one sentence saying so. On a 96-file split export over a share that sentence
+sits there for the better part of a minute without changing, and an unchanging
+sentence is indistinguishable from a page that has hung — which is the ordinary
+reading of it, and was the reported symptom.
+
+**So a scan reports what it is doing while it does it.** The reporting rides
+`core.worker_bridge.run_off_thread`'s existing reporter: passing `on_stage` or
+`on_progress` makes the bridge hand the worker function a reporter object, and
+both arrive back on the GUI thread through queued signals, so the scan thread
+never touches a widget. The readers take the reporter as an optional `report`
+argument and are silent when it is `None`, which is how the pipeline half stays
+Qt-free and how `process_microscopy.py` and every test calling them directly is
+unaffected.
+
+**What each page counts is the thing that actually takes the time.** The CZI
+page's two stages each walk the same file list, so `czi_set._per_file` ticks
+once per file as the pool yields it and the page counts files —
+`Reading the file headers (7 of 96)…`, then
+`Reading the rest of the plate (7 of 96)…`. The ND2 page reads one file, so a
+file count would say nothing; it names the steps instead —
+`Opening Plate7.nd2…`, `Reading the channel names…`,
+`Reading the acquisition times…` — and counts only the one step with a real
+total, the per-timepoint time scan, appending the count to whichever stage is
+current rather than replacing it. Naming the file is deliberate: a step that
+says which file it is working on cannot be mistaken for a leftover from the
+source the user just moved off.
+
+**A lone file is not given a count of one.** `(1 of 1)` says nothing a plain
+sentence does not and invites the reader to wait for a second number that never
+comes, so the CZI page falls back to the bare stage sentence below two files.
+
+**The counts are guarded on the scan generation like every other scan
+callback**, and they are transient: the readout's resting state is the layout
+the scan found. A page left reading `96 of 96` is a second kind of stuck — one
+that has finished and does not say so.
+
+The OME-TIFF page has none of this because it has no such scan: it reads a
+single file's header synchronously, cached per path and modification time, and
+there is no sentence to freeze. `tests/test_a_scan_says_it_is_working.py`
+asserts all of the above at the **boundary** — the strings the readout label is
+actually given — rather than on the reporter calls behind it, because a scan
+that computes a perfect count and never writes it to the label leaves exactly
+the frozen page this fixes.
+
 ### 6.2 `process_microscopy.py`
 
 The pipeline. **Self-sufficient by design** — no import from `review/`,

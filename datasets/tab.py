@@ -20,7 +20,6 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QLabel,
     QScrollArea,
     QSplitter,
     QVBoxLayout,
@@ -410,25 +409,22 @@ class DatasetsTab(QWidget):
         # insets the row body by 6px/4px — an outer container margin here
         # would stack on top of that and pull the highlight away from the
         # edge, which is what a themed.Spacing margin around the whole panel
-        # previously did). Only the header label gets its own inset.
+        # previously did).
+        #
+        # **No caption above the rail.** This carried a "DATASETS" label under
+        # a comment saying it matched Review, and Review has no such thing:
+        # its rail head is the *dataset control*, and its own comment records
+        # why — "the rail's items are self-evidently sections". The same is
+        # true here, and the pane is already named by the title bar's mode
+        # switcher, so the label restated the one thing on screen that was
+        # never in doubt while taking a row from the tool list. Analyze has
+        # none either.
         panel = QWidget(self)
         panel.setObjectName("Sidebar")
         panel.setFixedWidth(theme.Metrics.rail_w)
         col = QVBoxLayout(panel)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(0)
-
-        header = QLabel("DATASETS", panel)
-        header.setObjectName("RailHead")
-        header.setContentsMargins(13, 10, 13, 4)
-        header.setStyleSheet(
-            f"color: {theme.Colors.text_muted}; "
-            f"font-family: {theme.Typography.family}; "
-            f"font-size: 11px; "
-            f"font-weight: 600; "
-            f"letter-spacing: 0.08em;"
-        )
-        col.addWidget(header)
 
         self._nav = RailNav(panel)
         col.addWidget(self._nav)

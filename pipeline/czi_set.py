@@ -212,7 +212,8 @@ def scan_workers(n_files: int) -> int:
     return max(1, min(_MAX_SCAN_WORKERS, n_files))
 
 
-def _per_file(fn: "Callable[[Path], _T]", paths: list[Path]) -> list[_T]:
+def _per_file(fn: "Callable[[Path], _T]", paths: list[Path],
+              report=None) -> list[_T]:
     """Run *fn* over *paths* concurrently, **in order**.
 
     The order is load-bearing and not a nicety: it is the order ZEN wrote a
@@ -227,11 +228,29 @@ def _per_file(fn: "Callable[[Path], _T]", paths: list[Path]) -> list[_T]:
     One file is done on the calling thread: a pool for a single header read is
     two context switches to save nothing.
     """
+    # *report* hears one tick per file. ``map`` yields in argument order while
+    # the work runs concurrently, so the count lags the files actually
+    # finished — which is honest for a progress line and is the same ordering
+    # guarantee the results themselves depend on. A split export is ninety-six
+    # files over a share, and a page showing one unchanging sentence for that
+    # long is indistinguishable from one that has hung.
+    def _tick(index: int) -> None:
+        if report is not None:
+            report.progress(index, len(paths))
+
     if len(paths) < 2:
-        return [fn(path) for path in paths]
+        out = []
+        for i, path in enumerate(paths):
+            _tick(i)
+            out.append(fn(path))
+        return out
     with ThreadPoolExecutor(max_workers=scan_workers(len(paths)),
                             thread_name_prefix="czi-scan") as pool:
-        return list(pool.map(fn, paths))
+        results = []
+        for i, item in enumerate(pool.map(fn, paths)):
+            _tick(i)
+            results.append(item)
+        return results
 
 
 def discover_czi_files(source: Path | str) -> list[Path]:
@@ -347,7 +366,8 @@ def _wells_for(path: Path, layout: CziLayout, *,
                              from_filename=from_filename)
 
 
-def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None) -> CziSet:
+def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None,
+                 report=None) -> CziSet:
     """Read *source* — a file, or a folder of them — as one plate.
 
     *files* names the exact set to read, for a caller that has already decided
@@ -385,7 +405,7 @@ def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None) -> Cz
     def _layout_of(path: Path) -> CziLayout:
         return read_czi_layout(path, read_times=path == first_path_for_times)
 
-    result.layouts = _per_file(_layout_of, paths)
+    result.layouts = _per_file(_layout_of, paths, report)
 
     first, first_path = result.layouts[0], paths[0]
     # Each file has to be sound in its own right before the set is compared:
@@ -446,7 +466,8 @@ def _timepoint_tokens(layout: CziLayout) -> tuple[list[str], str]:
 
 
 def read_czi_set_safely(source: Path | str, *,
-                        files: "list[Path] | None" = None) -> CziSet:
+                        files: "list[Path] | None" = None,
+                        report=None) -> CziSet:
     """:func:`read_czi_set`, with an unreadable member turned into a *problem*.
 
     For the page, which asks this on every keystroke and has one label to say
@@ -454,7 +475,7 @@ def read_czi_set_safely(source: Path | str, *,
     file that cannot be read is a failure with a traceback worth keeping.
     """
     try:
-        return read_czi_set(source, files=files)
+        return read_czi_set(source, files=files, report=report)
     except CziReadError as exc:
         return CziSet(files=list(files or ()), problem=str(exc))
 
@@ -512,7 +533,7 @@ class PlatePeek:
 
 
 def peek_wells(source: Path | str, *,
-               files: "list[Path] | None" = None) -> PlatePeek:
+               files: "list[Path] | None" = None, report=None) -> PlatePeek:
     """Read the wells *source*'s files claim, from their headers alone.
 
     Never raises: a file that cannot be peeked is simply one the plate does not
@@ -539,7 +560,7 @@ def peek_wells(source: Path | str, *,
             return None
 
     seen: set[str] = set()
-    for path, scene in zip(paths, _per_file(_peek_one, paths)):
+    for path, scene in zip(paths, _per_file(_peek_one, paths, report)):
         if scene is None:
             peek.unnamed.append(path)
             continue

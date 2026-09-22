@@ -374,6 +374,11 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         self.build_log_header(outer, "Convert ND2 Output")
         self._dashboard = Nd2ImportDashboard(self)
+        # Picking wells on the plate is how a subset conversion is chosen. It
+        # already shows the mapping the settings resolve to, so a selection
+        # cannot name a well the source does not have. Nothing selected is the
+        # whole plate.
+        self._dashboard.wellsSelected.connect(self._on_readout_input_changed)
         outer.addWidget(self._dashboard)
         self.build_log_tail(outer, placeholder="Status will appear here.")
 
@@ -468,6 +473,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             direction=str(self._direction_cb.currentData() or "row"),
             serpentine=self._serpentine_cb.isChecked(),
             experiment=self._experiment_edit.text(),
+            well_subset=tuple(self._dashboard.selected_wells()),
         )
 
     def params(self) -> ConversionParams:
@@ -493,6 +499,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._direction_cb.setCurrentIndex(direction)
         self._serpentine_cb.setChecked(bool(params.serpentine))
         self._experiment_edit.setText(params.experiment or "")
+        self._dashboard.set_selected_wells(params.well_subset)
         self._grid_host.setVisible(self.well_source() == "grid")
         self.refresh_readout()
 
@@ -545,6 +552,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # Path fields lock rather than disable: ``setEnabled(False)`` dims the
         # path text too, which is the one piece of context someone watching a
         # long run most wants to read (see ``widgets/path_field.py``).
+        self._dashboard.set_selection_enabled(not running)
         self._src_field.setLocked(running)
         self._dest_field.setLocked(running)
 
@@ -598,6 +606,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._scan_generation += 1
         generation = self._scan_generation
         self._scanning = True
+        self._scan_stage = "Reading the file…"
         # Release what has already been delivered. Safe here and nowhere else:
         # this runs from a GUI event, never from inside a handler.
         for key in list(self._scan_delivered):
@@ -607,14 +616,39 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._set_verdict("", "muted")
         self._update_run_gate(False)
 
-        def _read():
-            return read_source(src)
+        def _read(report):
+            return read_source(src, report=report)
 
         self._scan_bridges[generation] = run_off_thread(
             _read,
             on_done=lambda layout: self._on_scanned(generation, layout),
             on_failed=lambda message: self._on_scan_failed(generation, message),
+            on_stage=lambda name: self._on_scan_stage(generation, name),
+            on_progress=lambda done, total: self._on_scan_progress(
+                generation, done, total),
         )
+
+    def _on_scan_stage(self, generation: int, name: str) -> None:
+        """Say which part of the read is under way.
+
+        One unchanging sentence for the whole read is indistinguishable from a
+        page that has hung, and on a large file over a share the read is long
+        enough for that to be the natural reading. These arrive on the GUI
+        thread through the bridge's queued signal, so the worker never touches
+        a widget.
+        """
+        if generation == self._scan_generation and self._scanning:
+            self._scan_stage = name
+            self._readout.setText(name)
+
+    def _on_scan_progress(self, generation: int, done: int, total: int) -> None:
+        """Add a count to the stage that has one, rather than replacing it."""
+        if generation != self._scan_generation or not self._scanning:
+            return
+        stage = getattr(self, "_scan_stage", "Reading the file…")
+        if total > 0:
+            self._readout.setText(
+                f"{stage.rstrip('… ')} ({done + 1} of {total})…")
 
     def _delivered(self, generation: int) -> None:
         """Note that this bridge has called back, so it may be released later.

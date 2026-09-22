@@ -466,41 +466,66 @@ def _counting_stats(folder):
 
 # ── reading the files at once ────────────────────────────────────────────────
 
-def test_a_multi_file_scan_reads_on_more_than_one_thread(tmp_path,
-                                                         monkeypatch):
+def test_a_multi_file_scan_reads_the_files_at_once(tmp_path, monkeypatch):
     """A scan is round trips, not cycles: eight files in flight cover eight
-    latencies instead of paying them end to end. Asserted as the thread count
-    rather than as a duration, because a timing assertion on a build machine is
-    a flake with a schedule."""
+    latencies instead of paying them end to end.
+
+    Asserted as a barrier every read must reach, rather than as a duration or
+    as a count of distinct thread ids. A duration is a flake with a schedule.
+    A thread-id count is a flake too, for a subtler reason: a
+    ``ThreadPoolExecutor`` spawns a worker only when no existing one has gone
+    idle, so on a loaded machine several quick header reads can legitimately
+    all land on the first thread. Measured rather than assumed — four reads
+    used one thread in 238 of 400 runs under CPU load, and the rate is the
+    same on the code this pool predates, so it was never a statement about the
+    implementation at all.
+
+    The barrier states the property the test is named for: every read is in
+    flight at the same moment. Reads run one after another cannot all reach
+    it, so the barrier breaks and the failure is the assertion below rather
+    than a hang.
+    """
     folder = _split_plate(tmp_path, wells=tuple(
         f"A{i + 1:02d}" for i in range(8)))
-    threads: set[int] = set()
+    #: Eight files against ``scan_workers(8)`` == 8, so a pool doing its job
+    #: can satisfy this and a serial read cannot. The timeout is long enough
+    #: that a starved container still passes and short enough that a genuinely
+    #: serial read reports rather than wedging the lane.
+    gate = threading.Barrier(8, timeout=30)
     real = czi_set.peek_scene_wells
 
     def _record(path, **kwargs):
-        threads.add(threading.get_ident())
+        gate.wait()
         return real(path, **kwargs)
 
     monkeypatch.setattr(czi_set, "peek_scene_wells", _record)
-    peek = peek_wells(folder)
+    try:
+        peek = peek_wells(folder)
+    except threading.BrokenBarrierError:
+        pytest.fail("the eight files were read one after another: they never "
+                    "reached the barrier together")
 
     assert len(peek.wells) == 8
-    assert len(threads) > 1, "the eight files were read one after another"
 
 
 def test_a_full_read_of_several_files_is_concurrent_too(tmp_path, monkeypatch):
+    """The second stage walks the same file list and pays the same latencies,
+    so it uses the same pool. Stated with the same barrier and for the same
+    reason as the peek above."""
     folder = _split_plate(tmp_path, wells=("A01", "A02", "A03", "A04"))
-    threads: set[int] = set()
+    gate = threading.Barrier(4, timeout=30)
     real = czi_set.read_czi_layout
 
     def _record(path, **kwargs):
-        threads.add(threading.get_ident())
+        gate.wait()
         return real(path, **kwargs)
 
     monkeypatch.setattr(czi_set, "read_czi_layout", _record)
-    read_czi_set(folder)
-
-    assert len(threads) > 1
+    try:
+        read_czi_set(folder)
+    except threading.BrokenBarrierError:
+        pytest.fail("the four files were read one after another: they never "
+                    "reached the barrier together")
 
 
 @pytest.mark.parametrize("stage", ["peek", "full"])

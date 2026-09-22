@@ -4958,6 +4958,26 @@ open **Show raw log** to find out whether it worked. The output is one
 per-well `<WELL>.zip` in `<destination>/in/`, the layout Analyze reads directly
 (no regrouping step).
 
+**Converting only part of a plate.** Click wells on the plate to convert just
+those; leave nothing selected and the whole plate is converted, which is the
+default. The wells offered are the ones this file actually holds, so a
+selection can never name a well that is not there.
+
+The readout says both numbers — *"2 of 3 well(s), selected"* — and so does the
+run log, because a dataset converted this way otherwise looks exactly like a
+plate that only ever had that many wells.
+
+**You can convert the rest later into the same folder.** Point the same source
+at the same destination with the same settings, pick the wells you skipped,
+and they are added alongside the ones already there. Change anything that
+decides which image becomes which well — the well source, the grid, the
+experiment name, the timepoint stride — and it is refused instead, the same
+way a resume is, because the two runs would write files with the same names
+from different images. A folder holding a plate this converter did not write
+is refused as before.
+
+The selection is locked while a conversion is running.
+
 **If a conversion is interrupted, running it again finishes it.** Each well is
 written in one piece, so whatever was completed before the interruption is
 already correct on disk. Point the same source at the same destination with the
@@ -5190,6 +5210,15 @@ on the plate rather than supplying it.
    readout describes the whole plate and **Convert** becomes available. Until
    then the button stays off: headers alone are not enough to convert on.
 
+   **Both reads count the files as they go.** A split export is up to
+   ninety-six files, and over a share either read takes long enough that a
+   single unchanging notice would look like a page that has hung, so the line
+   reads *"Reading the file headers (7 of 96)…"* and then *"Reading the rest
+   of the plate (7 of 96)…"*. A single `.czi` holding the whole plate is one
+   file and gets the sentence without the count. When the read lands the count
+   is replaced by the description of the plate, so a page that has finished
+   never sits on a number.
+
    A **Destination folder** is suggested beside the source, named after it. For
    a folder of per-scene files the suggestion is that folder's name with
    `_dataset` on the end, so the dataset never lands among the `.czi` files it
@@ -5278,6 +5307,26 @@ green or red, so you never have to open **Show raw log** to find out whether it
 worked. The output is one per-well `<WELL>.zip` in `<destination>/in/`, which
 Analyze reads directly with no regrouping step. Then **Open dataset in
 Analyze** — the channel tokens arrive pre-filled from the roles you set.
+
+**Converting only part of a plate.** Click wells on the plate to convert just
+those; leave nothing selected and the whole plate is converted, which is the
+default. The wells offered are the ones this file actually holds, so a
+selection can never name a well that is not there.
+
+The readout says both numbers — *"2 of 3 well(s), selected"* — and so does the
+run log, because a dataset converted this way otherwise looks exactly like a
+plate that only ever had that many wells.
+
+**You can convert the rest later into the same folder.** Point the same source
+at the same destination with the same settings, pick the wells you skipped,
+and they are added alongside the ones already there. Change anything that
+decides which image becomes which well — the well source, the grid, the
+experiment name, the timepoint stride — and it is refused instead, the same
+way a resume is, because the two runs would write files with the same names
+from different images. A folder holding a plate this converter did not write
+is refused as before.
+
+The selection is locked while a conversion is running.
 
 **If a conversion is interrupted, running it again finishes it.** Each well is
 written in one piece, so whatever completed before the interruption is already
@@ -5414,7 +5463,11 @@ rather than having the second visit overwrite the first.
    files to pick instead. All-Well never reads an image to work out what the
    plate holds, so none of this depends on how large the file is; it also never
    reads it on the window's thread, so nothing freezes while a slow disk or a
-   network share answers. When the read lands, the readout describes the file —
+   network share answers. While it reads, the line beneath names the step it is
+   on — *"Opening Plate7.nd2…"*, *"Reading the channel names…"*, *"Reading the
+   acquisition times (4 of 24)…"* — rather than showing one notice that never
+   changes, which over a share is indistinguishable from a page that has hung.
+   When the read lands, the readout describes the file —
    *"4 position(s) × 3 timepoint(s) × 1 Z-plane(s) × 2 channel(s) — 2048×2048
    px, uint16."* — the plate map fills in, and **Convert** becomes available.
 
@@ -5478,6 +5531,26 @@ plate says how it went in green or red, so you never have to open
 `<WELL>.zip` in `<destination>/in/`, which Analyze reads directly with no
 regrouping step. Then **Open dataset in Analyze** — the channel tokens arrive
 pre-filled from the roles you set.
+
+**Converting only part of a plate.** Click wells on the plate to convert just
+those; leave nothing selected and the whole plate is converted, which is the
+default. The wells offered are the ones this file actually holds, so a
+selection can never name a well that is not there.
+
+The readout says both numbers — *"2 of 3 well(s), selected"* — and so does the
+run log, because a dataset converted this way otherwise looks exactly like a
+plate that only ever had that many wells.
+
+**You can convert the rest later into the same folder.** Point the same source
+at the same destination with the same settings, pick the wells you skipped,
+and they are added alongside the ones already there. Change anything that
+decides which image becomes which well — the well source, the grid, the
+experiment name, the timepoint stride — and it is refused instead, the same
+way a resume is, because the two runs would write files with the same names
+from different images. A folder holding a plate this converter did not write
+is refused as before.
+
+The selection is locked while a conversion is running.
 
 **If a conversion is interrupted, running it again finishes it.** Each well is
 written in one piece, so whatever completed before the interruption is already

@@ -831,6 +831,19 @@ MAPPING_EXEMPTIONS = {
     "workers": ("the size of the per-well thread pool. It changes how fast "
                 "the conversion goes and nothing about what it writes, so "
                 "refusing a resume over it would refuse one that was safe"),
+    "well_subset": (
+        "which wells this run converts. It filters the well *indices* walked "
+        "and never the mapping, so a converted well's archive is byte-identical "
+        "to the one a whole-plate run would have written — verified by "
+        "comparing the two. The signature's question is 'which image lands "
+        "under which filename', and the selection does not change that "
+        "answer for any file it produces.\n\n"
+        "Keying on it would refuse the workflow the setting exists for: "
+        "convert six wells today, the rest next week, one dataset. That "
+        "top-up is instead permitted by `convert_marker.DONE_MARKER`, which "
+        "records the completed run's mapping so a second run can tell its own "
+        "dataset from a stranger's plate pointed at the same folder — the "
+        "narrower check, on the thing that really does have to match."),
 }
 
 

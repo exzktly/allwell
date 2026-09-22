@@ -25,7 +25,7 @@ from pathlib import Path
 
 from datasets.core import convert_marker as marker
 from datasets.core.convert_marker import ResumeState  # noqa: F401 (re-export)
-from pipeline.explode_common import timepoint_plan
+from pipeline.explode_common import timepoint_plan, wells_to_convert
 from pipeline.nd2_explode import WELL_SOURCES, resolve_well_map, timepoint_tokens
 from pipeline.nd2_read import Nd2Layout, Nd2ReadError, read_nd2_layout
 from util.channel_roles import (  # noqa: F401 (re-export for the view)
@@ -88,6 +88,17 @@ class ConversionParams:
     #: would notice the plate had gone ragged.
     timepoint_stride: int = 1
     experiment: str = ""                  # blank = derive from the filename
+    #: Convert only these wells, leaving the rest of the plate alone; empty
+    #: converts all of them. Canonical labels (``A01``), matched case- and
+    #: padding-insensitively against the mapping the other settings resolve.
+    #:
+    #: **Deliberately not part of the resume signature below.** A well's
+    #: archive holds exactly the same images whether or not the wells beside
+    #: it were converted in the same run, so the selection changes nothing
+    #: about which image lands under which filename — the one question that
+    #: signature answers. Keying on it would refuse the workflow a subset
+    #: exists for: convert six wells today, the rest next week, one dataset.
+    well_subset: tuple[str, ...] = ()
     workers: int = 0                      # 0 = auto (per-well thread pool)
 
 
@@ -110,6 +121,11 @@ class ConversionPlan:
     timepoint_note: str = ""
     well_labels: list[str] = field(default_factory=list)
     channels: list[str] = field(default_factory=list)
+    #: The wells this run will actually write, when a subset was chosen; empty
+    #: means the whole mapping. Kept beside ``well_labels`` rather than
+    #: replacing it, because the readout has to state both: which wells the
+    #: *source* holds, and which of them this run covers.
+    selected_wells: list[str] = field(default_factory=list)
     #: True when ``well_labels`` came from the positions' own names.
     from_file: bool = False
 
@@ -161,10 +177,20 @@ class ConversionPlan:
             first, last = self.well_labels[0], self.well_labels[-1]
             span = f" {first}" if first == last else f" {first}→{last}"
         source = ("named by the file" if self.from_file else "from the plate grid")
-        images = (self.n_wells * self.fovs_per_well * self.n_timepoints
+        # Counted over the wells this run writes. Denominating by the whole
+        # mapping described a subset conversion as the plate it was taken from
+        # — "3 well(s) … 6 image(s)" above a run that wrote two wells and four
+        # images — which is the same lie the run log's own count was fixed
+        # against, on the surface the user actually reads before pressing
+        # Convert.
+        n_writing = len(self.selected_wells) or self.n_wells
+        images = (n_writing * self.fovs_per_well * self.n_timepoints
                   * max(1, len(self.channels)))
+        wells_phrase = (f"{self.n_wells} well(s){span}" if not self.selected_wells
+                        else f"{n_writing} of {self.n_wells} well(s){span}, "
+                             f"selected")
         return (
-            f"{self.n_wells} well(s){span} ({source}) × "
+            f"{wells_phrase} ({source}) × "
             f"{self.fovs_per_well} FOV(s) × {self.timepoint_phrase} × "
             f"{len(self.channels)} channel(s) ({channels}) — {images} image(s)."
         )
@@ -208,6 +234,11 @@ class RawFields:
     direction: str = "row"
     serpentine: bool = True
     experiment: str = ""
+    #: Wells the user picked on the plate; empty converts all of them. Kept as
+    #: given rather than validated here — a well the source does not hold is
+    #: refused by `explode_common.wells_to_convert` with a message naming it,
+    #: which is where the plate's real labels are known.
+    well_subset: tuple[str, ...] = ()
 
     def problems(self) -> list[str]:
         """Everything wrong with the fields as they stand, in reading order."""
@@ -249,6 +280,7 @@ class RawFields:
             fovs_per_well=fovs,
             timepoint_stride=stride or 1,
             experiment=self.experiment.strip(),
+            well_subset=tuple(self.well_subset),
             workers=workers or 0,
         )
 
@@ -272,7 +304,8 @@ def default_dest(src: Path | str) -> Path:
     return src.parent / strip_nd2_suffix(src.name)
 
 
-def read_source(src: Path | str, params: ConversionParams | None = None) -> Nd2Layout:
+def read_source(src: Path | str, params: ConversionParams | None = None,
+                report=None) -> Nd2Layout:
     """Read *src*'s layout, with the times, for the page's readout.
 
     Never raises for a source that cannot be used — the page calls this on
@@ -287,7 +320,7 @@ def read_source(src: Path | str, params: ConversionParams | None = None) -> Nd2L
     """
     del params
     try:
-        return read_nd2_layout(src, read_times=True)
+        return read_nd2_layout(src, read_times=True, report=report)
     except (Nd2ReadError, OSError) as exc:
         layout = Nd2Layout()
         layout.warnings.append(str(exc))
@@ -321,6 +354,15 @@ def plan_conversion(source: Nd2Layout, params: ConversionParams) -> ConversionPl
         )
     except ValueError as exc:
         raise Nd2ImportError(str(exc)) from exc
+    # Resolved here rather than at run time so a well the source does not
+    # hold is refused on the page, where the plate showing the real labels is
+    # two inches away — not after the run has started.
+    try:
+        chosen = wells_to_convert(well_map.wells, params.well_subset)
+    except ValueError as exc:
+        raise Nd2ImportError(str(exc)) from exc
+    selected_labels = ([] if not params.well_subset
+                       else [well_map.wells[i] for i in chosen])
     tokens, note = timepoint_tokens(source)
     try:
         kept = timepoint_plan(tokens, params.timepoint_stride)
@@ -335,6 +377,7 @@ def plan_conversion(source: Nd2Layout, params: ConversionParams) -> ConversionPl
         fovs_per_well=well_map.fovs_per_well,
         well_labels=list(well_map.wells),
         channels=list(source.channel_names),
+        selected_wells=selected_labels,
         from_file=well_map.from_file,
     )
 
@@ -346,6 +389,18 @@ def write_run_marker(dest: Path | str, src: Path | str,
     """Record that a conversion is under way in *dest*, and with what settings."""
     marker.write_run_marker(dest, IN_PROGRESS_MARKER,
                             marker.mapping_signature(src, params, _MAPPING_FIELDS))
+
+
+def write_done_marker(dest: Path | str, src: Path | str,
+                      params: ConversionParams) -> None:
+    """Record the mapping this finished conversion used.
+
+    What lets a later run add the wells this one did not convert: without it a
+    top-up is indistinguishable from a stranger's plate pointed at the same
+    folder, which the destination check refuses outright.
+    """
+    marker.write_done_marker(
+        dest, marker.mapping_signature(src, params, _MAPPING_FIELDS))
 
 
 def clear_run_marker(dest: Path | str) -> None:
@@ -381,8 +436,17 @@ def destination_problem(dest: Path | str, src: Path | str = "",
     ``out/`` measurements beside them then describe inputs that are no longer
     there.
     """
+    # The signature is built only when the folder carries one of this tool's
+    # markers, because building it fingerprints the source — a stat per file,
+    # which on a split export is ninety-six of them, on a path a keystroke
+    # takes. Both markers are checked: the in-progress one says "finish this
+    # run", and the completed one says "this is the dataset you built, add the
+    # wells you skipped". Consulting only the first was a real gap — a
+    # finished run leaves no in-progress marker, so a subset top-up was
+    # refused as a stranger's plate.
     signature = None
-    if params is not None and marker.read_run_marker(
-            dest, IN_PROGRESS_MARKER) is not None:
+    if params is not None and (
+            marker.read_run_marker(dest, IN_PROGRESS_MARKER) is not None
+            or marker.read_done_marker(dest) is not None):
         signature = marker.mapping_signature(src or dest, params, _MAPPING_FIELDS)
     return marker.destination_problem(dest, IN_PROGRESS_MARKER, signature)

@@ -27,7 +27,7 @@ from datasets.core import convert_marker as marker
 from datasets.core.convert_marker import ResumeState  # noqa: F401 (re-export)
 from pipeline.czi_explode import WELL_SOURCES, resolve_well_map
 from pipeline.czi_read import CziReadError
-from pipeline.explode_common import timepoint_plan
+from pipeline.explode_common import timepoint_plan, wells_to_convert
 from pipeline.czi_set import (
     CziSet,
     PlatePeek,
@@ -91,6 +91,17 @@ class ConversionParams:
     #: would notice the plate had gone ragged.
     timepoint_stride: int = 1
     experiment: str = ""                  # blank = derive from the filename
+    #: Convert only these wells, leaving the rest of the plate alone; empty
+    #: converts all of them. Canonical labels (``A01``), matched case- and
+    #: padding-insensitively against the mapping the other settings resolve.
+    #:
+    #: **Deliberately not part of the resume signature below.** A well's
+    #: archive holds exactly the same images whether or not the wells beside
+    #: it were converted in the same run, so the selection changes nothing
+    #: about which image lands under which filename — the one question that
+    #: signature answers. Keying on it would refuse the workflow a subset
+    #: exists for: convert six wells today, the rest next week, one dataset.
+    well_subset: tuple[str, ...] = ()
     workers: int = 0                      # 0 = auto (per-well thread pool)
     #: Convert every ``.czi`` beside the selected one as a single plate. This
     #: is ZEN's *Split Scenes* export: one file per well, with nothing inside
@@ -128,6 +139,11 @@ class ConversionPlan:
     n_files: int = 1
     well_labels: list[str] = field(default_factory=list)
     channels: list[str] = field(default_factory=list)
+    #: The wells this run will actually write, when a subset was chosen; empty
+    #: means the whole mapping. Kept beside ``well_labels`` rather than
+    #: replacing it, because the readout has to state both: which wells the
+    #: *source* holds, and which of them this run covers.
+    selected_wells: list[str] = field(default_factory=list)
     #: True when ``well_labels`` came from the file's own scene names.
     from_file: bool = False
 
@@ -151,10 +167,17 @@ class ConversionPlan:
             span = f" {first}" if first == last else f" {first}→{last}"
         source = ("named by the file" if self.from_file else "from the plate grid")
         held = f" across {self.n_files} file(s)" if self.n_files > 1 else ""
-        images = (self.n_wells * self.fovs_per_well * self.n_timepoints
+        # Counted over the wells this run writes. Denominating by the whole
+        # mapping described a subset conversion as the plate it was taken from,
+        # on the surface the user reads before pressing Convert.
+        n_writing = len(self.selected_wells) or self.n_wells
+        images = (n_writing * self.fovs_per_well * self.n_timepoints
                   * max(1, len(self.channels)))
+        wells_phrase = (f"{self.n_wells} well(s){span}" if not self.selected_wells
+                        else f"{n_writing} of {self.n_wells} well(s){span}, "
+                             f"selected")
         return (
-            f"{self.n_wells} well(s){span} ({source}){held} × "
+            f"{wells_phrase} ({source}){held} × "
             f"{self.fovs_per_well} FOV(s) × {self.timepoint_phrase} × "
             f"{len(self.channels)} channel(s) ({channels}) — {images} image(s)."
         )
@@ -230,6 +253,11 @@ class RawFields:
     direction: str = "row"
     serpentine: bool = True
     experiment: str = ""
+    #: Wells the user picked on the plate; empty converts all of them. Kept as
+    #: given rather than validated here — a well the source does not hold is
+    #: refused by `explode_common.wells_to_convert` with a message naming it,
+    #: which is where the plate's real labels are known.
+    well_subset: tuple[str, ...] = ()
 
     def problems(self) -> list[str]:
         """Everything wrong with the fields as they stand, in reading order."""
@@ -271,6 +299,7 @@ class RawFields:
             serpentine=self.serpentine,
             fovs_per_well=fovs,
             experiment=self.experiment.strip(),
+            well_subset=tuple(self.well_subset),
             timepoint_stride=stride or 1,
             workers=workers or 0,
         )
@@ -326,7 +355,8 @@ def source_files(src: Path | str, params: ConversionParams) -> list[Path]:
     return siblings_of(src) if params.use_folder else [src]
 
 
-def peek_source(src: Path | str, params: ConversionParams) -> PlatePeek:
+def peek_source(src: Path | str, params: ConversionParams,
+                report=None) -> PlatePeek:
     """The wells *params*'s files claim, from their headers alone.
 
     What the page draws its plate from while the full read is still running.
@@ -336,10 +366,11 @@ def peek_source(src: Path | str, params: ConversionParams) -> PlatePeek:
     appearing at once and one appearing after every file has been round-tripped.
     Provisional by construction; see :class:`~pipeline.czi_set.PlatePeek`.
     """
-    return peek_wells(src, files=source_files(src, params))
+    return peek_wells(src, files=source_files(src, params), report=report)
 
 
-def read_source(src: Path | str, params: ConversionParams) -> CziSet:
+def read_source(src: Path | str, params: ConversionParams,
+                report=None) -> CziSet:
     """Read the files *params* selects as one plate.
 
     Never raises for a source that cannot be used — the page calls this on
@@ -349,7 +380,8 @@ def read_source(src: Path | str, params: ConversionParams) -> CziSet:
     :class:`CziImportError` at the point a caller is entitled to one.
     """
     try:
-        return read_czi_set_safely(src, files=source_files(src, params))
+        return read_czi_set_safely(src, files=source_files(src, params),
+                                   report=report)
     except (CziReadError, OSError) as exc:      # pragma: no cover — defensive
         return CziSet(problem=str(exc))
 
@@ -379,6 +411,15 @@ def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
         )
     except ValueError as exc:
         raise CziImportError(str(exc)) from exc
+    # Resolved here rather than at run time so a well the source does not hold
+    # is refused on the page, where the plate showing the real labels is two
+    # inches away — not after the run has started.
+    try:
+        chosen = wells_to_convert(well_map.wells, params.well_subset)
+    except ValueError as exc:
+        raise CziImportError(str(exc)) from exc
+    selected_labels = ([] if not params.well_subset
+                       else [well_map.wells[i] for i in chosen])
     try:
         kept = timepoint_plan(source.timepoint_tokens,
                               params.timepoint_stride)
@@ -394,6 +435,7 @@ def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
         n_files=source.n_files,
         well_labels=list(well_map.wells),
         channels=list(source.layout.channel_names),
+        selected_wells=selected_labels,
         from_file=well_map.from_file,
     )
 
@@ -429,6 +471,18 @@ def write_run_marker(dest: Path | str, src: Path | str,
     marker.write_run_marker(dest, IN_PROGRESS_MARKER, _signature(src, params))
 
 
+def write_done_marker(dest: Path | str, src: Path | str,
+                      params: ConversionParams) -> None:
+    """Record the mapping this finished conversion used.
+
+    What lets a later run add the wells this one did not convert: without it a
+    top-up is indistinguishable from a stranger's plate pointed at the same
+    folder, which the destination check refuses outright.
+    """
+    marker.write_done_marker(
+        dest, marker.mapping_signature(src, params, _MAPPING_FIELDS))
+
+
 def clear_run_marker(dest: Path | str) -> None:
     """Drop the marker — the run finished, so the folder is a dataset now."""
     marker.clear_run_marker(dest, IN_PROGRESS_MARKER, "czi-import")
@@ -445,7 +499,8 @@ def converted_wells(dest: Path | str) -> list[str]:
 
 
 def _signature_if_resumable(dest: Path | str, src: Path | str,
-                            params: ConversionParams | None) -> dict | None:
+                            params: ConversionParams | None, *,
+                            include_done: bool = False) -> dict | None:
     """This run's signature, but only when *dest* holds a marker to compare it to.
 
     Building the signature stats **every file in the set**, which is the right
@@ -454,10 +509,17 @@ def _signature_if_resumable(dest: Path | str, src: Path | str,
     every keystroke, and a destination with no marker is the ordinary case —
     so on a 96-file plate held on a network share this was ninety-six round
     trips per character typed. The marker's own existence is one stat.
+
+    *include_done* also accepts the marker a **completed** run leaves, which
+    the destination check needs and a resume must not have: a finished dataset
+    is something to add the skipped wells to, not an interrupted run to
+    continue. Keeping the two apart here rather than at the call sites is what
+    stops a completed conversion being reported as resumable.
     """
     if params is None:
         return None
-    if marker.read_run_marker(dest, IN_PROGRESS_MARKER) is None:
+    if marker.read_run_marker(dest, IN_PROGRESS_MARKER) is None and not (
+            include_done and marker.read_done_marker(dest) is not None):
         return None
     return _signature(src or dest, params)
 
@@ -476,4 +538,4 @@ def destination_problem(dest: Path | str, src: Path | str = "",
     """``""`` if *dest* is usable, else a short reason, for the field's hint."""
     return marker.destination_problem(
         dest, IN_PROGRESS_MARKER,
-        _signature_if_resumable(dest, src, params))
+        _signature_if_resumable(dest, src, params, include_done=True))

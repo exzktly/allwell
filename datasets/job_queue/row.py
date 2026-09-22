@@ -52,6 +52,7 @@ KIND_ICON = {
     "concatenate": "copy",
     "ome_import": "folder-open",
     "czi_import": "microscope",
+    "nd2_import": "microscope",
     "validate": "scan-line",
     "subset": "boxes",
     "import_loose": "download",

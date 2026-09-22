@@ -20,7 +20,13 @@ from tests._nd2_fixture import plate_value, write_nd2  # noqa: E402
 def test_the_parser_reads_back_the_plate_shape_that_was_written(tmp_path):
     path = write_nd2(tmp_path / "plate.nd2", n_pos=3, n_t=4, n_c=2)
     with nd2.ND2File(path) as f:
-        assert f.sizes == {"P": 3, "T": 4, "C": 2, "Y": 8, "X": 8}
+        # The **order** as well as the contents: ``sizes`` is ordered to match
+        # ``shape`` and that order is what decides which sequence index holds
+        # which image. Dict equality ignores it, so this assertion passed for a
+        # file written in any nesting at all.
+        expected = {"P": 3, "T": 4, "C": 2, "Y": 8, "X": 8}
+        assert dict(f.sizes) == expected
+        assert list(f.sizes) == list(expected)
         assert f.dtype == np.dtype("uint16")
 
 

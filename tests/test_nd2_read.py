@@ -441,3 +441,62 @@ def test_a_plane_outlives_the_handle_it_was_read_through(tmp_path, n_z):
     assert owns_its_memory, "the plane is a view into the closed file"
     want = max(plate_value(1, 1, 0, z) for z in range(n_z))
     assert int(np.unique(plane)[0]) == want
+
+
+# ── a refusal that names which of four things went wrong ─────────────────────
+
+@pytest.mark.parametrize("names,fragment", [
+    # NIS multipoint naming: a field number appended to the well.
+    (["A1_1", "A1_2", "B1_1", "B1_2"], "cannot read as a 96-well position"),
+    # A descriptive prefix, which NIS also writes.
+    (["Point A1", "Point A1", "Point B1", "Point B1"],
+     "cannot read as a 96-well position"),
+    # A 384-well plate: row I is outside A-H.
+    (["I01", "I01", "J01", "J01"], "cannot read as a 96-well position"),
+    # The acquisition comes back to a well later in the run.
+    (["A01", "B01", "A01", "B01"], "returns to A01, B01 later in the run"),
+    # Wells with different numbers of fields.
+    (["A01", "A01", "A01", "B01"], "do not all take the same number of fields"),
+])
+def test_the_refusal_names_which_way_the_well_names_failed(tmp_path, names,
+                                                           fragment):
+    """All five used to produce one identical sentence, and for three of them
+    it asserted two causes that had not occurred: it said the names were
+    present and blamed field counts and repeats, when the real cause is that
+    the name is not a well label at all. Two of those three carry a mapping
+    the file genuinely holds and were sent to the grid regardless."""
+    path = write_nd2(tmp_path / "p.nd2", n_pos=len(names), n_t=1, n_c=1,
+                     well_names=names)
+
+    problem = read_nd2_layout(path).well_mapping_problem()
+
+    assert fragment in problem
+    assert read_nd2_layout(path).wells_from_positions() == ([], 0)
+
+
+def test_a_plate_whose_names_are_wells_has_no_problem_to_report(tmp_path):
+    """The other direction: a message must not appear for a file that maps."""
+    path = write_nd2(tmp_path / "p.nd2", n_pos=4, n_t=1, n_c=1,
+                     well_names=["C07", "C07", "A02", "A02"])
+    layout = read_nd2_layout(path)
+
+    assert layout.well_mapping_problem() == ""
+    assert layout.wells_from_positions() == (["C07", "A02"], 2)
+
+
+def test_channel_names_that_cannot_be_read_are_reported_not_only_survived(
+        tmp_path):
+    """Losing the names is a degradation, so it carries a reason.
+
+    The archives are written ``c0``/``c1`` and those names reach the
+    filenames and Analyze's channel tokens, so a run that lost them and said
+    nothing is output that looks exactly like output from a file with no
+    channel names of its own.
+    """
+    path = write_nd2(tmp_path / "p.nd2", n_pos=2, n_c=2, drop_probe=True)
+
+    layout = read_nd2_layout(path)
+
+    assert layout.channel_names == ["c0", "c1"]
+    assert any("named by position" in w for w in layout.warnings), (
+        f"nothing recorded the loss: {layout.warnings}")

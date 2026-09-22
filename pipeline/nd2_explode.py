@@ -110,16 +110,11 @@ def resolve_well_map(
     if well_source == "file":
         wells, fovs = layout.wells_from_positions()
         if not wells:
-            named = sum(1 for label in layout.position_wells if label)
-            raise ValueError(
-                f"{name} does not name a well for every one of its "
-                f"{n_positions} stage position(s) in a way that lays over a "
-                f"plate — {named} of them carry a name, and the wells they "
-                f"name have to take the same number of fields each and must "
-                f"not repeat. Switch the well source to the plate grid and "
-                f"set the imaged rows and columns, which lays the acquisition "
-                f"order over the plate instead."
-            )
+            # The layout says *which* of the four ways this failed. One
+            # sentence for all of them named the wrong remedy for three: it
+            # asserted the names were present and blamed field counts and
+            # repeats, on files whose names simply are not well labels.
+            raise ValueError(f"{name}: {layout.well_mapping_problem()}")
         if fovs_per_well is not None and fovs_per_well != fovs:
             raise ValueError(
                 f"{name} names its wells with {fovs} field(s) of view each, "
@@ -372,8 +367,6 @@ def timepoint_tokens(layout: Nd2Layout) -> tuple[list[str], str]:
 
     positional = list(layout.timepoint_tokens)
     scan = layout.time_scan
-    if scan is None:
-        return positional, ""
     resolved = elapsed_hour_tokens(scan.hours_by_index, layout.size_t,
                                    source_reasons=scan.reasons)
     if resolved.tokens is not None:

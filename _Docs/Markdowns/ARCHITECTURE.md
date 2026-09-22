@@ -7100,10 +7100,51 @@ to carry, and refusing such a plate would turn a library bug into a file that
 cannot be converted. The channel *names* are what is lost there, and positional
 tokens are names a run can carry.
 
+**Which sequence holds which image is a property of the file, not of the
+format.** `nd2` numbers its sequences by a row-major walk of the experiment's
+loops **as they are nested in that file**, and NIS-Elements writes more than
+one nesting: a plate scanned position by position is `["P", "T"]`, and a
+multipoint time-course that visits every position within each round and comes
+back is `["T", "P"]`. `Nd2Layout.axis_order` carries that order — it is simply
+the loop axes of the ordered `sizes` dict — and `frame_index_for` builds every
+index from it.
+
+Discarding it was the converter's worst defect. With the order thrown away and
+the index computed as `position × size_t + t`, a multipoint file read every
+plane from the wrong place and produced an archive that was complete,
+correctly named, correctly counted, passed `validation_report` and reported
+success. The elapsed-hour scan indexed the same way and therefore sampled
+*positions* instead of time, reporting the stage's traverse across the plate
+as the experiment's whole duration — a twelve-hour timecourse named as a
+ninety-second one, with no reason recorded. Both go through `frame_index_for`
+now, so the frames the scan reads and the frames a conversion writes cannot
+disagree about what a coordinate means.
+
 **The axes, and what is done with each.** `P` is the stage position. `T`/`C`/`Z`
 are as usual, with Z collapsed by **maximum-intensity projection**, the same
 reduction `ome_explode` and `czi_explode` apply, so a plate converted from any
-of the three sources is measuring the same thing. There is **no mosaic-tile
+of the three sources is measuring the same thing.
+
+**Z is gathered across sequences, not out of a frame.** `nd2`'s own
+`AXIS.frame_coords()` is `{S, C, X, Y}` — a channel is part of a frame and Z
+is not — so `read_frame` returns a single Z plane and a projection written as
+"reduce whatever axis leads" is unreachable for any real ND2. It was, and no
+projection happened at all while four surfaces said it did, the run log
+included. `read_projection` now reads one frame per Z index at the resolved
+coordinate and reduces as each arrives, so peak memory is two planes however
+deep the stack is. The first plane is **copied**: `read_frame` hands back a
+view into the file's memory map, and a plane used after the reader closes
+touches unmapped memory — a segfault with no Python traceback (§12). The bug
+predated the projection and the projection hid it, because `np.maximum`
+allocates and so a stack was accidentally safe while a single plane, the
+common case, was not.
+
+That same "whatever leads" reduction was a domain predicate applied outside
+its domain (§7.1): on an RGB frame it maxed over the *sample* axis and turned
+an 8×8 image into an 8×3 one. An RGB file is now refused by
+`validation_report` rather than warned about, and a frame that does not
+resolve to one 2-D plane is refused rather than having an axis the reader
+cannot name reduced away. There is **no mosaic-tile
 axis**: where a CZI distinguishes the scene from the tiles within it, an ND2
 has only positions, and several positions naming one well simply *are* that
 well's fields of view. That is why this converter has no "FOVs per well"
@@ -7116,6 +7157,18 @@ NIS-Elements normally names each stage position after the well it scanned, so
 `XYPosLoop`, and the page's plate shows the mapping for the user to confirm
 rather than to supply. The grid is the fallback for a file whose positions are
 unnamed, and the two are never mixed.
+
+**The refusal names which of four things went wrong.** All four ways the
+position names can fail to map used to come back as one empty result, and the
+caller rendered one sentence for every one of them — a sentence asserting that
+the names were present and blaming field counts and repeats. Measured against
+five real shapes it was actively wrong for three: NIS multipoint naming
+(`A1_1`, `A1_2`), a descriptive prefix (`Point A1`) and a 384-well plate
+(`I01`) all fail because `canonical_well_label` does not recognise the *name*,
+and the first two carry a mapping the file genuinely holds.
+`Nd2Layout.well_mapping_problem` reports the cause: unreadable names (naming
+them, and saying what a well label can be here), a well the acquisition
+returns to later, or uneven field counts.
 
 `Nd2Layout.wells_from_positions` is **all or nothing, and distinct**, for
 exactly the reasons §6.2a gives — a partial mapping lands the named positions
@@ -8792,8 +8845,8 @@ metadata declares (§6.1) — alongside `ome_import_compute.selection_target`, w
 position/frame budget from the same `OmeLayout` and (when FOVs is pinned) the well
 count it implies, so the readout guides how many wells to place before any grid is
 entered, not only errors at the end. `apply.convert` calls `explode_ome_tiff` (which writes per-well zips into
-`<destination>/in/`, threaded, with progress + cancel), and `OmeImportWorker`
-runs it off the UI thread. **The form is read once, through
+`<destination>/in/`, threaded, with progress + cancel), and the shared
+`datasets.core.packed_convert.PackedConverterWorker` runs it off the UI thread. **The form is read once, through
 `ome_import_compute.RawFields`** — the boxes exactly as typed, with `parse_count`
 telling a blank ("auto", a real answer) from a value that is not a whole number.
 `RawFields.problems()` returns the user-facing reasons a box can't be read and

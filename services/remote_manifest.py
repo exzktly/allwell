@@ -44,7 +44,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # imported by process_microscopy at module load (and by well_plate_zipper). A
     # remote run never hits the frozen-windowed case, but the manifest must list
     # every ``util/`` file so the completeness guard (test_remote_manifest) passes.
-    # Reduces a metadata label to a filename token; both converters name
+    # Reduces a metadata label to a filename token; all three converters name
     # their images through it.
     "util/filename_token.py",
     "util/frozen_io.py",

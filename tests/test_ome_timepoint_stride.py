@@ -1,7 +1,7 @@
 """Feature parity with the CZI converter, on the OME-TIFF side.
 
 Two things ported here, and one that is deliberately *not* a port: the
-elapsed-hour rendering is now shared between the two converters rather than
+elapsed-hour rendering is now shared between the three converters rather than
 copied, so this file also pins the properties that only show up once the same
 code names both a CZI's stamps and an OME-TIFF's ``DeltaT``.
 

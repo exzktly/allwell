@@ -74,9 +74,6 @@ from datasets.ome_import.ome_import_compute import (
 from datasets.core.channel_roles_row import ChannelRolesMixin
 from datasets.core.dataset_fields import promote_open_button
 
-# Channel-name column in the per-channel role picker.
-ROLE_LABEL_MIN_W = 120
-
 # Widths of the small numeric boxes. Named, not written at the call site, both
 # because ARCHITECTURE §8 asks for it and because a literal passed through a
 # helper's parameter is invisible to the pixel guard that enforces it.

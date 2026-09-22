@@ -609,3 +609,299 @@ def test_a_stale_scan_does_not_overwrite_the_plate_of_a_newer_one(
     _settle(page)
 
     assert sorted(page._dashboard._fraction) == ["B05", "H11"]
+
+
+# ── what the adversarial review found ────────────────────────────────────────
+
+def test_a_job_started_from_the_queue_reports_on_a_plate_that_shows_the_run(
+        controller, tmp_path):
+    """The queue route begins before the source scan has landed.
+
+    ``start_from_queue`` calls ``show_job`` then ``_launch`` back to back while
+    the layout read is still on its worker thread, so the run used to start
+    with no wells on the plate — and the dashboard drops every well-progress
+    signal for a well it does not know. The conversion wrote its archives and
+    reported "done" above a plate reading "Pending: 0", bar at zero, while the
+    status line beside it said "8 of 8 image(s)": two writers on one section
+    disagreeing about whether anything had happened.
+
+    Asserted as the rail counts and the bar, not as the outcome, because the
+    outcome was `done` throughout and is what the plain run test already
+    covers.
+    """
+    src = _named_nd2(tmp_path, wells=("C07", "C07", "A02", "A02"),
+                     channels=("DAPI",))
+    dest = tmp_path / "queued"
+
+    controller.start_from_queue({"source": str(src), "destination": str(dest),
+                                 "params": {"well_source": "file"}})
+    controller._worker.wait(60_000)
+    for _ in range(50):
+        QApplication.processEvents()
+        time.sleep(0.01)
+
+    dashboard = controller.page._dashboard
+    assert sorted(p.name for p in (dest / "in").glob("*.zip")) == [
+        "A02.zip", "C07.zip"]
+    assert dashboard.outcome() == "done"
+    assert dict((state, n) for state, _label, n in dashboard._counts()) == {
+        "pending": 0, "converting": 0, "converted": 2}
+    assert dashboard._bar.value() == dashboard._bar.maximum() == 2
+
+
+def test_a_mid_run_reseed_never_wipes_a_plate_that_is_already_filling(
+        controller, tmp_path):
+    """The other direction of the same fix.
+
+    Seeding the plate mid-run is bounded to the case where it is *empty*; a
+    reseed of a populated plate would wipe the dials of the run in flight,
+    which is the defect the dashboard's own no-op guard exists for.
+    """
+    page = controller.page
+    _set_source(page, _named_nd2(tmp_path, wells=("C07", "A02")), tmp_path)
+    page.set_well_fraction("C07", 1, 1)
+    page.set_running(True)
+
+    page.refresh_readout()
+    QApplication.processEvents()
+
+    assert page._dashboard._fraction["C07"] == 1.0
+    page.set_running(False)
+
+
+@pytest.mark.parametrize("prepare,why", [
+    (lambda d: ((d / "in").mkdir(parents=True),
+                (d / "in" / "A01.zip").write_bytes(b"")),
+     "already holds converted wells"),
+    (lambda d: ((d / "out").mkdir(parents=True),
+                (d / "out" / "pipeline_info.json").write_text("{}")),
+     "already holds a finished dataset"),
+])
+def test_a_destination_the_run_would_refuse_also_disables_the_buttons(
+        controller, tmp_path, prepare, why):
+    """A red hint under the field is not a gate.
+
+    Convert stayed live and produced a worker-side refusal; **+ Queue** put a
+    job in the queue that was guaranteed to fail, which the user only finds
+    out about when the queue reaches it.
+    """
+    dest = tmp_path / "dest"
+    prepare(dest)
+    page = controller.page
+    _set_source(page, _named_nd2(tmp_path), tmp_path)
+
+    assert page._dest_field.message(), f"the field says nothing about {why}"
+    assert not page._run_btn.isEnabled(), why
+    assert not page._queue_btn.isEnabled(), why
+
+
+def test_an_unexpected_error_while_planning_is_not_reported_as_a_refusal(
+        controller, tmp_path, monkeypatch):
+    """A crash must not look like an ordinary answer.
+
+    The two worker arms had different exception sets by design, and sharing
+    one worker flattened them: ``ValueError`` is a refusal while *converting*,
+    because the exploder raises a plain one when the grid and the file
+    disagree, and every designed ``ValueError`` in *planning* is already
+    wrapped by the compute module. So a ``ValueError`` reaching the planning
+    arm is a bug, and reporting it as a refusal showed a bare sentence with no
+    traceback logged anywhere.
+    """
+    import dataclasses
+
+    page = controller.page
+    _set_source(page, _named_nd2(tmp_path), tmp_path)
+
+    def _boom(_source, _params):
+        raise ValueError("synthetic plan failure")
+
+    # ``ConverterSpec`` is frozen, so the spec is *replaced* rather than
+    # mutated — which is closer to how a converter declares one anyway.
+    monkeypatch.setattr(type(controller), "spec",
+                        dataclasses.replace(controller.spec, plan=_boom))
+    seen: list[tuple[bool, str, str]] = []
+    controller.jobFinished.connect(lambda *a: seen.append(a))
+
+    controller._launch()
+    controller._worker.wait(30_000)
+    QApplication.processEvents()
+
+    assert seen, "the job never reported back"
+    assert "Unexpected error while planning" in seen[-1][1]
+
+
+def test_the_spec_carries_the_destination_and_the_fov_count(controller,
+                                                            tmp_path):
+    """Two fields the round-trip test could not see.
+
+    ``destination`` was never asserted directly — only through
+    ``other.collect_spec() == spec``, which is symmetric, so dropping it from
+    both sides compared equal (§7.8 face two). And ``fovs_per_well`` was the
+    one editable field the round trip never gave a non-default value, so both
+    sides compared a blank box.
+    """
+    page = controller.page
+    _set_source(page, _bare_nd2(tmp_path), tmp_path)
+    page._well_source_cb.setCurrentIndex(page._well_source_cb.findData("grid"))
+    page._rows_edit.setText("2")
+    page._cols_edit.setText("2")
+    page._fovs_edit.setText("1")
+    _settle(page)
+
+    spec = controller.collect_spec()
+
+    assert spec["destination"] == str(tmp_path / "dest")
+    assert spec["params"]["fovs_per_well"] == 1
+
+    from datasets.nd2_import.controller import Nd2ImportController
+    other = Nd2ImportController()
+    try:
+        other.show_job(spec)
+        assert other.page.destination_path() == str(tmp_path / "dest")
+        assert other.page._fovs_edit.text() == "1"
+    finally:
+        other.shutdown()
+        other.page.deleteLater()
+
+
+def test_an_interrupted_run_writes_a_marker_and_the_next_run_finishes_it(
+        controller, tmp_path):
+    """The resume path, end to end on the real worker.
+
+    Nothing covered it. The only assertion that looked like it did — that the
+    marker is *absent* after a successful run — is satisfied by an
+    implementation that never writes one, and that implementation loses every
+    resume: a cancelled run then leaves wells behind with nothing recording
+    the settings, and the next attempt refuses with "Already holds converted
+    wells".
+    """
+    from datasets.nd2_import.nd2_import_compute import (
+        IN_PROGRESS_MARKER,
+        ConversionParams,
+        resume_state,
+    )
+    from pipeline.nd2_explode import explode_nd2
+
+    src = _named_nd2(tmp_path, wells=("C07", "C07", "A02", "A02"),
+                     channels=("DAPI",))
+    dest = tmp_path / "dest"
+    page = controller.page
+    _set_source(page, src, tmp_path)
+
+    # Cancel part-way, through the exploder the worker uses, so the marker and
+    # the partial archives are produced by the real path.
+    from datasets.nd2_import.apply import convert
+    calls = {"n": 0}
+
+    def _abort() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 2
+
+    params = ConversionParams()
+    try:
+        convert(src, dest, params, log=lambda _m: None,
+                is_cancelled=_abort, progress=lambda *_a: None,
+                well_progress=lambda *_a: None)
+    except Exception:
+        pass
+
+    assert (dest / IN_PROGRESS_MARKER).exists(), "no marker to resume from"
+    state = resume_state(dest, src, params)
+    assert state.resumable is True
+
+    del explode_nd2   # only imported to assert the real path is in play
+
+    controller._launch()
+    controller._worker.wait(60_000)
+    QApplication.processEvents()
+
+    assert page._dashboard.outcome() == "done"
+    assert sorted(p.name for p in (dest / "in").glob("*.zip")) == [
+        "A02.zip", "C07.zip"]
+    assert not (dest / IN_PROGRESS_MARKER).exists()
+
+
+def test_open_in_analyze_hands_over_the_folder_and_the_channel_tokens(
+        qapp, tmp_path):
+    """Driven through the **button**, not through the method behind it.
+
+    The assertion this replaces was ``page._open_btn.isVisible() or
+    page._dest_root == str(dest)``, whose right-hand side is set
+    unconditionally and is therefore always true. Deleting the promote call,
+    emitting the empty string, and handing over an empty token dict all left
+    the file green, and no test ever clicked the button.
+    """
+    from datasets.nd2_import.controller import Nd2ImportController
+
+    handed: list[tuple[str, dict]] = []
+    ctrl = Nd2ImportController(
+        on_open_in_analyze=lambda root, tokens=None: handed.append(
+            (root, tokens or {})))
+    try:
+        page = ctrl.page
+        _set_source(page, _named_nd2(tmp_path, channels=("DAPI", "GFP")),
+                    tmp_path)
+        ctrl._launch()
+        ctrl._worker.wait(60_000)
+        QApplication.processEvents()
+
+        # ``isVisibleTo`` rather than ``isVisible``: the page has no shown
+        # ancestor offscreen, so ``isVisible`` is False for every widget on it.
+        # Working around that with an ``or`` against a field set
+        # unconditionally is what made the assertion this replaces vacuous.
+        assert page._open_btn.isVisibleTo(page)
+        page._open_btn.click()
+        QApplication.processEvents()
+
+        assert handed, "clicking Open in Analyze handed over nothing"
+        root, tokens = handed[-1]
+        assert root == str(tmp_path / "dest")
+        assert tokens.get("nuclear_token") == "DAPI"
+    finally:
+        ctrl.shutdown()
+        ctrl.page.deleteLater()
+
+
+def test_a_plate_imaged_once_is_not_told_on_the_page_that_it_lost_its_clock(
+        controller, tmp_path):
+    """The page half of that fix, which nothing covered.
+
+    Deleting both caller guards left 281 tests green, including the page-level
+    files, because the only test called the shared helper directly and both
+    page tests used three timepoints and never reached the single-timepoint
+    case. A plate imaged once is not a timelapse whose elapsed times were
+    dropped, so there is nothing to warn about — and warning anyway put a
+    degradation notice on every ordinary non-timelapse plate.
+    """
+    page = controller.page
+    _set_source(page, _named_nd2(tmp_path, wells=("C07", "A02"),
+                                 channels=("DAPI",), timepoints=1), tmp_path)
+
+    verdict = page._verdict.text()
+    assert "1 timepoint(s)" in verdict
+    assert "named by position" not in verdict, verdict
+    assert "elapsed" not in verdict, verdict
+    assert page._run_btn.isEnabled()
+
+
+def test_a_finished_run_reports_the_job_as_finished(controller, tmp_path):
+    """The Job Queue waits on ``jobFinished`` and nothing else will send one.
+
+    Deleting this emit left the **whole fast lane** green — 9,982 tests — and
+    its absence stalls the queue for the session after every conversion,
+    success or failure. The failure path was covered; the normal one was not.
+    """
+    page = controller.page
+    _set_source(page, _named_nd2(tmp_path, channels=("DAPI",)), tmp_path)
+    seen: list[tuple[bool, str, str]] = []
+    controller.jobFinished.connect(lambda *args: seen.append(args))
+
+    controller._launch()
+    controller._worker.wait(60_000)
+    QApplication.processEvents()
+
+    assert seen, "a successful conversion never reported the job as finished"
+    ok, message, dest_root = seen[-1]
+    assert ok is True
+    assert dest_root == str(tmp_path / "dest")
+    assert "image(s)" in message

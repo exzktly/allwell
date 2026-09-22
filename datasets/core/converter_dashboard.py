@@ -101,6 +101,16 @@ class ConverterDashboard(PlateProgress):
         self.set_overall(0)
         self._refresh_rail()
 
+    def well_ids(self) -> list[str]:
+        """The wells this plate is currently showing, sorted.
+
+        Public because a page has to be able to ask whether the plate has been
+        filled in yet: a run started from the Job Queue begins before the
+        source scan has landed, and a plate that is still empty then silently
+        discards every well-progress signal of the whole conversion.
+        """
+        return list(self._wells)
+
     def set_well_progress(self, well_id: str, done: int, total: int) -> None:
         """Fill *well_id*'s dial, and finish it when it reaches *total*."""
         well = canon_well(well_id)

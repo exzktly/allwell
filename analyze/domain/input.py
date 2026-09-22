@@ -7,11 +7,13 @@ belong in the tab's run/log core:
   :class:`services.pipeline_runner.PipelineRunner`, which resolves the selected
   folder into ``(input_dir, output_dir, on_success)`` and streams grouping
   progress. Analyze only ever processes **folders**: a packed acquisition file
-  is converted to a dataset folder first, in the Datasets → *Convert OME-TIFF*
-  or *Convert CZI* page, so no de-interleave happens here.
-* ``_packed_input_hint`` — a guard that spots a raw ``.ome.tif`` or ``.czi``
-  selected as input and points the user at the converter for it instead of
-  trying to process the file.
+  is converted to a dataset folder first, in the Datasets → *Convert OME-TIFF*,
+  *Convert CZI* or *Convert ND2* page, so no de-interleave happens here.
+* ``_packed_input_hint`` — a guard that spots a raw ``.ome.tif``, ``.czi`` or
+  ``.nd2`` selected as input and points the user at the converter for it
+  instead of trying to process the file. The suffix table it reads is the one
+  place that decides which page converts what, so a format is added there and
+  nowhere else.
 * ``_set_fluor_rows`` — repopulates the fluorescent-channel rows, shared with the
   form's "load previous run" restore.
 * ``_autofill_from_input_scan`` / ``_report_scan_guess`` — the browse-time guess
@@ -42,7 +44,8 @@ class AnalyzeInputMixin:
         """Return a message that must block the run, or ``None`` to let it start.
 
         Analyze processes folders; a packed acquisition file — a packed
-        OME-TIFF or a Zeiss CZI — must be converted in the Datasets pane first,
+        OME-TIFF, a Zeiss CZI or a Nikon ND2 — must be converted in the
+        Datasets pane first,
         so one selected here earns that converter's own message. The message
         comes back from :func:`detect_packed_input` rather than being chosen
         here: which page to send the user to is decided by the suffix, and

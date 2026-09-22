@@ -178,9 +178,46 @@ class Nd2Layout:
         half from the file and half from a grid is right exactly where a user
         is most likely to spot-check it.
         """
-        labels = [canonical_well_label(name) for name in self.position_wells]
-        if not labels or not all(labels):
-            return [], 0
+        return self._wells_from_positions()[:2]
+
+    def well_mapping_problem(self) -> str:
+        """Why the positions' names cannot map this plate, or ``""``.
+
+        Separate from the mapping itself because all four ways it can fail
+        used to come back as the same empty result, and the caller then
+        rendered one sentence for every one of them — a sentence asserting
+        that the names were present and blaming field counts and repeats.
+        Measured against five real shapes it was actively wrong for three:
+        NIS multipoint naming (``A1_1``, ``A1_2``), a descriptive prefix
+        (``Point A1``) and a 384-well plate (``I01``) all fail because
+        ``canonical_well_label`` does not recognise the *name*, not because
+        the fields are uneven, and the first two carry a mapping the file
+        genuinely holds.
+        """
+        return self._wells_from_positions()[2]
+
+    def _wells_from_positions(self) -> "tuple[list[str], int, str]":
+        """``(wells, fovs per well, problem)`` — the one implementation."""
+        raw = list(self.position_wells)
+        if not raw:
+            return [], 0, "the file names no stage positions at all"
+        labels = [canonical_well_label(name) for name in raw]
+        unreadable = [raw[i] or "(unnamed)"
+                      for i, label in enumerate(labels) if not label]
+        if unreadable:
+            shown = ", ".join(repr(n) for n in sorted(set(unreadable))[:4])
+            more = "" if len(set(unreadable)) <= 4 else ", …"
+            named = sum(1 for label in labels if label)
+            return [], 0, (
+                f"{len(unreadable)} of {len(raw)} stage position(s) are named "
+                f"in a way this converter cannot read as a 96-well position "
+                f"({shown}{more}) — {named} of them do parse. Well names have "
+                f"to be a row letter A–H and a column 1–12, so a 384-well "
+                f"plate, a name carrying a field number such as 'A1_1', and a "
+                f"descriptive name such as 'Point A1' are all outside what a "
+                f"well label can be here. Switch the well source to the plate "
+                f"grid and set the imaged rows and columns, which lays the "
+                f"acquisition order over the plate instead.")
         runs: list[tuple[str, int]] = []
         for label in labels:
             if runs and runs[-1][0] == label:
@@ -188,12 +225,25 @@ class Nd2Layout:
             else:
                 runs.append((label, 1))
         wells = [label for label, _count in runs]
-        if len(set(wells)) != len(wells):
-            return [], 0
-        counts = {count for _label, count in runs}
+        repeated = sorted({w for w in wells if wells.count(w) > 1})
+        if repeated:
+            return [], 0, (
+                f"the acquisition returns to {', '.join(repeated)} later in "
+                f"the run, so those are two visits to one well rather than "
+                f"more fields of it, and the second visit's images would "
+                f"overwrite the first's. Switch the well source to the plate "
+                f"grid, or split the acquisition.")
+        counts = sorted({count for _label, count in runs})
         if len(counts) != 1:
-            return [], 0
-        return wells, counts.pop()
+            uneven = ", ".join(f"{label}: {count}" for label, count in runs
+                               if count != counts[-1])[:120]
+            return [], 0, (
+                f"the wells do not all take the same number of fields of "
+                f"view ({counts[0]} to {counts[-1]}; {uneven}). A plate whose "
+                f"wells carry different field counts has no single layout for "
+                f"the pipeline to read. Switch the well source to the plate "
+                f"grid, or re-export with the same fields in every well.")
+        return wells, counts[0], ""
 
     def validation_report(self, name: str) -> str:
         """The one sentence a caller shows, or ``""`` when the file is sound.
@@ -259,8 +309,11 @@ def _position_names(handle) -> list[str]:
     return []
 
 
-def _channel_names(handle, size_c: int) -> tuple[list[str], list[str]]:
-    """``(tokens, raw names)`` — positional where the file will not say.
+def _channel_names(handle, size_c: int) -> tuple[list[str], list[str], str]:
+    """``(tokens, raw names, reason)`` — positional where the file will not say.
+
+    *reason* is ``""`` when the names were read, and otherwise the sentence
+    the layout carries into its warnings.
 
     Guarded because ``ND2File.metadata`` raises on a file whose planes carry no
     fluorescent-probe block (see this module's docstring). Losing the channel
@@ -269,15 +322,23 @@ def _channel_names(handle, size_c: int) -> tuple[list[str], list[str]]:
     user cannot convert.
     """
     raw: list[str] = []
+    reason = ""
     try:
         channels = getattr(handle.metadata, "channels", None) or []
         raw = [str(getattr(getattr(ch, "channel", None), "name", "") or "")
                for ch in channels]
-    except Exception:
+    except Exception as exc:
+        # Recorded, not merely survived. Every other degradation route in this
+        # module writes down a reason; this one left the user with c0/c1
+        # archives and nothing on screen saying the file's own channel names
+        # had been lost, which is §7's degraded-output-looking-like-good-output
+        # in miniature — the names reach the filenames and the Analyze tokens.
         raw = []
+        reason = (f"the channel names could not be read ({exc}), so the "
+                  f"channels are named by position (c0, c1, …)")
     tokens = [safe_token(raw[i] if i < len(raw) else "", f"c{i}")
               for i in range(size_c)]
-    return tokens, raw
+    return tokens, raw, reason
 
 
 def read_nd2_layout(path: Path | str, *, read_times: bool = False) -> Nd2Layout:
@@ -318,8 +379,10 @@ def read_nd2_layout(path: Path | str, *, read_times: bool = False) -> Nd2Layout:
                 dtype=str(np.dtype(handle.dtype)),
                 position_wells=_position_names(handle),
             )
-            layout.channel_names, layout.raw_channel_names = _channel_names(
-                handle, layout.size_c)
+            (layout.channel_names, layout.raw_channel_names,
+             channel_reason) = _channel_names(handle, layout.size_c)
+            if channel_reason:
+                layout.warnings.append(channel_reason)
         except Nd2ReadError:
             raise
         except Exception as exc:
@@ -549,6 +612,12 @@ def _plane_from_frame(frame: np.ndarray, channel: int, size_c: int) -> np.ndarra
     while plane.ndim > 2 and plane.shape[-1] == 1:
         plane = plane[..., 0]
     if plane.ndim > 2 and size_c > 1 and plane.shape[0] == size_c:
+        # No clamp on ``channel``: the guard above establishes that the axis
+        # is exactly ``size_c`` long, and every caller indexes a channel of
+        # that layout. A ``min(channel, shape[0] - 1)`` here read as a
+        # safeguard and could only ever have silently substituted the last
+        # channel's pixels for an out-of-range request, which is the one
+        # outcome this function must not produce.
         plane = plane[channel]
     if plane.ndim != 2:
         raise Nd2ReadError(

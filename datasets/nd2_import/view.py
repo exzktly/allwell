@@ -737,11 +737,31 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # The plate shows the mapping *before* the run, which is the whole
         # point of drawing it: a well the file named wrongly is visible here
         # and nowhere else.
-        if not self._running:
+        #
+        # Seeded mid-run too, but only onto a plate that is still **empty**.
+        # A job started from the Job Queue calls ``show_job`` and ``_launch``
+        # back to back while the source scan is still on its worker thread, so
+        # the run begins with no wells on the plate — and every well-progress
+        # signal for the whole conversion is then dropped by the dashboard,
+        # which ignores wells it does not know. The run wrote its archives and
+        # reported "done" above a plate reading "Pending: 0" with the bar at
+        # zero. Bounded to the empty case because a mid-run reseed of a
+        # *populated* plate would wipe the dials of the run in flight; settings
+        # are disabled while running, so an empty plate is the only way the
+        # mapping can arrive late.
+        if not self._running or not self._dashboard.well_ids():
             self._dashboard.set_wells(plan.well_labels)
         self._update_run_gate(True)
 
     def _update_run_gate(self, ready: bool) -> None:
+        # The destination is part of "can this run", not merely a hint under
+        # its own field. Without this the buttons stayed live for a folder
+        # already holding a converted plate, for a finished dataset, and for a
+        # resume whose settings had changed — the run then refused on the
+        # worker thread, and **+ Queue** put a job in the queue that was
+        # guaranteed to fail. The OME-TIFF page has always gated on it.
+        if ready and self._dest_rule(self.destination_path()):
+            ready = False
         self._ready = bool(ready)
         enabled = ready and not self._running
         self._run_btn.setEnabled(enabled)

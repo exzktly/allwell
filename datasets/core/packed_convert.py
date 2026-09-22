@@ -68,8 +68,9 @@ class ConverterSpec:
     #: ``(src, params) -> source``. Whatever :attr:`plan` takes — a layout for
     #: one file, a set for a converter that reads a folder as one plate.
     read_source: Callable
-    #: ``(source, params) -> plan``. Raises one of :attr:`refusals` when the
-    #: settings cannot produce a dataset; called before anything is written.
+    #: ``(source, params) -> plan``. Raises one of :attr:`plan_refusals` when
+    #: the settings cannot produce a dataset; called before anything is
+    #: written.
     plan: Callable
     #: ``datasets.<tool>.apply.convert``.
     convert: Callable
@@ -78,12 +79,35 @@ class ConverterSpec:
     #: unsound. These are shown as themselves, because a traceback logged for
     #: an ordinary expected answer teaches a user to ignore tracebacks.
     refusals: tuple[type, ...]
+    #: The exceptions that are a refusal **in the planning phase**, which is
+    #: narrower than :attr:`refusals` and deliberately so.
+    #:
+    #: The two arms had different sets before they shared a worker, and
+    #: flattening them lost something. ``ValueError`` belongs on the convert
+    #: arm because the exploder's own well resolution raises a plain one when
+    #: the grid and the file disagree — an answer to show the user. It does
+    #: **not** belong in planning, because every designed ``ValueError`` on
+    #: that path is already wrapped into the tool's own error by its compute
+    #: module. So the only ``ValueError`` that can reach the planning arm is
+    #: an unexpected one — a bug, a corrupt file, a decode error — and
+    #: catching it as a refusal reported a crash as an ordinary answer with
+    #: no traceback logged anywhere, which is the one case where the traceback
+    #: is most wanted.
+    #:
+    #: Defaults to the tool's own error alone, taken from the first entry of
+    #: :attr:`refusals`, so a converter gets the narrow behaviour without
+    #: having to know this paragraph exists.
+    plan_refusals: tuple[type, ...] = ()
     #: The exploder's cancellation exception.
-    cancelled: type
+    cancelled: type = Exception
     #: Extra keyword arguments :attr:`read_source` needs. Empty for all three
     #: converters today; here so a reader does not have to wonder whether the
     #: uniform two-argument call is a coincidence.
     read_kwargs: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.plan_refusals:
+            object.__setattr__(self, "plan_refusals", self.refusals[:1])
 
 
 CANCELLED_MESSAGE = (
@@ -127,7 +151,7 @@ class PackedConverterWorker(QThread):
             source = spec.read_source(self._src, self._params,
                                       **spec.read_kwargs)
             spec.plan(source, self._params)     # validate before writing
-        except spec.refusals as exc:
+        except spec.plan_refusals as exc:
             self.failed.emit(str(exc))
             return
         except Exception as exc:  # pragma: no cover — defensive

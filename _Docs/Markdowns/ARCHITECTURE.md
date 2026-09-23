@@ -5346,10 +5346,13 @@ immune to the second of those by accident — each calls `set_done` on success,
 whose green overwrites the red — so it is the base class's job, not the
 callers'.
 
-A **Stop or Suspend is not a failure**: both end the subprocess by signal and
-arrive as the same kind of event, so both take the amber `set_cancelled` and
-neither opens a pane the user had closed. Which of the three it was is read
-from `PipelineRunner.cancel_state_at_failure`, a snapshot taken when the
+A **Stop or Suspend is not a failure**, and a Suspend is not a completion
+either. A Stop ends the subprocess by signal and arrives as an `error` event; a
+Suspend that winds down cleanly exits **0** and the runner reports it as its own
+`suspended` event (below), while one that dies by signal arrives as an `error`
+like a Stop. Either cancel takes the amber `set_cancelled` and neither opens a
+pane the user had closed. For the `error` case, which of the three it was is
+read from `PipelineRunner.cancel_state_at_failure`, a snapshot taken when the
 failure is *queued*, not from the live `was_stopped` / `was_suspended`. The GUI
 drains one timer tick later, and a Stop clicked inside that window would
 otherwise turn a genuine failure amber and silent.
@@ -8527,6 +8530,24 @@ normal end-of-well path so its CSV and `<well>_out.zip` are written. A second
 signal is a hard stop — the handler restores the previous disposition before
 returning, so a suspend that hangs is still escapable.
 
+**A suspended run exits 0, and the runner says so rather than calling it done.**
+Leaving through the normal end-of-well path means the pipeline's exit code is the
+same as a finished plate's, so `PipelineRunner` asks `_suspend_requested` before
+reading an exit of 0 as a completion: a suspended run queues
+`("suspended", …)` through `_enqueue_suspended` (one of `_CONTROL_KINDS`, so it
+is never dropped on overflow) instead of `("done", …)`, and the success hooks —
+the source-image cleanup `resolve_input_output` hands back, and on the remote
+path `zipped.on_pipeline_success` — do not run. `AnalyzeTab._poll_log` routes the
+event to `AnalyzeSuspendMixin._on_run_suspended`, which writes a `[Suspended]`
+line with the well tally and puts the dashboard in its amber state, and leaves
+`_run_ok` false. Everything downstream keys on that: `_on_pipeline_complete`
+(the hand-off of the output folder to Review) is never called, `_on_run_settled`
+keeps the suspend record, and `jobFinished` carries `(False, "", "")`, which is
+how the job queue recognises a suspend. Reading the exit code alone had made a
+Suspend print "Processing Complete", tell the queue the job had succeeded, and
+hand the half-written folder to Review from a `QTimer` callback — where a load
+that raised took the application down.
+
 **The done-set is not recorded anywhere — the output directory is it.**
 `--incremental` reads the per-well CSVs and out-zips back as the set of
 `(fov, timepoint)` groups already processed, so a resumed run recomputes only
@@ -8804,10 +8825,11 @@ went away mid-run) into `INTERRUPTED` and no longer cascade-blocks its
 successors: they stay `PENDING` and wait for output that is still coming.
 
 A run the queue started also suspends from the Analyze page, and the queue does
-the right thing for free there: `suspend` goes through `stop`, so
-`AnalyzeRunMixin.was_cancelled` is true, so `JobQueueController._on_job_finished`
-marks the job cancelled and pauses the queue rather than starting the next one
-underneath a user who has just asked for their machine back. What did *not* come
+the right thing there: the run ends with `jobFinished(False, "", "")`, and
+`JobQueueController._was_suspended` asks the runner's `was_suspended`, so
+`_on_job_finished` marks the job `SUSPENDED` and pauses the queue rather than
+starting the next one underneath a user who has just asked for their machine
+back. What did *not* come
 for free is restarting that job from the queue. A queued job's stored spec never
 carries `incremental` — it is not a form field — and re-running without it skips
 every well whose output zip exists: the wells that never began are recovered, but
@@ -9486,7 +9508,11 @@ broken merge never leaves a destination that looks finished.
 On success the page offers to open the merged dataset in Review, routed through
 `DatasetsTab._open_in_review → AllWellApp._open_dataset_in_review`, which loads
 the destination root into Review and switches to it — the same path
-`_on_analyze_pipeline_complete` uses.
+`_on_analyze_pipeline_complete` uses. Every such hand-off goes through
+`AllWellApp._load_in_review_later`, which defers the load to a `QTimer` so the
+pane switch paints first and catches whatever the load raises: an exception
+escaping a Qt callback aborts the process under PySide6, so a dataset that will
+not load must cost the load and not the window.
 
 `ConcatenatePage._update_status_preview` reveals `ConcatDashboard` as soon as
 both dataset fields are valid, rather than only once "▶ Concatenate" is

@@ -693,7 +693,9 @@ class PipelineRunner:
     # scheduler advances or blocks entirely on having seen one. Dropping one
     # on queue overflow doesn't cost a log line, it stalls the job forever,
     # so they're exempt from the drop-on-overflow policy below.
-    _CONTROL_KINDS = frozenset({"done", "error", "finished"})
+    #: ``suspended`` is the fourth ending: a run the user wound down with
+    #: Suspend exits 0 on purpose, and it is neither a completion nor a failure.
+    _CONTROL_KINDS = frozenset({"done", "suspended", "error", "finished"})
 
     def _enqueue(self, event: tuple[str, object]) -> None:
         """Non-blocking enqueue for a log line; drops the message on overflow
@@ -968,6 +970,30 @@ class PipelineRunner:
         self._error_was_stopped = self._stop_requested.is_set()
         self._error_was_suspended = self._suspend_requested.is_set()
         self._had_error = True
+
+    def _enqueue_suspended(self, *, where: str = "Pipeline") -> None:
+        """Report a run that wound down after Suspend and exited cleanly.
+
+        ``pipeline.suspend`` makes a suspended pipeline leave through its normal
+        end-of-well path, so it exits 0 — and an exit of 0 was read as "the
+        plate is finished". That reading did three things a suspend must never
+        do: it ran the success hooks that tidy away the source images the run
+        grouped, it handed the half-written output folder to Review as a
+        finished dataset (a load that then failed on the wells the run never
+        reached), and it told the job queue the job had succeeded, so the queue
+        dropped it rather than keeping it to resume.
+
+        A distinct event rather than ``done`` or ``error``: the tab needs to
+        say "suspended" rather than "complete" or "failed", and the queue needs
+        ``ok`` to be false with no error message, which is how it recognises a
+        suspend (``JobQueueController._was_suspended``).
+        """
+        self._enqueue((
+            "suspended",
+            f"{where} suspended: the wells in flight were finished and written; "
+            "the rest were not started. Resume from the Analyze banner, or "
+            "re-run this input with 'incremental', to finish the plate.\n",
+        ))
 
     def _enqueue_error(self, message: str) -> None:
         """Queue a failure. The queue itself records the cancel state."""
@@ -1280,7 +1306,9 @@ class PipelineRunner:
                 with swallow("waiting for the pipeline subprocess"):
                     proc.wait()
             rc = proc.returncode
-            if rc == 0:
+            if rc == 0 and self._suspend_requested.is_set():
+                self._enqueue_suspended()
+            elif rc == 0:
                 # v5.x.x: zipper-fired-this-run source cleanup. Only
                 # runs on a clean exit (rc == 0); any failure leaves
                 # the loose TIFs intact so the user can re-run.
@@ -1451,7 +1479,9 @@ class PipelineRunner:
                 dry_run=self._dry_run_cleanup,
                 log_fn=lambda m: self._enqueue(("line", m)),
             )
-            if rc == 0 and ok:
+            if rc == 0 and ok and self._suspend_requested.is_set():
+                self._enqueue_suspended(where="Remote pipeline")
+            elif rc == 0 and ok:
                 # v5.x.x: clean run-to-completion. Fire both success
                 # hooks:
                 # 1. ``zipped.on_pipeline_success`` — deletes the

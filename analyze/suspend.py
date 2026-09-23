@@ -204,6 +204,31 @@ class AnalyzeSuspendMixin:
         except Exception:
             swallowed()  # a failed suspend must not take the window down
 
+    def _on_run_suspended(self, payload, pending) -> None:
+        """The run wound down after Suspend. Not a completion, and not a failure.
+
+        A suspended pipeline exits 0, and before the runner reported that as
+        its own event it arrived as ``done``: the dashboard read "Complete",
+        the log printed "Processing Complete", and ``_on_run_done`` handed the
+        half-written output folder to Review as a finished dataset. Review then
+        loaded it from a timer callback and failed on the wells the run had
+        never reached, which took the window down. So this path leaves
+        ``_run_ok`` false — nothing downstream treats the plate as done, the
+        suspend record survives ``_on_run_settled``, and the queue sees a
+        suspend — and it never calls ``_on_pipeline_complete``.
+        """
+        self._log_lines(pending)
+        self._end_run_phase()
+        done, total = int(self._well_done or 0), int(self._well_total or 0)
+        with swallow("putting the suspended run on the dashboard"):
+            self._dashboard.set_cancelled("suspended; resume to finish")
+            if total:
+                self._dashboard.set_overall(done)
+            self._dashboard.set_status("")
+            self._dashboard.set_eta("")
+        tally = f" {done} of {total} well(s) finished." if total else ""
+        self._log_line(f"\n[Suspended]{tally} {payload}", "WARNING")
+
     def _write_suspend_record(self, out_dir: Path) -> None:
         """Persist the spec behind the running job, best-effort."""
         try:

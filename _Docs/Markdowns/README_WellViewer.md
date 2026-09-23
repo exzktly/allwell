@@ -5209,6 +5209,21 @@ on the plate rather than supplying it.
    megabyte for a 96-well plate, still no images — and when it lands the
    readout describes the whole plate.
 
+   **The plate map is where you choose which wells to convert.** Click wells
+   to convert only those; click a row or column header to take a whole line;
+   drag to sweep a block; or use the circle in the top-left corner to take
+   everything. The line under the plate says what will happen —
+   *"Converting all 96 well(s) — click to convert only some"*, or
+   *"Converting 3 of 96 well(s); 93 ignored"* — and carries **Convert all**,
+   which clears the selection, and **Invert**, which is the quick way to say
+   "everything except these three". Picking is locked while a conversion is
+   running, because the plate is the progress display then.
+
+   **A folder holding a master file still converts.** A Split Scenes export
+   writes one extra `.czi` describing the plate, with no images in it. It is
+   passed over and named in the readout rather than refused — it used to stop
+   the whole folder converting.
+
    **A source missing some images is converted anyway, and says so.** If the
    file holds fewer images than its scenes, tiles, timepoints and channels
    describe — an acquisition stopped early, or a channel imaged only at the

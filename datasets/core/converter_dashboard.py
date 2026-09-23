@@ -24,7 +24,12 @@ docstring and its object name.
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QWidget,
+)
 
 from ui import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
@@ -59,11 +64,14 @@ class ConverterDashboard(PlateProgress):
         # the first well that started converting.
         self._plate.setSelectionRim(True)
         self._plate.selectionChanged.connect(self._on_selection_changed)
+        self._build_pick_row()
+        self.set_selection_enabled(True)
         # Named per converter so a QSS rule or a test can address one
         # page's plate without reaching every converter's at once.
         self.setObjectName(object_name)
 
     def _on_selection_changed(self, ids) -> None:
+        self._refresh_pick_note()
         self.wellsSelected.emit(list(ids))
 
     def selected_wells(self) -> list[str]:
@@ -71,17 +79,122 @@ class ConverterDashboard(PlateProgress):
         return list(self._plate.selectedWellIds())
 
     def set_selected_wells(self, ids) -> None:
-        """Restore a selection — the Job Queue's edit path."""
+        """Restore a selection — the Job Queue's edit path, and the buttons."""
         self._plate.setSelectedWellIds(list(ids or []))
+        self._refresh_pick_note()
 
     def set_selection_enabled(self, on: bool) -> None:
-        """Allow or forbid picking wells.
+        """Allow or forbid picking wells, with everything picking needs.
 
         Forbidden while a run is in flight: the plate is the progress display
         then, and a selection changed mid-run would describe a conversion
         other than the one being reported on.
+
+        **Four things, not one.** ``PlateProgress`` builds its plate as a
+        status map — ``apply_plate_geometry(role="status")`` makes it
+        report-only, and the constructor turns off drag-select and the
+        row/column headers — because for most of its life that is what it is.
+        Turning the selection *mode* on over the top of that left exactly one
+        way to pick: clicking wells one at a time. On a 96-well plate, taking
+        all but three wells is ninety-three clicks, which is not a way of
+        doing it — and none of the usual affordances were there to suggest
+        the plate could be clicked at all.
+
+        So picking mode restores the corner select-all and the pointing-hand
+        cursor (``setReportOnly(False)``), the drag sweep, and the row and
+        column headers. A run puts all four back, because then the plate is
+        reporting rather than asking.
+
+        The plate's own action row stays hidden either way. It is shown by
+        ``role="picker"``, which also reserves height for it, and a row that
+        appeared when a run ended would resize the plate under the user's
+        cursor — so this dashboard carries its own buttons instead, in a line
+        under the plate that is always there.
         """
         self._plate.setSelectionMode("select" if on else "passive")
+        self._plate.setReportOnly(not on)
+        self._plate.setDragSelectEnabled(on)
+        self._plate.setRowColumnSelectable(on)
+        self._pick_row.setEnabled(on)
+        self._refresh_pick_note()
+
+    # ── saying that the plate is a picker, and what it has picked ───────────
+
+    def _build_pick_row(self) -> None:
+        """A line under the plate: what picking does, and two ways to do it.
+
+        Under the plate rather than in the header, because it describes the
+        plate and the eye arrives there after it. The buttons are this
+        widget's own rather than the plate's built-in action row for the
+        reason in :meth:`set_selection_enabled`, and they say what they do to
+        *a conversion* — "Convert all" rather than "None", which is what
+        clearing the selection means here and is the opposite of what the word
+        would suggest.
+        """
+        self._pick_row = QWidget(self)
+        row = QHBoxLayout(self._pick_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.Spacing.sm)
+
+        self._pick_note = QLabel("", self._pick_row)
+        self._pick_note.setObjectName("Muted")
+        self._pick_note.setWordWrap(True)
+        row.addWidget(self._pick_note, 1)
+
+        self._pick_all = QPushButton("Convert all", self._pick_row)
+        self._pick_all.setToolTip(
+            "Clear the selection, so every well the source holds is converted")
+        self._pick_all.clicked.connect(lambda: self.set_selected_wells([]))
+        row.addWidget(self._pick_all)
+
+        self._pick_invert = QPushButton("Invert", self._pick_row)
+        self._pick_invert.setToolTip(
+            "Convert the wells that are not picked, and skip the ones that are")
+        self._pick_invert.clicked.connect(self._invert_selection)
+        row.addWidget(self._pick_invert)
+
+        host = self._center_host.layout()
+        # Directly under the plate, before the stretch that holds it up.
+        host.insertWidget(host.indexOf(self._plate) + 1, self._pick_row)
+
+    def _invert_selection(self) -> None:
+        """Swap the wells that convert for the ones that do not.
+
+        The shortest way to say "everything but these", which is how a person
+        with three bad wells on a full plate thinks about it — and the one
+        thing the include-only model cannot express in fewer clicks than there
+        are wells.
+
+        Inverting nothing selects every well rather than leaving the plate
+        empty. That is the same conversion either way, but it says so on the
+        plate instead of leaving a control that appears to have done nothing.
+        """
+        picked = set(self._plate.selectedWellIds())
+        self.set_selected_wells([w for w in self._wells if w not in picked])
+
+    def _refresh_pick_note(self) -> None:
+        """Say which wells convert and which are skipped, in those words.
+
+        The count is what makes a subset legible: a rim drawn on twelve of
+        ninety-six cells is visible only once you know to look for it, and a
+        plate with nothing picked and a plate with everything picked convert
+        the same wells while looking completely different.
+        """
+        if not hasattr(self, "_pick_note"):
+            return
+        total = len(self._wells)
+        picked = len(self._plate.selectedWellIds())
+        if not self._pick_row.isEnabled():
+            self._pick_note.setText("")
+        elif not total:
+            self._pick_note.setText("Pick a source to choose wells.")
+        elif not picked:
+            self._pick_note.setText(
+                f"Converting all {total} well(s) — click to convert only some.")
+        else:
+            self._pick_note.setText(
+                f"Converting {picked} of {total} well(s); "
+                f"{total - picked} ignored.")
 
     def reset(self) -> None:
         """Back to idle, keeping no trace of the previous run's dials."""
@@ -96,6 +209,7 @@ class ConverterDashboard(PlateProgress):
         self.set_overall_range(len(self._wells))
         self.set_overall(0)
         self._refresh_rail()
+        self._refresh_pick_note()
         self._headline.setText("Idle")
         self._headline.setStyleSheet(f"color:{theme.Colors.text_primary};")
         self._eta.setText("")
@@ -136,6 +250,8 @@ class ConverterDashboard(PlateProgress):
             self._plate.setWellColor(well, theme.Colors.text_muted)
         self.set_overall_range(len(wells))
         self.set_overall(0)
+        # The note quotes the well count, which has just changed.
+        self._refresh_pick_note()
         self._refresh_rail()
 
     def well_ids(self) -> list[str]:

@@ -109,6 +109,12 @@ class CziSet:
     scene_wells: list[str] = field(default_factory=list)
     #: A problem that makes the set unconvertible, or ``""``.
     problem: str = ""
+    #: Files of the selected folder that hold no image tiles — ZEN's Split
+    #: Scenes export writes one master file describing the plate. Dropped
+    #: from the set rather than refused, and kept here so the page can say
+    #: which files it passed over: a converter that silently ignores an input
+    #: the user pointed it at is indistinguishable from one that missed it.
+    index_files: list = field(default_factory=list)
     #: What the files are short of the rectangle their axes imply, one
     #: sentence per file that is short of anything, or ``""``.
     #:
@@ -505,11 +511,57 @@ def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None,
         cached=lambda item: cached_layout(item[0], item[1]),
         remember=lambda item, layout: remember_layout(item[0], item[1], layout))
 
-    first, first_path = result.layouts[0], paths[0]
     # Each file has to be sound in its own right before the set is compared:
     # "these two disagree about the channel names" is a confusing thing to say
     # about a file that holds no channels because it was truncated.
+    # ZEN's Split Scenes export writes a **master** file beside the per-scene
+    # ones: it describes the plate and holds no image tiles of its own. It is
+    # part of the export rather than a fault in it, so it is dropped from the
+    # set instead of refused — refusing it took the whole folder down, which
+    # is the one thing a file holding no images should not be able to do.
+    #
+    # Dropped after the read because only the read can tell: "holds no image
+    # tiles" is a property of the subblock directory, not of the name. It
+    # sorts first on every export seen so far (``Exp.czi`` before
+    # ``Exp_A01.czi``), which is why it also had to stop being the file the
+    # timing is taken from and the file every other member is compared
+    # against.
+    with_images = [(path, layout) for path, layout
+                   in zip(paths, result.layouts) if layout.n_blocks]
+    if with_images and len(with_images) < len(paths):
+        result.index_files = [path for path, layout
+                              in zip(paths, result.layouts)
+                              if not layout.n_blocks]
+        paths = [path for path, _ in with_images]
+        result.files = paths
+        result.layouts = [layout for _, layout in with_images]
+        # The acquisition stamps were asked of whichever file sorted first,
+        # and that was the one just dropped. A layout read without them
+        # carries ``None`` rather than an empty scan, which is what tells the
+        # two apart — so this re-reads exactly when the timing went with the
+        # master, and never otherwise.
+        if result.layouts[0].time_scan is None:
+            result.layouts[0] = read_czi_layout(paths[0], read_times=True)
+
+    # Bound after the drop, never before it. The master sorts first, so a
+    # ``first`` taken ahead of this made it the baseline every other member
+    # was compared against — and the comparison it then failed was "0 tiles
+    # against 1", a second refusal from the same file wearing a different
+    # sentence.
+    first, first_path = result.layouts[0], paths[0]
+
     notes: list[str] = []
+    if result.index_files:
+        # Said, not silently done. A converter that passes over a file the
+        # user pointed it at, without a word, is indistinguishable from one
+        # that failed to notice it — and this one is dropping a file whose
+        # name is on the export.
+        shown = ", ".join(path.name for path in result.index_files[:2])
+        more = len(result.index_files) - min(2, len(result.index_files))
+        notes.append(
+            f"{len(result.index_files)} file(s) hold no image tiles and are "
+            f"not converted ({shown}{', …' if more else ''}) — ZEN writes one "
+            f"such file per split-scene export to describe the plate.")
     for path, layout in zip(paths, result.layouts):
         unsound = layout.validation_report(path.name)
         if unsound:

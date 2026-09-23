@@ -727,3 +727,98 @@ def test_a_split_member_is_still_named_by_its_filename(tmp_path):
 
     assert read_czi_set(folder).wells_from_files() == ["A01", "B02"]
     assert peek_wells(folder).wells == ["A01", "B02"]
+
+
+# ── the master file a split-scene export writes beside its scenes ────────────
+
+def _master_plate(tmp_path, wells=("A01", "A02")):
+    """A Split Scenes export as ZEN writes one: a master file describing the
+    plate and holding no image tiles, plus one file per scene."""
+    folder = tmp_path / "Exp_split"
+    folder.mkdir(parents=True, exist_ok=True)
+    write_czi(folder / "Exp.czi", [],
+              xml=plate_metadata_xml(
+                  scene_wells={i: w for i, w in enumerate(wells)},
+                  channels=["DAPI", "GFP"]))
+    for well in wells:
+        write_czi(folder / f"Exp_{well}.czi",
+                  plate_tiles(wells=1, fovs=1, timepoints=2, channels=2),
+                  xml=plate_metadata_xml(scene_wells={0: well},
+                                         channels=["DAPI", "GFP"]))
+    return folder
+
+
+def test_a_master_file_does_not_refuse_the_folder(tmp_path):
+    """ZEN's Split Scenes export writes a master file beside the per-scene
+    ones. It describes the plate and holds no image tiles, which is what it is
+    for — not a fault in the export, and not something that should be able to
+    take the whole folder down.
+
+    It refused twice over, and the second refusal is the one that would have
+    survived a careless fix: the master sorts first (``Exp.czi`` before
+    ``Exp_A01.czi``), so it was also the file every other member was compared
+    against, and dropping it *after* that comparison still failed on
+    "0 tiles against 1".
+    """
+    folder = _master_plate(tmp_path)
+
+    result = read_czi_set(folder)
+
+    assert result.problem == "", result.problem
+    assert result.wells_from_files() == ["A01", "A02"]
+    assert [p.name for p in result.files] == ["Exp_A01.czi", "Exp_A02.czi"]
+    assert [p.name for p in result.index_files] == ["Exp.czi"]
+
+
+def test_the_dropped_master_is_named_rather_than_silently_skipped(tmp_path):
+    """A converter that passes over a file the user pointed it at, without a
+    word, is indistinguishable from one that failed to notice it."""
+    folder = _master_plate(tmp_path)
+
+    note = read_czi_set(folder).shortfall_note
+
+    assert "Exp.czi" in note
+    assert "no image tiles" in note
+    assert "not converted" in note
+
+
+def test_the_timing_survives_the_master_being_dropped(tmp_path):
+    """The acquisition stamps are asked of whichever file sorts first, and
+    that is the master. Dropping it without re-asking left the plate with no
+    timing at all — its timepoints named by position, silently, which is a
+    dataset with no time axis in Review."""
+    folder = _master_plate(tmp_path)
+
+    result = read_czi_set(folder)
+
+    assert len(result.timepoint_tokens) == 2
+    assert result.layouts[0].time_scan is not None, (
+        "the surviving first file was never asked for its stamps")
+
+
+def test_a_single_file_holding_no_images_is_still_refused(tmp_path):
+    """The drop is for a member of a *set*. One file, picked on its own and
+    holding nothing, is the user having picked the wrong file — and saying so
+    is the whole value of the check."""
+    path = write_czi(tmp_path / "Exp.czi", [],
+                     xml=plate_metadata_xml(scene_wells={0: "A01"},
+                                            channels=["DAPI"]))
+
+    result = read_czi_set(path)
+
+    assert "holds no image tiles" in result.problem
+
+
+def test_a_folder_where_every_file_is_empty_is_refused(tmp_path):
+    """Dropping them all would leave an empty set reported as a fine one."""
+    folder = tmp_path / "all_empty"
+    folder.mkdir()
+    for name in ("Exp.czi", "Exp_two.czi"):
+        write_czi(folder / name,
+                  [], xml=plate_metadata_xml(scene_wells={0: "A01"},
+                                             channels=["DAPI"]))
+
+    result = read_czi_set(folder)
+
+    assert "holds no image tiles" in result.problem
+    assert result.index_files == []

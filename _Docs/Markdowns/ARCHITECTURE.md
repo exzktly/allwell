@@ -6969,6 +6969,25 @@ a judgement it has not made.
 
 Both derive wells through the one `czi_read.wells_from_scenes`, so the plate a
 peek paints and the plate a run converts cannot be derived two different ways.
+
+**A file holding no image tiles is dropped from a set, not refused.** ZEN's
+Split Scenes export writes a **master** file beside the per-scene ones,
+describing the plate and holding no tiles of its own. That is what it is for,
+not a fault in the export, and refusing it took the whole folder with it.
+`read_czi_set` drops such members and records them in `CziSet.index_files`,
+which the readout names — a converter that passes over a file the user pointed
+it at, silently, is indistinguishable from one that failed to notice it.
+
+Three things make it a drop rather than a one-line skip. The master sorts
+first (`Exp.czi` before `Exp_A01.czi`), so it was also the file every other
+member was compared against and the file the acquisition stamps were asked of:
+dropping it after `first` is bound still fails, on "0 tiles against 1", and
+dropping it without re-reading the surviving first file leaves the plate with
+no timing and its timepoints silently named by position. And the drop applies
+only to a member of a *set* — one file picked on its own and holding nothing
+is the user having picked the wrong file, which is the whole value of the
+check, so that refusal stays.
+
 A peek is allowed to be *incomplete* and not to be *wrong*: a file carrying no
 readable metadata contributes nothing, because the filename may only stand in
 for a scene name on a file holding exactly one scene and a peek cannot count
@@ -7434,6 +7453,28 @@ questions stay on two surfaces. All three lock the selection while a run is in
 flight; OME's is disabled outright rather than made passive, because a passive
 plate keeps its own "All 96" and "Invert" buttons live — which the page's
 existing lock guard caught.
+
+**Picking needs four settings, not one.** `PlateProgress` builds its plate as
+a status map — `apply_plate_geometry(role="status")` makes it report-only and
+the constructor turns off drag-select and the row/column headers — because for
+most of its life that is what it is. Turning the selection *mode* on over the
+top of that left exactly one way to pick: clicking wells one at a time, on a
+plate whose selection is a thin rim inside a box captioned "Convert Progress".
+Taking all but three wells of ninety-six was ninety-three clicks, and nothing
+said the plate could be clicked at all. `ConverterDashboard.set_selection_enabled`
+therefore also restores the corner select-all and the pointing-hand cursor, the
+drag sweep and the row and column headers, and a run takes all four back.
+
+It carries its own **Convert all** and **Invert** buttons in a line under the
+plate rather than showing the plate's built-in action row, which is tied to
+`role="picker"` and reserves height for itself — a row appearing when a run
+ended would resize the plate under the cursor. That line also states the count
+in words: `Converting all 96 well(s) — click to convert only some`, or
+`Converting 3 of 96 well(s); 93 ignored`. A plate with nothing picked and one
+with everything picked convert the same wells and look completely different,
+and a rim on three of ninety-six cells is visible only once you know to look
+for it. **Invert** is there because "everything except these" is the one thing
+an include-only model cannot say in fewer clicks than there are wells.
 
 ### 6.2d Saying the scan is still running
 

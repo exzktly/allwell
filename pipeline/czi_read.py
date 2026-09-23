@@ -36,6 +36,17 @@ Depends on the stdlib plus numpy only, with :mod:`imagecodecs` imported lazily
 and *only* for a file whose tiles are compressed — so the module stays inside
 the pipeline self-sufficiency contract (ARCHITECTURE §6.2) and a test suite
 without imagecodecs can still exercise every uncompressed path.
+
+**numpy is imported lazily too, inside the two functions that decode pixels.**
+Reading a header needs no arrays, and a header read is what the scan pool
+sends to its worker processes: with numpy at module scope every one of eight
+spawned children loaded it, and on Windows the eighth ran the machine out of
+paging file inside ``_umath_linalg``'s DLL load. Annotations here are strings
+(``from __future__ import annotations``), so ``np.ndarray`` in a signature
+never evaluates; only ``_decode_tile`` and ``read_projection`` touch numpy at
+run time, and the second and later ``import numpy`` calls are a dictionary
+lookup. ``tests/test_a_scan_worker_imports_no_pixels.py`` is what keeps it
+this way.
 """
 
 from __future__ import annotations
@@ -50,11 +61,12 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 
-import numpy as np
+if TYPE_CHECKING:                       # annotations only — see the
+    import numpy as np                  # module docstring on why
 
-from pipeline.explode_common import TimeScan  # noqa: F401 (re-export)
+from pipeline.timepoints import TimeScan  # noqa: F401 (re-export)
 from util.filename_token import safe_token
 from util.well_token import canonical_well_label
 
@@ -1589,6 +1601,8 @@ def _zstd1_payload(data: bytes) -> tuple[bytes, bool]:
 def _decode_tile(data: bytes, block: SubBlock, *, width: int, height: int,
                  dtype: str) -> np.ndarray:
     """The pixels of one subblock, as a ``(height, width)`` array of *dtype*."""
+    import numpy as np
+
     compression = block.compression
     if compression == 0:
         raw = data
@@ -1788,5 +1802,7 @@ class CziReader:
         planes = [self.read_plane(scene, tile, t, c, z) for z in depths]
         if len(planes) == 1:
             return planes[0]
+        import numpy as np
+
         stack = np.stack(planes, axis=0)
         return stack.max(axis=0)

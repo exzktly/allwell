@@ -314,8 +314,12 @@ allwell/
 │   ├── explode_common.py       ← what all three exploders do identically: the
 │   │                              member-name set, the resume check over it, the
 │   │                              worker split and count, the in-memory TIFF encode,
-│   │                              the cancellation, and the elapsed-hour timepoint
-│   │                              naming with its stride
+│   │                              the cancellation, and the timepoint stride
+│   ├── timepoints.py           ← naming a timelapse's frames from the times they
+│   │                              were recorded, and every bound on how far a name
+│   │                              may sit from its reading. Its own module, stdlib
+│   │                              only, because it is all a header scan needs of
+│   │                              `explode_common` — which imports numpy
 │   ├── fov_checkpoint.py       ← one well's staging dir, whose run owns it, and
 │   │                              the sweep that drops a superseded run's
 │   ├── incremental_keys.py     ← what an incremental run considers already done
@@ -6161,8 +6165,9 @@ seconds leaves every timepoint resolved, and a log line asserting data loss that
 did not occur sends a user to re-export a plate for nothing.
 
 **The rendering, and the decision to use the readings at all, are shared with
-the CZI converter.** `explode_common.hours_token` and
-`explode_common.elapsed_hour_tokens` are the single definitions; `ome_explode`
+the CZI converter.** `timepoints.hours_token` and
+`timepoints.elapsed_hour_tokens` are the single definitions (re-exported by
+`explode_common`, which is where both exploders still take them from); `ome_explode`
 keeps only `_source_reasons`, which builds the two reasons peculiar to OME-XML
 (an unreadable `DeltaTUnit`, a `TheT` outside the file's own T axis). Two
 definitions of "render an elapsed hour into a filename token" would answer
@@ -6185,7 +6190,7 @@ of frames 2 to 4. A number the app cannot read back is worse than a wrong one,
 which at least orders correctly.
 
 **A measured series is snapped onto its own interval.**
-`explode_common.regularise_hours` runs before the rendering, for both
+`timepoints.regularise_hours` runs before the rendering, for both
 converters. An acquisition that ran every four hours does not produce readings
 exactly four hours apart — the stage takes as long as it takes — so a real
 series reads 0, 4.00139, 8.00278 and would render as `0h`, `4.00139h`,
@@ -6987,7 +6992,7 @@ Three properties of that sampling, each measured rather than assumed:
   the stage visited first.
 
 Rendering and the decision to use the readings at all are
-`explode_common.hours_token` and `explode_common.elapsed_hour_tokens`, **shared
+`timepoints.hours_token` and `timepoints.elapsed_hour_tokens`, **shared
 with the OME-TIFF converter**, so one acquisition exported both ways cannot end
 up with two spellings of the same elapsed hour — a plate concatenated from the
 two would otherwise hold `4h` and `4.0h` as separate timepoints. The decision
@@ -7172,6 +7177,25 @@ load-bearing:
   have. macOS and Windows spawn regardless, so forcing it also means what is
   tested is what ships. `all_well_launcher` already dispatches a spawned child
   before any heavy import, which is what makes this work in the frozen bundle.
+- **Whatever the worker's module imports is paid once per worker.** The child
+  imports `pipeline.czi_set` from scratch, so a module-scope import anywhere in
+  that graph is multiplied by the pool's width before a byte of the plate is
+  read. It was multiplying numpy and tifffile, because `czi_set` took one name
+  off `explode_common` and `czi_read` imported numpy for the half of itself
+  that decodes pixels — 40 MB of peak RSS, 281 modules and 510 ms per child in
+  a fresh interpreter, against 19 MB, 160 modules and 71 ms now. On Windows
+  that was not merely wasteful: eight children loading numpy at once exhausted
+  the machine's paging file and every one of them died inside
+  `_umath_linalg`'s DLL load, so the pool broke, the scan fell back to threads,
+  and the terminal filled with tracebacks. The timepoint naming therefore lives
+  in `pipeline/timepoints.py`, which imports nothing outside the standard
+  library, and `czi_read` imports numpy inside the two functions that decode
+  pixels — its annotations are strings, so a `TYPE_CHECKING` import is enough
+  for the signatures. `tests/test_a_scan_worker_imports_no_pixels.py` reads the
+  worker roster out of the `_per_file` call sites and imports each worker's
+  module in a **fresh interpreter**, because inside pytest numpy is already
+  loaded and the check would pass for reasons that have nothing to do with the
+  module under test.
 
 Below `scan_pool.PROCESS_THRESHOLD` files the scan runs on threads, because
 starting an interpreter per worker is not worth paying to save a tenth of a

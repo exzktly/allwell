@@ -39,7 +39,7 @@ from typing import Any, Callable, TypeVar
 from util.aw_safe import swallowed
 from util.dir_scan import files_in
 from pipeline import scan_pool
-from pipeline.explode_common import elapsed_hour_tokens
+from pipeline.timepoints import elapsed_hour_tokens
 from pipeline.czi_read import (
     CziLayout,
     CziReadError,

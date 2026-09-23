@@ -2089,9 +2089,12 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/nd2_read.py",
         "pipeline/nd2_explode.py",
         # What the exploders share: the member-name rule, the resume check,
-        # the worker split, the timepoint plan, the elapsed-hour rendering and
-        # the in-memory TIFF encode.
+        # the worker split, the timepoint plan and the in-memory TIFF encode.
         "pipeline/explode_common.py",
+        # The elapsed-hour naming, split out of ``explode_common`` so that a
+        # header scan need not import numpy — see
+        # ``tests/test_a_scan_worker_imports_no_pixels.py``.
+        "pipeline/timepoints.py",
         # Packed OME-TIFF de-interleave; client-side, listed for manifest
         # completeness (mirrors every ``pipeline/`` file).
         "pipeline/ome_explode.py",

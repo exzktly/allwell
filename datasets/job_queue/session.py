@@ -49,7 +49,8 @@ class QueueSession:
         self._notify = notify
         self._add_job = add_job
         self._collectors: dict[str, Callable[[], dict]] = {}
-        self._on_session: Callable[[str, str], None] | None = None
+        self._validators: dict[str, Callable[[], bool]] = {}
+        self._on_session: Callable[[str, str], bool | None] | None = None
         self._on_session_end: Callable[[str], None] | None = None
         # (kind, job_id or None) — None means "a new job of this kind".
         self._session: tuple[str, str | None] | None = None
@@ -60,14 +61,32 @@ class QueueSession:
         ``collect_spec``, which is also what its "+ Queue" button uses."""
         self._collectors[kind] = collect
 
+    def register_validator(self, kind: str, validate: Callable[[], bool]) -> None:
+        """How this session asks a tool's page whether it is fit to queue.
+
+        Optional, and only Analyze has one. Its "+ Queue" button refuses a
+        form that its Run button would refuse — no input folder, an
+        unparseable schema, an out-of-range number — and the banner's Save is
+        the same act by another route. Without the check here, Save collected
+        whatever the form held and queued it, and the job failed at dequeue
+        time with nobody watching. The validator reports its own reason (Analyze
+        names the offending field); a ``False`` keeps the session open so the
+        user can correct the page rather than losing it.
+        """
+        self._validators[kind] = validate
+
     def set_hooks(
         self,
-        on_session: Callable[[str, str], None],
+        on_session: Callable[[str, str], bool | None],
         on_session_end: Callable[[str], None],
     ) -> None:
         """``DatasetsTab`` supplies "show that tool's page with this banner on
         it" and "take the banner off again"; this class supplies everything
-        about what the session means."""
+        about what the session means.
+
+        *on_session* may answer ``False`` to say the page could not be put in
+        front of the user; the session is then dropped and the refusal
+        reported, rather than left open behind a banner nobody can see."""
         self._on_session = on_session
         self._on_session_end = on_session_end
 
@@ -102,8 +121,7 @@ class QueueSession:
                         "but it won't run again until you choose Retry.")
         for problem in problems:
             self._notify(problem, "warn")
-        self._start(job.kind, job_id, message)
-        return True
+        return self._start(job.kind, job_id, message)
 
     def begin_new_job(self, kind: str) -> bool:
         """Open *kind*'s page to set up a job that does not exist yet."""
@@ -115,10 +133,9 @@ class QueueSession:
             self._notify(f"{KIND_LABEL.get(kind, kind)} isn't available in this build.",
                          "warn")
             return False
-        self._start(kind, None,
-                    f"Setting up a new {KIND_LABEL.get(kind, kind)} job. "
-                    "Fill the page in, then add it to the queue.")
-        return True
+        return self._start(kind, None,
+                           f"Setting up a new {KIND_LABEL.get(kind, kind)} job. "
+                           "Set every option on the page, then add it to the queue.")
 
     def _round_trip_losses(self, job: JobSpec) -> list[str]:
         """Which of the job's settings the page could not take on.
@@ -154,15 +171,24 @@ class QueueSession:
                 f"({', '.join(sorted(lost))}) — saving would clear "
                 "them. Check the input path first."]
 
-    def _start(self, kind: str, job_id: str | None, message: str) -> None:
+    def _start(self, kind: str, job_id: str | None, message: str) -> bool:
         if self._session is not None and self._session != (kind, job_id):
             # Silently overwriting it discarded whatever the user had typed on
             # the other page, with the banner disappearing from a page they
             # were no longer looking at.
             self._notify("Your previous edit was closed without saving.", "warn")
         self._session = (kind, job_id)
-        if self._on_session is not None:
-            self._on_session(kind, message)
+        if self._on_session is None:
+            return True
+        if self._on_session(kind, message) is False:
+            # Analyze lives in another pane, reachable only through the shell.
+            # A session whose page never appeared is a click that did nothing,
+            # which is exactly how "+ Add job → Analyze" used to behave.
+            self._session = None
+            self._notify(f"Couldn't open the {KIND_LABEL.get(kind, kind)} page "
+                         "from here — switch to it yourself.", "warn")
+            return False
+        return True
 
     # ── closing ──────────────────────────────────────────────────────────
     def save(self) -> bool:
@@ -176,6 +202,9 @@ class QueueSession:
                          "queue in this build — nothing was changed.", "warn")
             self.end()
             return False
+        validate = self._validators.get(kind)
+        if validate is not None and not validate():
+            return False        # the page said why; the session stays open
         spec = collect()
         if job_id is None:
             self._add_job(kind, spec)

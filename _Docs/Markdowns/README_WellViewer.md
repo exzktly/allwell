@@ -6024,10 +6024,14 @@ instead of babysitting each one.
 
 **Adding a job** — three routes, all equivalent:
 
-- **+ Add job** on the Job Queue page lists all seven tools. Pick one and
+- **+ Add job** on the Job Queue page lists Analyze and every Datasets tool. Pick one and
   All-Well takes you to that tool's page with a strip across the top saying
   you are setting up a queued job; fill the page in as usual and press **Add
-  to queue**.
+  to queue**. Picking **Analyze** switches to the Analyze pane, where every
+  option on the form is yours to set; **Add to queue** checks the form the
+  same way **Run Pipeline** does (a missing input folder or a bad value is
+  named and nothing is queued), then brings you back to the Job Queue.
+  **Cancel** brings you back without queueing anything.
 - **+ Queue** beside any Datasets tool's own run button, which queues
   whatever that page currently holds.
 - **+ Queue** beside Analyze's **Run Pipeline** button, which captures the

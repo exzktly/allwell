@@ -263,7 +263,15 @@ def test_a_new_job_session_adds_rather_than_updates(qapp, tmp_path):
 
 def test_a_session_is_abandoned_when_its_job_starts_running(qapp, tmp_path):
     """Saving it then would write over a spec already handed to a runner."""
-    tab, _ = _make_tab(tmp_path)
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+    fake_analyze = _FakeAnalyzeController()
+    # An Analyze session needs a form to put its banner on and a shell to
+    # switch panes; without them it is refused rather than opened unseen.
+    form_host = QWidget()
+    fake_analyze._form_layout = QVBoxLayout(form_host)
+    tab = DatasetsTab(analyze_controller=fake_analyze, queue_state_dir=tmp_path,
+                      on_reveal_analyze=lambda: True)
     try:
         jq = tab._controllers["job_queue"]
         jq.add_job("analyze", {"opts": {"raw": "/data/plate7"}})

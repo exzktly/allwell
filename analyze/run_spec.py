@@ -174,9 +174,20 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         sink = getattr(self, "_queue_sink", None)
         if sink is None:
             return
-        if self._validate_run_request() is None:
+        if not self.validate_for_queue():
             return              # already reported in a dialog naming the field
         sink(self.collect_spec())
+
+    def validate_for_queue(self) -> bool:
+        """Whether the form is a run the queue may accept, reporting why not.
+
+        The one gate for every route into the queue: this page's "+ Queue",
+        and the Job Queue's edit-session banner (``Add to queue`` / ``Save
+        changes``), which the Datasets pane reaches through the injected
+        collector registry. Two routes with two checks would disagree about
+        what a runnable form is.
+        """
+        return self._validate_run_request() is not None
 
     def collect_spec(self) -> dict:
         """The current form's run, as a job queue's JSON spec."""

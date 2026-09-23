@@ -51,6 +51,7 @@ from pipeline.explode_common import (
     resolve_positions,
     shortfall_summary,
     stride_note,
+    uneven_fields_note,
     subset_note,
     timepoint_plan,
     well_is_complete,
@@ -185,27 +186,36 @@ def resolve_well_map(
         raise ValueError(f"{name} holds no image tiles to convert.")
 
     if well_source == "file":
-        wells = source.wells_from_files()
-        if not wells:
+        groups = source.scene_well_groups()
+        if not groups:
             raise ValueError(_why_the_file_cannot_name_the_wells(source, name))
-        fovs = source.fovs_per_scene
-        if fovs <= 0:
+        tiles = source.fovs_per_scene
+        if tiles <= 0:
             raise ValueError(
                 f"{name}'s scenes hold different numbers of tiles, so there is "
                 f"no single fields-of-view-per-well for the plate."
             )
+        # Every scene in the set holds exactly ``tiles`` tiles — ragged scenes
+        # are refused inside a file by ``CziLayout`` and across a set by
+        # ``_MUST_AGREE`` — so scene *i* owns ``positions[i * tiles:]``, and a
+        # well's fields are its scenes' tiles laid end to end in scene order.
+        wells = [well for well, _scenes in groups]
+        grouped: list[list[ScenePosition]] = [
+            [position
+             for scene in scenes
+             for position in positions[scene * tiles:(scene + 1) * tiles]]
+            for _well, scenes in groups
+        ]
+        # The nominal count is the largest, so that a plate where one well was
+        # imaged at fewer positions is described by its plate rather than by
+        # its smallest well. Every well keeps its own count in ``positions``.
+        fovs = max(len(block) for block in grouped)
         if fovs_per_well is not None and fovs_per_well != fovs:
             raise ValueError(
-                f"{name} holds {fovs} tile(s) per scene, but FOVs per well is "
+                f"{name} holds {fovs} field(s) per well, but FOVs per well is "
                 f"set to {fovs_per_well}. Clear it to use the file's own "
                 f"count, or switch the well source to the plate grid."
             )
-        # Grouped by scene, in the order the scenes appear across the set —
-        # the same order ``wells`` is in, because both come from walking
-        # ``source.positions``.
-        grouped: list[list[ScenePosition]] = []
-        for index in range(0, len(positions), fovs):
-            grouped.append(positions[index:index + fovs])
         return WellMap(wells=wells, positions=grouped, fovs_per_well=fovs,
                        from_file=True)
 
@@ -227,22 +237,18 @@ def resolve_well_map(
 
 
 def _why_the_file_cannot_name_the_wells(source: CziSet, name: str) -> str:
-    """Which of the three conditions ``wells_from_files`` refused on, and how.
+    """Which of the two conditions ``scene_well_groups`` refused on, and how.
 
-    It refuses unless the scenes map **one to one** onto wells: no scene
-    unnamed, and no well claimed twice. One sentence covered all three and
-    quoted the count belonging to the *unnamed* check whatever had actually
-    failed, so a set whose scenes all resolve but collide read as a flat
-    contradiction — "these do not name a distinct well for every one of their
-    660 scenes, and 660 of them resolve to a well". That is what a real
-    660-scene export produced, and there is nothing in it to act on.
+    It refuses unless **every** scene names a well: either none of them does,
+    or some do and some do not. One sentence covered both, and it quoted the
+    count of scenes that *did* resolve whatever had actually failed, so the
+    message a user got was built out of the check that passed.
 
-    Each cause now says what it is. The collision case — the only one whose
-    numbers look fine — names wells that repeat and counts the distinct ones,
-    because on a plate of ninety-six "660 scenes naming 96 distinct wells" is
-    the whole diagnosis: the acquisition visited each well several times, and
-    this converter reads one scene as one well with the tiles inside it as
-    that well's fields of view.
+    Scenes naming the *same* well is not one of the causes and never was a
+    fault — several scenes in one well are that well's fields of view, which
+    is what ``CziSet.scene_well_groups`` reads them as. The sentence for it
+    said a well "would be written from more than one scene and only the last
+    would survive", which described a converter that no longer exists.
 
     Every sentence names the scenes rather than the source, so that the verb
     does not have to agree with a subject that is one file here and six
@@ -259,29 +265,14 @@ def _why_the_file_cannot_name_the_wells(source: CziSet, name: str) -> str:
                 f"{where}. {advice}")
 
     unnamed = [index for index, label in enumerate(labels) if not label]
-    if unnamed:
-        shown = ", ".join(str(index) for index in unnamed[:3])
-        more = "" if len(unnamed) <= 3 else f", and {len(unnamed) - 3} more"
-        return (f"{len(unnamed)} of the {len(labels)} scene(s) in {where} "
-                f"name no well (scene {shown}{more}); the other "
-                f"{len(labels) - len(unnamed)} do. A mapping where some "
-                f"scenes land on their real wells and the rest land wherever "
-                f"the grid put them is wrong exactly where it would be "
-                f"spot-checked. {advice}")
-
-    seen: dict[str, int] = {}
-    for label in labels:
-        seen[label] = seen.get(label, 0) + 1
-    repeats = sorted(((count, well) for well, count in seen.items()
-                      if count > 1), reverse=True)
-    shown = ", ".join(f"{well} ({count} scenes)" for count, well in repeats[:3])
-    return (f"The {len(labels)} scene(s) in {where} name only {len(seen)} "
-            f"distinct well(s) between them — {shown} — so a well would be "
-            f"written from more than one scene and only the last would "
-            f"survive. This converter reads one scene as one well, with the "
-            f"tiles inside it as that well's fields of view; an acquisition "
-            f"that visits a well several times as separate scenes does not "
-            f"fit that. {advice}")
+    shown = ", ".join(str(index) for index in unnamed[:3])
+    more = "" if len(unnamed) <= 3 else f", and {len(unnamed) - 3} more"
+    return (f"{len(unnamed)} of the {len(labels)} scene(s) in {where} "
+            f"name no well (scene {shown}{more}); the other "
+            f"{len(labels) - len(unnamed)} do. A mapping where some "
+            f"scenes land on their real wells and the rest land wherever "
+            f"the grid put them is wrong exactly where it would be "
+            f"spot-checked. {advice}")
 
 
 def explode_czi(
@@ -388,6 +379,11 @@ def explode_czi(
     tp_tokens = [token for _index, token in tp_plan]
     n_kept_t = len(tp_plan)
     fovs = well_map.fovs_per_well
+    # Per well, because a CZI plate names one scene per imaged position and an
+    # acquisition need not visit every well the same number of times. ``fovs``
+    # is the plate's nominal count — the largest — and everything that counts
+    # planes counts them from here instead.
+    field_counts = [len(block) for block in well_map.positions]
     n_wells = well_map.n_wells
     selected = wells_to_convert(well_map.wells, well_subset)
     if czi_set.timepoint_note:
@@ -398,7 +394,9 @@ def explode_czi(
     # denominated by the whole plate reports a complete conversion as a
     # fraction of one.
     n_selected = len(selected)
-    total = n_selected * fovs * n_kept_t * layout.size_c
+    planes_in = {index: field_counts[index] * n_kept_t * layout.size_c
+                 for index in selected}
+    total = sum(planes_in.values())
     n_workers = pick_workers(workers, n_selected)
     source = "the file's scene names" if well_map.from_file else "the plate grid"
     held_in = (f"{czi_set.n_files} file(s)" if czi_set.n_files > 1
@@ -412,6 +410,9 @@ def explode_czi(
         f"{f', {layout.size_z} Z-plane(s) max-projected' if layout.size_z > 1 else ''}"
         f" -- wells from {source}, {n_workers} worker(s).\n"
     )
+    uneven = uneven_fields_note(well_map.wells, field_counts, fovs)
+    if uneven:
+        _log(f"[czi] {uneven}\n")
 
     # Wells a previous attempt already finished. Each archive is published
     # atomically, so one that exists holding every member these settings call
@@ -420,12 +421,12 @@ def explode_czi(
     # conversion's interrupted output.
     resumable: set[str] = set()
     if resume:
-        chosen = {well_map.wells[i] for i in selected}
         resumable = {
-            label for label in well_map.wells
-            if label in chosen and well_is_complete(
-                out_in_dir / f"{label}.zip",
-                expected_members(exp_tok, layout.channel_names, label, fovs,
+            well_map.wells[index] for index in selected
+            if well_is_complete(
+                out_in_dir / f"{well_map.wells[index]}.zip",
+                expected_members(exp_tok, layout.channel_names,
+                                 well_map.wells[index], field_counts[index],
                                  tp_tokens))
         }
         if resumable:
@@ -434,9 +435,9 @@ def explode_czi(
 
     lock = threading.Lock()
     done = 0
-    planes_per_well = max(1, fovs * n_kept_t * layout.size_c)
 
-    def _bump(well: "str | None" = None, well_done: int = 0) -> None:
+    def _bump(well: "str | None" = None, well_done: int = 0,
+              well_total: int = 0) -> None:
         nonlocal done
         with lock:
             done += 1
@@ -447,7 +448,7 @@ def explode_czi(
         # harmless, and taking the lock per plane would serialise the very
         # parallelism this reports on.
         if well_progress_fn and well is not None:
-            well_progress_fn(well, well_done, planes_per_well)
+            well_progress_fn(well, well_done, well_total)
 
     if progress_fn:
         progress_fn(0, total)
@@ -468,6 +469,7 @@ def explode_czi(
                 if _abort():
                     raise CziExplodeCancelled()
                 label = well_map.wells[index]
+                planes_per_well = max(1, planes_in[index])
                 if label in resumable:
                     # Reported full rather than silently absent: the plate map
                     # this drives would otherwise show a finished well as one
@@ -509,7 +511,8 @@ def explode_czi(
                                         f"{layout.channel_names[channel]} — "
                                         f"skipped")
                                     well_written += 1
-                                    _bump(label, well_written)
+                                    _bump(label, well_written,
+                                          planes_per_well)
                                     continue
                                 read_s += time.perf_counter() - started
                                 started = time.perf_counter()
@@ -520,7 +523,7 @@ def explode_czi(
                                 write_s += time.perf_counter() - started
                                 written += 1
                                 well_written += 1
-                                _bump(label, well_written)
+                                _bump(label, well_written, planes_per_well)
                 converted.append(label)
         return written, converted, read_s, write_s, resumed, missing
 

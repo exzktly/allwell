@@ -104,8 +104,11 @@ class CziSet:
     #: tile. File-major because a split-scene export visits one well per file.
     positions: list[ScenePosition] = field(default_factory=list)
     #: The well each position belongs to, where the files say — one entry per
-    #: *scene*, in the same order scenes appear in :attr:`positions`. Empty
-    #: when the set does not name a distinct well for every scene.
+    #: *scene*, in the same order scenes appear in :attr:`positions`. Repeats
+    #: are ordinary: several scenes naming one well are that well's fields of
+    #: view, which is what :meth:`scene_well_groups` reads them as. A scene the
+    #: files name nothing for carries ``""``, and one of those anywhere sends
+    #: the whole mapping to the grid.
     scene_wells: list[str] = field(default_factory=list)
     #: A problem that makes the set unconvertible, or ``""``.
     problem: str = ""
@@ -165,19 +168,45 @@ class CziSet:
         counts = {lay.fovs_per_scene for lay in self.layouts}
         return 0 if len(counts) != 1 or 0 in counts else counts.pop()
 
-    def wells_from_files(self) -> list[str]:
-        """One well per scene, in position order — or ``[]`` if unusable.
+    def scene_well_groups(self) -> "list[tuple[str, list[int]]]":
+        """The distinct wells the files name, each with its own scene indices.
 
-        All or nothing, and distinct, for the same reason a single file's
+        In first-appearance order, which for a plate scan is acquisition order,
+        and inside each well the scene indices are in that order too — so the
+        Nth scene of a well becomes its FOV N.
+
+        **Several scenes may name one well, and that is the ordinary case for a
+        multi-position plate scan.** ZEN writes one scene per imaged position
+        and names each after the well it sits in, so a 96-well plate imaged at
+        seven positions per well is 660-odd scenes naming ninety-six wells.
+        Those scenes are the well's fields of view, which is what this grouping
+        makes them. A repeat is not a revisit: CZI carries time on its own axis,
+        so a well imaged again later in a run is another ``T``, never another
+        scene. (``pipeline.nd2_explode`` groups over *runs* of equal names
+        instead, because ND2 has no such guarantee and a returning stage really
+        can mean a second visit.)
+
+        **All or nothing**, for the same reason a single file's
         :meth:`~pipeline.czi_read.CziLayout.wells_from_metadata` is: a mapping
         where some scenes land on their real wells and the rest land wherever
         the grid put them is right exactly where a user is most likely to
-        spot-check it.
+        spot-check it. So an unnamed scene anywhere yields ``[]`` and the whole
+        mapping falls to the grid.
         """
         labels = list(self.scene_wells)
-        if not labels or not all(labels) or len(set(labels)) != len(labels):
+        if not labels or not all(labels):
             return []
-        return labels
+        groups: dict[str, list[int]] = {}
+        for index, label in enumerate(labels):
+            groups.setdefault(label, []).append(index)
+        return list(groups.items())
+
+    def wells_from_files(self) -> list[str]:
+        """The distinct wells the files name, in acquisition order, or ``[]``.
+
+        One entry per *well*, not per scene — see :meth:`scene_well_groups`.
+        """
+        return [well for well, _scenes in self.scene_well_groups()]
 
     def describe(self) -> str:
         """A one-line summary of the set, for the page readout and the log."""
@@ -189,9 +218,16 @@ class CziSet:
             head = f"{self.n_scenes} scene(s)"
         fovs = self.fovs_per_scene
         fov_text = f"{fovs} tile(s) each" if fovs else "a varying number of tiles"
-        named = len(self.wells_from_files())
-        source = (f", wells named by the file(s) ({named})" if named
-                  else ", wells from the grid you set")
+        named = self.wells_from_files()
+        if not named:
+            source = ", wells from the grid you set"
+        elif len(named) < self.n_scenes:
+            # Both numbers, because "96 wells" over a 660-scene export reads
+            # exactly like a plate that only ever held ninety-six scenes.
+            source = (f", wells named by the file(s) ({len(named)}, holding "
+                      f"the {self.n_scenes} scene(s) between them)")
+        else:
+            source = f", wells named by the file(s) ({len(named)})"
         channels = ", ".join(layout.channel_names) if layout.channel_names else "?"
         z_note = (f", {layout.size_z} Z-plane(s) max-projected"
                   if layout.size_z > 1 else "")

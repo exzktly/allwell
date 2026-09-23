@@ -121,7 +121,7 @@ def test_a_fovs_per_well_that_contradicts_the_file_is_refused(tmp_path):
     """Silently preferring one of the two would make the *other* one a setting
     that is displayed, accepted and ignored."""
     path = _named_plate(tmp_path, wells=2, fovs=2, timepoints=1, channels=1)
-    with pytest.raises(ValueError, match="holds 2 tile"):
+    with pytest.raises(ValueError, match="holds 2 field"):
         resolve_well_map(read_czi_set(path), fovs_per_well=3,
                          name="Plate7.czi")
 

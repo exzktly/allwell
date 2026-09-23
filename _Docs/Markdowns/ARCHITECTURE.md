@@ -6777,26 +6777,45 @@ and the page's plate shows it for the user to confirm rather than to supply.
 `well_from_scene_name` anchors its embedded-well pattern on a separator, so the
 `C1` inside `SPECIMENC12` is not read as a well.
 
-`CziLayout.wells_from_metadata` is **all or nothing, and distinct**. A partial
-mapping is the worst of the three outcomes available: the named scenes would land
-on their real wells and the rest wherever the grid put them, producing a plate
-that is right in the places a user is most likely to spot-check. Two scenes
-claiming one well is the same failure by a different route — the second's images
-would overwrite the first's archive while the run reported writing both. Either
-condition yields `[]`, and `resolve_well_map` then refuses with a message
-pointing at the grid, which is the other `well_source`. The two are never mixed.
+`CziLayout.wells_from_metadata` is **all or nothing**. A partial mapping is the
+worst of the outcomes available: the named scenes would land on their real wells
+and the rest wherever the grid put them, producing a plate that is right in the
+places a user is most likely to spot-check. So an unnamed scene anywhere yields
+`[]`, and `resolve_well_map` then refuses with a message pointing at the grid,
+which is the other `well_source`. The two are never mixed.
 
-Three conditions produce that empty list — no scene names a well, some scenes do
-and some do not, and every scene names one but several name the same one — and
-`czi_explode._why_the_file_cannot_name_the_wells` says which. They are worth
-distinguishing because only one of them looks like a malformed file. A set whose
-scenes all resolve but collide is a perfectly sound acquisition that visited each
-well several times, so its sentence counts the distinct wells, names the ones
-that repeat and how often, and says what the converter's model is: one scene is
-one well, with the tiles inside that scene as the well's fields of view. The
-unnamed cases quote how many scenes name nothing and which, capped at three with
-the remainder counted. All three end with the same advice, since the grid is the
-only other way to get a mapping.
+It is **not** distinct. Several scenes naming one well are that well's fields of
+view, and that is the ordinary shape of a multi-position plate scan: ZEN writes
+one scene per imaged position and names each after the well it sits in, so a
+96-well plate imaged at seven positions per well is six hundred and sixty scenes
+naming ninety-six wells. `CziSet.scene_well_groups` returns the distinct wells in
+first-appearance order, each with the scene indices that name it, and
+`resolve_well_map`'s file arm lays a well's scenes end to end — scene-major, each
+contributing its own tiles — as that well's fields. A repeat is never a revisit:
+CZI carries time on its own axis, so a well imaged again later in a run is
+another `T`. (`Nd2Layout.wells_from_positions` groups over *runs* of equal names
+instead, because ND2 offers no such guarantee; §6.2b says why.)
+
+Nothing obliges an acquisition to visit every well the same number of times, so
+`WellMap.positions` carries each well's own fields and `fovs_per_well` is the
+largest of them — a plate described by its smallest well would be a worse lie
+than one described by its largest. `explode_common.uneven_fields_note` is what
+keeps the larger number honest: it names the wells that hold fewer and how many
+they hold, in the page's readout (`ConversionPlan.summary`) and in the run log,
+because "96 well(s) × 7 FOV(s)" over a plate where four wells hold five is
+indistinguishable from one where all ninety-six hold seven. Everything that
+counts planes — the progress denominator, the per-well progress total, and the
+member set `expected_members` builds for a resume check — counts from the well's
+own field count rather than from that nominal.
+
+Two conditions still produce the empty list — no scene names a well, and some
+scenes do while others do not — and
+`czi_explode._why_the_file_cannot_name_the_wells` says which. One sentence used
+to cover both, and it quoted the count of scenes that *did* resolve whatever had
+actually failed, so the message was assembled out of the check that passed. Each
+now quotes its own numbers: how many scenes name nothing and which, capped at
+three with the remainder counted. Both end with the same advice, since the grid
+is the only other way to get a mapping.
 
 **ZEN saves a plate two ways, and `pipeline/czi_set.py` is what makes them one
 input.** The ordinary raw save is a single file holding every scene. The *Split
@@ -7388,17 +7407,19 @@ and the first two carry a mapping the file genuinely holds.
 them, and saying what a well label can be here), a well the acquisition
 returns to later, or uneven field counts.
 
-`Nd2Layout.wells_from_positions` is **all or nothing, and distinct**, for
-exactly the reasons §6.2a gives — a partial mapping lands the named positions
-on their real wells and the rest wherever the grid put them, which is right in
-the places a user is most likely to spot-check. It differs from the CZI version
-in one way that is a property of the format rather than a choice: it groups
-over **runs** of equal names in acquisition order rather than over the set of
-names. A plate that returns to a well later in the run is two visits to one
-well and not eight fields of it, and the difference decides whether the second
-visit's images overwrite the first's. Repeated wells and uneven field counts
-both yield `([], 0)`, and `resolve_well_map` then refuses with a message
-pointing at the grid.
+`Nd2Layout.wells_from_positions` is **all or nothing**, for exactly the reason
+§6.2a gives — a partial mapping lands the named positions on their real wells
+and the rest wherever the grid put them, which is right in the places a user is
+most likely to spot-check. It is also **distinct**, and that is where it parts
+company with the CZI side rather than by choice. It groups over **runs** of
+equal names in acquisition order rather than over the set of names, because a
+plate that returns to a well later in an ND2 run is two visits to one well and
+not eight fields of it, and the difference decides whether the second visit's
+images overwrite the first's. A CZI has no such ambiguity — time is its own
+axis there, so a repeated scene name can only be another position — which is
+why `CziSet.scene_well_groups` reads repeats as fields and this does not.
+Repeated wells and uneven field counts both yield `([], 0)`, and
+`resolve_well_map` then refuses with a message pointing at the grid.
 
 **What the converter refuses.** `Nd2Layout.validation_report` runs before a
 single archive is written, ordered by how far upstream the fault is: a file

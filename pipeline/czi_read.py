@@ -1167,19 +1167,26 @@ class CziLayout:
         return [f"t{t}" for t in range(self.size_t)]
 
     def wells_from_metadata(self) -> list[str]:
-        """One well per scene, in scene order — or ``[]`` if they cannot be used.
+        """The distinct wells this file's scenes name, in scene order, or ``[]``.
 
-        All or nothing, and distinct. A partial mapping is the worst of the
-        three outcomes: the named scenes would land on their real wells and the
-        rest on wherever the grid put them, producing a plate that is right in
-        the places a user is most likely to spot-check. Two scenes claiming one
-        well is the same failure by a different route — the second scene's
-        images would overwrite the first's archive.
+        **All or nothing**: a partial mapping is the worst of the outcomes
+        available, because the named scenes would land on their real wells and
+        the rest wherever the grid put them, producing a plate that is right in
+        the places a user is most likely to spot-check. So one unnamed scene
+        yields ``[]`` and the whole mapping falls to the grid.
+
+        **Not distinct.** Several scenes naming one well are that well's fields
+        of view — see :meth:`pipeline.czi_set.CziSet.scene_well_groups`, which
+        is what the conversion actually maps through. This answers the same
+        question for a single file, so it must answer it the same way: it is
+        read by :meth:`describe`, and a readout saying a 660-scene plate names
+        no wells while the converter names ninety-six of them is worse than no
+        readout at all.
         """
         labels = [self.scene_wells.get(s, "") for s in self.scenes]
-        if not labels or not all(labels) or len(set(labels)) != len(labels):
+        if not labels or not all(labels):
             return []
-        return labels
+        return list(dict.fromkeys(labels))
 
     def _colliding_channels(self) -> tuple[str, list[str]] | None:
         """The first filename-token collision among the channels, or ``None``.
@@ -1353,9 +1360,16 @@ class CziLayout:
         channels = ", ".join(self.channel_names) if self.channel_names else "?"
         fovs = self.fovs_per_scene
         fov_text = f"{fovs} tile(s) each" if fovs else "a varying number of tiles"
-        named = len(self.wells_from_metadata())
-        source = (f", wells named by the file ({named})" if named
-                  else ", wells from the grid you set")
+        named = self.wells_from_metadata()
+        if not named:
+            source = ", wells from the grid you set"
+        elif len(named) < self.n_scenes:
+            # Both numbers, because "96 wells" over a 660-scene plate reads
+            # exactly like a file that only ever held ninety-six scenes.
+            source = (f", wells named by the file ({len(named)}, holding "
+                      f"the {self.n_scenes} scene(s) between them)")
+        else:
+            source = f", wells named by the file ({len(named)})"
         return (
             f"{self.n_scenes} scene(s), {fov_text}, {self.size_t} timepoint(s), "
             f"{self.size_c} channel(s) ({channels})"

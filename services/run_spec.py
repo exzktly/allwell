@@ -57,6 +57,15 @@ class RunSpec:
     dry_run_cleanup: bool = False
     output_filter: str = "full"
     selective_channels: bool = True
+    #: Replace the filename schema, separator and channel roles in ``opts``
+    #: with what the input is found to carry, when the run starts
+    #: (``services.run_detect``). Beside ``opts`` so it never reaches the
+    #: pipeline's argv.
+    auto_detect: bool = False
+    #: The layout a converter earlier in the job queue recorded for the folder
+    #: this run reads — written by ``JobQueue.materialise`` for a chained job,
+    #: never by the form. ``None`` when there is none.
+    upstream_layout: dict | None = None
 
     def label(self) -> str:
         raw = self.opts.get("raw")
@@ -66,7 +75,7 @@ class RunSpec:
     def to_json(self) -> dict:
         opts = dict(self.opts)
         for key in _PATH_KEYS:
-            if key in opts and opts[key] is not None:
+            if opts.get(key):             # a blank input stays blank, not "."
                 opts[key] = str(opts[key])
         return {
             "opts": opts,
@@ -75,13 +84,16 @@ class RunSpec:
             "dry_run_cleanup": self.dry_run_cleanup,
             "output_filter": self.output_filter,
             "selective_channels": self.selective_channels,
+            "auto_detect": self.auto_detect,
+            **({"upstream_layout": dict(self.upstream_layout)}
+               if self.upstream_layout else {}),
         }
 
     @classmethod
     def from_json(cls, data: dict) -> RunSpec:
         opts = dict(data.get("opts") or {})
         for key in _PATH_KEYS:
-            if key in opts and opts[key] is not None:
+            if opts.get(key):             # a blank input stays blank, not "."
                 opts[key] = Path(opts[key])
         return cls(
             opts=opts,
@@ -90,6 +102,9 @@ class RunSpec:
             dry_run_cleanup=bool(data.get("dry_run_cleanup", False)),
             output_filter=data.get("output_filter", "full"),
             selective_channels=bool(data.get("selective_channels", True)),
+            auto_detect=bool(data.get("auto_detect", False)),
+            upstream_layout=dict(data["upstream_layout"])
+            if isinstance(data.get("upstream_layout"), dict) else None,
         )
 
     def resolve_remote(self) -> RemoteHost | None:
@@ -113,6 +128,6 @@ class RunSpec:
         expect it — ``opts["raw"]`` as a live ``Path``, not a string."""
         opts = dict(self.opts)
         raw = opts.get("raw")
-        if raw is not None and not isinstance(raw, Path):
+        if raw and not isinstance(raw, Path):
             opts["raw"] = Path(raw)
         return opts

@@ -222,7 +222,10 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 870
 # analyze.schema_section.AnalyzeSchemaSectionMixin, beside the controls they
 # write to -- which were in analyze/form.py, so the widget and the one function
 # that fills it had been in different files under different budgets.
-ANALYZE_TAB_BUDGET = 781
+# 781 -> 737: _validate_run_request moved to analyze.run_spec.AnalyzeRunMixin,
+# beside validate_for_queue and the run-time detection it now defers to. Genuine
+# extraction -- the whole method moved, and its queue-aware rules live there.
+ANALYZE_TAB_BUDGET = 737
 
 # analyze/form.py carried no budget while analyze/tab.py did, so every
 # addition to the pair landed here by default. Opened at its measured size so it

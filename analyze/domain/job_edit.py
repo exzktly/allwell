@@ -191,6 +191,14 @@ class AnalyzeJobEditMixin:
         if dry_run is not None:
             dry_run.setChecked(bool(spec.get("dry_run_cleanup")))
 
+        # Set whether or not the key is present: a job queued before run-time
+        # detection existed has none, and means "no", so hydrating it over a
+        # form where the box was ticked must untick it rather than save the
+        # previous job's choice into this one.
+        detect = getattr(self, "_auto_detect_cb", None)
+        if detect is not None:
+            detect.setChecked(bool(spec.get("auto_detect")))
+
         # The remote-only parameter group's visibility is driven by the combo
         # and the cleanup checkbox; both were just set programmatically, which
         # does not always fire the signals that keep the group in step.

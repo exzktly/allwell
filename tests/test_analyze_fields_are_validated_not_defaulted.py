@@ -285,10 +285,30 @@ def _queued(tab):
     return jobs
 
 
-def test_queue_refuses_a_form_with_no_input_folder(tab, refusals):
+def test_a_blank_input_queues_for_chaining_and_is_refused_if_never_filled(
+        tab, refusals):
+    """A queued job may be added blank so "Run after…" can fill its input.
+
+    This refused a blank input outright, which left no way to queue an Analyze
+    run after a converter whose output does not exist yet: chaining is set on
+    a job that is already in the queue. The refusal moved to where it is
+    decidable — the start of the run — and it still names the problem, rather
+    than handing the pipeline an input of ``.``.
+    """
     tab._input_edit.setText("")
-    assert _queued(tab) == [], "an unrunnable job was queued"
-    assert refusals, "nothing told the user why the job was not queued"
+    tab._flatfield_cb.setCurrentText("gaussian")    # the default needs a blank well
+    jobs = _queued(tab)
+    assert len(jobs) == 1, f"a blank job could not be queued: {refusals!r}"
+    assert not refusals
+    error = tab.start_run(__import__("services.run_spec", fromlist=["RunSpec"])
+                          .RunSpec.from_json(jobs[0]))
+    assert error is not None and "no input folder" in error, error
+
+
+def test_the_run_button_still_refuses_a_blank_input(tab, refusals):
+    tab._input_edit.setText("")
+    assert tab._validate_run_request() is None
+    assert refusals and refusals[0][0] == "Input Error"
 
 
 def test_queue_refuses_a_mistyped_number(tab, refusals, tmp_path):
@@ -308,7 +328,8 @@ def test_queue_accepts_a_form_run_would_accept(tab, refusals, monkeypatch):
     """The two buttons have to agree, or one of them is lying about the form."""
     from pathlib import Path as _P
 
-    monkeypatch.setattr(type(tab), "_validate_run_request", lambda self: _P("pm.py"))
+    monkeypatch.setattr(type(tab), "_validate_run_request",
+                        lambda self, **_kw: _P("pm.py"))
     jobs = _queued(tab)
     assert len(jobs) == 1, f"a valid form did not queue: {refusals!r}"
     assert not refusals

@@ -6037,6 +6037,26 @@ instead of babysitting each one.
 - **+ Queue** beside Analyze's **Run Pipeline** button, which captures the
   whole Analyze form — every option, not just the input folder.
 
+**Queuing an Analyze run whose input does not exist yet** — for example, one
+that analyses what a converter earlier in the queue will produce:
+
+- Tick **Detect schema & channels at run time** under *Filename Schema*. The
+  schema picker and the *Segmentation channel* field grey out: when the run
+  starts, All-Well reads the filename schema, the channels and which channel to
+  segment from the input's filenames, exactly as **Detect from filenames**
+  does. When the job runs after a converter, the converter's own file naming
+  and the channel roles you picked on its page are used instead of a guess.
+- The input folder may be one that has not been written yet, or blank if you
+  are about to chain the job with the row's **Run after…** menu. A blank job
+  that is never chained says so on its row, and fails when it starts.
+- If the layout cannot be read — a single-channel plate, no image files, no
+  channel that can be segmented — the job **fails and says why** rather than
+  running with the form's values. It also fails if an option that names a
+  channel (an smFISH mark, the cytoplasm channel, the Cellpose nuclei channel,
+  a label-free phase channel) names one the input does not carry.
+- What was detected is written to the Analyze log when the run starts and
+  shown on the finished job's row in the Job Queue.
+
 **Looking at a job** — click its row and All-Well takes you to that tool's
 page. What you find there depends on the job:
 

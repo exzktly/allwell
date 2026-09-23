@@ -204,7 +204,16 @@ class AnalyzeSegParamsMixin:
 
     # ── hints + validation for the selected routine ──────────────────────────
 
-    def _segmentation_validation_errors(self) -> list[str]:
+    def _segmentation_validation_errors(self, *, channels: bool = True) -> list[str]:
+        """What stops the selected routine running, as user-facing sentences.
+
+        *channels* False skips every check that compares the form's channel
+        tokens with each other — the segmentation channel, the Phase mark —
+        because run-time detection is about to replace those tokens, and
+        ``services.run_detect.channel_option_errors`` asks the same questions
+        of the detected ones. What detection cannot supply (a cytoplasm token
+        for watershed, a positive minimum area) is still required here.
+        """
         errors: list[str] = []
         method = self._seg_method()
         if method == "stardist_seeded_watershed_cell":
@@ -212,7 +221,7 @@ class AnalyzeSegParamsMixin:
             nuc = self._nuclear_token_edit.text().strip()
             if not cyto:
                 errors.append("Watershed mode requires a cytoplasm token.")
-            if cyto and cyto == nuc:
+            if channels and cyto and cyto == nuc:
                 errors.append("Cytoplasm token must differ from nuclear token.")
             try:
                 area = int(self._min_nucleus_area_edit.text().strip())
@@ -220,12 +229,13 @@ class AnalyzeSegParamsMixin:
                     errors.append("Minimum nucleus area must be a positive integer.")
             except ValueError:
                 errors.append("Minimum nucleus area must be a positive integer.")
-        elif method == "cellpose_labelfree":
+        elif method == "cellpose_labelfree" and channels:
             if not self._phase_token():
                 errors.append(
                     "Label-free segmentation requires exactly one channel marked "
                     "'Phase' (the brightfield image to segment).")
-        errors.extend(self._phase_collision_errors(method))
+        if channels:
+            errors.extend(self._phase_collision_errors(method))
         return errors
 
     def _phase_collision_errors(self, method: str) -> list[str]:
@@ -284,7 +294,7 @@ class AnalyzeSegParamsMixin:
         phase_locked = method == "cellpose_labelfree"
         if hasattr(self, "_nuclear_row_widget"):
             self._nuclear_row_widget.setVisible(not phase_locked)
-        errors = self._segmentation_validation_errors()
+        errors = self._segmentation_validation_errors(channels=not self._auto_detect_on())
         if errors:
             self._segmentation_hint_lbl.setText("  ".join(errors))
             return

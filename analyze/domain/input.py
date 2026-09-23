@@ -33,6 +33,7 @@ from services.input_resolution_service import (
     resolve_input_output,
     select_incremental_scope,
 )
+from services.run_detect import scan_pipeline_info
 from util.schema_infer import infer_from_dir
 from core.safe import swallowed
 
@@ -221,12 +222,11 @@ class AnalyzeInputMixin:
         # must appear exactly once"), which `_validate_run_request` raises as a
         # blocking dialog. Picking such a folder made Run impossible until the
         # user noticed that one slot of the picker read `ignore`.
-        info: dict = {}
-        if guess.confident:
-            info = {"separator": guess.separator, "schema": guess.schema_str}
-        tokens = guess.channel_tokens() if guess.channels else None
-        if tokens is not None:
-            info.update(tokens.as_pipeline_info())
+        #
+        # The rule itself is `services.run_detect.scan_pipeline_info`, shared
+        # with the run-time detection a queued job can ask for, so the button
+        # here and a queued run cannot disagree about what a scan may write.
+        info, tokens = scan_pipeline_info(guess)
         if info:
             self._apply_pipeline_info(info)
         # Beside the fields it just wrote, not only on the dashboard: the

@@ -86,6 +86,12 @@ class JobSpec:
     output_dir: str | None = None
     dataset_root: str | None = None
     in_dir: str | None = None
+    #: What a finished converter job recorded about the files it wrote — the
+    #: filename schema and separator, and the channel roles set on its page —
+    #: so an Analyze job chained after it can take them as known rather than
+    #: guess them (``services.job_kinds.produced_layout``). ``None`` for every
+    #: other kind, and until the job succeeds.
+    layout: dict | None = None
 
     def to_json(self) -> dict:
         return {
@@ -101,6 +107,7 @@ class JobSpec:
             "output_dir": self.output_dir,
             "dataset_root": self.dataset_root,
             "in_dir": self.in_dir,
+            "layout": self.layout,
         }
 
     @classmethod
@@ -118,6 +125,7 @@ class JobSpec:
             output_dir=data.get("output_dir"),
             dataset_root=data.get("dataset_root"),
             in_dir=data.get("in_dir"),
+            layout=dict(data["layout"]) if isinstance(data.get("layout"), dict) else None,
         )
 
 
@@ -296,6 +304,7 @@ class JobQueue:
         job.state = JobState.PENDING
         job.message = ""
         job.output_dir = job.dataset_root = job.in_dir = None
+        job.layout = None
         self._cascade_unblock(job_id)
         return True
 
@@ -436,6 +445,12 @@ class JobQueue:
             )
         if job.chain_target:
             _set_dotted(spec, job.chain_target, value)
+        # What the predecessor recorded about the files it wrote travels with
+        # the path to them. Only Analyze reads it, and only when the job asked
+        # for run-time detection (services.run_detect); a key it ignores is
+        # harmless on every other kind, but it is not written there anyway.
+        if pred.layout and job.kind == "analyze":
+            spec["upstream_layout"] = json.loads(json.dumps(pred.layout))
         return spec
 
     def mark_running(self, job_id: str) -> None:
@@ -476,6 +491,7 @@ class JobQueue:
             job.output_dir = produced.get("out_dir")
             job.dataset_root = produced.get("dataset_root")
             job.in_dir = produced.get("in_dir")
+            job.layout = produced.get("layout")
         else:
             job.state = JobState.CANCELLED if cancelled else JobState.FAILED
             job.message = message

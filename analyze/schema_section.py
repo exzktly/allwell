@@ -23,7 +23,7 @@ widget still lands on the ``AnalyzeTab`` instance under the same
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QCheckBox, QLabel, QWidget
 
 from widgets.schema_picker import SchemaPicker
 
@@ -68,6 +68,24 @@ class AnalyzeSchemaSectionMixin:
             "Pick an input folder below, then detect its layout from the "
             "filenames.")
 
+        # Run-time detection: the same scan the button above makes, made again
+        # when the run starts — for a queued job whose input an earlier job
+        # has not written yet, so there is nothing to scan now. The values it
+        # finds replace the schema above and the channel tokens below, which is
+        # why the picker greys out: its contents are no longer what will run.
+        self._auto_detect_cb = QCheckBox(
+            "Detect schema && channels at run time", sec)
+        self._auto_detect_cb.setToolTip(
+            "For a queued run whose input does not exist yet. When the run "
+            "starts, the filename schema, the channels and which channel is "
+            "segmented are read from the input's filenames — or taken from the "
+            "converter this job runs after — replacing what this form shows. "
+            "If they cannot be read, the run fails and says why. smFISH marks, "
+            "the cytoplasm channel and the Cellpose nuclei channel are kept, "
+            "and must name channels the input carries.")
+        self._auto_detect_cb.toggled.connect(self._on_auto_detect_toggled)
+        sec.layout().addWidget(self._auto_detect_cb)
+
         self._schema_err_lbl = QLabel("", sec)
         self._schema_err_lbl.setObjectName("Error")
         self._schema_err_lbl.setWordWrap(True)
@@ -77,6 +95,23 @@ class AnalyzeSchemaSectionMixin:
         self._schema_preview_lbl.setObjectName("Muted")
         self._schema_preview_lbl.setWordWrap(True)
         sec.layout().addWidget(self._schema_preview_lbl)
+
+    def _on_auto_detect_toggled(self, on: bool) -> None:
+        """Grey out what run-time detection replaces, and re-check the form.
+
+        Only the schema picker and the segmentation-channel row are disabled.
+        The fluorescent rows stay live because their smFISH marks are kept
+        through detection — they are checked against the detected channels
+        when the run starts rather than replaced.
+        """
+        self._schema_picker.setEnabled(not on)
+        row = getattr(self, "_nuclear_row_widget", None)
+        if row is not None:
+            row.setEnabled(not on)
+        self._refresh_schema_preview()
+        refresh_hints = getattr(self, "_refresh_segmentation_hints", None)
+        if callable(refresh_hints):
+            refresh_hints()
 
     # ------------------------------------------------------------------
     # Schema helpers
@@ -101,7 +136,11 @@ class AnalyzeSchemaSectionMixin:
     def _refresh_schema_preview(self) -> None:
         if not hasattr(self, "_schema_picker") or not hasattr(self, "_schema_err_lbl"):
             return
-        errors = self._schema_errors()
+        # A schema detection will replace is not one that has to be valid now:
+        # refusing it would lock the input field this very option exists to
+        # let the user fill with a folder that has no files yet.
+        detect = self._auto_detect_on() if hasattr(self, "_auto_detect_cb") else False
+        errors = [] if detect else self._schema_errors()
         fields = self._schema_field_list()
         sep = self._filename_sep()
         schema_valid = not errors
@@ -120,6 +159,12 @@ class AnalyzeSchemaSectionMixin:
             return
 
         self._schema_err_lbl.setText("")
+        if detect:
+            self._schema_preview_lbl.setText(
+                "Read from the input's filenames when the run starts.")
+            if hasattr(self, "_run_btn"):
+                self._run_btn.setEnabled(not self._running)
+            return
         if hasattr(self, "_run_btn"):
             # A valid schema is necessary, not sufficient. This runs from four
             # controls that stay live during a run — the segmentation-channel

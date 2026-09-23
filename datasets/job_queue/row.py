@@ -212,6 +212,13 @@ class JobRow(QWidget):
         if job.chain_from:
             pred = dict(self._predecessors).get(job.chain_from)
             parts.append(f"after “{pred}”" if pred else f"after {job.chain_from}")
+        elif job.kind == "analyze" and job.state == JobState.PENDING \
+                and not str((job.spec.get("opts") or {}).get("raw") or "").strip():
+            # Allowed to be queued blank so chaining can fill it, and refused
+            # when it starts if nothing did. Said here first, because a blank
+            # job otherwise reads exactly like a ready one until it fails.
+            parts.append("no input folder — chain it after a job (Run after…) "
+                         "or edit it")
         detail = describe_detail(job.kind, job.spec)
         if detail:
             parts.append(detail)

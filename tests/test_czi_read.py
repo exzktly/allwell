@@ -187,16 +187,27 @@ def test_a_partly_named_scene_set_is_refused_rather_than_half_used(tmp_path):
     assert layout.wells_from_metadata() == []
 
 
-def test_two_scenes_claiming_one_well_are_refused(tmp_path):
-    """The second scene's images would overwrite the first scene's archive,
-    and the run would report having written both."""
+def test_two_scenes_claiming_one_well_are_one_well(tmp_path):
+    """Not a clash: they are the two positions imaged in A01, and the
+    conversion writes them as that well's two fields of view. This asked for
+    ``[]`` until a real plate showed the shape is ordinary — see
+    ``tests/test_several_scenes_make_one_well.py``.
+
+    The distinct count, so that this answers the question the same way
+    ``CziSet.wells_from_files`` does; the per-scene labels are
+    ``layout.scene_wells``, which is what the grouping is built from.
+    """
     path = write_czi(
         tmp_path / "dup_well.czi",
         plate_tiles(wells=2, fovs=1, timepoints=1, channels=1),
         xml=plate_metadata_xml(scene_wells={0: "A01", 1: "A01"},
                                channels=["GFP"]),
     )
-    assert read_czi_layout(path).wells_from_metadata() == []
+    layout = read_czi_layout(path)
+
+    assert layout.wells_from_metadata() == ["A01"]
+    assert "wells named by the file (1, holding the 2 scene(s) between them)" \
+        in layout.describe()
 
 
 # ── what the reader refuses, and why ─────────────────────────────────────────

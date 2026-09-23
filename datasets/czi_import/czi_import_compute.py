@@ -27,7 +27,11 @@ from datasets.core import convert_marker as marker
 from datasets.core.convert_marker import ResumeState  # noqa: F401 (re-export)
 from pipeline.czi_explode import WELL_SOURCES, resolve_well_map
 from pipeline.czi_read import CziReadError
-from pipeline.explode_common import timepoint_plan, wells_to_convert
+from pipeline.explode_common import (
+    timepoint_plan,
+    uneven_fields_note,
+    wells_to_convert,
+)
 from pipeline.czi_set import (
     CziSet,
     PlatePeek,
@@ -151,10 +155,23 @@ class ConversionPlan:
     selected_wells: list[str] = field(default_factory=list)
     #: True when ``well_labels`` came from the file's own scene names.
     from_file: bool = False
+    #: Fields per well, one entry per ``well_labels`` entry. A CZI plate names
+    #: one scene per imaged position, so a well's fields are however many
+    #: scenes name it and an acquisition need not visit every well the same
+    #: number of times. ``fovs_per_well`` is the largest of these; this is what
+    #: lets the readout say so rather than describe the plate by its biggest
+    #: well and leave it there.
+    field_counts: list[int] = field(default_factory=list)
 
     @property
     def n_wells(self) -> int:
         return len(self.well_labels)
+
+    @property
+    def uneven_note(self) -> str:
+        """The wells imaged at fewer positions than the plate's nominal, or ``""``."""
+        return uneven_fields_note(self.well_labels, self.field_counts,
+                                  self.fovs_per_well)
 
     def summary(self) -> str:
         """A one-line description of what a run would produce.
@@ -176,15 +193,26 @@ class ConversionPlan:
         # mapping described a subset conversion as the plate it was taken from,
         # on the surface the user reads before pressing Convert.
         n_writing = len(self.selected_wells) or self.n_wells
-        images = (n_writing * self.fovs_per_well * self.n_timepoints
-                  * max(1, len(self.channels)))
+        writing = set(self.selected_wells) if self.selected_wells else None
+        # Counted from each well's own field count, so an uneven plate's total
+        # is the number of images the run writes rather than the number a
+        # rectangular plate of the same size would have written.
+        fields = sum(count for well, count
+                     in zip(self.well_labels, self.field_counts)
+                     if writing is None or well in writing)
+        images = fields * self.n_timepoints * max(1, len(self.channels))
         wells_phrase = (f"{self.n_wells} well(s){span}" if not self.selected_wells
                         else f"{n_writing} of {self.n_wells} well(s){span}, "
                              f"selected")
+        uneven = self.uneven_note
+        fov_phrase = (f"{self.fovs_per_well} FOV(s)" if not uneven
+                      else f"up to {self.fovs_per_well} FOV(s)")
+        tail = f" {uneven}" if uneven else ""
         return (
             f"{wells_phrase} ({source}){held} × "
-            f"{self.fovs_per_well} FOV(s) × {self.timepoint_phrase} × "
+            f"{fov_phrase} × {self.timepoint_phrase} × "
             f"{len(self.channels)} channel(s) ({channels}) — {images} image(s)."
+            f"{tail}"
         )
 
     @property
@@ -443,6 +471,7 @@ def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
         raise CziImportError(str(exc)) from exc
     return ConversionPlan(
         n_scenes=source.n_scenes,
+        field_counts=[len(block) for block in well_map.positions],
         n_timepoints=len(kept),
         n_source_timepoints=source.layout.size_t,
         timepoint_tokens=[token for _index, token in kept],

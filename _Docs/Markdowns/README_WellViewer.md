@@ -5379,17 +5379,42 @@ instead, because the two
 runs would write files with the same names from different images. Empty the
 folder and start again in that case.
 
+**Several positions per well.** A plate scan imaged at more than one position
+per well writes one scene per position and names each after the well it sits in,
+so a 96-well plate imaged at seven positions per well is a file (or a folder)
+holding six hundred and sixty scenes that name ninety-six wells. Those scenes
+are the wells' fields of view: each well's archive gets one field per scene that
+names it, numbered `f0`, `f1`, … in the order the stage visited them, and a
+scene that itself holds several tiles contributes all of them. The readout says
+`96 well(s) A01→H12 (named by the file) × 7 FOV(s) × …` before you convert, so
+you can check the grouping against what you set up in ZEN.
+
+Wells need not all have been imaged the same number of times. When they differ,
+the readout says `up to 7 FOV(s)` and then names the wells that hold fewer and
+how many they hold — `3 well(s) hold fewer than 7 field(s): C04 (5), D07 (6),
+E11 (6).` — and the run log repeats it. Each well is converted with the fields
+it actually has.
+
 **The file is checked as soon as you pick it**, and one that cannot be converted
 honestly is refused there rather than part-way through a run. What it catches:
 
-- **"does not name a distinct well for every one of its scenes"** — some scenes
-  are named and some are not, or two claim the same well. A mapping that is half
-  from the file and half from a grid is right exactly where you are most likely
-  to spot-check it, so it is all or nothing: switch to the plate grid. For a
-  split export each file's well comes from its scene metadata first and from
-  its **filename** second — `Exp7_A1.czi` is well A01 — but only for a file
-  holding a single scene, so a whole-plate file that happens to be called
-  `Exp_A1.czi` is never read as one well of ninety-six fields.
+- **a scene that names no well** — the message says which of the two ways this
+  happens you have hit, because they are not the same problem.
+
+  *"No well is named for any of the … scenes"* means the export carries no well
+  names at all; use the plate grid.
+
+  *"… of the … scenes name no well"* means some are named and some are not, and
+  it lists which. A mapping that is half from the file and half from a grid is
+  right exactly where you are most likely to spot-check it, so it is all or
+  nothing: use the plate grid. For a split export each file's well comes from
+  its scene metadata first and from its **filename** second — `Exp7_A1.czi` is
+  well A01 — but only for a file holding a single scene, so a whole-plate file
+  that happens to be called `Exp_A1.czi` is never read as one well of ninety-six
+  fields.
+
+  Several scenes naming the *same* well is not a problem and is not refused —
+  see **Several positions per well** below.
 - **"… and … disagree about the number of channels"** (or the channel names,
   timepoints, pixel format or image size) — two files you asked to convert
   together. They become one dataset, so a difference here would mean the same

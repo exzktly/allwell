@@ -82,6 +82,32 @@ def shortfall_summary(missing: dict) -> str:
             f"and are not complete.")
 
 
+def uneven_fields_note(wells, counts, nominal: int) -> str:
+    """One line naming the wells imaged at fewer positions than the plate, or ``""``.
+
+    A CZI plate scan names one scene per imaged position, so the fields of a
+    well are however many scenes name it, and nothing obliges an acquisition to
+    give every well the same number. The plate is then described by its largest
+    well — anything else would report a whole plate by its worst corner — and
+    this is what stops that description being a lie about the rest: a readout
+    saying "96 well(s) × 7 FOV(s)" over a plate where four wells hold five is
+    indistinguishable from one where all ninety-six hold seven, which is
+    CLAUDE.md §7's cardinal failure.
+
+    Wells and counts, in plate order rather than acquisition order, capped at
+    six named with the remainder counted so that a wholly irregular plate
+    produces a sentence rather than a paragraph.
+    """
+    short = sorted((well, count) for well, count in zip(wells, counts)
+                   if count < nominal)
+    if not short:
+        return ""
+    named = ", ".join(f"{well} ({count})" for well, count in short[:6])
+    more = "" if len(short) <= 6 else f", and {len(short) - 6} more"
+    return (f"{len(short)} well(s) hold fewer than {nominal} field(s): "
+            f"{named}{more}.")
+
+
 def resolve_positions(
     total: int, n_wells: int, fovs_per_well: int | None, *, what: str, name: str,
 ) -> int:

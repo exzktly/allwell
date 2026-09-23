@@ -184,12 +184,22 @@ def test_a_partly_named_split_set_is_refused_rather_than_half_used(tmp_path):
     assert read_czi_set(folder).wells_from_files() == []
 
 
-def test_two_files_claiming_one_well_are_refused(tmp_path):
-    """The second file's images would overwrite the first file's archive."""
-    folder = tmp_path / "clash"
+def test_two_files_claiming_one_well_are_that_well_s_two_fields(tmp_path):
+    """Not a clash. ZEN writes one scene per imaged position and names it
+    after the well it sits in, so two files naming A01 are the two positions
+    imaged in A01 — ``scene_well_groups`` reads them as its fields of view.
+
+    This asserted a refusal until a real 660-scene plate showed what the shape
+    means: 660 scenes over ninety-six wells is seven fields each, and refusing
+    it left the whole plate unconvertible for being ordinary.
+    """
+    folder = tmp_path / "two_fields"
     _scene_file(folder, "a.czi", "A01")
     _scene_file(folder, "b.czi", "A01")
-    assert read_czi_set(folder).wells_from_files() == []
+    source = read_czi_set(folder)
+
+    assert source.wells_from_files() == ["A01"]
+    assert source.scene_well_groups() == [("A01", [0, 1])]
 
 
 # ── what the files of a set must agree about ─────────────────────────────────

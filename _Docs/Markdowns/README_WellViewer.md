@@ -5382,14 +5382,28 @@ folder and start again in that case.
 **The file is checked as soon as you pick it**, and one that cannot be converted
 honestly is refused there rather than part-way through a run. What it catches:
 
-- **"does not name a distinct well for every one of its scenes"** — some scenes
-  are named and some are not, or two claim the same well. A mapping that is half
-  from the file and half from a grid is right exactly where you are most likely
-  to spot-check it, so it is all or nothing: switch to the plate grid. For a
-  split export each file's well comes from its scene metadata first and from
-  its **filename** second — `Exp7_A1.czi` is well A01 — but only for a file
-  holding a single scene, so a whole-plate file that happens to be called
+- **the scenes do not name one well each** — the message says which of the three
+  ways this happens you have hit, because they are not the same problem.
+
+  *"No well is named for any of the … scenes"* means the export carries no well
+  names at all; use the plate grid.
+
+  *"… of the … scenes name no well"* means some are named and some are not. A
+  mapping that is half from the file and half from a grid is right exactly where
+  you are most likely to spot-check it, so it is all or nothing: use the plate
+  grid. For a split export each file's well comes from its scene metadata first
+  and from its **filename** second — `Exp7_A1.czi` is well A01 — but only for a
+  file holding a single scene, so a whole-plate file that happens to be called
   `Exp_A1.czi` is never read as one well of ninety-six fields.
+
+  *"… scenes … name only … distinct wells between them"* means every scene
+  resolves, but several land on the same well — the message names the repeated
+  wells and how many scenes each has. Nothing is wrong with the file: the
+  converter reads one scene as one well and the tiles inside that scene as the
+  well's fields of view, so an acquisition that visited a well several times as
+  separate scenes has no place to put the extra visits. Use the plate grid and
+  set the imaged rows and columns, which lays the acquisition order over the
+  plate instead.
 - **"… and … disagree about the number of channels"** (or the channel names,
   timepoints, pixel format or image size) — two files you asked to convert
   together. They become one dataset, so a difference here would mean the same

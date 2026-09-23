@@ -187,16 +187,7 @@ def resolve_well_map(
     if well_source == "file":
         wells = source.wells_from_files()
         if not wells:
-            named = sum(1 for label in source.scene_wells if label)
-            subject = (f"{name}'s {source.n_files} file(s)" if source.n_files > 1
-                       else name)
-            raise ValueError(
-                f"{subject} do not name a distinct well for every one of their "
-                f"{source.n_scenes} scene(s) — {named} of them resolve to a "
-                f"well. Switch the well source to the plate grid and set the "
-                f"imaged rows and columns, which lays the acquisition order "
-                f"over the plate instead."
-            )
+            raise ValueError(_why_the_file_cannot_name_the_wells(source, name))
         fovs = source.fovs_per_scene
         if fovs <= 0:
             raise ValueError(
@@ -233,6 +224,64 @@ def resolve_well_map(
         fovs_per_well=fovs,
         from_file=False,
     )
+
+
+def _why_the_file_cannot_name_the_wells(source: CziSet, name: str) -> str:
+    """Which of the three conditions ``wells_from_files`` refused on, and how.
+
+    It refuses unless the scenes map **one to one** onto wells: no scene
+    unnamed, and no well claimed twice. One sentence covered all three and
+    quoted the count belonging to the *unnamed* check whatever had actually
+    failed, so a set whose scenes all resolve but collide read as a flat
+    contradiction — "these do not name a distinct well for every one of their
+    660 scenes, and 660 of them resolve to a well". That is what a real
+    660-scene export produced, and there is nothing in it to act on.
+
+    Each cause now says what it is. The collision case — the only one whose
+    numbers look fine — names wells that repeat and counts the distinct ones,
+    because on a plate of ninety-six "660 scenes naming 96 distinct wells" is
+    the whole diagnosis: the acquisition visited each well several times, and
+    this converter reads one scene as one well with the tiles inside it as
+    that well's fields of view.
+
+    Every sentence names the scenes rather than the source, so that the verb
+    does not have to agree with a subject that is one file here and six
+    hundred there.
+    """
+    labels = list(source.scene_wells)
+    where = (f"{name}'s {source.n_files} file(s)" if source.n_files > 1
+             else name)
+    advice = ("Switch the well source to the plate grid and set the imaged "
+              "rows and columns, which lays the acquisition order over the "
+              "plate instead.")
+    if not labels or not any(labels):
+        return (f"No well is named for any of the {len(labels)} scene(s) in "
+                f"{where}. {advice}")
+
+    unnamed = [index for index, label in enumerate(labels) if not label]
+    if unnamed:
+        shown = ", ".join(str(index) for index in unnamed[:3])
+        more = "" if len(unnamed) <= 3 else f", and {len(unnamed) - 3} more"
+        return (f"{len(unnamed)} of the {len(labels)} scene(s) in {where} "
+                f"name no well (scene {shown}{more}); the other "
+                f"{len(labels) - len(unnamed)} do. A mapping where some "
+                f"scenes land on their real wells and the rest land wherever "
+                f"the grid put them is wrong exactly where it would be "
+                f"spot-checked. {advice}")
+
+    seen: dict[str, int] = {}
+    for label in labels:
+        seen[label] = seen.get(label, 0) + 1
+    repeats = sorted(((count, well) for well, count in seen.items()
+                      if count > 1), reverse=True)
+    shown = ", ".join(f"{well} ({count} scenes)" for count, well in repeats[:3])
+    return (f"The {len(labels)} scene(s) in {where} name only {len(seen)} "
+            f"distinct well(s) between them — {shown} — so a well would be "
+            f"written from more than one scene and only the last would "
+            f"survive. This converter reads one scene as one well, with the "
+            f"tiles inside it as that well's fields of view; an acquisition "
+            f"that visits a well several times as separate scenes does not "
+            f"fit that. {advice}")
 
 
 def explode_czi(

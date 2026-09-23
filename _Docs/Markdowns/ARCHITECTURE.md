@@ -6786,6 +6786,18 @@ would overwrite the first's archive while the run reported writing both. Either
 condition yields `[]`, and `resolve_well_map` then refuses with a message
 pointing at the grid, which is the other `well_source`. The two are never mixed.
 
+Three conditions produce that empty list — no scene names a well, some scenes do
+and some do not, and every scene names one but several name the same one — and
+`czi_explode._why_the_file_cannot_name_the_wells` says which. They are worth
+distinguishing because only one of them looks like a malformed file. A set whose
+scenes all resolve but collide is a perfectly sound acquisition that visited each
+well several times, so its sentence counts the distinct wells, names the ones
+that repeat and how often, and says what the converter's model is: one scene is
+one well, with the tiles inside that scene as the well's fields of view. The
+unnamed cases quote how many scenes name nothing and which, capped at three with
+the remainder counted. All three end with the same advice, since the grid is the
+only other way to get a mapping.
+
 **ZEN saves a plate two ways, and `pipeline/czi_set.py` is what makes them one
 input.** The ordinary raw save is a single file holding every scene. The *Split
 Scenes* export — what a long acquisition is usually saved as — is a folder of

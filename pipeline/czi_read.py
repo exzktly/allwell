@@ -769,16 +769,36 @@ def peek_scene_wells(path: Path | str, *,
     scenes are *called* and not what the document says.
     """
     path = Path(path)
+    return peek_from_metadata(path, plate_metadata_for(path),
+                              from_filename=from_filename)
+
+
+def plate_metadata_for(path: Path) -> _PlateMetadata:
+    """*path*'s parsed plate document, read only if it is not already known."""
     meta = cached_plate_metadata(path)
-    if meta is None:
-        with open(path, "rb") as raw:
-            fh = _CountingReader(raw)
-            directory_position, metadata_position = _read_file_header(fh)
-            del directory_position                  # deliberately not read
-            xml = _read_metadata_xml(fh, metadata_position)
-            read = fh.bytes_read
-        meta = parse_plate_metadata(xml, bytes_read=read)
-        remember_plate_metadata(path, meta)
+    if meta is not None:
+        return meta
+    with open(path, "rb") as raw:
+        fh = _CountingReader(raw)
+        directory_position, metadata_position = _read_file_header(fh)
+        del directory_position                      # deliberately not read
+        xml = _read_metadata_xml(fh, metadata_position)
+        read = fh.bytes_read
+    meta = parse_plate_metadata(xml, bytes_read=read)
+    remember_plate_metadata(path, meta)
+    return meta
+
+
+def peek_from_metadata(path: Path, meta: _PlateMetadata, *,
+                       from_filename: bool = True) -> ScenePeek:
+    """The scene peek *meta* implies for *path*, reading nothing.
+
+    Split out because the answer is now built in two places: here, from a
+    document this process parsed, and in the parent after a **worker process**
+    parsed one and sent the small value object back. Two spellings of one rule
+    is how a plate ends up mapped one way by the page and another by the run
+    (CLAUDE.md §7.5 #5), so there is one spelling and both call it.
+    """
     if not meta.has_metadata:
         return ScenePeek(path=path, has_metadata=False,
                          bytes_read=meta.bytes_read)
@@ -1395,7 +1415,8 @@ def _build_layout(blocks: list[SubBlock], meta: _PlateMetadata, *,
 
 
 def read_czi_layout(path: Path | str, *,
-                    read_times: bool = False) -> CziLayout:
+                    read_times: bool = False,
+                    metadata: "_PlateMetadata | None" = None) -> CziLayout:
     """Read *path*'s layout without decoding a single pixel.
 
     Costs two seeks on a sound file: one to the header, one to the subblock
@@ -1437,7 +1458,7 @@ def read_czi_layout(path: Path | str, *,
         # hit this skips the read as well as the parse, which on a network
         # share is the larger half: the page's peek has normally just taken
         # it, and the document is the same bytes either way.
-        meta = cached_plate_metadata(path)
+        meta = metadata if metadata is not None else cached_plate_metadata(path)
         if meta is None:
             xml = _read_metadata_xml(fh, metadata_position)
             meta = parse_plate_metadata(xml, bytes_read=0)

@@ -6969,29 +6969,52 @@ and never kept the event loop waiting, while eight took 4.22 s and starved it
 for 65.6% of the run, with single pauses of 266 ms. Slower *and* unusable,
 from threads added to make it faster.
 
-So the pool **reads wide and parses narrow**: the reads stay as wide as
-`scan_workers` says, and every stretch of pure computation on bytes already
-read — the subblock directory's entries, the plate document, `_build_layout`'s
-passes over the blocks, and the per-plane acquisition stamps — is serialised
-behind `czi_read._PARSE_LOCK`. A thread waiting on a share still overlaps with
-every other thread's wait, which is the whole of what the pool was for; what
-no longer overlaps is the part that could never overlap anyway. The same
-96-file scan then starves the window for 19.2% of the run rather than 65.6%,
-with the peek's latency gain intact at 809 ms on one thread against 107 ms on
-eight.
+So the pool is a pool of **processes**, not of threads, once a plate is big
+enough to be worth starting them. `pipeline/scan_pool.py` owns that decision;
+`czi_set._per_file` goes through it. Measured on a 96-file split export shaped
+like a real one — 3,168 subblocks per file across four fields of view, each
+file carrying the whole plate's document — read through `read_czi_set`:
 
-The lock must never be held across a read. Taken around the IO it would put
-the round trips back end to end and undo the pool completely, which is why
-`tests/test_czi_scan_leaves_the_window_alive.py` asserts **both** halves —
-that no two files are parsed at once, and that the files are still opened at
-once. Each is what catches the opposite mistake, and the second one is green
-for any amount of over-locking the first would allow.
+| | wall | worst pause | window starved |
+|---|---|---|---|
+| eight threads | 3.95 s | 53–87 ms | 1–10% |
+| eight spawned processes | 1.54 s | 17–18 ms | 0% |
 
-What remains is not fixed: at eight workers the window still sees pauses of
-about 227 ms, and the measurements above put the residue in the contention
-between the pool's threads themselves rather than in the parsing. Getting rid
-of it means getting the work out of the interpreter's lock altogether — a
-process pool — which is a change with its own costs and has not been made.
+Two and a half times faster, and the window stops noticing the scan at all:
+17 ms against a timer asked to fire every 10 ms. `czi_read._PARSE_LOCK`
+remains, because the thread path is still taken below the threshold and is
+still what a machine that cannot give us a pool falls back to.
+
+Four things follow from a worker being a separate interpreter, and each is
+load-bearing:
+
+- **The work must be reachable by name.** A spawned child is told a module and
+  a qualified name, so `_read_one_layout` and `_peek_one_file` are module-level
+  functions taking one picklable tuple each. They were closures, and the thread
+  path would never have objected.
+- **A worker's caches die with it.** `czi_read`'s stat-keyed caches are per
+  process, so `_per_file` takes `cached` and `remember` hooks that run in the
+  **parent**: the parent skips dispatching what it already knows, and keeps
+  what comes back. Without them, moving the scan off-thread would have quietly
+  undone the reuse across the four passes a plate is read in.
+- **What the parent knows has to travel outward too.** A peek returns its
+  parsed document alongside its answer, and a full read's job carries the
+  document the peek already parsed, so a split export's plate document is not
+  read and parsed once per file all over again.
+- **Spawn, on every platform.** Forking a process that is running a Qt event
+  loop and several threads inherits locks held by threads the child does not
+  have. macOS and Windows spawn regardless, so forcing it also means what is
+  tested is what ships. `all_well_launcher` already dispatches a spawned child
+  before any heavy import, which is what makes this work in the frozen bundle.
+
+Below `scan_pool.PROCESS_THRESHOLD` files the scan runs on threads, because
+starting an interpreter per worker is not worth paying to save a tenth of a
+second, and in a PyInstaller bundle that start is a cost this repository
+cannot measure from a source checkout. `ALLWELL_SCAN_PROCESSES` forces either
+path, for a machine where the pool misbehaves. A pool that cannot start at all
+falls back to threads rather than failing the scan: the answer does not depend
+on where it was computed, which is the property
+`tests/test_a_plate_scan_uses_processes.py` asserts first and hardest.
 
 Through `Executor.map`, which yields **by argument order** however the work
 completes. The order is load-bearing: it is the order ZEN wrote a split export

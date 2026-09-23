@@ -492,13 +492,13 @@ def test_a_multi_file_scan_reads_the_files_at_once(tmp_path, monkeypatch):
     #: that a starved container still passes and short enough that a genuinely
     #: serial read reports rather than wedging the lane.
     gate = threading.Barrier(8, timeout=30)
-    real = czi_set.peek_scene_wells
+    real = czi_set.plate_metadata_for
 
     def _record(path, **kwargs):
         gate.wait()
         return real(path, **kwargs)
 
-    monkeypatch.setattr(czi_set, "peek_scene_wells", _record)
+    monkeypatch.setattr(czi_set, "plate_metadata_for", _record)
     try:
         peek = peek_wells(folder)
     except threading.BrokenBarrierError:
@@ -541,7 +541,7 @@ def test_the_order_is_the_file_order_however_the_reads_finish(
     """
     folder = _split_plate(tmp_path, wells=("C07", "A02", "H11"))
     first = sorted(folder.glob("*.czi"))[0]           # Exp7_A02.czi
-    name = {"peek": "peek_scene_wells", "full": "read_czi_layout"}[stage]
+    name = {"peek": "plate_metadata_for", "full": "read_czi_layout"}[stage]
     real = getattr(czi_set, name)
 
     def _slow_first(path, **kwargs):
@@ -566,7 +566,7 @@ def test_a_single_file_is_read_on_the_calling_thread(tmp_path, monkeypatch,
                      plate_tiles(wells=1, fovs=1, timepoints=1, channels=1),
                      xml=plate_metadata_xml(scene_wells={0: "A01"},
                                             channels=["DAPI"]))
-    name = {"peek": "peek_scene_wells", "full": "read_czi_layout"}[stage]
+    name = {"peek": "plate_metadata_for", "full": "read_czi_layout"}[stage]
     real = getattr(czi_set, name)
     seen: list[int] = []
 

@@ -28,6 +28,7 @@ from services.job_kinds import (
     CHAIN_TARGET,
     describe,
     produced_for,
+    produced_layout,
 )
 from services.job_queue import JobQueue, JobSpec, JobState, load_queue, save_queue
 from datasets.job_queue.session import QueueSession
@@ -345,6 +346,10 @@ class QueueBridge(QObject):
         job_id, _kind = self._current
         self._current = None
         produced = produced_for(kind, output_path) if ok else {}
+        finished = self._queue.get(job_id)
+        layout = produced_layout(kind, finished.spec) if ok and finished else None
+        if layout is not None:
+            produced["layout"] = layout
         if not ok and self._was_suspended(kind, job_id):
             # Suspended, not cancelled: the job keeps its place and its
             # progress, its successors keep waiting rather than blocking, and

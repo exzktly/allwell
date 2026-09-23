@@ -605,7 +605,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         """``"otsu"`` or ``"controls"`` — the selected estimator."""
         return str(self._auto_threshold_method_cb.currentData() or "otsu")
 
-    def _auto_threshold_validation_error(self) -> str | None:
+    def _auto_threshold_validation_error(self, *, check_input: bool = True) -> str | None:
         """Block the run when the control wells are half-given or unusable.
 
         ``None`` when valid — including the pass being off or Otsu selected,
@@ -640,8 +640,8 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         sep = self._schema_picker.separator()
         schema = [f.strip().lower() for f in self._build_schema_arg().split(":") if f.strip()]
         from services.input_resolution_service import well_present_in_input
-        missing_wells = [w for w in (pos, neg)
-                         if not well_present_in_input(input_dir, w, schema=schema, sep=sep)]
+        missing_wells = [w for w in (pos, neg) if check_input  # False: input not readable yet
+                         and not well_present_in_input(input_dir, w, schema=schema, sep=sep)]
         if missing_wells:
             label = ", ".join(f"'{w}'" for w in missing_wells)
             return (f"Control well {label} was not found in the input folder.\n\n"
@@ -662,7 +662,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
             cyto = ""
         sd_prob, sd_nms = self._stardist_threshold_values()
         opts = dict(
-            raw=Path(self._input_edit.text().strip()),
+            raw=Path(raw_text) if (raw_text := self._input_edit.text().strip()) else "",
             scratch_dir=self._scratch_edit.text().strip() or None,
             nuclear_token=self._nuclear_token_edit.text().strip() or "NIR",
             fluor_tokens=self._fluor_tokens_list(),

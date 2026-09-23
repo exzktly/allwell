@@ -250,7 +250,7 @@ allwell/
 │   │                              the settings that produced it
 │   ├── progress.py             ← run-progress rendering (ETA + progress events → dashboard)
 │   ├── suspend.py              ← suspend / resume offers on the form side
-│   ├── run_spec.py             ← collect the form into a runnable spec + the run-controls row
+│   ├── run_spec.py             ← collect the form into a runnable spec, validate it, start it + the run-controls row
 │   └── remote_dialog.py        ← the Remotes dialogs (form, SSH-key wizard,
 │                                  bootstrap log, manage remotes)
 ├── datasets/                    ← Datasets pane: the page-rail shell + the dataset tools —
@@ -5718,7 +5718,11 @@ listing and *zero* stats for a folder of files and sub-folders, which is the
 assertion an implementation that enumerated once and then stat-ed each entry
 would fail.
 
-The scan applies what it infers. `_autofill_from_input_scan` hands
+The scan applies what it infers, under the rule
+`services.run_detect.scan_pipeline_info` states once for both of its users —
+this button and the run-time detection a queued job can ask for (below): the
+schema and separator only from a *confident* guess, the channel roles only when
+channels were found. `_autofill_from_input_scan` hands
 `_apply_pipeline_info` a **sidecar-shaped** dict — `schema`, `separator`, and
 the channel keys `ChannelTokens.as_pipeline_info` produces — because that is
 what `_pinfo_flat` reads. Spelled with the flattened argparse names
@@ -5951,6 +5955,88 @@ numbers. Note also that `_refresh_remote_controls` *enables* dry-run only while
 auto-delete is checked, so "auto-delete off, dry-run on" is not a state the user
 can click their way to; hydrating one from a hand-edited `job_queue.json` leaves
 the value alone and simply shows the box disabled.
+
+**Run-time detection.** A queued job freezes the form's filename schema,
+separator and channel tokens when it is queued, but the input they describe may
+not exist until an earlier job in the queue writes it. The Filename Schema
+section's **Detect schema & channels at run time** checkbox
+(`AnalyzeSchemaSectionMixin._auto_detect_cb`) sets `RunSpec.auto_detect`, which
+lives beside `opts` so it can never reach the pipeline's argv; `hydrate_job`
+restores it, and sets it false for a job with no such key. Ticking it greys the
+schema picker, whose values are about to be replaced, and
+`_refresh_schema_preview` stops requiring a valid schema, since refusing one
+would lock the input field the option exists to let the user fill. The
+Segmentation channel stays live: which channel to segment is a choice, not a
+fact the filenames carry, and detection honours it when the input carries it.
+The readout under the input field counts loose files by suffix rather than
+under the form's schema (`_refresh_output` passes none), the pre-run report's
+scope sentence is left out, and its coverage scan resolves the detected layout
+on its worker thread before reading the output folder.
+
+`start_run` resolves it, so every entry point — Run, the queue, the resume
+banner — answers the same way: after the busy refusal and before
+`resume_aware_spec`, it calls `services.run_detect.resolve_detection`, which
+replaces exactly the `opts` keys in `run_detect.DETECTED_OPTS` (schema,
+separator, segmentation channel, fluorescent channels, phase channel). The
+resume banner's `_resume_suspended` and `resume_aware_spec` both change only
+`opts` (`dataclasses.replace`), so a resumed detection run detects again rather
+than running the frozen layout its suspend record also holds.
+
+`detect_layout` infers the schema from a dense sample of the input's names
+(`_INFER_SAMPLE`, 20,000) but reads the **channel list from every name**
+(`_ENUMERATE_LIMIT`): the channel list decides what is quantified, so a channel
+a sample misses would be dropped from the run without a word. That costs no
+more file I/O than the sample — the sampler already opens every archive — and
+measured 0.81 s for a 96-well plate of 103,680 zip members. It runs on the GUI
+thread, once per run start, like the form's Detect button and the input
+planner: `start_run` refuses before it touches any UI state, and moving the
+scan into the runner's worker would make that refusal asynchronous. The sampler itself
+(`util.schema_infer._spread`) starts each archive's stride one member later
+than the last, because the converters write every archive with the channel
+varying fastest and a stride that was a multiple of the channel count read the
+same channel from every well; the form's Detect button had the same blind spot.
+
+The segmentation channel is chosen by method, because it is a choice rather
+than a fact the names carry. Label-free methods segment the phase channel —
+the pipeline remaps the segmentation slot onto it — so detection writes that,
+and quantifies every channel. Otherwise the converter's roles win, then the
+form's own Segmentation channel when the input carries it, then the name
+heuristic in `util.channel_roles`; general Cellpose with a cell-body model is
+refused when only the heuristic could choose, since the heuristic picks a
+nuclear stain. Unlike the button, which applies whatever part of a guess it
+gets because a person is looking at the result, an unattended run requires all
+of it: a guess that is not confident, a folder with no image names, no channel
+for the segmentation role or no fluorescent channel besides it raises
+`DetectionError`, and `start_run` returns its message as the run's failure. It
+never falls back to the frozen values, which are exactly the ones the job asked
+not to use. The resolved options are then held against every option that
+*names* a channel (`run_detect.channel_option_errors`), matched the way the
+pipeline matches them — smFISH marks and the watershed cytoplasm channel by
+exact membership of the fluorescent list, the Cellpose nuclei channel (which
+the pipeline silently ignores when absent) case-insensitively — and against
+the phase-role conflict. The detected layout's one-line
+`DetectedLayout.summary()` is written to the log and the dashboard status when
+the run starts, and carried as the finished job's `jobFinished` message, so the
+queue row of a job whose layout was never on any form says what it turned out
+to be. `start_run` also refuses a run with no input folder at all
+(`run_detect.missing_input_error`): a queued job may be added blank so chaining
+can fill it, and reaching the start of a run still blank means it never was.
+A blank input field is collected as `""` rather than `Path("")`, and
+`RunSpec` round-trips it as blank — `Path("")` serialises to `"."`, which reads
+as a real folder.
+
+Validation follows the same split. `_validate_run_request(for_queue=…)` lives in
+`AnalyzeRunMixin` beside `validate_for_queue`. With detection on, it skips the
+schema, fluorescent-channel and channel-comparing segmentation checks
+(`_segmentation_validation_errors(channels=False)` still requires a cytoplasm
+token for watershed and a positive minimum nucleus area, which detection
+cannot supply). On the queue path it also accepts a blank input and an input
+that does not exist yet, and so skips every check that reads the input: the
+packed-file redirect and the parts of the background-well and control-well
+checks that parse the input's filenames (`check_input=False`), which the
+pipeline itself refuses at run start. Those two parse with the form's schema,
+so with detection on they are deferred on the Run path as well; without it,
+the Run button asks all of them of whatever the field names, as before.
 
 **`_refresh_remote_controls` changes what is reachable, never what is set.** It
 shows the *Remote options* group only while a remote is selected and enables the
@@ -7384,7 +7470,14 @@ pieces are common code, each measured before it was extracted (CLAUDE.md §7.5
 controller — the run, the queue round-trip, the worker results and the "open in
 Analyze" hand-off — parameterised by a per-tool `ConverterSpec`;
 `datasets/core/channel_roles_row.py` holds the per-channel role picker, as a
-mixin rather than a widget so each page places the rows in its own layout; and
+mixin rather than a widget so each page places the rows in its own layout —
+`channel_role_pairs` writes the rows into a queued job's spec as
+`channel_roles`, and `set_channel_roles` reads them back, holding them until
+rows with those names are built, since an edited job's page reads its source
+file after `show_job` names it. Until then `channel_role_pairs` answers with
+the held roles, so the edit session's round-trip check — which collects
+straight after `show_job` — does not report them lost; and a job with no roles
+resets the rows to their defaults rather than keeping the previous job's; and
 `datasets/core/converter_dashboard.py` holds the plate map, which was already
 identical bar a class name and an object name.
 
@@ -8237,6 +8330,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `subprocess_kill.py` | Kills a spawned pipeline's whole process group / session (what Stop uses). |
 | `subprocess_text.py` | `TEXT_UTF8` — the one spelling of "decode this subprocess's output as UTF-8", splatted into every `subprocess.run` / `Popen` whose text-mode output the app reads. `text=True` on its own decodes with `locale.getpreferredencoding(False)`, which is UTF-8 on macOS and Linux but the ANSI codepage on Windows — so the `✓` / `→` markers, the em-dash in `Well X — done.` and any non-ASCII byte in a path either mojibake or raise `UnicodeDecodeError` out of a reader thread, skipping the `proc.wait()` behind it. `errors="replace"` is the second half: a `?` in a log line beats an exception that makes the GUI report a run as never started while it keeps going. `tests/test_subprocess_text_decoding.py` fails on any text-mode call in the tree that names no codec, including one whose flag sits in a kwargs dict; `services/remote_bootstrap.py` spells the same three arguments out because it stays stdlib-only. |
 | *(pipeline)* `settings_record.py` + `util/settings_digest.py` | Which configuration produced each well's output, recorded beside it as `<out>/.aw_settings/<WELL>.json`. `KEYED_ON` is the roster of what invalidates a prior result — the segmenter and every one of its thresholds, the channels quantified, the QC gate, both top-hat radii and FFT bands, the mesh background parameters, the flat-field and blank, the auto-threshold controls and their control wells, and the filename schema — with the reason each entry is in it; `settings_digest` hashes whatever of them a run states. **The keys are `process_microscopy.build_parser()` destinations**, because the one caller digests that parser's namespace: a key spelled any other way contributes nothing, silently, which is how the first version of the roster came to name six options that do not exist and leave fifteen real ones unkeyed. `NOT_KEYED_ON` is its complement, carrying the reason each remaining option is outside the key, so the two partition the parser exactly and a newly added option fails the suite until someone classifies it. Both of the pipeline's reuse predicates consult the record: the plain re-run skip (`well_skip.output_exists_for_well`) and the incremental done-set. Without it, re-running a plate with a different segmenter was answered "up to date" while `write_pipeline_info` rewrote the sidecar to advertise the new configuration, so the plate described a setup that had produced none of the numbers in it. The marker is written by the worker, after both the CSV and the archive are on disk and past every short circuit — a well that logged "up to date (no new FOVs)" computed nothing and must not be credited with this run's settings. A remote run's marker is written on the worker host, so `Fetcher._pull_settings_marker` brings each well's back with its output rather than the client recomputing a second copy of the digest. **A well with no recorded digest is accepted**, so introducing the check forces nobody to reprocess anything; the cost is that a plate written before the record existed keeps the old behaviour until its next forced run. The digest is deliberately blind to the paths, to `--force`/`--incremental` and to anything about the machine, so a plate computed locally and on a worker host produces the same key. Registered in `tests/test_reuse_is_keyed_completely.py`, which drives every key through `well_settings_allow_reuse` itself rather than only through the digest. |
+| `run_detect.py` | Run-time detection of an Analyze run's filename schema, separator and channel roles from its input (`resolve_detection`, for a `RunSpec` with `auto_detect`), preferring a chained converter's recorded `upstream_layout`, and the checks that the detected channels fit every option naming a channel (`channel_option_errors`). Detection that cannot decide raises `DetectionError`; it never falls back to the job's frozen values. `scan_pipeline_info` is the confidence rule the form's **Detect from filenames** shares. |
 | `run_journal.py` | The record of what a run intended, where it sent the work, and what became of each well — opened before the first well is processed, amended as the run goes, closed with an outcome, so a record still open at the next start-up is a run the app was killed during (§6.5). Stdlib-only. Writes `<output_dir>/.aw_journal/`: `run.json` for the run and one `wells/<WELL>.json` per well, `pipeline/run_report.py`'s one-atomic-file-per-unit shape so the orchestrator, the worker pool and the Fetcher thread all record without a lock. **Evidence, never authority** — `pipeline.completeness` stays the answer to "is this well complete" and the artefacts stay the done-set, so a journal that goes missing costs answers rather than making a good dataset look empty. It drives exactly one decision, the remote re-attach above. A well record can name the run it belongs to: `open_run` returns a token, and a writer that hands it back cannot file its progress under a previous run's surviving record — which is what a run whose own `open_run` failed would otherwise do. The local path passes it (`analyze.progress._journal_well`); the remote writers — `_record_remote_in_journal` and the Fetcher's three `record_well` calls — do not, so they are trusted writes and that protection does not extend to them. The consequence is worth stating rather than leaving implied: on a *remote* run whose own `open_run` failed, those four still write into whatever record survives in that directory, which in that exact scenario is the previous run's, still open because the index is holding it for resume. Measured: run 2's remote address and its uploaded wells land inside run 1's record. Re-attach is keyed on the cache key and would therefore decline, so no wrong numbers follow — but run 1's tally and per-well detail are corrupted, and its resume offer describes a run that did not produce them — while a run's *own* completion lines, which are parsed on the GUI thread and therefore arrive after the worker thread closed the record, are still accepted. Asking the cheaper question instead, "is a run open here", refused the tail of every plate: a 24-well run recorded four wells and the pre-run readout said so. `tests/test_a_run_end_to_end_records_every_well.py` drives a real run through a real drain and is the only test on either side of this record that does. `WELL_STATES` is the single roster of what a run can have done to a well, guarded by `tests/test_no_second_journal_vocabulary.py` — which walks dict keys as well as tuples, lists and sets, because a states-to-words table is presentation only for as long as the module holding it also consults the canonical roster; one that does not is holding its only copy, and anything iterating it drops every state it fails to spell. |
 
 These modules deliberately have no Qt imports beyond what the Analyze tab
@@ -10609,6 +10703,13 @@ Qt event loop. Four layers:
   before writing the link, and a reorder placing a dependent before its
   predecessor is refused.
 
+  A finished converter job also records a **`layout`** — what it knows about
+  the files it wrote (`services.job_kinds.produced_layout`, below) — and
+  `materialise` copies it into an Analyze successor's spec as
+  `upstream_layout`, beside the path. Only an Analyze successor receives it, and
+  only a job that asked for run-time detection reads it; `retry` clears it
+  with the other outputs, and a failed job records none.
+
   The editing half — everything that changes a job after it is queued —
   is `update_spec`, `set_label`, `duplicate`, `retry`, `clear_terminal`,
   `move_to` and `counts`. Two of those carry decisions worth stating.
@@ -10672,6 +10773,17 @@ Qt event loop. Four layers:
   `produced_for(kind, path)` and `CHAIN_KIND`. Together they are why the
   interface can derive a chain from "run after that one" alone; a user should
   not also have to know where each tool receives its input.
+
+  `CONVERTER_KINDS` and `produced_layout(kind, spec)` are the other thing a
+  finished job can hand along a chain. The three converters name every image
+  themselves, `<experiment>_<channel>_<well>_f<fov>_<tp>` with each token
+  passed through `util.filename_token.safe_token`, so the schema and separator
+  are stated rather than scanned; the channel roles come from the converter
+  page's role rows, which its queued spec carries as `channel_roles`. The
+  queue bridge stores the result on the finished job (`QueueBridge._on_job_finished`).
+  `services.run_detect.detect_layout` prefers it to a scan for the parts it
+  states, still checks its channel names against every name on disk, and
+  fails the run naming both lists when they disagree.
 
   **`CHAIN_KIND` is a constant, `"dataset_root"`, not a per-kind table**, and
   that is the correction it exists to record. Every tool here — Analyze
@@ -10960,7 +11072,9 @@ ends when its job starts running and a user on the Analyze pane is then
 watching that run. Saving first asks the kind's registered validator —
 `QueueSession.register_validator`, which only Analyze supplies, as
 `AnalyzeRunMixin.validate_for_queue`, the same `_validate_run_request` gate
-its own **+ Queue** uses — and a refusal leaves the session open on the form.
+its own **+ Queue** uses, with the queue path's deferrals (a blank or
+not-yet-written input, and with run-time detection on, the schema and channel
+checks) — and a refusal leaves the session open on the form.
 
 ---
 

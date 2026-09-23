@@ -23,6 +23,7 @@ into.
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from pathlib import Path
 
@@ -752,14 +753,10 @@ class AnalyzeSuspendMixin:
                 "instead.\n",
                 "INFO",
             )
-            return RunSpec(
-                opts=opts,
-                remote_name=spec.remote_name,
-                cleanup_remote=spec.cleanup_remote,
-                dry_run_cleanup=spec.dry_run_cleanup,
-                output_filter=spec.output_filter,
-                selective_channels=spec.selective_channels,
-            )
+            # `replace`, not a field-by-field rebuild: the rebuild dropped every
+            # field it did not name, and `auto_detect` was one of them, so a
+            # detection run resumed here ran the form's frozen layout instead.
+            return dataclasses.replace(spec, opts=opts)
         except Exception:
             swallowed()  # never block a run because the record was unreadable
             return spec
@@ -781,14 +778,8 @@ class AnalyzeSuspendMixin:
             spec = RunSpec.from_json(offer.spec)
             opts = dict(spec.opts)
             opts["incremental"] = True
-            spec = RunSpec(
-                opts=opts,
-                remote_name=spec.remote_name,
-                cleanup_remote=spec.cleanup_remote,
-                dry_run_cleanup=spec.dry_run_cleanup,
-                output_filter=spec.output_filter,
-                selective_channels=spec.selective_channels,
-            )
+            # Every other field as recorded — see `resume_aware_spec`.
+            spec = dataclasses.replace(spec, opts=opts)
             error = self.start_run(spec)
             if error is not None:
                 QMessageBox.critical(self, "Resume Error", error)

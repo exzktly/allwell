@@ -98,6 +98,9 @@ _SPEC = {
     "dry_run_cleanup": False,
     "output_filter": "full",
     "selective_channels": True,
+    # Non-default, so the round trip proves the flag is restored rather than
+    # merely left at the form's own default.
+    "auto_detect": True,
 }
 
 # Both remote variants below are combinations the form can actually reach.

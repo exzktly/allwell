@@ -302,11 +302,18 @@ class PackedConverterController(DatasetToolController):
         for name in self._tuple_fields():
             if name in params:
                 params[name] = list(params[name])
-        return {
+        spec = {
             "source": self.page.source_path(),
             "destination": self.page.destination_path(),
             "params": params,
         }
+        # Only when the page has rows to read: a source not yet readable has
+        # none, and an empty list would claim "no channels" rather than
+        # "unknown", which is what leaves a chained Analyze job to scan.
+        roles = self.page.channel_role_pairs()
+        if roles:
+            spec["channel_roles"] = roles
+        return spec
 
     def _on_queue_requested(self) -> None:
         if self._on_add_to_queue is not None:
@@ -321,6 +328,7 @@ class PackedConverterController(DatasetToolController):
                 if name in params:
                     params[name] = tuple(params[name] or ())
             self.page.set_params(self.spec.params_cls(**params))
+        self.page.set_channel_roles(spec.get("channel_roles") or [])
 
     def start_from_queue(self, spec: dict) -> None:
         self.show_job(spec)

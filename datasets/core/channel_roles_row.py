@@ -60,6 +60,10 @@ class ChannelRolesMixin:
         """Set up the state the rebuild keeps. Called from the page's ``__init__``."""
         self._channel_rows: list[tuple[str, QComboBox]] = []
         self._channel_names_shown: list[str] = []
+        # Roles a queued job asked for, held until rows with those names exist.
+        # The rows are built from reading the source file, which a job's
+        # ``show_job`` has only just named, so they may not exist yet.
+        self._pending_roles: dict[str, str] = {}
 
     def _rebuild_channels(self, names) -> None:
         """Rebuild the per-channel role rows when the channel set changes.
@@ -97,6 +101,57 @@ class ChannelRolesMixin:
             self._channels_lay.addWidget(row)
             self._channel_rows.append((name, combo))
         self._channels_caption.setVisible(bool(names))
+        if self._pending_roles and set(self._pending_roles) & set(names):
+            self._apply_roles(self._pending_roles)
+            self._pending_roles = {}
+
+    def channel_role_pairs(self) -> list[list[str]]:
+        """The rows as ``[[name, role], …]`` — JSON-shaped, for a queued job.
+
+        A queued converter job carries these so an Analyze job chained after
+        it can take the roles as known (``services.job_kinds.produced_layout``)
+        instead of guessing them from the filenames.
+        """
+        if not self._channel_rows and self._pending_roles:
+            # A job just shown, whose source the page has not read yet. The
+            # roles it is holding *are* this page's roles until the rows
+            # exist; answering "none" made the Job Queue's edit session, which
+            # collects straight after ``show_job``, report that saving would
+            # clear them, on every converter job it opened.
+            return [[name, role] for name, role in self._pending_roles.items()]
+        return [[name, str(combo.currentData() or "fluor")]
+                for name, combo in self._channel_rows]
+
+    def set_channel_roles(self, pairs) -> None:
+        """Select *pairs*' roles on the rows with those names.
+
+        Applied now to any row that already exists, and held for the next
+        rebuild otherwise — a queued job's page reads its source file after
+        ``show_job`` names it, so on an edit the rows usually arrive later.
+        """
+        roles = {str(p[0]): str(p[1]) for p in (pairs or [])
+                 if isinstance(p, (list, tuple)) and len(p) == 2}
+        shown = {name for name, _combo in self._channel_rows}
+        if not roles:
+            # A job with no roles of its own. The rows may still hold the
+            # previous job's choices — ``_rebuild_channels`` keeps rows whose
+            # names are unchanged — and saving this job would then write them
+            # into it. Back to the defaults the rows are built with.
+            self._pending_roles = {}
+            self._apply_roles(default_channel_roles(
+                [name for name, _combo in self._channel_rows]))
+            return
+        if set(roles) & shown:
+            self._apply_roles(roles)
+            self._pending_roles = {}
+        else:
+            self._pending_roles = roles
+
+    def _apply_roles(self, roles: dict[str, str]) -> None:
+        for name, combo in self._channel_rows:
+            role = roles.get(name)
+            if role in CHANNEL_ROLES:
+                combo.setCurrentIndex(CHANNEL_ROLES.index(role))
 
     def channel_tokens_dict(self) -> dict:
         """The channel role assignment as a ``pipeline_info``-shaped dict."""

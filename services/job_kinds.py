@@ -71,6 +71,38 @@ def produced_for(kind: str, path: str) -> dict:
 # Where a predecessor's output lands in this job's spec. For the two-dataset
 # tools it is the *first* dataset: chaining means "carry this result forward",
 # and the result is what the combination starts from.
+#: The kinds that write a dataset from a packed acquisition file, naming every
+#: image themselves. Those names are ``<experiment>_<channel>_<well>_f<fov>_<tp>``
+#: (``pipeline.explode_common`` and each ``*_explode`` module), with every
+#: token passed through ``util.filename_token.safe_token`` so no token can
+#: carry the separator — which is what lets :func:`produced_layout` state the
+#: schema outright instead of scanning for it.
+CONVERTER_KINDS = ("ome_import", "czi_import", "nd2_import")
+
+
+def produced_layout(kind: str, spec: dict) -> dict | None:
+    """What a finished converter job knows about the files it wrote, or ``None``.
+
+    The schema and separator are the converters' own naming; the channel roles
+    are the ones set on the converter's page, which its queued spec carries as
+    ``channel_roles`` (``[[name, role], …]``). A converter job queued before
+    its page could read the source has no roles, and then only the schema is
+    stated — the chained Analyze job scans for the rest.
+    """
+    if kind not in CONVERTER_KINDS:
+        return None
+    from util.channel_roles import channel_tokens_from_roles
+    from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
+
+    layout: dict = {"schema": DEFAULT_SCHEMA, "separator": DEFAULT_SEP}
+    pairs = [(str(pair[0]), str(pair[1]))
+             for pair in (spec.get("channel_roles") or [])
+             if isinstance(pair, (list, tuple)) and len(pair) == 2 and pair[0]]
+    if pairs:
+        layout.update(channel_tokens_from_roles(pairs).as_pipeline_info())
+    return layout
+
+
 CHAIN_TARGET = {
     "analyze": "opts.raw",
     "concatenate": "dataset1",
@@ -117,6 +149,21 @@ def _analyze_label(spec: dict) -> str:
         return KIND_LABEL["analyze"]
 
 
+def _analyze_detail(spec: dict) -> str:
+    """The input path, plus a note when the job reads its schema and channels
+    from that input when it runs.
+
+    The note is there because the row is the only place a queued job
+    describes itself, and a job whose schema and channels are settled at run
+    time otherwise reads exactly like one whose form fixed them.
+    """
+    raw = str((spec.get("opts") or {}).get("raw") or "").strip()
+    parts = [raw] if raw else []
+    if spec.get("auto_detect"):
+        parts.append("schema and channels read from the input when it runs")
+    return " · ".join(parts)
+
+
 def describe(kind: str, spec: dict) -> str:
     """A one-line name for this job, e.g. ``"Subset — plateA → plateA_sub"``.
 
@@ -143,7 +190,7 @@ def describe_detail(kind: str, spec: dict) -> str:
     showing an arrow with nothing on either side of it.
     """
     if kind == "analyze":
-        return str((spec.get("opts") or {}).get("raw") or "")
+        return _analyze_detail(spec)
     inputs, out_key = _DESCRIBE_KEYS.get(kind, ((), None))
     parts = [str(spec.get(k) or "").strip() for k in inputs]
     parts = [p for p in parts if p]

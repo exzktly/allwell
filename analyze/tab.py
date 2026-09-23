@@ -35,7 +35,6 @@ from services.pipeline_runner import (
     classify_log_line,
     is_transient_progress,
 )
-from services.pipeline_service import find_pipeline_script
 from ui import theme
 from ui import theme
 from core.safe import swallowed
@@ -487,7 +486,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         # anything whose well token will not parse.
         plan = plan_input_layout(
             Path(raw_str),
-            filename_schema=self._build_schema_arg(),
+            filename_schema="" if self._auto_detect_on() else self._build_schema_arg(),
             filename_sep=self._filename_sep(),
         )
         self._output_lbl.setText(
@@ -510,49 +509,6 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         error = self.start_run(spec, pipeline=pipeline)
         if error is not None:
             QMessageBox.critical(self, "Run Error", error)
-
-    def _validate_run_request(self) -> Path | None:
-        if not self._input_edit.text().strip():
-            QMessageBox.critical(self, "Input Error", "No input folder selected.")
-            return None
-        packed_hint = self._packed_input_hint()
-        if packed_hint is not None:
-            QMessageBox.critical(self, "Packed File Input", packed_hint)
-            return None
-        schema_errors = self._schema_errors()
-        if schema_errors:
-            QMessageBox.critical(self, "Schema Error", "Invalid filename schema:\n\n" + "\n".join(schema_errors))
-            return None
-        if not self._fluor_tokens_list():
-            QMessageBox.critical(self, "Channel Error", "At least one fluorescent channel token is required.")
-            return None
-        seg_errors = self._segmentation_validation_errors()
-        if seg_errors:
-            QMessageBox.critical(self, "Segmentation Error", "\n".join(seg_errors))
-            return None
-        # Numeric fields — block a bad value at the boundary rather than
-        # silently dropping the flag or dividing by zero downstream.
-        num_errors = _numeric_option_errors(self._collect_run_options())
-        if num_errors:
-            QMessageBox.critical(self, "Input Error", "\n".join(num_errors))
-            return None
-        # Empty-well flat-field / background reads its references from a named
-        # background well — require it to exist in the input before starting,
-        # rather than letting the run no-op or fail mid-pipeline.
-        bw_err = self._background_well_validation_error()
-        if bw_err:
-            QMessageBox.critical(self, "Background Well Error", bw_err)
-            return None
-        at_err = self._auto_threshold_validation_error()
-        if at_err:
-            QMessageBox.critical(self, "Control Well Error", at_err)
-            return None
-        pipeline = find_pipeline_script()
-        if pipeline is None:
-            QMessageBox.critical(self, "Configuration Error",
-                "process_microscopy.py not found next to allwell.py.")
-            return None
-        return pipeline
 
     def _set_running_ui_state(self, *, remote=None) -> None:
         self._running = True
@@ -741,7 +697,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
                     except Exception:
                         swallowed()
                     try:
-                        self.jobFinished.emit(ok, "" if ok else message, out_dir)
+                        self.jobFinished.emit(ok, message if not ok else self._detection_note, out_dir)
                     except Exception:
                         swallowed()
         except queue.Empty:

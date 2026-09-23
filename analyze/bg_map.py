@@ -1034,7 +1034,8 @@ class AnalyzeBackgroundMapMixin:
         self._refresh_background_map_editor()
 
     # ── validation, moved here with the field it now shares ──────────────
-    def _background_well_validation_error(self) -> str | None:
+    def _background_well_validation_error(self, *,
+                                          check_input: bool = True) -> str | None:
         """Block the run when an ``empty_well`` request cannot be honoured.
 
         Three questions, in the order a user would fix them: is a blank named at
@@ -1067,6 +1068,12 @@ class AnalyzeBackgroundMapMixin:
                     "comma-separated (e.g. H12, G12) — so its measured "
                     "background can be sampled.")
 
+        if not check_input:
+            # The input is not there yet, or its schema is about to be
+            # detected: the presence and pairing-coverage checks below both
+            # parse its filenames with the form's schema, so neither can be
+            # asked. The pipeline refuses the same two things at run start.
+            return None
         input_dir = Path(self._input_edit.text().strip())
         sep = self._schema_picker.separator()
         schema = [f.strip().lower()

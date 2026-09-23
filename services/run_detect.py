@@ -42,9 +42,11 @@ from pathlib import Path
 from util.channel_roles import (
     ChannelTokens,
     LABELFREE_METHODS,
+    channel_tokens_from_roles,
+    default_channel_roles,
     phase_role_conflicts,
 )
-from util.schema_infer import InferredSchema, infer_from_dir
+from util.schema_infer import InferredSchema, _spread, infer_schema, sample_stems
 
 #: The ``RunSpec`` JSON key that asks for detection at run time. Beside
 #: ``opts`` rather than inside it, so it can never reach the pipeline's argv.
@@ -77,6 +79,11 @@ class DetectedLayout:
     channels_from: str = "scan"
     #: Where the schema came from, the same two words.
     schema_from: str = "scan"
+    #: Why the segmentation channel is the one it is: ``"phase"`` (label-free),
+    #: ``"upstream"`` (the converter's roles), ``"form"`` (the form's own
+    #: Segmentation channel, which the input carries) or ``"names"`` (chosen
+    #: from the channel names).
+    segmentation_from: str = "names"
     #: The guess's own statement of the sample it did not match, or ``""``.
     shortfall: str = ""
 
@@ -93,7 +100,8 @@ class DetectedLayout:
         """One line for the run log and the finished job's queue row."""
         parts = [f"schema {self.schema} (separator {self.separator!r})",
                  f"channels {', '.join(self.fluor_tokens) or 'none'}",
-                 f"segmentation channel {self.nuclear_token}"]
+                 f"segmentation channel {self.nuclear_token}"
+                 + _SEGMENTATION_WHY.get(self.segmentation_from, "")]
         if self.phase_token:
             parts.append(f"phase {self.phase_token}")
         text = "Detected " + "; ".join(parts)
@@ -107,6 +115,13 @@ class DetectedLayout:
         if self.shortfall:
             text += f" {self.shortfall}"
         return text
+
+
+_SEGMENTATION_WHY = {
+    "phase": " (the phase channel, for label-free)",
+    "form": " (as set on the form)",
+    "names": " (chosen from the channel names)",
+}
 
 
 def wants_detection(spec: dict) -> bool:
@@ -132,43 +147,98 @@ def scan_pipeline_info(guess: InferredSchema) -> tuple[dict, ChannelTokens | Non
     return info, tokens
 
 
-def _lower(tokens) -> list[str]:
-    return [str(t or "").strip().lower() for t in tokens if str(t or "").strip()]
-
-
 def _upstream_tokens(upstream: dict) -> ChannelTokens | None:
     nuclear = str(upstream.get("nuclear_token") or "").strip()
     fluor = [str(t).strip() for t in (upstream.get("fluor_tokens") or []) if str(t).strip()]
-    if not nuclear and not fluor:
+    phase = str(upstream.get("phase_token") or "").strip()
+    if not nuclear and not fluor and not phase:
         return None
-    return ChannelTokens(nuclear_token=nuclear, fluor_tokens=fluor,
-                         phase_token=str(upstream.get("phase_token") or "").strip())
+    return ChannelTokens(nuclear_token=nuclear, fluor_tokens=fluor, phase_token=phase)
 
 
-def detect_layout(raw: Path | str, upstream: dict | None = None) -> DetectedLayout:
+#: How many names the schema is inferred from. Well above the form's
+#: ``_SAMPLE_LIMIT`` — this runs once per run rather than per keystroke, and
+#: measured at ~0.27 s for 20,000 names — so a pattern present in a small
+#: minority of the plate still reaches the classifier.
+_INFER_SAMPLE = 20_000
+
+#: Every name is read for the channel list, up to this many. The channel list
+#: decides what gets quantified, so a sample is the wrong source for it: a
+#: channel present in some wells only, or one a stride happens to skip, would
+#: be dropped from the run without a word. Reading every name costs no more
+#: file I/O than the sample does — the sampler already opens every archive and
+#: lists every folder — only the splitting.
+_ENUMERATE_LIMIT = 500_000
+
+
+def _channel_values(stems: list[str], separator: str, schema: str) -> list[str]:
+    """Every distinct channel-slot value among *stems*, in first-seen order."""
+    fields = [f.strip() for f in schema.split(":")]
+    if "channel" not in fields:
+        return []
+    k, ci = len(fields), fields.index("channel")
+    out: dict[str, None] = {}
+    for stem in stems:
+        parts = stem.split(separator)
+        if len(parts) == k and parts[ci]:
+            out.setdefault(parts[ci], None)
+    return list(out)
+
+
+def _cell_body_cellpose(method: str, cellpose_model: str) -> bool:
+    """General Cellpose with a model that segments whole cells, not nuclei."""
+    return method == "cellpose" and str(cellpose_model or "").strip().lower() != "nuclei"
+
+
+def detect_layout(
+    raw: Path | str,
+    upstream: dict | None = None,
+    *,
+    method: str = "",
+    requested_segmentation: str = "",
+    cellpose_model: str = "",
+) -> DetectedLayout:
     """Everything detection can establish about *raw*, or :class:`DetectionError`.
 
-    *upstream* is the layout a converter earlier in the chain recorded, when
-    there is one. It wins over the scan for the parts it states; the scan
-    still has to agree with it about which channels the files carry, because
-    a converter job that was edited after this one was chained, or a folder
-    somebody wrote into by hand, would otherwise run under roles that name
-    channels the files do not have.
+    The **schema** comes from *upstream* when a converter earlier in the chain
+    stated it, and otherwise from a confident guess over a dense sample of the
+    input's names. The **channel list** always comes from every name, never a
+    sample (:data:`_ENUMERATE_LIMIT`).
+
+    The **segmentation channel** depends on the method, because "which channel
+    is segmented" is a choice, not a fact the filenames carry:
+
+    * label-free methods segment the phase channel — the pipeline itself
+      remaps the segmentation slot onto it — so that is what is written, and
+      every other channel is quantified;
+    * otherwise the converter's roles, when there are any, then
+      *requested_segmentation* (the form's own Segmentation channel) when the
+      input carries it, then the name heuristic in ``util.channel_roles``;
+    * general Cellpose with a cell-body model is refused when only the
+      heuristic could choose, because the heuristic picks a nuclear stain and
+      that model would then segment nuclei as cells without complaint.
+
+    The converter's channel names are checked against the enumerated list;
+    a job edited after it was chained, or a folder written into by hand,
+    would otherwise run under roles naming channels the files lack.
     """
     upstream = dict(upstream or {})
     name = Path(str(raw)).name or str(raw)
     try:
-        guess = infer_from_dir(raw)
+        stems = sample_stems(raw, limit=_ENUMERATE_LIMIT)
     except OSError as exc:
         raise DetectionError(
             f"The input folder {name!r} could not be read to detect its "
             f"filename layout: {exc}") from exc
-    if guess is None or guess.sampled == 0:
+    if not stems:
         raise DetectionError(
             f"No image filenames were found in {name!r} to detect a filename "
             "layout from. Check that the job before this one wrote its output "
             "there, or turn off run-time detection and set the schema and "
             "channels by hand.")
+    guess = infer_schema(_spread(stems, _INFER_SAMPLE))
+    if guess is None:
+        raise DetectionError(f"No filename layout could be read from {name!r}.")
 
     schema = str(upstream.get("schema") or "").strip()
     separator = str(upstream.get("separator") or "")
@@ -178,41 +248,71 @@ def detect_layout(raw: Path | str, upstream: dict | None = None) -> DetectedLayo
             raise DetectionError(
                 f"Couldn't read a filename layout from {name!r}: "
                 f"{guess.summary()} No well and channel pair was identified. "
-                "Set the schema and channels by hand for this job.")
+                "Turn off run-time detection and set the schema and channels "
+                "by hand for this job.")
         schema, separator = guess.schema_str, guess.separator
 
-    tokens = _upstream_tokens(upstream)
-    channels_from = "upstream" if tokens is not None else "scan"
-    if tokens is None:
-        _info, tokens = scan_pipeline_info(guess)
-        if tokens is None:
-            raise DetectionError(
-                f"No channel names could be read from the filenames in {name!r}. "
-                "Set the channels by hand for this job.")
-    elif guess.channels:
-        carried = set(_lower(guess.channels))
-        named = [tokens.nuclear_token, *tokens.fluor_tokens]
-        missing = [t for t in named if t and t.lower() not in carried]
+    carried = _channel_values(stems, separator, schema)
+    if not carried:
+        raise DetectionError(
+            f"No channel names could be read from the filenames in {name!r}.")
+
+    up = _upstream_tokens(upstream)
+    if up is not None:
+        named = [t for t in (up.nuclear_token, *up.fluor_tokens, up.phase_token) if t]
+        missing = [t for t in dict.fromkeys(named) if t not in carried]
         if missing:
             raise DetectionError(
                 f"The converter this job ran after assigned roles to "
                 f"{', '.join(missing)}, but the files in {name!r} carry "
-                f"{', '.join(guess.channels)}. Edit the job's channels by hand.")
+                f"{', '.join(carried)}. Turn off run-time detection and set "
+                "this job's channels by hand.")
+        roles, channels_from = up, "upstream"
+        in_play = [c for c in carried if c in set(named)]
+    else:
+        roles = channel_tokens_from_roles(
+            [(c, r) for c, r in default_channel_roles(carried).items()])
+        channels_from, in_play = "scan", list(carried)
 
-    if not tokens.nuclear_token:
+    phase = roles.phase_token
+    if method in LABELFREE_METHODS:
+        if not phase:
+            raise DetectionError(
+                "Label-free segmentation needs a phase/brightfield channel, and "
+                f"none of the channels in {name!r} ({', '.join(carried)}) is "
+                "marked or named as one.")
+        nuclear, seg_from = phase, "phase"
+    elif up is not None and up.nuclear_token:
+        nuclear, seg_from = up.nuclear_token, "upstream"
+    elif requested_segmentation and requested_segmentation in in_play:
+        nuclear, seg_from = requested_segmentation, "form"
+    else:
+        nuclear, seg_from = roles.nuclear_token, "names"
+        if _cell_body_cellpose(method, cellpose_model):
+            raise DetectionError(
+                f"Cellpose ({cellpose_model or 'cell-body model'}) segments whole "
+                f"cells, and the Segmentation channel on the form "
+                f"({requested_segmentation or 'blank'}) is not one of the "
+                f"channels in {name!r} ({', '.join(carried)}). Name the "
+                "cell-body channel there; a channel chosen from the names "
+                "would be a nuclear stain.")
+    if not nuclear:
         raise DetectionError(
             f"No channel in {name!r} could be given the segmentation role.")
-    if not tokens.fluor_tokens:
+
+    if method in LABELFREE_METHODS:
+        fluor = list(in_play)          # the phase channel is quantified too
+    else:
+        fluor = [c for c in in_play if c != nuclear]
+    if not fluor:
         raise DetectionError(
-            f"Only one channel ({tokens.nuclear_token}) was found in {name!r}; "
-            "a run needs at least one fluorescent channel besides the "
-            "segmentation channel.")
+            f"Only one channel ({nuclear}) was found in {name!r}; a run needs "
+            "at least one fluorescent channel besides the segmentation channel.")
     return DetectedLayout(
-        schema=schema, separator=separator,
-        nuclear_token=tokens.nuclear_token,
-        fluor_tokens=list(tokens.fluor_tokens),
-        phase_token=tokens.phase_token,
+        schema=schema, separator=separator, nuclear_token=nuclear,
+        fluor_tokens=fluor, phase_token=phase,
         channels_from=channels_from, schema_from=schema_from,
+        segmentation_from=seg_from,
         shortfall=guess.shortfall() if schema_from == "scan" else "",
     )
 
@@ -222,59 +322,59 @@ def channel_option_errors(opts: dict) -> list[str]:
 
     A queued job's segmentation settings were chosen against whatever channels
     the form held when it was queued. Once detection has replaced those, every
-    option that names a channel has to be checked against the replacement:
-    ``cellpose_nuclei_channel`` in particular is looked up in the pipeline
-    and, when absent, silently ignored (``process_microscopy``'s Cellpose
-    branch) — so a stale one does not fail, it quietly segments without the
-    nucleus image it was asked for.
+    option that names a channel has to be checked against the replacement,
+    **the way the pipeline matches it**: smFISH and the watershed cytoplasm
+    channel by exact membership of the fluorescent list
+    (``process_microscopy``'s ``tok in set(smfish_tokens)`` and
+    ``cytoplasm_token not in fluor_tokens``), the Cellpose nuclei channel
+    case-insensitively. A case-insensitive check on the first two passed a
+    ``gfp`` smFISH mark that the pipeline then silently never applied, and a
+    ``mcherry`` cytoplasm channel that failed every field of the run. The
+    Cellpose nuclei channel matters most of all: absent from the list, the
+    pipeline ignores it silently and segments without the nucleus image it
+    was asked for.
     """
     nuclear = str(opts.get("nuclear_token") or "").strip()
     fluor = [str(t) for t in (opts.get("fluor_tokens") or [])]
-    carried = set(_lower([nuclear, *fluor]))
+    have = ", ".join(fluor) or "none"
     method = str(opts.get("segmentation_method") or "")
     errors: list[str] = []
 
-    smfish = [t for t in (opts.get("smfish_tokens") or []) if str(t).strip()]
-    stray = [t for t in smfish if str(t).strip().lower() not in set(_lower(fluor))]
+    smfish = [str(t).strip() for t in (opts.get("smfish_tokens") or []) if str(t).strip()]
+    stray = [t for t in smfish if t not in fluor]
     if stray:
         errors.append(
             f"smFISH is marked on {', '.join(stray)}, which the input's "
-            f"fluorescent channels ({', '.join(fluor) or 'none'}) do not include.")
+            f"fluorescent channels ({have}) do not include.")
 
     if method == "stardist_seeded_watershed_cell":
         cyto = str(opts.get("cytoplasm_token") or "").strip()
         if not cyto:
             errors.append("Watershed mode requires a cytoplasm token.")
-        elif cyto.lower() not in carried:
+        elif cyto == nuclear:
             errors.append(
-                f"The cytoplasm channel is {cyto!r}, which the input does not "
-                f"carry (it has {', '.join([nuclear, *fluor])}).")
-        elif cyto.lower() == nuclear.lower():
+                f"The segmentation channel is {nuclear!r}, which is also the "
+                "cytoplasm channel. Cytoplasm token must differ from nuclear token.")
+        elif cyto not in fluor:
             errors.append(
-                f"The detected segmentation channel is {nuclear!r}, which is "
-                "also the cytoplasm channel. Cytoplasm token must differ from "
-                "nuclear token.")
-
-    if method in LABELFREE_METHODS and not str(opts.get("phase_token") or "").strip():
-        errors.append(
-            "Label-free segmentation needs a phase/brightfield channel, and "
-            "none of the input's channels reads as one "
-            f"({', '.join([nuclear, *fluor])}).")
+                f"The cytoplasm channel is {cyto!r}, which is not one of the "
+                f"input's fluorescent channels ({have}).")
 
     nuc_channel = str(opts.get("cellpose_nuclei_channel") or "").strip()
     if method.startswith("cellpose") and nuc_channel \
-            and nuc_channel.lower() not in set(_lower(fluor)):
-        errors.append(
-            f"The Cellpose nuclei channel is {nuc_channel!r}, which is not one "
-            f"of the input's fluorescent channels ({', '.join(fluor) or 'none'}).")
+            and nuc_channel.lower() not in {t.lower() for t in fluor}:
+        where = ("is the segmentation channel, not a fluorescent one"
+                 if nuc_channel.lower() == nuclear.lower()
+                 else f"is not one of the input's fluorescent channels ({have})")
+        errors.append(f"The Cellpose nuclei channel is {nuc_channel!r}, which {where}.")
 
     phase = str(opts.get("phase_token") or "").strip()
     for slot in phase_role_conflicts(
             method, phase_token=phase, nuclear_token=nuclear,
             cytoplasm_token=str(opts.get("cytoplasm_token") or "")):
         errors.append(
-            f"The detected phase channel {phase!r} is also the {slot} "
-            "channel; a fluorescence routine cannot segment a brightfield image.")
+            f"The phase channel {phase!r} is also the {slot} channel; a "
+            "fluorescence routine cannot segment a brightfield image.")
     return errors
 
 
@@ -307,9 +407,14 @@ def resolve_detection(spec: dict) -> tuple[dict, DetectedLayout | None]:
     raw = str((spec.get("opts") or {}).get("raw") or "").strip()
     if not raw:
         raise DetectionError(missing_input_error(spec) or "")
-    layout = detect_layout(raw, spec.get(UPSTREAM_KEY))
-    out = dict(spec)
     opts = dict(spec.get("opts") or {})
+    layout = detect_layout(
+        raw, spec.get(UPSTREAM_KEY),
+        method=str(opts.get("segmentation_method") or ""),
+        requested_segmentation=str(opts.get("nuclear_token") or "").strip(),
+        cellpose_model=str(opts.get("cellpose_model") or ""),
+    )
+    out = dict(spec)
     opts.update(layout.as_opts())
     out["opts"] = opts
     errors = channel_option_errors(opts)

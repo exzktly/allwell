@@ -5963,26 +5963,58 @@ section's **Detect schema & channels at run time** checkbox
 (`AnalyzeSchemaSectionMixin._auto_detect_cb`) sets `RunSpec.auto_detect`, which
 lives beside `opts` so it can never reach the pipeline's argv; `hydrate_job`
 restores it, and sets it false for a job with no such key. Ticking it greys the
-schema picker and the segmentation-channel row, whose values are about to be
-replaced, and `_refresh_schema_preview` stops requiring a valid schema, since
-refusing one would lock the input field the option exists to let the user fill.
+schema picker, whose values are about to be replaced, and
+`_refresh_schema_preview` stops requiring a valid schema, since refusing one
+would lock the input field the option exists to let the user fill. The
+Segmentation channel stays live: which channel to segment is a choice, not a
+fact the filenames carry, and detection honours it when the input carries it.
+The readout under the input field counts loose files by suffix rather than
+under the form's schema (`_refresh_output` passes none), the pre-run report's
+scope sentence is left out, and its coverage scan resolves the detected layout
+on its worker thread before reading the output folder.
 
 `start_run` resolves it, so every entry point — Run, the queue, the resume
 banner — answers the same way: after the busy refusal and before
 `resume_aware_spec`, it calls `services.run_detect.resolve_detection`, which
-scans the input with `util.schema_infer.infer_from_dir` and replaces exactly
-the `opts` keys in `run_detect.DETECTED_OPTS` (schema, separator, segmentation
-channel, fluorescent channels, phase channel). Unlike the button, which applies
-whatever part of a guess it gets because a person is looking at the result,
-an unattended run requires all of it: a guess that is not confident, a folder
-with no image names, no channel for the segmentation role or no fluorescent
-channel besides it raises `DetectionError`, and `start_run` returns its message
-as the run's failure. It never falls back to the frozen values, which are
-exactly the ones the job asked not to use. The resolved options are then held
-against every option that *names* a channel (`run_detect.channel_option_errors`):
-an smFISH mark, the watershed cytoplasm channel, the Cellpose nuclei channel —
-which the pipeline silently ignores when absent — a label-free run's phase
-channel, and the phase-role conflict. The detected layout's one-line
+replaces exactly the `opts` keys in `run_detect.DETECTED_OPTS` (schema,
+separator, segmentation channel, fluorescent channels, phase channel). The
+resume banner's `_resume_suspended` and `resume_aware_spec` both change only
+`opts` (`dataclasses.replace`), so a resumed detection run detects again rather
+than running the frozen layout its suspend record also holds.
+
+`detect_layout` infers the schema from a dense sample of the input's names
+(`_INFER_SAMPLE`, 20,000) but reads the **channel list from every name**
+(`_ENUMERATE_LIMIT`): the channel list decides what is quantified, so a channel
+a sample misses would be dropped from the run without a word. That costs no
+more file I/O than the sample — the sampler already opens every archive — and
+measured 0.81 s for a 96-well plate of 103,680 zip members. It runs on the GUI
+thread, once per run start, like the form's Detect button and the input
+planner: `start_run` refuses before it touches any UI state, and moving the
+scan into the runner's worker would make that refusal asynchronous. The sampler itself
+(`util.schema_infer._spread`) starts each archive's stride one member later
+than the last, because the converters write every archive with the channel
+varying fastest and a stride that was a multiple of the channel count read the
+same channel from every well; the form's Detect button had the same blind spot.
+
+The segmentation channel is chosen by method, because it is a choice rather
+than a fact the names carry. Label-free methods segment the phase channel —
+the pipeline remaps the segmentation slot onto it — so detection writes that,
+and quantifies every channel. Otherwise the converter's roles win, then the
+form's own Segmentation channel when the input carries it, then the name
+heuristic in `util.channel_roles`; general Cellpose with a cell-body model is
+refused when only the heuristic could choose, since the heuristic picks a
+nuclear stain. Unlike the button, which applies whatever part of a guess it
+gets because a person is looking at the result, an unattended run requires all
+of it: a guess that is not confident, a folder with no image names, no channel
+for the segmentation role or no fluorescent channel besides it raises
+`DetectionError`, and `start_run` returns its message as the run's failure. It
+never falls back to the frozen values, which are exactly the ones the job asked
+not to use. The resolved options are then held against every option that
+*names* a channel (`run_detect.channel_option_errors`), matched the way the
+pipeline matches them — smFISH marks and the watershed cytoplasm channel by
+exact membership of the fluorescent list, the Cellpose nuclei channel (which
+the pipeline silently ignores when absent) case-insensitively — and against
+the phase-role conflict. The detected layout's one-line
 `DetectedLayout.summary()` is written to the log and the dashboard status when
 the run starts, and carried as the finished job's `jobFinished` message, so the
 queue row of a job whose layout was never on any form says what it turned out
@@ -6002,8 +6034,9 @@ cannot supply). On the queue path it also accepts a blank input and an input
 that does not exist yet, and so skips every check that reads the input: the
 packed-file redirect and the parts of the background-well and control-well
 checks that parse the input's filenames (`check_input=False`), which the
-pipeline itself refuses at run start. The Run button asks all of them of
-whatever the field names, as before.
+pipeline itself refuses at run start. Those two parse with the form's schema,
+so with detection on they are deferred on the Run path as well; without it,
+the Run button asks all of them of whatever the field names, as before.
 
 **`_refresh_remote_controls` changes what is reachable, never what is set.** It
 shows the *Remote options* group only while a remote is selected and enables the
@@ -7441,7 +7474,10 @@ mixin rather than a widget so each page places the rows in its own layout —
 `channel_role_pairs` writes the rows into a queued job's spec as
 `channel_roles`, and `set_channel_roles` reads them back, holding them until
 rows with those names are built, since an edited job's page reads its source
-file after `show_job` names it; and
+file after `show_job` names it. Until then `channel_role_pairs` answers with
+the held roles, so the edit session's round-trip check — which collects
+straight after `show_job` — does not report them lost; and a job with no roles
+resets the rows to their defaults rather than keeping the previous job's; and
 `datasets/core/converter_dashboard.py` holds the plate map, which was already
 identical bar a class name and an object name.
 
@@ -10746,8 +10782,8 @@ Qt event loop. Four layers:
   page's role rows, which its queued spec carries as `channel_roles`. The
   queue bridge stores the result on the finished job (`QueueBridge._on_job_finished`).
   `services.run_detect.detect_layout` prefers it to a scan for the parts it
-  states, still checks its channel names against the files on disk, and fails
-  the run naming both lists when they disagree.
+  states, still checks its channel names against every name on disk, and
+  fails the run naming both lists when they disagree.
 
   **`CHAIN_KIND` is a constant, `"dataset_root"`, not a per-kind table**, and
   that is the correction it exists to record. Every tool here — Analyze

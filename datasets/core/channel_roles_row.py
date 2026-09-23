@@ -112,6 +112,13 @@ class ChannelRolesMixin:
         it can take the roles as known (``services.job_kinds.produced_layout``)
         instead of guessing them from the filenames.
         """
+        if not self._channel_rows and self._pending_roles:
+            # A job just shown, whose source the page has not read yet. The
+            # roles it is holding *are* this page's roles until the rows
+            # exist; answering "none" made the Job Queue's edit session, which
+            # collects straight after ``show_job``, report that saving would
+            # clear them, on every converter job it opened.
+            return [[name, role] for name, role in self._pending_roles.items()]
         return [[name, str(combo.currentData() or "fluor")]
                 for name, combo in self._channel_rows]
 
@@ -125,7 +132,16 @@ class ChannelRolesMixin:
         roles = {str(p[0]): str(p[1]) for p in (pairs or [])
                  if isinstance(p, (list, tuple)) and len(p) == 2}
         shown = {name for name, _combo in self._channel_rows}
-        if roles and set(roles) & shown:
+        if not roles:
+            # A job with no roles of its own. The rows may still hold the
+            # previous job's choices — ``_rebuild_channels`` keeps rows whose
+            # names are unchanged — and saving this job would then write them
+            # into it. Back to the defaults the rows are built with.
+            self._pending_roles = {}
+            self._apply_roles(default_channel_roles(
+                [name for name, _combo in self._channel_rows]))
+            return
+        if set(roles) & shown:
             self._apply_roles(roles)
             self._pending_roles = {}
         else:

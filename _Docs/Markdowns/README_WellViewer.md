@@ -6041,11 +6041,17 @@ instead of babysitting each one.
 that analyses what a converter earlier in the queue will produce:
 
 - Tick **Detect schema & channels at run time** under *Filename Schema*. The
-  schema picker and the *Segmentation channel* field grey out: when the run
-  starts, All-Well reads the filename schema, the channels and which channel to
-  segment from the input's filenames, exactly as **Detect from filenames**
-  does. When the job runs after a converter, the converter's own file naming
-  and the channel roles you picked on its page are used instead of a guess.
+  schema picker greys out: when the run starts, All-Well reads the filename
+  schema and the channels from the input's filenames, as **Detect from
+  filenames** does. When the job runs after a converter, the converter's own
+  file naming and the channel roles you picked on its page are used instead of
+  a guess.
+- The channel that is segmented is the *Segmentation channel* you set, if the
+  input has it; otherwise one is chosen from the channel names (a nuclear stain
+  such as DAPI or Hoechst). Label-free runs segment the phase/brightfield
+  channel. For Cellpose with a cell-body model, name the cell-body channel —
+  a channel chosen from the names would be a nuclear stain, so the run refuses
+  to guess.
 - The input folder may be one that has not been written yet, or blank if you
   are about to chain the job with the row's **Run after…** menu. A blank job
   that is never chained says so on its row, and fails when it starts.

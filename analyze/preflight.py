@@ -71,6 +71,7 @@ from PySide6.QtWidgets import (
 from ui import theme
 from services import run_journal
 from services.input_resolution_service import plan_incremental_scope
+from services.run_detect import DetectionError, resolve_detection
 from pipeline import completeness
 from core.safe import swallow, swallowed
 
@@ -469,6 +470,12 @@ class AnalyzePreflightMixin:
         in_dir = getattr(self, "_preflight_input", "")
         if not in_dir:
             return ""
+        if self._auto_detect_on():
+            # The sentence counts new images with the form's schema, which
+            # run-time detection is about to replace, and this runs on the GUI
+            # thread, where the detection scan does not belong. Saying nothing
+            # beats a count made under a layout that will not run.
+            return ""
         try:
             opts = self._collect_run_options()
         except Exception:
@@ -505,11 +512,26 @@ class AnalyzePreflightMixin:
         if not in_dir:
             return
         signals = self._preflight_signals
+        detect = self._auto_detect_on()
 
         def _work() -> None:
             block = None
+            scan_opts = opts
+            if detect:
+                # With run-time detection on, the report describes the layout
+                # the run will use, not the one the form shows. Resolved here,
+                # on the worker, because the scan reads the input; a layout
+                # that cannot be decided gives no report rather than one made
+                # under the form's frozen schema.
+                try:
+                    scan_opts = resolve_detection(
+                        {"opts": {**opts, "raw": in_dir},
+                         "auto_detect": True})[0]["opts"]
+                except DetectionError:
+                    scan_opts = None
             try:
-                block = _scan_coverage(Path(in_dir), Path(target), opts)
+                if scan_opts is not None:
+                    block = _scan_coverage(Path(in_dir), Path(target), scan_opts)
             except Exception:
                 swallowed(f"scanning {target} for the pre-run readout")
             try:

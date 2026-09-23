@@ -136,3 +136,25 @@ def test_an_edit_applies_roles_once_the_rows_arrive(converter):
     # Applied once: a later, different source keeps its own defaults.
     page._rebuild_channels(["Hoechst", "GFP"])
     assert _roles(page) == [["Hoechst", "nuclear"], ["GFP", "fluor"]]
+
+
+def test_a_job_with_no_roles_resets_the_previous_job_s(converter):
+    """Rows whose names are unchanged are kept by a rebuild, so without the
+    reset the previous job's roles were saved into this one."""
+    page = converter.page
+    page._rebuild_channels(["DAPI", "GFP"])
+    page.set_channel_roles([["DAPI", "fluor"], ["GFP", "nuclear"]])
+    # What ``show_job`` passes for a job with no roles, on rows that survive —
+    # the same source re-read keeps rows whose names are unchanged.
+    page.set_channel_roles([])
+    page._rebuild_channels(["DAPI", "GFP"])
+    assert _roles(page) == [["DAPI", "nuclear"], ["GFP", "fluor"]]
+
+
+def test_roles_held_for_unbuilt_rows_are_what_the_page_reports(converter):
+    """The edit session collects straight after ``show_job``; reporting no
+    roles there made it warn that saving would clear them."""
+    converter.show_job({"source": "", "destination": "",
+                        "channel_roles": [["DAPI", "fluor"], ["GFP", "nuclear"]]})
+    assert converter.collect_spec()["channel_roles"] == [["DAPI", "fluor"],
+                                                         ["GFP", "nuclear"]]

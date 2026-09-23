@@ -189,7 +189,7 @@ def _is_bare_number(tok: str) -> bool:
 
 
 # ── sampling ─────────────────────────────────────────────────────────────────
-def _spread(names: list[str], take: int) -> list[str]:
+def _spread(names: list[str], take: int, phase: int = 0) -> list[str]:
     """Up to *take* entries drawn evenly across *names*, keeping their order.
 
     A leading slice is the wrong sample here. Names arrive sorted, and a plate is
@@ -199,13 +199,25 @@ def _spread(names: list[str], take: int) -> list[str]:
     slot with one distinct value is not recognised as the channel slot at all, so
     the scan reports no channels rather than the wrong ones. Striding the listing
     reaches every value of the slowest-varying slot whatever it happens to be.
+
+    *phase* shifts where the stride starts, and callers pass each container's
+    position. Without it, a plate of per-well archives that all hold the same
+    number of members was sampled at the **same indices in every archive** —
+    and the converters write each archive with the channel varying fastest, so
+    a stride that happened to be a multiple of the channel count read one
+    channel from every well and never the others. A 96-well, 5-channel plate
+    lost a channel from the scan without a word; a 3-channel, 4-field one read
+    a single channel and was not recognised at all. Shifting the start by one
+    member per archive walks the stride's residues across the plate instead.
     """
     if take <= 0 or not names:
         return []
     if len(names) <= take:
         return list(names)
     step = len(names) / take
-    return [names[int(i * step)] for i in range(take)]
+    shift = phase % max(1, int(step))
+    last = len(names) - 1
+    return [names[min(last, int(i * step) + shift)] for i in range(take)]
 
 
 def _tif_stems_in(root: Path, limit: int) -> list[str]:
@@ -228,14 +240,14 @@ def _zip_stems_in(root: Path, limit: int) -> list[str]:
     zips = [p for p in files_in(root)
             if p.match("*.zip")] if root.is_dir() else []
     per_zip = max(4, (limit // max(1, len(zips))) if zips else limit)
-    for z in zips:
+    for phase, z in enumerate(zips):
         try:
             with zipfile.ZipFile(z) as zf:
                 members = [Path(m).stem for m in zf.namelist()
                            if is_run_input_member(m)]
         except (zipfile.BadZipFile, OSError):
             continue
-        stems.extend(_spread(members, min(per_zip, limit - len(stems))))
+        stems.extend(_spread(members, min(per_zip, limit - len(stems)), phase))
         if len(stems) >= limit:
             break
     return stems
@@ -264,13 +276,13 @@ def _well_folder_stems_in(root: Path, limit: int) -> list[str]:
         return []
     stems: list[str] = []
     per_well = max(4, (limit // max(1, len(wells))) if wells else limit)
-    for well in wells:
+    for phase, well in enumerate(wells):
         try:
             names = [f.stem for f in files_in(well)
                      if is_run_input_member(f.name)]
         except OSError:
             continue
-        stems.extend(_spread(names, min(per_well, limit - len(stems))))
+        stems.extend(_spread(names, min(per_well, limit - len(stems)), phase))
         if len(stems) >= limit:
             break
     return stems

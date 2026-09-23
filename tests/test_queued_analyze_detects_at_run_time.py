@@ -112,7 +112,7 @@ def test_the_picker_greys_out_and_run_stays_armed_with_an_invalid_schema(tab):
     assert not tab._run_btn.isEnabled()
     tab._auto_detect_cb.setChecked(True)
     assert not tab._schema_picker.isEnabled()
-    assert not tab._nuclear_row_widget.isEnabled()
+    assert tab._nuclear_row_widget.isEnabled()          # still a choice
     assert tab._run_btn.isEnabled()
     assert tab._input_edit.isEnabled()
     tab._auto_detect_cb.setChecked(False)
@@ -318,3 +318,74 @@ def test_the_queue_accepts_an_unwritten_input_without_detection(tab, tmp_path,
     spec = _queue_from_form(tab)
     assert refused == []
     assert spec["auto_detect"] is False
+
+
+# ── resuming a detection run ─────────────────────────────────────────────────
+
+def test_resuming_a_suspended_detection_run_detects_again(tab, tmp_path,
+                                                         monkeypatch):
+    """The banner's Resume rebuilt the spec field by field and dropped
+    ``auto_detect``, so the resumed run ran the form's frozen layout."""
+    from types import SimpleNamespace
+
+    raw = _plate(tmp_path / "plate")
+    tab._input_edit.setText(str(raw))
+    tab._auto_detect_cb.setChecked(True)
+    recorded = tab.collect_spec()                  # what a suspend record holds
+    assert recorded["opts"]["nuclear_token"] == "NIR"
+    offer = SimpleNamespace(spec=recorded, headline="suspended")
+    monkeypatch.setattr(type(tab), "_resumable", lambda self, *a, **k: offer)
+    monkeypatch.setattr(type(tab), "_forget_resumable", lambda self, o: None)
+
+    tab._resume_suspended()
+
+    assert len(tab.started) == 1, tab.finished
+    assert tab.started[0]["incremental"] is True
+    assert tab.started[0]["nuclear_token"] == "DAPI"
+    assert tab.started[0]["filename_sep"] == "_"
+
+
+def test_a_forced_incremental_run_keeps_its_detection_request(tab, tmp_path,
+                                                             monkeypatch):
+    """``resume_aware_spec`` forces incremental on an input with unfinished
+    work behind it, and must not drop the rest of the spec doing so."""
+    from services.run_spec import RunSpec
+
+    monkeypatch.setattr(type(tab), "_input_has_unfinished_work",
+                        lambda self, raw: "a suspended run")
+    spec = RunSpec(opts={"raw": "/d"}, auto_detect=True,
+                   upstream_layout={"schema": "a:b", "separator": "_"})
+    out = tab.resume_aware_spec(spec)
+    assert out.opts["incremental"] is True
+    assert out.auto_detect is True
+    assert out.upstream_layout == {"schema": "a:b", "separator": "_"}
+
+
+# ── the pre-run report with detection on ────────────────────────────────────
+
+def test_the_pre_run_report_describes_the_detected_layout(tab, tmp_path,
+                                                         monkeypatch, qtbot):
+    import analyze.preflight as preflight
+
+    raw = _plate(tmp_path / "plate")
+    seen: list[dict] = []
+    monkeypatch.setattr(preflight, "_scan_coverage",
+                        lambda _in, _out, opts: seen.append(dict(opts)))
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(preflight, "plan_incremental_scope",
+                        lambda _opts, _in: SimpleNamespace(preview="3 new images"))
+    tab._preflight_input = str(raw)
+    tab._preflight_dir = str(tmp_path / "plate" / "out")
+    tab._preflight_scanning = ""
+    assert tab._scope_line() == "3 new images"      # the sentence, without it
+    tab._auto_detect_cb.setChecked(True)
+    # Ticking repaints the readout from the (empty) input field; point the
+    # report back at the plate.
+    tab._preflight_input = str(raw)
+    tab._preflight_dir = str(tmp_path / "plate" / "out")
+    assert tab._scope_line() == ""        # counted under the frozen schema
+    tab._start_coverage_scan()
+    qtbot.waitUntil(lambda: bool(seen), timeout=5000)
+    assert seen[0]["nuclear_token"] == "DAPI"
+    assert seen[0]["filename_sep"] == "_"

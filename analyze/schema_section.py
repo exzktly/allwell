@@ -71,18 +71,23 @@ class AnalyzeSchemaSectionMixin:
         # Run-time detection: the same scan the button above makes, made again
         # when the run starts — for a queued job whose input an earlier job
         # has not written yet, so there is nothing to scan now. The values it
-        # finds replace the schema above and the channel tokens below, which is
-        # why the picker greys out: its contents are no longer what will run.
+        # finds replace the schema above and the fluorescent channel rows below,
+        # which is why the picker greys out: its contents are no longer what
+        # will run. The Segmentation channel stays live, because which channel
+        # to segment is a choice rather than a fact the filenames carry: it is
+        # used whenever the input turns out to carry it.
         self._auto_detect_cb = QCheckBox(
             "Detect schema && channels at run time", sec)
         self._auto_detect_cb.setToolTip(
             "For a queued run whose input does not exist yet. When the run "
-            "starts, the filename schema, the channels and which channel is "
-            "segmented are read from the input's filenames — or taken from the "
-            "converter this job runs after — replacing what this form shows. "
-            "If they cannot be read, the run fails and says why. smFISH marks, "
-            "the cytoplasm channel and the Cellpose nuclei channel are kept, "
-            "and must name channels the input carries.")
+            "starts, the filename schema and the channels are read from the "
+            "input's filenames — or taken from the converter this job runs "
+            "after — replacing what this form shows. The Segmentation channel "
+            "below is segmented if the input carries it; otherwise one is "
+            "chosen from the channel names (label-free runs segment the phase "
+            "channel). If any of this cannot be decided, the run fails and "
+            "says why. smFISH marks, the cytoplasm channel and the Cellpose "
+            "nuclei channel are kept, and must name channels the input carries.")
         self._auto_detect_cb.toggled.connect(self._on_auto_detect_toggled)
         sec.layout().addWidget(self._auto_detect_cb)
 
@@ -99,16 +104,21 @@ class AnalyzeSchemaSectionMixin:
     def _on_auto_detect_toggled(self, on: bool) -> None:
         """Grey out what run-time detection replaces, and re-check the form.
 
-        Only the schema picker and the segmentation-channel row are disabled.
-        The fluorescent rows stay live because their smFISH marks are kept
-        through detection — they are checked against the detected channels
-        when the run starts rather than replaced.
+        Only the schema picker is disabled. The Segmentation channel is a
+        choice detection honours when the input carries it, and the
+        fluorescent rows carry smFISH marks that are kept through detection —
+        both are checked against the detected channels when the run starts
+        rather than replaced outright.
         """
         self._schema_picker.setEnabled(not on)
-        row = getattr(self, "_nuclear_row_widget", None)
-        if row is not None:
-            row.setEnabled(not on)
         self._refresh_schema_preview()
+        # The readout under the input field counts loose files to fold with the
+        # form's schema; with detection on it counts by suffix instead
+        # (`_refresh_output` passes no schema), since the form's schema is not
+        # the one that will run. Repaint it and the pre-run report now.
+        refresh_output = getattr(self, "_refresh_output", None)
+        if callable(refresh_output):
+            refresh_output()
         refresh_hints = getattr(self, "_refresh_segmentation_hints", None)
         if callable(refresh_hints):
             refresh_hints()

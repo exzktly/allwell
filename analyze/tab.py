@@ -486,7 +486,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         # anything whose well token will not parse.
         plan = plan_input_layout(
             Path(raw_str),
-            filename_schema=self._build_schema_arg(),
+            filename_schema="" if self._auto_detect_on() else self._build_schema_arg(),
             filename_sep=self._filename_sep(),
         )
         self._output_lbl.setText(

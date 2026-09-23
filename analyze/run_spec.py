@@ -187,17 +187,20 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         """Queue the current form, through the same gate as Run.
 
         "+ Queue" used to hand the sink whatever ``collect_spec`` produced,
-        skipping ``_validate_run_request`` entirely — so a run with no input
-        folder, an unparseable schema, no fluorescent channels or an
-        out-of-range numeric field was accepted without a word and sat in the
-        queue looking identical to a valid job. It failed at dequeue time, in
-        ``start_from_queue``, which reports through ``jobFinished`` because
-        there is no dialog to show it to: the user came back to a queue entry
-        marked failed and no statement of what was wrong with it.
+        skipping ``_validate_run_request`` entirely — so an unparseable schema,
+        no fluorescent channels or an out-of-range numeric field was accepted
+        without a word and sat in the queue looking identical to a valid job.
+        It failed at dequeue time, in ``start_from_queue``, which reports
+        through ``jobFinished`` because there is no dialog to show it to: the
+        user came back to a queue entry marked failed and no statement of what
+        was wrong with it.
 
         Validating here is not a duplicate of Run's check — it is the same
-        check, and it has to be the same one, or the two buttons disagree about
-        what a runnable form is.
+        check, with ``for_queue`` deferring only what a queued job cannot know
+        yet: an input that is blank (so chaining can fill it) or not written
+        yet, and with run-time detection on, the schema and channels. Those
+        are asked again when the run starts, and the queue row says which are
+        outstanding.
         """
         sink = getattr(self, "_queue_sink", None)
         if sink is None:

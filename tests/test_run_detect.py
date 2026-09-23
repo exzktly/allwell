@@ -170,6 +170,7 @@ def test_a_cellpose_nuclei_channel_the_input_lacks_fails(tmp_path):
     """The pipeline ignores an unknown one silently, so this is the only place
     a stale value can be caught."""
     spec = _spec(_plate(tmp_path / "plate"), segmentation_method="cellpose",
+                 nuclear_token="GFP", cellpose_model="cyto3",
                  cellpose_nuclei_channel="YFP")
     with pytest.raises(DetectionError, match="Cellpose nuclei channel is 'YFP'"):
         resolve_detection(spec)
@@ -181,7 +182,7 @@ def test_watershed_needs_a_cytoplasm_channel_the_input_carries():
     assert channel_option_errors({**base, "cytoplasm_token": "GFP"}) == []
     assert channel_option_errors({**base, "cytoplasm_token": "YFP"})
     assert channel_option_errors({**base, "cytoplasm_token": ""})
-    assert channel_option_errors({**base, "cytoplasm_token": "dapi"})
+    assert channel_option_errors({**base, "cytoplasm_token": "DAPI"})
 
 
 def test_label_free_without_a_detected_phase_channel_fails(tmp_path):
@@ -215,3 +216,132 @@ def test_auto_detect_and_upstream_layout_round_trip():
     assert again.auto_detect is True
     assert again.upstream_layout == {"schema": "a:b", "separator": "_"}
     assert "auto_detect" not in again.runner_opts()
+
+
+# ── review findings: converter-shaped plates, method-aware roles, exact case ─
+
+def _converter_plate(root: Path, channels, fovs: int, wells=None) -> Path:
+    """The converters' real layout: ``in/<well>.zip``, members written field
+    by field with the channel varying fastest (``pipeline/ome_explode.py``)."""
+    import zipfile
+
+    ind = root / "in"
+    ind.mkdir(parents=True)
+    wells = wells or [f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)]
+    for well in wells:
+        with zipfile.ZipFile(ind / f"{well}.zip", "w") as zf:
+            for f in range(fovs):
+                for ch in channels:
+                    zf.writestr(f"exp_{ch}_{well}_f{f:02d}_t01.tif", b"x")
+            zf.writestr("__MACOSX/._junk", b"x")
+    return root
+
+
+@pytest.mark.parametrize("channels,fovs", [
+    (("DAPI", "GFP", "RFP", "Cy5", "BF"), 9),   # lost BF silently
+    (("DAPI", "GFP", "RFP"), 4),                # read one channel, not recognised
+])
+def test_a_full_converter_plate_keeps_every_channel(tmp_path, channels, fovs):
+    raw = _converter_plate(tmp_path / "ds", channels, fovs)
+    spec, layout = resolve_detection(_spec(raw))
+    assert [layout.nuclear_token, *layout.fluor_tokens] == ["DAPI", *channels[1:]]
+
+
+def test_the_form_s_sample_reaches_every_channel_of_a_converter_plate(tmp_path):
+    """The same aliasing sat under the form's Detect button."""
+    from util.schema_infer import infer_from_dir
+
+    raw = _converter_plate(tmp_path / "ds", ("DAPI", "GFP", "RFP", "Cy5", "BF"), 9)
+    assert infer_from_dir(raw).channels == ["DAPI", "GFP", "RFP", "Cy5", "BF"]
+
+
+def test_converter_roles_are_checked_against_every_name_not_a_sample(tmp_path):
+    raw = _converter_plate(tmp_path / "ds", ("DAPI", "GFP", "RFP", "Cy5", "BF"), 9)
+    spec = _spec(raw)
+    spec["upstream_layout"] = {
+        "schema": "experiment:channel:well:fov:timepoint", "separator": "_",
+        "nuclear_token": "DAPI", "fluor_tokens": ["GFP", "RFP", "Cy5", "BF"],
+        "phase_token": "BF"}
+    out, _ = resolve_detection(spec)
+    assert out["opts"]["fluor_tokens"] == ["GFP", "RFP", "Cy5", "BF"]
+
+
+def test_the_form_s_segmentation_channel_wins_when_the_input_carries_it(tmp_path):
+    """Which channel to segment is a choice; the heuristic would take DAPI."""
+    raw = _plate(tmp_path / "plate", channels=("DAPI", "CellMask", "GFP"))
+    out, layout = resolve_detection(_spec(
+        raw, segmentation_method="cellpose", cellpose_model="cyto3",
+        nuclear_token="CellMask", cellpose_nuclei_channel="DAPI"))
+    assert out["opts"]["nuclear_token"] == "CellMask"
+    assert out["opts"]["fluor_tokens"] == ["DAPI", "GFP"]
+    assert layout.segmentation_from == "form"
+    assert "(as set on the form)" in layout.summary()
+
+
+def test_cell_body_cellpose_refuses_a_segmentation_channel_chosen_by_name(tmp_path):
+    raw = _plate(tmp_path / "plate", channels=("DAPI", "CellMask", "GFP"))
+    with pytest.raises(DetectionError, match="segments whole cells"):
+        resolve_detection(_spec(raw, segmentation_method="cellpose",
+                                cellpose_model="cyto3", nuclear_token="NIR"))
+
+
+def test_nuclei_cellpose_may_take_the_nuclear_stain_by_name(tmp_path):
+    raw = _plate(tmp_path / "plate", channels=("DAPI", "CellMask", "GFP"))
+    out, layout = resolve_detection(_spec(
+        raw, segmentation_method="cellpose", cellpose_model="nuclei",
+        nuclear_token="NIR"))
+    assert out["opts"]["nuclear_token"] == "DAPI"
+    assert layout.segmentation_from == "names"
+
+
+def test_a_nuclei_channel_that_is_the_segmentation_channel_says_so():
+    errors = channel_option_errors({
+        "nuclear_token": "DAPI", "fluor_tokens": ["GFP"],
+        "segmentation_method": "cellpose", "cellpose_nuclei_channel": "DAPI"})
+    assert errors == ["The Cellpose nuclei channel is 'DAPI', which is the "
+                      "segmentation channel, not a fluorescent one."]
+
+
+def test_label_free_segments_the_phase_channel_and_quantifies_the_rest(tmp_path):
+    raw = _plate(tmp_path / "plate", channels=("GFP", "BF"))
+    out, layout = resolve_detection(_spec(raw, segmentation_method="cellpose_labelfree"))
+    assert out["opts"]["nuclear_token"] == "BF"
+    assert out["opts"]["phase_token"] == "BF"
+    # Filename order (BF sorts first). GFP is the channel the heuristic would
+    # have called the segmentation channel and then dropped from the list.
+    assert out["opts"]["fluor_tokens"] == ["BF", "GFP"]
+    assert layout.segmentation_from == "phase"
+
+
+def test_label_free_takes_a_converter_s_natural_roles(tmp_path):
+    raw = _plate(tmp_path / "plate", channels=("BF", "GFP"))
+    spec = _spec(raw, segmentation_method="cellpose_labelfree")
+    spec["upstream_layout"] = {
+        "schema": "experiment:channel:well:fov:timepoint", "separator": "_",
+        "nuclear_token": "", "fluor_tokens": ["BF", "GFP"], "phase_token": "BF"}
+    out, _ = resolve_detection(spec)
+    assert out["opts"]["nuclear_token"] == "BF"
+    assert out["opts"]["fluor_tokens"] == ["BF", "GFP"]
+
+
+def test_channel_checks_match_case_exactly_as_the_pipeline_does():
+    base = {"nuclear_token": "DAPI", "fluor_tokens": ["GFP", "mCherry"]}
+    assert channel_option_errors({**base, "smfish_tokens": ["gfp"]})
+    assert channel_option_errors({**base, "smfish_tokens": ["GFP"]}) == []
+    wshed = {**base, "segmentation_method": "stardist_seeded_watershed_cell"}
+    assert channel_option_errors({**wshed, "cytoplasm_token": "mcherry"})
+    assert channel_option_errors({**wshed, "cytoplasm_token": "mCherry"}) == []
+
+
+def test_a_channel_in_one_well_only_is_still_listed(tmp_path):
+    """The channel list comes from every name, not the 400-name sample — a
+    channel the sample misses would be dropped from the run without a word."""
+    import zipfile
+
+    raw = _converter_plate(tmp_path / "ds", ("DAPI", "GFP", "RFP"), 9)
+    with zipfile.ZipFile(raw / "in" / "H12.zip", "a") as zf:
+        zf.writestr("exp_Cy7_H12_f00_t01.tif", b"x")
+    from util.schema_infer import sample_stems
+    assert not any("_Cy7_" in s for s in sample_stems(raw)), "fixture: sample must miss it"
+    _spec_out, layout = resolve_detection(_spec(raw))
+    assert layout.fluor_tokens == ["GFP", "RFP", "Cy7"]

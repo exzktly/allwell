@@ -38,8 +38,8 @@ from typing import Any, Callable, TypeVar
 
 from util.aw_safe import swallowed
 from util.dir_scan import files_in
-from pipeline import scan_pool
-from pipeline.explode_common import elapsed_hour_tokens
+from pipeline import scan_cache, scan_pool
+from pipeline.timepoints import elapsed_hour_tokens
 from pipeline.czi_read import (
     CziLayout,
     CziReadError,
@@ -537,6 +537,12 @@ def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None,
     # §6.2a).
     first_path_for_times = paths[0]
 
+    # What a previous session already parsed, keyed on each file's size and
+    # modification time. It goes into the same in-memory caches the ``cached``
+    # hooks below read, so a plate that has not moved reaches them as hits and
+    # no file is opened at all — see :mod:`pipeline.scan_cache`.
+    scan_cache.load(paths)
+
     # The plate document rides with each job when the parent already has it,
     # because a worker process cannot reach back for it — see
     # ``_read_one_layout``. A peek normally ran first and left them all here.
@@ -546,6 +552,10 @@ def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None,
         _read_one_layout, jobs, report,
         cached=lambda item: cached_layout(item[0], item[1]),
         remember=lambda item, layout: remember_layout(item[0], item[1], layout))
+    # Saved against the paths as selected, before the master file is dropped
+    # below: it was read like any other member and a cache that forgot it would
+    # read it again on every reopen.
+    scan_cache.save(paths)
 
     # Each file has to be sound in its own right before the set is compared:
     # "these two disagree about the channel names" is a confusing thing to say
@@ -747,6 +757,7 @@ def peek_wells(source: Path | str, *,
         return peek
     from_filename = len(paths) > 1
 
+    scan_cache.load(paths)
     peek_jobs = [(path, from_filename) for path in paths]
     # A peek has no cache hook of its own: the parsed document it wants is
     # remembered under the file, and asking for it is how it gets remembered.
@@ -771,4 +782,5 @@ def peek_wells(source: Path | str, *,
             if well not in seen:
                 seen.add(well)
                 peek.wells.append(well)
+    scan_cache.save(paths)
     return peek

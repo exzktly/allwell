@@ -395,6 +395,27 @@ def _settings_go_to_a_scratch_file(tmp_path_factory, monkeypatch):
     yield scratch
 
 
+@pytest.fixture(autouse=True)
+def _scan_cache_goes_to_a_scratch_directory(tmp_path_factory, monkeypatch):
+    """No test reads or writes the developer's real CZI scan cache.
+
+    ``pipeline.scan_cache`` remembers a plate's parsed headers under
+    ``~/.cache/allwell/czi-scans`` so that reopening a folder costs no parsing.
+    Left alone, every test that scans a fixture plate would write there, and —
+    worse — a test that means to measure a *cold* scan would get a hit from
+    whatever an earlier test in the same session, or an earlier run on the same
+    machine, happened to leave behind. Read counts are how most of the scan's
+    tests assert anything, so that is the difference between a suite that
+    measures the reader and one that measures the cache directory.
+
+    A fresh directory per test rather than switching the cache off: with it
+    off, the load and save on every scan path would be dead code in the lane
+    and only the cache's own tests would ever exercise them.
+    """
+    monkeypatch.setenv("ALLWELL_SCAN_CACHE",
+                       str(tmp_path_factory.mktemp("czi-scans")))
+
+
 class ModalDialogInTest(AssertionError):
     """A test reached a modal dialog. See the note above ``_MODAL_CALLS``."""
 

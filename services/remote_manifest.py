@@ -154,9 +154,18 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/nd2_read.py",
     "pipeline/nd2_explode.py",
     # What the exploders share: the member-name rule, the resume check, the
-    # worker split, the timepoint plan, the elapsed-hour rendering and the
-    # in-memory TIFF encode.
+    # worker split, the timepoint plan and the in-memory TIFF encode.
     "pipeline/explode_common.py",
+    # The elapsed-hour naming, which ``explode_common`` re-exports. Its own
+    # module because it is the only part of that one a header scan needs, and
+    # ``explode_common`` imports numpy and tifffile — which a spawned scan
+    # worker would then pay for once per process.
+    "pipeline/timepoints.py",
+    # Where a plate's parsed headers are remembered between sessions, so a
+    # folder reopened costs no parsing. Client-side like the converters it
+    # serves, and listed because the manifest mirrors every ``pipeline/`` file
+    # rather than carrying exceptions nobody can see.
+    "pipeline/scan_cache.py",
     "pipeline/ome_explode.py",
     # The loose-TIF grouping pre-pass, spawned as a subprocess. Like
     # ``ome_explode`` it runs client-side — the remote is sent per-well archives

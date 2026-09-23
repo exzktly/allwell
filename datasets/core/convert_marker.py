@@ -109,6 +109,73 @@ def write_done_marker(dest: Path | str, signature: dict) -> None:
     write_json_atomic(Path(dest) / DONE_MARKER, dict(signature))
 
 
+#: Where a conversion records the images its source had no data for.
+#:
+#: A plain name rather than a dotted one, and beside the data rather than
+#: inside a marker: this is the thing somebody opening the folder in six
+#: months needs to see without being told to look. Deliberately **not** put
+#: into the done marker either, whose contents are compared against a later
+#: run's settings to decide whether the dataset may be topped up — a field
+#: added there changes that answer.
+GAP_RECORD = "INCOMPLETE_WELLS.txt"
+
+
+def write_gap_record(dest: Path | str, missing: dict,
+                     converted: "list[str] | None" = None) -> None:
+    """Record which wells came out short, keeping what earlier runs recorded.
+
+    *converted* names the wells **this** run wrote. Their entries are replaced
+    from *missing* and every other well's are kept, because a conversion can
+    add wells to a dataset it did not create: a top-up run that converted the
+    second half of a plate knows nothing about the first half's gaps, and
+    writing only its own findings would quietly erase them. The dataset would
+    then hold a short well and a record saying every well is whole, which is
+    worse than having no record at all.
+
+    Passing no *converted* list replaces the record outright, which is what a
+    caller that converted the whole plate means.
+
+    The file is removed when nothing is left to say. A record left behind
+    claiming a shortfall the dataset no longer has trains its reader to ignore
+    the real one.
+    """
+    path = Path(dest) / GAP_RECORD
+    kept = read_gap_record(dest) if converted is not None else {}
+    for well in (converted or ()):
+        kept.pop(well, None)
+    kept.update(missing)
+    if not kept:
+        with swallow(f"remove stale {GAP_RECORD}"):
+            path.unlink(missing_ok=True)
+        return
+    missing = kept
+    lines = [
+        "Some images were missing from the source and were skipped.",
+        "",
+        "These wells are present in this dataset and are NOT complete.",
+        "Each line is a well and the number of images it should have had.",
+        "",
+    ]
+    lines += [f"{well}\t{count}" for well, count in sorted(missing.items())]
+    lines.append("")
+    with swallow(f"write {GAP_RECORD}"):
+        path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def read_gap_record(dest: Path | str) -> dict:
+    """``{well: images missing}`` recorded for *dest*, or ``{}``."""
+    path = Path(dest) / GAP_RECORD
+    if not path.is_file():
+        return {}
+    out: dict = {}
+    with swallow(f"read {GAP_RECORD}"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            well, _, count = line.partition("\t")
+            if count.strip().isdigit():
+                out[well.strip()] = int(count)
+    return out
+
+
 def read_done_marker(dest: Path | str) -> dict | None:
     """The settings of the completed conversion in *dest*, or ``None``."""
     path = Path(dest) / DONE_MARKER

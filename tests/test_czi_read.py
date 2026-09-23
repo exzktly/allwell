@@ -219,9 +219,11 @@ def test_a_missing_plane_is_named_rather_than_converted_as_a_blank(tmp_path):
 
     assert layout.total_images == 4
     assert layout.missing_images == 1
-    report = layout.validation_report("short.czi")
-    assert "incomplete" in report
-    assert "describe 4 image(s)" in report and "1 of them" in report
+    # Counted and said out loud. The conversion goes ahead and skips it — what
+    # it must never do is write something in its place, which is what the test
+    # below pins on the reader itself.
+    note = layout.shortfall_note("short.czi")
+    assert "3 of the 4 image(s)" in note and "1 are missing" in note
 
 
 def test_reading_a_plane_the_file_lacks_raises_rather_than_returning_zeros(
@@ -426,4 +428,42 @@ def test_a_coordinate_with_no_planes_at_all_is_still_missing(tmp_path):
 
     assert layout.total_images == 4
     assert layout.missing_images == 1
-    assert "incomplete" in layout.validation_report("gone.czi")
+
+
+def test_a_gap_is_reported_and_not_refused(tmp_path):
+    """It used to be a refusal, and refusing was wrong twice over.
+
+    A split-scene export is read a file at a time, so one file short of a
+    plane refused the whole plate — six hundred and sixty sound wells lost for
+    one — and it refused after the read, so the hour spent getting there
+    bought nothing. The sentence it refused with also gave a count and no
+    coordinate, which is not something anybody can act on.
+
+    So the shortfall is a note now, and the note has to carry both numbers:
+    how many images the file holds and how many the axes imply. A note saying
+    only "some are missing" would be the same unactionable thing in a quieter
+    voice.
+    """
+    tiles = plate_tiles(wells=2, fovs=1, timepoints=1, channels=2, z=2)
+    tiles = [t for t in tiles if not (t.scene == 1 and t.c == 1)]
+    path = write_czi(tmp_path / "gone.czi", tiles)
+    layout = read_czi_layout(path)
+
+    assert layout.validation_report("gone.czi") == "", (
+        "a gap is not a reason to refuse the file")
+    note = layout.shortfall_note("gone.czi")
+    assert "gone.czi" in note
+    assert "3 of the 4 image(s)" in note, note
+    assert "1 are missing" in note, note
+
+
+def test_a_complete_file_has_nothing_to_say_about_shortfall(tmp_path):
+    """The note is silent when there is nothing to report, so that seeing it
+    means something (§7.8: "it says something" is satisfied by a note that
+    always does)."""
+    path = write_czi(tmp_path / "whole.czi",
+                     plate_tiles(wells=2, fovs=1, timepoints=2, channels=2))
+    layout = read_czi_layout(path)
+
+    assert layout.missing_images == 0
+    assert layout.shortfall_note("whole.czi") == ""

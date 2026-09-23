@@ -32,19 +32,25 @@ stdlib, so it stays inside the pipeline self-sufficiency contract
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
+from util.aw_safe import swallowed
 from util.dir_scan import files_in
+from pipeline import scan_pool
 from pipeline.explode_common import elapsed_hour_tokens
 from pipeline.czi_read import (
     CziLayout,
     CziReadError,
     ScenePeek,
-    peek_scene_wells,
+    cached_layout,
+    cached_plate_metadata,
+    peek_from_metadata,
+    plate_metadata_for,
     read_czi_layout,
+    remember_layout,
+    remember_plate_metadata,
     wells_from_scenes,
 )
 
@@ -103,6 +109,14 @@ class CziSet:
     scene_wells: list[str] = field(default_factory=list)
     #: A problem that makes the set unconvertible, or ``""``.
     problem: str = ""
+    #: What the files are short of the rectangle their axes imply, one
+    #: sentence per file that is short of anything, or ``""``.
+    #:
+    #: Not a problem: a gap is skipped at conversion and the well is written
+    #: without it. It is carried separately **because** it is not a problem —
+    #: the page can say it before the run rather than after an hour of
+    #: reading, which is what a refusal could only ever do at the end.
+    shortfall_note: str = ""
     #: The timepoint token each image is named with — elapsed hours (``0h``,
     #: ``4h``, …) when the files' acquisition stamps yield a complete, distinct
     #: series, and the positional ``t0``, ``t1``, … otherwise.
@@ -212,45 +226,124 @@ def scan_workers(n_files: int) -> int:
     return max(1, min(_MAX_SCAN_WORKERS, n_files))
 
 
-def _per_file(fn: "Callable[[Path], _T]", paths: list[Path],
-              report=None) -> list[_T]:
-    """Run *fn* over *paths* concurrently, **in order**.
+def _per_file(fn: "Callable[[Any], _T]", items: list, report=None, *,
+              cached: "Callable[[Any], Any] | None" = None,
+              remember: "Callable[[Any, Any], None] | None" = None) -> list:
+    """Run *fn* over *items* concurrently, **in order**.
 
     The order is load-bearing and not a nicety: it is the order ZEN wrote a
     split export in, the order a grid mapping lays its well labels over, and the
     order ``CziSet.positions`` is walked in. Collecting results as they finish
     would make a plate's well mapping depend on which file the filer answered
-    first. ``Executor.map`` yields by argument order however the work completes,
-    which is exactly that guarantee — and it re-raises each call's exception at
-    its own position, so a set whose third file is broken still fails on the
-    third file.
+    first. :func:`pipeline.scan_pool.map_ordered` yields by argument order
+    however the work completes, which is exactly that guarantee — and it
+    re-raises each call's exception at its own position, so a set whose third
+    file is broken still fails on the third file.
 
-    One file is done on the calling thread: a pool for a single header read is
-    two context switches to save nothing.
+    Across **processes** rather than threads once the plate is big enough to
+    pay for starting them, because this module's work is a Python parser and
+    threads of it contend for the interpreter lock rather than overlapping —
+    ``scan_pool`` states the measurements. *fn* is therefore a module-level
+    function and never a closure: a spawned child is told a module and a name.
+
+    *cached* and *remember* keep the parent's answer from being recomputed in
+    a child that cannot see it. A worker process has its own memory, so the
+    stat-keyed caches in :mod:`pipeline.czi_read` are populated in the child
+    and die with it — without these, moving the scan off-thread would quietly
+    undo the reuse across the four passes a plate is read in. Both run in the
+    **parent** and may be closures; only *fn* crosses the process boundary.
     """
-    # *report* hears one tick per file. ``map`` yields in argument order while
-    # the work runs concurrently, so the count lags the files actually
-    # finished — which is honest for a progress line and is the same ordering
-    # guarantee the results themselves depend on. A split export is ninety-six
-    # files over a share, and a page showing one unchanging sentence for that
-    # long is indistinguishable from one that has hung.
-    def _tick(index: int) -> None:
-        if report is not None:
-            report.progress(index, len(paths))
+    total = len(items)
+    #: *report* hears one tick per file, whether the file was read or already
+    #: known: the count is what the user is waiting on, and a plate that
+    #: appears to stall through its cached half would be a worse lie than no
+    #: count at all.
+    seen = 0
 
-    if len(paths) < 2:
-        out = []
-        for i, path in enumerate(paths):
-            _tick(i)
-            out.append(fn(path))
-        return out
-    with ThreadPoolExecutor(max_workers=scan_workers(len(paths)),
-                            thread_name_prefix="czi-scan") as pool:
-        results = []
-        for i, item in enumerate(pool.map(fn, paths)):
-            _tick(i)
-            results.append(item)
-        return results
+    def _tick() -> None:
+        nonlocal seen
+        if report is not None:
+            report.progress(seen, total)
+        seen += 1
+
+    workers = scan_workers(total)
+    if cached is None:
+        return scan_pool.map_ordered(fn, list(items), workers=workers,
+                                     on_result=lambda _index: _tick())
+
+    known = [cached(item) for item in items]
+    pending = [item for item, hit in zip(items, known) if hit is None]
+    for hit in known:
+        if hit is not None:
+            _tick()
+    fresh = scan_pool.map_ordered(fn, pending, workers=scan_workers(len(pending)),
+                                  on_result=lambda _index: _tick())
+    supply = iter(fresh)
+    out = []
+    for item, hit in zip(items, known):
+        if hit is not None:
+            out.append(hit)
+            continue
+        result = next(supply)
+        if remember is not None:
+            remember(item, result)
+        out.append(result)
+    return out
+
+
+def _read_one_layout(item: tuple) -> CziLayout:
+    """One file's layout, for a worker that may be a separate process.
+
+    Module-level, and taking its arguments as one picklable tuple, because
+    that is how a spawned child is told what to run.
+
+    The third element is the plate document the **parent** already parsed, if
+    it has one. A worker process cannot see the parent's caches, so without
+    this a split export's full read would re-read and re-parse the whole
+    plate's document once per file — the cost the caching was added to remove.
+    Sending it is kilobytes; re-reading it is megabytes over a share.
+    """
+    path, read_times, metadata = item
+    return read_czi_layout(path, read_times=read_times, metadata=metadata)
+
+
+def _peek_one_file(item: "tuple[Path, bool]") -> tuple:
+    """``(peek, document)`` for one file, or ``(None, None)`` if unreadable.
+
+    The parsed document comes back with the answer so the **parent** can
+    remember it. In a worker process the module-level caches are the worker's
+    and die with it, so a peek that returned only its conclusion would leave
+    the parent to read and parse every file's document a second time for the
+    full read that follows.
+
+    The failure is caught **inside** the worker rather than around the whole
+    batch, so one unreadable file costs that one file and not the rest of the
+    plate. Not reported as a problem either: the full read is the authority on
+    a file being broken, and saying so from here would put a refusal on screen
+    that a peek is not entitled to make.
+    """
+    path, from_filename = item
+    try:
+        meta = plate_metadata_for(path)
+        return peek_from_metadata(path, meta, from_filename=from_filename), meta
+    except (CziReadError, OSError):
+        swallowed(f"peek {path.name}")
+        return None, None
+
+
+def _peek_from_cache(path: Path, from_filename: bool) -> "tuple | None":
+    """The peek the parent can answer without reading, or ``None``."""
+    meta = cached_plate_metadata(path)
+    if meta is None:
+        return None
+    return peek_from_metadata(path, meta, from_filename=from_filename), meta
+
+
+def _remember_peeked(item: "tuple[Path, bool]", answer: tuple) -> None:
+    """Keep what a worker parsed, so the full read need not parse it again."""
+    _peek, meta = answer
+    if meta is not None:
+        remember_plate_metadata(item[0], meta)
 
 
 def discover_czi_files(source: Path | str) -> list[Path]:
@@ -402,20 +495,38 @@ def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None,
     # §6.2a).
     first_path_for_times = paths[0]
 
-    def _layout_of(path: Path) -> CziLayout:
-        return read_czi_layout(path, read_times=path == first_path_for_times)
-
-    result.layouts = _per_file(_layout_of, paths, report)
+    # The plate document rides with each job when the parent already has it,
+    # because a worker process cannot reach back for it — see
+    # ``_read_one_layout``. A peek normally ran first and left them all here.
+    jobs = [(path, path == first_path_for_times, cached_plate_metadata(path))
+            for path in paths]
+    result.layouts = _per_file(
+        _read_one_layout, jobs, report,
+        cached=lambda item: cached_layout(item[0], item[1]),
+        remember=lambda item, layout: remember_layout(item[0], item[1], layout))
 
     first, first_path = result.layouts[0], paths[0]
     # Each file has to be sound in its own right before the set is compared:
     # "these two disagree about the channel names" is a confusing thing to say
     # about a file that holds no channels because it was truncated.
+    notes: list[str] = []
     for path, layout in zip(paths, result.layouts):
         unsound = layout.validation_report(path.name)
         if unsound:
             result.problem = unsound
             return result
+        short = layout.shortfall_note(path.name)
+        if short:
+            notes.append(short)
+    #: Capped, because a plate whose export was interrupted can have every
+    #: file short and a readout is not a log. The count that follows is the
+    #: honest part: a list that silently stopped at three would say the plate
+    #: has three bad files when it has six hundred.
+    if notes:
+        shown = notes[:3]
+        more = len(notes) - len(shown)
+        result.shortfall_note = " ".join(shown) + (
+            f" {more} further file(s) are short too." if more else "")
     for path, layout in list(zip(paths, result.layouts))[1:]:
         clash = _disagreement(first, first_path, layout, path)
         if clash:
@@ -548,19 +659,18 @@ def peek_wells(source: Path | str, *,
         return peek
     from_filename = len(paths) > 1
 
-    def _peek_one(path: Path) -> "ScenePeek | None":
-        try:
-            return peek_scene_wells(path, from_filename=from_filename)
-        except (CziReadError, OSError):
-            # Caught **inside** the worker rather than around the whole batch,
-            # so one unreadable file costs that one file and not the rest of
-            # the plate. Not reported as a problem either: the full read is the
-            # authority on a file being broken, and saying so from here would
-            # put a refusal on screen that a peek is not entitled to make.
-            return None
-
+    peek_jobs = [(path, from_filename) for path in paths]
+    # A peek has no cache hook of its own: the parsed document it wants is
+    # remembered under the file, and asking for it is how it gets remembered.
+    # What a hit would save is the read, which ``peek_scene_wells`` skips by
+    # itself when the parent already holds the document — and in a worker
+    # process there is nothing to hold.
+    peeked = _per_file(
+        _peek_one_file, peek_jobs, report,
+        cached=lambda item: _peek_from_cache(item[0], item[1]),
+        remember=_remember_peeked)
     seen: set[str] = set()
-    for path, scene in zip(paths, _per_file(_peek_one, paths, report)):
+    for path, (scene, _document) in zip(paths, peeked):
         if scene is None:
             peek.unnamed.append(path)
             continue

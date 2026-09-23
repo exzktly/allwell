@@ -228,7 +228,7 @@ def test_files_may_disagree_about_z(tmp_path):
     assert czi_set.wells_from_files() == ["A01", "A02"]
 
 
-def test_an_unsound_member_is_reported_as_itself(tmp_path):
+def test_a_member_short_of_a_plane_is_named_and_still_converted(tmp_path):
     """Not as a disagreement: "these two disagree about the channel names" is a
     confusing thing to say about a file that is short of an image, and it names
     the wrong remedy. Each file is checked on its own first."""
@@ -242,9 +242,17 @@ def test_an_unsound_member_is_reported_as_itself(tmp_path):
     write_czi(folder / "b_A02.czi", tiles,
               xml=plate_metadata_xml(scene_wells={0: "A02", 1: "A03"},
                                      channels=["DAPI", "GFP"]))
-    problem = read_czi_set(folder).problem
+    result = read_czi_set(folder)
 
-    assert "b_A02.czi" in problem and "incomplete" in problem
+    # Not refused. One file short of a plane used to take the whole plate
+    # down with it, which on a 661-file export was six hundred and sixty
+    # sound wells lost for the sake of one — and it was decided after the
+    # read, so the wait bought nothing either.
+    assert result.problem == ""
+    assert "b_A02.czi" in result.shortfall_note
+    assert "3 of the 4 image(s)" in result.shortfall_note
+    # All three wells convert, the short one included.
+    assert result.wells_from_files() == ["A01", "A02", "A03"]
 
 
 def test_an_unreadable_member_raises_but_the_safe_form_reports(tmp_path):
@@ -492,13 +500,13 @@ def test_a_multi_file_scan_reads_the_files_at_once(tmp_path, monkeypatch):
     #: that a starved container still passes and short enough that a genuinely
     #: serial read reports rather than wedging the lane.
     gate = threading.Barrier(8, timeout=30)
-    real = czi_set.peek_scene_wells
+    real = czi_set.plate_metadata_for
 
     def _record(path, **kwargs):
         gate.wait()
         return real(path, **kwargs)
 
-    monkeypatch.setattr(czi_set, "peek_scene_wells", _record)
+    monkeypatch.setattr(czi_set, "plate_metadata_for", _record)
     try:
         peek = peek_wells(folder)
     except threading.BrokenBarrierError:
@@ -541,7 +549,7 @@ def test_the_order_is_the_file_order_however_the_reads_finish(
     """
     folder = _split_plate(tmp_path, wells=("C07", "A02", "H11"))
     first = sorted(folder.glob("*.czi"))[0]           # Exp7_A02.czi
-    name = {"peek": "peek_scene_wells", "full": "read_czi_layout"}[stage]
+    name = {"peek": "plate_metadata_for", "full": "read_czi_layout"}[stage]
     real = getattr(czi_set, name)
 
     def _slow_first(path, **kwargs):
@@ -566,7 +574,7 @@ def test_a_single_file_is_read_on_the_calling_thread(tmp_path, monkeypatch,
                      plate_tiles(wells=1, fovs=1, timepoints=1, channels=1),
                      xml=plate_metadata_xml(scene_wells={0: "A01"},
                                             channels=["DAPI"]))
-    name = {"peek": "peek_scene_wells", "full": "read_czi_layout"}[stage]
+    name = {"peek": "plate_metadata_for", "full": "read_czi_layout"}[stage]
     real = getattr(czi_set, name)
     seen: list[int] = []
 

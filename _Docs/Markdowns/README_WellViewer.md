@@ -5209,6 +5209,20 @@ on the plate rather than supplying it.
    megabyte for a 96-well plate, still no images — and when it lands the
    readout describes the whole plate.
 
+   **A source missing some images is converted anyway, and says so.** If the
+   file holds fewer images than its scenes, tiles, timepoints and channels
+   describe — an acquisition stopped early, or a channel imaged only at the
+   first timepoint — the missing ones are skipped and everything else is
+   converted. Nothing is invented in their place: a blank image would look
+   exactly like a real dark field. You are told four times over, because a
+   well that is short and looks complete is the worst thing this tool could
+   hand you: the page says it before you start, the log names each skipped
+   image as it goes, the closing line repeats it, and a file called
+   `INCOMPLETE_WELLS.txt` is written beside the data listing each well and how
+   many images it is short. It used to refuse the whole plate instead, which
+   on a split export meant losing ninety-five good wells because of one — and
+   it only said so after reading everything.
+
    **Convert does not wait for any of it.** The button is available as soon as
    the folder holds a `.czi` and the fields make sense, and the verdict says
    plainly that the plate has not been read yet. The conversion reads and

@@ -6772,9 +6772,39 @@ formats across tiles; JPEG-compressed tiles, which are lossy, so the intensities
 are not the ones the camera measured; a compression method the reader does not
 know; an extra axis as above; a duplicated coordinate, which is what a file
 concatenated from two acquisitions looks like; scenes with different tile counts;
-two channel names reducing to one filename token, compared case-insensitively
-because every consumer of a channel token downstream folds case; and a
-coordinate the file holds no image data for at all.
+and two channel names reducing to one filename token, compared
+case-insensitively because every consumer of a channel token downstream folds
+case.
+
+**A file short of some images is reported, not refused.** It was refused, and
+refusing was wrong twice over. A split-scene export is read a file at a time,
+so one file short of a plane took the whole plate with it — on a 661-file
+export, six hundred and sixty sound wells lost for the sake of one — and the
+refusal was decided *after* the read, so on a plate that takes an hour to scan
+the hour bought a sentence saying no. A gap is not always a fault either: the
+count is the difference between the distinct `(scene, tile, timepoint, channel)`
+a file holds and the rectangle those axes imply, and a brightfield channel
+imaged once at the start of a time course is short by every timepoint after
+the first and is exactly what was intended.
+
+So `CziLayout.shortfall_note` reports it and `validation_report` no longer
+mentions it, the plane is **skipped** at conversion, and the well is written
+without it. Skipped and never substituted: a zero-filled image is
+indistinguishable from a real image of a dark field, which is the silent
+substitution §7 is about. What must never happen is that it proceeds quietly,
+so the same fact is stated four times over — on the page before the run, in
+the run log as each plane is skipped, in the closing summary the page shows
+when the run ends, and in `INCOMPLETE_WELLS.txt` beside the converted data for
+whoever opens the folder months later. `explode_common.shortfall_summary` is
+the one spelling of the sentence that three of those four share, because three
+spellings is how a log and an artifact come to disagree about what happened.
+
+The record is merged per well rather than replaced (`convert_marker.write_gap_record`
+takes the wells the run converted). A conversion can add wells to a dataset it
+did not create: a top-up that converted the second half of a plate knows
+nothing about the first half's gaps, and writing only its own findings would
+leave a dataset holding a short well beside a record saying every well is
+whole.
 
 **Completeness is counted in images, not in stored tiles.** `total_images` is
 one per (scene, tile, timepoint, channel) — Z collapses into each — and
@@ -6969,29 +6999,52 @@ and never kept the event loop waiting, while eight took 4.22 s and starved it
 for 65.6% of the run, with single pauses of 266 ms. Slower *and* unusable,
 from threads added to make it faster.
 
-So the pool **reads wide and parses narrow**: the reads stay as wide as
-`scan_workers` says, and every stretch of pure computation on bytes already
-read — the subblock directory's entries, the plate document, `_build_layout`'s
-passes over the blocks, and the per-plane acquisition stamps — is serialised
-behind `czi_read._PARSE_LOCK`. A thread waiting on a share still overlaps with
-every other thread's wait, which is the whole of what the pool was for; what
-no longer overlaps is the part that could never overlap anyway. The same
-96-file scan then starves the window for 19.2% of the run rather than 65.6%,
-with the peek's latency gain intact at 809 ms on one thread against 107 ms on
-eight.
+So the pool is a pool of **processes**, not of threads, once a plate is big
+enough to be worth starting them. `pipeline/scan_pool.py` owns that decision;
+`czi_set._per_file` goes through it. Measured on a 96-file split export shaped
+like a real one — 3,168 subblocks per file across four fields of view, each
+file carrying the whole plate's document — read through `read_czi_set`:
 
-The lock must never be held across a read. Taken around the IO it would put
-the round trips back end to end and undo the pool completely, which is why
-`tests/test_czi_scan_leaves_the_window_alive.py` asserts **both** halves —
-that no two files are parsed at once, and that the files are still opened at
-once. Each is what catches the opposite mistake, and the second one is green
-for any amount of over-locking the first would allow.
+| | wall | worst pause | window starved |
+|---|---|---|---|
+| eight threads | 3.95 s | 53–87 ms | 1–10% |
+| eight spawned processes | 1.54 s | 17–18 ms | 0% |
 
-What remains is not fixed: at eight workers the window still sees pauses of
-about 227 ms, and the measurements above put the residue in the contention
-between the pool's threads themselves rather than in the parsing. Getting rid
-of it means getting the work out of the interpreter's lock altogether — a
-process pool — which is a change with its own costs and has not been made.
+Two and a half times faster, and the window stops noticing the scan at all:
+17 ms against a timer asked to fire every 10 ms. `czi_read._PARSE_LOCK`
+remains, because the thread path is still taken below the threshold and is
+still what a machine that cannot give us a pool falls back to.
+
+Four things follow from a worker being a separate interpreter, and each is
+load-bearing:
+
+- **The work must be reachable by name.** A spawned child is told a module and
+  a qualified name, so `_read_one_layout` and `_peek_one_file` are module-level
+  functions taking one picklable tuple each. They were closures, and the thread
+  path would never have objected.
+- **A worker's caches die with it.** `czi_read`'s stat-keyed caches are per
+  process, so `_per_file` takes `cached` and `remember` hooks that run in the
+  **parent**: the parent skips dispatching what it already knows, and keeps
+  what comes back. Without them, moving the scan off-thread would have quietly
+  undone the reuse across the four passes a plate is read in.
+- **What the parent knows has to travel outward too.** A peek returns its
+  parsed document alongside its answer, and a full read's job carries the
+  document the peek already parsed, so a split export's plate document is not
+  read and parsed once per file all over again.
+- **Spawn, on every platform.** Forking a process that is running a Qt event
+  loop and several threads inherits locks held by threads the child does not
+  have. macOS and Windows spawn regardless, so forcing it also means what is
+  tested is what ships. `all_well_launcher` already dispatches a spawned child
+  before any heavy import, which is what makes this work in the frozen bundle.
+
+Below `scan_pool.PROCESS_THRESHOLD` files the scan runs on threads, because
+starting an interpreter per worker is not worth paying to save a tenth of a
+second, and in a PyInstaller bundle that start is a cost this repository
+cannot measure from a source checkout. `ALLWELL_SCAN_PROCESSES` forces either
+path, for a machine where the pool misbehaves. A pool that cannot start at all
+falls back to threads rather than failing the scan: the answer does not depend
+on where it was computed, which is the property
+`tests/test_a_plate_scan_uses_processes.py` asserts first and hardest.
 
 Through `Executor.map`, which yields **by argument order** however the work
 completes. The order is load-bearing: it is the order ZEN wrote a split export

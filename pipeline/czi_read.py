@@ -769,16 +769,36 @@ def peek_scene_wells(path: Path | str, *,
     scenes are *called* and not what the document says.
     """
     path = Path(path)
+    return peek_from_metadata(path, plate_metadata_for(path),
+                              from_filename=from_filename)
+
+
+def plate_metadata_for(path: Path) -> _PlateMetadata:
+    """*path*'s parsed plate document, read only if it is not already known."""
     meta = cached_plate_metadata(path)
-    if meta is None:
-        with open(path, "rb") as raw:
-            fh = _CountingReader(raw)
-            directory_position, metadata_position = _read_file_header(fh)
-            del directory_position                  # deliberately not read
-            xml = _read_metadata_xml(fh, metadata_position)
-            read = fh.bytes_read
-        meta = parse_plate_metadata(xml, bytes_read=read)
-        remember_plate_metadata(path, meta)
+    if meta is not None:
+        return meta
+    with open(path, "rb") as raw:
+        fh = _CountingReader(raw)
+        directory_position, metadata_position = _read_file_header(fh)
+        del directory_position                      # deliberately not read
+        xml = _read_metadata_xml(fh, metadata_position)
+        read = fh.bytes_read
+    meta = parse_plate_metadata(xml, bytes_read=read)
+    remember_plate_metadata(path, meta)
+    return meta
+
+
+def peek_from_metadata(path: Path, meta: _PlateMetadata, *,
+                       from_filename: bool = True) -> ScenePeek:
+    """The scene peek *meta* implies for *path*, reading nothing.
+
+    Split out because the answer is now built in two places: here, from a
+    document this process parsed, and in the parent after a **worker process**
+    parsed one and sent the small value object back. Two spellings of one rule
+    is how a plate ends up mapped one way by the page and another by the run
+    (CLAUDE.md §7.5 #5), so there is one spelling and both call it.
+    """
     if not meta.has_metadata:
         return ScenePeek(path=path, has_metadata=False,
                          bytes_read=meta.bytes_read)
@@ -1293,17 +1313,40 @@ class CziLayout:
                 f"ZEN so they differ by more than punctuation or spacing, and "
                 f"export again."
             )
-        if self.missing_images > 0:
-            return (
-                f"{subject} is incomplete: its scenes, tiles, timepoints and "
-                f"channels describe {self.total_images} image(s), but "
-                f"{self.missing_images} of them have no image data at all. "
-                f"Converting would leave those missing from wells that "
-                f"otherwise look complete. That usually means the acquisition "
-                f"was stopped before it finished — re-export it with the "
-                f"dimensions it actually holds."
-            )
         return ""
+
+    def shortfall_note(self, subject: str) -> str:
+        """What *subject* is short of the rectangle it describes, or ``""``.
+
+        **Not a refusal.** It was one, and refusing was the wrong answer twice
+        over: in a split-scene export each file is read on its own, so one file
+        short of a plane took the whole plate down with it — six hundred and
+        sixty sound wells refused for the sake of one — and the sentence it
+        refused with gave a count and no coordinate, so it could not even be
+        acted on.
+
+        A gap is also not always a fault. The count is the difference between
+        the distinct ``(scene, tile, timepoint, channel)`` this file holds and
+        the rectangle those axes imply, and a legitimate acquisition need not
+        fill its rectangle: a brightfield channel imaged once at the start of a
+        time course is short by every timepoint after the first, and is exactly
+        what the acquisition intended.
+
+        So the shortfall is reported and the conversion proceeds. What it must
+        never do is proceed *quietly* — a well short of a timepoint that reads
+        as complete is CLAUDE.md §7's cardinal failure — which is why this
+        sentence reaches the page before the run, the run log during it, and
+        the dataset's own marker afterwards.
+        """
+        if self.missing_images <= 0:
+            return ""
+        return (
+            f"{subject} holds {self.total_images - self.missing_images} of the "
+            f"{self.total_images} image(s) its scenes, tiles, timepoints and "
+            f"channels describe — {self.missing_images} are missing. They are "
+            f"skipped, and the wells they belong to are named in the run log "
+            f"and recorded with the converted dataset."
+        )
 
     def describe(self) -> str:
         """A one-line summary of the file, for the page readout and the log."""
@@ -1395,7 +1438,8 @@ def _build_layout(blocks: list[SubBlock], meta: _PlateMetadata, *,
 
 
 def read_czi_layout(path: Path | str, *,
-                    read_times: bool = False) -> CziLayout:
+                    read_times: bool = False,
+                    metadata: "_PlateMetadata | None" = None) -> CziLayout:
     """Read *path*'s layout without decoding a single pixel.
 
     Costs two seeks on a sound file: one to the header, one to the subblock
@@ -1437,7 +1481,7 @@ def read_czi_layout(path: Path | str, *,
         # hit this skips the read as well as the parse, which on a network
         # share is the larger half: the page's peek has normally just taken
         # it, and the document is the same bytes either way.
-        meta = cached_plate_metadata(path)
+        meta = metadata if metadata is not None else cached_plate_metadata(path)
         if meta is None:
             xml = _read_metadata_xml(fh, metadata_position)
             meta = parse_plate_metadata(xml, bytes_read=0)

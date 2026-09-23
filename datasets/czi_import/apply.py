@@ -33,6 +33,8 @@ from datasets.czi_import.czi_import_compute import (
     write_run_marker,
 )
 from pipeline.czi_explode import explode_czi
+from pipeline.explode_common import shortfall_summary
+from datasets.core.convert_marker import write_gap_record
 
 
 def convert(
@@ -127,12 +129,24 @@ def convert(
     # marker, so a later run adding the wells this one skipped can tell
     # its own dataset from a stranger's plate.
     write_done_marker(dest, src, params)
+    # Beside the data and in plain sight, not inside the marker: the
+    # marker's contents are compared against a later run's settings to
+    # decide whether this dataset may be topped up, so anything added to
+    # it changes that answer. And a record of what is missing belongs
+    # where somebody opening the folder will see it.
+    write_gap_record(dest, result.images_missing, result.wells)
     clear_run_marker(dest)
     channels = ", ".join(result.channels) if result.channels else "?"
     kept = (f" ({len(result.wells_resumed)} kept from an interrupted run)"
             if result.wells_resumed else "")
-    return (
+    summary = (
         f"Wrote {result.images_written} image(s) for {len(result.wells)} well(s)"
         f"{kept} (channels: {channels}) into {dest.name}/in — open it in Analyze "
         f"to process."
     )
+    # Appended rather than logged only, because this line is what the page
+    # shows when the run ends: a closing summary that reported the total
+    # written and nothing else would read exactly like a complete plate, which
+    # is the silent substitution CLAUDE.md §7 is about.
+    shortfall = shortfall_summary(result.images_missing)
+    return f"{summary} {shortfall}" if shortfall else summary

@@ -10905,6 +10905,22 @@ second name → kind map to keep in step. `DatasetsTab._begin_session` switches
 the rail and inserts the banner; `_end_session` takes it down and returns to
 the queue page.
 
+Analyze is the one kind with no rail entry, so its session (both **+ Add job →
+Analyze** and a queued Analyze row's **Edit…**) puts the banner on
+`AnalyzeTab._form_layout` and leaves the pane through the shell's
+`on_reveal_analyze` (`allwell._reveal_analyze_pane`). `_begin_session` returns
+whether the page reached the screen; `QueueSession._start` drops the session
+and reports it through `notify` when it did not, so a build with no shell to
+switch panes refuses the click instead of opening a session behind a banner
+nobody can see. The banner's **Add to queue** / **Save changes** and **Cancel**
+return through `on_reveal_datasets` (`allwell._reveal_datasets_pane`) to the
+Job Queue; `_end_session` itself never changes pane, because a session also
+ends when its job starts running and a user on the Analyze pane is then
+watching that run. Saving first asks the kind's registered validator —
+`QueueSession.register_validator`, which only Analyze supplies, as
+`AnalyzeRunMixin.validate_for_queue`, the same `_validate_run_request` gate
+its own **+ Queue** uses — and a refusal leaves the session open on the form.
+
 ---
 
 ### 6.6b Why a cell is gone: the Segmentation overlay

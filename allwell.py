@@ -415,6 +415,7 @@ class AllWellApp(QMainWindow):
             on_open_in_review=self._open_dataset_in_review,
             on_open_in_analyze=self._open_dataset_in_analyze,
             on_reveal_analyze=self._reveal_analyze_pane,
+            on_reveal_datasets=self._reveal_datasets_pane,
             analyze_controller=self._analyze,
         )
         self._review.mountDatasetsPane(self._datasets)
@@ -1450,6 +1451,23 @@ class AllWellApp(QMainWindow):
         if self._analyze is None:
             return False
         self._nb.setCurrentIndex(1)
+        return True
+
+    def _reveal_datasets_pane(self) -> bool:
+        """Switch to the Datasets pane and change nothing on it.
+
+        The return leg of an Analyze queue session: "+ Add job → Analyze" and
+        a queued Analyze row's Edit… take the user to the Analyze pane, and
+        saving or cancelling brings them back to the Job Queue they started
+        from rather than leaving them on a form that no longer stands for a job.
+        """
+        datasets = getattr(self, "_datasets", None)
+        if datasets is None:
+            return False
+        index = self._nb.indexOf(datasets)
+        if index < 0:
+            return False
+        self._nb.setCurrentIndex(index)
         return True
 
     def _open_dataset_in_analyze(

@@ -447,18 +447,28 @@ class JobQueueController(QObject):
         if callable(collect):
             self.sessions.register_collector(kind, collect)
 
-    def set_analyze_provider(self, collect_spec: Callable[[], dict]) -> None:
+    def set_analyze_provider(
+        self,
+        collect_spec: Callable[[], dict],
+        validate: Callable[[], bool] | None = None,
+    ) -> None:
         """Injects ``AnalyzeTab.collect_spec`` (a bound method) so this page
         can build an Analyze job without importing ``analyze.tab``.
 
         It goes into the same collector registry every other kind uses, so
         "+ Add job → Analyze" and an Analyze edit session both reach it by the
-        one path rather than Analyze keeping a second, special one."""
+        one path rather than Analyze keeping a second, special one.
+
+        *validate* is ``AnalyzeTab.validate_for_queue`` — the same gate its
+        own "+ Queue" button applies — so saving a session cannot queue a form
+        that button would have refused."""
         self.sessions.register_collector("analyze", collect_spec)
+        if validate is not None:
+            self.sessions.register_validator("analyze", validate)
 
     def set_session_hooks(
         self,
-        on_session: Callable[[str, str], None],
+        on_session: Callable[[str, str], bool | None],
         on_session_end: Callable[[str], None],
     ) -> None:
         """``DatasetsTab`` supplies "show that tool's page with this banner on

@@ -129,7 +129,9 @@ def _build_job_queue(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | 
         controller.register(kind, tab._controllers[kind])
     if tab._analyze_controller is not None:
         controller.register("analyze", tab._analyze_controller)
-        controller.set_analyze_provider(tab._analyze_controller.collect_spec)
+        controller.set_analyze_provider(
+            tab._analyze_controller.collect_spec,
+            getattr(tab._analyze_controller, "validate_for_queue", None))
         # The reverse of the injection above: Analyze's own "+ Queue" button
         # needs somewhere to send a run, and neither module imports the other.
         sink = getattr(tab._analyze_controller, "set_queue_sink", None)
@@ -172,6 +174,7 @@ class DatasetsTab(QWidget):
         on_open_in_review: Callable[[Path], None] | None = None,
         on_open_in_analyze: Callable[..., None] | None = None,
         on_reveal_analyze: Callable[[], bool] | None = None,
+        on_reveal_datasets: Callable[[], bool] | None = None,
         analyze_controller: object | None = None,
         queue_state_dir: Path | None = None,
     ) -> None:
@@ -185,6 +188,11 @@ class DatasetsTab(QWidget):
         # profiles): _reveal_page then reports that it could not get there
         # rather than pretending it did.
         self._on_reveal_analyze = on_reveal_analyze
+        # The way back: "switch to this pane". An Analyze edit session is the
+        # one that takes the user out of it, so ending one has to bring them
+        # back to the queue their job is now on. None without a shell, where
+        # there is no other pane to have left.
+        self._on_reveal_datasets = on_reveal_datasets
         # The already-built AnalyzeTab, injected by allwell.py the same way
         # on_open_in_review/on_open_in_analyze are — duck-typed to
         # datasets.job_queue.controller.QueueableController via
@@ -233,26 +241,35 @@ class DatasetsTab(QWidget):
         return True
 
     # ── queue edit sessions ──────────────────────────────────────────────────
-    def _begin_session(self, kind: str, message: str) -> None:
+    def _begin_session(self, kind: str, message: str) -> bool:
         """Show *kind*'s page with a banner saying it is standing in for a job.
 
         The Job Queue controller decides when a session may start and what
         saving one means; this only knows how to get the user to the right
         page and put the strip on it. Without the strip the page looks exactly
         as it always does, and the only way to finish would be to guess.
+
+        Returns whether the page is now in front of the user, so the session
+        can be dropped and the refusal reported when it is not.
         """
         page_name = self._page_name_for(kind)
         if page_name is None:
             # Analyze lives in a different pane entirely, so there is no rail
-            # entry to switch to — the banner goes onto its form column, where
-            # the resume banner already sits, and the user is already looking
-            # at it (an Analyze session can only be started from a queue page
-            # that Analyze's own "+ Queue" button put the job on).
-            self._show_session_banner(self._analyze_form_layout(), message)
-            return
+            # entry to switch to. The banner goes onto its form column, where
+            # the resume banner already sits, and the shell switches panes —
+            # both "+ Add job → Analyze" and a queued Analyze row's Edit… start
+            # here, from the Job Queue page, so without the switch the whole
+            # session happened on a pane nobody was looking at and the click
+            # appeared to do nothing.
+            layout = self._analyze_form_layout()
+            if layout is None or not self._reveal_page(kind):
+                return False
+            self._show_session_banner(layout, message)
+            return True
         self._show_page(page_name)
         page = self._pages_by_kind.get(kind)
         self._show_session_banner(page.layout() if page is not None else None, message)
+        return True
 
     def _drop_session_banner(self) -> None:
         if self._session_banner is not None:
@@ -265,19 +282,38 @@ class DatasetsTab(QWidget):
         tearing the banner down directly — the controller owns whether a
         session exists, and dropping only the strip would leave it believing
         one was still live and willing to save it later."""
+        kind = self._session_kind()
         job_queue = self._controllers.get("job_queue")
         if job_queue is not None:
             job_queue.end_session()
         else:
             self._end_session()
+        self._return_from_analyze(kind)
 
     def _end_session(self, _kind: str = "") -> None:
         """The controller reporting a session is over: take the banner down
-        wherever it is and go back to the queue page."""
+        wherever it is and go back to the queue page.
+
+        Deliberately does not change pane. A session also ends when its job
+        starts running, and a user on the Analyze pane at that moment is
+        watching that very run; only the banner's own buttons, which the user
+        pressed, take them back (:meth:`_return_from_analyze`)."""
         self._drop_session_banner()
         queue_page = self._page_name_for(None)
         if queue_page is not None:
             self._show_page(queue_page)
+
+    def _return_from_analyze(self, kind: str | None) -> None:
+        """After the banner's Save or Cancel ended an Analyze session, go back
+        to the Job Queue the session was opened from — the job the user just
+        added is there, and the Analyze form no longer stands for anything."""
+        if kind == "analyze" and self._on_reveal_datasets is not None:
+            self._on_reveal_datasets()
+
+    def _session_kind(self) -> str | None:
+        job_queue = self._controllers.get("job_queue")
+        session = job_queue.session() if job_queue is not None else None
+        return session[0] if session else None
 
     def _show_session_banner(self, layout, message: str) -> None:
         """Insert the strip at the top of *layout*.
@@ -299,9 +335,12 @@ class DatasetsTab(QWidget):
         self._session_banner = banner
 
     def _save_session(self) -> None:
+        kind = self._session_kind()
         job_queue = self._controllers.get("job_queue")
-        if job_queue is not None:
-            job_queue.save_session()
+        # A refused save (Analyze's form failed validation) keeps the session
+        # and the user on the form they need to correct.
+        if job_queue is not None and job_queue.save_session():
+            self._return_from_analyze(kind)
 
     def current_help_page(self) -> str:
         """Rail label of the tool page showing now, or ``""`` before build.

@@ -2095,6 +2095,11 @@ def test_required_files_list_is_what_we_promised():
         # header scan need not import numpy — see
         # ``tests/test_a_scan_worker_imports_no_pixels.py``.
         "pipeline/timepoints.py",
+        # Where a plate's parsed headers are remembered between sessions, so a
+        # folder reopened costs no parsing. Client-side like the converters it
+        # serves, and listed because the manifest mirrors every ``pipeline/`` file
+        # rather than carrying exceptions nobody can see.
+        "pipeline/scan_cache.py",
         # Packed OME-TIFF de-interleave; client-side, listed for manifest
         # completeness (mirrors every ``pipeline/`` file).
         "pipeline/ome_explode.py",

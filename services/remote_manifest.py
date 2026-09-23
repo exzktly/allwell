@@ -161,6 +161,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # ``explode_common`` imports numpy and tifffile — which a spawned scan
     # worker would then pay for once per process.
     "pipeline/timepoints.py",
+    # Where a plate's parsed headers are remembered between sessions, so a
+    # folder reopened costs no parsing. Client-side like the converters it
+    # serves, and listed because the manifest mirrors every ``pipeline/`` file
+    # rather than carrying exceptions nobody can see.
+    "pipeline/scan_cache.py",
     "pipeline/ome_explode.py",
     # The loose-TIF grouping pre-pass, spawned as a subprocess. Like
     # ``ome_explode`` it runs client-side — the remote is sent per-well archives

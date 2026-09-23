@@ -6772,9 +6772,39 @@ formats across tiles; JPEG-compressed tiles, which are lossy, so the intensities
 are not the ones the camera measured; a compression method the reader does not
 know; an extra axis as above; a duplicated coordinate, which is what a file
 concatenated from two acquisitions looks like; scenes with different tile counts;
-two channel names reducing to one filename token, compared case-insensitively
-because every consumer of a channel token downstream folds case; and a
-coordinate the file holds no image data for at all.
+and two channel names reducing to one filename token, compared
+case-insensitively because every consumer of a channel token downstream folds
+case.
+
+**A file short of some images is reported, not refused.** It was refused, and
+refusing was wrong twice over. A split-scene export is read a file at a time,
+so one file short of a plane took the whole plate with it — on a 661-file
+export, six hundred and sixty sound wells lost for the sake of one — and the
+refusal was decided *after* the read, so on a plate that takes an hour to scan
+the hour bought a sentence saying no. A gap is not always a fault either: the
+count is the difference between the distinct `(scene, tile, timepoint, channel)`
+a file holds and the rectangle those axes imply, and a brightfield channel
+imaged once at the start of a time course is short by every timepoint after
+the first and is exactly what was intended.
+
+So `CziLayout.shortfall_note` reports it and `validation_report` no longer
+mentions it, the plane is **skipped** at conversion, and the well is written
+without it. Skipped and never substituted: a zero-filled image is
+indistinguishable from a real image of a dark field, which is the silent
+substitution §7 is about. What must never happen is that it proceeds quietly,
+so the same fact is stated four times over — on the page before the run, in
+the run log as each plane is skipped, in the closing summary the page shows
+when the run ends, and in `INCOMPLETE_WELLS.txt` beside the converted data for
+whoever opens the folder months later. `explode_common.shortfall_summary` is
+the one spelling of the sentence that three of those four share, because three
+spellings is how a log and an artifact come to disagree about what happened.
+
+The record is merged per well rather than replaced (`convert_marker.write_gap_record`
+takes the wells the run converted). A conversion can add wells to a dataset it
+did not create: a top-up that converted the second half of a plate knows
+nothing about the first half's gaps, and writing only its own findings would
+leave a dataset holding a short well beside a record saying every well is
+whole.
 
 **Completeness is counted in images, not in stored tiles.** `total_images` is
 one per (scene, tile, timepoint, channel) — Z collapses into each — and

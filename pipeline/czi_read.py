@@ -1313,17 +1313,40 @@ class CziLayout:
                 f"ZEN so they differ by more than punctuation or spacing, and "
                 f"export again."
             )
-        if self.missing_images > 0:
-            return (
-                f"{subject} is incomplete: its scenes, tiles, timepoints and "
-                f"channels describe {self.total_images} image(s), but "
-                f"{self.missing_images} of them have no image data at all. "
-                f"Converting would leave those missing from wells that "
-                f"otherwise look complete. That usually means the acquisition "
-                f"was stopped before it finished — re-export it with the "
-                f"dimensions it actually holds."
-            )
         return ""
+
+    def shortfall_note(self, subject: str) -> str:
+        """What *subject* is short of the rectangle it describes, or ``""``.
+
+        **Not a refusal.** It was one, and refusing was the wrong answer twice
+        over: in a split-scene export each file is read on its own, so one file
+        short of a plane took the whole plate down with it — six hundred and
+        sixty sound wells refused for the sake of one — and the sentence it
+        refused with gave a count and no coordinate, so it could not even be
+        acted on.
+
+        A gap is also not always a fault. The count is the difference between
+        the distinct ``(scene, tile, timepoint, channel)`` this file holds and
+        the rectangle those axes imply, and a legitimate acquisition need not
+        fill its rectangle: a brightfield channel imaged once at the start of a
+        time course is short by every timepoint after the first, and is exactly
+        what the acquisition intended.
+
+        So the shortfall is reported and the conversion proceeds. What it must
+        never do is proceed *quietly* — a well short of a timepoint that reads
+        as complete is CLAUDE.md §7's cardinal failure — which is why this
+        sentence reaches the page before the run, the run log during it, and
+        the dataset's own marker afterwards.
+        """
+        if self.missing_images <= 0:
+            return ""
+        return (
+            f"{subject} holds {self.total_images - self.missing_images} of the "
+            f"{self.total_images} image(s) its scenes, tiles, timepoints and "
+            f"channels describe — {self.missing_images} are missing. They are "
+            f"skipped, and the wells they belong to are named in the run log "
+            f"and recorded with the converted dataset."
+        )
 
     def describe(self) -> str:
         """A one-line summary of the file, for the page readout and the log."""

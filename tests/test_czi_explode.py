@@ -181,15 +181,54 @@ def test_a_grid_mapped_plate_writes_the_grid_s_wells(tmp_path):
     assert _member(out / "B01.zip", "G_c0_B01_f0_t0.tif")[0, 0] == _value(3, 0, 0, 0)
 
 
-def test_an_unsound_source_is_refused_before_a_single_archive_is_written(tmp_path):
+def test_a_source_short_of_a_plane_converts_and_says_what_it_skipped(tmp_path):
+    """It used to refuse, and refusing lost far more than it protected: on a
+    split export one file short of a plane took the whole plate with it, after
+    the read rather than before it.
+
+    So the plane is **skipped** — never substituted, because a zero-filled
+    image is indistinguishable from a real dark field — the rest of the well
+    converts, and the result says which well came out short and by how much.
+    """
     tiles = plate_tiles(wells=2, fovs=1, timepoints=1, channels=2)
-    del tiles[1]
+    del tiles[1]                                   # scene 0, channel 1
     path = write_czi(tmp_path / "short.czi", tiles)
     out = tmp_path / "dest" / "in"
 
-    with pytest.raises(ValueError, match="incomplete"):
-        explode_czi(path, out, well_source="grid", grid_rows=1, grid_cols=2)
-    assert not list(out.glob("*.zip")) if out.exists() else True
+    result = explode_czi(path, out, experiment="E", well_source="grid",
+                         grid_rows=1, grid_cols=2, workers=1)
+
+    assert sorted(p.name for p in out.glob("*.zip")) == ["A01.zip", "A02.zip"]
+    # Three of the four images, and the missing one named by its well rather
+    # than merely subtracted from a total.
+    assert result.images_written == 3
+    assert result.images_missing == {"A01": 1}
+    # The archive is short exactly the member that had no data, and holds no
+    # placeholder standing in for it.
+    with zipfile.ZipFile(out / "A01.zip") as archive:
+        members = sorted(archive.namelist())
+    # The fixture names no channels, so they are the positional c0 / c1 —
+    # and what survived is c0, which is the channel the deleted tile was not.
+    assert members == ["E_c0_A01_f0_t0.tif"]
+
+
+def test_what_was_skipped_reaches_the_run_log(tmp_path):
+    """A result nobody prints is a result nobody sees. The closing line is the
+    one thing in this log a reader must not scroll past, so it comes last and
+    on its own."""
+    tiles = plate_tiles(wells=2, fovs=1, timepoints=1, channels=2)
+    del tiles[1]
+    path = write_czi(tmp_path / "short.czi", tiles)
+    lines: list[str] = []
+
+    explode_czi(path, tmp_path / "dest" / "in", experiment="E",
+                well_source="grid", grid_rows=1, grid_cols=2, workers=1,
+                log_fn=lines.append)
+
+    closing = "\n".join(lines)
+    assert "1 image(s) had no data in the source" in closing
+    assert "A01 (1)" in closing
+    assert "are not complete" in closing
 
 
 # ── progress, resume and cancellation ────────────────────────────────────────

@@ -133,6 +133,11 @@ class ConversionPlan:
     #: Surfaced so a plate that lost its elapsed times says so before the run
     #: rather than only in the log afterwards.
     timepoint_note: str = ""
+    #: What the source is short of the rectangle its axes imply, or ``""``.
+    #: Surfaced beside the timepoint note and for the same reason: a plate
+    #: that will come out short says so **before** the run, while the source
+    #: can still be re-exported, rather than at the end of one.
+    shortfall_note: str = ""
     #: How many ``.czi`` files this conversion reads. More than one is a
     #: split-scene export, and the readout says so — the same well count from
     #: one file and from ninety-six is two very different things to check.
@@ -212,6 +217,17 @@ class ConversionPlan:
         before the filenames are read as a regular series.
         """
         return self.timepoint_note
+
+    @property
+    def shortfall_warning(self) -> str:
+        """The sentence the page shows about images the source does not hold.
+
+        Separate from :attr:`timepoint_warning` because they are different
+        news and a reader should be able to tell which they are reading: one
+        is about what the timepoints will be *called*, the other about images
+        that will not be there at all.
+        """
+        return self.shortfall_note
 
 
 def parse_count(text: object) -> tuple[int | None, bool]:
@@ -431,6 +447,7 @@ def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
         n_source_timepoints=source.layout.size_t,
         timepoint_tokens=[token for _index, token in kept],
         timepoint_note=source.timepoint_note,
+        shortfall_note=source.shortfall_note,
         fovs_per_well=well_map.fovs_per_well,
         n_files=source.n_files,
         well_labels=list(well_map.wells),

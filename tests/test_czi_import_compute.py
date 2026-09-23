@@ -71,15 +71,38 @@ def test_a_grid_plan_says_it_came_from_the_grid(tmp_path):
     assert "from the plate grid" in plan.summary()
 
 
-def test_an_unsound_file_is_reported_as_unsound_not_as_a_bad_grid(tmp_path):
-    """No grid can make an incomplete file convertible, so the readout must
-    say *that* rather than a divisibility error derived from it."""
+def test_a_file_short_of_a_plane_still_plans_and_says_so(tmp_path):
+    """A gap is no longer a refusal, so a short file plans like any other —
+    and the plan carries the sentence that says it will come out short.
+
+    Said here, on the plan, because that is what the page renders *before* the
+    run. As a refusal this news could only ever arrive at the end of the read,
+    which on a large export is an hour spent to be told no.
+    """
+    tiles = plate_tiles(wells=2, fovs=1, timepoints=1, channels=2)
+    del tiles[1]
+    path = write_czi(tmp_path / "short.czi", tiles)
+
+    params = ConversionParams(well_source="grid", grid_rows=1, grid_cols=2)
+    plan = plan_conversion(read_source(path, params), params)
+
+    assert plan.well_labels == ["A01", "A02"]
+    assert "3 of the 4 image(s)" in plan.shortfall_warning
+    # Its own sentence, not folded into the one about timepoint names: they
+    # are different news and a reader has to be able to tell which is which.
+    assert plan.shortfall_warning != plan.timepoint_warning
+
+
+def test_a_grid_that_does_not_fit_is_still_a_grid_error(tmp_path):
+    """What the refusal used to mask. With the file no longer refused
+    outright, a grid of three columns for two positions has to be reported as
+    the grid problem it is."""
     tiles = plate_tiles(wells=2, fovs=1, timepoints=1, channels=2)
     del tiles[1]
     path = write_czi(tmp_path / "short.czi", tiles)
 
     params = ConversionParams(well_source="grid", grid_rows=1, grid_cols=3)
-    with pytest.raises(CziImportError, match="incomplete"):
+    with pytest.raises(CziImportError):
         plan_conversion(read_source(path, params), params)
 
 

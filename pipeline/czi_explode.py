@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from pipeline.czi_read import CziReader
+from pipeline.czi_read import CziReader, CziReadError
 from pipeline.czi_set import CziSet, ScenePosition, read_czi_set
 from pipeline.explode_common import (
     ExplodeCancelled,
@@ -49,6 +49,7 @@ from pipeline.explode_common import (
     expected_members,
     pick_workers,
     resolve_positions,
+    shortfall_summary,
     stride_note,
     subset_note,
     timepoint_plan,
@@ -406,6 +407,7 @@ def explode_czi(
         written = 0
         converted: list[str] = []
         resumed: list[str] = []
+        missing: dict[str, int] = {}
         read_s = write_s = 0.0
         # One reader per file this thread actually touches, opened on first
         # use and closed together at the end. A split-scene plate has one file
@@ -437,9 +439,29 @@ def explode_czi(
                                 if _abort():
                                     raise CziExplodeCancelled()
                                 started = time.perf_counter()
-                                plane = reader.read_projection(
-                                    position.scene, position.tile,
-                                    t_index, channel)
+                                try:
+                                    plane = reader.read_projection(
+                                        position.scene, position.tile,
+                                        t_index, channel)
+                                except CziReadError:
+                                    # A coordinate the file holds no data for.
+                                    # Skipped, never substituted: a zero-filled
+                                    # image is indistinguishable from a real
+                                    # dark field, which is the silent
+                                    # substitution CLAUDE.md §7 is about. The
+                                    # well still converts, and comes back
+                                    # counted so that nothing reports it as
+                                    # whole.
+                                    read_s += time.perf_counter() - started
+                                    missing[label] = missing.get(label, 0) + 1
+                                    _log(
+                                        f"  {label}: no image data for field "
+                                        f"{fov}, {tp_token}, "
+                                        f"{layout.channel_names[channel]} — "
+                                        f"skipped")
+                                    well_written += 1
+                                    _bump(label, well_written)
+                                    continue
                                 read_s += time.perf_counter() - started
                                 started = time.perf_counter()
                                 member = (
@@ -451,7 +473,7 @@ def explode_czi(
                                 well_written += 1
                                 _bump(label, well_written)
                 converted.append(label)
-        return written, converted, read_s, write_s, resumed
+        return written, converted, read_s, write_s, resumed, missing
 
     result = ExplodeResult(
         channels=list(layout.channel_names),
@@ -466,7 +488,9 @@ def explode_czi(
         futures = [pool.submit(_convert_wells, group)
                    for group in worker_groups(selected, n_workers)]
         for future in as_completed(futures):
-            count, wells, read_time, write_time, resumed = future.result()
+            (count, wells, read_time, write_time, resumed,
+             short) = future.result()
+            result.images_missing.update(short)
             result.images_written += count
             all_wells.extend(wells)
             all_resumed.extend(resumed)
@@ -485,4 +509,10 @@ def explode_czi(
         f"{wall:.1f}s ({rate:.0f} planes/s; read {read_total:.1f}s, write "
         f"{write_total:.1f}s summed across {n_workers} worker(s)).\n"
     )
+    if result.images_missing:
+        # Last, and as its own line, because it is the one thing in this log a
+        # reader must not scroll past: these wells are in the dataset and are
+        # not whole. A closing line that reported only the total written would
+        # read exactly like a complete plate (CLAUDE.md §7).
+        _log(shortfall_summary(result.images_missing))
     return result

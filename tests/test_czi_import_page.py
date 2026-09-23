@@ -215,8 +215,18 @@ def test_an_unreadable_source_says_so_rather_than_showing_a_stale_plan(
     assert not page._run_btn.isEnabled()
 
 
-def test_an_incomplete_file_is_refused_on_the_page_not_at_run_time(
+def test_an_incomplete_file_is_named_on_the_page_and_still_convertible(
         controller, tmp_path):
+    """It used to be refused here, and refused again at run time. Refusing
+    lost more than it protected: on a split export one file short of a plane
+    took the whole plate with it, and the news arrived only after the read.
+
+    So the page says what will be missing, before the run, while the source
+    can still be re-exported — and leaves the decision to the person who knows
+    whether that well matters. What it must never do is stay quiet: a plate
+    that will come out short and reads as whole is CLAUDE.md §7's cardinal
+    failure.
+    """
     tiles = plate_tiles(wells=2, fovs=1, timepoints=1, channels=2)
     del tiles[1]
     path = write_czi(tmp_path / "short.czi", tiles,
@@ -225,8 +235,10 @@ def test_an_incomplete_file_is_refused_on_the_page_not_at_run_time(
     page = controller.page
     _set_source(page, path, tmp_path)
 
-    assert "incomplete" in page._verdict.text()
-    assert not page._run_btn.isEnabled()
+    verdict = page._verdict.text()
+    assert "3 of the 4 image(s)" in verdict, verdict
+    assert "are missing" in verdict, verdict
+    assert page._run_btn.isEnabled()
 
 
 # ── channels ─────────────────────────────────────────────────────────────────

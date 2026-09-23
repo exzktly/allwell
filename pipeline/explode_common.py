@@ -49,6 +49,37 @@ class ExplodeResult:
     # rather than merely skipped: a run that converted a tenth of a plate and
     # one that converted all of it otherwise print the same closing line.
     wells_resumed: list[str] = field(default_factory=list)
+    #: ``{well: images the source held no data for}``, for the wells that had
+    #: any. A gap is skipped rather than written as a blank — a zero-filled
+    #: image is indistinguishable from a real dark field — and is carried here
+    #: so the run log, the closing summary and the dataset's own marker can
+    #: each say which wells came out short. A well that is short and looks
+    #: complete is CLAUDE.md §7's cardinal failure, so this travels with the
+    #: result rather than being logged once and forgotten.
+    images_missing: dict = field(default_factory=dict)
+
+
+def shortfall_summary(missing: dict) -> str:
+    """One line naming the wells a conversion could not fill, or ``""``.
+
+    Wells and counts, which is the granularity asked for: enough to know which
+    well to look at and how much of it is absent, without a per-plane list
+    nobody reads. The wells are named in plate order rather than in whichever
+    order the workers finished, so two runs of the same plate say the same
+    thing.
+
+    Shared by the run log, the page's closing summary and the dataset marker,
+    because three spellings of one sentence is how the log and the artifact
+    come to disagree about what happened.
+    """
+    if not missing:
+        return ""
+    named = ", ".join(f"{well} ({count})"
+                      for well, count in sorted(missing.items()))
+    total = sum(missing.values())
+    return (f"{total} image(s) had no data in the source and were skipped, in "
+            f"{len(missing)} well(s): {named}. Those wells are in the dataset "
+            f"and are not complete.")
 
 
 def resolve_positions(

@@ -228,7 +228,7 @@ def test_files_may_disagree_about_z(tmp_path):
     assert czi_set.wells_from_files() == ["A01", "A02"]
 
 
-def test_an_unsound_member_is_reported_as_itself(tmp_path):
+def test_a_member_short_of_a_plane_is_named_and_still_converted(tmp_path):
     """Not as a disagreement: "these two disagree about the channel names" is a
     confusing thing to say about a file that is short of an image, and it names
     the wrong remedy. Each file is checked on its own first."""
@@ -242,9 +242,17 @@ def test_an_unsound_member_is_reported_as_itself(tmp_path):
     write_czi(folder / "b_A02.czi", tiles,
               xml=plate_metadata_xml(scene_wells={0: "A02", 1: "A03"},
                                      channels=["DAPI", "GFP"]))
-    problem = read_czi_set(folder).problem
+    result = read_czi_set(folder)
 
-    assert "b_A02.czi" in problem and "incomplete" in problem
+    # Not refused. One file short of a plane used to take the whole plate
+    # down with it, which on a 661-file export was six hundred and sixty
+    # sound wells lost for the sake of one — and it was decided after the
+    # read, so the wait bought nothing either.
+    assert result.problem == ""
+    assert "b_A02.czi" in result.shortfall_note
+    assert "3 of the 4 image(s)" in result.shortfall_note
+    # All three wells convert, the short one included.
+    assert result.wells_from_files() == ["A01", "A02", "A03"]
 
 
 def test_an_unreadable_member_raises_but_the_safe_form_reports(tmp_path):

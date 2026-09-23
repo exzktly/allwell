@@ -109,6 +109,14 @@ class CziSet:
     scene_wells: list[str] = field(default_factory=list)
     #: A problem that makes the set unconvertible, or ``""``.
     problem: str = ""
+    #: What the files are short of the rectangle their axes imply, one
+    #: sentence per file that is short of anything, or ``""``.
+    #:
+    #: Not a problem: a gap is skipped at conversion and the well is written
+    #: without it. It is carried separately **because** it is not a problem —
+    #: the page can say it before the run rather than after an hour of
+    #: reading, which is what a refusal could only ever do at the end.
+    shortfall_note: str = ""
     #: The timepoint token each image is named with — elapsed hours (``0h``,
     #: ``4h``, …) when the files' acquisition stamps yield a complete, distinct
     #: series, and the positional ``t0``, ``t1``, … otherwise.
@@ -501,11 +509,24 @@ def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None,
     # Each file has to be sound in its own right before the set is compared:
     # "these two disagree about the channel names" is a confusing thing to say
     # about a file that holds no channels because it was truncated.
+    notes: list[str] = []
     for path, layout in zip(paths, result.layouts):
         unsound = layout.validation_report(path.name)
         if unsound:
             result.problem = unsound
             return result
+        short = layout.shortfall_note(path.name)
+        if short:
+            notes.append(short)
+    #: Capped, because a plate whose export was interrupted can have every
+    #: file short and a readout is not a log. The count that follows is the
+    #: honest part: a list that silently stopped at three would say the plate
+    #: has three bad files when it has six hundred.
+    if notes:
+        shown = notes[:3]
+        more = len(notes) - len(shown)
+        result.shortfall_note = " ".join(shown) + (
+            f" {more} further file(s) are short too." if more else "")
     for path, layout in list(zip(paths, result.layouts))[1:]:
         clash = _disagreement(first, first_path, layout, path)
         if clash:

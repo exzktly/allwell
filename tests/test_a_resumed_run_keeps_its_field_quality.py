@@ -320,3 +320,26 @@ def test_the_cli_resumes_a_folder_mode_plate_it_left_mixed(
     block = _run_main(monkeypatch, plate, incremental=True)
     assert set(block["wells"]) == {"C01", "D01"}, "a well left as a folder was not run"
     assert (plate / "out" / "measurements_D01.csv").exists()
+
+
+# ── a folder-mode well leaves no folder of spent checkpoints ────────────────
+
+def test_a_committed_folder_mode_well_leaves_no_checkpoint_folder(tmp_path):
+    """The staging dir carries each FOV's checkpoint (``.fov_<id>.done`` and
+    its records) and is renamed into ``out/<WELL>/``; archiving then took the
+    images and left the checkpoints, so the folder outlived the well holding
+    nothing but hidden files."""
+    from pipeline.io import _commit_staging_dir
+
+    staging = tmp_path / "_tmp_images_x"
+    staging.mkdir()
+    imwrite(str(staging / "exp_GFP_C01_F001_0h_processed.tif"), _frame(0))
+    (staging / ".fov_exp_DAPI_C01_F001_0h.done").write_text("")
+    (staging / ".fov_exp_DAPI_C01_F001_0h.records.json").write_text("{}")
+    final_out = tmp_path / "out" / "C01"
+    final_out.parent.mkdir()
+
+    _commit_staging_dir(staging, final_out)
+    pm.compress_folder_images_to_zip_and_remove(final_out, tmp_path / "out" / "C01_out.zip")
+    assert not final_out.exists(), sorted(p.name for p in final_out.iterdir())
+    assert (tmp_path / "out" / "C01_out.zip").exists()

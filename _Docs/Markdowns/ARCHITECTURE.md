@@ -9171,6 +9171,10 @@ what its `_tmp_*` glob finds.
 Both modes honour it. Folder mode used to pin its staging to `output_dir` so the
 closing commit could be a same-filesystem `rename`; `pipeline.io._commit_staging_dir`
 now falls back to a copy on `EXDEV`, so the staging dir is free to live anywhere.
+Once the move is complete it drops the well's per-FOV checkpoints (`.fov_*`)
+from the committed folder: the CSV was written before the commit, so they are
+spent, and left behind they were all `out/<WELL>/` held once its images had
+been archived.
 `_sweep_stale_scratch_dirs_all` sweeps the scratch base *and* `output_dir` (when
 they differ) so staging left by pre-change runs is still reclaimed.
 

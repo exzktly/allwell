@@ -8431,7 +8431,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `frame_preview.py` | The GUI-side StarDist inference behind the Playground's **Segment** button. Holds the session's single loaded model (`_GUI_STARDIST_MODEL`) and the `find_spec` dependency probe, and calls the pipeline's own `pipeline.stardist.segment_nuclei` — so what the Playground shows cannot disagree with what a run produces. **TF and StarDist are imported inside `segment_frame`, never at module scope**: the Playground's controller imports its worker (and through it this module) at GUI start-up, so a module-scope TF import would add tens of seconds and gigabytes to launching the app for everyone who never presses Segment. Qt-free and `review`-free, which is why it sits here rather than beside the feature that uses it. `segment_frame` takes an optional `on_stage(name)` — a plain callable, so the module stays Qt-free — and reports `STAGE_LOADING` then `STAGE_SEGMENTING`, because only the first call of a session pays the model load and a UI that reports both phases identically leaves that one looking like a hang. |
 | `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. Hosts `ProgressTracker`, a stateless log-line parser that turns the pipeline's stdout into structured run events — coarse `("stage", name)`, per-well `("well_stage", (well, stage))` (`upload`/`active`/`process`/`threshold`/`download`) — a completion carries a third element, the word the run journal should record for that well, because the plate's `process` is deliberately lossy about whether anything was computed, per-well FOV sub-progress `("well_fov", (well, done, total))`, per-well transfer progress `("well_xfer", (well, "up"|"down", fraction))`, and `("zipper_well", well)` — which drive the live `RunDashboard`. `download` fires only once **both** the output zip and the well's CSV(s) have landed (a server-side threshold or a zip-only fetch must not read as "downloaded"). Well completion is counted by **identity, not by marker**: the three terminal markers (`Well X — done.`, `Well X — up to date`, `SKIP well X — output already exists`) all feed one set of finished wells, so a well announced terminal twice is counted once and reported as `("well_repeat", well)`. That matters in batched remote mode, where the pipeline is launched once per batch: a well announced terminal by one batch and again by the next drove the headline to "N / N wells (100%)" with wells still outstanding. The batches once shared a remote input directory and relied on the Fetcher having emptied it in time, which is where the repeats came from; the driver's whole-directory swap removes that particular source, and the identity-based count stays because it is the honest way to count a marker that can legitimately repeat. The announced total is a floor, never a ceiling — more distinct wells finishing than the banner promised raises it (a fresh `("well_total", n)`) rather than printing a fraction over 100%. |
 | `remote_manifest.py` | `_REQUIRED_REMOTE_FILES` — the one list of files a remote run needs on the worker. A data declaration with no behaviour, and it lives apart from `remote_runner` because the two guards over it pulled opposite ways: `tests/test_remote_manifest.py` requires an entry for every new `pipeline/` or `util/` module, while `REMOTE_RUNNER_BUDGET` caps the file it used to sit in — so a required entry could fail the budget, and the budget could only be met by omitting it. Here a new entry costs the runner nothing. Re-exported by `remote_runner`, so `services/remote_bootstrap`, the PyInstaller spec, the manifest tests and the several `util/` and `pipeline/` docstrings that cite it by that path all keep working — with the same re-export caveat as the row below: patching the name on `remote_runner` does not reach a reader that imports it from here. |
-| `remote_transport.py` | How bytes and commands reach a remote host: what this rsync build supports (`_rsync_version` and the capability probes over it), how a path is quoted so the remote shell expands `~` rather than making a directory called it (`_remote_quote` / `_remote_join`), the retry funnel every transfer passes through (`_rsync_with_retry`, `_rsync_run_cancellable`), and the reader that turns rsync's progress chatter back into lines. Knows nothing about a *run* — no run id, no journal, no well. Re-exported by `remote_runner`, with one caveat worth knowing: a re-export is a **binding**, so a test patching one of these names on `remote_runner` does not reach a caller that also lives here. Patch `remote_transport`. |
+| `remote_transport.py` | How bytes and commands reach a remote host: what this rsync build supports (`_rsync_version` and the capability probes over it), how a path is quoted so the remote shell expands `~` rather than making a directory called it (`_remote_quote` / `_remote_join`), the retry funnel every transfer passes through (`_rsync_with_retry`, `_rsync_run_cancellable`), the non-fatal remote `rm` the Fetcher runs after each well lands (`delete_remote_paths`, which takes paths and knows nothing of wells), and the reader that turns rsync's progress chatter back into lines. Knows nothing about a *run* — no run id, no journal, no well. Re-exported by `remote_runner`, with one caveat worth knowing: a re-export is a **binding**, so a test patching one of these names on `remote_runner` does not reach a caller that also lives here. Patch `remote_transport`. |
 | `remote_run_id.py` | Where a remote run lives, and whether an earlier one's work may be reused — two questions sharing a module because they are keyed on the same facts, and every reuse defect here came from one being keyed on less than the other. `_compute_run_id` and `pipeline_argv_digest` decide the address; `_choose_remote_output_dir` decides whether a recorded one may be used instead; `remote_run_dir` / `remote_run_paths` are its single spelling. Pure — no ssh, no filesystem — which is what lets the highest-stakes predicate in the remote path be tested directly rather than through a harness. |
 | `remote_commands.py` | The shell a remote run sends, as strings: `_compose_remote_cmd` (the single-launch line — record the pidfile, optionally exec the scheduler launcher, activate conda, wait for the upload, exec the pipeline), `_compose_driver_cmd` and `_batch_driver_snippet` (the batched driver that holds one allocation and runs a pipeline per batch, stopping early when the run's suspend request appears), `_remote_scratch_export`, and the batch handshake names (`BATCH_READY`, `BATCH_DONE`, `BATCH_DONE_MARKER`). No ssh and no I/O, so a quoting decision is tested by reading the string and the driver by running it in `bash`. Re-exported by `remote_runner`; imports the transport's quoting and the conda / wait snippets, never the runner. |
 | `remote_suspend.py` | Asking a running remote pipeline to suspend: `request_suspend` (touch the run's request file over ssh, bounded by `SUSPEND_REQUEST_TIMEOUT_S`, telling a batched run's local loop first), and `_AnySet`, the Event-shaped view a batch upload watches so either a Stop or a suspend ends it. `RemoteRunner.request_suspend` is a one-line delegate; every name is re-exported by `remote_runner`. |
@@ -11777,10 +11777,20 @@ sample every `interval`, and a durable breadcrumb every `_BREADCRUMB_INTERVAL_S`
 (60s) that *does* go to the log — a status line cannot answer "was it stuck at
 3am?" the next morning, and one line a minute is a record rather than a flood.
 
-**A well turns green only when both halves of its output have landed** — the
-`{well}_out.zip` and its per-well CSV(s) are two separate rsyncs, and
-`ProgressTracker._mark_fetch_part` fires the `download` stage on the transition
-where both are present. Two paths bypass that handshake, and both must announce
+**A well turns green only when both halves of its output have landed and the
+zip is in the output folder** — the `{well}_out.zip` and its per-well CSV(s) are
+two separate rsyncs, and `ProgressTracker._mark_fetch_part` fires the `download`
+stage on the transition where both are present. The in-stream fetcher holds its
+`N CSV file(s)` line back until `Fetcher._materialize` has put the zip in place,
+so the second half is never reported while the output still sits in the transit
+directory; a materialise that fails logs a `WARN local materialize failed` line
+instead, which the tracker does not read, and the well stays "computed, awaiting
+fetch" for the end-of-run retry. `_materialize` itself is a rename
+(`os.replace`) out of the transit directory beside the output folder, falling
+back to a staged copy only on a cross-device (`EXDEV`) rename — copying there
+wrote every byte of each well a second time onto the output volume, which on a
+network share held the fetcher for minutes after the well had been painted
+fetched. Two paths bypass that handshake, and both must announce
 themselves or the well stays painted "computed, awaiting fetch" with its data
 already on disk: a well the remote skipped as already current
 (`[remote] ✓ W: up to date`), and one rescued by the end-of-run backstop. The
@@ -11791,9 +11801,12 @@ because by the time it runs the well has usually registered *neither*: the
 in-stream fetcher returns early when the zip pull fails, before it reaches the
 CSVs. Reusing the fetch vocabulary rather than inventing a form of its own means
 a rescued well reaches green by the same route, with nothing extra for the
-tracker to learn. The drain's own chatter
-(`draining fetcher: N well(s)`, `still downloading… (5/8 wells)`) carries counts
-rather than well ids and deliberately marks nothing.
+tracker to learn. The drain's own chatter (`draining fetcher: N well(s)`,
+`fetcher still working… (5/8 wells fetched) — B03: placing the output in …, 2m 10s
+so far`) deliberately marks nothing: the heartbeat names the well and the step
+the worker is on (`Fetcher._activity`, set at each step of `_fetch_one`) so a
+slow post-download step is not reported as "still downloading", but the well id
+follows the word `fetcher` rather than the `↓ ` the per-well patterns anchor on.
 
 **Per-well transfer progress** rides the same marker. `WELL_XFER_PREFIX` is
 `TRANSIENT_PREFIX` plus `xfer `, so the "never write this to the log" rule
@@ -13512,6 +13525,23 @@ fixture (it doesn't help).
    its own inline `subprocess.run(ssh … bash -s)` rather than through
    `DatasetCache._ssh_script` — a fourth spelling of "list files on the remote",
    and the one a test is most likely to miss.
+
+10. **No autouse fixture makes a numbered temp directory.** `tmp_path` and
+   `tmp_path_factory.mktemp` choose each new directory's number by listing every
+   entry already in the session's base temp directory, so a call costs time in
+   proportion to the directories the session has made so far. Called once per
+   test from an autouse fixture, that makes the lane's total setup quadratic in
+   its test count: two `mktemp` calls measured 0.2 ms at the first test, 16 ms
+   at the 3,000th and 30 ms at the 6,000th. Three autouse fixtures did it — the
+   settings, scan-cache and run-journal isolation — and across ~10,300 tests
+   setup came to 316 s against 259 s of test bodies, which put the CI job past
+   its 15-minute cap on every branch. They now take a per-test directory from
+   `tempfile.mkdtemp` under one session-scoped root
+   (`conftest._autouse_scratch_root`, via `conftest._scratch_dir`), whose cost
+   does not grow; setup fell to 22 s and the lane from 10 min 27 s to 5 min 13 s
+   on the same machine. A test that asks for `tmp_path` itself still pays the
+   listing, which is fine at the scale a test's own request happens.
+   `test_the_fast_lane_stays_fast.py` holds the rule.
 
 **The slow lane runs on demand, not on PRs and not on a schedule** —
 `.github/workflows/slow-lane.yml`, six sharded runners, dispatched by hand from

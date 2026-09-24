@@ -78,6 +78,14 @@ _SCRATCH_DIR_ALLOWLIST = frozenset({
     # beside it, and neither is removed here.
     ("services/remote_runner.py", "_fetch_one"),
     ("services/remote_runner.py", "_materialize_incremental"),
+    # `stage_local_zips`' planning closure. What it removes is the upload
+    # staging dir `_open_staging_if_needed` opened a moment earlier (a
+    # `_new_transit_dir`) to hold the rewritten *copies* of the user's
+    # archives; the originals are read, never written or removed. It became
+    # visible when the block moved out of `stage_local_zips`, which the check
+    # passes wholesale because its folder zip-up elsewhere calls the safe
+    # helper.
+    ("services/remote_runner.py", "_planned"),
 })
 
 

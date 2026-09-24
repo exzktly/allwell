@@ -241,17 +241,42 @@ def test_a_request_left_by_the_last_suspend_does_not_suspend_the_resume(spawned)
         "which would wind down before processing anything")
 
 
-def test_an_unreachable_host_asks_nothing_and_says_so(spawned, monkeypatch):
-    spawn, _remote = spawned
-    runner = spawn()
+def _unreachable(monkeypatch, runner):
     monkeypatch.setattr(type(runner._cache), "_ssh_run",
                         lambda self, argv, **k: subprocess.CompletedProcess(
                             argv, 255, "", "Connection refused"))
+
+
+def test_an_unreachable_host_asks_nothing_and_says_so(spawned, monkeypatch):
+    """Single-shot: nothing is in effect, so the caller treats the run as going on."""
+    spawn, _remote = spawned
+    runner = spawn()
+    _unreachable(monkeypatch, runner)
     log: list[str] = []
-    batched = MagicMock()
-    assert runner.request_suspend(batched, log_fn=log.append) is False
-    batched.note_suspend_requested.assert_not_called()
+    assert runner.request_suspend(None, log_fn=log.append) is False
     assert "Connection refused" in "".join(log)
+    assert "Press Suspend again" in "".join(log)
+
+
+def test_a_batched_run_is_told_before_the_host_is_asked(spawned, monkeypatch):
+    """Batched: told first, so the driver's early exit is never read as a lost
+    node, and in effect even if the ``touch`` fails, because no more batches
+    will be sent whatever the host says."""
+    spawn, _remote = spawned
+    runner = spawn()
+    order: list[str] = []
+    batched = MagicMock()
+    batched.note_suspend_requested.side_effect = lambda: order.append("told")
+
+    def ssh_run(self, argv, **k):
+        order.append(argv[0])
+        return subprocess.CompletedProcess(argv, 255, "", "Connection refused")
+
+    monkeypatch.setattr(type(runner._cache), "_ssh_run", ssh_run)
+    log: list[str] = []
+    assert runner.request_suspend(batched, log_fn=log.append) is True
+    assert order == ["told", "touch"]
+    assert "no more will be sent" in "".join(log)
 
 
 # ── PipelineRunner: which way a suspend goes ────────────────────────────────
@@ -384,3 +409,206 @@ def test_a_driver_that_stops_without_a_suspend_is_still_a_lost_node():
     b._read_driver(_driver_output(BATCH_DONE_MARKER.format(i=1, rc=0) + "\n"))
     assert b._driver_lost.is_set()
     b._fetcher.cancel.assert_called_once_with()
+
+
+# ── what the review of the first version found ──────────────────────────────
+
+class _Ask:
+    """A remote whose answers a test releases one at a time."""
+
+    def __init__(self, answers):
+        import threading
+
+        self.can_request_suspend = True
+        self._answers = list(answers)       # (release_event, result) per call
+        self.lock = threading.Lock()
+
+    def request_suspend(self, proc=None, *, log_fn=None):
+        with self.lock:
+            release, result = self._answers.pop(0)
+        release.wait(5)
+        return result
+
+
+def test_a_slow_failed_click_does_not_undo_a_later_one_that_landed(runner):
+    """Two clicks; the first ssh times out *after* the second succeeded.
+
+    Before, the first thread cleared the suspend and put the deleting cleanup
+    mode back, so the run that the second request did wind down was reported
+    as finished — success hooks, remote data deleted, the half-done folder
+    handed to Review.
+    """
+    import threading
+
+    first, second = threading.Event(), threading.Event()
+    runner._remote_runner = _Ask([(first, False), (second, True)])
+    runner.suspend()
+    t1 = runner._suspend_thread
+    runner.suspend()
+    t2 = runner._suspend_thread
+    second.set()
+    t2.join(5)
+    first.set()
+    t1.join(5)
+    assert runner.was_suspended
+    assert runner._cleanup_remote == "none"
+
+
+def test_a_previous_run_s_late_thread_cannot_touch_the_next_run(runner):
+    import threading
+
+    gate = threading.Event()
+    runner._remote_runner = _Ask([(gate, False)])
+    runner.suspend()
+    late = runner._suspend_thread
+    runner._run_generation += 1          # what `start()` does for the next run
+    runner._suspend_requested.set()      # the next run's own suspend
+    runner._cleanup_remote = "none"
+    gate.set()
+    late.join(5)
+    assert runner.was_suspended
+    assert runner._cleanup_remote == "none"
+
+
+def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag):
+    """Run the real `_run_pipeline_remote` with staging and the host stubbed."""
+    import types
+
+    import services.pipeline_runner as pr
+
+    hooks: list[str] = []
+    zipped = types.SimpleNamespace(
+        up_to_date_wells=(), well_zips=(), mode=types.SimpleNamespace(value="zip"),
+        on_pipeline_success=lambda: hooks.append("zipped"), cleanup=None)
+    monkeypatch.setattr(pr, "stage_local_zips", lambda *a, **k: zipped)
+    verified: list[str] = []
+
+    class _Proc:
+        pid = 1
+        returncode = 0
+        stdout = iter(lines)
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    remote = types.SimpleNamespace(
+        estimate=lambda z: types.SimpleNamespace(format=lambda: "est"),
+        spawn=lambda *a, **k: _Proc(),
+        verify_and_cleanup=lambda ok, cleanup_mode, **k: verified.append(cleanup_mode) or True,
+        close_remote_job=lambda **k: None,
+        can_request_suspend=True)
+    r = pr.PipelineRunner()
+    r._remote = types.SimpleNamespace(name="h")
+    r._remote_runner = remote
+    r._cleanup_remote = "all"
+    if suspend_flag:
+        r._suspend_requested.set()
+    opts = {"filename_schema": "a:b", "filename_sep": "_", "fluor_tokens": ["GFP"],
+            "nuclear_token": "DAPI"}
+    r._run_pipeline_remote(tmp_path / "in", tmp_path / "out", [], opts,
+                           on_success=lambda: hooks.append("on_success"))
+    kinds = []
+    while not r.log_q.empty():
+        kinds.append(r.log_q.get_nowait()[0])
+    return r, kinds, verified, hooks
+
+
+def test_a_run_that_says_it_saw_the_request_is_suspended_whatever_the_ssh_said(
+        monkeypatch, tmp_path):
+    """The ask failed (a timeout, say) and cleared the flag, but it had landed.
+
+    The line is the pipeline's own, as `pipeline.suspend` writes it.
+    """
+    r, kinds, verified, hooks = _drive_remote_run(
+        monkeypatch, tmp_path, suspend_flag=False,
+        lines=["Well A01 F001 starting\n",
+               "2026 WARNING SUSPEND requested (request file /x) — finishing\n",
+               "Well A01 F001 done.\n"])
+    assert "suspended" in kinds and "done" not in kinds, kinds
+    assert verified == ["none"], "a suspended run's remote output must not be deleted"
+    assert hooks == []
+    assert r.was_suspended
+
+
+def test_a_run_that_never_saw_one_still_finishes(monkeypatch, tmp_path):
+    """The control: no request on the stream and none asked is a completion."""
+    r, kinds, verified, hooks = _drive_remote_run(
+        monkeypatch, tmp_path, suspend_flag=False,
+        lines=["Well A01 F001 starting\n", "Well A01 F001 done.\n"])
+    assert "done" in kinds and "suspended" not in kinds, kinds
+    assert verified == ["all"]
+    assert sorted(hooks) == ["on_success", "zipped"]
+
+
+def test_a_well_that_starts_after_the_request_leaves_nothing(tmp_path):
+    """No CSV, no out.zip and no ``— done.`` line for a well that never began.
+
+    The pool's call queue holds wells the orchestrator cannot cancel; each one
+    used to run the whole end-of-well path with nothing in it and announce
+    itself done, which a remote Fetcher then expected a CSV for.
+    """
+    import numpy as np
+    tifffile = pytest.importorskip("tifffile")
+
+    request = tmp_path / "req"
+    request.touch()
+    # A real well: one field, two channels, named by the default schema, so
+    # the task gets as far as it would on a plate.
+    with zipfile.ZipFile(tmp_path / "A01.zip", "w") as zf:
+        for channel in ("DAPI", "GFP"):
+            png = tmp_path / f"{channel}.tif"
+            tifffile.imwrite(png, np.zeros((16, 16), dtype=np.uint16))
+            zf.write(png, f"exp_{channel}_A01_F001_0h.tif")
+    script = textwrap.dedent(f"""
+        import sys, logging
+        sys.path.insert(0, {str(_REPO)!r})
+        logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+        import process_microscopy as pm
+        pm._suspend.watch_request_file({str(request)!r})
+        out = pm.process_well_zip_task(
+            "A01", __import__("pathlib").Path({str(tmp_path / "A01.zip")!r}),
+            __import__("pathlib").Path({str(tmp_path / "out")!r}), {{}},
+            "DAPI", ["GFP"], "measurements")
+        print("RESULT", out)
+    """)
+    path = tmp_path / "well.py"
+    path.write_text(script)
+    env = {k: v for k, v in os.environ.items() if k != "ALLWELL_SUSPEND_FILE"}
+    out = subprocess.run([sys.executable, str(path)], capture_output=True,
+                         text=True, timeout=120, env=env)
+    text = out.stdout + out.stderr
+    assert "RESULT ([], [])" in text, text[-2000:]
+    assert "— done." not in text
+    assert "starting" not in text
+    assert not (tmp_path / "out").exists() or not any((tmp_path / "out").iterdir())
+
+
+def test_the_request_path_exists_only_once_the_upload_is_done(
+        spawned, monkeypatch):
+    """A suspend during the upload stops it; asked of the real spawn's ordering."""
+    from services.remote_runner import DatasetCache
+
+    spawn, _remote = spawned
+    seen: list[bool] = []
+    key = "cachekey" + "0" * 24
+
+    def upload(self, z, **k):
+        seen.append(bool(holder[0]._run and holder[0].can_request_suspend))
+        return (key, 0, 0.01)
+
+    holder: list = [None]
+    monkeypatch.setattr(DatasetCache, "ensure_uploaded", upload)
+    from services import remote_runner as rr
+    real_init = rr.RemoteRunner.__init__
+
+    def init(self, *a, **k):
+        real_init(self, *a, **k)
+        holder[0] = self
+
+    monkeypatch.setattr(rr.RemoteRunner, "__init__", init)
+    runner = spawn()
+    assert seen == [False], "the run could be asked to suspend mid-upload"
+    assert runner.can_request_suspend

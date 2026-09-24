@@ -51,6 +51,7 @@ from services.remote_runner import (
 from services import run_journal
 from services.subprocess_kill import signal_subprocess
 from util.aw_safe import swallow, swallowed
+from pipeline.suspend import LOG_MARKER as _SUSPEND_LOG_MARKER
 
 _LOG = logging.getLogger("allwell.pipeline_runner")
 
@@ -648,8 +649,17 @@ class PipelineRunner:
         # winds down, and that this runner then leaves the remote's files alone
         # so a resume can pick them up. Read by ``was_suspended``.
         self._suspend_requested: threading.Event = threading.Event()
-        # The thread a remote suspend's request runs on (see ``suspend``).
+        # The thread a remote suspend's request runs on (see ``suspend``), and
+        # the two counters that keep a late one from undoing a later decision:
+        # `_suspend_seq` numbers the requests within a run, `_run_generation`
+        # the runs, so neither an older click nor a previous run's thread can
+        # clear what a newer one set.
         self._suspend_thread: threading.Thread | None = None
+        self._suspend_seq = 0
+        self._run_generation = 0
+        # Set when the remote pipeline's own stream says it saw a suspend
+        # request (`pipeline.suspend.LOG_MARKER`) — the evidence that decides.
+        self._suspend_seen = False
         # Snapshots of the two events above, taken when a failure is queued —
         # see ``cancel_state_at_failure``.
         self._error_was_stopped = False
@@ -871,6 +881,8 @@ class PipelineRunner:
         # Clearing before the thread exists closes the window entirely.
         self._stop_requested.clear()
         self._suspend_requested.clear()
+        self._suspend_seen = False
+        self._run_generation += 1
         self._error_was_stopped = False
         self._error_was_suspended = False
         self._had_error = False
@@ -950,11 +962,12 @@ class PipelineRunner:
             # ssh round trip, and this is called from a button — so it goes on
             # a thread of its own rather than freezing the window for as long
             # as an unreachable host takes to time out.
-            with self._proc_lock:
-                proc = self._proc
+            self._suspend_seq += 1
             self._suspend_thread = threading.Thread(
                 target=self._ask_remote_to_suspend,
-                args=(remote, proc, previous_cleanup), daemon=True)
+                args=(remote, previous_cleanup,
+                      self._suspend_seq, self._run_generation),
+                daemon=True)
             self._suspend_thread.start()
             return
         # A local run, or a remote one still staging or uploading — there is no
@@ -962,21 +975,47 @@ class PipelineRunner:
         # what a suspend can do.
         self.stop(escalate=False)
 
-    def _ask_remote_to_suspend(self, remote, proc, previous_cleanup: str) -> None:
-        """Worker half of a remote :meth:`suspend`."""
+    def _ask_remote_to_suspend(self, remote, previous_cleanup: str,
+                               seq: int, generation: int) -> None:
+        """Worker half of a remote :meth:`suspend`.
+
+        The process handle is read here rather than by the button: the lock
+        that guards it is held by the spawn for the whole of the upload.
+        """
+        with self._proc_lock:
+            proc = self._proc
         try:
             asked = remote.request_suspend(
                 proc, log_fn=lambda m: self._enqueue(("line", m)))
         except Exception:
             swallowed("asking the remote run to suspend")
             asked = False
-        if asked:
+        if asked or seq != self._suspend_seq or generation != self._run_generation:
+            # Asked; or a newer click, or a newer run, has decided since.
             return
-        # The host could not be reached, so nothing was asked and the run
-        # carries on. Left set, the flag would describe a run that finishes the
-        # plate as a suspended one; the warning has already told the user.
+        # The ssh call failed, so the run is taken to be carrying on — but a
+        # timeout can fail after the ``touch`` ran. That case is not guessed at
+        # here: a pipeline that saw the request says so on its stream, and
+        # `_run_pipeline_remote` restores the suspend from that line.
         self._suspend_requested.clear()
         self._cleanup_remote = previous_cleanup
+
+    def _note_suspend_evidence(self, line: str) -> None:
+        """Remember that the remote pipeline reported seeing a suspend request."""
+        if not self._suspend_seen and _SUSPEND_LOG_MARKER in line:
+            self._suspend_seen = True
+
+    def _settle_remote_suspend(self) -> str:
+        """Decide, once the remote pipeline has exited, whether it was suspended.
+
+        The pipeline's own word wins over the ssh call's: a request whose ssh
+        timed out may still have landed, and a run that says it saw one wound
+        down whatever the app believed. Returns the cleanup mode to use — never
+        a deleting one for a suspended run, whose remote output a resume needs.
+        """
+        if self._suspend_seen:
+            self._suspend_requested.set()
+        return "none" if self._suspend_requested.is_set() else self._cleanup_remote
 
     @property
     def was_suspended(self) -> bool:
@@ -1494,6 +1533,7 @@ class PipelineRunner:
             try:
                 for line in proc.stdout:
                     self._enqueue(("line", line))
+                    self._note_suspend_evidence(line)
                     if line.strip():
                         tail.append(line.rstrip("\n"))
             except Exception as exc:
@@ -1516,10 +1556,11 @@ class PipelineRunner:
                 with swallow("waiting for the pipeline subprocess"):
                     proc.wait()
             rc = proc.returncode
+            cleanup_mode = self._settle_remote_suspend()
 
             ok = self._remote_runner.verify_and_cleanup(
                 ok=(rc == 0),
-                cleanup_mode=self._cleanup_remote,
+                cleanup_mode=cleanup_mode,
                 dry_run=self._dry_run_cleanup,
                 log_fn=lambda m: self._enqueue(("line", m)),
             )

@@ -380,6 +380,71 @@ def test_a_suspend_finishes_the_batch_in_flight_and_sends_no_more(
     assert "not sent" in "".join(p._logged)
 
 
+def test_a_suspend_during_a_batch_upload_ends_the_upload(tmp_path, monkeypatch):
+    """A batch still uploading when Suspend lands is abandoned, not finished.
+
+    It would be thrown away unrun either way: the loop sends no batch after a
+    suspend. Watching only `_stop`, the upload ran to the end first — the whole
+    transfer paid for a batch that was then discarded.
+    """
+    proc = _FakeProc()
+    ordering: list[str] = []
+    p = _batched(tmp_path, ["A01", "A02"])
+    _stub_runner(p, proc, ordering)
+    uploads = []
+
+    def upload(zips, dest, *, stop_event=None, **kw):
+        uploads.append(dest.rsplit("/", 1)[-1])
+        if len(uploads) == 1:
+            return (0, 0.0, 0)
+        p.note_suspend_requested()          # Suspend, mid-transfer of batch 2
+        # A transfer far longer than the test waits: only an upload that sees
+        # the suspend comes back in time.
+        stopped = stop_event.wait(timeout=30)
+        return (0, 0.0, 20 if stopped else 0)
+
+    p._runner._cache.upload_subset = upload
+    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+                        lambda argv, **kw: proc)
+    worker = threading.Thread(target=p._run_batches, daemon=True)
+    worker.start()
+    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    worker.join(timeout=5)
+    interrupted = not worker.is_alive()
+    proc.finish()
+
+    assert interrupted, "the upload was not interrupted by the suspend"
+    assert uploads == ["b1", "b2"]
+    assert p._returncode == 0
+    assert not any("upload failed" in m for m in p._logged)
+    assert "not sent" in "".join(p._logged)
+    assert not any("b2_ready" in o or "_2_ready" in o for o in ordering), ordering
+
+
+def test_a_suspended_plate_gets_no_thresholds_from_its_fraction(tmp_path, monkeypatch):
+    """The end-of-run auto-threshold pass is for a finished plate.
+
+    Run over the wells a suspend left, it wrote cutoffs from a fraction of the
+    plate into the sidecar the resumed run then starts from.
+    """
+    proc = _FakeProc()
+    p = _batched(tmp_path, ["A01", "A02"])
+    _stub_runner(p, proc, [])
+    ran = []
+    p._auto_threshold_off_by_user = lambda: False
+    p._run_local_auto_threshold = lambda: ran.append(True)
+    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+                        lambda argv, **kw: proc)
+    worker = threading.Thread(target=p._run_batches, daemon=True)
+    worker.start()
+    p.note_suspend_requested()
+    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.finish()
+    worker.join(timeout=20)
+    assert p._returncode == 0
+    assert ran == []
+
+
 def test_the_markers_never_reach_the_log(tmp_path, monkeypatch):
     """They are this loop's handshake with the driver; `ProgressTracker` has no
     reason to see them, and a stray one in the log reads as pipeline output."""

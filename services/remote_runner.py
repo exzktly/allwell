@@ -205,6 +205,11 @@ from services.remote_transport import (  # noqa: F401
 # addresses, the keys they are derived from, and the re-attach decision. Its own
 # module because it is pure, which is what lets the reuse predicate be tested
 # directly rather than through a harness. Re-exported so existing imports work.
+from services.remote_suspend import (  # noqa: F401 — re-exported
+    SUSPEND_REQUEST_TIMEOUT_S,
+    _AnySet,
+)
+from services.remote_suspend import request_suspend as _request_suspend
 from services.remote_commands import (  # noqa: F401 — re-exported
     _BATCH_DONE_RE,
     BATCH_DONE,
@@ -2137,10 +2142,6 @@ def _scheduler_handoff_lines(launcher: str, *, batch: int | None = None) -> str:
 # enough for an ``rm -rf`` of a run directory on a slow shared filesystem, and
 # far short of the hours an unbounded one can park a thread for.
 SSH_CONTROL_TIMEOUT_S = 120.0
-#: A suspend request is one ``touch``. Bounded tighter than the other control
-#: calls because the user is waiting on the answer: a host that has not answered
-#: in this long is not going to, and the run should be left to carry on.
-SUSPEND_REQUEST_TIMEOUT_S = 30.0
 
 
 def _only_my_job(jid_var: str, marker: str) -> str:
@@ -3966,7 +3967,9 @@ class _BatchedRemoteProcess:
                     self._batch_staging_dir(batch_idx + 1),
                     log_fn=self._log,
                     progress_fn=inner_progress,
-                    stop_event=self._stop,
+                    # A suspend ends the upload too: a batch sent after the
+                    # user asked for the machine back is thrown away unrun.
+                    stop_event=_AnySet(self._stop, self._suspending),
                 )
                 if rc != 0:
                     # `upload_subset` watches `_stop`, so a Stop mid-transfer
@@ -3979,6 +3982,8 @@ class _BatchedRemoteProcess:
                         self._returncode = (
                             1 if self._driver_lost.is_set() else 130)
                         return
+                    if self._suspend_before(batch_idx + 1, n_batches):
+                        break
                     self._log(
                         f"[remote] batch {batch_idx + 1} upload failed "
                         f"(rsync rc={rc}); aborting remaining batches\n"
@@ -4064,9 +4069,11 @@ class _BatchedRemoteProcess:
                 # output. The per-batch passes were suppressed via
                 # ``--no_auto_threshold`` so a batch wouldn't write thresholds
                 # derived from a sliver of the plate. Fires only when the whole
-                # run succeeded — a mid-run abort leaves the previous run's
-                # pipeline_info.json (if any) untouched.
-                if self._returncode == 0 and not self._auto_threshold_off_by_user():
+                # run succeeded — a mid-run abort or a suspend leaves the
+                # previous run's pipeline_info.json (if any) untouched; the
+                # resumed run that finishes the plate writes the thresholds.
+                if (self._returncode == 0 and not self._suspending.is_set()
+                        and not self._auto_threshold_off_by_user()):
                     self._run_local_auto_threshold()
             finally:
                 self._line_q.put(None)
@@ -5596,7 +5603,6 @@ class RemoteRunner:
                 output_filter,
                 zipped.mode,
             ) + ["--suspend_file", own.suspend_request]
-            self._run.suspend_request = own.suspend_request
 
         # Compose the remote shell command. PID echoed first so the
         # cancel path can target the pipeline directly. v5.2.11: tilde-
@@ -5751,6 +5757,12 @@ class RemoteRunner:
         # Keep a handle so cancel() can stop an in-flight per-well download.
         self._fetcher = fetcher
         self._cancelled.clear()
+        # Suspendable only from here: the pipeline is launched and its input is
+        # all on the host. Earlier, a request would wait out the rest of the
+        # upload and a node for a run that then does nothing, so a suspend
+        # during the upload stops it instead (`PipelineRunner.suspend`).
+        if not cache_hit:
+            self._run.suspend_request = own.suspend_request
         return _RemoteProcess(popen, self._run, fetcher, heartbeat=heartbeat)
 
     # ── Verify + cleanup ────────────────────────────────────────────────
@@ -6639,47 +6651,8 @@ class RemoteRunner:
 
     def request_suspend(self, proc=None, *,
                         log_fn: Callable[[str], None] | None = None) -> bool:
-        """Ask the running remote pipeline to wind down. ``True`` if it was asked.
-
-        A suspend cannot go the way a Stop does. The process the app can name
-        on the remote is the login shell's ``conda run`` or ``srun``, not the
-        pipeline, so a signal to it reaches the pipeline only if those forward
-        it; and signalling the local ssh session instead ends the session —
-        which is what a remote Suspend used to do, taking the run's output
-        stream, the per-well downloads (:meth:`cancel` stops the Fetcher) and
-        on a scheduler the allocation (``scancel``) down with it. What was left
-        was a Stop with the wells in flight thrown away and the finished ones
-        stranded on the remote.
-
-        So the request is a file. The pipeline was started with
-        ``--suspend_file`` naming it and checks for it at every FOV-group
-        boundary, exactly where it checks for the signal; a batched driver
-        checks it before starting each batch. Nothing else about the run is
-        touched: the stream keeps flowing, the Fetcher keeps downloading, and
-        the run ends through its ordinary exit with code 0.
-
-        ``False`` when there is nothing to ask — no run launched yet, or one
-        that was never given a request path — or the host could not be reached.
-        The caller decides what that means; see ``PipelineRunner.suspend``.
-        """
-        log = log_fn or (lambda _m: None)
-        run = self._run
-        if run is None or not run.suspend_request:
-            return False
-        result = self._cache._ssh_run(["touch", run.suspend_request], check=False,
-                                     timeout_s=SUSPEND_REQUEST_TIMEOUT_S)
-        if result is None or result.returncode != 0:
-            detail = (result.stderr or "").strip() if result is not None else ""
-            log("[remote] warn: could not reach the host to ask the run to "
-                f"suspend{f' ({detail})' if detail else ''}; it is still running. "
-                "Press Suspend again, or Stop to cancel it.\n")
-            return False
-        notify = getattr(proc, "note_suspend_requested", None)
-        if callable(notify):
-            notify()
-        log("[remote] suspend requested on the host — the run will finish the "
-            "FOV-group(s) in flight and download what it has written.\n")
-        return True
+        """Ask the running pipeline to wind down; see :func:`remote_suspend.request_suspend`."""
+        return _request_suspend(self, proc, log_fn=log_fn)
 
     def cancel(self, ssh_proc: subprocess.Popen) -> None:
         """Best-effort remote kill. The local pgid kill (handled by

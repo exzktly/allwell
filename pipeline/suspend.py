@@ -34,6 +34,13 @@ import threading
 # asked to wind down does not un-wind-down, and each run is its own process.
 _SUSPENDED = threading.Event()
 
+#: The words every "suspend requested" log line starts with, whichever way the
+#: request arrived. The app reads the run's stream for it: over ssh, whether a
+#: request reached the host cannot be known from the ssh call that made it (a
+#: timeout may have run the ``touch``), but a pipeline that saw the request says
+#: so on the stream, and that is the evidence ``PipelineRunner`` acts on.
+LOG_MARKER = "SUSPEND requested"
+
 # The signals a suspend request can arrive on. SIGTERM is what the GUI's Stop /
 # Suspend path sends (via the process group); SIGINT is Ctrl-C for a CLI run.
 _SUSPEND_SIGNALS = (signal.SIGTERM, signal.SIGINT)
@@ -69,7 +76,7 @@ def is_suspended() -> bool:
         _SUSPENDED.set()
         if _request_log is not None:
             _request_log.warning(
-                "SUSPEND requested (request file %s) — finishing the "
+                LOG_MARKER + " (request file %s) — finishing the "
                 "FOV-group(s) already in flight, then writing each well's CSV "
                 "and out.zip from the work done so far. Re-run with "
                 "--incremental to continue.", path)
@@ -131,7 +138,7 @@ def _make_handler(sig, previous, log):
             pass
         if first and log is not None:
             log.warning(
-                "SUSPEND requested (signal %s, pid %s) — finishing the "
+                LOG_MARKER + " (signal %s, pid %s) — finishing the "
                 "FOV-group(s) already in flight, then writing each well's CSV "
                 "and out.zip from the work done so far. Re-run with "
                 "--incremental to continue. Signal again to stop immediately.",

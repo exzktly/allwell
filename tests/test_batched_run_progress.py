@@ -15,6 +15,7 @@ user staged, with nothing on the plate map for the difference.
 from __future__ import annotations
 
 import queue
+import threading
 import types
 from pathlib import Path
 
@@ -154,6 +155,7 @@ def _bare_batched(tmp_path: Path, wells: list[str]) -> rr._BatchedRemoteProcess:
     p._line_q = queue.Queue()
     p._log = lambda _m: None
     p._returncode = None
+    p._suspending = threading.Event()
     p._fetcher = types.SimpleNamespace(
         run=types.SimpleNamespace(well_count_total=0),
         flush_and_join=lambda: None,

@@ -1800,6 +1800,7 @@ def main() -> None:
     _boot_diag.boot("creating QApplication (loads Qt platform plugin) …")
     app = QApplication.instance() or QApplication(sys.argv)
     _boot_diag.boot("QApplication created OK")
+    _boot_diag.install_qt_cross_thread_trace()
     _install_combobox_popup_widener()
     # Collapse both font-family tokens to single resolvable names so Qt's
     # QSS parser doesn't walk alias tables and warn at startup

@@ -167,6 +167,12 @@ SILENT_EXCEPT_ALLOWLIST = {
     ("startup/boot_diag.py", "arm_faulthandler"),
     ("startup/boot_diag.py", "_hook"),
     ("startup/boot_diag.py", "install_excepthook"),
+    # The Qt message handler that traces cross-thread warnings into the boot
+    # log. It runs inside Qt's message delivery, on whichever thread warned,
+    # and its failures are about the diagnostic channel itself: logging them
+    # would re-enter the logging and Qt machinery the handler is reporting on.
+    ("startup/boot_diag.py", "_handler"),
+    ("startup/boot_diag.py", "install_qt_cross_thread_trace"),
     # The bootstrap's own last-resort note. `_quietly` reports a failed log
     # write to the real stderr; when *that* write fails too there is no
     # remaining channel to report on, which is the one honest case for a bare

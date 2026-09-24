@@ -203,6 +203,81 @@ def arm_faulthandler() -> None:
         pass  # diagnostics-only; never block startup
 
 
+#: Qt's words for an object touched from a thread that does not own it — the
+#: "Timers cannot be stopped from another thread" family. Qt only *warns* for
+#: these, and the native crash that usually follows leaves a stack of the
+#: thread it happened on, not of the one that did the damage.
+_CROSS_THREAD_MARKERS = ("from another thread", "different thread",
+                         "in a different thread")
+
+#: How many cross-thread warnings get a full stack dump. The first names the
+#: culprit; a flood would bury it and grow the log without bound.
+_CROSS_THREAD_DUMPS = 5
+
+
+def _all_thread_stacks() -> str:
+    """Every live thread's Python stack, formatted by hand.
+
+    Not ``faulthandler.dump_traceback``: its header lines are what
+    :func:`_looks_like_a_crash` keys on, so a warning dumped in its format would
+    make the next launch keep and report this log as a crash that never
+    happened.
+    """
+    import threading
+    import traceback
+
+    names = {t.ident: t.name for t in threading.enumerate()}
+    parts = []
+    for ident, frame in sys._current_frames().items():
+        parts.append(f"  -- thread {names.get(ident, '?')} ({ident})\n")
+        parts.extend("    " + line for line in
+                     "".join(traceback.format_stack(frame)).splitlines(True))
+    return "".join(parts)
+
+
+def install_qt_cross_thread_trace() -> None:
+    """Record who touched a Qt object from the wrong thread. Never raises.
+
+    Call once the ``QApplication`` exists. Installs a Qt message handler that,
+    for a cross-thread warning, writes the message, the thread that raised it
+    and every thread's Python stack to the boot log — the evidence a report
+    like "clicking Stop crashes with *timers cannot be stopped from another
+    thread*" needs, and which no reading of the code had produced. Every
+    message is still passed on to the previous handler, or to stderr as Qt's
+    default handler would print it.
+    """
+    try:
+        from PySide6.QtCore import qInstallMessageHandler
+    except Exception:
+        return
+    dumps = [0]
+    previous = None
+
+    def _handler(mode, context, message):
+        try:
+            if (dumps[0] < _CROSS_THREAD_DUMPS
+                    and any(m in str(message) for m in _CROSS_THREAD_MARKERS)):
+                import threading
+                dumps[0] += 1
+                boot(f"Qt cross-thread warning on thread "
+                     f"{threading.current_thread().name!r}: {message}\n"
+                     f"{_all_thread_stacks()}")
+        except Exception:
+            pass
+        if previous is not None:
+            previous(mode, context, message)
+        elif sys.stderr is not None:
+            try:
+                sys.stderr.write(f"{message}\n")
+            except Exception:
+                pass
+
+    try:
+        previous = qInstallMessageHandler(_handler)
+    except Exception:
+        pass
+
+
 def install_excepthook() -> None:
     """Route uncaught exceptions to the boot log + a best-effort GUI dialog, so
     a failure is never silent even without a usable console. Never raises."""

@@ -5445,6 +5445,18 @@ channel-role handoff, and Validate & Repair's "Complete this run in Analyze".
 snapshot the pipeline records) and falls back to the top-level/`qc_options` keys
 for older sidecars; `None`-valued keys are dropped so a sparse sidecar can't
 clobber widget defaults with blanks.
+It restores settings and never resumes: nothing here reads the run journal or
+the suspend record, ticks Incremental or starts a run — resuming is the resume
+banner's job (`analyze.suspend`). **A sidecar can describe another machine.** A
+remote run's is written by the host from the host's argv and fetched home as
+is, so its `input_dir`, `output_dir` and `scratch_dir` name the host's run
+directory and its `no_run_check` is the one the remote runner adds to every
+launch. `analyze.pinfo.recorded_elsewhere` recognises such a sidecar —
+`suspend_file`, which only the remote runner passes, or a recorded `output_dir`
+that is not the folder the file sits in — and the restore then takes the input
+from the file's own location and leaves the scratch disk and the completeness
+check as the form has them. Host `extra_args` baked into the argv cannot be told
+apart from the user's own settings and are restored like any other.
 
 The **Incremental — process only missing FOVs** checkbox in Output & Compute
 carries `--incremental` into the run: each well's already-recorded
@@ -14051,6 +14063,19 @@ the one crash out of the ring. The crash dialog also carries the traceback in
 its "Show Details" section, so the usual case needs no file at all — and it no
 longer says "failed to start", which was untrue for every crash that happened
 after start-up.
+
+**A cross-thread Qt warning names its culprit.** "Timers cannot be stopped from
+another thread" and its siblings are Qt *warnings*; the native crash that often
+follows dumps the stack of the thread it happened on, which says nothing about
+the code that reached across. `install_qt_cross_thread_trace`, installed by
+`allwell.main` once the `QApplication` exists, is a Qt message handler that —
+for the first `_CROSS_THREAD_DUMPS` such warnings — writes the message, the
+thread that raised it and every thread's Python stack to the boot log, then
+passes the message on as Qt would. The stacks are formatted by hand from
+`sys._current_frames()`, not by `faulthandler`, whose header lines are the crash
+markers above: a warning in that format would have the next launch keep and
+report a crash that never happened. `tests/test_a_cross_thread_qt_warning_is_traced.py`
+stops a GUI-thread `QTimer` from a named worker thread and reads the log.
 
 Run from a terminal to capture the same output live. These usually come from touching a Qt widget tree mid-event-dispatch or after
 its C++ object is deleted — e.g. the Split View focus filter (§5.10) defers its

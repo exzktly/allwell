@@ -453,6 +453,14 @@ already accounts for, so you can see how much a re-run has left to do. If new
 images have been dropped in since, it also says what the run will do about them,
 in the same words the run log will use.
 
+**Load settings from a previous run (pipeline_info.json)…**, at the top of
+the form, does the same from a file you pick, and points the input at the plate
+that file belongs to. It loads settings only — it does not resume the run; use
+the resume card (or tick **Incremental** and Run) for that. A file from a
+remote run is read against this computer: the input comes from where the file
+is, and the scratch disk and the completeness check are left as they are,
+because the recorded values describe the remote host.
+
 **Load these settings** fills the form with the settings that produced that
 output — from the run's own record where there is one, otherwise from the
 `pipeline_info.json` beside it, so it works on plates you ran long ago. Nothing
@@ -3078,6 +3086,9 @@ still exported (see below).
   file is normally rewritten each time the app starts, **but a copy carrying a
   crash is kept** — as `allwell-boot.log.1`, `.2`, `.3`, newest first — so
   relaunching to try again no longer throws away the record of what went wrong.
+  If a message like *"Timers cannot be stopped from another thread"* appears,
+  the same log also records which part of the app caused it — send that file
+  with the report, even if the app did not close.
 - **You can look at the finished wells while the rest are still running** —
   Analyze and Review are two panes of one window, and the run is a separate
   process (or on the cluster), so switching to Review does not touch it. Open

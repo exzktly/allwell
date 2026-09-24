@@ -8672,6 +8672,13 @@ and one that began just before it but attempted no group returns after the
 group loop (`_suspended_before_any_group`); both write nothing and print no
 `— done.` — otherwise the Fetcher would expect a CSV for it and fail the run's
 verification.
+A well the request reaches part way through writes what it finished and prints
+`— done.` like any other — the Fetcher has to bring it home for the resume to add
+to — so `_process_groups_in_worker` first logs `Well <W> — SUSPENDED part way: N
+of M FOV-group(s) not reached`. The run journal still files that well as
+`fetched`: its states record where a well's output got to, not whether the output
+is whole, which is the sidecar `run_report`'s `incomplete_wells` and the field
+quality block's `partial_wells`.
 
 **Whether the run was suspended is settled from the pipeline's own word.** The
 ssh call that makes the request cannot say whether it landed: a timeout can fail

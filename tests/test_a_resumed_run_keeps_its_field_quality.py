@@ -259,3 +259,41 @@ def test_logging_names_the_merged_plate(tmp_path, caplog):
                                log=logging.getLogger("t"), prior_block=prior)
     assert "PARTIAL" not in caplog.text
     assert "3 field(s) measured across 1 well(s)" in caplog.text
+
+
+# ── the well a suspend cut short says so ────────────────────────────────────
+
+def test_a_well_cut_short_by_a_suspend_says_it_is_partial(
+        tmp_path, monkeypatch, stubbed_segmenter, caplog):
+    """The loop's suspend break was silent, and the well then wrote its CSV
+    and printed ``— done.``: in the log, and in the journal's tally that reads
+    that line, a well measured on one field of three was a finished well."""
+    plate = _plate(tmp_path)
+    groups = []
+    with zipfile.ZipFile(plate / "in" / "C01.zip") as zf:
+        zf.extractall(tmp_path / "raw")
+    for fov in ("F001", "F002", "F003"):
+        groups.append((tmp_path / "raw" / f"exp_DAPI_C01_{fov}_0h.tif",
+                       [tmp_path / "raw" / f"exp_GFP_C01_{fov}_0h.tif"]))
+    suspended = []
+
+    def _group(nuclear_path, fluor_paths, **kwargs):
+        out = _REAL_GROUP(nuclear_path, fluor_paths, **kwargs)
+        suspended.append(True)              # Suspend lands during F001
+        return out
+
+    monkeypatch.setattr(pm, "process_image_group", _group)
+    monkeypatch.setattr(pm._suspend, "is_suspended", lambda: bool(suspended))
+    (tmp_path / "staging").mkdir()
+    with caplog.at_level(logging.INFO):
+        records, failed, _reason, _skipped = pm._process_groups_in_worker(
+            groups, dict(fluor_tokens=["GFP"], output_dir=tmp_path / "staging",
+                         nuclear_token="DAPI", tophat_nir=False,
+                         tophat_radius_nir=50, tophat_fluor=[False],
+                         tophat_radius_fluor=[50], schema=SCHEMA, sep="_",
+                         segmentation_method="stardist_nuclei",
+                         background_method="none", flatfield_mode="none"),
+            "C01", errors_dir=tmp_path / "out")
+    assert len(records) == 1 and not failed
+    assert ("Well C01 — SUSPENDED part way: 2 of 3 FOV-group(s) not reached"
+            in caplog.text), caplog.text[-1500:]

@@ -2260,6 +2260,13 @@ def _process_groups_in_worker(
             ", ".join(not_attempted),
         )
 
+    # A suspend breaks the loop without a word, and the well then writes its
+    # CSV and prints "done." like a whole one: say it is partial, and why.
+    _left = _fov_total - _fov_done - len(not_attempted)
+    if _left > 0 and _fov_done and _suspend.is_suspended():
+        log.warning("Well %s — SUSPENDED part way: %d of %d FOV-group(s) not "
+                    "reached; resuming processes them.", well_label, _left, _fov_total)
+
     # The well's quality record, against the number of FOV-groups the well
     # HAS rather than the number that produced a measurement. A well that
     # failed, aborted, or was suspended part way is then visibly partial in

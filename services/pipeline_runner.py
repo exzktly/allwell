@@ -1015,7 +1015,9 @@ class PipelineRunner:
         """
         if self._suspend_seen:
             self._suspend_requested.set()
-        return "none" if self._suspend_requested.is_set() else self._cleanup_remote
+        if self._suspend_requested.is_set() or self._stop_requested.is_set():
+            return "none"
+        return self._cleanup_remote
 
     @property
     def was_suspended(self) -> bool:
@@ -1077,6 +1079,22 @@ class PipelineRunner:
             "the rest were not started. Resume from the Analyze banner, or "
             "re-run this input with 'incremental', to finish the plate.\n",
         ))
+
+    def _enqueue_stopped(self, *, where: str = "Pipeline") -> None:
+        """Report a run the user stopped that nonetheless exited 0.
+
+        Stop sends SIGTERM, and the pipeline answers SIGTERM by winding down
+        (`pipeline.suspend`), so a run that finishes its in-flight groups inside
+        the five seconds before the SIGKILL exits 0. Read as a completion, a
+        Stop printed "Processing Complete", ran the source-image success hooks,
+        handed the half-done folder to Review and told the queue the job had
+        succeeded, while the journal recorded it as stopped. Reported through
+        the error seam, so it is latched as a cancel (`cancel_state_at_failure`)
+        and the GUI shows it amber, the same as a Stop that ended by signal.
+        """
+        self._enqueue_error(
+            f"{where} stopped: the wells that finished are kept; the rest were "
+            "not processed.\n")
 
     def _enqueue_error(self, message: str) -> None:
         """Queue a failure. The queue itself records the cancel state."""
@@ -1391,6 +1409,8 @@ class PipelineRunner:
             rc = proc.returncode
             if rc == 0 and self._suspend_requested.is_set():
                 self._enqueue_suspended()
+            elif rc == 0 and self._stop_requested.is_set():
+                self._enqueue_stopped()
             elif rc == 0:
                 # v5.x.x: zipper-fired-this-run source cleanup. Only
                 # runs on a clean exit (rc == 0); any failure leaves
@@ -1566,6 +1586,8 @@ class PipelineRunner:
             )
             if rc == 0 and ok and self._suspend_requested.is_set():
                 self._enqueue_suspended(where="Remote pipeline")
+            elif rc == 0 and self._stop_requested.is_set():
+                self._enqueue_stopped(where="Remote pipeline")
             elif rc == 0 and ok:
                 # v5.x.x: clean run-to-completion. Fire both success
                 # hooks:

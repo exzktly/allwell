@@ -221,3 +221,38 @@ def test_a_review_load_that_raises_does_not_escape_the_timer(qtbot, caplog):
             lambda: any("loading /nowhere into Review failed" in r.getMessage()
                         for r in caplog.records),
             timeout=5_000)
+
+
+def test_a_stop_that_winds_down_cleanly_is_not_reported_done(tmp_path, fake_pipeline):
+    """Stop is a SIGTERM, and the pipeline answers SIGTERM by winding down.
+
+    Inside the five seconds before the SIGKILL it can finish and exit 0, and an
+    exit of 0 was read as a finished plate whenever Suspend had not been pressed:
+    "Processing Complete", the source-image success hooks, the Review hand-off
+    of a half-done folder and `jobFinished(True)` — for a run the user stopped,
+    and which the journal records as stopped.
+    """
+    from services.pipeline_runner import PipelineRunner
+
+    in_dir, out_dir = tmp_path / "in", tmp_path / "out"
+    in_dir.mkdir()
+    cleaned: list[bool] = []
+    runner = PipelineRunner()
+    runner.start(
+        fake_pipeline,
+        {"filename_schema": "experiment:channel:well:fov:timepoint",
+         "filename_sep": "_"},
+        resolve_dirs=lambda opts, log_q, **kw: (
+            in_dir, out_dir, lambda: cleaned.append(True)),
+        journal_spec={"opts": {}},
+    )
+    seen: list[str] = []
+    _wait_for_line(runner, "Well A01 F001 starting", seen)
+    runner.stop()
+    seen += _drain(runner, "finished")
+
+    assert "done" not in seen, f"a Stop was reported as a finished plate: {seen}"
+    assert "suspended" not in seen
+    assert "error" in seen, seen
+    assert runner.cancel_state_at_failure == (True, False)
+    assert not cleaned, "the success hook ran for a stopped run"

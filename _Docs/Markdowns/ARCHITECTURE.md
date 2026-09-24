@@ -5354,11 +5354,15 @@ immune to the second of those by accident — each calls `set_done` on success,
 whose green overwrites the red — so it is the base class's job, not the
 callers'.
 
-A **Stop or Suspend is not a failure**, and a Suspend is not a completion
-either. A Stop ends the subprocess by signal and arrives as an `error` event; a
-Suspend that winds down cleanly exits **0** and the runner reports it as its own
-`suspended` event (below), while one that dies by signal arrives as an `error`
-like a Stop. Either cancel takes the amber `set_cancelled` and neither opens a
+A **Stop or Suspend is not a failure**, and neither is a completion. A Stop
+sends SIGTERM, which the pipeline answers by winding down (`pipeline.suspend`),
+so it ends either by signal or — when the wind-down beats the SIGKILL five
+seconds later — with exit 0. Both arrive as an `error` event: the runner reads
+an exit of 0 with `_stop_requested` set as a stop (`_enqueue_stopped`), never as
+`done`, so no success hook, "Processing Complete" or Review hand-off follows a
+Stop, and a remote one keeps its remote output. A Suspend that winds down
+cleanly exits 0 and is reported as its own `suspended` event (below), while one
+that dies by signal arrives as an `error` like a Stop. Either cancel takes the amber `set_cancelled` and neither opens a
 pane the user had closed. For the `error` case, which of the three it was is
 read from `PipelineRunner.cancel_state_at_failure`, a snapshot taken when the
 failure is *queued*, not from the live `was_stopped` / `was_suspended`. The GUI

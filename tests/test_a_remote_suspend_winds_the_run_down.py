@@ -470,7 +470,7 @@ def test_a_previous_run_s_late_thread_cannot_touch_the_next_run(runner):
     assert runner._cleanup_remote == "none"
 
 
-def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag):
+def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag, stop_flag=False):
     """Run the real `_run_pipeline_remote` with staging and the host stubbed."""
     import types
 
@@ -483,10 +483,18 @@ def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag):
     monkeypatch.setattr(pr, "stage_local_zips", lambda *a, **k: zipped)
     verified: list[str] = []
 
+    holder: list = []
+
+    def _stream():
+        for i, line in enumerate(lines):
+            if stop_flag and i == 1:
+                holder[0]._stop_requested.set()     # Stop, mid-run
+            yield line
+
     class _Proc:
         pid = 1
         returncode = 0
-        stdout = iter(lines)
+        stdout = _stream()
 
         def poll(self):
             return 0
@@ -504,6 +512,7 @@ def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag):
     r._remote = types.SimpleNamespace(name="h")
     r._remote_runner = remote
     r._cleanup_remote = "all"
+    holder.append(r)
     if suspend_flag:
         r._suspend_requested.set()
     opts = {"filename_schema": "a:b", "filename_sep": "_", "fluor_tokens": ["GFP"],
@@ -612,3 +621,16 @@ def test_the_request_path_exists_only_once_the_upload_is_done(
     runner = spawn()
     assert seen == [False], "the run could be asked to suspend mid-upload"
     assert runner.can_request_suspend
+
+
+def test_a_stopped_remote_run_that_exits_zero_is_neither_done_nor_cleaned(
+        monkeypatch, tmp_path):
+    """A Stop the remote pipeline wound down from is a stop: no success hooks,
+    no "done", and its remote output left in place rather than deleted."""
+    r, kinds, verified, hooks = _drive_remote_run(
+        monkeypatch, tmp_path, suspend_flag=False, stop_flag=True,
+        lines=["Well A01 F001 starting\n", "Well A01 F001 done.\n"])
+    assert "done" not in kinds and "error" in kinds, kinds
+    assert verified == ["none"]
+    assert hooks == []
+    assert r.cancel_state_at_failure == (True, False)

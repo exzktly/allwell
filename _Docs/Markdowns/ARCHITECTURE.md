@@ -11690,10 +11690,20 @@ sample every `interval`, and a durable breadcrumb every `_BREADCRUMB_INTERVAL_S`
 (60s) that *does* go to the log — a status line cannot answer "was it stuck at
 3am?" the next morning, and one line a minute is a record rather than a flood.
 
-**A well turns green only when both halves of its output have landed** — the
-`{well}_out.zip` and its per-well CSV(s) are two separate rsyncs, and
-`ProgressTracker._mark_fetch_part` fires the `download` stage on the transition
-where both are present. Two paths bypass that handshake, and both must announce
+**A well turns green only when both halves of its output have landed and the
+zip is in the output folder** — the `{well}_out.zip` and its per-well CSV(s) are
+two separate rsyncs, and `ProgressTracker._mark_fetch_part` fires the `download`
+stage on the transition where both are present. The in-stream fetcher holds its
+`N CSV file(s)` line back until `Fetcher._materialize` has put the zip in place,
+so the second half is never reported while the output still sits in the transit
+directory; a materialise that fails logs a `WARN local materialize failed` line
+instead, which the tracker does not read, and the well stays "computed, awaiting
+fetch" for the end-of-run retry. `_materialize` itself is a rename
+(`os.replace`) out of the transit directory beside the output folder, falling
+back to a staged copy only on a cross-device (`EXDEV`) rename — copying there
+wrote every byte of each well a second time onto the output volume, which on a
+network share held the fetcher for minutes after the well had been painted
+fetched. Two paths bypass that handshake, and both must announce
 themselves or the well stays painted "computed, awaiting fetch" with its data
 already on disk: a well the remote skipped as already current
 (`[remote] ✓ W: up to date`), and one rescued by the end-of-run backstop. The
@@ -11704,9 +11714,12 @@ because by the time it runs the well has usually registered *neither*: the
 in-stream fetcher returns early when the zip pull fails, before it reaches the
 CSVs. Reusing the fetch vocabulary rather than inventing a form of its own means
 a rescued well reaches green by the same route, with nothing extra for the
-tracker to learn. The drain's own chatter
-(`draining fetcher: N well(s)`, `still downloading… (5/8 wells)`) carries counts
-rather than well ids and deliberately marks nothing.
+tracker to learn. The drain's own chatter (`draining fetcher: N well(s)`,
+`fetcher still working… (5/8 wells fetched) — B03: placing the output in …, 2m 10s
+so far`) deliberately marks nothing: the heartbeat names the well and the step
+the worker is on (`Fetcher._activity`, set at each step of `_fetch_one`) so a
+slow post-download step is not reported as "still downloading", but the well id
+follows the word `fetcher` rather than the `↓ ` the per-well patterns anchor on.
 
 **Per-well transfer progress** rides the same marker. `WELL_XFER_PREFIX` is
 `TRANSIENT_PREFIX` plus `xfer `, so the "never write this to the log" rule

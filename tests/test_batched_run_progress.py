@@ -321,6 +321,8 @@ def test_the_drain_chatter_marks_nothing():
     tracker = ProgressTracker()
     for line in ("[remote] ↓ draining fetcher: 3 well(s) still to fetch…\n",
                  "[remote] ↓ still downloading… (5/8 wells)\n",
+                 "[remote] ↓ fetcher still working… (5/8 wells fetched) — "
+                 "B03: placing the output in /x, 2m 10s so far\n",
                  "[remote] ↓ fetcher: 8/8 wells downloaded in 4m12s\n",
                  "[remote] end-of-run retry: re-pulling 2 well(s)…\n"):
         assert not any(k == "well_stage" for k, _ in tracker.parse(line)), line

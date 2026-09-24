@@ -1172,7 +1172,10 @@ and by `remote_fetch_report.txt` in the output folder.
   is waiting for those fields to land. When it has wound down, the log says
   *[Suspended]* with how many wells finished, and the results stay on the
   Analyze pane rather than opening in Review — a suspended plate is not a
-  finished one. On a remote run, Suspend leaves the connection open: the host
+  finished one. If All-Well closes or crashes while a local run is going,
+  the run notices and suspends itself; starting that plate again right
+  after a restart tells you to wait until it has wound down, rather than
+  racing it for the same files. On a remote run, Suspend leaves the connection open: the host
   finishes the fields in flight and the wells it finished keep downloading, so
   the run can take a little longer to end than a local one. Pressed while the
   plate is still uploading, there is nothing running on the host yet, so it

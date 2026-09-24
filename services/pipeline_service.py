@@ -330,6 +330,10 @@ def spawn_pipeline(args: list[str]) -> subprocess.Popen:
         # user's plate while the GUI reports the run never started.
         **TEXT_UTF8,
         bufsize=1,
-        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        # The pipeline watches this pid and winds itself down if the app goes
+        # away (`pipeline.suspend.watch_parent`): in a session of its own it
+        # would otherwise outlive a crash and race the restarted app's run.
+        env={**os.environ, "PYTHONUNBUFFERED": "1",
+             "ALLWELL_PARENT_PID": str(os.getpid())},
         **kwargs,
     )

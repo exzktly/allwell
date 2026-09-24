@@ -3289,6 +3289,7 @@ def main() -> None:
         _suspend.watch_request_file(args.suspend_file, log=log)
     input_dir = args.input_dir.resolve()
     output_dir = args.output_dir.resolve()
+    _suspend.watch_parent(output_dir, log=log)   # wind down if the app dies
 
     # Publish --scratch_dir through the env so the spawn-pool workers (which
     # inherit os.environ but not argv) resolve the same scratch base. Must

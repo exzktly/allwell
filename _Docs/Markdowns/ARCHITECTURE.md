@@ -8622,6 +8622,24 @@ normal end-of-well path so its CSV and `<well>_out.zip` are written. A second
 signal is a hard stop — the handler restores the previous disposition before
 returning, so a suspend that hangs is still escapable.
 
+**A local run winds itself down when the app goes away.** The app launches the
+pipeline in a session of its own so Stop can signal the whole tree, which also
+means a crashed app used to leave it running, writing to a pipe nobody read.
+Restarting and resuming the same plate then raced it: the new run's grouping
+removed the `in/<well>/` folders the orphan was reading ("No such file or
+directory"), and whichever run wrote a well's CSV last won. `spawn_pipeline`
+now passes the app's pid as `ALLWELL_PARENT_PID`, and `process_microscopy.main`
+arms `pipeline.suspend.watch_parent` on the output directory: a thread that
+notices the reparenting and sends SIGTERM to the pipeline's own process group —
+the suspend signal, so every well worker winds down and writes what it
+finished — and that keeps `<out>/.aw_pipeline.alive` (its pid) fresh while the
+run lives. `analyze.run_spec.start_run`, which Run, Resume and the job queue all
+go through, refuses to start a plate whose output folder has a live heartbeat
+(`live_pipeline_pid`: fresh within `ALIVE_STALE_S` *and* the pid exists), so a
+restarted app waits for the orphan rather than racing it. A CLI or remote run
+sets no variable and is not watched; neither is Windows, which does not
+reparent an orphan.
+
 **A remote run is suspended through a request file, not a signal.** On the host
 the process the app can name is the login shell's `conda run` or `srun`, not the
 pipeline, so a SIGTERM reaches the pipeline only if those forward it; and the

@@ -29,6 +29,8 @@ from __future__ import annotations
 import os
 import signal
 import threading
+import time
+from pathlib import Path
 
 # Set once a suspend signal has been caught. Never cleared: a run that has been
 # asked to wind down does not un-wind-down, and each run is its own process.
@@ -158,3 +160,110 @@ def worker_initializer() -> None:
     single user action is noise, and the orchestrator already said it.
     """
     install_handlers()
+
+
+# ── outliving the app ────────────────────────────────────────────────────────
+
+#: Set by the app when it launches a local pipeline: the pid of the process
+#: that is reading this run's output. See :func:`watch_parent`.
+PARENT_ENV = "ALLWELL_PARENT_PID"
+
+#: In the output directory while a watched run is alive: its pid, rewritten
+#: every :data:`ALIVE_BEAT_S` so a reader can tell a live run from a file a
+#: killed one left behind. See :func:`live_pipeline_pid`.
+ALIVE_FILENAME = ".aw_pipeline.alive"
+ALIVE_BEAT_S = 20.0
+ALIVE_STALE_S = 90.0
+
+
+def watch_parent(output_dir, *, log=None, poll_s: float = 2.0) -> None:
+    """Wind this run down if the app that launched it goes away.
+
+    The app launches a local pipeline in a session of its own, so that Stop can
+    signal the whole tree — which also means a crashed app leaves it running.
+    Its output then goes to a pipe nobody reads, the broken pipe is swallowed,
+    and it goes on processing the plate. When the user restarts the app and
+    resumes the same plate, the new run's input grouping packs and removes the
+    ``in/<well>/`` folders the orphan is still reading ("No such file or
+    directory"), and whichever run writes a well's CSV last wins, so a complete
+    CSV can be overwritten by a partial one.
+
+    So a run the app launched (:data:`PARENT_ENV` set) watches for its parent
+    to change — POSIX reparents an orphan — and then suspends itself: a
+    SIGTERM to its own process group, the signal Suspend sends, so every well
+    worker winds down at its next FOV-group boundary and writes what it
+    finished. It also keeps :data:`ALIVE_FILENAME` fresh in the output
+    directory for as long as it lives, which is how the restarted app knows to
+    wait (:func:`live_pipeline_pid`). A no-op for a run nobody launched this
+    way — a CLI run, a remote one — and on Windows, which does not reparent.
+    """
+    raw = os.environ.get(PARENT_ENV, "")
+    if not raw or os.name != "posix":
+        return
+    try:
+        parent = int(raw)
+    except ValueError:
+        return
+    alive = Path(output_dir) / ALIVE_FILENAME
+
+    def _beat() -> None:
+        try:
+            alive.parent.mkdir(parents=True, exist_ok=True)
+            alive.write_text(str(os.getpid()))
+        except OSError:
+            pass    # best-effort: an unwritable output dir fails the run anyway
+
+    def _clear() -> None:
+        try:
+            alive.unlink()
+        except OSError:
+            pass
+
+    def _watch() -> None:
+        last_beat = 0.0
+        while True:
+            if os.getppid() != parent:
+                if log is not None:
+                    log.warning(
+                        "The app that launched this run has gone away — "
+                        "suspending, so the run winds down rather than going "
+                        "on unwatched.")
+                if os.getpgrp() == os.getpid():
+                    os.killpg(os.getpgrp(), signal.SIGTERM)
+                else:
+                    _SUSPENDED.set()
+                return
+            if time.monotonic() - last_beat >= ALIVE_BEAT_S:
+                _beat()
+                last_beat = time.monotonic()
+            time.sleep(poll_s)
+
+    import atexit
+    atexit.register(_clear)
+    threading.Thread(target=_watch, name="aw-parent-watch", daemon=True).start()
+
+
+def live_pipeline_pid(output_dir, *, now: float | None = None) -> int | None:
+    """The pid of a watched run still working in *output_dir*, or ``None``.
+
+    Alive means the heartbeat file is fresh **and** its pid exists: a file a
+    killed run left behind goes stale, and a pid the system has since reused
+    for something else has no fresh heartbeat behind it.
+    """
+    path = Path(output_dir) / ALIVE_FILENAME
+    try:
+        age = (time.time() if now is None else now) - path.stat().st_mtime
+        pid = int(path.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    if age > ALIVE_STALE_S or pid <= 0:
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return None
+    except PermissionError:
+        return pid          # exists, owned by someone else
+    except OSError:
+        return None
+    return pid

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import QMessageBox, QPushButton, QWidget
 
 from analyze.domain.fields import _numeric_option_errors
 from analyze.domain.job_edit import AnalyzeJobEditMixin
+from core.safe import swallowed
 from services.pipeline_service import find_pipeline_script
 from services.run_detect import (
     DetectionError,
@@ -77,6 +78,9 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         missing = missing_input_error(spec.to_json())
         if missing is not None:
             return missing
+        orphan = _earlier_run_still_alive(spec)
+        if orphan is not None:
+            return orphan
         # Before `resume_aware_spec`, which reads the output folder the input
         # resolves to — and before any UI state is touched, like every other
         # refusal here. The scan reads a bounded sample of names (the same one
@@ -376,3 +380,36 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         ``error`` event, so a queue bridge needs this to tell a cancel apart
         from a failure when deciding whether to cascade-block successors."""
         return self._runner.was_stopped
+
+
+def _earlier_run_still_alive(spec: RunSpec) -> str | None:
+    """Why this plate cannot start yet: a pipeline from an earlier session is on it.
+
+    A local pipeline outlives an app that crashed (it runs in a session of its
+    own), and one that is still going when the restarted app resumes the same
+    plate races it: the new run's grouping removes the ``in/<well>/`` folders
+    the old one is reading, and whichever writes a well's CSV last wins. The
+    old run winds itself down once it notices the app is gone
+    (`pipeline.suspend.watch_parent`) and keeps a heartbeat in the output
+    folder while it lives; this reads that heartbeat, for the Run button,
+    Resume and the job queue alike, since all three start here.
+    """
+    from pipeline.suspend import live_pipeline_pid
+    from services.input_resolution_service import plan_input_layout
+
+    raw = str((spec.opts or {}).get("raw") or "").strip()
+    if not raw:
+        return None
+    try:
+        out_dir = plan_input_layout(Path(raw)).output_dir
+    except Exception:
+        swallowed("finding the output folder to check for a running pipeline")
+        return None
+    pid = live_pipeline_pid(out_dir) if out_dir is not None else None
+    if pid is None:
+        return None
+    return (f"A pipeline from an earlier session (process {pid}) is still "
+            f"writing to {out_dir}. It winds itself down once it notices the "
+            "app that started it has closed, which takes about as long as one "
+            "field; wait for it to finish, then try again. Starting now would "
+            "race it for the same files.")

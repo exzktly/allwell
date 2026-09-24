@@ -637,6 +637,10 @@ class PipelineRunner:
         # _stop_requested and assigns _proc under this lock so the two are
         # atomic with respect to stop().
         self._proc_lock: threading.Lock = threading.Lock()
+        # True while `_spawn_tracked` is inside its spawn call, which for a
+        # remote run is the whole staging and upload. `stop` reads it so that it
+        # never waits on that lock from the GUI thread (see `_spawn_tracked`).
+        self._spawning = False
         self._thread: threading.Thread | None = None
         self._last_output_dir: Path | None = None
         self._log_overflow_warned: bool = False
@@ -928,8 +932,19 @@ class PipelineRunner:
         with self._proc_lock:
             if self._stop_requested.is_set():
                 return None
-            self._proc = spawn_fn()
-            return self._proc
+            self._spawning = True
+            try:
+                self._proc = spawn_fn()
+            finally:
+                self._spawning = False
+            proc = self._proc
+        # A remote spawn is the whole staging and upload, and it runs with the
+        # lock held. `stop` therefore does not wait for it — it sets the stop
+        # event the upload watches and returns — so a Stop that landed while
+        # this was spawning has not signalled what it launched. Do it here.
+        if self._stop_requested.is_set():
+            self._signal_run(proc, escalate=not self._suspend_requested.is_set())
+        return proc
 
     def suspend(self) -> None:
         """Ask the run to wind down at a FOV-group boundary and exit cleanly.
@@ -1141,26 +1156,49 @@ class PipelineRunner:
         # half-assigned _proc mid-launch (audit E21). Signalling is done on the
         # snapshot outside the lock — a SIGTERM must not block a launch racing
         # on the same lock.
+        #
+        # Never waits on a spawn in progress. A remote spawn holds the lock for
+        # the whole staging and upload — minutes to hours — and this runs on the
+        # GUI thread, so taking the lock there froze the window until the upload
+        # ended, which then launched the pipeline only to kill it. The stop event
+        # set above is the one the upload watches, and `_spawn_tracked` signals
+        # whatever the spawn launched once it returns.
+        if self._spawning:
+            self._signal_subprocess(self._zipper_proc, escalate=escalate)
+            return
         with self._proc_lock:
             zipper_proc, proc = self._zipper_proc, self._proc
 
         # Reach both the grouping subprocess (if active) and the pipeline
         # subprocess. Signal each one's whole process group so any
         # multiprocessing workers it spawned get torn down too.
-        for p in (zipper_proc, proc):
-            self._signal_subprocess(p, escalate=escalate)
+        self._signal_subprocess(zipper_proc, escalate=escalate)
+        self._signal_run(proc, escalate=escalate)
 
+    def _signal_run(self, proc, *, escalate: bool) -> None:
+        """Signal the pipeline process *proc*, and the remote run behind it."""
+        self._signal_subprocess(proc, escalate=escalate)
         # For remote runs, the local SIGTERM above tears down the ssh
         # client; ssh -tt propagates SIGHUP to the remote pipeline. The
         # second channel here is belt-and-braces — a fresh ssh that kills
         # the PID we wrote on startup, in case the PTY hangup didn't
         # propagate (older OpenSSH on the remote, NAT teardown, etc.).
+        #
+        # On a thread of its own: it is two ssh round trips (a `kill` with a
+        # 10 s timeout, then the scheduler's `scancel`), and this is reached
+        # from the Stop button, where they froze the window for as long as a
+        # slow or unreachable host took to answer. Nothing in it touches Qt.
         if self._remote_runner is not None and proc is not None:
-            try:
-                inner = getattr(proc, "_ssh", None) or proc
-                self._remote_runner.cancel(inner)
-            except Exception:  # best-effort kill
-                swallowed()  # was: pass (silent except)
+            remote, inner = self._remote_runner, getattr(proc, "_ssh", None) or proc
+
+            def _cancel() -> None:
+                try:
+                    remote.cancel(inner)
+                except Exception:  # best-effort kill
+                    swallowed("cancelling the remote run")
+
+            threading.Thread(target=_cancel, name="aw-remote-cancel",
+                             daemon=True).start()
 
     @staticmethod
     def _signal_subprocess(proc: subprocess.Popen | None, *,
@@ -1553,6 +1591,9 @@ class PipelineRunner:
                 log_fn=lambda m: self._enqueue(("line", m)),
                 progress_fn=_on_xfer_progress,
                 batch_size=max(0, batch_size),
+                # What Stop sets first. Without it the upload never heard a
+                # Stop: it ran to the end and the pipeline was launched.
+                stop_event=self._stop_requested,
             ))
             if proc is None:
                 self._enqueue(("line", "[info] Remote run cancelled before launch.\n"))
@@ -1650,7 +1691,14 @@ class PipelineRunner:
                     "Remote pipeline finished but local verification failed; "
                     "remote files preserved for retry.\n")
         except Exception as exc:  # surface any failure to the GUI
-            self._enqueue_error(f"Failed to run pipeline remotely: {exc}\n")
+            if self._stop_requested.is_set():
+                # Stop (or a Suspend before launch) ends a remote upload by
+                # interrupting its rsync, which then fails: that failure is the
+                # stop, and reads as one rather than as the run breaking.
+                self._enqueue(("line", f"[stopped] {exc}\n"))
+                self._enqueue_stopped(where="Remote run")
+            else:
+                self._enqueue_error(f"Failed to run pipeline remotely: {exc}\n")
         finally:
             # Always close any scheduler job this run spawned — on success,
             # failure, or exception. ``srun`` normally exits when the

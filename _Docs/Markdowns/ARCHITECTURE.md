@@ -5354,6 +5354,20 @@ immune to the second of those by accident — each calls `set_done` on success,
 whose green overwrites the red — so it is the base class's job, not the
 callers'.
 
+**Stop never waits on the GUI thread.** A remote run's `RemoteRunner.spawn` is
+the whole staging, upload and launch, and `_spawn_tracked` runs it holding
+`_proc_lock`; `stop` used to take that lock from the Stop button, so a Stop during
+the upload froze the window until the upload ended — and, since `spawn` was not
+given the stop event it accepts, the upload ran to the end and the pipeline was
+launched only to be killed. `spawn` now gets `stop_event=_stop_requested`, which
+`stop` sets first; while `_spawning` is true `stop` signals only the grouping
+subprocess and returns, and `_spawn_tracked` signals whatever the spawn launched
+if a Stop landed meanwhile. The interrupted upload's rsync failure is reported
+through `_enqueue_stopped`, not as a failure. The host-side kill
+(`RemoteRunner.cancel` — an ssh `kill`, then `scancel`) runs on a daemon thread
+(`_signal_run`) rather than in the button's slot.
+`tests/test_stop_never_waits_on_a_remote_upload.py`.
+
 A **Stop or Suspend is not a failure**, and neither is a completion. A Stop
 sends SIGTERM, which the pipeline answers by winding down (`pipeline.suspend`),
 so it ends either by signal or — when the wind-down beats the SIGKILL five

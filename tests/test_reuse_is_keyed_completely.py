@@ -165,6 +165,41 @@ REUSE_CONTRACTS = {
             "third as many timepoints. The plate would go ragged with nothing "
             "raising"),
     },
+    "scan_cache.load": {
+        "size": (
+            "the CZI's byte count. What is being reused is everything the "
+            "reader concluded from those bytes — the scenes, the wells, the "
+            "tiles per scene, the channel names — so a file re-exported from "
+            "ZEN with different settings would be converted under the "
+            "previous export's plate map, with the right well count and the "
+            "wrong wells in them"),
+        "mtime_ns": (
+            "the other half of 'this file changed'. Size alone misses a "
+            "re-export that lands on the same byte count, which re-exporting "
+            "one well of a plate with the settings untouched produces. "
+            "Nanoseconds because a whole second is long enough for a writer "
+            "to replace a file within one"),
+        "read_times": (
+            "whether the layout was read with its acquisition stamps. A "
+            "layout read without them carries no ``time_scan`` at all, so "
+            "serving one to the caller that asked would report a timelapse "
+            "as having no elapsed times and name every image positionally"),
+        "PARSER_VERSION": (
+            "the thing being reused is not the file, it is "
+            "``read_czi_layout``'s and ``parse_plate_metadata``'s *output* — "
+            "a function of the bytes AND of the reader that parsed them. That "
+            "reader is not stable: it has gained the missing-image count, the "
+            "master-file drop, the pyramid exclusion and the scene-name well "
+            "patterns. Without this key a fix to it keeps serving the answers "
+            "the broken one gave, off every user's disk, with nothing saying "
+            "so"),
+        "FORMAT_VERSION": (
+            "the on-disk shape, as distinct from the reader that filled it. A "
+            "field added to CziLayout makes an older entry a *partial* answer "
+            "rather than a wrong one, and a partial answer decoded into a "
+            "full object takes that field's default — which is the silent "
+            "substitution, not a crash"),
+    },
     "parquet_cache.read_cached": {
         "st_size": (
             "the CSV's byte count. The pipeline rewrites these files — an "
@@ -232,6 +267,7 @@ def test_every_reuse_decision_is_registered():
     assert "ome_import.resume_state" in REUSE_CONTRACTS
     assert "czi_import.resume_state" in REUSE_CONTRACTS
     assert "nd2_import.resume_state" in REUSE_CONTRACTS
+    assert "scan_cache.load" in REUSE_CONTRACTS
 
 
 def test_the_roster_names_every_key_the_decision_actually_takes():
@@ -809,6 +845,36 @@ def test_a_changed_parser_version_declines(tmp_path, monkeypatch):
     monkeypatch.setattr(pc, "PARSER_VERSION", pc.PARSER_VERSION + 1)
     assert pc.read_cached(plate) is None, (
         REUSE_CONTRACTS[_CACHE_KEY]["PARSER_VERSION"])
+
+
+# ── the CZI header scan's on-disk cache ────────────────────────────────────
+#
+# Each key is watched declining in ``test_the_scan_is_remembered_on_disk.py``,
+# against a real plate and counting the files that get opened. What belongs
+# here is the reverse direction the roster exists for: that the set of keys the
+# code compares is the set with a written reason beside it.
+
+def test_the_scan_cache_compares_exactly_the_keys_it_declares():
+    """Read off the code rather than restated, so a key added without a reason
+    fails here and a reason left behind for a key nobody compares does too."""
+    import inspect
+
+    from pipeline import scan_cache
+
+    listed = set(REUSE_CONTRACTS["scan_cache.load"])
+    source = inspect.getsource(scan_cache.load) + inspect.getsource(
+        scan_cache._read_file) + inspect.getsource(scan_cache._entry_for)
+    for key in listed:
+        assert key in source, (
+            f"{key!r} has a written reason in the roster and appears nowhere "
+            f"in the code that decides the reuse — either it is not compared, "
+            f"or it is spelled differently and nobody is checking what the "
+            f"reason describes")
+    # ``read_times`` is compared by being part of the in-memory layout key
+    # rather than by name in the entry, so it is named in the roster and
+    # exercised end to end rather than grepped for here.
+    assert listed == {"size", "mtime_ns", "read_times", "PARSER_VERSION",
+                      "FORMAT_VERSION"}
 
 
 # ── the converters' resume markers ─────────────────────────────────────────

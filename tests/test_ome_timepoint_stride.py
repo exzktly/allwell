@@ -21,11 +21,11 @@ import numpy as np
 import pytest
 import tifffile
 
-from pipeline.explode_common import (
+from pipeline.explode_common import stride_note
+from pipeline.timepoints import (
     _rounding_unit,
     elapsed_hour_tokens,
     regularise_hours,
-    stride_note,
 )
 from pipeline.ome_explode import explode_ome_tiff
 

@@ -314,8 +314,16 @@ allwell/
 │   ├── explode_common.py       ← what all three exploders do identically: the
 │   │                              member-name set, the resume check over it, the
 │   │                              worker split and count, the in-memory TIFF encode,
-│   │                              the cancellation, and the elapsed-hour timepoint
-│   │                              naming with its stride
+│   │                              the cancellation, and the timepoint stride
+│   ├── scan_cache.py           ← a plate's parsed headers, written to the user's
+│   │                              cache directory and keyed on each file's size
+│   │                              and mtime, so reopening a folder costs no
+│   │                              parsing. Never writes beside the images
+│   ├── timepoints.py           ← naming a timelapse's frames from the times they
+│   │                              were recorded, and every bound on how far a name
+│   │                              may sit from its reading. Its own module, stdlib
+│   │                              only, because it is all a header scan needs of
+│   │                              `explode_common` — which imports numpy
 │   ├── fov_checkpoint.py       ← one well's staging dir, whose run owns it, and
 │   │                              the sweep that drops a superseded run's
 │   ├── incremental_keys.py     ← what an incremental run considers already done
@@ -6164,8 +6172,9 @@ seconds leaves every timepoint resolved, and a log line asserting data loss that
 did not occur sends a user to re-export a plate for nothing.
 
 **The rendering, and the decision to use the readings at all, are shared with
-the CZI converter.** `explode_common.hours_token` and
-`explode_common.elapsed_hour_tokens` are the single definitions; `ome_explode`
+the CZI converter.** `timepoints.hours_token` and
+`timepoints.elapsed_hour_tokens` are the single definitions (re-exported by
+`explode_common`, which is where both exploders still take them from); `ome_explode`
 keeps only `_source_reasons`, which builds the two reasons peculiar to OME-XML
 (an unreadable `DeltaTUnit`, a `TheT` outside the file's own T axis). Two
 definitions of "render an elapsed hour into a filename token" would answer
@@ -6188,7 +6197,7 @@ of frames 2 to 4. A number the app cannot read back is worse than a wrong one,
 which at least orders correctly.
 
 **A measured series is snapped onto its own interval.**
-`explode_common.regularise_hours` runs before the rendering, for both
+`timepoints.regularise_hours` runs before the rendering, for both
 converters. An acquisition that ran every four hours does not produce readings
 exactly four hours apart — the stage takes as long as it takes — so a real
 series reads 0, 4.00139, 8.00278 and would render as `0h`, `4.00139h`,
@@ -6990,7 +6999,7 @@ Three properties of that sampling, each measured rather than assumed:
   the stage visited first.
 
 Rendering and the decision to use the readings at all are
-`explode_common.hours_token` and `explode_common.elapsed_hour_tokens`, **shared
+`timepoints.hours_token` and `timepoints.elapsed_hour_tokens`, **shared
 with the OME-TIFF converter**, so one acquisition exported both ways cannot end
 up with two spellings of the same elapsed hour — a plate concatenated from the
 two would otherwise hold `4h` and `4.0h` as separate timepoints. The decision
@@ -7175,6 +7184,25 @@ load-bearing:
   have. macOS and Windows spawn regardless, so forcing it also means what is
   tested is what ships. `all_well_launcher` already dispatches a spawned child
   before any heavy import, which is what makes this work in the frozen bundle.
+- **Whatever the worker's module imports is paid once per worker.** The child
+  imports `pipeline.czi_set` from scratch, so a module-scope import anywhere in
+  that graph is multiplied by the pool's width before a byte of the plate is
+  read. It was multiplying numpy and tifffile, because `czi_set` took one name
+  off `explode_common` and `czi_read` imported numpy for the half of itself
+  that decodes pixels — 40 MB of peak RSS, 281 modules and 510 ms per child in
+  a fresh interpreter, against 19 MB, 160 modules and 71 ms now. On Windows
+  that was not merely wasteful: eight children loading numpy at once exhausted
+  the machine's paging file and every one of them died inside
+  `_umath_linalg`'s DLL load, so the pool broke, the scan fell back to threads,
+  and the terminal filled with tracebacks. The timepoint naming therefore lives
+  in `pipeline/timepoints.py`, which imports nothing outside the standard
+  library, and `czi_read` imports numpy inside the two functions that decode
+  pixels — its annotations are strings, so a `TYPE_CHECKING` import is enough
+  for the signatures. `tests/test_a_scan_worker_imports_no_pixels.py` reads the
+  worker roster out of the `_per_file` call sites and imports each worker's
+  module in a **fresh interpreter**, because inside pytest numpy is already
+  loaded and the check would pass for reasons that have nothing to do with the
+  module under test.
 
 Below `scan_pool.PROCESS_THRESHOLD` files the scan runs on threads, because
 starting an interpreter per worker is not worth paying to save a tenth of a
@@ -7184,6 +7212,54 @@ path, for a machine where the pool misbehaves. A pool that cannot start at all
 falls back to threads rather than failing the scan: the answer does not depend
 on where it was computed, which is the property
 `tests/test_a_plate_scan_uses_processes.py` asserts first and hardest.
+
+**And the scan survives the process.** `czi_read` already remembers both the
+parsed plate document and the layout in memory, keyed on `(path, size,
+mtime_ns)`, which is what makes the four passes a plate is read in cost one
+read. `pipeline/scan_cache.py` is that same memory written to a file:
+`czi_set.read_czi_set` and `czi_set.peek_wells` call `scan_cache.load` before
+they scan and `scan_cache.save` after, the load puts entries back into
+`czi_read`'s caches, and the scan's existing `cached=` hooks hit them. Nothing
+else in the scan changed, which is the reason it is written this way round.
+
+Measured on a 96-file split export whose files each carry a full plate
+document, in the order the page uses them — peek, then full read: 620 ms and
+390 ms cold, 37 ms and 38 ms warm, for one 83 KB file. On the user's own plate
+the ratio is larger, because there the parse is over real 30 MB documents and
+every file is a round trip to a share.
+
+Four things about it are load-bearing:
+
+- **The key is the same key.** An entry is used only when the file's size and
+  modification time in nanoseconds both still match, and only when it was
+  written by this `scan_cache.PARSER_VERSION`. The version is the half a file
+  stamp cannot cover: what is reused is not the file, it is `read_czi_layout`'s
+  and `parse_plate_metadata`'s *output*, which is a function of the bytes and
+  of the reader. Without it, a fix to the reader would go on serving the
+  answers the broken one gave, off every user's disk. `FORMAT_VERSION` covers
+  the on-disk shape separately, because a field added to `CziLayout` makes an
+  older entry a *partial* answer rather than a wrong one, and a partial answer
+  decoded into a full object takes that field's default — the silent
+  substitution, not a crash. Every key carries its written reason in
+  `tests/test_reuse_is_keyed_completely.py` and is watched declining in
+  `tests/test_the_scan_is_remembered_on_disk.py`.
+- **It never writes into the images' own folder.** A plate is routinely on a
+  read-only archive, a share somebody else administers, or a cloud-sync root.
+  The cache lives beside the boot log — `%LOCALAPPDATA%\allwell\czi-scans` or
+  `~/.cache/allwell/czi-scans` — one file per scanned folder, named for the
+  folder and hashed on its absolute path so two plates called `split` under
+  different parents do not share an entry. `ALLWELL_SCAN_CACHE` points it
+  elsewhere, or `off` disables it.
+- **The encoding is tagged, and refuses what it does not know.** `tiles` and
+  `scene_wells` are keyed by *integer* and JSON object keys are strings, so an
+  untagged round trip turns scene 3 into scene `"3"` and every lookup misses —
+  quietly, as a plate whose scenes name no wells. Sets and tuples have the same
+  problem. A value of a type the encoder does not recognise raises rather than
+  being dropped, because a field added to `CziLayout` that is silently absent
+  from every entry reads back as "the file does not have that".
+- **An unusable cache is a slow scan, never a wrong answer.** Truncated,
+  hand-edited, written by another build, naming a type that does not exist —
+  each is read as an empty cache and the files are read instead.
 
 Through `Executor.map`, which yields **by argument order** however the work
 completes. The order is load-bearing: it is the order ZEN wrote a split export

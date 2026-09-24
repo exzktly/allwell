@@ -5398,6 +5398,23 @@ how many they hold — `3 well(s) hold fewer than 7 field(s): C04 (5), D07 (6),
 E11 (6).` — and the run log repeats it. Each well is converted with the fields
 it actually has.
 
+**The second time you open a folder, the check is instant.** Reading a plate's
+headers means parsing every file's metadata and walking its index — no pixels,
+but on six hundred files over a network share it is the better part of an hour.
+All-Well remembers what it read, so reopening the same folder costs no parsing
+at all: measured on a 96-file export, the two passes went from 620 ms and
+390 ms to 37 ms and 38 ms.
+
+It is remembered per file and keyed on the file's size and modification time,
+so a plate you re-export is read again and only the files that changed cost
+anything. Nothing is written into the folder holding your images — a plate is
+often on a read-only archive or a share you do not administer — it goes with
+All-Well's other working files, in `%LOCALAPPDATA%\allwell\czi-scans` on
+Windows and `~/.cache/allwell/czi-scans` on macOS and Linux, one small file per
+folder you have opened. Deleting them costs one slow scan and nothing else. Set
+`ALLWELL_SCAN_CACHE` to a folder to keep them somewhere else, or to `off` to
+turn it off.
+
 **The file is checked as soon as you pick it**, and one that cannot be converted
 honestly is refused there rather than part-way through a run. What it catches:
 

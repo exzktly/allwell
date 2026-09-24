@@ -129,6 +129,8 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # Which of the three input layouts a plate is in; process_microscopy
     # imports it at module scope.
     "pipeline/input_layout.py",
+    # The mixed-``in/`` consolidation ``main`` runs before it reads the layout.
+    "pipeline/mixed_input.py",
     "pipeline/incremental_keys.py",
     "pipeline/well_skip.py",
     "pipeline/io.py",

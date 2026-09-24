@@ -221,3 +221,78 @@ def test_a_review_load_that_raises_does_not_escape_the_timer(qtbot, caplog):
             lambda: any("loading /nowhere into Review failed" in r.getMessage()
                         for r in caplog.records),
             timeout=5_000)
+
+
+def test_a_stop_that_winds_down_cleanly_is_not_reported_done(tmp_path, fake_pipeline):
+    """Stop is a SIGTERM, and the pipeline answers SIGTERM by winding down.
+
+    Inside the five seconds before the SIGKILL it can finish and exit 0, and an
+    exit of 0 was read as a finished plate whenever Suspend had not been pressed:
+    "Processing Complete", the source-image success hooks, the Review hand-off
+    of a half-done folder and `jobFinished(True)` — for a run the user stopped,
+    and which the journal records as stopped.
+    """
+    from services.pipeline_runner import PipelineRunner
+
+    in_dir, out_dir = tmp_path / "in", tmp_path / "out"
+    in_dir.mkdir()
+    cleaned: list[bool] = []
+    runner = PipelineRunner()
+    runner.start(
+        fake_pipeline,
+        {"filename_schema": "experiment:channel:well:fov:timepoint",
+         "filename_sep": "_"},
+        resolve_dirs=lambda opts, log_q, **kw: (
+            in_dir, out_dir, lambda: cleaned.append(True)),
+        journal_spec={"opts": {}},
+    )
+    seen: list[str] = []
+    _wait_for_line(runner, "Well A01 F001 starting", seen)
+    runner.stop()
+    seen += _drain(runner, "finished")
+
+    assert "done" not in seen, f"a Stop was reported as a finished plate: {seen}"
+    assert "suspended" not in seen
+    assert "error" in seen, seen
+    assert runner.cancel_state_at_failure == (True, False)
+    assert not cleaned, "the success hook ran for a stopped run"
+
+
+def test_the_suspend_record_describes_the_run_not_the_form(
+        tab, qtbot, tmp_path, fake_pipeline):
+    """Edit the form mid-run, press Suspend: the record is still the run's.
+
+    It was read from the live form, so Resume ran whatever plate and settings
+    had been typed there since the run began, and cleared the real plate's
+    offer. And its tally was taken at the click, before the wells in flight
+    finished, so it always read short.
+    """
+    from services.run_spec import RunSpec
+    from services.suspend_record import load_all
+
+    plate = tmp_path / "plateX"
+    (plate / "in").mkdir(parents=True)
+    out_dir = plate / "out"
+    out_dir.mkdir()
+    finished: list[tuple] = []
+    tab.jobFinished.connect(lambda *a: finished.append(a))
+    tab._resolve_run_dirs_for_runner = lambda opts, log_q, **kw: (plate / "in", out_dir, None)
+    spec = RunSpec.from_json({"opts": {
+        "raw": str(plate), "csv_prefix": "measurements",
+        "filename_schema": "experiment:channel:well:fov:timepoint",
+        "filename_sep": "_", "nuclear_token": "DAPI", "fluor_tokens": ["GFP"]}})
+    assert tab.start_run(spec, pipeline=fake_pipeline) is None
+
+    qtbot.waitUntil(lambda: "Well A01 F001 starting" in tab._log.toPlainText(),
+                    timeout=10_000)
+    tab._input_edit.setText(str(tmp_path / "plateY"))     # the user moves on
+    tab._suspend_btn.click()
+    qtbot.waitUntil(lambda: bool(finished), timeout=20_000)
+
+    records = load_all()
+    assert len(records) == 1
+    record = records[0]
+    assert record.spec["opts"]["raw"] == str(plate), record.spec["opts"]["raw"]
+    assert record.input_dir == str(plate)
+    assert (record.wells_done, record.wells_total) == (1, len(_WELLS)), (
+        "the record's tally is the one the run ended with, not the click's")

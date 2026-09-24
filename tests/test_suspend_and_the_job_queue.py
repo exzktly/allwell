@@ -296,3 +296,65 @@ def test_the_suspend_record_is_marked_by_the_writer_not_the_reader(
     _Pane()._write_suspend_record(tmp_path / "out")
     assert written[-1].queued is False, (
         "the flag is hardcoded rather than read from the run")
+
+
+def _pause_while_grouping(tmp_path, monkeypatch, qtbot, *, press):
+    """A real AnalyzeTab and runner; the grouping subprocess is what *press* ends.
+
+    The stand-in grouping waits until the run has been told to stop, then fails
+    the way a killed ``well_plate_zipper`` does — Stop reaches that subprocess
+    through ``proc_hook`` and its non-zero exit comes back as a RuntimeError.
+    """
+    import threading
+    import time
+    import zipfile
+
+    import analyze.domain.input as analyze_input
+    import analyze.form
+    from analyze.tab import AnalyzeTab
+
+    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    plate = tmp_path / "plate"
+    (plate / "in").mkdir(parents=True)
+    with zipfile.ZipFile(plate / "in" / "A01.zip", "w") as zf:
+        zf.writestr("exp_DAPI_A01_F001_0h.tif", b"\0" * 64)
+    tab = AnalyzeTab()
+    qtbot.addWidget(tab)
+    grouping = threading.Event()
+
+    def _grouping(*a, **k):
+        grouping.set()
+        deadline = time.monotonic() + 10
+        while not tab._runner.was_stopped and time.monotonic() < deadline:
+            time.sleep(0.01)
+        raise RuntimeError("well_plate_zipper exited with code -15")
+
+    monkeypatch.setattr(analyze_input, "resolve_input_output", _grouping)
+    spec = RunSpec.from_json({"opts": {
+        "raw": str(plate), "filename_schema": "experiment:channel:well:fov:timepoint",
+        "filename_sep": "_", "nuclear_token": "DAPI", "fluor_tokens": ["GFP"]}})
+    assert tab.start_run(spec, pipeline=Path("pm.py")) is None
+    assert grouping.wait(10), "the run never reached grouping"
+    press(tab)
+    finished: list = []
+    tab.jobFinished.connect(lambda ok, msg, out: finished.append((ok, msg)))
+    qtbot.waitUntil(lambda: bool(finished), timeout=15000)
+    return tab, finished[0]
+
+
+def test_pausing_the_queue_while_grouping_is_not_an_input_error(
+        tmp_path, monkeypatch, qtbot):
+    tab, (ok, message) = _pause_while_grouping(
+        tmp_path, monkeypatch, qtbot, press=lambda t: t.suspend())   # the queue's hook
+    assert not ok
+    assert tab._runner.cancel_state_at_failure == (True, True)
+    assert "Input error" not in message, message
+    assert message.startswith("Run suspended while the input was being grouped")
+    assert "exited with code -15" in message, "the underlying report was dropped"
+
+
+def test_a_stop_while_grouping_says_stopped(tmp_path, monkeypatch, qtbot):
+    _tab, (ok, message) = _pause_while_grouping(
+        tmp_path, monkeypatch, qtbot, press=lambda t: t._runner.stop())
+    assert not ok
+    assert message.startswith("Run stopped while the input was being grouped"), message

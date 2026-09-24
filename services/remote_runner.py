@@ -223,6 +223,7 @@ from services.remote_commands import (  # noqa: F401 — re-exported
     _remote_scratch_export,
 )
 from services.remote_run_id import (  # noqa: F401
+    _pipeline_launch_is_pointless,
     UPLOAD_HEARTBEAT,
     UPLOAD_SENTINEL,
     RemoteRunPaths,
@@ -485,36 +486,21 @@ def stage_local_zips(
     if log_fn is not None:
         log_fn(f"[remote] input layout: {mode.value}\n")
 
-    if mode is LocalInputMode.ZIP:
-        well_zips = tuple(sorted(_well_zips_in(input_dir)))
-        if not well_zips:
-            raise RuntimeError(
-                f"Input dir reports zip-mode but contains no A01.zip-style files: {input_dir}"
-            )
-        if fluor_tokens is None and not incremental:
-            # No filtering — use the user's zips directly (read-only).
-            return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
-        # v5.2.18: copy the user's zips into a staging dir BEFORE
-        # filtering. Pre-v5.2.18 the filter rewrote zips in place at
-        # ``input_dir`` — if the user mis-typed a fluor channel name
-        # (e.g. "GP" for "GFP"), every fluor image got dropped from
-        # the user's original dataset on disk. The user's input dir
-        # must be treated as read-only. The incremental split rewrites
-        # zips too, so it likewise requires staging.
-        # Plan before moving anything. Reading each archive's member list is a
-        # small read of its central directory, so the whole plate can be planned
-        # for the cost of a few seeks even over a network mount — and then only
-        # the members that will actually be uploaded are ever read. An earlier
-        # shape copied every archive in full into scratch and *then* rewrote it
-        # down to the members it wanted, which on a NAS-resident dataset dragged
-        # the entire plate across the network before a single byte went to the
-        # remote.
+    def _planned(well_zips, keep_tokens, zip_dir, *, prior_cleanup=None,
+                 on_success=None) -> ZippedInput:
+        """Plan, stage and describe *well_zips*: the channel filter and the
+        incremental split, whichever apply. Every layout's archives come
+        through here on an incremental run — the split is what the remote
+        side's no-re-attach, output wipe and merging fetch all key on.
+
+        Planned before anything moves: a member list is a small read of the
+        central directory, so only the members to be uploaded are ever read —
+        copying whole archives first dragged a NAS plate across the network."""
         if log_fn is not None:
             log_fn(f"[remote] planning {len(well_zips)} well archive(s)…\n")
         plans, up_to_date_list, zero_match = _plan_staging(
             well_zips,
-            keep_tokens=(_required_tokens(nuclear_token, fluor_tokens)
-                         if fluor_tokens is not None else None),
+            keep_tokens=keep_tokens,
             incremental=incremental,
             prior_output_dir=prior_output_dir,
             csv_prefix=csv_prefix,
@@ -526,10 +512,8 @@ def stage_local_zips(
             log_fn=log_fn,
         )
         if log_fn is not None:
-            # Planning emits a line only for a well it drops or rewrites, so a
-            # plate whose remaining wells all stage unchanged went silent right
-            # after the two or three wells it did report — reading as a stall
-            # with most of the plate still to go. Say what the pass concluded.
+            # Planning names only the wells it drops or rewrites; without this
+            # a plate staging mostly unchanged went silent and read as a stall.
             log_fn(f"[remote] planned {len(plans)} well archive(s) to upload, "
                    f"{len(up_to_date_list)} already up to date.\n")
         _raise_on_zero_channel_match(zero_match)
@@ -538,26 +522,44 @@ def stage_local_zips(
         staging = _open_staging_if_needed(plans, log_fn=log_fn)
         try:
             if log_fn is not None and staging is not None:
-                _to_move = sum(len(p_.keep) for p_ in plans
-                               if p_.keep is not None)
-                n_rewrite = sum(1 for p_ in plans if p_.keep is not None)
-                log_fn(f"[remote] rewriting {n_rewrite} well archive(s), "
-                       f"{_to_move} member(s) → {staging}\n")
-            staged_zips = _materialize_staging(plans, staging, log_fn=log_fn)
-            up_to_date = tuple(up_to_date_list)
+                rewrites = [p_ for p_ in plans if p_.keep is not None]
+                log_fn(f"[remote] rewriting {len(rewrites)} well archive(s), "
+                       f"{sum(len(p_.keep) for p_ in rewrites)} member(s) → {staging}\n")
             return ZippedInput(
-                zip_dir=staging or input_dir,
-                mode=mode,
-                well_zips=staged_zips,
-                cleanup=(None if staging is None else
-                         (lambda d=staging: shutil.rmtree(d, ignore_errors=True))),
-                incremental=incremental,
-                up_to_date_wells=up_to_date,
-            )
+                zip_dir=staging or zip_dir, mode=mode,
+                well_zips=_materialize_staging(plans, staging, log_fn=log_fn),
+                cleanup=_both(prior_cleanup, None if staging is None else
+                              (lambda d=staging: shutil.rmtree(d, ignore_errors=True))),
+                on_pipeline_success=on_success, incremental=incremental,
+                up_to_date_wells=tuple(up_to_date_list))
         except Exception:
             if staging is not None:
                 shutil.rmtree(staging, ignore_errors=True)
             raise
+
+    def _then_split(zin: ZippedInput) -> ZippedInput:
+        # Grouping and zip-up produce whole-well archives; the split is applied
+        # after them, so a resumed plate in any layout uploads only what is
+        # missing rather than being recomputed — or, batched, skipped as done.
+        if not incremental:
+            return zin
+        return _planned(zin.well_zips, None, zin.zip_dir, prior_cleanup=zin.cleanup,
+                        on_success=zin.on_pipeline_success)
+
+    if mode is LocalInputMode.ZIP:
+        well_zips = tuple(sorted(_well_zips_in(input_dir)))
+        if not well_zips:
+            raise RuntimeError(
+                f"Input dir reports zip-mode but contains no A01.zip-style files: {input_dir}"
+            )
+        if fluor_tokens is None and not incremental:
+            # No filtering — use the user's zips directly (read-only).
+            return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
+        # The user's input dir is read-only: a filter or split writes to a
+        # staging dir, never over their archives (a mistyped channel once
+        # dropped every fluor image from the originals on disk).
+        return _planned(well_zips, (_required_tokens(nuclear_token, fluor_tokens)
+                                    if fluor_tokens is not None else None), input_dir)
 
     if mode is LocalInputMode.MIXED:
         # v5.2.21: input has zips for some wells and folders for
@@ -565,12 +567,9 @@ def stage_local_zips(
         # through compress_input_well_folders. Resume by trusting the
         # existing zips and zipping the leftover folders into a
         # staging dir.
-        return _stage_mixed_mode(
-            input_dir,
-            fluor_tokens=fluor_tokens,
-            nuclear_token=nuclear_token,
-            log_fn=log_fn,
-        )
+        return _then_split(_stage_mixed_mode(
+            input_dir, fluor_tokens=fluor_tokens, nuclear_token=nuclear_token,
+            log_fn=log_fn))
 
     # Folder or flat mode: shell out to well_plate_zipper. The zipper writes
     # ``{well}.zip`` files directly into ``input_dir`` (alongside the
@@ -803,15 +802,10 @@ def stage_local_zips(
             log_fn=log_fn,
         )
         zin.on_pipeline_success = _on_success_effective
-        return zin
+        return _then_split(zin)
 
-    return ZippedInput(
-        zip_dir=input_dir,
-        mode=mode,
-        well_zips=well_zips,
-        cleanup=None,
-        on_pipeline_success=_on_success_effective,
-    )
+    return _then_split(ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips,
+                                   cleanup=None, on_pipeline_success=_on_success_effective))
 
 
 def _detect_local_input_mode(input_dir: Path) -> LocalInputMode:
@@ -1012,34 +1006,6 @@ def _artifact_changed(run, path: Path) -> bool:
 
 
 
-def _pipeline_launch_is_pointless(
-    pipeline_argv: list[str], expected_well_count: int, completed_remote: set[str],
-) -> bool:
-    """Whether the remote pipeline can be replaced with a no-op.
-
-    True only when the remote already holds output for every well **and the run
-    has not been asked to reprocess anything**. That second clause is the whole
-    point of this predicate existing.
-
-    ``_compute_run_id`` deliberately leaves ``--force`` out of its hash so a
-    forced re-run lands in the *same* remote output dir and overwrites it —
-    which is exactly what stocks that dir with a complete set of ``_out.zip``
-    files from the previous run. Without a force term here, those two reasonable
-    decisions compose into a guarantee: a forced run always resolves to a dir
-    that always looks like a cache hit, so the pipeline is replaced by ``true``,
-    nothing is recomputed, nothing is fetched, and every local artefact keeps
-    the previous run's bytes and mtime while the run reports success. The
-    stronger the user's demand to reprocess, the more certain it was to be
-    ignored.
-    """
-    if expected_well_count <= 0:
-        return False
-    force_all, forced_wells = _forced_from_argv(pipeline_argv)
-    if force_all or forced_wells:
-        return False
-    return len(completed_remote) >= expected_well_count
-
-
 def _required_tokens(
     nuclear_token: str | None, fluor_tokens: Iterable[str]
 ) -> set[str]:
@@ -1082,6 +1048,12 @@ def _zip_well_folder(folder: Path, out_zip: Path) -> list[Path]:
 
     retry_io(_pack, what=out_zip.name, advice=_TRANSFER_ADVICE, path=out_zip)
     return tifs
+
+
+def _both(*cleanups: Callable[[], None] | None) -> Callable[[], None] | None:
+    """One cleanup that runs each of *cleanups* given, or ``None``."""
+    fns = [f for f in cleanups if f is not None]
+    return (lambda: [f() for f in fns] and None) if fns else None
 
 
 def _stage_mixed_mode(
@@ -3634,7 +3606,10 @@ class _BatchedRemoteProcess:
         before the first batch, a driver that died, a Stop. The job may still
         be *queued* at this point, in which case its ``.slurm`` sidecar does
         not exist yet and ``close_remote_job`` has nothing to read — so the ssh
-        that is holding the queue position is terminated directly as well.
+        that is holding the queue position is terminated directly as well. A
+        suspend that ended the loop counts as such an end while the driver is
+        still alive: a job still queued would otherwise take the node later,
+        see the request file and hand it straight back.
         """
         # Read through `getattr`: this runs in a ``finally``, so it also runs
         # for a crash that happened before `_start_driver` ever set any of it.
@@ -3645,13 +3620,15 @@ class _BatchedRemoteProcess:
                 heartbeat.stop()
         if not getattr(self, "_owns_allocation", False):
             return          # never launched: nothing here is ours to cancel
-        if self._returncode in (0, None):
-            return          # a clean run: the driver exited on its own
         lock = getattr(self, "_current_proc_lock", None)
         if lock is None or getattr(self, "_runner", None) is None:
             return          # nothing was ever launched
         with lock:
             proc = self._current_proc
+        # A clean run's driver exits on its own; after a suspend a queued one has not.
+        if self._returncode in (0, None) and not (
+                self._suspending.is_set() and proc is not None and proc.poll() is None):
+            return
         if proc is not None:
             self._log("[remote] releasing the allocation\n")
             with swallow("terminating the batch driver"):
@@ -3933,10 +3910,7 @@ class _BatchedRemoteProcess:
                 if self._suspend_before(batch_idx + 1, n_batches):
                     break
                 if self._stop.is_set():
-                    self._log(
-                        f"[remote] stopped before batch "
-                        f"{batch_idx + 1}/{n_batches}\n"
-                    )
+                    self._log(f"[remote] stopped before batch {batch_idx + 1}/{n_batches}\n")
                     self._returncode = 130
                     return
 
@@ -4024,9 +3998,7 @@ class _BatchedRemoteProcess:
                         f"continuing with the remaining batches\n"
                     )
                 else:
-                    self._log(
-                        f"[remote] batch {batch_idx + 1}/{n_batches} complete\n"
-                    )
+                    self._log(f"[remote] batch {batch_idx + 1}/{n_batches} complete\n")
 
             if failed:
                 names = ", ".join(str(i) for i in sorted(failed))
@@ -5469,12 +5441,21 @@ class RemoteRunner:
         # reasons and only one of them is a reason to re-attach.
         source_key = source_fingerprint(_local_input_dir_from_argv(pipeline_argv))
         own_output = remote_output
-        remote_output = self._reattach_output_dir(
-            remote_output, local_output_dir, pipeline_argv,
-            argv_digest=argv_digest, source_key=source_key,
-            host_alias=self.host.ssh_alias, log=log,
-        )
+        # An incremental run uploads a split — only the groups still missing —
+        # so any earlier directory's outputs can only mislead it: the pre-flight
+        # counts them as this run's, and a pipeline that finds a well's output
+        # already there skips the well. It never borrows a directory, and its
+        # own is emptied below (`run_id` is deterministic, so its own may hold
+        # an earlier incremental run's outputs too).
+        if not zipped.incremental:
+            remote_output = self._reattach_output_dir(
+                remote_output, local_output_dir, pipeline_argv,
+                argv_digest=argv_digest, source_key=source_key,
+                host_alias=self.host.ssh_alias, log=log,
+            )
         reattached = remote_output != own_output
+        if zipped.incremental:
+            self._cache._ssh_run(["rm", "-rf", own_output], check=False)
 
         # **Both** directories, and the second one is not optional. A
         # re-attached run writes its outputs under a *previous* run's id, but
@@ -5569,7 +5550,9 @@ class RemoteRunner:
                 f"{'…' if len(completed_remote) > 5 else ''})\n"
             )
             if _pipeline_launch_is_pointless(
-                    pipeline_argv, expected_well_count, completed_remote):
+                    pipeline_argv, expected_well_count, completed_remote,
+                    uploaded={wz.stem.upper() for wz in zipped.well_zips},
+                    incremental=zipped.incremental):
                 cache_hit = True
                 log(
                     "[remote] FULL CACHE HIT — every well has output "
@@ -5830,7 +5813,7 @@ class RemoteRunner:
         if merge_fetched_run_report(info_path, prior_run_report):
             log("[remote] merged this run's completeness records into the "
                 "existing pipeline_info run_report.\n")
-        if merge_fetched_field_quality(info_path, prior_field_quality):
+        if merge_fetched_field_quality(info_path, prior_field_quality, incremental=run.incremental):
             log("[remote] merged this run's field-quality measurements into "
                 "the existing pipeline_info field_quality.\n")
         restored = restore_user_blocks(info_path, prior_user_blocks)

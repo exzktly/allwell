@@ -150,6 +150,26 @@ def _unfinished_parts(out_dir: str, journal) -> tuple[str, str, str, str]:
     )
 
 
+def _journal_names_input(record, raw_input: str) -> bool:
+    """Whether a run journal describes a run of the folder the user picked.
+
+    Two spellings of one plate, and both have to be asked. The journal's
+    ``input_dir`` is the directory the pipeline was *resolved* to — ``<plate>/in``
+    for a plate folder or a drop of loose TIFs, which is almost every plate —
+    while the form holds the folder the user picked. Comparing only those two
+    never matched on that layout, so a queue job restarted after Pause, and a
+    Run after Discard, Stop or a crash, went on without ``--incremental`` and
+    skipped the well that was mid-flight as complete. The run's own spec
+    records the picked folder as ``opts.raw``, which is the like-for-like match.
+    """
+    if not raw_input:
+        return False
+    spec_raw = str(((getattr(record, "spec", None) or {}).get("opts") or {})
+                   .get("raw") or "")
+    return any(candidate and same_dir(candidate, raw_input)
+               for candidate in (spec_raw, str(record.input_dir or "")))
+
+
 class AnalyzeSuspendMixin:
     """Suspend / resume behaviour for ``AnalyzeTab``.
 
@@ -179,6 +199,23 @@ class AnalyzeSuspendMixin:
         """
         try:
             if not self._runner.is_running:
+                if self._runner.is_busy:
+                    # Busy with no pipeline yet: the input is still being
+                    # grouped. This used to return in silence, and the run then
+                    # went on to process the whole plate.
+                    QMessageBox.information(
+                        self, "Suspend",
+                        "The run is still preparing its input, so there is "
+                        "nothing to suspend yet. Press Suspend again once the "
+                        "pipeline has started, or Stop to cancel.")
+                return
+            if self._runner.was_suspended:
+                # A second SIGTERM is a hard stop by design, so a second click
+                # used to kill the run it was meant to keep, and end it as an
+                # error while the log still said "finishing".
+                self._log_line(
+                    "[Suspending] Already winding down — press Stop to give up "
+                    "on the in-flight work instead.\n", "WARNING")
                 return
             out_dir = self._runner.last_output_dir
             if out_dir is None:
@@ -228,17 +265,47 @@ class AnalyzeSuspendMixin:
             self._dashboard.set_eta("")
         tally = f" {done} of {total} well(s) finished." if total else ""
         self._log_line(f"\n[Suspended]{tally} {payload}", "WARNING")
+        with swallow("updating the suspend record's tally"):
+            self._settle_suspend_record_tally(done, total)
+
+    def _settle_suspend_record_tally(self, done: int, total: int) -> None:
+        """Give the suspend record the tally the run ended with.
+
+        The record is written when Suspend is pressed, before the wells in
+        flight finish, so its count was always short by those wells — the
+        banner and the resume line said "1 of 4 done" of a run whose own log
+        had just said 2.
+        """
+        out_dir = getattr(self._runner, "last_output_dir", None)
+        if out_dir is None:
+            return
+        for run in load_all():
+            if same_dir(run.output_dir, str(out_dir)):
+                save(dataclasses.replace(run, wells_done=done, wells_total=total))
+                return
 
     def _write_suspend_record(self, out_dir: Path) -> None:
-        """Persist the spec behind the running job, best-effort."""
-        try:
-            spec = self._collect_run_spec()
-        except Exception:
-            swallowed()  # a form that cannot be read cannot be resumed
-            return
+        """Persist the spec behind the running job, best-effort.
+
+        The spec is the one the runner launched, not the form's. The form stays
+        editable while a run goes, and a record read from it described whatever
+        was typed there at the moment of the click: edit the input or a setting
+        mid-run, press Suspend, and Resume then ran a different plate with
+        different settings — and forgot the real plate's offer, because Resume
+        clears the record it acted on. The form is read only when the runner
+        has no spec to give, which no path through `start_run` produces.
+        """
+        spec_json = getattr(self._runner, "running_spec", None)
+        if not spec_json:
+            try:
+                spec_json = self._collect_run_spec().to_json()
+            except Exception:
+                swallowed()  # a form that cannot be read cannot be resumed
+                return
+        raw = str((spec_json.get("opts") or {}).get("raw") or "").strip()
         run = SuspendedRun(
-            spec=spec.to_json(),
-            input_dir=self._input_edit.text().strip(),
+            spec=spec_json,
+            input_dir=raw or self._input_edit.text().strip(),
             output_dir=str(out_dir),
             suspended_at=time.time(),
             # Both pointers carry it, because a suspend writes both. Filtering
@@ -494,10 +561,18 @@ class AnalyzeSuspendMixin:
             offers = [*suspended, *from_journal]
         else:
             # No folder named, so the question really is "what is the newest
-            # unfinished run anywhere". Ranked by when each stopped, with the
-            # suspend record breaking a tie for the reason above.
-            offers = sorted([*suspended, *from_journal],
-                            key=lambda o: (-o.at, o.from_journal))
+            # unfinished run anywhere" — asked of *plates*, not of records. A
+            # suspend writes both records and closes the journal after stamping
+            # its own, so ranking records by time let the journal's offer for
+            # the very plate the suspend record describes outrank it. Each
+            # plate is ranked by its newest record, and within a plate the
+            # specificity rule above still decides.
+            pool = [*suspended, *from_journal]
+
+            def _plate_at(offer: _Resumable) -> float:
+                return max(o.at for o in pool if same_dir(o.output_dir, offer.output_dir))
+
+            offers = sorted(pool, key=lambda o: (-_plate_at(o), o.from_journal, -o.at))
         return offers[0] if offers else None
 
     #: `_current_output_dir`'s answer when the form names an input it cannot
@@ -717,8 +792,7 @@ class AnalyzeSuspendMixin:
                 continue
             with swallow(f"reading the run journal in {out}"):
                 rec = _journal.read_journal(out)
-                if rec is not None and rec.input_dir and same_dir(
-                        rec.input_dir, raw_input):
+                if rec is not None and _journal_names_input(rec, raw_input):
                     # ``None`` is the *record left open* case, and it is
                     # keyed on the record being open rather than reached as a
                     # fallback: an outcome outside the roster — an index entry

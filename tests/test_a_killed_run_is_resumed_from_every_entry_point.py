@@ -133,3 +133,74 @@ def test_the_input_directory_is_read_from_the_journal_not_guessed(tmp_path, monk
     entries = J.unfinished_runs()
     assert any(str(e.get("output_dir")) == str(out) for e in entries), (
         "a run with no closed_at is not offered as unfinished")
+
+
+def test_an_unfinished_run_is_found_when_the_input_was_resolved_to_in(
+        tmp_path, qtbot, monkeypatch):
+    """The app's real call order, on the plate layout almost everyone has.
+
+    The user picks the plate folder; the resolver runs the pipeline over
+    ``<plate>/in``; the runner opens the journal with that *resolved* directory.
+    The check that decides whether a restart must be incremental compared the
+    journal's ``input_dir`` with the folder the user picked, so it never matched
+    on this layout: a queue job restarted after Pause, a Run after Discard or
+    Stop, all skipped the well that was mid-flight as complete. Every earlier
+    test here called ``open_run`` with ``raw == input_dir``, which the app never
+    does.
+    """
+    import sys
+    import time
+
+    import analyze.form
+    from services import run_journal as J
+    from services.pipeline_runner import PipelineRunner
+
+    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "state" / "idx.json")
+    monkeypatch.setattr("services.suspend_record.record_path",
+                        lambda: tmp_path / "state" / "suspended.json")
+
+    plate = tmp_path / "plate"
+    (plate / "in").mkdir(parents=True)
+    script = tmp_path / "fake.py"
+    script.write_text(
+        "import signal, sys, time\n"
+        "stop = []\n"
+        "signal.signal(signal.SIGTERM, lambda *a: stop.append(1))\n"
+        "print('Zip mode: 2 wells', flush=True)\n"
+        "for w in ('A01', 'A02'):\n"
+        "    if stop: break\n"
+        "    print(f'Well {w} F001 starting', flush=True); time.sleep(0.6)\n"
+        "    print(f'Well {w} F001 done.', flush=True)\n")
+    import services.pipeline_runner as pr
+    monkeypatch.setattr(pr, "build_pipeline_args",
+                        lambda p, i, o, opts: [sys.executable, str(script)])
+
+    runner = PipelineRunner()
+    runner.start(script, {"filename_schema": "experiment:channel:well:fov:timepoint",
+                          "filename_sep": "_"},
+                 resolve_dirs=lambda opts, log_q, **kw: (plate / "in", plate / "out", None),
+                 journal_spec={"opts": {"raw": str(plate)}})
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        kind, payload = runner.log_q.get(timeout=5)
+        if kind == "line" and "A01 F001 starting" in str(payload):
+            break
+    runner.stop()
+    while True:
+        kind, _ = runner.log_q.get(timeout=10)
+        if kind == "finished":
+            break
+    record = J.read_journal(plate / "out")
+    assert record.outcome == "stopped" and record.input_dir == str(plate / "in")
+
+    from analyze.tab import AnalyzeTab
+
+    tab = AnalyzeTab()
+    qtbot.addWidget(tab)
+    assert tab._input_has_unfinished_work(str(plate)) is not None, (
+        "the plate the user picked was not matched to its own unfinished run")
+    spec = tab._collect_run_spec()
+    spec.opts["raw"] = str(plate)
+    spec.opts.pop("incremental", None)
+    assert tab.resume_aware_spec(spec).opts.get("incremental") is True

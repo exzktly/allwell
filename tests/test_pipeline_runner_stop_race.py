@@ -94,5 +94,3 @@ def test_suspend_signals_without_the_sigkill_escalation(monkeypatch):
     assert (fake, {"escalate": False}) in signalled
     assert r.was_suspended is True
     assert r.was_stopped is True          # suspend is a stop, of a gentler kind
-    assert r._cleanup_remote == "none", (
-        "a suspended run's remote output is what a resume reads")

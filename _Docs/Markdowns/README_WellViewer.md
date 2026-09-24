@@ -1172,14 +1172,22 @@ and by `remote_fetch_report.txt` in the output folder.
   is waiting for those fields to land. When it has wound down, the log says
   *[Suspended]* with how many wells finished, and the results stay on the
   Analyze pane rather than opening in Review — a suspended plate is not a
-  finished one. On a remote run, Suspend leaves the connection open: the host
+  finished one. Pressing Suspend again while it winds down changes nothing;
+  use Stop to give up on the fields in flight. Closing All-Well during the
+  wind-down leaves it to finish. If All-Well closes or crashes while a local run is going,
+  the run notices and suspends itself; starting that plate again right
+  after a restart tells you to wait until it has wound down, rather than
+  racing it for the same files. On a remote run, Suspend leaves the connection open: the host
   finishes the fields in flight and the wells it finished keep downloading, so
   the run can take a little longer to end than a local one. Pressed while the
   plate is still uploading, there is nothing running on the host yet, so it
   stops the run instead. A batched remote run finishes the batch it is on and
   stops any upload of the next one. If the host cannot be reached, the log says
   so and the run keeps going — press Suspend again, or Stop; if the request did
-  reach the host after all, the run still ends as suspended. You can close
+  reach the host after all, the run still ends as suspended. Once everything
+  it finished has downloaded, the run's files on the host are deleted as for a
+  finished run (if auto-delete is on): Resume uploads what is still missing
+  afresh and does not need them. You can close
   All-Well afterwards; next
   time you open the Analyze pane a card at the top of the sidebar offers to
   carry on. It reads top to bottom: what state the run is in (*Suspended run*),

@@ -774,6 +774,16 @@ class PipelineRunner:
         return self._last_output_dir
 
     @property
+    def running_spec(self) -> dict | None:
+        """The spec of the run in flight, exactly as it was launched.
+
+        The Analyze form stays editable while a run goes, so the form is not a
+        description of what is running; this is. A copy, so a caller cannot
+        change what the journal will record.
+        """
+        return dict(self._journal_spec) if self._journal_spec else None
+
+    @property
     def journal_queued(self) -> bool:
         """Whether the job queue started the run currently in flight.
 
@@ -939,21 +949,26 @@ class PipelineRunner:
         ssh session the run's output and downloads travel over. Nothing local
         is signalled: the run keeps streaming and downloading until it exits 0.
 
-        Two things are deliberately suppressed for the rest of this run:
+        **The SIGKILL escalation** that follows five seconds after the SIGTERM
+        is suppressed for the rest of this run. A well mid-FOV can easily need
+        longer than that, and killing it at second five would throw away
+        exactly the work this is trying to preserve. A suspend that hangs is
+        still recoverable — Stop is right there, and its second signal is a
+        hard kill by design.
 
-        * **The SIGKILL escalation** that follows five seconds after the
-          SIGTERM. A well mid-FOV can easily need longer than that, and killing
-          it at second five would throw away exactly the work this is trying to
-          preserve. A suspend that hangs is still recoverable — Stop is right
-          there, and its second signal is a hard kill by design.
-        * **Remote cleanup.** Auto-delete is on by default, and it only fires
-          after a verified-successful run; a suspend is not that, but the guard
-          is made explicit here rather than left to depend on it. The partial
-          output on the remote is the thing a resume needs.
+        Remote cleanup is **not** suppressed. It fires only once the fetch has
+        been verified, so everything the suspended run produced is local by
+        then — and nothing on the host is read by the resume, which uploads
+        only the missing groups and never re-attaches (``RemoteRunner.spawn``).
+        Keeping the directory "for the resume" left it on the host for ever.
         """
-        previous_cleanup = self._cleanup_remote
+        if self._suspend_requested.is_set() and self._remote_runner is None:
+            # Already winding down. The pipeline's handler gives SIGTERM back to
+            # its default after the first, so a second one is a hard stop —
+            # the opposite of what a second Suspend asks for. (A remote run's
+            # request is a file, and asking twice is harmless.)
+            return
         self._suspend_requested.set()
-        self._cleanup_remote = "none"
         remote = self._remote_runner
         if remote is not None and remote.can_request_suspend:
             # A remote run is asked through its request file and nothing else
@@ -965,8 +980,7 @@ class PipelineRunner:
             self._suspend_seq += 1
             self._suspend_thread = threading.Thread(
                 target=self._ask_remote_to_suspend,
-                args=(remote, previous_cleanup,
-                      self._suspend_seq, self._run_generation),
+                args=(remote, self._suspend_seq, self._run_generation),
                 daemon=True)
             self._suspend_thread.start()
             return
@@ -975,8 +989,7 @@ class PipelineRunner:
         # what a suspend can do.
         self.stop(escalate=False)
 
-    def _ask_remote_to_suspend(self, remote, previous_cleanup: str,
-                               seq: int, generation: int) -> None:
+    def _ask_remote_to_suspend(self, remote, seq: int, generation: int) -> None:
         """Worker half of a remote :meth:`suspend`.
 
         The process handle is read here rather than by the button: the lock
@@ -998,7 +1011,6 @@ class PipelineRunner:
         # here: a pipeline that saw the request says so on its stream, and
         # `_run_pipeline_remote` restores the suspend from that line.
         self._suspend_requested.clear()
-        self._cleanup_remote = previous_cleanup
 
     def _note_suspend_evidence(self, line: str) -> None:
         """Remember that the remote pipeline reported seeing a suspend request."""
@@ -1010,12 +1022,15 @@ class PipelineRunner:
 
         The pipeline's own word wins over the ssh call's: a request whose ssh
         timed out may still have landed, and a run that says it saw one wound
-        down whatever the app believed. Returns the cleanup mode to use — never
-        a deleting one for a suspended run, whose remote output a resume needs.
+        down whatever the app believed. Returns the cleanup mode to use: the
+        configured one for a finished or suspended run (see :meth:`suspend`),
+        never a deleting one for a stopped run.
         """
         if self._suspend_seen:
             self._suspend_requested.set()
-        return "none" if self._suspend_requested.is_set() else self._cleanup_remote
+        if self._stop_requested.is_set():
+            return "none"
+        return self._cleanup_remote
 
     @property
     def was_suspended(self) -> bool:
@@ -1077,6 +1092,22 @@ class PipelineRunner:
             "the rest were not started. Resume from the Analyze banner, or "
             "re-run this input with 'incremental', to finish the plate.\n",
         ))
+
+    def _enqueue_stopped(self, *, where: str = "Pipeline") -> None:
+        """Report a run the user stopped that nonetheless exited 0.
+
+        Stop sends SIGTERM, and the pipeline answers SIGTERM by winding down
+        (`pipeline.suspend`), so a run that finishes its in-flight groups inside
+        the five seconds before the SIGKILL exits 0. Read as a completion, a
+        Stop printed "Processing Complete", ran the source-image success hooks,
+        handed the half-done folder to Review and told the queue the job had
+        succeeded, while the journal recorded it as stopped. Reported through
+        the error seam, so it is latched as a cancel (`cancel_state_at_failure`)
+        and the GUI shows it amber, the same as a Stop that ended by signal.
+        """
+        self._enqueue_error(
+            f"{where} stopped: the wells that finished are kept; the rest were "
+            "not processed.\n")
 
     def _enqueue_error(self, message: str) -> None:
         """Queue a failure. The queue itself records the cancel state."""
@@ -1391,6 +1422,8 @@ class PipelineRunner:
             rc = proc.returncode
             if rc == 0 and self._suspend_requested.is_set():
                 self._enqueue_suspended()
+            elif rc == 0 and self._stop_requested.is_set():
+                self._enqueue_stopped()
             elif rc == 0:
                 # v5.x.x: zipper-fired-this-run source cleanup. Only
                 # runs on a clean exit (rc == 0); any failure leaves
@@ -1566,6 +1599,8 @@ class PipelineRunner:
             )
             if rc == 0 and ok and self._suspend_requested.is_set():
                 self._enqueue_suspended(where="Remote pipeline")
+            elif rc == 0 and self._stop_requested.is_set():
+                self._enqueue_stopped(where="Remote pipeline")
             elif rc == 0 and ok:
                 # v5.x.x: clean run-to-completion. Fire both success
                 # hooks:

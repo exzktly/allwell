@@ -155,7 +155,11 @@ PROCESS_MICROSCOPY_BUDGET = 3804
 # 6853 -> 6826: the review of that change needed the request made in a
 # different order and the batch upload made interruptible, and the request
 # itself moved to `services/remote_suspend.py` to pay for it.
-REMOTE_RUNNER_BUDGET = 6826
+# 6826 -> 6810: an incremental run stopped borrowing earlier runs' directories,
+# and the full-cache-hit predicate that decides it moved to
+# `services/remote_run_id.py`, whose subject is exactly whether an earlier
+# run's work may be reused.
+REMOTE_RUNNER_BUDGET = 6810
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis

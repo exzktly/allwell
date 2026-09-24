@@ -86,7 +86,12 @@ def _stop_analyze_runner(analyze) -> None:
     if runner is None:
         return
     try:
-        if getattr(runner, "is_running", False):
+        # A run that is winding down after Suspend is left to finish: the
+        # pipeline suspends itself when the app goes (`watch_parent`), while a
+        # Stop here is a hard kill that throws away the wells in flight — the
+        # work Suspend was pressed to keep.
+        if getattr(runner, "is_running", False) and not getattr(
+                runner, "was_suspended", False):
             runner.stop()
     except Exception:
         swallowed()

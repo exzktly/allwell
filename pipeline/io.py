@@ -39,6 +39,7 @@ import imageio.v3 as iio
 from tifffile import imread, imwrite
 from skimage.segmentation import find_boundaries
 
+from util.aw_safe import swallow
 from util.retry_io import retry_io
 from util.image_exts import GROUP_IMAGE_EXTS
 from util.zip_write import atomic_zip, fsync_path, staging_path
@@ -264,19 +265,27 @@ def _commit_staging_dir(tmp_images: Path, final_out: Path) -> None:
     The copy is deliberately not atomic: the caller has already removed any
     previous *final_out*, and a crash mid-copy leaves the well's per-FOV
     checkpoints intact for ``--incremental`` to resume from.
+
+    Once the move is complete those checkpoints are spent — the well's CSV was
+    written before this is called — so they are dropped from *final_out*. Left
+    there they were the only thing the output folder held after its images
+    were archived, so every folder-mode well kept an ``out/<WELL>/`` of hidden
+    files the log reported as "not carried by the archive".
     """
     try:
         tmp_images.rename(final_out)
-        return
     except OSError as exc:
         if exc.errno != errno.EXDEV:
             raise
-    log.info(
-        "Well output staged on a different filesystem than %s; copying instead "
-        "of renaming.", final_out.parent,
-    )
-    shutil.copytree(tmp_images, final_out, dirs_exist_ok=True)
-    remove_directory(tmp_images)
+        log.info(
+            "Well output staged on a different filesystem than %s; copying "
+            "instead of renaming.", final_out.parent,
+        )
+        shutil.copytree(tmp_images, final_out, dirs_exist_ok=True)
+        remove_directory(tmp_images)
+    for spent in final_out.glob(".fov_*"):
+        with swallow(f"removing the spent checkpoint {spent.name}"):
+            spent.unlink()
 
 
 def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool) -> None:

@@ -332,7 +332,7 @@ def test_a_launched_remote_run_is_asked_and_its_session_left_alone(runner):
     assert runner.signalled == [], "the local ssh was signalled, ending the session"
     assert not remote.cancelled, "the remote run was cancelled, not suspended"
     assert runner.was_suspended
-    assert runner._cleanup_remote == "none"
+    assert runner._cleanup_remote == "run", "the user's cleanup setting was changed"
 
 
 def test_a_host_that_cannot_be_reached_leaves_the_run_as_it_was(runner):
@@ -433,10 +433,9 @@ class _Ask:
 def test_a_slow_failed_click_does_not_undo_a_later_one_that_landed(runner):
     """Two clicks; the first ssh times out *after* the second succeeded.
 
-    Before, the first thread cleared the suspend and put the deleting cleanup
-    mode back, so the run that the second request did wind down was reported
-    as finished — success hooks, remote data deleted, the half-done folder
-    handed to Review.
+    Before, the first thread cleared the suspend, so the run that the second
+    request did wind down was reported as finished — success hooks and the
+    half-done folder handed to Review.
     """
     import threading
 
@@ -451,7 +450,6 @@ def test_a_slow_failed_click_does_not_undo_a_later_one_that_landed(runner):
     first.set()
     t1.join(5)
     assert runner.was_suspended
-    assert runner._cleanup_remote == "none"
 
 
 def test_a_previous_run_s_late_thread_cannot_touch_the_next_run(runner):
@@ -470,7 +468,7 @@ def test_a_previous_run_s_late_thread_cannot_touch_the_next_run(runner):
     assert runner._cleanup_remote == "none"
 
 
-def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag):
+def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag, stop_flag=False):
     """Run the real `_run_pipeline_remote` with staging and the host stubbed."""
     import types
 
@@ -483,10 +481,18 @@ def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag):
     monkeypatch.setattr(pr, "stage_local_zips", lambda *a, **k: zipped)
     verified: list[str] = []
 
+    holder: list = []
+
+    def _stream():
+        for i, line in enumerate(lines):
+            if stop_flag and i == 1:
+                holder[0]._stop_requested.set()     # Stop, mid-run
+            yield line
+
     class _Proc:
         pid = 1
         returncode = 0
-        stdout = iter(lines)
+        stdout = _stream()
 
         def poll(self):
             return 0
@@ -504,6 +510,7 @@ def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag):
     r._remote = types.SimpleNamespace(name="h")
     r._remote_runner = remote
     r._cleanup_remote = "all"
+    holder.append(r)
     if suspend_flag:
         r._suspend_requested.set()
     opts = {"filename_schema": "a:b", "filename_sep": "_", "fluor_tokens": ["GFP"],
@@ -528,7 +535,11 @@ def test_a_run_that_says_it_saw_the_request_is_suspended_whatever_the_ssh_said(
                "2026 WARNING SUSPEND requested (request file /x) — finishing\n",
                "Well A01 F001 done.\n"])
     assert "suspended" in kinds and "done" not in kinds, kinds
-    assert verified == ["none"], "a suspended run's remote output must not be deleted"
+    # The configured cleanup, as for a finished run: it fires only once the
+    # fetch is verified, and the resume reads nothing on the host (it uploads
+    # only the missing groups and never re-attaches). Kept "for the resume",
+    # the suspended run's directory stayed on the host for ever.
+    assert verified == ["all"], "a suspended run's remote directory was kept for ever"
     assert hooks == []
     assert r.was_suspended
 
@@ -612,3 +623,71 @@ def test_the_request_path_exists_only_once_the_upload_is_done(
     runner = spawn()
     assert seen == [False], "the run could be asked to suspend mid-upload"
     assert runner.can_request_suspend
+
+
+def test_a_stopped_remote_run_that_exits_zero_is_neither_done_nor_cleaned(
+        monkeypatch, tmp_path):
+    """A Stop the remote pipeline wound down from is a stop: no success hooks,
+    no "done", and its remote output left in place rather than deleted."""
+    r, kinds, verified, hooks = _drive_remote_run(
+        monkeypatch, tmp_path, suspend_flag=False, stop_flag=True,
+        lines=["Well A01 F001 starting\n", "Well A01 F001 done.\n"])
+    assert "done" not in kinds and "error" in kinds, kinds
+    assert verified == ["none"]
+    assert hooks == []
+    assert r.cancel_state_at_failure == (True, False)
+
+
+def test_a_well_suspended_before_its_first_group_leaves_nothing(tmp_path):
+    """The task began, then the suspend landed before any group was attempted.
+
+    That is the window between the task's own entry check and the group loop's
+    first one — extracting the archive, finding its groups. The well ran the
+    whole end-of-well path with nothing in it and printed ``— done.``, which a
+    remote Fetcher reads as "a CSV to fetch": the suspended run then failed its
+    verification instead of ending suspended.
+    """
+    import numpy as np
+    tifffile = pytest.importorskip("tifffile")
+
+    with zipfile.ZipFile(tmp_path / "A01.zip", "w") as zf:
+        for channel in ("DAPI", "GFP"):
+            png = tmp_path / f"{channel}.tif"
+            tifffile.imwrite(png, np.zeros((16, 16), dtype=np.uint16))
+            zf.write(png, f"exp_{channel}_A01_F001_0h.tif")
+    script = textwrap.dedent(f"""
+        import sys, logging, pathlib
+        sys.path.insert(0, {str(_REPO)!r})
+        logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+        import process_microscopy as pm
+        real = pm.extract_zip
+        def extract_then_suspend(*a, **k):
+            n = real(*a, **k)
+            pm._suspend.request_suspend()     # lands mid-task
+            return n
+        pm.extract_zip = extract_then_suspend
+        out = pm.process_well_zip_task(
+            "A01", pathlib.Path({str(tmp_path / "A01.zip")!r}),
+            pathlib.Path({str(tmp_path / "out")!r}), {{}},
+            "DAPI", ["GFP"], "measurements")
+        print("RESULT", out)
+    """)
+    path = tmp_path / "well.py"
+    path.write_text(script)
+    env = {k: v for k, v in os.environ.items() if k != "ALLWELL_SUSPEND_FILE"}
+    out = subprocess.run([sys.executable, str(path)], capture_output=True,
+                         text=True, timeout=120, env=env)
+    text = out.stdout + out.stderr
+    assert "RESULT ([], [])" in text, text[-2000:]
+    assert "— done." not in text, "a well that attempted nothing announced itself done"
+    written = sorted(p.name for p in (tmp_path / "out").rglob("*") if p.is_file()) \
+        if (tmp_path / "out").exists() else []
+    assert not [n for n in written if n.endswith((".csv", "_out.zip"))], written
+
+
+def test_a_second_local_suspend_sends_no_second_signal(runner):
+    """The queue calls the runner directly, so the guard lives here too: a
+    second SIGTERM is a hard stop once the pipeline's handler has fired."""
+    runner.suspend()
+    runner.suspend()
+    assert runner.signalled.count(runner._proc) == 1

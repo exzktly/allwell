@@ -127,6 +127,7 @@ import pipeline.field_quality as _field_quality
 from pipeline.field_quality import FOCUS_COLUMN  # noqa: F401 (re-exported)
 import pipeline.stardist as _stardist
 import pipeline.suspend as _suspend
+from pipeline.mixed_input import consolidate_mixed_to_zips
 from pipeline.stardist import (
     _segment_stardist_nuclei,
     _segment_stardist_seeded_watershed_cell,
@@ -2038,6 +2039,7 @@ def _process_groups_in_worker(
     fov_threads: int = 1,
     errors_dir: Path | None = None,
     settings_key: str = "",
+    measured_of: int | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     Process all image groups for one well within a single worker process.
@@ -2259,6 +2261,13 @@ def _process_groups_in_worker(
             ", ".join(not_attempted),
         )
 
+    # A suspend breaks the loop without a word, and the well then writes its
+    # CSV and prints "done." like a whole one: say it is partial, and why.
+    _left = _fov_total - _fov_done - len(not_attempted)
+    if _left > 0 and _fov_done and _suspend.is_suspended():
+        log.warning("Well %s — SUSPENDED part way: %d of %d FOV-group(s) not "
+                    "reached; resuming processes them.", well_label, _left, _fov_total)
+
     # The well's quality record, against the number of FOV-groups the well
     # HAS rather than the number that produced a measurement. A well that
     # failed, aborted, or was suspended part way is then visibly partial in
@@ -2276,7 +2285,7 @@ def _process_groups_in_worker(
     if errors_dir is not None:
         _field_quality.write_well_field_quality(
             errors_dir, well_label, fields=quality_fields,
-            measured_of=_fov_total)
+            measured_of=_fov_total if measured_of is None else measured_of)
 
     return all_records, failed, aborted_reason, tuple(not_attempted)
 
@@ -2298,6 +2307,25 @@ def _well_not_started_for_suspend(well_label: str) -> bool:
     if not _suspend.is_suspended():
         return False
     log.info("Well %s — not started (the run is suspending).", well_label)
+    return True
+
+
+def _suspended_before_any_group(well_label: str, records, failed) -> bool:
+    """Whether a suspend landed after this well began but before it did any work.
+
+    The task's entry check (:func:`_well_not_started_for_suspend`) covers a
+    well that begins after the request; this covers one that began just before
+    it and took the group loop's first ``is_suspended()`` break while its
+    archive was still being extracted or its groups found. Such a well has
+    nothing to write, and must not say ``— done.``: a remote Fetcher reads that
+    line as a CSV to fetch, and its absence failed the suspended run's
+    verification. A well whose attempted groups all produced no cells also
+    lands here, and is simply recomputed by the resume.
+    """
+    if records or failed or not _suspend.is_suspended():
+        return False
+    log.info("Well %s — not started (the run suspended before its first "
+             "field).", well_label)
     return True
 
 
@@ -2452,7 +2480,10 @@ def process_well_zip_task(
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
             records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
                 groups, kwargs, well_label, errors_dir=output_dir,
-                settings_key=settings_key)
+                settings_key=settings_key,
+                measured_of=groups_in_input if incremental else None)
+            if _suspended_before_any_group(well_label, records, failed):
+                return [], []
 
             # The extracted inputs are dead weight from here on, and what
             # follows — building <well>_out.zip beside a staging dir that still
@@ -2650,7 +2681,10 @@ def process_well_folder_task(
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
             records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
                 groups, kwargs, well_label, errors_dir=output_dir,
-                settings_key=settings_key)
+                settings_key=settings_key,
+                measured_of=groups_in_input if incremental else None)
+            if _suspended_before_any_group(well_label, records, failed):
+                return [], []
 
             if incremental:
                 # Merge new rows / images into the existing well outputs.
@@ -3266,6 +3300,7 @@ def main() -> None:
         _suspend.watch_request_file(args.suspend_file, log=log)
     input_dir = args.input_dir.resolve()
     output_dir = args.output_dir.resolve()
+    _suspend.watch_parent(output_dir, log=log)   # wind down if the app dies
 
     # Publish --scratch_dir through the env so the spawn-pool workers (which
     # inherit os.environ but not argv) resolve the same scratch base. Must
@@ -3337,7 +3372,10 @@ def main() -> None:
 
     # Write the pipeline_info.json sidecar before any image work so the
     # well-viewer / image-resolver have schema metadata available even if
-    # processing crashes partway through.
+    # processing crashes partway through. That rewrite drops the field-quality
+    # block; an incremental run adds to it, so it is read first (see the end).
+    prior_quality = (_field_quality.read_field_quality_block(
+        output_dir / PIPELINE_INFO_FILENAME) if args.incremental else None)
     try:
         info_path = write_pipeline_info(
             output_dir,
@@ -3553,6 +3591,9 @@ def main() -> None:
     # Ahead of the model precompute below, because both refusals here are
     # decided from the plate's own well list alone. A run that cannot say what
     # corrects one of its wells should not first spend a model build per blank.
+    # A folder-mode run archives each well it finishes, so resuming one meets
+    # zips and bare folders together; fold the folders in, as the Analyze pane does.
+    consolidate_mixed_to_zips(input_dir, log_fn=lambda m: log.info("%s", m.rstrip()))
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
     if well_zips:
@@ -3711,7 +3752,7 @@ def main() -> None:
     # biased subset is indistinguishable from a whole plate.
     _field_quality.finalize_field_quality(
         output_dir, output_dir / PIPELINE_INFO_FILENAME,
-        atomic_writer=_safe_atomic_text_write, log=log,
+        atomic_writer=_safe_atomic_text_write, log=log, prior_block=prior_quality,
     )
 
     # Auto-threshold: every well is processed and the output zips, per-well CSVs

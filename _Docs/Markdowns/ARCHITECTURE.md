@@ -5354,11 +5354,23 @@ immune to the second of those by accident — each calls `set_done` on success,
 whose green overwrites the red — so it is the base class's job, not the
 callers'.
 
-A **Stop or Suspend is not a failure**, and a Suspend is not a completion
-either. A Stop ends the subprocess by signal and arrives as an `error` event; a
-Suspend that winds down cleanly exits **0** and the runner reports it as its own
-`suspended` event (below), while one that dies by signal arrives as an `error`
-like a Stop. Either cancel takes the amber `set_cancelled` and neither opens a
+A **Stop or Suspend is not a failure**, and neither is a completion. A Stop
+sends SIGTERM, which the pipeline answers by winding down (`pipeline.suspend`),
+so it ends either by signal or — when the wind-down beats the SIGKILL five
+seconds later — with exit 0. Both arrive as an `error` event: the runner reads
+an exit of 0 with `_stop_requested` set as a stop (`_enqueue_stopped`), never as
+`done`, so no success hook, "Processing Complete" or Review hand-off follows a
+Stop, and a remote one keeps its remote output. A Suspend that winds down
+cleanly exits 0 and is reported as its own `suspended` event (below); a remote
+one keeps the configured cleanup, which fires only after the fetch is verified,
+because the resume uploads only the missing groups and never re-attaches, so
+nothing on the host is read again. While one
+that dies by signal arrives as an `error` like a Stop. A Stop, Suspend or queue
+Pause that lands while the input is still being grouped ends the grouping
+subprocess, and the resolver (`AnalyzeInputMixin._input_failure_text`) words
+the resulting failure as the stop it was — "Run suspended while the input was
+being grouped", with the grouping step's own message kept in brackets — rather
+than as "Input error". Either cancel takes the amber `set_cancelled` and neither opens a
 pane the user had closed. For the `error` case, which of the three it was is
 read from `PipelineRunner.cancel_state_at_failure`, a snapshot taken when the
 failure is *queued*, not from the live `was_stopped` / `was_suspended`. The GUI
@@ -8526,7 +8538,17 @@ derived address, the recorded one, whether the run is forced, and whether
 journal proposes and the remote listing decides — a recorded address is a
 statement about where work was *sent*, not that it is still there — and a forced
 run never re-attaches, since landing in a directory already full of the previous
-run's output is exactly how a forced re-run gets skipped. Only the *output*
+run's output is exactly how a forced re-run gets skipped. **Neither does an
+incremental run**, and its own output directory is emptied before it launches:
+its upload is a split holding only the groups still missing, so a previous
+run's outputs in the directory can only mislead it — the remote pipeline runs
+without `--incremental` and skips any well whose output exists, and a resumed
+run of a resumed run otherwise re-attached to the first resume's directory and
+was declared complete over a partial well. For the same reason the pre-flight's
+full-cache-hit check (`remote_run_id._pipeline_launch_is_pointless`) never fires
+for an incremental run, and otherwise asks whether every *uploaded* well is
+present, not whether the directory holds as many out.zips as were uploaded.
+Only the *output*
 directory moves: the input keys on this run's own staged archives, and the
 pidfile, sentinel and heartbeat stay under this run's own `run_id`, because
 `_sweep_orphaned_allocation` finds a crashed session's job by recomputing that
@@ -8606,7 +8628,31 @@ every pool worker, the per-group loops stop taking on new FOV-groups, wells not
 yet started are cancelled, and each well that did any work returns through the
 normal end-of-well path so its CSV and `<well>_out.zip` are written. A second
 signal is a hard stop — the handler restores the previous disposition before
-returning, so a suspend that hangs is still escapable.
+returning, so a suspend that hangs is still escapable. Nothing the app does
+sends that second signal by accident: `PipelineRunner.suspend` ignores a second
+local suspend, the Suspend button only notes that the run is already winding
+down, closing the window leaves a suspending run to finish rather than Stopping
+it, and `watch_parent` does not signal an orphan that is already suspending.
+Suspend pressed while the run is still preparing its input — busy, with no
+pipeline yet — says there is nothing to suspend yet.
+
+**A local run winds itself down when the app goes away.** The app launches the
+pipeline in a session of its own so Stop can signal the whole tree, which also
+means a crashed app used to leave it running, writing to a pipe nobody read.
+Restarting and resuming the same plate then raced it: the new run's grouping
+removed the `in/<well>/` folders the orphan was reading ("No such file or
+directory"), and whichever run wrote a well's CSV last won. `spawn_pipeline`
+now passes the app's pid as `ALLWELL_PARENT_PID`, and `process_microscopy.main`
+arms `pipeline.suspend.watch_parent` on the output directory: a thread that
+notices the reparenting and sends SIGTERM to the pipeline's own process group —
+the suspend signal, so every well worker winds down and writes what it
+finished — and that keeps `<out>/.aw_pipeline.alive` (its pid) fresh while the
+run lives. `analyze.run_spec.start_run`, which Run, Resume and the job queue all
+go through, refuses to start a plate whose output folder has a live heartbeat
+(`live_pipeline_pid`: fresh within `ALIVE_STALE_S` *and* the pid exists), so a
+restarted app waits for the orphan rather than racing it. A CLI or remote run
+sets no variable and is not watched; neither is Windows, which does not
+reparent an orphan.
 
 **A remote run is suspended through a request file, not a signal.** On the host
 the process the app can name is the login shell's `conda run` or `srun`, not the
@@ -8630,8 +8676,17 @@ deterministic, so a resume lands in the directory the suspend was requested in,
 and a leftover request would suspend it before it did anything. The pipeline
 only ever reads it. A well the pool had already queued when the request landed
 returns before it starts (`process_microscopy._well_not_started_for_suspend`),
-writing nothing and printing no `— done.` — otherwise the Fetcher would expect a
-CSV for it and fail the run's verification.
+and one that began just before it but attempted no group returns after the
+group loop (`_suspended_before_any_group`); both write nothing and print no
+`— done.` — otherwise the Fetcher would expect a CSV for it and fail the run's
+verification.
+A well the request reaches part way through writes what it finished and prints
+`— done.` like any other — the Fetcher has to bring it home for the resume to add
+to — so `_process_groups_in_worker` first logs `Well <W> — SUSPENDED part way: N
+of M FOV-group(s) not reached`. The run journal still files that well as
+`fetched`: its states record where a well's output got to, not whether the output
+is whole, which is the sidecar `run_report`'s `incomplete_wells` and the field
+quality block's `partial_wells`.
 
 **Whether the run was suspended is settled from the pipeline's own word.** The
 ssh call that makes the request cannot say whether it landed: a timeout can fail
@@ -8663,7 +8718,12 @@ batch that just finished); it also stops the local loop sending further batches
 (`_suspend_before`) and interrupts a batch upload already in progress, whose
 `stop_event` is `_AnySet(_stop, _suspending)`. For a batched run the suspend is
 in effect even when the `touch` fails, because no more batches will be sent: the
-batch running on the host simply finishes. A suspended batched run skips the
+batch running on the host simply finishes. When the loop ends that way with the
+driver still alive — the job still queued, so it has seen no request file —
+`_release_driver` terminates the ssh holding the queue position and cancels the
+job, as it does for a failed run, rather than letting the job take a node later
+only to give it straight back; a driver that has already exited on its own is
+left alone. A suspended batched run skips the
 end-of-run auto-threshold pass, which is for a finished plate; the resumed run
 that finishes it writes the thresholds.
 
@@ -8869,7 +8929,11 @@ contradicts itself and Resume acts on the plate that is not on screen. So a
 record matching the form's own output directory wins, a form naming a folder
 neither record describes gets no offer at all (the pre-run report is what speaks
 for that folder), and newest-anywhere is the fallback only for an empty form —
-the state the app opens in, and the one this banner exists for. That is also why
+the state the app opens in, and the one this banner exists for. "Newest" there
+ranks *plates*, each by its newest record, and within a plate the suspend record
+still wins: a suspend writes both records and closes the journal after stamping
+its own, so ranking records by time alone offered the journal's account of the
+very plate the suspend record describes. That is also why
 both strips refresh together through `_refresh_folder_banners`, on every change
 to the input field and once at construction: a resume offer left over from a
 different folder is precisely the contradiction the scoping prevents, and a
@@ -8973,8 +9037,15 @@ every well whose output zip exists: the wells that never began are recovered, bu
 the ones that were *in flight* wrote a CSV and an out.zip from the FOV-groups
 they had finished, so they read as complete, are skipped, and never get their
 missing groups back. The plate returns looking done.
-`AnalyzeSuspendMixin.resume_aware_spec`, which `start_from_queue` routes through,
-forces incremental when a suspend record names the same input directory.
+`AnalyzeSuspendMixin.resume_aware_spec`, which every `start_run` routes through,
+forces incremental when the input has an unfinished run behind it: a suspend
+record naming it, or an unfinished entry in the run journal's index. A journal
+is matched on the folder the user picked, which its spec records as `opts.raw`,
+as well as on the directory the run was resolved to (`<plate>/in` for a plate
+folder or a drop of loose TIFs) — `_journal_names_input` asks both, because the
+journal's `input_dir` is the resolved one and the form holds the picked one. A
+queue job's restart is covered by the journal, since the queue writes no suspend
+record.
 
 **Grouping consumes each well folder as it goes, but deletes only what it
 archived.** The FOLDER / FLAT staging path (and the MIXED leftover zip-up) turns
@@ -9000,7 +9071,7 @@ that remainder, and the caller's log line names what it kept rather than
 reporting the folder gone. Four paths route through it —
 `remote_runner._zip_well_folder`'s two callers (plus the post-success hook, which
 skips any folder the pass preserved),
-`input_resolution_service._consolidate_mixed_to_zips`, the Datasets pane's
+`pipeline.mixed_input.consolidate_mixed_to_zips`, the Datasets pane's
 `_zip_well_folders`, and
 `process_microscopy.compress_folder_images_to_zip_and_remove`. The extension
 filter stays with each caller: `util/image_exts.py` records why the folder
@@ -9100,6 +9171,10 @@ what its `_tmp_*` glob finds.
 Both modes honour it. Folder mode used to pin its staging to `output_dir` so the
 closing commit could be a same-filesystem `rename`; `pipeline.io._commit_staging_dir`
 now falls back to a copy on `EXDEV`, so the staging dir is free to live anywhere.
+Once the move is complete it drops the well's per-FOV checkpoints (`.fov_*`)
+from the committed folder: the CSV was written before the commit, so they are
+spent, and left behind they were all `out/<WELL>/` held once its images had
+been archived.
 `_sweep_stale_scratch_dirs_all` sweeps the scratch base *and* `output_dir` (when
 they differ) so staging left by pre-change runs is still reclaimed.
 
@@ -10174,6 +10249,19 @@ exists live is not a diagnostic.
 in `_plan_staging` to reach a real run; fixing that one alone looks right and
 does nothing.
 
+**Every input layout takes the split.** `stage_local_zips` routes the archives
+of all four layouts through one closure, `_planned` — the ZIP layout's own
+archives directly, and a MIXED, FOLDER or FLAT plate's once grouping and zip-up
+have produced them (`_then_split`), with the zip-up's cleanup and
+post-success hook carried across. The split is what sets
+`ZippedInput.incremental`, and the rest of the remote path keys on that flag:
+no re-attach and an emptied output directory, the merging fetch, and batched
+mode's local-CSV skip turned off. A resumed plate that was split only when it
+was already one zip per well came back from the other layouts with the flag
+unset, so it could re-attach to the suspended run's directory and find its
+partial wells complete there, and batched mode skipped every well with a local
+CSV, the partial ones included.
+
 The sidecar and the incremental flag both matter, and each was missing on its
 own account. Without the sidecar the Analyze form keeps whatever was already in
 it, so the schema, separator, channel roles, QC options and — the one that
@@ -10605,7 +10693,7 @@ Two conversion modes, one code path each, both in `apply.py`:
   `_zip_well_folders` then converts every one of them into `<well>.zip`,
   removing the folder once packed, so the result lands in the same
   ready-to-run layout the new-destination mode writes. This is deliberately
-  **not** `services.input_resolution_service._consolidate_mixed_to_zips` —
+  **not** `pipeline.mixed_input.consolidate_mixed_to_zips` —
   that helper only tops up a *mixed* zips+folders state (Analyze's own
   loose-TIF handling, which is happy to read pure per-well folders directly)
   and is a documented no-op when zero zips exist yet, which is exactly the
@@ -11440,6 +11528,22 @@ is visibly partial in the artifact. The per-FOV checkpoint carries a group's
 quality in the same file as its records (`_FOV_CHECKPOINT_SCHEMA` 2; a
 version-1 checkpoint is refused rather than misread), so a resumed well is
 measured as completely as one that ran straight through.
+
+An `--incremental` run — Resume — re-measures only the fields a well is
+missing, so its record is **added to** the well's earlier one rather than put
+in its place (`field_quality_record.merge_well_records`: fields keyed by
+`(fov, timepoint)`, `measured_of` the larger of the two). Locally,
+`write_pipeline_info` drops the block when it rewrites the sidecar at the start
+of the run, so `main` reads the block first and hands it to
+`finalize_field_quality` as `prior_block`, which merges before it writes or
+logs anything; the worker is also given the well's full group count
+(`measured_of=groups_in_input`), so a resumed well with no earlier record to
+add to still reads as partial. Remotely the fetch does the same merge
+(`merge_fetched_field_quality(..., incremental=run.incremental)`), where the
+host's own count is the split's and the earlier record supplies the well's.
+Without either, a well measured on two of three fields read as two of two and
+the scorer went ahead. `tests/test_a_resumed_run_keeps_its_field_quality.py`
+drives `main` twice through the real well task.
 
 **On the Review side the subsystem reports, and only filters when asked.**
 `review/data/field_quality_cache.py` projects the verdicts onto the row cache
@@ -13086,7 +13190,7 @@ findings, evidence and repair on top, while `scan_run` walks a directory the run
 has just written. The shared predicate takes data the caller already holds and
 opens exactly one thing between its functions — the well's output container —
 which is what lets Validate delegate without changing its per-well read count,
-a number `tests/test_validate_compute.py` pins exactly. The fifth state is `csv_only` — measurements whole, output archive gone — added because `health` accepted `has_out_zip` and never read it, so a well whose archive had been deleted answered `complete` on the strength of its CSV alone. `pipeline/input_layout.py` holds the three questions about which layout a plate's input is in, including the refusal that stops a run whose loose images were moved into a folder no zip-mode run will read; `pipeline/cli_args.py` holds `build_parser`. Both left `process_microscopy` under its line budget and are in the remote manifest.
+a number `tests/test_validate_compute.py` pins exactly. The fifth state is `csv_only` — measurements whole, output archive gone — added because `health` accepted `has_out_zip` and never read it, so a well whose archive had been deleted answered `complete` on the strength of its CSV alone. `pipeline/input_layout.py` holds the three questions about which layout a plate's input is in, including the refusal that stops a run whose loose images were moved into a folder no zip-mode run will read; `pipeline/cli_args.py` holds `build_parser`. Both left `process_microscopy` under its line budget and are in the remote manifest. `pipeline/mixed_input.py` holds `consolidate_mixed_to_zips`, which zips each bare well folder in an `in/` that already has well archives: a folder-mode run archives each well it finishes, so a suspended or interrupted one leaves exactly that, and `main` runs it before reading the layout so that `--incremental` from the command line — the pipeline's own resume advice — works as it does from the Analyze pane, whose resolver calls the same function (`services.input_resolution_service` re-exports it under its old private name). With it in front, the refusal above is reached only if a folder is left unarchived for another reason.
 
 The check runs after the auto-threshold pass and before the exit-code decision,
 and records a `run_check` block per well: how many `(fov, timepoint)` groups the

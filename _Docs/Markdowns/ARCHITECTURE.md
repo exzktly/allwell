@@ -10226,6 +10226,19 @@ exists live is not a diagnostic.
 in `_plan_staging` to reach a real run; fixing that one alone looks right and
 does nothing.
 
+**Every input layout takes the split.** `stage_local_zips` routes the archives
+of all four layouts through one closure, `_planned` — the ZIP layout's own
+archives directly, and a MIXED, FOLDER or FLAT plate's once grouping and zip-up
+have produced them (`_then_split`), with the zip-up's cleanup and
+post-success hook carried across. The split is what sets
+`ZippedInput.incremental`, and the rest of the remote path keys on that flag:
+no re-attach and an emptied output directory, the merging fetch, and batched
+mode's local-CSV skip turned off. A resumed plate that was split only when it
+was already one zip per well came back from the other layouts with the flag
+unset, so it could re-attach to the suspended run's directory and find its
+partial wells complete there, and batched mode skipped every well with a local
+CSV, the partial ones included.
+
 The sidecar and the incremental flag both matter, and each was missing on its
 own account. Without the sidecar the Analyze form keeps whatever was already in
 it, so the schema, separator, channel roles, QC options and — the one that

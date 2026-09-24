@@ -439,3 +439,47 @@ def test_the_fetch_captures_the_field_quality_block_before_it_is_overwritten():
     assert read_at < rsync_at < merge_at, (
         "the local field-quality block must be captured before the sidecar is "
         "pulled over it, and merged back after")
+
+
+def test_every_layout_takes_the_incremental_split(tmp_path):
+    """A resumed plate that is not already one zip per well is split too.
+
+    Only the ZIP layout used to apply the split. A MIXED or FOLDER plate — a
+    local folder-mode run, or a staging interrupted part way through its
+    zip-up — came back with ``incremental`` unset, so everything the remote side
+    keys on it was skipped: the run re-attached to the suspended run's
+    directory and could find its partial wells "complete" there, and batched
+    mode skipped every well with a local CSV, the partial ones included.
+    """
+    from services.remote_runner import LocalInputMode, stage_local_zips
+
+    out = tmp_path / "out"
+    out.mkdir()
+    _prior_csv(out / "measurements_A01.csv", [("1", "T01")])     # partial
+    _prior_csv(out / "measurements_B02.csv", [("1", "T01")])     # complete
+
+    for layout in ("mixed", "folder"):
+        plate = tmp_path / layout
+        plate.mkdir()
+        if layout == "mixed":
+            _zip(plate / "A01.zip", ["e_w1_A01_1_T01.tif", "e_w1_A01_2_T01.tif"])
+        else:
+            (plate / "A01").mkdir()
+            for name in ("e_w1_A01_1_T01.tif", "e_w1_A01_2_T01.tif"):
+                (plate / "A01" / name).write_bytes(b"data")
+        (plate / "B02").mkdir()
+        (plate / "B02" / "e_w1_B02_1_T01.tif").write_bytes(b"data")
+
+        zipped = stage_local_zips(
+            plate, filename_schema=SCHEMA, filename_sep=SEP, incremental=True,
+            prior_output_dir=out)
+        try:
+            assert zipped.mode is LocalInputMode[layout.upper()]
+            assert zipped.incremental, f"{layout}: the resume was not split"
+            assert zipped.up_to_date_wells == ("B02",), layout
+            (a01,) = zipped.well_zips
+            assert set(zipfile.ZipFile(a01).namelist()) == {"e_w1_A01_2_T01.tif"}, (
+                f"{layout}: the partial well was uploaded whole")
+        finally:
+            if zipped.cleanup is not None:
+                zipped.cleanup()

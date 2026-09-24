@@ -486,36 +486,21 @@ def stage_local_zips(
     if log_fn is not None:
         log_fn(f"[remote] input layout: {mode.value}\n")
 
-    if mode is LocalInputMode.ZIP:
-        well_zips = tuple(sorted(_well_zips_in(input_dir)))
-        if not well_zips:
-            raise RuntimeError(
-                f"Input dir reports zip-mode but contains no A01.zip-style files: {input_dir}"
-            )
-        if fluor_tokens is None and not incremental:
-            # No filtering — use the user's zips directly (read-only).
-            return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
-        # v5.2.18: copy the user's zips into a staging dir BEFORE
-        # filtering. Pre-v5.2.18 the filter rewrote zips in place at
-        # ``input_dir`` — if the user mis-typed a fluor channel name
-        # (e.g. "GP" for "GFP"), every fluor image got dropped from
-        # the user's original dataset on disk. The user's input dir
-        # must be treated as read-only. The incremental split rewrites
-        # zips too, so it likewise requires staging.
-        # Plan before moving anything. Reading each archive's member list is a
-        # small read of its central directory, so the whole plate can be planned
-        # for the cost of a few seeks even over a network mount — and then only
-        # the members that will actually be uploaded are ever read. An earlier
-        # shape copied every archive in full into scratch and *then* rewrote it
-        # down to the members it wanted, which on a NAS-resident dataset dragged
-        # the entire plate across the network before a single byte went to the
-        # remote.
+    def _planned(well_zips, keep_tokens, zip_dir, *, prior_cleanup=None,
+                 on_success=None) -> ZippedInput:
+        """Plan, stage and describe *well_zips*: the channel filter and the
+        incremental split, whichever apply. Every layout's archives come
+        through here on an incremental run — the split is what the remote
+        side's no-re-attach, output wipe and merging fetch all key on.
+
+        Planned before anything moves: a member list is a small read of the
+        central directory, so only the members to be uploaded are ever read —
+        copying whole archives first dragged a NAS plate across the network."""
         if log_fn is not None:
             log_fn(f"[remote] planning {len(well_zips)} well archive(s)…\n")
         plans, up_to_date_list, zero_match = _plan_staging(
             well_zips,
-            keep_tokens=(_required_tokens(nuclear_token, fluor_tokens)
-                         if fluor_tokens is not None else None),
+            keep_tokens=keep_tokens,
             incremental=incremental,
             prior_output_dir=prior_output_dir,
             csv_prefix=csv_prefix,
@@ -527,10 +512,8 @@ def stage_local_zips(
             log_fn=log_fn,
         )
         if log_fn is not None:
-            # Planning emits a line only for a well it drops or rewrites, so a
-            # plate whose remaining wells all stage unchanged went silent right
-            # after the two or three wells it did report — reading as a stall
-            # with most of the plate still to go. Say what the pass concluded.
+            # Planning names only the wells it drops or rewrites; without this
+            # a plate staging mostly unchanged went silent and read as a stall.
             log_fn(f"[remote] planned {len(plans)} well archive(s) to upload, "
                    f"{len(up_to_date_list)} already up to date.\n")
         _raise_on_zero_channel_match(zero_match)
@@ -539,26 +522,44 @@ def stage_local_zips(
         staging = _open_staging_if_needed(plans, log_fn=log_fn)
         try:
             if log_fn is not None and staging is not None:
-                _to_move = sum(len(p_.keep) for p_ in plans
-                               if p_.keep is not None)
-                n_rewrite = sum(1 for p_ in plans if p_.keep is not None)
-                log_fn(f"[remote] rewriting {n_rewrite} well archive(s), "
-                       f"{_to_move} member(s) → {staging}\n")
-            staged_zips = _materialize_staging(plans, staging, log_fn=log_fn)
-            up_to_date = tuple(up_to_date_list)
+                rewrites = [p_ for p_ in plans if p_.keep is not None]
+                log_fn(f"[remote] rewriting {len(rewrites)} well archive(s), "
+                       f"{sum(len(p_.keep) for p_ in rewrites)} member(s) → {staging}\n")
             return ZippedInput(
-                zip_dir=staging or input_dir,
-                mode=mode,
-                well_zips=staged_zips,
-                cleanup=(None if staging is None else
-                         (lambda d=staging: shutil.rmtree(d, ignore_errors=True))),
-                incremental=incremental,
-                up_to_date_wells=up_to_date,
-            )
+                zip_dir=staging or zip_dir, mode=mode,
+                well_zips=_materialize_staging(plans, staging, log_fn=log_fn),
+                cleanup=_both(prior_cleanup, None if staging is None else
+                              (lambda d=staging: shutil.rmtree(d, ignore_errors=True))),
+                on_pipeline_success=on_success, incremental=incremental,
+                up_to_date_wells=tuple(up_to_date_list))
         except Exception:
             if staging is not None:
                 shutil.rmtree(staging, ignore_errors=True)
             raise
+
+    def _then_split(zin: ZippedInput) -> ZippedInput:
+        # Grouping and zip-up produce whole-well archives; the split is applied
+        # after them, so a resumed plate in any layout uploads only what is
+        # missing rather than being recomputed — or, batched, skipped as done.
+        if not incremental:
+            return zin
+        return _planned(zin.well_zips, None, zin.zip_dir, prior_cleanup=zin.cleanup,
+                        on_success=zin.on_pipeline_success)
+
+    if mode is LocalInputMode.ZIP:
+        well_zips = tuple(sorted(_well_zips_in(input_dir)))
+        if not well_zips:
+            raise RuntimeError(
+                f"Input dir reports zip-mode but contains no A01.zip-style files: {input_dir}"
+            )
+        if fluor_tokens is None and not incremental:
+            # No filtering — use the user's zips directly (read-only).
+            return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
+        # The user's input dir is read-only: a filter or split writes to a
+        # staging dir, never over their archives (a mistyped channel once
+        # dropped every fluor image from the originals on disk).
+        return _planned(well_zips, (_required_tokens(nuclear_token, fluor_tokens)
+                                    if fluor_tokens is not None else None), input_dir)
 
     if mode is LocalInputMode.MIXED:
         # v5.2.21: input has zips for some wells and folders for
@@ -566,12 +567,9 @@ def stage_local_zips(
         # through compress_input_well_folders. Resume by trusting the
         # existing zips and zipping the leftover folders into a
         # staging dir.
-        return _stage_mixed_mode(
-            input_dir,
-            fluor_tokens=fluor_tokens,
-            nuclear_token=nuclear_token,
-            log_fn=log_fn,
-        )
+        return _then_split(_stage_mixed_mode(
+            input_dir, fluor_tokens=fluor_tokens, nuclear_token=nuclear_token,
+            log_fn=log_fn))
 
     # Folder or flat mode: shell out to well_plate_zipper. The zipper writes
     # ``{well}.zip`` files directly into ``input_dir`` (alongside the
@@ -804,15 +802,10 @@ def stage_local_zips(
             log_fn=log_fn,
         )
         zin.on_pipeline_success = _on_success_effective
-        return zin
+        return _then_split(zin)
 
-    return ZippedInput(
-        zip_dir=input_dir,
-        mode=mode,
-        well_zips=well_zips,
-        cleanup=None,
-        on_pipeline_success=_on_success_effective,
-    )
+    return _then_split(ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips,
+                                   cleanup=None, on_pipeline_success=_on_success_effective))
 
 
 def _detect_local_input_mode(input_dir: Path) -> LocalInputMode:
@@ -1055,6 +1048,12 @@ def _zip_well_folder(folder: Path, out_zip: Path) -> list[Path]:
 
     retry_io(_pack, what=out_zip.name, advice=_TRANSFER_ADVICE, path=out_zip)
     return tifs
+
+
+def _both(*cleanups: Callable[[], None] | None) -> Callable[[], None] | None:
+    """One cleanup that runs each of *cleanups* given, or ``None``."""
+    fns = [f for f in cleanups if f is not None]
+    return (lambda: [f() for f in fns] and None) if fns else None
 
 
 def _stage_mixed_mode(

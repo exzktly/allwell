@@ -3607,7 +3607,10 @@ class _BatchedRemoteProcess:
         before the first batch, a driver that died, a Stop. The job may still
         be *queued* at this point, in which case its ``.slurm`` sidecar does
         not exist yet and ``close_remote_job`` has nothing to read — so the ssh
-        that is holding the queue position is terminated directly as well.
+        that is holding the queue position is terminated directly as well. A
+        suspend that ended the loop counts as such an end while the driver is
+        still alive: a job still queued would otherwise take the node later,
+        see the request file and hand it straight back.
         """
         # Read through `getattr`: this runs in a ``finally``, so it also runs
         # for a crash that happened before `_start_driver` ever set any of it.
@@ -3618,13 +3621,15 @@ class _BatchedRemoteProcess:
                 heartbeat.stop()
         if not getattr(self, "_owns_allocation", False):
             return          # never launched: nothing here is ours to cancel
-        if self._returncode in (0, None):
-            return          # a clean run: the driver exited on its own
         lock = getattr(self, "_current_proc_lock", None)
         if lock is None or getattr(self, "_runner", None) is None:
             return          # nothing was ever launched
         with lock:
             proc = self._current_proc
+        # A clean run's driver exits on its own; after a suspend a queued one has not.
+        if self._returncode in (0, None) and not (
+                self._suspending.is_set() and proc is not None and proc.poll() is None):
+            return
         if proc is not None:
             self._log("[remote] releasing the allocation\n")
             with swallow("terminating the batch driver"):
@@ -3906,10 +3911,7 @@ class _BatchedRemoteProcess:
                 if self._suspend_before(batch_idx + 1, n_batches):
                     break
                 if self._stop.is_set():
-                    self._log(
-                        f"[remote] stopped before batch "
-                        f"{batch_idx + 1}/{n_batches}\n"
-                    )
+                    self._log(f"[remote] stopped before batch {batch_idx + 1}/{n_batches}\n")
                     self._returncode = 130
                     return
 
@@ -3997,9 +3999,7 @@ class _BatchedRemoteProcess:
                         f"continuing with the remaining batches\n"
                     )
                 else:
-                    self._log(
-                        f"[remote] batch {batch_idx + 1}/{n_batches} complete\n"
-                    )
+                    self._log(f"[remote] batch {batch_idx + 1}/{n_batches} complete\n")
 
             if failed:
                 names = ", ".join(str(i) for i in sorted(failed))

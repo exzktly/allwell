@@ -8703,7 +8703,12 @@ batch that just finished); it also stops the local loop sending further batches
 (`_suspend_before`) and interrupts a batch upload already in progress, whose
 `stop_event` is `_AnySet(_stop, _suspending)`. For a batched run the suspend is
 in effect even when the `touch` fails, because no more batches will be sent: the
-batch running on the host simply finishes. A suspended batched run skips the
+batch running on the host simply finishes. When the loop ends that way with the
+driver still alive — the job still queued, so it has seen no request file —
+`_release_driver` terminates the ssh holding the queue position and cancels the
+job, as it does for a failed run, rather than letting the job take a node later
+only to give it straight back; a driver that has already exited on its own is
+left alone. A suspended batched run skips the
 end-of-run auto-threshold pass, which is for a finished plate; the resumed run
 that finishes it writes the thresholds.
 

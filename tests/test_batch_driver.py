@@ -357,6 +357,8 @@ def test_a_suspend_finishes_the_batch_in_flight_and_sends_no_more(
     ordering: list[str] = []
     p = _batched(tmp_path, ["A01", "A02", "A03"])
     _stub_runner(p, proc, ordering)
+    closed = []
+    p._runner.close_remote_job = lambda **kw: closed.append(True)
     monkeypatch.setattr("services.remote_runner.subprocess.Popen",
                         lambda argv, **kw: proc)
 
@@ -367,6 +369,9 @@ def test_a_suspend_finishes_the_batch_in_flight_and_sends_no_more(
         time.sleep(0.01)
     assert any("ready" in o for o in ordering), ordering
     p.note_suspend_requested()
+    # The driver has exited by the time its last lines are read — set before
+    # they are said, so the release never sees it still running by accident.
+    proc._done = True
     proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
     proc.say("[remote] batch-driver: suspended — no further batches\n")
     proc.finish()
@@ -378,6 +383,8 @@ def test_a_suspend_finishes_the_batch_in_flight_and_sends_no_more(
     assert not p._driver_lost.is_set()
     assert p._cancelled == [], "the downloads of the finished batch were cancelled"
     assert "not sent" in "".join(p._logged)
+    assert not proc.terminated, "a driver that ended on its own was killed"
+    assert closed == [], "a job that ended on its own was cancelled"
 
 
 def test_a_suspend_during_a_batch_upload_ends_the_upload(tmp_path, monkeypatch):
@@ -419,6 +426,39 @@ def test_a_suspend_during_a_batch_upload_ends_the_upload(tmp_path, monkeypatch):
     assert not any("upload failed" in m for m in p._logged)
     assert "not sent" in "".join(p._logged)
     assert not any("b2_ready" in o or "_2_ready" in o for o in ordering), ordering
+
+
+def test_a_suspend_while_the_job_is_queued_gives_the_allocation_back(
+        tmp_path, monkeypatch):
+    """Suspend lands during batch 1's upload, while the job is still queued.
+
+    The loop ends with nothing failed, so the run's code is 0 — and a code of 0
+    read as "the driver exited on its own" left the ssh holding the queue
+    position alive. The job would take the node whenever the queue reached it,
+    only to see the request file and hand it straight back.
+    """
+    proc = _FakeProc()
+    p = _batched(tmp_path, ["A01", "A02"])
+    _stub_runner(p, proc, [])
+    closed = []
+    p._runner.close_remote_job = lambda **kw: closed.append(True)
+
+    def upload(zips, dest, *, stop_event=None, **kw):
+        p.note_suspend_requested()
+        return (0, 0.0, 20)                 # the transfer the suspend cut short
+
+    p._runner._cache.upload_subset = upload
+    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+                        lambda argv, **kw: proc)
+    worker = threading.Thread(target=p._run_batches, daemon=True)
+    worker.start()
+    worker.join(timeout=20)
+    proc.finish()
+
+    assert not worker.is_alive()
+    assert p._returncode == 0
+    assert proc.terminated, "the queued driver was left holding its place"
+    assert closed == [True], "the scheduler job was not cancelled"
 
 
 def test_a_suspended_plate_gets_no_thresholds_from_its_fraction(tmp_path, monkeypatch):

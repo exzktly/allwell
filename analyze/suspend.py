@@ -150,6 +150,26 @@ def _unfinished_parts(out_dir: str, journal) -> tuple[str, str, str, str]:
     )
 
 
+def _journal_names_input(record, raw_input: str) -> bool:
+    """Whether a run journal describes a run of the folder the user picked.
+
+    Two spellings of one plate, and both have to be asked. The journal's
+    ``input_dir`` is the directory the pipeline was *resolved* to — ``<plate>/in``
+    for a plate folder or a drop of loose TIFs, which is almost every plate —
+    while the form holds the folder the user picked. Comparing only those two
+    never matched on that layout, so a queue job restarted after Pause, and a
+    Run after Discard, Stop or a crash, went on without ``--incremental`` and
+    skipped the well that was mid-flight as complete. The run's own spec
+    records the picked folder as ``opts.raw``, which is the like-for-like match.
+    """
+    if not raw_input:
+        return False
+    spec_raw = str(((getattr(record, "spec", None) or {}).get("opts") or {})
+                   .get("raw") or "")
+    return any(candidate and same_dir(candidate, raw_input)
+               for candidate in (spec_raw, str(record.input_dir or "")))
+
+
 class AnalyzeSuspendMixin:
     """Suspend / resume behaviour for ``AnalyzeTab``.
 
@@ -717,8 +737,7 @@ class AnalyzeSuspendMixin:
                 continue
             with swallow(f"reading the run journal in {out}"):
                 rec = _journal.read_journal(out)
-                if rec is not None and rec.input_dir and same_dir(
-                        rec.input_dir, raw_input):
+                if rec is not None and _journal_names_input(rec, raw_input):
                     # ``None`` is the *record left open* case, and it is
                     # keyed on the record being open rather than reached as a
                     # fallback: an outcome outside the roster — an index entry

@@ -8977,8 +8977,15 @@ every well whose output zip exists: the wells that never began are recovered, bu
 the ones that were *in flight* wrote a CSV and an out.zip from the FOV-groups
 they had finished, so they read as complete, are skipped, and never get their
 missing groups back. The plate returns looking done.
-`AnalyzeSuspendMixin.resume_aware_spec`, which `start_from_queue` routes through,
-forces incremental when a suspend record names the same input directory.
+`AnalyzeSuspendMixin.resume_aware_spec`, which every `start_run` routes through,
+forces incremental when the input has an unfinished run behind it: a suspend
+record naming it, or an unfinished entry in the run journal's index. A journal
+is matched on the folder the user picked, which its spec records as `opts.raw`,
+as well as on the directory the run was resolved to (`<plate>/in` for a plate
+folder or a drop of loose TIFs) — `_journal_names_input` asks both, because the
+journal's `input_dir` is the resolved one and the form holds the picked one. A
+queue job's restart is covered by the journal, since the queue writes no suspend
+record.
 
 **Grouping consumes each well folder as it goes, but deletes only what it
 archived.** The FOLDER / FLAT staging path (and the MIXED leftover zip-up) turns

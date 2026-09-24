@@ -121,8 +121,25 @@ class AnalyzeInputMixin:
             # TIFs at raw/ get cleaned up once raw/in/ has the zipped equivalents.
             return input_dir, output_dir, on_success
         except (ValueError, RuntimeError) as exc:
-            log_q.put(("error", f"Input error: {exc}\n"))
+            log_q.put(("error", self._input_failure_text(exc)))
             return None
+
+    def _input_failure_text(self, exc: Exception) -> str:
+        """What a failed resolution says — unless the run was told to stop.
+
+        Stop, Suspend and the job queue's Pause all end the grouping subprocess
+        (Stop reaches it through ``proc_hook``), and its failure then arrived as
+        "Input error: …" at ERROR level: a red line naming the user's input for
+        the pause they asked for. It stays an ``error`` event — that is what
+        latches the run as a cancel and tells the queue it did not finish — and
+        keeps the underlying message, in case the input really was at fault too.
+        """
+        runner = getattr(self, "_runner", None)
+        if runner is None or not runner.was_stopped:
+            return f"Input error: {exc}\n"
+        verb = "suspended" if runner.was_suspended else "stopped"
+        return (f"Run {verb} while the input was being grouped — nothing was "
+                f"processed yet. (The grouping step reported: {exc})\n")
 
     def _set_fluor_rows(self, tokens, *, smfish, phase) -> None:
         """Repopulate the fluor-channel rows to *tokens*, restoring smFISH/Phase flags.

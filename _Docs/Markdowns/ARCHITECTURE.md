@@ -5365,7 +5365,12 @@ cleanly exits 0 and is reported as its own `suspended` event (below); a remote
 one keeps the configured cleanup, which fires only after the fetch is verified,
 because the resume uploads only the missing groups and never re-attaches, so
 nothing on the host is read again. While one
-that dies by signal arrives as an `error` like a Stop. Either cancel takes the amber `set_cancelled` and neither opens a
+that dies by signal arrives as an `error` like a Stop. A Stop, Suspend or queue
+Pause that lands while the input is still being grouped ends the grouping
+subprocess, and the resolver (`AnalyzeInputMixin._input_failure_text`) words
+the resulting failure as the stop it was — "Run suspended while the input was
+being grouped", with the grouping step's own message kept in brackets — rather
+than as "Input error". Either cancel takes the amber `set_cancelled` and neither opens a
 pane the user had closed. For the `error` case, which of the three it was is
 read from `PipelineRunner.cancel_state_at_failure`, a snapshot taken when the
 failure is *queued*, not from the live `was_stopped` / `was_suspended`. The GUI

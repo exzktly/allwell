@@ -14064,6 +14064,19 @@ its "Show Details" section, so the usual case needs no file at all — and it no
 longer says "failed to start", which was untrue for every crash that happened
 after start-up.
 
+**A cross-thread Qt warning names its culprit.** "Timers cannot be stopped from
+another thread" and its siblings are Qt *warnings*; the native crash that often
+follows dumps the stack of the thread it happened on, which says nothing about
+the code that reached across. `install_qt_cross_thread_trace`, installed by
+`allwell.main` once the `QApplication` exists, is a Qt message handler that —
+for the first `_CROSS_THREAD_DUMPS` such warnings — writes the message, the
+thread that raised it and every thread's Python stack to the boot log, then
+passes the message on as Qt would. The stacks are formatted by hand from
+`sys._current_frames()`, not by `faulthandler`, whose header lines are the crash
+markers above: a warning in that format would have the next launch keep and
+report a crash that never happened. `tests/test_a_cross_thread_qt_warning_is_traced.py`
+stops a GUI-thread `QTimer` from a named worker thread and reads the log.
+
 Run from a terminal to capture the same output live. These usually come from touching a Qt widget tree mid-event-dispatch or after
 its C++ object is deleted — e.g. the Split View focus filter (§5.10) defers its
 pane switch with `QTimer.singleShot(0, …)` precisely to avoid reparenting during

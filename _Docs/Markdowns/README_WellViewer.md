@@ -3086,6 +3086,9 @@ still exported (see below).
   file is normally rewritten each time the app starts, **but a copy carrying a
   crash is kept** — as `allwell-boot.log.1`, `.2`, `.3`, newest first — so
   relaunching to try again no longer throws away the record of what went wrong.
+  If a message like *"Timers cannot be stopped from another thread"* appears,
+  the same log also records which part of the app caused it — send that file
+  with the report, even if the app did not close.
 - **You can look at the finished wells while the rest are still running** —
   Analyze and Review are two panes of one window, and the run is a separate
   process (or on the cluster), so switching to Review does not touch it. Open

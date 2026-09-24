@@ -65,7 +65,7 @@ for a bare `python -m pytest`.
 The suite has two lanes and **running the wrong one hangs the run and OOM-kills
 the container**:
 
-- **Fast lane** (~6,840 tests of ~7,280 collected, across ~690 files):
+- **Fast lane** (~10,280 tests of ~10,830 collected, across ~870 files):
   `scripts/test.sh`. Pure-logic, guardrail, and per-feature tests. CI invokes
   this same script, so local and CI runs cannot drift in flags or config —
   don't hand-roll a `pytest` command.
@@ -78,10 +78,10 @@ the container**:
   tests have passed, which is why the fast lane's widget reaper exempts
   anything marked `slow`.
 
-Three things keep the fast lane fast, all of them in the harness rather than in
+Four things keep the fast lane fast, all of them in the harness rather than in
 any test, and all of them easy to undo without a single test going red.
 `tests/test_the_fast_lane_stays_fast.py` is what notices; ARCHITECTURE.md §10.4
-rules 7–9 explain each.
+rules 7–10 explain each.
 
 1. **A test does not keep the widgets it builds.** An autouse fixture deletes
    the top-level widgets it leaves behind. Without it the process carried
@@ -94,13 +94,18 @@ rules 7–9 explain each.
 3. **No test spawns `ssh` / `rsync` / `scp` / `sftp`.** Use the
    `offline_transport` fixture. The remote layer's seams nest, so patching
    `Fetcher._rsync` still lets three other paths through to the real binary.
+4. **No autouse fixture makes a numbered temp directory.** `tmp_path` and
+   `tmp_path_factory.mktemp` list the whole session temp dir to pick a number,
+   so one per test makes setup quadratic in the test count — it reached 316 s
+   of a 10.5-minute lane and pushed CI past its 15-minute cap on every branch.
+   Take a per-test dir from `conftest._scratch_dir(_autouse_scratch_root, …)`.
 
 **How long it actually takes**, so a run that is merely slow is not mistaken for
 one that is wedged:
 
 | | Measured |
 |---|---|
-| Fast lane, local, quiet container | ~3.5 min |
+| Fast lane, local, quiet container | ~5 min (10,277 tests) |
 | Fast lane, local, under contention from other work in the same container | roughly 2–3× that |
 | Fast lane, CI job end to end | add ~2 min for checkout and installing the test stack. The job cap is 15 min (`ci.yml`) |
 | One slow-lane file of ~15 full-app tests | ~3.5 min, i.e. ~14 s per app construction |
@@ -112,6 +117,18 @@ two thirds of that was three costs no test's own logic accounted for. Run
 `scripts/test.sh --durations=40` and read where it went; a cost that lands in
 `setup`, or the same number appearing against several unrelated tests, is the
 shape of a harness problem.
+
+It happened a second time, and was misread twice over. The lane crept from ~9
+to ~13 minutes on CI across a few PRs; a local run of 13 min 56 s was put down
+to "overlap with another run", and the CI job then being cancelled at its cap
+was put down to runner noise — on the grounds that the PR's own new tests cost
+0.1 s, which measures the diff and says nothing about the lane. `--durations=0`
+summed by phase answered it in one read: setup 316 s, test bodies 259 s. A cost
+that grows with how many tests ran *before* a test — here, pytest's numbered
+temp directories, rule 4 above — is invisible in any single test's timing and
+only shows in that sum. When CI is cancelled at its cap, sum the phases before
+theorising, and compare against the base branch on the same machine rather
+than against a different runner's log.
 
 Re-count rather than trusting these when it matters: `python -m pytest tests -m
 "not slow" -q --collect-only | tail -1` prints the split in about two seconds.

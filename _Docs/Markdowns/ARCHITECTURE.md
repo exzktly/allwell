@@ -13465,6 +13465,23 @@ fixture (it doesn't help).
    `DatasetCache._ssh_script` — a fourth spelling of "list files on the remote",
    and the one a test is most likely to miss.
 
+10. **No autouse fixture makes a numbered temp directory.** `tmp_path` and
+   `tmp_path_factory.mktemp` choose each new directory's number by listing every
+   entry already in the session's base temp directory, so a call costs time in
+   proportion to the directories the session has made so far. Called once per
+   test from an autouse fixture, that makes the lane's total setup quadratic in
+   its test count: two `mktemp` calls measured 0.2 ms at the first test, 16 ms
+   at the 3,000th and 30 ms at the 6,000th. Three autouse fixtures did it — the
+   settings, scan-cache and run-journal isolation — and across ~10,300 tests
+   setup came to 316 s against 259 s of test bodies, which put the CI job past
+   its 15-minute cap on every branch. They now take a per-test directory from
+   `tempfile.mkdtemp` under one session-scoped root
+   (`conftest._autouse_scratch_root`, via `conftest._scratch_dir`), whose cost
+   does not grow; setup fell to 22 s and the lane from 10 min 27 s to 5 min 13 s
+   on the same machine. A test that asks for `tmp_path` itself still pays the
+   listing, which is fine at the scale a test's own request happens.
+   `test_the_fast_lane_stays_fast.py` holds the rule.
+
 **The slow lane runs on demand, not on PRs and not on a schedule** —
 `.github/workflows/slow-lane.yml`, six sharded runners, dispatched by hand from
 the Actions tab; `scripts/test_slow.sh` runs the same lane locally. It is not a

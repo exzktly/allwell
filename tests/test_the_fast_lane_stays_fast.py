@@ -1,4 +1,4 @@
-"""The three harness rules that keep the fast lane from decaying again.
+"""The harness rules that keep the fast lane from decaying again.
 
 The lane took 10 minutes 47 seconds to run 6,840 tests. Three costs accounted
 for roughly two thirds of that, and none of them was in any test's own logic:
@@ -14,6 +14,11 @@ for roughly two thirds of that, and none of them was in any test's own logic:
 * **56 s** in ``time.sleep``. Four tests spawned a real ``rsync`` at a host
   alias that exists nowhere, and ``_rsync_with_retry`` reads that failure as a
   flaky network: three attempts, 2 + 4 + 8 s apart.
+
+A fourth arrived later: **316 s** of fixture setup, because three autouse
+fixtures each made a numbered temp directory per test, and pytest numbers one by
+listing every directory the session has already made — so the cost per test grew
+with the test count, and the total with its square.
 
 Each fix is a fixture or a helper somebody could remove without any test going
 red, which is the state these tests exist to prevent. They assert the
@@ -230,3 +235,69 @@ def _have(binary: str) -> bool:
     import shutil
 
     return shutil.which(binary) is not None
+
+
+# ── An autouse fixture makes no numbered temp directory ──────────────────────
+#
+# ``tmp_path`` and ``tmp_path_factory.mktemp`` pick each new directory's number
+# by listing every entry already in the session's base temp directory, so one
+# call per test costs time proportional to the tests that ran before it. Three
+# autouse fixtures did that, and the lane's fixture setup came to 316 s against
+# 259 s of test calls — enough to push the CI job past its 15-minute cap on
+# every branch at once. ``conftest._autouse_scratch_root`` is the replacement.
+
+def _autouse_fixtures_that_make_numbered_dirs(tree: ast.Module) -> list[str]:
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        autouse = any(
+            isinstance(d, ast.Call)
+            and any(k.arg == "autouse"
+                    and isinstance(k.value, ast.Constant) and k.value.value
+                    for k in d.keywords)
+            for d in node.decorator_list)
+        if not autouse:
+            continue
+        params = {a.arg for a in node.args.args}
+        if "tmp_path" in params or "tmp_path_factory" in params:
+            offenders.append(f"{node.name} takes a tmp_path fixture")
+        for sub in ast.walk(node):
+            if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr == "mktemp"):
+                offenders.append(f"{node.name} calls .mktemp()")
+    return offenders
+
+
+def test_no_autouse_fixture_makes_a_numbered_temp_directory():
+    # Every conftest in the repository, found from the root: the scan roster
+    # in _repo_scan covers the application's packages, not tests/.
+    conftests = sorted(p for p in REPO_ROOT.rglob("conftest.py")
+                       if ".git" not in p.parts)
+    assert conftests, "found no conftest.py — this guard would measure nothing"
+    offenders = [
+        f"{rel(path)}: {o}"
+        for path in conftests
+        for o in _autouse_fixtures_that_make_numbered_dirs(parse_source(path))
+    ]
+    assert not offenders, (
+        "An autouse fixture makes a numbered temp directory per test, which "
+        "makes the lane's setup time quadratic in its test count. Use "
+        "conftest._scratch_dir(_autouse_scratch_root, ...) instead:\n  "
+        + "\n  ".join(offenders))
+
+
+def test_the_numbered_dir_guard_bites():
+    bad = ast.parse(
+        "import pytest\n"
+        "@pytest.fixture(autouse=True)\n"
+        "def a(tmp_path): pass\n"
+        "@pytest.fixture(autouse=True)\n"
+        "def b(tmp_path_factory): tmp_path_factory.mktemp('x')\n"
+        "@pytest.fixture\n"
+        "def not_autouse(tmp_path): pass\n")
+    assert _autouse_fixtures_that_make_numbered_dirs(bad) == [
+        "a takes a tmp_path fixture",
+        "b takes a tmp_path fixture",
+        "b calls .mktemp()",
+    ]

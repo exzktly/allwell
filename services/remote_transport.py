@@ -494,3 +494,38 @@ def pull_small_file(host: "RemoteHost", remote_path: str, dest: Path, *,
         with swallow(f"cleaning up the staged copy of {what}"):
             tmp.unlink()
     return ok
+
+
+def delete_remote_paths(host: "RemoteHost", paths: Iterable[str], *,
+                        what: str, log_fn: Callable[[str], None]) -> None:
+    """``rm -f`` *paths* (globs allowed) on *host*; *what* names them in the log.
+
+    Non-fatal: a failure is logged and returns, because every caller has a
+    backstop (the end-of-run ``verify_and_cleanup``).
+
+    The script is piped to ``bash -s`` on stdin rather than passed as
+    ``bash -c "..."`` arguments. ssh joins multi-arg remote commands with
+    spaces, so a ``["bash", "-c", "rm -f a b c"]`` argv arrived at the remote
+    bash as ``bash -c rm -f a b c`` — bash took ``rm`` as the ``-c`` script and
+    ``-f a b c`` as positional args to it, and the bare ``rm`` failed with
+    ``missing operand`` every time. The stdin pipe avoids the shell-quoting
+    round-trip entirely.
+    """
+    script = "rm -f -- " + " ".join(paths) + "\n"
+    try:
+        result = subprocess.run(
+            host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
+            input=script.encode("utf-8"),
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            stderr = (
+                result.stderr.decode("utf-8", errors="replace")
+                if isinstance(result.stderr, (bytes, bytearray))
+                else (result.stderr or "")
+            )
+            log_fn(f"[remote] warn: cleanup of {what} on remote "
+                   f"returned {result.returncode}: {stderr.strip()}\n")
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        log_fn(f"[remote] warn: cleanup of {what} on remote failed: {exc}\n")

@@ -212,3 +212,29 @@ def test_the_drain_heartbeat_names_the_well_and_the_step(tmp_path):
     # The heartbeat is chatter, not a per-well outcome.
     assert not any(ev[0] == "well_stage"
                    for ev in ProgressTracker().parse(beats[0]))
+
+
+# ── the per-well remote delete, moved to remote_transport ───────────────────
+
+def test_the_per_well_remote_delete_pipes_its_script_to_bash(monkeypatch, tmp_path):
+    """The Fetcher's per-well delete names the three remote paths and sends the
+    script on stdin — as ``bash -c`` arguments ssh re-splits it and the ``rm``
+    runs with no operands."""
+    import services.remote_transport as rt
+
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen["argv"], seen["input"] = argv, kw.get("input")
+        return types.SimpleNamespace(returncode=0, stderr=b"")
+    monkeypatch.setattr(rt.subprocess, "run", fake_run)
+
+    f = object.__new__(Fetcher)
+    f.host = RemoteHost(name="h", ssh_alias="h")
+    f.run = _run(tmp_path)
+    f._log = lambda _m: None
+    f._delete_well_files_on_remote("A01")
+
+    assert seen["argv"][-2:] == ["bash", "-s"]
+    assert seen["input"] == (b"rm -f -- /r/in/A01.zip /r/out/A01_out.zip "
+                             b"/r/out/*_A01.csv\n")

@@ -199,6 +199,7 @@ from services.remote_transport import (  # noqa: F401
     _rsync_supports_info_flag,
     _rsync_version,
     _rsync_with_retry,
+    delete_remote_paths,
     pull_small_file,
 )
 
@@ -4475,9 +4476,7 @@ class Fetcher:
         self._delete_after_download = delete_after_download
         self._stop = threading.Event()
         self._pending: queue.Queue[str | None] = queue.Queue()
-        # What the worker is doing right now — (well, step, since) — so the
-        # drain heartbeat can name it. Written by the worker, read by the
-        # thread joining it; a tuple is replaced whole, never mutated.
+        # (well, step, since) for the drain heartbeat; replaced whole, never mutated.
         self._activity: tuple[str, str, float] | None = None
         self._worker = threading.Thread(target=self._loop, daemon=True)
         self._worker.start()
@@ -4592,15 +4591,9 @@ class Fetcher:
             )
 
     def _drain_heartbeat_line(self) -> str:
-        """The line logged while the drain waits on the worker.
-
-        Names the well and the step the worker is on. It used to say "still
-        downloading…" whatever the worker was doing, including the steps after
-        a well's bytes had all landed — placing the zip in the output folder,
-        fetching the settings record, deleting the remote copy — which is
-        exactly when the plate already shows that well fetched, so the two read
-        as contradicting each other.
-        """
+        """The drain's wait line, naming the well and step the worker is on —
+        "still downloading…" during the post-download steps contradicted a
+        plate that already showed the well fetched."""
         done = len(self.run.fetched_wells)
         tot = self.run.well_count_total
         tally = f"{done}/{tot} wells" if tot else f"{done} well(s)"
@@ -5047,12 +5040,8 @@ class Fetcher:
             with _csv_dir_heartbeat(csv_dest):
                 csv_count = self._pull_listed(csv_host, csv_files, csv_dest)
         csv_elapsed = time.monotonic() - t1
-        # The CSV line is held back until the zip is in place. It is the second
-        # of the two lines the progress tracker pairs to paint the well
-        # fetched, so logging it here — before ``_materialize`` — turned the
-        # well green while its output was still only in the transit directory,
-        # and a materialise that then failed left a green well with nothing in
-        # the output folder.
+        # Held back until the zip is in place: this line is the half that
+        # paints the well fetched on the plate (ProgressTracker._mark_fetch_part).
         csv_line = (
             f"[remote] ↓ {well}: {csv_count} CSV file(s) in "
             f"{_fmt_secs(csv_elapsed)}\n"
@@ -5086,8 +5075,6 @@ class Fetcher:
             # The local artifact isn't safely in place — do NOT mark the well
             # fetched or delete the remote copy (audit X2); leave it for the
             # end-of-run retry to re-pull.
-            # The CSVs did land; say so, but not in the form the tracker
-            # reads as "fetched" — the well is not.
             landed = f" ({csv_count} CSV file(s) did land)" if csv_line else ""
             self._log(
                 f"[remote] ↓ {well}: WARN local materialize failed{landed}; "
@@ -5129,52 +5116,14 @@ class Fetcher:
             self._delete_well_files_on_remote(well)
 
     def _delete_well_files_on_remote(self, well: str) -> None:
-        """rm the remote input + output zips + per-well CSVs for
-        ``well``. Fires after the local download is confirmed safe
-        (Fetcher.fetched_wells.add). Non-fatal: ssh-delete failure is
-        logged but doesn't abort the run — the end-of-run
-        ``verify_and_cleanup`` is the backstop. On a disk-constrained
-        remote this is the difference between the pipeline completing
-        and ENOSPC mid-run.
-
-        v5.4.7: pipe the script via stdin to ``bash -s`` instead of
-        passing it as ``bash -c "..."`` arguments. ssh joins multi-
-        arg remote commands with spaces, so a ``["bash", "-c",
-        "rm -f a b c"]`` argv arrived at the remote bash as
-        ``bash -c rm -f a b c`` — bash then took ``rm`` as the
-        ``-c`` script and treated ``-f a b c`` as positional args
-        to that script. The script ``rm`` (no args) hit ``rm: missing
-        operand`` and the user saw the warning on every well. The
-        stdin pipe avoids the shell-quoting round-trip entirely.
-        """
-        script = (
-            f"rm -f -- "
-            f"{self.run.remote_input_dir}/{well}.zip "
-            f"{self.run.remote_output_dir}/{well}_out.zip "
-            f"{self.run.remote_output_dir}/*_{well}.csv\n"
-        )
-        try:
-            result = subprocess.run(
-                self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
-                input=script.encode("utf-8"),
-                capture_output=True,
-                timeout=30,
-            )
-            if result.returncode != 0:
-                stderr = (
-                    result.stderr.decode("utf-8", errors="replace")
-                    if isinstance(result.stderr, (bytes, bytearray))
-                    else (result.stderr or "")
-                )
-                self._log(
-                    f"[remote] warn: per-well cleanup of {well} on remote "
-                    f"returned {result.returncode}: {stderr.strip()}\n"
-                )
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            self._log(
-                f"[remote] warn: per-well cleanup of {well} on remote "
-                f"failed: {exc}\n"
-            )
+        """rm the remote input + output zips + per-well CSVs for ``well`` once
+        its download is safe — bounds peak remote disk to about one well's
+        output. Non-fatal; ``verify_and_cleanup`` is the backstop."""
+        rin, rout = self.run.remote_input_dir, self.run.remote_output_dir
+        delete_remote_paths(
+            self.host, [f"{rin}/{well}.zip", f"{rout}/{well}_out.zip",
+                        f"{rout}/*_{well}.csv"],
+            what=f"per-well files of {well}", log_fn=self._log)
 
     def _merge_fetched_csvs(self, tmp_csv_dir: Path) -> None:
         """Merge each partial per-well CSV pulled into *tmp_csv_dir* into the
@@ -5232,23 +5181,13 @@ class Fetcher:
                 pass
 
         def _publish() -> None:
-            # A rename, not a copy. The fetched zip already waits in the
-            # transit directory beside ``dest`` (see ``_transit_dir``), which
-            # exists precisely so that this step is a same-volume rename.
-            # Copying it instead wrote every byte of the well a second time,
-            # onto what is often a network share, *after* both halves of the
-            # download had been logged — so the plate showed the well fetched
-            # while the fetcher sat here for minutes and the log could only
-            # say "still downloading…". A rename is atomic, so it keeps the
-            # no-truncated-archive guarantee without the staging copy.
+            # A rename, not a copy: the transit dir sits beside ``dest`` for
+            # exactly this. Copying rewrote every byte onto the output volume.
             try:
                 os.replace(well_zip, final)
                 return
             except OSError as exc:
-                # Only a cross-device rename falls back to copying: that is
-                # the transit directory having fallen back to the scratch
-                # volume. Anything else is a fault on the output volume and
-                # goes to the retry shield like any other write.
+                # Transit fell back to scratch; other faults go to retry_io.
                 if exc.errno != errno.EXDEV:
                     raise
             shutil.copyfile(well_zip, tmp)

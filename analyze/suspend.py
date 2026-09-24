@@ -199,6 +199,23 @@ class AnalyzeSuspendMixin:
         """
         try:
             if not self._runner.is_running:
+                if self._runner.is_busy:
+                    # Busy with no pipeline yet: the input is still being
+                    # grouped. This used to return in silence, and the run then
+                    # went on to process the whole plate.
+                    QMessageBox.information(
+                        self, "Suspend",
+                        "The run is still preparing its input, so there is "
+                        "nothing to suspend yet. Press Suspend again once the "
+                        "pipeline has started, or Stop to cancel.")
+                return
+            if self._runner.was_suspended:
+                # A second SIGTERM is a hard stop by design, so a second click
+                # used to kill the run it was meant to keep, and end it as an
+                # error while the log still said "finishing".
+                self._log_line(
+                    "[Suspending] Already winding down — press Stop to give up "
+                    "on the in-flight work instead.\n", "WARNING")
                 return
             out_dir = self._runner.last_output_dir
             if out_dir is None:

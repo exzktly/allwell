@@ -681,3 +681,11 @@ def test_a_well_suspended_before_its_first_group_leaves_nothing(tmp_path):
     written = sorted(p.name for p in (tmp_path / "out").rglob("*") if p.is_file()) \
         if (tmp_path / "out").exists() else []
     assert not [n for n in written if n.endswith((".csv", "_out.zip"))], written
+
+
+def test_a_second_local_suspend_sends_no_second_signal(runner):
+    """The queue calls the runner directly, so the guard lives here too: a
+    second SIGTERM is a hard stop once the pipeline's handler has fired."""
+    runner.suspend()
+    runner.suspend()
+    assert runner.signalled.count(runner._proc) == 1

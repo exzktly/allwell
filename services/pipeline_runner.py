@@ -961,6 +961,12 @@ class PipelineRunner:
           is made explicit here rather than left to depend on it. The partial
           output on the remote is the thing a resume needs.
         """
+        if self._suspend_requested.is_set() and self._remote_runner is None:
+            # Already winding down. The pipeline's handler gives SIGTERM back to
+            # its default after the first, so a second one is a hard stop —
+            # the opposite of what a second Suspend asks for. (A remote run's
+            # request is a file, and asking twice is harmless.)
+            return
         previous_cleanup = self._cleanup_remote
         self._suspend_requested.set()
         self._cleanup_remote = "none"

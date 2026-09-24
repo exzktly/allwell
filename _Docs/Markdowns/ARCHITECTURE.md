@@ -8620,7 +8620,13 @@ every pool worker, the per-group loops stop taking on new FOV-groups, wells not
 yet started are cancelled, and each well that did any work returns through the
 normal end-of-well path so its CSV and `<well>_out.zip` are written. A second
 signal is a hard stop — the handler restores the previous disposition before
-returning, so a suspend that hangs is still escapable.
+returning, so a suspend that hangs is still escapable. Nothing the app does
+sends that second signal by accident: `PipelineRunner.suspend` ignores a second
+local suspend, the Suspend button only notes that the run is already winding
+down, closing the window leaves a suspending run to finish rather than Stopping
+it, and `watch_parent` does not signal an orphan that is already suspending.
+Suspend pressed while the run is still preparing its input — busy, with no
+pipeline yet — says there is nothing to suspend yet.
 
 **A local run winds itself down when the app goes away.** The app launches the
 pipeline in a session of its own so Stop can signal the whole tree, which also

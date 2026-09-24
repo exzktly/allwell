@@ -167,3 +167,32 @@ def test_the_pipeline_arms_the_watch_on_its_output_dir(monkeypatch, tmp_path):
     with pytest.raises(SystemExit):
         pm.main()
     assert armed == [(tmp_path / "out").resolve()]
+
+
+def test_an_orphan_already_suspending_is_not_signalled_again(tmp_path):
+    """After its first SIGTERM the handler is back to the default, so a second
+    one — the watch's own — would kill the run Suspend was letting finish."""
+    pipeline = tmp_path / "pipeline.py"
+    pipeline.write_text(textwrap.dedent(f"""
+        import os, signal, sys, time
+        sys.path.insert(0, {str(_REPO)!r})
+        from pipeline import suspend
+        suspend.install_handlers()
+        os.kill(os.getpid(), signal.SIGTERM)       # the user's Suspend
+        time.sleep(0.1)
+        suspend.watch_parent({str(tmp_path / "out")!r}, poll_s=0.05)
+        time.sleep(2.0)                             # the wind-down, app gone
+        open({str(tmp_path / "survived")!r}, "w").close()
+    """))
+    app = tmp_path / "app.py"
+    app.write_text(textwrap.dedent(f"""
+        import os, subprocess, sys, time
+        subprocess.Popen([sys.executable, {str(pipeline)!r}], start_new_session=True,
+                         env={{**os.environ, "ALLWELL_PARENT_PID": str(os.getpid())}})
+        time.sleep(0.5)
+    """))
+    subprocess.run([sys.executable, str(app)], timeout=30, check=True)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not (tmp_path / "survived").exists():
+        time.sleep(0.1)
+    assert (tmp_path / "survived").exists(), "the watch killed a run that was winding down"

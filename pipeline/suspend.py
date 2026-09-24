@@ -223,6 +223,11 @@ def watch_parent(output_dir, *, log=None, poll_s: float = 2.0) -> None:
         last_beat = 0.0
         while True:
             if os.getppid() != parent:
+                if _SUSPENDED.is_set():
+                    # Already winding down: the first SIGTERM put the default
+                    # disposition back, so sending another would kill the run
+                    # this is trying to let finish.
+                    return
                 if log is not None:
                     log.warning(
                         "The app that launched this run has gone away — "

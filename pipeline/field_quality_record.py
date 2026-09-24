@@ -81,6 +81,33 @@ def _quality_dir(output_dir) -> Path:
     return Path(output_dir) / FIELD_QUALITY_DIRNAME
 
 
+def merge_well_records(prior: dict, new: dict) -> dict:
+    """One well's record after an incremental run added fields to it.
+
+    An incremental run measures only the FOV-groups it was given — the ones a
+    suspended or failed run left missing — so its record covers those alone.
+    Written over the well's earlier record, the fields measured before were
+    lost and ``measured_of`` became the split's size, so a well scored on part
+    of its fields stopped being flagged partial. Fields are keyed by
+    ``(fov, timepoint)``; a newly measured field replaces an earlier one with
+    the same key, and ``measured_of`` is the largest either side knew of.
+    """
+    def _key(field: dict) -> tuple[str, str]:
+        return (str(field.get("fov", "")), str(field.get("timepoint", "")))
+
+    merged = {_key(f): f for f in (prior.get("fields") or []) if isinstance(f, dict)}
+    merged.update({_key(f): f for f in (new.get("fields") or []) if isinstance(f, dict)})
+    fields = list(merged.values())
+    totals = [int(t) for t in (prior.get("measured_of"), new.get("measured_of"))
+              if t is not None]
+    return {
+        "well": new.get("well", prior.get("well")),
+        "fields": fields,
+        "measured": len(fields),
+        "measured_of": max(totals + [len(fields)]) if totals else None,
+    }
+
+
 def write_well_field_quality(output_dir, well_label: str, *, fields: list[dict],
                              measured_of: int | None = None) -> Path | None:
     """Record one well's per-field metrics. Best-effort: never fails the run.
@@ -143,14 +170,39 @@ def collect_field_quality(output_dir) -> dict:
             except (OSError, ValueError):
                 continue
             wells[str(rec.get("well") or path.stem)] = rec
-    partial = sorted(w for w, r in wells.items() if well_is_partial(r))
+    return block_of(wells)
+
+
+def block_of(wells: dict) -> dict:
+    """The block for a map of per-well records, its totals derived from it.
+
+    Derived rather than merged, so they cannot disagree with the wells they
+    summarise.
+    """
     return {
         "wells": wells,
-        "partial_wells": partial,
-        "measured": sum(int(r.get("measured", 0)) for r in wells.values()),
-        "measured_of": sum(int(r.get("measured_of") or 0)
+        "partial_wells": sorted(w for w, r in wells.items() if well_is_partial(r)),
+        "measured": sum(int((r or {}).get("measured", 0)) for r in wells.values()),
+        "measured_of": sum(int((r or {}).get("measured_of") or 0)
                            for r in wells.values()) or None,
     }
+
+
+def merge_wells(prior_wells: dict, new_wells: dict | None, *,
+                incremental: bool) -> dict:
+    """*prior_wells* with *new_wells* laid over them.
+
+    A new record replaces the prior one for its well, except on an
+    *incremental* run, whose record covers only the fields it re-measured and
+    is therefore added to the prior one (:func:`merge_well_records`).
+    """
+    merged = dict(prior_wells)
+    for well, record in (new_wells or {}).items():
+        earlier = prior_wells.get(well)
+        merged[well] = (merge_well_records(earlier, record)
+                        if incremental and isinstance(earlier, dict)
+                        and isinstance(record, dict) else record)
+    return merged
 
 
 def clear_field_quality(output_dir) -> None:
@@ -202,7 +254,8 @@ def summarize(block: dict | None) -> str:
             f"{len(wells):,} well(s).")
 
 
-def finalize_field_quality(output_dir, info_path, *, atomic_writer, log) -> None:
+def finalize_field_quality(output_dir, info_path, *, atomic_writer, log,
+                           prior_block: dict | None = None) -> None:
     """Fold the per-well quality files into ``pipeline_info.json``.
 
     Called once at the end of a run, mirroring
@@ -217,9 +270,17 @@ def finalize_field_quality(output_dir, info_path, *, atomic_writer, log) -> None
     all: a resumed or incremental run measures only the fields it
     re-processed, so a plate-wide comparison drawn from it is biased, and the
     scorer refuses rather than reporting a number.
+
+    *prior_block* is the block an incremental run found in the sidecar before
+    rewriting it; this run's records are added to it (:func:`merge_wells`)
+    before anything is written or summarised, so the log line describes the
+    plate rather than the resumed handful.
     """
     try:
         block = collect_field_quality(output_dir)
+        if isinstance(prior_block, dict) and isinstance(prior_block.get("wells"), dict):
+            block = block_of(merge_wells(prior_block["wells"], block["wells"],
+                                         incremental=True))
         if block.get("wells"):
             merge_into_pipeline_info(
                 info_path, {FIELD_QUALITY_BLOCK: block},
@@ -249,7 +310,8 @@ def read_field_quality_block(info_path) -> dict | None:
     return block if isinstance(block, dict) else None
 
 
-def merge_fetched_field_quality(info_path, prior_block: dict | None) -> bool:
+def merge_fetched_field_quality(info_path, prior_block: dict | None, *,
+                                incremental: bool = False) -> bool:
     """Fold *prior_block* back into the sidecar a remote fetch just overwrote.
 
     The same defect :func:`pipeline.run_report.merge_fetched_run_report`
@@ -268,8 +330,17 @@ def merge_fetched_field_quality(info_path, prior_block: dict | None) -> bool:
     is individually complete, so ``partial_wells`` stays empty and the scorer
     proceeds.
 
+    A local incremental run has the same shape: ``write_pipeline_info``
+    rewrites the sidecar at the start of every run keeping only the user-side
+    blocks, so ``process_microscopy.main`` reads the block before that rewrite
+    and hands it to :func:`finalize_field_quality` as *prior_block*, which
+    merges it the way this does.
+
     Fetched records win per well (they are this run's, and newer); prior
-    records survive for every well the fetched block does not mention. The
+    records survive for every well the fetched block does not mention. With
+    *incremental*, a well both sides hold is merged by
+    :func:`merge_well_records` instead, because an incremental run's record
+    covers only the fields it re-measured. The
     derived fields are recomputed from the merged map rather than merged
     themselves, so they cannot disagree with the wells they summarise.
     Returns True iff the file was rewritten.
@@ -288,20 +359,10 @@ def merge_fetched_field_quality(info_path, prior_block: dict | None) -> bool:
     prior_wells = prior_block.get("wells")
     if not isinstance(prior_wells, dict):
         return False
-    merged = dict(prior_wells)
-    if isinstance(fetched_wells, dict):
-        merged.update(fetched_wells)
+    merged = merge_wells(prior_wells, fetched_wells, incremental=incremental)
     if merged == fetched_wells:
         return False
-    info[FIELD_QUALITY_BLOCK] = {
-        "wells": merged,
-        "partial_wells": sorted(w for w, r in merged.items()
-                                if well_is_partial(r)),
-        "measured": sum(int((r or {}).get("measured", 0))
-                        for r in merged.values()),
-        "measured_of": sum(int((r or {}).get("measured_of") or 0)
-                           for r in merged.values()) or None,
-    }
+    info[FIELD_QUALITY_BLOCK] = block_of(merged)
     try:
         # ``write_json_atomic``, not ``write_text``: this is a live sidecar a
         # crash mid-write would leave truncated, and the file also carries the

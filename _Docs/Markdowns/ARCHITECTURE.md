@@ -11488,6 +11488,22 @@ quality in the same file as its records (`_FOV_CHECKPOINT_SCHEMA` 2; a
 version-1 checkpoint is refused rather than misread), so a resumed well is
 measured as completely as one that ran straight through.
 
+An `--incremental` run — Resume — re-measures only the fields a well is
+missing, so its record is **added to** the well's earlier one rather than put
+in its place (`field_quality_record.merge_well_records`: fields keyed by
+`(fov, timepoint)`, `measured_of` the larger of the two). Locally,
+`write_pipeline_info` drops the block when it rewrites the sidecar at the start
+of the run, so `main` reads the block first and hands it to
+`finalize_field_quality` as `prior_block`, which merges before it writes or
+logs anything; the worker is also given the well's full group count
+(`measured_of=groups_in_input`), so a resumed well with no earlier record to
+add to still reads as partial. Remotely the fetch does the same merge
+(`merge_fetched_field_quality(..., incremental=run.incremental)`), where the
+host's own count is the split's and the earlier record supplies the well's.
+Without either, a well measured on two of three fields read as two of two and
+the scorer went ahead. `tests/test_a_resumed_run_keeps_its_field_quality.py`
+drives `main` twice through the real well task.
+
 **On the Review side the subsystem reports, and only filters when asked.**
 `review/data/field_quality_cache.py` projects the verdicts onto the row cache
 as a `Field_Pass` column — the fourth in the same family as `Included`,

@@ -2038,6 +2038,7 @@ def _process_groups_in_worker(
     fov_threads: int = 1,
     errors_dir: Path | None = None,
     settings_key: str = "",
+    measured_of: int | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     Process all image groups for one well within a single worker process.
@@ -2276,7 +2277,7 @@ def _process_groups_in_worker(
     if errors_dir is not None:
         _field_quality.write_well_field_quality(
             errors_dir, well_label, fields=quality_fields,
-            measured_of=_fov_total)
+            measured_of=_fov_total if measured_of is None else measured_of)
 
     return all_records, failed, aborted_reason, tuple(not_attempted)
 
@@ -2471,7 +2472,8 @@ def process_well_zip_task(
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
             records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
                 groups, kwargs, well_label, errors_dir=output_dir,
-                settings_key=settings_key)
+                settings_key=settings_key,
+                measured_of=groups_in_input if incremental else None)
             if _suspended_before_any_group(well_label, records, failed):
                 return [], []
 
@@ -2671,7 +2673,8 @@ def process_well_folder_task(
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
             records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
                 groups, kwargs, well_label, errors_dir=output_dir,
-                settings_key=settings_key)
+                settings_key=settings_key,
+                measured_of=groups_in_input if incremental else None)
             if _suspended_before_any_group(well_label, records, failed):
                 return [], []
 
@@ -3361,7 +3364,10 @@ def main() -> None:
 
     # Write the pipeline_info.json sidecar before any image work so the
     # well-viewer / image-resolver have schema metadata available even if
-    # processing crashes partway through.
+    # processing crashes partway through. That rewrite drops the field-quality
+    # block; an incremental run adds to it, so it is read first (see the end).
+    prior_quality = (_field_quality.read_field_quality_block(
+        output_dir / PIPELINE_INFO_FILENAME) if args.incremental else None)
     try:
         info_path = write_pipeline_info(
             output_dir,
@@ -3735,7 +3741,7 @@ def main() -> None:
     # biased subset is indistinguishable from a whole plate.
     _field_quality.finalize_field_quality(
         output_dir, output_dir / PIPELINE_INFO_FILENAME,
-        atomic_writer=_safe_atomic_text_write, log=log,
+        atomic_writer=_safe_atomic_text_write, log=log, prior_block=prior_quality,
     )
 
     # Auto-threshold: every well is processed and the output zips, per-well CSVs

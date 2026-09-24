@@ -5814,7 +5814,7 @@ class RemoteRunner:
         if merge_fetched_run_report(info_path, prior_run_report):
             log("[remote] merged this run's completeness records into the "
                 "existing pipeline_info run_report.\n")
-        if merge_fetched_field_quality(info_path, prior_field_quality):
+        if merge_fetched_field_quality(info_path, prior_field_quality, incremental=run.incremental):
             log("[remote] merged this run's field-quality measurements into "
                 "the existing pipeline_info field_quality.\n")
         restored = restore_user_blocks(info_path, prior_user_blocks)

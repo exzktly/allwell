@@ -311,6 +311,22 @@ def test_the_older_record_wins_when_it_is_the_newer_one(tab, tmp_path):
     assert offer.from_journal is False
 
 
+def test_with_no_folder_on_the_form_one_plate_s_suspend_record_still_wins(
+        tab, tmp_path):
+    """A suspend writes both records, and the journal is closed *after* the
+    suspend record is stamped — so ranked by time alone, the journal's offer
+    for the same plate always won in the empty-form case, against the tie rule
+    stated for it."""
+    plate = _plate(tmp_path, "PLATE")
+    _suspend(plate, at=time.time() - 60.0)
+    _journal(plate, outcome="suspended")            # closed now, after it
+
+    offer = tab._resumable("")
+    assert offer is not None
+    assert offer.output_dir == str(plate / "out")
+    assert offer.from_journal is False, "the journal's offer outranked the suspend record"
+
+
 def test_for_one_folder_the_suspend_record_still_wins(tab, tmp_path):
     """Ranking across plates must not disturb the specificity rule.
 

@@ -8924,7 +8924,11 @@ contradicts itself and Resume acts on the plate that is not on screen. So a
 record matching the form's own output directory wins, a form naming a folder
 neither record describes gets no offer at all (the pre-run report is what speaks
 for that folder), and newest-anywhere is the fallback only for an empty form —
-the state the app opens in, and the one this banner exists for. That is also why
+the state the app opens in, and the one this banner exists for. "Newest" there
+ranks *plates*, each by its newest record, and within a plate the suspend record
+still wins: a suspend writes both records and closes the journal after stamping
+its own, so ranking records by time alone offered the journal's account of the
+very plate the suspend record describes. That is also why
 both strips refresh together through `_refresh_folder_banners`, on every change
 to the input field and once at construction: a resume offer left over from a
 different folder is precisely the contradiction the scoping prevents, and a

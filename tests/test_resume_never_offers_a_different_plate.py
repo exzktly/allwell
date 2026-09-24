@@ -115,6 +115,7 @@ def test_an_empty_form_still_gets_the_newest_run_anywhere():
     class _Offer:
         at = 1.0
         from_journal = True
+        output_dir = "/plate/out"      # every real offer names its folder
 
     got = mixin._resumable(_Stub())
     assert got is not None and got is not sentinel, (

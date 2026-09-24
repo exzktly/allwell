@@ -561,10 +561,18 @@ class AnalyzeSuspendMixin:
             offers = [*suspended, *from_journal]
         else:
             # No folder named, so the question really is "what is the newest
-            # unfinished run anywhere". Ranked by when each stopped, with the
-            # suspend record breaking a tie for the reason above.
-            offers = sorted([*suspended, *from_journal],
-                            key=lambda o: (-o.at, o.from_journal))
+            # unfinished run anywhere" — asked of *plates*, not of records. A
+            # suspend writes both records and closes the journal after stamping
+            # its own, so ranking records by time let the journal's offer for
+            # the very plate the suspend record describes outrank it. Each
+            # plate is ranked by its newest record, and within a plate the
+            # specificity rule above still decides.
+            pool = [*suspended, *from_journal]
+
+            def _plate_at(offer: _Resumable) -> float:
+                return max(o.at for o in pool if same_dir(o.output_dir, offer.output_dir))
+
+            offers = sorted(pool, key=lambda o: (-_plate_at(o), o.from_journal, -o.at))
         return offers[0] if offers else None
 
     #: `_current_output_dir`'s answer when the form names an input it cannot

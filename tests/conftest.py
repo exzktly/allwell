@@ -361,8 +361,33 @@ _MODAL_CALLS = (
 )
 
 
+@pytest.fixture(scope="session")
+def _autouse_scratch_root(tmp_path_factory):
+    """One directory per session under which the autouse fixtures below make
+    their per-test scratch directories.
+
+    They must not use ``tmp_path`` or ``tmp_path_factory.mktemp``. Both create a
+    *numbered* directory, and pytest picks the number by listing every entry
+    already in the base temp directory — so each call costs time proportional
+    to the number of directories the session has made so far. An autouse
+    fixture calls it once per test, which makes the lane's total setup time
+    quadratic in its test count: measured, two ``mktemp`` calls cost 0.2 ms at
+    the first test, 16 ms at the 3,000th and 30 ms at the 6,000th, and across
+    the ~10,000-test lane setup came to 316 s against 259 s spent in the tests
+    themselves. ``tempfile.mkdtemp`` under a fixed root costs the same at the
+    last test as at the first. ``test_the_fast_lane_stays_fast.py`` holds it.
+    """
+    return tmp_path_factory.mktemp("autouse")
+
+
+def _scratch_dir(root, prefix: str):
+    from pathlib import Path
+    import tempfile
+    return Path(tempfile.mkdtemp(prefix=prefix + "-", dir=root))
+
+
 @pytest.fixture(autouse=True)
-def _settings_go_to_a_scratch_file(tmp_path_factory, monkeypatch):
+def _settings_go_to_a_scratch_file(_autouse_scratch_root, monkeypatch):
     """No test writes the developer's real ``~/.config/AllWell/AllWellApp.conf``.
 
     ``core/recent_datasets``' own module docstring says the store is written the
@@ -387,7 +412,7 @@ def _settings_go_to_a_scratch_file(tmp_path_factory, monkeypatch):
 
     from core import app_settings as app_settings_module
 
-    scratch = tmp_path_factory.mktemp("qsettings") / "AllWellApp.ini"
+    scratch = _scratch_dir(_autouse_scratch_root, "qsettings") / "AllWellApp.ini"
     monkeypatch.setattr(
         app_settings_module, "app_settings",
         lambda: QSettings(str(scratch), QSettings.IniFormat),
@@ -396,7 +421,7 @@ def _settings_go_to_a_scratch_file(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _scan_cache_goes_to_a_scratch_directory(tmp_path_factory, monkeypatch):
+def _scan_cache_goes_to_a_scratch_directory(_autouse_scratch_root, monkeypatch):
     """No test reads or writes the developer's real CZI scan cache.
 
     ``pipeline.scan_cache`` remembers a plate's parsed headers under
@@ -413,7 +438,7 @@ def _scan_cache_goes_to_a_scratch_directory(tmp_path_factory, monkeypatch):
     and only the cache's own tests would ever exercise them.
     """
     monkeypatch.setenv("ALLWELL_SCAN_CACHE",
-                       str(tmp_path_factory.mktemp("czi-scans")))
+                       str(_scratch_dir(_autouse_scratch_root, "czi-scans")))
 
 
 class ModalDialogInTest(AssertionError):
@@ -797,7 +822,7 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
-def _isolated_run_journal_index(tmp_path, monkeypatch):
+def _isolated_run_journal_index(_autouse_scratch_root, monkeypatch):
     """No test writes to the developer's real journal index. Ever.
 
     ``run_journal.index_path()`` is ``~/.config/allwell/run_index.json``, capped
@@ -815,9 +840,9 @@ def _isolated_run_journal_index(tmp_path, monkeypatch):
     """
     from services import run_journal
 
+    state = _scratch_dir(_autouse_scratch_root, "aw_state")
     monkeypatch.setattr(
-        run_journal, "index_path",
-        lambda: tmp_path / "_aw_state" / "run_index.json")
+        run_journal, "index_path", lambda: state / "run_index.json")
 
 
 #: The background threads a spawned remote run owns, by the type that owns

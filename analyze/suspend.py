@@ -248,17 +248,47 @@ class AnalyzeSuspendMixin:
             self._dashboard.set_eta("")
         tally = f" {done} of {total} well(s) finished." if total else ""
         self._log_line(f"\n[Suspended]{tally} {payload}", "WARNING")
+        with swallow("updating the suspend record's tally"):
+            self._settle_suspend_record_tally(done, total)
+
+    def _settle_suspend_record_tally(self, done: int, total: int) -> None:
+        """Give the suspend record the tally the run ended with.
+
+        The record is written when Suspend is pressed, before the wells in
+        flight finish, so its count was always short by those wells — the
+        banner and the resume line said "1 of 4 done" of a run whose own log
+        had just said 2.
+        """
+        out_dir = getattr(self._runner, "last_output_dir", None)
+        if out_dir is None:
+            return
+        for run in load_all():
+            if same_dir(run.output_dir, str(out_dir)):
+                save(dataclasses.replace(run, wells_done=done, wells_total=total))
+                return
 
     def _write_suspend_record(self, out_dir: Path) -> None:
-        """Persist the spec behind the running job, best-effort."""
-        try:
-            spec = self._collect_run_spec()
-        except Exception:
-            swallowed()  # a form that cannot be read cannot be resumed
-            return
+        """Persist the spec behind the running job, best-effort.
+
+        The spec is the one the runner launched, not the form's. The form stays
+        editable while a run goes, and a record read from it described whatever
+        was typed there at the moment of the click: edit the input or a setting
+        mid-run, press Suspend, and Resume then ran a different plate with
+        different settings — and forgot the real plate's offer, because Resume
+        clears the record it acted on. The form is read only when the runner
+        has no spec to give, which no path through `start_run` produces.
+        """
+        spec_json = getattr(self._runner, "running_spec", None)
+        if not spec_json:
+            try:
+                spec_json = self._collect_run_spec().to_json()
+            except Exception:
+                swallowed()  # a form that cannot be read cannot be resumed
+                return
+        raw = str((spec_json.get("opts") or {}).get("raw") or "").strip()
         run = SuspendedRun(
-            spec=spec.to_json(),
-            input_dir=self._input_edit.text().strip(),
+            spec=spec_json,
+            input_dir=raw or self._input_edit.text().strip(),
             output_dir=str(out_dir),
             suspended_at=time.time(),
             # Both pointers carry it, because a suspend writes both. Filtering

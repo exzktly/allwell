@@ -774,6 +774,16 @@ class PipelineRunner:
         return self._last_output_dir
 
     @property
+    def running_spec(self) -> dict | None:
+        """The spec of the run in flight, exactly as it was launched.
+
+        The Analyze form stays editable while a run goes, so the form is not a
+        description of what is running; this is. A copy, so a caller cannot
+        change what the journal will record.
+        """
+        return dict(self._journal_spec) if self._journal_spec else None
+
+    @property
     def journal_queued(self) -> bool:
         """Whether the job queue started the run currently in flight.
 

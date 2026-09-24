@@ -256,3 +256,43 @@ def test_a_stop_that_winds_down_cleanly_is_not_reported_done(tmp_path, fake_pipe
     assert "error" in seen, seen
     assert runner.cancel_state_at_failure == (True, False)
     assert not cleaned, "the success hook ran for a stopped run"
+
+
+def test_the_suspend_record_describes_the_run_not_the_form(
+        tab, qtbot, tmp_path, fake_pipeline):
+    """Edit the form mid-run, press Suspend: the record is still the run's.
+
+    It was read from the live form, so Resume ran whatever plate and settings
+    had been typed there since the run began, and cleared the real plate's
+    offer. And its tally was taken at the click, before the wells in flight
+    finished, so it always read short.
+    """
+    from services.run_spec import RunSpec
+    from services.suspend_record import load_all
+
+    plate = tmp_path / "plateX"
+    (plate / "in").mkdir(parents=True)
+    out_dir = plate / "out"
+    out_dir.mkdir()
+    finished: list[tuple] = []
+    tab.jobFinished.connect(lambda *a: finished.append(a))
+    tab._resolve_run_dirs_for_runner = lambda opts, log_q, **kw: (plate / "in", out_dir, None)
+    spec = RunSpec.from_json({"opts": {
+        "raw": str(plate), "csv_prefix": "measurements",
+        "filename_schema": "experiment:channel:well:fov:timepoint",
+        "filename_sep": "_", "nuclear_token": "DAPI", "fluor_tokens": ["GFP"]}})
+    assert tab.start_run(spec, pipeline=fake_pipeline) is None
+
+    qtbot.waitUntil(lambda: "Well A01 F001 starting" in tab._log.toPlainText(),
+                    timeout=10_000)
+    tab._input_edit.setText(str(tmp_path / "plateY"))     # the user moves on
+    tab._suspend_btn.click()
+    qtbot.waitUntil(lambda: bool(finished), timeout=20_000)
+
+    records = load_all()
+    assert len(records) == 1
+    record = records[0]
+    assert record.spec["opts"]["raw"] == str(plate), record.spec["opts"]["raw"]
+    assert record.input_dir == str(plate)
+    assert (record.wells_done, record.wells_total) == (1, len(_WELLS)), (
+        "the record's tally is the one the run ended with, not the click's")

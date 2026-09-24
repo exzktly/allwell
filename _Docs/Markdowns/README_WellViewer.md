@@ -1184,7 +1184,10 @@ and by `remote_fetch_report.txt` in the output folder.
   stops the run instead. A batched remote run finishes the batch it is on and
   stops any upload of the next one. If the host cannot be reached, the log says
   so and the run keeps going — press Suspend again, or Stop; if the request did
-  reach the host after all, the run still ends as suspended. You can close
+  reach the host after all, the run still ends as suspended. Once everything
+  it finished has downloaded, the run's files on the host are deleted as for a
+  finished run (if auto-delete is on): Resume uploads what is still missing
+  afresh and does not need them. You can close
   All-Well afterwards; next
   time you open the Analyze pane a card at the top of the sidebar offers to
   carry on. It reads top to bottom: what state the run is in (*Suspended run*),

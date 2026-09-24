@@ -332,7 +332,7 @@ def test_a_launched_remote_run_is_asked_and_its_session_left_alone(runner):
     assert runner.signalled == [], "the local ssh was signalled, ending the session"
     assert not remote.cancelled, "the remote run was cancelled, not suspended"
     assert runner.was_suspended
-    assert runner._cleanup_remote == "none"
+    assert runner._cleanup_remote == "run", "the user's cleanup setting was changed"
 
 
 def test_a_host_that_cannot_be_reached_leaves_the_run_as_it_was(runner):
@@ -433,10 +433,9 @@ class _Ask:
 def test_a_slow_failed_click_does_not_undo_a_later_one_that_landed(runner):
     """Two clicks; the first ssh times out *after* the second succeeded.
 
-    Before, the first thread cleared the suspend and put the deleting cleanup
-    mode back, so the run that the second request did wind down was reported
-    as finished — success hooks, remote data deleted, the half-done folder
-    handed to Review.
+    Before, the first thread cleared the suspend, so the run that the second
+    request did wind down was reported as finished — success hooks and the
+    half-done folder handed to Review.
     """
     import threading
 
@@ -451,7 +450,6 @@ def test_a_slow_failed_click_does_not_undo_a_later_one_that_landed(runner):
     first.set()
     t1.join(5)
     assert runner.was_suspended
-    assert runner._cleanup_remote == "none"
 
 
 def test_a_previous_run_s_late_thread_cannot_touch_the_next_run(runner):
@@ -537,7 +535,11 @@ def test_a_run_that_says_it_saw_the_request_is_suspended_whatever_the_ssh_said(
                "2026 WARNING SUSPEND requested (request file /x) — finishing\n",
                "Well A01 F001 done.\n"])
     assert "suspended" in kinds and "done" not in kinds, kinds
-    assert verified == ["none"], "a suspended run's remote output must not be deleted"
+    # The configured cleanup, as for a finished run: it fires only once the
+    # fetch is verified, and the resume reads nothing on the host (it uploads
+    # only the missing groups and never re-attaches). Kept "for the resume",
+    # the suspended run's directory stayed on the host for ever.
+    assert verified == ["all"], "a suspended run's remote directory was kept for ever"
     assert hooks == []
     assert r.was_suspended
 

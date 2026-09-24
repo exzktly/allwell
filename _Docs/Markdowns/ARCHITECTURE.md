@@ -5361,7 +5361,10 @@ seconds later — with exit 0. Both arrive as an `error` event: the runner reads
 an exit of 0 with `_stop_requested` set as a stop (`_enqueue_stopped`), never as
 `done`, so no success hook, "Processing Complete" or Review hand-off follows a
 Stop, and a remote one keeps its remote output. A Suspend that winds down
-cleanly exits 0 and is reported as its own `suspended` event (below), while one
+cleanly exits 0 and is reported as its own `suspended` event (below); a remote
+one keeps the configured cleanup, which fires only after the fetch is verified,
+because the resume uploads only the missing groups and never re-attaches, so
+nothing on the host is read again. While one
 that dies by signal arrives as an `error` like a Stop. Either cancel takes the amber `set_cancelled` and neither opens a
 pane the user had closed. For the `error` case, which of the three it was is
 read from `PipelineRunner.cancel_state_at_failure`, a snapshot taken when the

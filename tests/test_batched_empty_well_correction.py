@@ -357,6 +357,7 @@ def _batched(tmp_path, wells, batch_size=1):
     p._log = lambda m: p._logged.append(m)
     p._returncode = None
     p._stop = threading.Event()
+    p._suspending = threading.Event()
     p._current_proc_lock = threading.Lock()
     p._current_proc = None
     p._batch_events = {}

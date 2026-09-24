@@ -39,9 +39,56 @@ _SUSPENDED = threading.Event()
 _SUSPEND_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 
 
+#: Where :func:`watch_request_file` publishes the request file's path. An
+#: environment variable rather than a module global because the well workers
+#: are separate processes — spawned or forked, they inherit ``os.environ`` —
+#: and each has to be able to see the request for itself.
+REQUEST_FILE_ENV = "ALLWELL_SUSPEND_FILE"
+
+# The log the request file is announced on, once, by whichever process sees it
+# first. Set by `watch_request_file` in the orchestrator; a worker has none and
+# stays quiet, for the reason `worker_initializer` gives.
+_request_log = None
+
+
 def is_suspended() -> bool:
-    """Whether this process has been asked to wind down."""
-    return _SUSPENDED.is_set()
+    """Whether this process has been asked to wind down.
+
+    Two ways to be asked. A signal sets the flag directly. The request file is
+    for the runs a signal cannot reliably reach: on a remote host the process
+    the app can name is ``conda run`` or ``srun``, not this interpreter, and
+    signalling the ssh session instead ends it — which took the run's output
+    stream, and on some hosts the run itself, down with it. So a remote
+    Suspend writes a file, and every FOV-group boundary asks for it: one
+    ``stat`` per group, against work measured in seconds per group.
+    """
+    if _SUSPENDED.is_set():
+        return True
+    path = os.environ.get(REQUEST_FILE_ENV)
+    if path and os.path.exists(path):
+        _SUSPENDED.set()
+        if _request_log is not None:
+            _request_log.warning(
+                "SUSPEND requested (request file %s) — finishing the "
+                "FOV-group(s) already in flight, then writing each well's CSV "
+                "and out.zip from the work done so far. Re-run with "
+                "--incremental to continue.", path)
+        return True
+    return False
+
+
+def watch_request_file(path, *, log=None) -> None:
+    """Treat *path* appearing as a suspend request, in this process and its workers.
+
+    The file is never created or removed here. Whoever asks for the suspend
+    creates it, and whoever launches the run clears it first — a request left
+    over from an earlier suspend of the same plate would otherwise suspend the
+    resumed run before it did anything, and on a remote host the run directory
+    *is* reused, because its name is derived from the plate and the arguments.
+    """
+    global _request_log
+    os.environ[REQUEST_FILE_ENV] = str(path)
+    _request_log = log
 
 
 def request_suspend() -> None:

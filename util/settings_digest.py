@@ -129,6 +129,8 @@ NOT_KEYED_ON: dict[str, str] = {
     "force_wells":           "the same, for named wells",
     "incremental":           "asks for reuse; it does not change the result",
     "incremental_prior_dir": "where reuse looks, not what is computed",
+    "suspend_file":          "where a request to stop early may appear; what "
+                             "is computed for the groups that run is unchanged",
     # Execution and machine. The digest must be identical for the same plate
     # computed locally and on a worker host.
     "workers":               "how many wells run at once",

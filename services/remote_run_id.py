@@ -31,6 +31,9 @@ from services.remote_config import RemoteHost
 #: only thing that builds their paths.
 UPLOAD_SENTINEL = ".aw_upload_complete"
 UPLOAD_HEARTBEAT = ".aw_upload_alive"
+#: Touched by the app to ask a running remote pipeline to suspend; the pipeline
+#: is told the path with ``--suspend_file`` and polls for it.
+SUSPEND_REQUEST = ".aw_suspend_request"
 
 #: What a frozen bundle passes instead of a script path — the launcher routes
 #: argv past it into ``process_microscopy.main``. It is launcher plumbing, so
@@ -191,6 +194,9 @@ class RemoteRunPaths:
     pidfile: str
     sentinel: str
     heartbeat: str
+    #: Under the run's own directory rather than ``out`` so a re-attached run,
+    #: whose ``out`` is borrowed from an earlier one, still owns its request.
+    suspend_request: str
 
 def remote_run_dir(host: "RemoteHost", run_id: str) -> str:
     """``{remote_staging_dir}/runs/{run_id}`` — the one place this is spelled.
@@ -207,7 +213,7 @@ def remote_run_dir(host: "RemoteHost", run_id: str) -> str:
     return f"{host.remote_staging_dir}/runs/{run_id}"
 
 def remote_run_paths(host: "RemoteHost", run_id: str) -> RemoteRunPaths:
-    """The four paths a run owns, so they cannot disagree about their parent."""
+    """The paths a run owns, so they cannot disagree about their parent."""
     run_dir = remote_run_dir(host, run_id)
     return RemoteRunPaths(
         run_dir=run_dir,
@@ -215,6 +221,7 @@ def remote_run_paths(host: "RemoteHost", run_id: str) -> RemoteRunPaths:
         pidfile=f"{run_dir}/run.pid",
         sentinel=f"{run_dir}/{UPLOAD_SENTINEL}",
         heartbeat=f"{run_dir}/{UPLOAD_HEARTBEAT}",
+        suspend_request=f"{run_dir}/{SUSPEND_REQUEST}",
     )
 
 def _forced_from_argv(pipeline_argv: list[str]) -> tuple[bool, frozenset[str]]:

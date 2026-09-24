@@ -648,6 +648,8 @@ class PipelineRunner:
         # winds down, and that this runner then leaves the remote's files alone
         # so a resume can pick them up. Read by ``was_suspended``.
         self._suspend_requested: threading.Event = threading.Event()
+        # The thread a remote suspend's request runs on (see ``suspend``).
+        self._suspend_thread: threading.Thread | None = None
         # Snapshots of the two events above, taken when a failure is queued —
         # see ``cancel_state_at_failure``.
         self._error_was_stopped = False
@@ -910,13 +912,20 @@ class PipelineRunner:
     def suspend(self) -> None:
         """Ask the run to wind down at a FOV-group boundary and exit cleanly.
 
-        The signal is the one ``stop`` already sends — a SIGTERM to the process
-        group. The difference is entirely on the receiving end: since
+        For a local run the signal is the one ``stop`` already sends — a SIGTERM
+        to the process group. The difference is entirely on the receiving end:
+        since
         ``pipeline.suspend`` installs a handler, the pipeline stops taking on new
         FOV-groups, lets the ones in flight finish, and exits through the normal
         end-of-well path so every well that got work done writes its CSV and its
         ``<well>_out.zip``. Those artifacts are what a resumed run reads as its
         done-set, so nothing else needs saving here.
+
+        A remote run is asked through a request file instead
+        (``RemoteRunner.request_suspend``), because no signal the app can send
+        reliably reaches the pipeline there, and the one ``stop`` sends ends the
+        ssh session the run's output and downloads travel over. Nothing local
+        is signalled: the run keeps streaming and downloading until it exits 0.
 
         Two things are deliberately suppressed for the rest of this run:
 
@@ -930,9 +939,44 @@ class PipelineRunner:
           is made explicit here rather than left to depend on it. The partial
           output on the remote is the thing a resume needs.
         """
+        previous_cleanup = self._cleanup_remote
         self._suspend_requested.set()
         self._cleanup_remote = "none"
+        remote = self._remote_runner
+        if remote is not None and remote.can_request_suspend:
+            # A remote run is asked through its request file and nothing else
+            # (``RemoteRunner.request_suspend``): signalling the local ssh, as
+            # below, ends the session and every download with it. The ask is an
+            # ssh round trip, and this is called from a button — so it goes on
+            # a thread of its own rather than freezing the window for as long
+            # as an unreachable host takes to time out.
+            with self._proc_lock:
+                proc = self._proc
+            self._suspend_thread = threading.Thread(
+                target=self._ask_remote_to_suspend,
+                args=(remote, proc, previous_cleanup), daemon=True)
+            self._suspend_thread.start()
+            return
+        # A local run, or a remote one still staging or uploading — there is no
+        # pipeline on the host yet to wind down, so stopping the transfer is
+        # what a suspend can do.
         self.stop(escalate=False)
+
+    def _ask_remote_to_suspend(self, remote, proc, previous_cleanup: str) -> None:
+        """Worker half of a remote :meth:`suspend`."""
+        try:
+            asked = remote.request_suspend(
+                proc, log_fn=lambda m: self._enqueue(("line", m)))
+        except Exception:
+            swallowed("asking the remote run to suspend")
+            asked = False
+        if asked:
+            return
+        # The host could not be reached, so nothing was asked and the run
+        # carries on. Left set, the flag would describe a run that finishes the
+        # plate as a suspended one; the warning has already told the user.
+        self._suspend_requested.clear()
+        self._cleanup_remote = previous_cleanup
 
     @property
     def was_suspended(self) -> bool:

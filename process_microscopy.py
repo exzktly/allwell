@@ -3238,6 +3238,8 @@ def main() -> None:
     parser    = build_parser()
     args      = parser.parse_args()
     _suspend.install_handlers(log=log)   # SIGTERM/SIGINT → wind down, don't die
+    if args.suspend_file is not None:    # …and so does this file appearing
+        _suspend.watch_request_file(args.suspend_file, log=log)
     input_dir = args.input_dir.resolve()
     output_dir = args.output_dir.resolve()
 

@@ -453,8 +453,8 @@ already accounts for, so you can see how much a re-run has left to do. If new
 images have been dropped in since, it also says what the run will do about them,
 in the same words the run log will use.
 
-**Load settings from a previous run (pipeline_info.json)…**, at the top of
-the form, does the same from a file you pick, and points the input at the plate
+**Load settings from a run…**, at the top of the form, does the same from a
+`pipeline_info.json` you pick, and points the input at the plate
 that file belongs to. It loads settings only — it does not resume the run; use
 the resume card (or tick **Incremental** and Run) for that. A file from a
 remote run is read against this computer: the input comes from where the file

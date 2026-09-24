@@ -156,12 +156,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         rl = QHBoxLayout(row)
         rl.setContentsMargins(12, 8, 12, 0)
         rl.setSpacing(4)
-        # Short enough to keep the form inside the sidebar's width
-        # (tests/test_analyze_narrow_sidebar_fit.py); the tooltip says the rest.
         self._open_pinfo_btn = QPushButton("Load settings from a run…", row)
-        self._open_pinfo_btn.setToolTip(
-            "Fill the form with the settings recorded in a previous run's "
-            "pipeline_info.json. Settings only — this does not resume the run.")
         self._open_pinfo_btn.setProperty("variant", "secondary")
         self._open_pinfo_btn.clicked.connect(self._open_pipeline_info)
         rl.addWidget(self._open_pinfo_btn)

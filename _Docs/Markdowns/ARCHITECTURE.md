@@ -5445,6 +5445,18 @@ channel-role handoff, and Validate & Repair's "Complete this run in Analyze".
 snapshot the pipeline records) and falls back to the top-level/`qc_options` keys
 for older sidecars; `None`-valued keys are dropped so a sparse sidecar can't
 clobber widget defaults with blanks.
+It restores settings and never resumes: nothing here reads the run journal or
+the suspend record, ticks Incremental or starts a run — resuming is the resume
+banner's job (`analyze.suspend`). **A sidecar can describe another machine.** A
+remote run's is written by the host from the host's argv and fetched home as
+is, so its `input_dir`, `output_dir` and `scratch_dir` name the host's run
+directory and its `no_run_check` is the one the remote runner adds to every
+launch. `analyze.pinfo.recorded_elsewhere` recognises such a sidecar —
+`suspend_file`, which only the remote runner passes, or a recorded `output_dir`
+that is not the folder the file sits in — and the restore then takes the input
+from the file's own location and leaves the scratch disk and the completeness
+check as the form has them. Host `extra_args` baked into the argv cannot be told
+apart from the user's own settings and are restored like any other.
 
 The **Incremental — process only missing FOVs** checkbox in Output & Compute
 carries `--incremental` into the run: each well's already-recorded

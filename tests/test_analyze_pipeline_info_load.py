@@ -151,3 +151,116 @@ def test_a_queued_job_does_restore_it(qtbot):
     qtbot.addWidget(tab)
     tab.hydrate_job({"opts": {"raw": "", "allow_low_disk": True}})
     assert tab._allow_low_disk_cb.isChecked() is True
+
+
+# ── a remote run's sidecar describes the host, not this machine ──────────────
+
+def _remote_sidecar(tab, plate):
+    """The sidecar a remote run leaves in ``plate/out``, built the way one is.
+
+    The form's options go through the real ``build_pipeline_args``, the real
+    ``RemoteRunner._build_remote_argv`` and the ``--suspend_file`` ``spawn``
+    appends, then the pipeline's own parser — ``execution_options`` is
+    ``vars(args)`` of exactly that. The fetch brings the file home unchanged.
+    """
+    import json
+    from pathlib import Path
+
+    from pipeline.cli_args import build_parser
+    from services.pipeline_service import build_pipeline_args
+    from services.remote_runner import (
+        LocalInputMode, OutputFilter, RemoteHost, RemoteRunner,
+    )
+
+    host = RemoteHost(
+        name="hpc", ssh_alias="hpc", remote_project_dir="~/allwell",
+        remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
+        cpu_only=False, extra_args=(), cache_budget_gb=10,
+        measured_bandwidth_mbps=100.0)
+    local = build_pipeline_args(Path("process_microscopy.py"), plate / "in",
+                                plate / "out", dict(tab._collect_run_options()))
+    run_dir = "/home/me/.allwell-staging/runs/run-abc"
+    argv = RemoteRunner(host)._build_remote_argv(
+        local, f"{run_dir}/in", f"{run_dir}/out", OutputFilter.FULL,
+        LocalInputMode.ZIP)
+    argv += ["--suspend_file", f"{run_dir}/.aw_suspend_request"]
+    args = argv[argv.index("--input_dir"):]
+    ns = vars(build_parser().parse_known_args(args)[0])
+    info = {"execution_options": {k: (str(v) if isinstance(v, Path) else v)
+                                  for k, v in ns.items()}}
+    (plate / "out").mkdir(parents=True, exist_ok=True)
+    side = plate / "out" / "pipeline_info.json"
+    side.write_text(json.dumps(info))
+    return side, info
+
+
+def test_a_remote_run_s_sidecar_is_opened_against_this_machine(qtbot, tmp_path):
+    """Reported: opening a remote run's pipeline_info.json filled the form wrong.
+
+    Its paths name the host — the input field became the host's
+    ``runs/<id>/in``, the scratch disk its output dir — and "Run completeness
+    check" came back unticked, because the remote runner adds
+    ``--no_run_check`` to every launch whatever the form said.
+    """
+    from analyze.tab import AnalyzeTab
+
+    plate = tmp_path / "plate"
+    (plate / "in").mkdir(parents=True)
+    source_tab = AnalyzeTab()
+    qtbot.addWidget(source_tab)
+    source_tab._run_check_cb.setChecked(True)
+    side, info = _remote_sidecar(source_tab, plate)
+    assert info["execution_options"]["no_run_check"] is True, "fixture: not remote-shaped"
+
+    tab = AnalyzeTab()
+    qtbot.addWidget(tab)
+    tab._run_check_cb.setChecked(True)
+    tab._apply_pipeline_info(info, source=side)
+
+    assert tab._input_edit.text() == str(plate / "in"), (
+        "the input field names the host's run directory")
+    assert tab._scratch_edit.text() == "", "the scratch disk names the host's output dir"
+    assert tab._run_check_cb.isChecked(), (
+        "the host's forced --no_run_check was restored as the user's choice")
+
+
+def test_a_local_run_s_sidecar_still_restores_its_own_paths(qtbot, tmp_path):
+    """The control: a sidecar recorded where it sits keeps every path it names."""
+    from analyze.tab import AnalyzeTab
+
+    plate = tmp_path / "plate"
+    (plate / "in").mkdir(parents=True)
+    (plate / "out").mkdir()
+    scratch = tmp_path / "fast-disk"
+    scratch.mkdir()
+    info = {"execution_options": {
+        "input_dir": str(plate / "in"), "output_dir": str(plate / "out"),
+        "scratch_dir": str(scratch), "no_run_check": True}}
+    tab = AnalyzeTab()
+    qtbot.addWidget(tab)
+    tab._apply_pipeline_info(info, source=plate / "out" / "pipeline_info.json")
+    assert tab._input_edit.text() == str(plate / "in")
+    assert tab._scratch_edit.text() == str(scratch)
+    assert not tab._run_check_cb.isChecked()
+
+
+def test_a_remote_sidecar_applied_without_its_location_is_still_recognised(
+        qtbot, tmp_path):
+    """Validate & Repair's hand-off and the pre-run *Load these settings* apply
+    a sidecar without saying where it sits, so the recorded ``output_dir``
+    cannot be compared with anything; ``--suspend_file``, which only the remote
+    runner passes, is what still says whose paths these are."""
+    from analyze.tab import AnalyzeTab
+
+    plate = tmp_path / "plate"
+    (plate / "in").mkdir(parents=True)
+    source_tab = AnalyzeTab()
+    qtbot.addWidget(source_tab)
+    _side, info = _remote_sidecar(source_tab, plate)
+
+    tab = AnalyzeTab()
+    qtbot.addWidget(tab)
+    tab._run_check_cb.setChecked(True)
+    tab._apply_pipeline_info(info, set_input_path=False)
+    assert tab._scratch_edit.text() == ""
+    assert tab._run_check_cb.isChecked()

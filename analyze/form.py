@@ -156,7 +156,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         rl = QHBoxLayout(row)
         rl.setContentsMargins(12, 8, 12, 0)
         rl.setSpacing(4)
-        self._open_pinfo_btn = QPushButton("Open previous run (pipeline_info.json)…", row)
+        self._open_pinfo_btn = QPushButton("Load settings from a previous run (pipeline_info.json)…", row)
         self._open_pinfo_btn.setProperty("variant", "secondary")
         self._open_pinfo_btn.clicked.connect(self._open_pipeline_info)
         rl.addWidget(self._open_pinfo_btn)

@@ -40,6 +40,29 @@ def _positive_or_none(value) -> object | None:
     return value if f > 0 else None
 
 
+def recorded_elsewhere(d: dict, source: Path | None) -> bool:
+    """Whether a flattened sidecar's paths belong to another machine.
+
+    A remote run's sidecar is written by the host from the host's own argv and
+    fetched home unchanged, so its ``input_dir``, ``output_dir`` and
+    ``scratch_dir`` name the host's run directory, and its ``no_run_check`` is
+    the one the remote runner adds to every launch rather than the user's
+    choice. Two signs, either sufficient: ``suspend_file`` is passed only by
+    the remote runner, and a recorded ``output_dir`` that is not the folder
+    the file sits in means the paths were written somewhere else (a remote
+    run from before ``suspend_file`` existed, or a moved dataset).
+    """
+    if d.get("suspend_file"):
+        return True
+    recorded = d.get("output_dir")
+    if source is None or not recorded:
+        return False
+    try:
+        return Path(str(recorded)).resolve() != source.parent.resolve()
+    except (OSError, ValueError):
+        return True
+
+
 class AnalyzePipelineInfoMixin:
     """Read a ``pipeline_info.json`` sidecar back into the Analyze form."""
 
@@ -172,11 +195,13 @@ class AnalyzePipelineInfoMixin:
         applying a sidecar that only one of the two callers wants, and because
         the branch it needed pushed that method past the complexity ratchet.
 
-        Prefers the recorded ``input_dir``; a sidecar that carries none is
-        located from its own folder, since it lives in the output directory and
-        the input is that directory's sibling.
+        Prefers the recorded ``input_dir``; a sidecar that carries none, or
+        whose paths were recorded on another machine (:func:`recorded_elsewhere`
+        — a remote run's names the host's run directory), is located from its
+        own folder, since it lives in the output directory and the input is
+        that directory's sibling.
         """
-        in_dir = d.get("input_dir")
+        in_dir = None if recorded_elsewhere(d, source) else d.get("input_dir")
         if not in_dir and source is not None:
             out = source.parent
             sib = out.parent / "in"
@@ -276,7 +301,11 @@ class AnalyzePipelineInfoMixin:
         # Same inversion for the completeness check. Absent means the run
         # predates the flag, and the checkbox keeps its own default rather than
         # inheriting a decision nobody made.
-        nrc = d.get("no_run_check")
+        # A remote launch always carries ``--no_run_check`` (the check runs on
+        # the client after the fetch), so a remote sidecar's value is the
+        # runner's, not the user's; see `recorded_elsewhere`.
+        foreign = recorded_elsewhere(d, source)
+        nrc = None if foreign else d.get("no_run_check")
         if nrc is not None and hasattr(self, "_run_check_cb"):
             self._run_check_cb.setChecked(not bool(nrc))
         s("_pos_control_well_edit", d.get("pos_control_well"))
@@ -325,7 +354,9 @@ class AnalyzePipelineInfoMixin:
 
         # Scratch disk — a recorded value pins the field; absent, it stays blank
         # so the pipeline default (~/.allwell/scratch) applies.
-        scratch = d.get("scratch_dir")
+        # Not from another machine's sidecar: a remote run pins scratch to the
+        # host's output directory, a path that means nothing here.
+        scratch = None if foreign else d.get("scratch_dir")
         if scratch and hasattr(self, "_scratch_edit"):
             self._scratch_edit.setText(str(scratch))
             self._scratch_user_set = True

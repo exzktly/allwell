@@ -656,8 +656,8 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
                     except (TypeError, ValueError):
                         pct = 0.0
                     self._dashboard.set_transfer(pct)
-                elif kind == "done":
-                    self._on_run_done(payload, pending)
+                elif kind in ("done", "suspended"):      # the two clean endings
+                    (self._on_run_done if kind == "done" else self._on_run_suspended)(payload, pending)
                     pending = []
                 elif kind == "error":
                     self._log_lines(pending)      # see the "done" branch

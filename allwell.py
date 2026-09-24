@@ -14,6 +14,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -195,7 +196,7 @@ class AllWellApp(QMainWindow):
         QTimer.singleShot(0, self._install_app_icon)
 
         if data_path is not None and self._review is not None:
-            QTimer.singleShot(150, lambda: self._review._load_path(data_path))
+            self._load_in_review_later(data_path, delay_ms=150)
 
     # ── UI construction ──────────────────────────────────────────────────
     def _apply_stylesheet(self) -> None:
@@ -1363,7 +1364,7 @@ class AllWellApp(QMainWindow):
             return
         self._nb.setCurrentIndex(0)
         if self._review is not None:
-            QTimer.singleShot(50, lambda: self._review._load_path(Path(d)))
+            self._load_in_review_later(Path(d))
 
     def _reveal_dataset_in_file_manager(self) -> None:
         """Reveal the currently-loaded dataset's folder in the host file
@@ -1423,15 +1424,39 @@ class AllWellApp(QMainWindow):
         if output_dir.name.lower() == "out" and (output_dir.parent / "in").is_dir():
             dataset_path = output_dir.parent
         self._nb.setCurrentIndex(0)
-        QTimer.singleShot(50, lambda: self._review._load_path(dataset_path))
+        self._load_in_review_later(dataset_path)
         self._update_dataset_chip(dataset_path)
+
+    def _load_in_review_later(self, dataset_path: Path, *, delay_ms: int = 50) -> None:
+        """Load *dataset_path* into Review on a later event-loop turn, safely.
+
+        Every hand-off to Review is deferred so the pane switch paints first,
+        which puts the load inside a ``QTimer`` callback — and an exception
+        escaping a Qt callback aborts the whole process under PySide6 >= 6.5.
+        That is how a Suspend took the window down: the half-written output
+        folder was handed to Review, the load raised, and the traceback named
+        nothing but this timer. A dataset that will not load must cost the
+        load, never the application and whatever run is going in it.
+        """
+        review = self._review
+        if review is None:
+            return
+
+        def _load() -> None:
+            try:
+                review._load_path(dataset_path)
+            except Exception:
+                swallowed(f"loading {dataset_path} into Review failed",
+                          level=logging.WARNING)
+
+        QTimer.singleShot(delay_ms, _load)
 
     def _open_dataset_in_review(self, dataset_path: Path) -> None:
         """Load a dataset root into Review and switch to it (from Datasets)."""
         if self._review is None:
             return
         self._nb.setCurrentIndex(0)
-        QTimer.singleShot(50, lambda: self._review._load_path(dataset_path))
+        self._load_in_review_later(dataset_path)
         self._update_dataset_chip(dataset_path)
 
     def _reveal_analyze_pane(self) -> bool:

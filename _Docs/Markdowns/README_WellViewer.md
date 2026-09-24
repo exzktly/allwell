@@ -1169,7 +1169,10 @@ and by `remote_fetch_report.txt` in the output folder.
   computed, then lets every well that got any work done write its results, and
   remembers what you were running. Use it when the run is fine but you need the
   machine back — it takes a little longer to stop than **Stop** does, because it
-  is waiting for those fields to land. You can close All-Well afterwards; next
+  is waiting for those fields to land. When it has wound down, the log says
+  *[Suspended]* with how many wells finished, and the results stay on the
+  Analyze pane rather than opening in Review — a suspended plate is not a
+  finished one. You can close All-Well afterwards; next
   time you open the Analyze pane a card at the top of the sidebar offers to
   carry on. It reads top to bottom: what state the run is in (*Suspended run*),
   which plate and when (*Plate_07 · suspended 24 Aug 14:32*), what resuming will

@@ -118,9 +118,11 @@ two thirds of that was three costs no test's own logic accounted for. Run
 `setup`, or the same number appearing against several unrelated tests, is the
 shape of a harness problem.
 
-It happened a second time, and was misread twice over. The lane crept from ~9
-to ~13 minutes on CI across a few PRs; a local run of 13 min 56 s was put down
-to "overlap with another run", and the CI job then being cancelled at its cap
+It happened a second time, and was misread twice over. The CI fast-lane step
+was 8 min 15 s at #927 and 11 min 54 s at #933; locally, on one machine, that is
+454 s against 613 s, all of it in setup (167 s -> 316 s) — #933 added a third
+per-test numbered temp directory. A local run of 13 min 56 s was put down to
+"overlap with another run", and the CI job then being cancelled at its cap
 was put down to runner noise — on the grounds that the PR's own new tests cost
 0.1 s, which measures the diff and says nothing about the lane. `--durations=0`
 summed by phase answered it in one read: setup 316 s, test bodies 259 s. A cost

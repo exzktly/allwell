@@ -634,3 +634,50 @@ def test_a_stopped_remote_run_that_exits_zero_is_neither_done_nor_cleaned(
     assert verified == ["none"]
     assert hooks == []
     assert r.cancel_state_at_failure == (True, False)
+
+
+def test_a_well_suspended_before_its_first_group_leaves_nothing(tmp_path):
+    """The task began, then the suspend landed before any group was attempted.
+
+    That is the window between the task's own entry check and the group loop's
+    first one — extracting the archive, finding its groups. The well ran the
+    whole end-of-well path with nothing in it and printed ``— done.``, which a
+    remote Fetcher reads as "a CSV to fetch": the suspended run then failed its
+    verification instead of ending suspended.
+    """
+    import numpy as np
+    tifffile = pytest.importorskip("tifffile")
+
+    with zipfile.ZipFile(tmp_path / "A01.zip", "w") as zf:
+        for channel in ("DAPI", "GFP"):
+            png = tmp_path / f"{channel}.tif"
+            tifffile.imwrite(png, np.zeros((16, 16), dtype=np.uint16))
+            zf.write(png, f"exp_{channel}_A01_F001_0h.tif")
+    script = textwrap.dedent(f"""
+        import sys, logging, pathlib
+        sys.path.insert(0, {str(_REPO)!r})
+        logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+        import process_microscopy as pm
+        real = pm.extract_zip
+        def extract_then_suspend(*a, **k):
+            n = real(*a, **k)
+            pm._suspend.request_suspend()     # lands mid-task
+            return n
+        pm.extract_zip = extract_then_suspend
+        out = pm.process_well_zip_task(
+            "A01", pathlib.Path({str(tmp_path / "A01.zip")!r}),
+            pathlib.Path({str(tmp_path / "out")!r}), {{}},
+            "DAPI", ["GFP"], "measurements")
+        print("RESULT", out)
+    """)
+    path = tmp_path / "well.py"
+    path.write_text(script)
+    env = {k: v for k, v in os.environ.items() if k != "ALLWELL_SUSPEND_FILE"}
+    out = subprocess.run([sys.executable, str(path)], capture_output=True,
+                         text=True, timeout=120, env=env)
+    text = out.stdout + out.stderr
+    assert "RESULT ([], [])" in text, text[-2000:]
+    assert "— done." not in text, "a well that attempted nothing announced itself done"
+    written = sorted(p.name for p in (tmp_path / "out").rglob("*") if p.is_file()) \
+        if (tmp_path / "out").exists() else []
+    assert not [n for n in written if n.endswith((".csv", "_out.zip"))], written

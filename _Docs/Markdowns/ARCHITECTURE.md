@@ -8644,8 +8644,10 @@ deterministic, so a resume lands in the directory the suspend was requested in,
 and a leftover request would suspend it before it did anything. The pipeline
 only ever reads it. A well the pool had already queued when the request landed
 returns before it starts (`process_microscopy._well_not_started_for_suspend`),
-writing nothing and printing no `— done.` — otherwise the Fetcher would expect a
-CSV for it and fail the run's verification.
+and one that began just before it but attempted no group returns after the
+group loop (`_suspended_before_any_group`); both write nothing and print no
+`— done.` — otherwise the Fetcher would expect a CSV for it and fail the run's
+verification.
 
 **Whether the run was suspended is settled from the pipeline's own word.** The
 ssh call that makes the request cannot say whether it landed: a timeout can fail

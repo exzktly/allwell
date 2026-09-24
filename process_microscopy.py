@@ -2301,6 +2301,25 @@ def _well_not_started_for_suspend(well_label: str) -> bool:
     return True
 
 
+def _suspended_before_any_group(well_label: str, records, failed) -> bool:
+    """Whether a suspend landed after this well began but before it did any work.
+
+    The task's entry check (:func:`_well_not_started_for_suspend`) covers a
+    well that begins after the request; this covers one that began just before
+    it and took the group loop's first ``is_suspended()`` break while its
+    archive was still being extracted or its groups found. Such a well has
+    nothing to write, and must not say ``— done.``: a remote Fetcher reads that
+    line as a CSV to fetch, and its absence failed the suspended run's
+    verification. A well whose attempted groups all produced no cells also
+    lands here, and is simply recomputed by the resume.
+    """
+    if records or failed or not _suspend.is_suspended():
+        return False
+    log.info("Well %s — not started (the run suspended before its first "
+             "field).", well_label)
+    return True
+
+
 def process_well_zip_task(
     well_label: str,
     zip_path: Path,
@@ -2453,6 +2472,8 @@ def process_well_zip_task(
             records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
                 groups, kwargs, well_label, errors_dir=output_dir,
                 settings_key=settings_key)
+            if _suspended_before_any_group(well_label, records, failed):
+                return [], []
 
             # The extracted inputs are dead weight from here on, and what
             # follows — building <well>_out.zip beside a staging dir that still
@@ -2651,6 +2672,8 @@ def process_well_folder_task(
             records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
                 groups, kwargs, well_label, errors_dir=output_dir,
                 settings_key=settings_key)
+            if _suspended_before_any_group(well_label, records, failed):
+                return [], []
 
             if incremental:
                 # Merge new rows / images into the existing well outputs.

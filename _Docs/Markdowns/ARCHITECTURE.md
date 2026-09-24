@@ -8530,7 +8530,17 @@ derived address, the recorded one, whether the run is forced, and whether
 journal proposes and the remote listing decides — a recorded address is a
 statement about where work was *sent*, not that it is still there — and a forced
 run never re-attaches, since landing in a directory already full of the previous
-run's output is exactly how a forced re-run gets skipped. Only the *output*
+run's output is exactly how a forced re-run gets skipped. **Neither does an
+incremental run**, and its own output directory is emptied before it launches:
+its upload is a split holding only the groups still missing, so a previous
+run's outputs in the directory can only mislead it — the remote pipeline runs
+without `--incremental` and skips any well whose output exists, and a resumed
+run of a resumed run otherwise re-attached to the first resume's directory and
+was declared complete over a partial well. For the same reason the pre-flight's
+full-cache-hit check (`remote_run_id._pipeline_launch_is_pointless`) never fires
+for an incremental run, and otherwise asks whether every *uploaded* well is
+present, not whether the directory holds as many out.zips as were uploaded.
+Only the *output*
 directory moves: the input keys on this run's own staged archives, and the
 pidfile, sentinel and heartbeat stay under this run's own `run_id`, because
 `_sweep_orphaned_allocation` finds a crashed session's job by recomputing that

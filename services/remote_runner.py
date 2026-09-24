@@ -223,6 +223,7 @@ from services.remote_commands import (  # noqa: F401 — re-exported
     _remote_scratch_export,
 )
 from services.remote_run_id import (  # noqa: F401
+    _pipeline_launch_is_pointless,
     UPLOAD_HEARTBEAT,
     UPLOAD_SENTINEL,
     RemoteRunPaths,
@@ -1010,34 +1011,6 @@ def _artifact_changed(run, path: Path) -> bool:
     return (st.st_size, st.st_mtime_ns) != before
 
 
-
-
-def _pipeline_launch_is_pointless(
-    pipeline_argv: list[str], expected_well_count: int, completed_remote: set[str],
-) -> bool:
-    """Whether the remote pipeline can be replaced with a no-op.
-
-    True only when the remote already holds output for every well **and the run
-    has not been asked to reprocess anything**. That second clause is the whole
-    point of this predicate existing.
-
-    ``_compute_run_id`` deliberately leaves ``--force`` out of its hash so a
-    forced re-run lands in the *same* remote output dir and overwrites it —
-    which is exactly what stocks that dir with a complete set of ``_out.zip``
-    files from the previous run. Without a force term here, those two reasonable
-    decisions compose into a guarantee: a forced run always resolves to a dir
-    that always looks like a cache hit, so the pipeline is replaced by ``true``,
-    nothing is recomputed, nothing is fetched, and every local artefact keeps
-    the previous run's bytes and mtime while the run reports success. The
-    stronger the user's demand to reprocess, the more certain it was to be
-    ignored.
-    """
-    if expected_well_count <= 0:
-        return False
-    force_all, forced_wells = _forced_from_argv(pipeline_argv)
-    if force_all or forced_wells:
-        return False
-    return len(completed_remote) >= expected_well_count
 
 
 def _required_tokens(
@@ -5469,12 +5442,21 @@ class RemoteRunner:
         # reasons and only one of them is a reason to re-attach.
         source_key = source_fingerprint(_local_input_dir_from_argv(pipeline_argv))
         own_output = remote_output
-        remote_output = self._reattach_output_dir(
-            remote_output, local_output_dir, pipeline_argv,
-            argv_digest=argv_digest, source_key=source_key,
-            host_alias=self.host.ssh_alias, log=log,
-        )
+        # An incremental run uploads a split — only the groups still missing —
+        # so any earlier directory's outputs can only mislead it: the pre-flight
+        # counts them as this run's, and a pipeline that finds a well's output
+        # already there skips the well. It never borrows a directory, and its
+        # own is emptied below (`run_id` is deterministic, so its own may hold
+        # an earlier incremental run's outputs too).
+        if not zipped.incremental:
+            remote_output = self._reattach_output_dir(
+                remote_output, local_output_dir, pipeline_argv,
+                argv_digest=argv_digest, source_key=source_key,
+                host_alias=self.host.ssh_alias, log=log,
+            )
         reattached = remote_output != own_output
+        if zipped.incremental:
+            self._cache._ssh_run(["rm", "-rf", own_output], check=False)
 
         # **Both** directories, and the second one is not optional. A
         # re-attached run writes its outputs under a *previous* run's id, but
@@ -5569,7 +5551,9 @@ class RemoteRunner:
                 f"{'…' if len(completed_remote) > 5 else ''})\n"
             )
             if _pipeline_launch_is_pointless(
-                    pipeline_argv, expected_well_count, completed_remote):
+                    pipeline_argv, expected_well_count, completed_remote,
+                    uploaded={wz.stem.upper() for wz in zipped.well_zips},
+                    incremental=zipped.incremental):
                 cache_hit = True
                 log(
                     "[remote] FULL CACHE HIT — every well has output "

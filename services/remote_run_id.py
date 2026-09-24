@@ -282,3 +282,41 @@ def _parse_argv_flags(argv, multi: set[str], single: set[str]) -> dict:
             continue
         i += 1
     return out
+
+
+def _pipeline_launch_is_pointless(
+    pipeline_argv: list[str], expected_well_count: int, completed_remote: set[str],
+    *, uploaded: set[str] | None = None, incremental: bool = False,
+) -> bool:
+    """Whether the remote pipeline can be replaced with a no-op.
+
+    True only when the remote already holds output for every well **and the run
+    has not been asked to reprocess anything**. That second clause is the whole
+    point of this predicate existing.
+
+    ``_compute_run_id`` deliberately leaves ``--force`` out of its hash so a
+    forced re-run lands in the *same* remote output dir and overwrites it —
+    which is exactly what stocks that dir with a complete set of ``_out.zip``
+    files from the previous run. Without a force term here, those two reasonable
+    decisions compose into a guarantee: a forced run always resolves to a dir
+    that always looks like a cache hit, so the pipeline is replaced by ``true``,
+    nothing is recomputed, nothing is fetched, and every local artefact keeps
+    the previous run's bytes and mtime while the run reports success. The
+    stronger the user's demand to reprocess, the more certain it was to be
+    ignored.
+
+    **The wells, not their number, and never an incremental run.** A count
+    compared the uploaded plate with a directory that held as many *other*
+    wells' outputs — a resumed run uploading C01 and D01 into a directory
+    holding B01 and C01 was a "full cache hit". And an incremental run's upload
+    is a split of the groups still missing, which an out.zip's existence says
+    nothing about: a partial well's archive is exactly what it has to add to.
+    """
+    if expected_well_count <= 0 or incremental:
+        return False
+    force_all, forced_wells = _forced_from_argv(pipeline_argv)
+    if force_all or forced_wells:
+        return False
+    if uploaded is not None:
+        return bool(uploaded) and uploaded <= completed_remote
+    return len(completed_remote) >= expected_well_count

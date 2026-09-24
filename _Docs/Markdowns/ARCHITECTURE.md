@@ -9071,7 +9071,7 @@ that remainder, and the caller's log line names what it kept rather than
 reporting the folder gone. Four paths route through it —
 `remote_runner._zip_well_folder`'s two callers (plus the post-success hook, which
 skips any folder the pass preserved),
-`input_resolution_service._consolidate_mixed_to_zips`, the Datasets pane's
+`pipeline.mixed_input.consolidate_mixed_to_zips`, the Datasets pane's
 `_zip_well_folders`, and
 `process_microscopy.compress_folder_images_to_zip_and_remove`. The extension
 filter stays with each caller: `util/image_exts.py` records why the folder
@@ -10689,7 +10689,7 @@ Two conversion modes, one code path each, both in `apply.py`:
   `_zip_well_folders` then converts every one of them into `<well>.zip`,
   removing the folder once packed, so the result lands in the same
   ready-to-run layout the new-destination mode writes. This is deliberately
-  **not** `services.input_resolution_service._consolidate_mixed_to_zips` —
+  **not** `pipeline.mixed_input.consolidate_mixed_to_zips` —
   that helper only tops up a *mixed* zips+folders state (Analyze's own
   loose-TIF handling, which is happy to read pure per-well folders directly)
   and is a documented no-op when zero zips exist yet, which is exactly the
@@ -13186,7 +13186,7 @@ findings, evidence and repair on top, while `scan_run` walks a directory the run
 has just written. The shared predicate takes data the caller already holds and
 opens exactly one thing between its functions — the well's output container —
 which is what lets Validate delegate without changing its per-well read count,
-a number `tests/test_validate_compute.py` pins exactly. The fifth state is `csv_only` — measurements whole, output archive gone — added because `health` accepted `has_out_zip` and never read it, so a well whose archive had been deleted answered `complete` on the strength of its CSV alone. `pipeline/input_layout.py` holds the three questions about which layout a plate's input is in, including the refusal that stops a run whose loose images were moved into a folder no zip-mode run will read; `pipeline/cli_args.py` holds `build_parser`. Both left `process_microscopy` under its line budget and are in the remote manifest.
+a number `tests/test_validate_compute.py` pins exactly. The fifth state is `csv_only` — measurements whole, output archive gone — added because `health` accepted `has_out_zip` and never read it, so a well whose archive had been deleted answered `complete` on the strength of its CSV alone. `pipeline/input_layout.py` holds the three questions about which layout a plate's input is in, including the refusal that stops a run whose loose images were moved into a folder no zip-mode run will read; `pipeline/cli_args.py` holds `build_parser`. Both left `process_microscopy` under its line budget and are in the remote manifest. `pipeline/mixed_input.py` holds `consolidate_mixed_to_zips`, which zips each bare well folder in an `in/` that already has well archives: a folder-mode run archives each well it finishes, so a suspended or interrupted one leaves exactly that, and `main` runs it before reading the layout so that `--incremental` from the command line — the pipeline's own resume advice — works as it does from the Analyze pane, whose resolver calls the same function (`services.input_resolution_service` re-exports it under its old private name). With it in front, the refusal above is reached only if a folder is left unarchived for another reason.
 
 The check runs after the auto-threshold pass and before the exit-code decision,
 and records a `run_check` block per well: how many `(fov, timepoint)` groups the

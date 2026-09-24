@@ -2075,6 +2075,7 @@ def test_required_files_list_is_what_we_promised():
         # Which of the three input layouts a plate is in; process_microscopy
     # imports it at module scope.
     "pipeline/input_layout.py",
+    "pipeline/mixed_input.py",
     "pipeline/incremental_keys.py",
         "pipeline/well_skip.py",
         "pipeline/io.py",

@@ -127,6 +127,7 @@ import pipeline.field_quality as _field_quality
 from pipeline.field_quality import FOCUS_COLUMN  # noqa: F401 (re-exported)
 import pipeline.stardist as _stardist
 import pipeline.suspend as _suspend
+from pipeline.mixed_input import consolidate_mixed_to_zips
 from pipeline.stardist import (
     _segment_stardist_nuclei,
     _segment_stardist_seeded_watershed_cell,
@@ -3590,6 +3591,9 @@ def main() -> None:
     # Ahead of the model precompute below, because both refusals here are
     # decided from the plate's own well list alone. A run that cannot say what
     # corrects one of its wells should not first spend a model build per blank.
+    # A folder-mode run archives each well it finishes, so resuming one meets
+    # zips and bare folders together; fold the folders in, as the Analyze pane does.
+    consolidate_mixed_to_zips(input_dir, log_fn=lambda m: log.info("%s", m.rstrip()))
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
     if well_zips:

@@ -19,6 +19,9 @@ from util.retry_io import retry_io
 from util.schema import parse_schema
 from util.zip_write import (
     atomic_zip, replace_folder_with_archive)
+from pipeline.mixed_input import (  # noqa: F401 (re-exported under the old names)
+    CONSOLIDATION_ADVICE as _CONSOLIDATION_ADVICE,
+    consolidate_mixed_to_zips as _consolidate_mixed_to_zips)
 
 HERE = Path(__file__).resolve().parent.parent
 ZIPPER_SCRIPT = HERE / "pipeline" / "well_plate_zipper.py"
@@ -28,19 +31,6 @@ ZIPPER_SCRIPT = HERE / "pipeline" / "well_plate_zipper.py"
 #: it: deciding which loose files are this run's input is
 #: `util.image_exts.is_run_input_member`'s job.
 TIF_GLOB = ("*.tif", "*.tiff", "*.TIF", "*.TIFF")  # aw-image-exts-ok: zipper argv
-
-# Consolidation reads and writes on whatever volume the user pointed at as the
-# input folder, and it moves the whole plate: every loose TIF into a per-well
-# archive. On a network mount that load is enough to drop the session, and the
-# unguarded write turned the blip into a failed run before analysis started
-# (``OSError: [Errno 9] Bad file descriptor``). ``atomic_zip`` stages and
-# commits with ``os.replace``, so re-running an attempt is safe.
-_CONSOLIDATION_ADVICE = (
-    "A repeated failure here usually means the input volume is a network "
-    "mount dropping its session under load. Copy the plate to local storage "
-    "and point All-Well at that copy."
-)
-
 
 def find_zipper_script() -> Path | None:
     return ZIPPER_SCRIPT if ZIPPER_SCRIPT.exists() else None
@@ -1351,99 +1341,6 @@ def run_zipper(
         if proc_hook is not None:
             with swallow("clearing the zipper process hook"):
                 proc_hook(None)
-
-
-def _consolidate_mixed_to_zips(
-    folder: Path,
-    *,
-    log_fn: Callable[[str], None] | None = None,
-) -> bool:
-    """Normalise a *mixed* grouped dir (some ``<well>.zip`` + some ``<well>/``
-    folders) to all-zips, so the pipeline reads every well.
-
-    A hard-killed run can leave ``in/`` with zips for the wells it finished
-    compressing and bare folders for the rest. ``process_microscopy`` prefers
-    zips — ``well_folders`` is ignored whenever ANY zip is present — so the
-    folder-only wells would be silently dropped. This zips each well folder that
-    has no matching zip yet (atomic tmp→rename) and removes the now-redundant
-    folder, mirroring the remote ``_stage_mixed_mode`` behaviour. Folders for
-    wells that already have a zip are left untouched (the zip wins), as are
-    folders holding no TIFs at all — packing one would publish a member-less
-    ``<WELL>.zip``. No-op unless the dir is genuinely mixed. Returns True iff it
-    zipped at least one folder.
-    """
-    from util.well_token import canonical_well_label
-
-    try:
-        files, subdirs = files_and_subdirs(folder)
-    except OSError:
-        return False
-    zip_wells = {
-        canonical_well_label(p.stem)
-        for p in files
-        if p.suffix.lower() == ".zip" and canonical_well_label(p.stem)
-    }
-    if not zip_wells:
-        return False  # pure folders / pure loose — folder mode handles it
-    leftover: dict[str, Path] = {}
-    for p in subdirs:
-        tok = canonical_well_label(p.name)
-        if tok and tok not in zip_wells:
-            leftover[tok] = p
-    if not leftover:
-        return False
-
-    if log_fn:
-        log_fn(
-            f"[zipper] Mixed input ({len(zip_wells)} zip(s) + "
-            f"{len(leftover)} bare well folder(s)) — zipping the leftover "
-            f"folder(s) so every well is processed.\n"
-        )
-    zipped_any = False
-    for well, well_dir in sorted(leftover.items()):
-        target = folder / f"{well}.zip"
-        # Input images, by the one definition — this packs the *user's* well
-        # folder into the archive the pipeline segments from, so a narrower
-        # rule here silently drops a PNG plate's images out of the run.
-        tifs = tif_files_in(well_dir)
-        if not tifs:
-            # Nothing to pack. Writing the archive anyway would publish a
-            # member-less <WELL>.zip — which macOS refuses to expand and the
-            # pipeline reads as a well whose images vanished — and deleting the
-            # folder would destroy whatever non-TIF content it does hold.
-            if log_fn:
-                log_fn(
-                    f"[zipper]   {well}: folder holds no TIFs — left as-is "
-                    "(no zip written)\n"
-                )
-            continue
-        def _pack(target=target, tifs=tifs) -> None:
-            with atomic_zip(target) as zf:
-                for t in tifs:
-                    zf.write(t, arcname=t.name)
-
-        retry_io(
-            _pack, what=target.name, advice=_CONSOLIDATION_ADVICE, log_fn=log_fn,
-        )
-        # Drop the TIFs the archive now holds, and the folder only when the
-        # archive covers everything in it. The zero-TIF branch above already
-        # refuses to destroy non-image content; this is the same rule applied
-        # to the branch where the folder *does* yield images, which is where
-        # the content was actually being lost.
-        outcome = replace_folder_with_archive(well_dir, tifs)
-        zipped_any = True
-        if log_fn:
-            tail = (
-                ""
-                if outcome.folder_removed
-                else (f" — folder kept, {len(outcome.kept)} file(s) not "
-                      f"archived: {', '.join(outcome.kept)}")
-            )
-            log_fn(
-                f"[zipper]   {well}: folder → {well}.zip "
-                f"({len(tifs)} file(s)){tail}\n"
-            )
-    return zipped_any
 
 
 def _fold_well_folders_into_existing_zips(

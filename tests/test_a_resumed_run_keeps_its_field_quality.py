@@ -297,3 +297,26 @@ def test_a_well_cut_short_by_a_suspend_says_it_is_partial(
     assert len(records) == 1 and not failed
     assert ("Well C01 — SUSPENDED part way: 2 of 3 FOV-group(s) not reached"
             in caplog.text), caplog.text[-1500:]
+
+
+# ── the CLI can take its own resume advice ──────────────────────────────────
+
+def test_the_cli_resumes_a_folder_mode_plate_it_left_mixed(
+        tmp_path, monkeypatch, stubbed_segmenter):
+    """"Re-run with --incremental to continue" is what a suspended run prints.
+
+    A folder-mode run archives each well it finishes into ``in/<WELL>.zip``, so
+    the plate it leaves has zips for the finished wells and bare folders for
+    the rest. ``main`` reads folders only when no zip exists, and refused this
+    ``in/`` outright — the Analyze pane folded the folders in first; the
+    command line, taking the pipeline's own advice, did not.
+    """
+    plate = _plate(tmp_path)                        # C01 archived: it finished
+    (plate / "in" / "D01").mkdir()                  # D01 never reached
+    for i, channel in enumerate(("DAPI", "GFP")):
+        imwrite(str(plate / "in" / "D01" / f"exp_{channel}_D01_F001_0h.tif"),
+                _frame(seed=i))
+
+    block = _run_main(monkeypatch, plate, incremental=True)
+    assert set(block["wells"]) == {"C01", "D01"}, "a well left as a folder was not run"
+    assert (plate / "out" / "measurements_D01.csv").exists()

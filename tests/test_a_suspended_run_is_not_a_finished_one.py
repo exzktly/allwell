@@ -34,6 +34,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _FAKE_PIPELINE = '''
 import signal, sys, time
 wells = sys.argv[1].split(",")
+delay = float(sys.argv[2])
 stop = []
 signal.signal(signal.SIGTERM, lambda *a: stop.append(1))
 print(f"Zip mode: {len(wells)} wells", flush=True)
@@ -41,7 +42,7 @@ for w in wells:
     if stop:
         break
     print(f"Well {w} F001 starting", flush=True)
-    time.sleep(0.6)
+    time.sleep(delay)
     print(f"Well {w} F001 done.", flush=True)
 '''
 
@@ -56,8 +57,14 @@ def fake_pipeline(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         pr, "build_pipeline_args",
-        lambda pipeline, i, o, opts: [sys.executable, str(script), ",".join(_WELLS)])
+        lambda pipeline, i, o, opts: [sys.executable, str(script),
+                                      ",".join(_WELLS), str(PER_WELL_S)])
     return script
+
+
+#: Seconds per well. Long enough by default for a test to press Suspend while
+#: the first well is running; a test that never suspends shortens it.
+PER_WELL_S = 0.6
 
 
 def _drain(runner, until_kind: str, timeout: float = 20.0) -> list[str]:
@@ -117,9 +124,11 @@ def test_the_runner_reports_a_suspend_that_exits_zero_as_suspended(
     assert not cleaned, "the success hook ran for a run that did not finish"
 
 
-def test_a_run_that_finishes_is_still_done(tmp_path, fake_pipeline):
+def test_a_run_that_finishes_is_still_done(tmp_path, fake_pipeline, monkeypatch):
     """The other side of the split: an exit of 0 without Suspend is a completion."""
     from services.pipeline_runner import PipelineRunner
+
+    monkeypatch.setattr(sys.modules[__name__], "PER_WELL_S", 0.05)
 
     in_dir, out_dir = tmp_path / "in", tmp_path / "out"
     in_dir.mkdir()

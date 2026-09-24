@@ -94,7 +94,8 @@ def test_the_pipeline_watches_the_file_it_is_given(monkeypatch, tmp_path):
 
 # ── the batched driver ───────────────────────────────────────────────────────
 
-def _run_driver(tmp_path, *, suspend_during_batch_1: bool) -> subprocess.CompletedProcess:
+def _run_driver(tmp_path, *, suspend_during_batch_1: bool,
+                timeout: float = 8) -> subprocess.CompletedProcess:
     """Run the real driver snippet in bash, with batch 1 ready and batch 2 not."""
     from services.remote_run_id import SUSPEND_REQUEST
     from services.remote_runner import BATCH_READY, _batch_driver_snippet
@@ -110,7 +111,7 @@ def _run_driver(tmp_path, *, suspend_during_batch_1: bool) -> subprocess.Complet
     snippet = _batch_driver_snippet(str(run_dir), 3, ["bash", "-c", body],
                                     suspend_request=str(request))
     return subprocess.run(["bash", "-c", snippet], capture_output=True,
-                          text=True, timeout=8)
+                          text=True, timeout=timeout)
 
 
 def test_the_driver_starts_no_batch_after_a_suspend(tmp_path):
@@ -121,9 +122,14 @@ def test_the_driver_starts_no_batch_after_a_suspend(tmp_path):
 
 
 def test_without_a_request_the_driver_waits_for_the_next_batch(tmp_path):
-    """The control: what the driver did on a suspend before — held the node."""
+    """The control: what the driver did on a suspend before — held the node.
+
+    Two seconds is enough to tell: the suspended driver exits in well under
+    one, and this one is sitting in a three-second poll for a batch that
+    never arrives.
+    """
     with pytest.raises(subprocess.TimeoutExpired):
-        _run_driver(tmp_path, suspend_during_batch_1=False)
+        _run_driver(tmp_path, suspend_during_batch_1=False, timeout=2)
 
 
 # ── the spawn and the request, on a host with a filesystem ──────────────────

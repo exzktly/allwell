@@ -502,6 +502,7 @@ def _batched_that_will_skip_every_well(tmp_path, argv):
     p._log = lambda _m: None
     p._returncode = None
     p._stop = threading.Event()
+    p._suspending = threading.Event()
     p._fetcher = types.SimpleNamespace(
         run=types.SimpleNamespace(well_count_total=0), flush_and_join=lambda: None)
     calls = []

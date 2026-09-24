@@ -145,7 +145,17 @@ PROCESS_MICROSCOPY_BUDGET = 3804
 # the single-shot job waiting for its upload and by the batch driver waiting
 # for its next batch, with one dependency and nothing that runs anything. Every
 # name is re-exported, so no call site and no test moved with it.
-REMOTE_RUNNER_BUDGET = 7061
+# 7061 -> 6853: a remote Suspend needed a request file threaded through the
+# launch, the batch driver and the batched loop, and the file was again exactly
+# at its budget. The shell commands a run sends — the launch line, the batch
+# driver, the scratch export and the batch handshake names — moved to
+# `services/remote_commands.py`: pure string composition with no ssh and no
+# I/O, which is also what lets the driver be tested by running it in bash.
+# Every name is re-exported, so no call site and no test moved with it.
+# 6853 -> 6826: the review of that change needed the request made in a
+# different order and the batch upload made interruptible, and the request
+# itself moved to `services/remote_suspend.py` to pay for it.
+REMOTE_RUNNER_BUDGET = 6826
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis

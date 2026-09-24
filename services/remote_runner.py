@@ -207,6 +207,21 @@ from services.remote_transport import (  # noqa: F401
 # addresses, the keys they are derived from, and the re-attach decision. Its own
 # module because it is pure, which is what lets the reuse predicate be tested
 # directly rather than through a harness. Re-exported so existing imports work.
+from services.remote_suspend import (  # noqa: F401 — re-exported
+    SUSPEND_REQUEST_TIMEOUT_S,
+    _AnySet,
+)
+from services.remote_suspend import request_suspend as _request_suspend
+from services.remote_commands import (  # noqa: F401 — re-exported
+    _BATCH_DONE_RE,
+    BATCH_DONE,
+    BATCH_DONE_MARKER,
+    BATCH_READY,
+    _batch_driver_snippet,
+    _compose_driver_cmd,
+    _compose_remote_cmd,
+    _remote_scratch_export,
+)
 from services.remote_run_id import (  # noqa: F401
     UPLOAD_HEARTBEAT,
     UPLOAD_SENTINEL,
@@ -2089,50 +2104,6 @@ def refresh_pipeline_info_available_from_outputs(
 
 
 
-# Characters that would end the assignment and start something else. The value
-# comes from the user's own remotes.toml, so this is not about a hostile input —
-# it is about a typo taking the whole command down with a shell error nobody can
-# read back to a config field.
-_SCRATCH_FORBIDDEN = ('"', "`", "$(", ";", "&", "|", "<", ">", "\\", "\n", "\r")
-
-
-def _remote_scratch_export(value: str) -> str:
-    """``export ALLWELL_SCRATCH_DIR=…;`` for the remote, or ``""`` when unset.
-
-    This is the one place a path is deliberately **not** run through
-    :func:`_remote_quote`. That helper single-quotes, which is right for a path
-    the user typed literally and wrong for this one: the values a cluster user
-    reaches for are ``$TMPDIR``, ``$SLURM_TMPDIR`` and ``/scratch/$USER``, and
-    single quotes would send the literal string ``$TMPDIR`` to the pipeline,
-    which would then create a directory named ``$TMPDIR``. (The batch driver hit
-    the same class of bug with ``$_aw_i``.)
-
-    So the value is emitted inside double quotes, where ``$VAR`` expands and
-    spaces are still safe — and a leading ``~`` is rewritten to ``$HOME`` first,
-    because tilde expansion is exactly what double quotes *do* suppress. That
-    combination is the whole reason this cannot reuse either existing helper.
-
-    Raises ``ValueError`` on a value carrying shell syntax, rather than
-    composing a command that will fail on the remote with an error that names
-    nothing the user can act on.
-    """
-    value = (value or "").strip()
-    if not value:
-        return ""
-    bad = [c for c in _SCRATCH_FORBIDDEN if c in value]
-    if bad:
-        raise ValueError(
-            f"remote_scratch_dir contains shell syntax ({', '.join(bad)!r}) and "
-            f"cannot be used as a directory: {value!r}. Use a plain path; "
-            f"environment variables such as $TMPDIR or /scratch/$USER are fine."
-        )
-    if value == "~":
-        value = "$HOME"
-    elif value.startswith("~/"):
-        value = "$HOME/" + value[2:]
-    return f'export ALLWELL_SCRATCH_DIR="{value}"; '
-
-
 def _scheduler_handoff_lines(launcher: str, *, batch: int | None = None) -> str:
     """The lines announcing that the run is now waiting on a scheduler.
 
@@ -2277,279 +2248,6 @@ class _UploadHeartbeat:
 
     def __exit__(self, *_exc) -> None:
         self.stop()
-
-
-# Per-batch handshake files inside the run directory. The local side writes
-# ``ready``; the driver writes ``done`` holding that batch's exit code. Names
-# are formatted with the 1-based batch number.
-BATCH_READY = ".aw_batch_{i}_ready"
-BATCH_DONE = ".aw_batch_{i}_done"
-
-# What the driver prints when a batch ends. The local side reads its own
-# progress off this rather than polling the remote for the ``done`` file: the
-# stream is already being read, so a marker costs no extra ssh and has no poll
-# interval to wait out.
-BATCH_DONE_MARKER = "[remote] batch-driver: batch {i} finished rc={rc}"
-_BATCH_DONE_RE = re.compile(
-    r"\[remote\] batch-driver: batch (\d+) finished rc=(-?\d+)")
-
-
-def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
-                          heartbeat: str = "",
-                          per_batch_timeout_s: int = 0,
-                          link_blanks: tuple[str, ...] = ()) -> str:
-    """A loop that runs the pipeline once per batch **inside one allocation**.
-
-    Batched mode launched every batch separately, so on a scheduler-backed host
-    each one queued on its own: an eight-batch plate paid eight queue waits, and
-    between them the node was handed back only to be asked for again. An
-    allocation is the expensive thing to obtain and the cheap thing to keep.
-
-    So the job holds the node and the batches come to it. For each batch the
-    driver waits for that batch's ``ready`` file, runs the pipeline over the
-    input directory as it stands, writes the exit code into the matching
-    ``done`` file, and prints :data:`BATCH_DONE_MARKER`.
-
-    **A failed batch does not end the run.** The loop carries on and the local
-    side collects the codes, so one bad well does not cost the plate its node —
-    the end-of-run tally names which batches failed and the run's own exit code
-    reflects that any did.
-
-    Two things *do* end it, both meaning "the app is gone rather than slow": a
-    heartbeat that stopped advancing, and a batch that never arrived inside
-    :data:`UPLOAD_WAIT_TIMEOUT_S`. Both exit :data:`_UPLOAD_WAIT_EXIT` so they
-    read as that rather than as a pipeline crash.
-    """
-    pipeline = _remote_join(argv)
-    waits = int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S)
-    hb_init, stale = _heartbeat_stale_snippet(
-        heartbeat,
-        "[remote] ERROR the app stopped responding — giving the node back")
-    # The batch number is a shell variable, so the filename cannot be quoted
-    # whole: `_remote_quote` single-quotes, which would leave the loop watching
-    # for a file literally called ".aw_batch_$_aw_i_ready". The directory keeps
-    # its quoting (it may contain ~ or spaces) and the leaf is appended in
-    # double quotes, which bash concatenates. Braces around the variable are
-    # load-bearing too — bare `$_aw_i_ready` names a *different*, unset
-    # variable, so every batch would wait on the same empty path.
-    in_q = _remote_quote(f"{run_dir}/in")
-    staged = _remote_quote(run_dir) + '"/b${_aw_i}"'
-    marker_fail = BATCH_DONE_MARKER.format(i="$_aw_i", rc="90")
-    # One batch may not outlive the budget the operator sized for one batch.
-    # Without this a single wedged well holds the node for the whole run's
-    # scaled walltime, which is strictly worse than the per-batch launches this
-    # replaces — there, a hang cost one batch's allocation and no more.
-    budget = f"timeout {int(per_batch_timeout_s)} " if per_batch_timeout_s else ""
-    # The empty-well blank lives in `bg/` for the whole run so every batch can
-    # build the same correction from it without it crossing the wire again. A
-    # blank that still needs processing is hard-linked into the final batch to
-    # be run once for its own output — `ln` on one filesystem moves no bytes,
-    # and `cp` is the fallback where it cannot.
-    #
-    # Named one by one rather than globbing `bg/*.zip`: on a re-run some blanks
-    # may already be complete locally, and those are in `bg/` as a reference
-    # only. Linking the whole directory would reprocess a well the user's own
-    # re-run just declined.
-    blank_link = (
-        f'if [ "$_aw_i" -eq {int(n_batches)} ]; then '
-        + "".join(
-            f'_aw_b={_remote_quote(f"{run_dir}/bg/{stem}.zip")}; '
-            f'[ -e "$_aw_b" ] && {{ ln "$_aw_b" {in_q}"/" 2>/dev/null '
-            f'|| cp "$_aw_b" {in_q}"/"; }}; '
-            for stem in link_blanks)
-        + 'fi; '
-    ) if link_blanks else ""
-    ready = (_remote_quote(run_dir)
-             + '"/' + BATCH_READY.format(i="${_aw_i}") + '"')
-    done = (_remote_quote(run_dir)
-            + '"/' + BATCH_DONE.format(i="${_aw_i}") + '"')
-    marker = BATCH_DONE_MARKER.format(i="$_aw_i", rc="$_aw_rc")
-    return (
-        f'_aw_i=1; '
-        f'while [ "$_aw_i" -le {int(n_batches)} ]; do '
-        f'echo "[remote] batch-driver: waiting for batch $_aw_i of '
-        f'{int(n_batches)}"; '
-        f'_aw_w=0; {hb_init}'
-        f'while [ ! -f {ready} ]; do '
-        f'_aw_w=$((_aw_w+1)); '
-        f'{stale}'
-        f'if [ "$_aw_w" -gt {waits} ]; then '
-        f'echo "[remote] ERROR batch $_aw_i never arrived"; '
-        f'exit {_UPLOAD_WAIT_EXIT}; fi; '
-        f'sleep {UPLOAD_WAIT_POLL_S}; done; '
-        # Swap this batch's staged directory into the place the pipeline
-        # reads. `mv` within one filesystem is atomic and instant, so the
-        # pipeline cannot see a partially-populated input dir, and it cannot
-        # see the previous batch's leftovers either — the whole directory is
-        # replaced rather than being emptied well by well as downloads land.
-        f'rm -rf {in_q} && mv {staged} {in_q} || {{ '
-        f'echo "[remote] ERROR batch $_aw_i: could not stage its input"; '
-        f'echo "90" > {done}; echo "{marker_fail}"; '
-        f'_aw_i=$((_aw_i+1)); continue; }}; '
-        f'{blank_link}'
-        f'echo "[remote] batch-driver: batch $_aw_i starting"; '
-        f'{budget}{pipeline}; _aw_rc=$?; '
-        f'echo "$_aw_rc" > {done}; '
-        f'echo "{marker}"; '
-        f'_aw_i=$((_aw_i+1)); done; '
-        f'echo "[remote] batch-driver: all {int(n_batches)} batch(es) done"'
-    )
-
-
-def _compose_driver_cmd(
-    launcher: str,
-    remote_pidfile: str,
-    driver_script: str,
-    *,
-    env_selector: EnvSelector = DEFAULT_ENV_SELECTOR,
-    scratch_dir: str = "",
-) -> str:
-    """The login-shell command that puts :func:`_batch_driver_snippet` on a node.
-
-    The same shape as :func:`_compose_remote_cmd` — record the login PID, exec
-    the launcher, activate conda and record ``$SLURM_JOB_ID`` inside the
-    allocation so both cancel paths keep working — but the thing it ends by
-    running is the driver loop rather than a single pipeline invocation.
-
-    A separate function rather than another parameter on ``_compose_remote_cmd``
-    because that one's exact output is pinned by two test modules, and because
-    the driver has no ``cache_hit`` and no upload sentinel: the batches announce
-    themselves one at a time, which is what the loop is for.
-
-    With no *launcher* there is no allocation to hold and nothing to save, so
-    the driver runs on the login shell — the batched path is then exactly as
-    cheap as it was, and the caller keeps its per-batch behaviour either way.
-    """
-    pidfile_q = _remote_quote(remote_pidfile)
-    launcher = launcher.strip()
-    guard = f"{_conda_env_guard(env_selector)}; "
-    # Both shapes carry it: a batched run on a launcher-less host still writes
-    # the pipeline's working set somewhere, and leaving one shape out would put
-    # only *some* runs on the configured volume with nothing saying which.
-    scratch = _remote_scratch_export(scratch_dir)
-    if not launcher:
-        return (
-            f"echo $$ > {pidfile_q}; "
-            f"{_CONDA_ACTIVATE_SNIPPET}; "
-            f"{guard}"
-            f"{scratch}"
-            f"{driver_script}"
-        )
-    slurm_sidecar_q = _remote_quote(f"{remote_pidfile}.slurm")
-    inner = (
-        f"{_CONDA_ACTIVATE_SNIPPET}; "
-        f"{guard}"
-        f"{scratch}"
-        f'echo "${{SLURM_JOB_ID:-}}" > {slurm_sidecar_q} 2>/dev/null || true; '
-        f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
-        f'on ${{SLURMD_NODENAME:-$(hostname)}} '
-        f'(partition ${{SLURM_JOB_PARTITION:-?}}) — held for every batch"; '
-        f"{driver_script}"
-    )
-    return (
-        f"echo $$ > {pidfile_q}; "
-        # `shlex.join`, not `' '.join`: the split alone drops the quoting, so a
-        # token carrying a shell metacharacter (`--constraint=a|b`) reaches the
-        # login shell as a pipe and the launch dies with "b: command not found".
-        # `_compose_remote_cmd` has always done this; this one had not.
-        f"exec {shlex.join(shlex.split(launcher))} bash -lc {shlex.quote(inner)}"
-    )
-
-
-def _compose_remote_cmd(
-    launcher: str,
-    remote_pidfile: str,
-    remote_argv: list[str],
-    *,
-    cache_hit: bool,
-    env_selector: EnvSelector = DEFAULT_ENV_SELECTOR,
-    upload_sentinel: str = "",
-    upload_heartbeat: str = "",
-    scratch_dir: str = "",
-) -> str:
-    """Build the bash command string ssh runs on the remote login node.
-
-    Pure (no IO) so it can be unit-tested without a live ssh. Two shapes:
-
-    **Direct execution** (``launcher`` empty, or ``cache_hit`` — never
-    allocate a compute node just to run the ``true`` no-op): the login
-    shell records its own PID, activates conda, and execs the pipeline.
-    This is byte-identical to the pre-``compute_launcher`` behaviour::
-
-        echo $$ > <pidfile>; <conda activate>; exec <pipeline argv>
-
-    **Scheduled execution** (``launcher`` set, e.g. an ``srun …`` line,
-    and not a cache hit): the login shell records its PID then *execs the
-    launcher*, which places a fresh allocation on a compute node the
-    cluster schedules. Conda activation and the pipeline run **inside**
-    that allocation (``bash -lc``) — that's where the env, the shared-FS
-    conda install, and any requested GPU live. The job's own
-    ``$SLURM_JOB_ID`` is written to ``<pidfile>.slurm`` (on the shared FS,
-    so the login-side ``cancel()`` can ``scancel`` it as a second kill
-    channel)::
-
-        echo $$ > <pidfile>; exec srun … bash -lc '<conda>; echo $JOBID > <pidfile>.slurm; exec <pipeline argv>'
-
-    The inner script is single-quoted for the *outer* login shell (via
-    ``shlex.quote``) so the outer shell passes it through literally and
-    the inner ``bash`` is the one that expands ``$HOME`` / ``$SLURM_JOB_ID``
-    on the compute node.
-
-    Both shapes check that *env_selector* actually names an environment before
-    reaching ``conda run`` (:func:`_conda_env_guard`), so a host that was never
-    bootstrapped — or one whose **Remote python** points somewhere that no
-    longer exists — fails with a labelled, actionable message instead of
-    conda's bare ``EnvironmentLocationNotFound``. A cache hit runs ``true`` and
-    needs no environment at all, so it skips the check rather than failing a
-    run that was never going to import anything.
-    """
-    pidfile_q = _remote_quote(remote_pidfile)
-    launcher = launcher.strip()
-    guard = "" if cache_hit else f"{_conda_env_guard(env_selector)}; "
-    # Where the pipeline puts its transient working set on the remote. A cache
-    # hit execs `true` and writes nothing, so it needs no scratch at all.
-    scratch = "" if cache_hit else _remote_scratch_export(scratch_dir)
-    if cache_hit or not launcher:
-        # PID echoed first so the cancel path can target the pipeline
-        # directly; conda activated on the login shell; then exec.
-        return (
-            f"echo $$ > {pidfile_q}; "
-            f"{_CONDA_ACTIVATE_SNIPPET}; "
-            f"{guard}"
-            f"{scratch}"
-            f"exec {_remote_join(remote_argv)}"
-        )
-
-    slurm_sidecar_q = _remote_quote(f"{remote_pidfile}.slurm")
-    # The ``[remote] scheduler: …`` echo runs *inside* the allocation, so it
-    # only prints once the scheduler has granted a node — it streams back over
-    # the same ssh stdout and is the user's "queue wait over, now running on
-    # <node>" signal, naming the job id and partition for diagnosis.
-    # The wait goes first, before conda and before the pipeline: the job may
-    # have been granted its node while the plate was still uploading, which is
-    # the point of requesting it early.
-    wait_snippet = (_wait_for_upload_snippet(upload_sentinel, upload_heartbeat)
-                    if upload_sentinel else "")
-    inner = (
-        f"{_CONDA_ACTIVATE_SNIPPET}; "
-        f"{guard}"
-        f"{scratch}"
-        f'echo "${{SLURM_JOB_ID:-}}" > {slurm_sidecar_q} 2>/dev/null || true; '
-        f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
-        f'on ${{SLURMD_NODENAME:-$(hostname)}} '
-        f'(partition ${{SLURM_JOB_PARTITION:-?}})"; '
-        f"{wait_snippet}"
-        f"exec {_remote_join(remote_argv)}"
-    )
-    # shlex.split→join normalises whitespace AND re-quotes any token with
-    # shell metacharacters (e.g. ``--constraint=a|b``) so the outer remote
-    # login shell passes them to the scheduler literally instead of, say,
-    # treating ``|`` as a pipe.
-    launcher_str = shlex.join(shlex.split(launcher))
-    return (
-        f"echo $$ > {pidfile_q}; "
-        f"exec {launcher_str} bash -lc {shlex.quote(inner)}"
-    )
 
 
 @lru_cache(maxsize=1)
@@ -3284,6 +2982,10 @@ class _RemoteRun:
     output_filter: OutputFilter = OutputFilter.FULL
     expected_wells: set[str] = field(default_factory=set)
     fetched_wells: set[str] = field(default_factory=set)
+    #: The file :meth:`RemoteRunner.request_suspend` touches, and the path the
+    #: pipeline was given with ``--suspend_file``. Empty for a run that was
+    #: never told one (a cache hit runs ``true``), which cannot be suspended.
+    suspend_request: str = ""
     well_count_total: int = 0
     # Incremental remote run: fetched outputs are PARTIAL (new FOVs only), so the
     # Fetcher merges them into the existing local CSV / out-zip instead of
@@ -3549,6 +3251,9 @@ class _BatchedRemoteProcess:
         self._log = log_fn or (lambda _m: None)
         self._progress = progress_fn
         self._stop = stop_event or threading.Event()
+        # Set by `note_suspend_requested`: finish the batch in flight, send no
+        # more. Separate from `_stop`, which tears the batch in flight down.
+        self._suspending = threading.Event()
         self._returncode: int | None = None
         self._line_q: queue.Queue[str | None] = queue.Queue()
         self._lines = _QueueLineIterator(self._line_q)
@@ -3723,6 +3428,26 @@ class _BatchedRemoteProcess:
         if proc is not None:
             proc.send_signal(sig)
 
+    def note_suspend_requested(self) -> None:
+        """Finish the batch in flight and send no more.
+
+        :meth:`RemoteRunner.request_suspend` has already written the request
+        file, which winds the running batch down and stops the driver from
+        starting another; this is the local half, which stops *uploading* them.
+        The uploads are the expensive part of a batch, and one sent after the
+        user asked for the machine back would be thrown away unrun.
+        """
+        self._suspending.set()
+
+    def _suspend_before(self, batch_no: int, n_batches: int) -> bool:
+        """Whether a suspend means batch *batch_no* is not to be sent."""
+        if not self._suspending.is_set():
+            return False
+        self._log(
+            f"[remote] suspended — batch {batch_no}/{n_batches} and any after "
+            f"it were not sent; resume to process them\n")
+        return True
+
     # Internals ────────────────────────────────────────────────────────
 
     def _batch_flag(self, template: str, index: int) -> str:
@@ -3773,9 +3498,10 @@ class _BatchedRemoteProcess:
         # already flagged ready and start against an empty input directory.
         self._runner._cache._ssh_run(["mkdir", "-p", run_dir], check=False)
         self._runner._cache._ssh_run(
-            ["rm", "-f"] + [self._batch_flag(t, i)
-                            for i in range(1, n_batches + 1)
-                            for t in (BATCH_READY, BATCH_DONE)],
+            ["rm", "-f", paths.suspend_request]
+            + [self._batch_flag(t, i)
+               for i in range(1, n_batches + 1)
+               for t in (BATCH_READY, BATCH_DONE)],
             check=False,
         )
         # …and any batch a previous, aborted run of this same dataset staged.
@@ -3849,6 +3575,8 @@ class _BatchedRemoteProcess:
         # — it is suppressed here and re-run once locally over everything.
         if "--no_auto_threshold" not in remote_argv:
             remote_argv = list(remote_argv) + ["--no_auto_threshold"]
+        remote_argv = list(remote_argv) + ["--suspend_file", paths.suspend_request]
+        run.suspend_request = paths.suspend_request
 
         # The budget for one batch is what the operator wrote before this
         # change: their --time sized a single launch.
@@ -3864,7 +3592,8 @@ class _BatchedRemoteProcess:
                                        heartbeat, per_batch_s,
                                        link_blanks=(
                                            getattr(self, "_link_blank_stems", ())
-                                           if blanks else ()))
+                                           if blanks else ()),
+                                       suspend_request=paths.suspend_request)
         ssh_argv = host.ssh_argv(allocate_tty=True) + [
             _compose_driver_cmd(launcher, run.remote_pidfile, driver,
                                 env_selector=self._runner.env_selector,
@@ -3970,7 +3699,12 @@ class _BatchedRemoteProcess:
             # all. Without this the worker thread would sit inside the next
             # batch's rsync — `upload_subset` takes `_stop` and watches it —
             # pushing wells at a node that no longer exists.
-            if not self._stop.is_set() and len(self._batch_rc) < self._n_batches:
+            # A suspend is the one deliberate early exit the driver has
+            # (`_batch_driver_snippet`), and reading it as a lost node would
+            # cancel the Fetcher mid-way through the batch that just finished —
+            # the wells the suspend was meant to keep.
+            if (not self._stop.is_set() and not self._suspending.is_set()
+                    and len(self._batch_rc) < self._n_batches):
                 self._driver_lost.set()
                 self._stop.set()
                 with swallow("cancelling downloads after the driver went away"):
@@ -4196,6 +3930,8 @@ class _BatchedRemoteProcess:
             failed: dict[int, int] = {}
 
             for batch_idx, batch_zips in enumerate(batches):
+                if self._suspend_before(batch_idx + 1, n_batches):
+                    break
                 if self._stop.is_set():
                     self._log(
                         f"[remote] stopped before batch "
@@ -4233,7 +3969,9 @@ class _BatchedRemoteProcess:
                     self._batch_staging_dir(batch_idx + 1),
                     log_fn=self._log,
                     progress_fn=inner_progress,
-                    stop_event=self._stop,
+                    # A suspend ends the upload too: a batch sent after the
+                    # user asked for the machine back is thrown away unrun.
+                    stop_event=_AnySet(self._stop, self._suspending),
                 )
                 if rc != 0:
                     # `upload_subset` watches `_stop`, so a Stop mid-transfer
@@ -4246,12 +3984,16 @@ class _BatchedRemoteProcess:
                         self._returncode = (
                             1 if self._driver_lost.is_set() else 130)
                         return
+                    if self._suspend_before(batch_idx + 1, n_batches):
+                        break
                     self._log(
                         f"[remote] batch {batch_idx + 1} upload failed "
                         f"(rsync rc={rc}); aborting remaining batches\n"
                     )
                     self._returncode = rc
                     return
+                if self._suspend_before(batch_idx + 1, n_batches):
+                    break
                 self._log(
                     f"[remote] batch {batch_idx + 1}: upload complete "
                     f"({sent_bytes / (1024**2):.1f} MB); handing it to the "
@@ -4329,9 +4071,11 @@ class _BatchedRemoteProcess:
                 # output. The per-batch passes were suppressed via
                 # ``--no_auto_threshold`` so a batch wouldn't write thresholds
                 # derived from a sliver of the plate. Fires only when the whole
-                # run succeeded — a mid-run abort leaves the previous run's
-                # pipeline_info.json (if any) untouched.
-                if self._returncode == 0 and not self._auto_threshold_off_by_user():
+                # run succeeded — a mid-run abort or a suspend leaves the
+                # previous run's pipeline_info.json (if any) untouched; the
+                # resumed run that finishes the plate writes the thresholds.
+                if (self._returncode == 0 and not self._suspending.is_set()
+                        and not self._auto_threshold_off_by_user()):
                     self._run_local_auto_threshold()
             finally:
                 self._line_q.put(None)
@@ -5756,6 +5500,10 @@ class RemoteRunner:
         # token, so an ``&&`` between them would reach the remote as a
         # directory named "&&" instead of as an operator.
         self._cache._ssh_run(["rm", "-f", remote_sentinel], check=False)
+        # A suspend request the last run of this plate left behind would stop
+        # this one before it did anything: ``run_id`` is deterministic, so a
+        # resume lands in the very directory the suspend was requested in.
+        self._cache._ssh_run(["rm", "-f", own.suspend_request], check=False)
 
         _force, _forced_wells = _forced_from_argv(pipeline_argv)
         self._run = _RemoteRun(
@@ -5854,7 +5602,7 @@ class RemoteRunner:
                 remote_output,
                 output_filter,
                 zipped.mode,
-            )
+            ) + ["--suspend_file", own.suspend_request]
 
         # Compose the remote shell command. PID echoed first so the
         # cancel path can target the pipeline directly. v5.2.11: tilde-
@@ -6009,6 +5757,12 @@ class RemoteRunner:
         # Keep a handle so cancel() can stop an in-flight per-well download.
         self._fetcher = fetcher
         self._cancelled.clear()
+        # Suspendable only from here: the pipeline is launched and its input is
+        # all on the host. Earlier, a request would wait out the rest of the
+        # upload and a node for a run that then does nothing, so a suspend
+        # during the upload stops it instead (`PipelineRunner.suspend`).
+        if not cache_hit:
+            self._run.suspend_request = own.suspend_request
         return _RemoteProcess(popen, self._run, fetcher, heartbeat=heartbeat)
 
     # ── Verify + cleanup ────────────────────────────────────────────────
@@ -6888,6 +6642,17 @@ class RemoteRunner:
                 f"still in use. Leaving it running.\n")
             return "unknown"
         return "none"
+
+    @property
+    def can_request_suspend(self) -> bool:
+        """Whether a pipeline has been launched that :meth:`request_suspend` can reach."""
+        run = self._run
+        return run is not None and bool(run.suspend_request)
+
+    def request_suspend(self, proc=None, *,
+                        log_fn: Callable[[str], None] | None = None) -> bool:
+        """Ask the running pipeline to wind down; see :func:`remote_suspend.request_suspend`."""
+        return _request_suspend(self, proc, log_fn=log_fn)
 
     def cancel(self, ssh_proc: subprocess.Popen) -> None:
         """Best-effort remote kill. The local pgid kill (handled by

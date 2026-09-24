@@ -21,6 +21,7 @@ def _bare_batched():
     p._returncode = None
     p._current_proc_lock = threading.Lock()
     p._stop = threading.Event()
+    p._suspending = threading.Event()
     return p
 
 

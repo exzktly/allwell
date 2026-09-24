@@ -2281,6 +2281,26 @@ def _process_groups_in_worker(
     return all_records, failed, aborted_reason, tuple(not_attempted)
 
 
+def _well_not_started_for_suspend(well_label: str) -> bool:
+    """Whether a suspend arrived before this well began; if so, leave it untouched.
+
+    The orchestrator cancels the wells it has not handed out, but a process
+    pool's call queue already holds a few more than it has workers, and those
+    cannot be cancelled. Each one used to start after the suspend, take the
+    FOV-group loop's first ``is_suspended()`` break, and then go through the
+    whole end-of-well path with nothing to show for it: no CSV, an empty
+    ``<well>_out.zip``, a completeness record, and ``Well X — done.`` A remote
+    run's Fetcher reads that line as "this well has output to fetch", so the
+    missing CSV then failed the run's verification — a suspended plate
+    reported as a broken one. A well that never started must look exactly like
+    one the orchestrator cancelled: absent.
+    """
+    if not _suspend.is_suspended():
+        return False
+    log.info("Well %s — not started (the run is suspending).", well_label)
+    return True
+
+
 def process_well_zip_task(
     well_label: str,
     zip_path: Path,
@@ -2318,6 +2338,8 @@ def process_well_zip_task(
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
+    if _well_not_started_for_suspend(well_label):
+        return [], []
     log.info("Well %s — starting (pid %d)", well_label, os.getpid())
     tmp_extract = scratch_base_for(output_dir) / f"_tmp_extract_{well_label}"
     tmp_images  = _staging_dir_for(output_dir, well_label, settings_key)
@@ -2538,6 +2560,8 @@ def process_well_folder_task(
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
+    if _well_not_started_for_suspend(well_label):
+        return [], []
     log.info("Well %s — starting (folder mode, pid %d)", well_label, os.getpid())
 
     # Folder-mode staging used to be pinned to ``output_dir`` (so the closing
@@ -3238,6 +3262,8 @@ def main() -> None:
     parser    = build_parser()
     args      = parser.parse_args()
     _suspend.install_handlers(log=log)   # SIGTERM/SIGINT → wind down, don't die
+    if args.suspend_file is not None:    # …and so does this file appearing
+        _suspend.watch_request_file(args.suspend_file, log=log)
     input_dir = args.input_dir.resolve()
     output_dir = args.output_dir.resolve()
 

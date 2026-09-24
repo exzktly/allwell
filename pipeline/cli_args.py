@@ -63,6 +63,15 @@ def build_parser() -> argparse.ArgumentParser:
                         "network mount puts the run's bulk I/O on a volume whose "
                         "dropped sessions surface as 'Bad file descriptor'.")
 
+    p.add_argument("--suspend_file", type=Path, default=None,
+                   help="A file whose appearance asks this run to suspend: stop "
+                        "taking on new FOV-groups, finish the ones in flight, "
+                        "write each started well's CSV and out.zip, and exit 0 — "
+                        "exactly what SIGTERM does. For hosts a signal cannot "
+                        "reach reliably, such as a remote run behind ssh, "
+                        "'conda run' or a scheduler. Its creator clears it "
+                        "before the run starts; the pipeline only reads it.")
+
     p.add_argument("--nuclear_token", default="NIR",
                    help="Channel token identifying nuclear-channel files "
                         "(used for segmentation and quantified like other channels)")

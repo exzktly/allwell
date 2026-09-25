@@ -4356,7 +4356,7 @@ exact correction and segmentation code).
 - **Correction controls** — all in the **right-hand panel**, where every other
   per-tab inspector in the app sits: any flat-field + background method and its
   parameters. Correction re-runs as you change them; segmentation waits for the
-  Segment button.
+  Segment button. On a window too short to show the whole panel, it scrolls.
   - The `empty_well` and `basic` modes first estimate a field from every frame
     of the **Bg well** you choose, for the channel you are viewing. That takes a
     moment the first time you pick a well, a channel or one of those two modes;

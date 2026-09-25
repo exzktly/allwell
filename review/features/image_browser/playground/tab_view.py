@@ -87,14 +87,42 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # ── The controls dock (mounted on the right, below) ──────────────────────
     # Dressed as a right-hand inspector, matching ``ExportStyleSidebar``: the
     # rail fill, a hairline down its left edge, and the shared dock width.
-    controls = QWidget(parent)
+    #
+    # The controls sit in a VERTICAL scroll area inside that dock. The panel is
+    # taller than a laptop window leaves for it, and a bare layout handed less
+    # than its minimum height squeezes every row at once — buttons, combos,
+    # entries and wrapped notes all lose the bottom of their text, which is how
+    # this tab looked on a short window. Scrolling keeps each row at its full
+    # height. The horizontal axis never scrolls: the dock is a fixed width and
+    # the rows are built to fit it, as in the left rail (``app_shell_view``).
+    dock = QWidget(parent)
+    dock.setObjectName("PlaygroundDock")
+    dock.setAttribute(Qt.WA_StyledBackground, True)
+    dock.setStyleSheet(
+        f"#PlaygroundDock {{ background-color: {theme.Colors.rail};"
+        f" border-left: 1px solid {theme.Colors.border_subtle}; }}"
+        # The blanket ``QScrollArea`` / ``QWidget`` rules would paint the
+        # scroll area and its viewport in the canvas colour over the rail fill.
+        "#PlaygroundDockScroll, #PlaygroundDockScroll > QWidget"
+        " { background-color: transparent; }"
+        f"#PropertyPanel {{ background-color: {theme.Colors.rail}; }}"
+    )
+    dock.setFixedWidth(theme.Metrics.dock_w)
+    dock_scroll = QScrollArea(dock)
+    dock_scroll.setObjectName("PlaygroundDockScroll")
+    dock_scroll.setWidgetResizable(True)
+    dock_scroll.setFrameShape(QScrollArea.NoFrame)
+    dock_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    dock_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    dock_outer = QVBoxLayout(dock)
+    # One pixel on the left so the dock's hairline is not painted over.
+    dock_outer.setContentsMargins(1, 0, 0, 0)
+    dock_outer.setSpacing(0)
+    dock_outer.addWidget(dock_scroll)
+    controls = QWidget()
     controls.setObjectName("PropertyPanel")
     controls.setAttribute(Qt.WA_StyledBackground, True)
-    controls.setStyleSheet(
-        f"#PropertyPanel {{ background-color: {theme.Colors.rail};"
-        f" border-left: 1px solid {theme.Colors.border_subtle}; }}"
-    )
-    controls.setFixedWidth(theme.Metrics.dock_w)
+    dock_scroll.setWidget(controls)
     cl = QVBoxLayout(controls)
     cl.setContentsMargins(10, 10, 10, 10)
     cl.setSpacing(4)
@@ -192,8 +220,18 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # panel does nothing) is the part a reader needs before hovering anything.
     # (Its signal is connected further down, where the per-stage LUT memory that
     # the handler needs is defined.)
+    #
+    # The label sits above the control rather than beside it: the three
+    # segments need ~240px and the label column ~100px, which is wider than the
+    # dock leaves, so side by side the segments were squeezed into each other.
     from widgets.segmented_control import SegmentedControl
-    stage_row = _row(controls, "Correct up to")
+    stage_lbl = QLabel("Correct up to", controls)
+    stage_lbl.setObjectName("Muted")
+    cl.addWidget(stage_lbl)
+    stage_row = QWidget(controls)
+    srl = QHBoxLayout(stage_row)
+    srl.setContentsMargins(0, 1, 0, 1)
+    cl.addWidget(stage_row)
     source_seg = SegmentedControl(stage_row)
     for _lbl, _data in (("Raw", "raw"), ("Flat-field only", "flatfield"),
                         ("Corrected", "corrected")):
@@ -207,6 +245,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         "• Flat-field only — the flat-field is applied; the background method "
         "and its parameters are not used.\n"
         "• Corrected — flat-field + background, what a pipeline run produces.")
+    stage_lbl.setToolTip(source_seg.toolTip())
     stage_row.layout().addWidget(source_seg)
     stage_row.layout().addStretch(1)
     app._playground_source_seg = source_seg
@@ -303,13 +342,20 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # the counts. The button draws all of them at once. It marks where the user
     # currently is and suggests nothing -- see
     # ``review.domain.threshold_sweep`` for the measurement behind that.
-    sweep_btn = QPushButton("Threshold curve…", seg_btn_row)
+    # The sweep sits on a row of its own: Segment, Threshold curve…, Focus
+    # distribution… and the sweep's Stop need ~390px side by side, and the
+    # dock leaves ~330px, so one row squeezed all four until their labels
+    # clipped. The sweep and its Stop pair naturally, so they share this one.
+    sweep_row = QWidget(controls)
+    swl = QHBoxLayout(sweep_row)
+    swl.setContentsMargins(0, 2, 0, 2)
+    sweep_btn = QPushButton("Threshold curve…", sweep_row)
     sweep_btn.setToolTip(
         "Segment the displayed frame at a range of probability thresholds and "
         "plot how many nuclei each one finds.\n"
         "Slower than Segment — it runs the detector across the whole range — "
         "and it suggests no threshold: the curve is the answer.")
-    sweep_stop_btn = QPushButton("Stop", seg_btn_row)
+    sweep_stop_btn = QPushButton("Stop", sweep_row)
     sweep_stop_btn.setToolTip(
         "Stop after the threshold now running. What was measured so far is "
         "still plotted.")
@@ -320,8 +366,9 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # the failure and no-frame paths too.
     sweep_btn.clicked.connect(lambda _=False: playground_sweep_now(ctx))
     sweep_stop_btn.clicked.connect(lambda _=False: playground_sweep_stop(ctx))
-    sbl.addWidget(sweep_btn)
-    sbl.addWidget(sweep_stop_btn)
+    swl.addWidget(sweep_btn)
+    swl.addWidget(sweep_stop_btn)
+    swl.addStretch(1)
 
     # The second threshold this tab helps choose, beside the first. The
     # Analyze form's "Out of focus below" box is blank by default and nothing
@@ -360,6 +407,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
 
     sbl.addStretch(1)
     cl.addWidget(seg_btn_row)
+    cl.addWidget(sweep_row)
 
     # The count, directly under the controls that change it — this is the number
     # the two thresholds are being tuned against, and reading it out of the
@@ -564,7 +612,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     label.setMouseTracking(True)
     canvas.setWidget(label)
     body.layout().addWidget(canvas, 1)
-    body.layout().addWidget(controls)
+    body.layout().addWidget(dock)
     app._playground_image_canvas = canvas
     app._playground_image_label = label
 

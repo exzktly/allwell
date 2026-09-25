@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     import numpy as np
 
 import logging
+from pathlib import Path
 
 from review.data.image_resolver import normalize_numeric_token
 from domain.tp_match import tp_close
@@ -200,18 +201,22 @@ def load_well_channel(
     tophat dict also fall back to raw at lookup time (handled in
     ``load_frame_array``).
 
-    **Only non-empty results are cached.** ``cache`` outlives every Generate
-    (it is dropped on dataset load, not per render), so storing an empty scan
-    in it pins "this well/channel has no images" for the rest of the session —
-    and a scan can come up empty for reasons that are not permanent: a drive
-    that stalled or briefly unmounted, a directory being rewritten by a
-    running pipeline, a transient OSError inside the walk. Once pinned, the
-    affected cells read "(no image)" forever while their neighbours render,
-    which is exactly the half-empty grid this avoids. An empty result is
-    instead recorded in the caller's *scan_misses* set, so one render pass
-    still scans a genuinely-absent well/channel only once, and the next
-    Generate retries it. A caller that passes no set gets a throwaway one,
-    which suppresses nothing beyond this call.
+    **An empty result is cached only when it is definitive.** ``cache``
+    outlives every Generate (it is dropped on dataset load, not per render),
+    so storing an empty scan in it pins "this well/channel has no images" for
+    the rest of the session — and a scan can come up empty for reasons that
+    are not permanent: a drive that stalled or briefly unmounted, a transient
+    OSError inside the walk. Pinned, those cells read "(no image)" forever
+    while their neighbours render. So an empty scan that raised, was cut short
+    (``partial``), or searched a dataset folder that is not there is recorded
+    only in the caller's *scan_misses* set — one pass scans it once, the next
+    Generate retries it. A caller that passes no set gets a throwaway one.
+
+    But an empty scan of folders that exist, walked to the end, is an answer
+    about the dataset (:func:`_scan_is_definitive`) and is cached like a hit.
+    Re-asking it every pass re-walked every well's archives on every zoom, LUT
+    or crop change — for a plate brought back from a remote run, whose raw
+    inputs are not local, that was every Raw cell's well rescanned per change.
 
     **A truncated scan is reported, not absorbed.** ``find_well_images_and_masks``
     returns :class:`~review.data.zip_members.ScanResult` inventories that
@@ -245,6 +250,7 @@ def load_well_channel(
     fluor_token = chan_lower
     if is_overlay:
         fluor_token = (info.get("nuclear_token") or chan_lower).strip().lower()
+    scanned_cleanly = True
     try:
         fluor, overlay, mask, tophat = find_well_images_and_masks(
             ctx.state.dataset.data_dir,
@@ -263,6 +269,7 @@ def load_well_channel(
             "will retry on the next Generate", well, chan_lower, exc_info=True,
         )
         fluor, overlay, mask, tophat = {}, {}, {}, {}
+        scanned_cleanly = False
     # Cache the mask dict (keyed by a sentinel channel token) so
     # boundary/binary overlays can access it without a second IO round-trip.
     # An empty scan is not cached — the first channel to be scanned would
@@ -279,6 +286,19 @@ def load_well_channel(
     _record_partial_scan(partials, key, result)
     if result:
         cache[key] = result
+    elif scanned_cleanly and _scan_is_definitive(ctx, result):
+        # The folders are there, the walk finished, and they hold none of
+        # these. That is an answer about this dataset, not about this moment,
+        # so it is kept like a hit: re-asking it on every Generate re-walked
+        # every well's archives on every zoom, LUT or crop change — on a
+        # dataset whose raw inputs were never brought back from a remote run,
+        # that was the whole grid's worth of scans per change, for nothing.
+        cache[key] = result
+        logger.info(
+            "frame_load: no %s images found for well=%r channel=%r — not "
+            "searched again until the dataset is reloaded", variant, well,
+            chan_lower,
+        )
     else:
         misses.add(key)
         logger.info(
@@ -290,6 +310,28 @@ def load_well_channel(
     if use_tophat and not is_overlay and fluor:
         cache.setdefault((well, chan_lower, "raw"), fluor)
     return result
+
+
+def _scan_is_definitive(ctx, result) -> bool:
+    """Whether an empty scan is an answer about the dataset or about the moment.
+
+    Definitive when the walk was not cut short (a read that failed part-way
+    marks the inventory ``partial``) and every folder it searched exists. A
+    folder that is not there — a drive that unmounted, a share that dropped —
+    may be back by the next Generate, so that miss is retried; a folder that is
+    there and holds no such images will say the same thing next time.
+    """
+    if getattr(result, "partial", False):
+        return False
+    ds = ctx.state.dataset
+    dirs = [d for d in (getattr(ds, "data_dir", None), getattr(ds, "in_dir", None))
+            if d is not None]
+    if not dirs:
+        return False
+    try:
+        return all(Path(d).is_dir() for d in dirs)
+    except OSError:
+        return False
 
 
 def match_image_ref(images: dict, fov: str, tp: str):

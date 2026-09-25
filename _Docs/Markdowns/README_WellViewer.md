@@ -4299,9 +4299,13 @@ channel for every well).
   missing fluorescence frame does not stop it); `(render failed)` means that one cell errored —
   the rest of the table still draws, and the status line counts how many cells
   could not be drawn. A cell that failed because the source was briefly
-  unavailable (an external drive spinning down, a folder still being written)
-  comes back the next time you press **Generate** — nothing is written off for
-  the session, so there is no need to reload the dataset.
+  unavailable (an external drive spinning down, a network share that dropped)
+  comes back the next time you press **Generate**, so there is no need to
+  reload the dataset. A frame that simply isn't in the dataset is remembered
+  instead, so changing zoom, LUTs or the crop doesn't search for it again — a
+  plate brought back from a remote run usually has its corrected frames but not
+  its raw inputs, so its **Raw** cells read `(no image)`; switch those rows to
+  **Corrected**. If you add frames to a dataset while it is open, reload it.
 - **Large grids** — the images a Generate decodes are held in one bounded cache
   sized to your machine's RAM, and nothing else keeps them: the grid on screen
   holds thumbnails, not full-resolution frames. A grid whose images exceed that

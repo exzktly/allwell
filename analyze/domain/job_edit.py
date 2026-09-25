@@ -69,11 +69,12 @@ def _opts_as_pinfo_keys(opts: dict) -> dict:
       trips as a blank because ``_apply_focus_settings`` clears the box on a
       stated zero rather than skipping it.
 
-    A sixth, ``allow_low_disk``, is spelled the same on both sides and still
-    has to be restored by the caller: ``_apply_pipeline_info`` refuses it on
+    A sixth and seventh, ``allow_low_disk`` and ``only_wells``, are spelled
+    the same on both sides and still have to be restored by the caller: ``_apply_pipeline_info`` refuses it on
     purpose, because a sidecar describes some folder's last run and must not
-    re-arm a safety override for the next one. A queued job is a decision the
-    user made for that job, so it does come back.
+    re-arm a safety override for the next one — nor narrow the next run to a
+    subset of wells. A queued job is a decision the user made for that job, so
+    both do come back.
     """
     d = dict(opts)
     raw = d.get("raw")
@@ -137,6 +138,13 @@ class AnalyzeJobEditMixin:
         batch = getattr(self, "_remote_batch_size_edit", None)
         if batch is not None and "remote_batch_size" in opts:
             batch.setText(str(opts["remote_batch_size"] or ""))
+
+        # Refused by ``_apply_pipeline_info`` on purpose — a sidecar's subset
+        # must not narrow the next run — but a queued job's subset is the
+        # decision its author made for that job, so it comes back.
+        only = getattr(self, "_only_wells_edit", None)
+        if only is not None and "only_wells" in opts:
+            only.setText(", ".join(str(w) for w in opts["only_wells"] or ()))
 
         # Blank is a value for these two as well, and _apply_pipeline_info is
         # set-only (`if scratch and ...`, `if in_dir:`) — so hydrating a job

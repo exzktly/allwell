@@ -839,6 +839,24 @@ def wells_needing_force(ctx) -> list[str]:
     )
 
 
+def wells_needing_work(ctx) -> list[str]:
+    """The wells a completion run should be limited to (``--only_wells``).
+
+    The partial wells, which an incremental run finishes, and the ones
+    :func:`wells_needing_force` names — so the run this page hands to Analyze
+    touches no well that is already whole. The same rule as
+    ``datasets.validate.validate_compute.wells_needing_work``, read off the
+    record rather than off a fresh scan; like :func:`wells_needing_force` it
+    has no zero-cell or never-fetched exemption to apply, because the record
+    carries neither.
+    """
+    wells = (_record(ctx).get("wells") or {})
+    return sorted(
+        well for well, rec in wells.items()
+        if isinstance(rec, dict) and rec.get("health") in ("partial", "missing")
+    )
+
+
 def wells_named_on_figures(ctx) -> int:
     """How many loaded wells a figure calls something other than their token.
 

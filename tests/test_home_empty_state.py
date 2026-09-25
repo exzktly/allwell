@@ -228,6 +228,43 @@ def test_a_dataset_with_no_record_forces_nothing():
     assert hc.wells_needing_force(ctx) == []
 
 
+def test_the_completion_run_is_limited_to_the_wells_that_need_work():
+    """Partial and missing-CSV wells; never the complete one. The wrong
+    implementation is the force list, which leaves the partial well out of a
+    run that is meant to finish it."""
+    from review.features.home import collect as hc
+
+    ctx = _ctx_with({
+        "A01": _well("complete"),
+        "A02": _well("partial", covered=4),
+        "A03": _well("missing", covered=8),
+        "A04": _well("csv_only"),
+    })
+    assert hc.wells_needing_work(ctx) == ["A02", "A03"]
+
+
+def test_finish_this_run_hands_analyze_the_subset():
+    """The call the button makes, not only the rule behind it."""
+    from pathlib import Path
+
+    from review.features.home import controller as hctl
+
+    ctx = _ctx_with({"A01": _well("complete"), "A02": _well("partial", covered=4)})
+    ctx.state.dataset.data_dir = Path("/data/plate7/out")
+    ctx.state.dataset.in_dir = Path("/data/plate7/in")
+    seen = {}
+
+    def _open(path, info, *, incremental, force_wells, only_wells):
+        seen.update(path=path, incremental=incremental, force=force_wells,
+                    only=only_wells)
+
+    shell = SimpleNamespace(_open_dataset_in_analyze=_open)
+    ctx.window.window = lambda: shell
+    hctl._complete_run_in_analyze(ctx)
+    assert seen == {"path": Path("/data/plate7"), "incremental": True,
+                    "force": [], "only": ["A02"]}
+
+
 # ── what a Datasets tool is handed ──────────────────────────────────────────
 
 def test_a_datasets_tool_is_given_the_project_folder_not_the_out_dir():

@@ -175,6 +175,29 @@ def wells_needing_force(report: "DatasetReport") -> tuple[str, ...]:
     )
 
 
+def wells_needing_work(report: "DatasetReport") -> tuple[str, ...]:
+    """The wells a completion run should be limited to (``--only_wells``).
+
+    Every well the completion run can do something for: the *partial* ones,
+    which an incremental run finishes, and the ones :func:`wells_needing_force`
+    names. Nothing else is sent, so the run touches no well that is already
+    whole — the reason the handoff carries a subset at all.
+
+    The same two exemptions apply, for the same reasons: a well that segmented
+    zero cells would produce the same empty result again, and one produced on a
+    remote host and never transferred needs a fetch, not a run. A ``csv_only``
+    well (numbers whole, archive gone) is not here either: its CSV rows count
+    as done, so a completion run would skip it — sending it would promise a
+    repair the run does not make.
+    """
+    return tuple(
+        w.well for w in report.wells
+        if well_health(w) in ("partial", "missing")
+        and not w.zero_cell_recorded
+        and not w.not_fetched_recorded
+    )
+
+
 @dataclass(frozen=True)
 class ScanProgress:
     """Optional callbacks that follow a :func:`build_report` scan while it runs.

@@ -19,6 +19,7 @@ from datasets.validate.validate_compute import (
     read_dataset_settings,
     well_health,
     wells_needing_force,
+    wells_needing_work,
 )
 from datasets.validate.view import ValidatePage
 from datasets.validate.worker import ValidateWorker
@@ -46,6 +47,7 @@ class ValidateController(DatasetToolController):
         # the ones an incremental run skips forever. Carried to the completion
         # handoff as its per-well force list.
         self._force_wells: tuple[str, ...] = ()
+        self._only_wells: tuple[str, ...] = ()
 
         self.page = ValidatePage()
         self.page.checkRequested.connect(self._on_check)
@@ -154,6 +156,7 @@ class ValidateController(DatasetToolController):
         # log never recorded that the scan had even finished, let alone what
         # it concluded.
         self._force_wells = wells_needing_force(report)
+        self._only_wells = wells_needing_work(report)
         self.page.append_log(f"✓ {summary}")
         self.page.dashboard.set_done(summary)
         self.page.show_report(report)
@@ -171,6 +174,7 @@ class ValidateController(DatasetToolController):
         # sidecar had just failed to read.
         self.page.show_failure(message)
         self._force_wells = ()
+        self._only_wells = ()
         self._last_result = (False, message, "")
 
     def _on_finished(self) -> None:
@@ -194,7 +198,9 @@ class ValidateController(DatasetToolController):
         to report: pressing Run again did nothing for the very wells it named.
 
         So the dataset's own recorded sidecar goes with it, and the run is asked
-        for FOV-level incremental mode.
+        for FOV-level incremental mode — limited to the wells this check found
+        needing work (``wells_needing_work``), so a repair run touches nothing
+        that is already whole.
         """
         if self._on_open_in_analyze is None or not dataset_root:
             return
@@ -215,6 +221,7 @@ class ValidateController(DatasetToolController):
             self.page.append_log(warning)
             self.page.show_note(warning)
         self._on_open_in_analyze(
-            dataset_root, info, incremental=True, force_wells=list(self._force_wells))
+            dataset_root, info, incremental=True, force_wells=list(self._force_wells),
+            only_wells=list(self._only_wells))
 
     # ── lifecycle ────────────────────────────────────────────────────────────

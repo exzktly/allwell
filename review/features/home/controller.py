@@ -932,7 +932,8 @@ def _complete_run_in_analyze(ctx) -> None:
     * a plain re-run *skips* any well whose archive and CSV both exist, however
       few of its FOV-groups landed, which is precisely the state this page
       exists to report. So the run is asked for FOV-level incremental mode, and
-      the wells an incremental run would skip forever are named explicitly.
+      the wells an incremental run would skip forever are named explicitly —
+      and the run is limited to the wells that need work at all.
 
     Reached through the top-level window because the Analyze pane is the outer
     shell's, not Review's; ``ctx.window`` is Review's own. Duck-typed and
@@ -951,6 +952,7 @@ def _complete_run_in_analyze(ctx) -> None:
         dict(getattr(ctx.state.dataset, "pipeline_info", None) or {}),
         incremental=True,
         force_wells=hc.wells_needing_force(ctx),
+        only_wells=hc.wells_needing_work(ctx),
     )
 
 

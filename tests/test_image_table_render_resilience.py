@@ -8,7 +8,9 @@ drive — into a table that looked finished but wasn't:
   entirely empty) table and no message;
 * a scan that came up empty was written into the cross-Generate image cache, so
   a drive that stalled for a moment left those wells reading "(no image)" for
-  the rest of the session, whatever happened afterwards;
+  the rest of the session, whatever happened afterwards. An empty scan is kept
+  now only when it is an answer about the dataset — the folders exist and the
+  walk finished — and retried whenever it might be about the moment;
 * a mask / threshold cell whose segmentation mask couldn't be resolved fell
   through to the plain intensity image — indistinguishable from a cell with no
   signal above threshold, and the reason a threshold view came out half
@@ -82,6 +84,60 @@ def test_empty_scan_is_not_pinned_and_retries_on_the_next_pass(monkeypatch):
     IC.reset_scan_misses(ctx)        # the next Generate starts a new pass
     assert IC._load_well_channel(ctx, cache, "A01", "gfp") == {("1", "0"): ref}
     assert calls["n"] == 2
+
+
+def test_a_definitive_empty_scan_is_not_repeated_on_every_pass(monkeypatch, tmp_path):
+    """The folders are there, the walk finished, and they hold no such images:
+    that is an answer about the dataset, so the next Generate does not ask it
+    again. The reported case — a plate brought back from a remote run carries
+    its corrected frames but not its raw inputs, so every Raw cell missed, and
+    because a miss was never kept every zoom / LUT / crop change re-walked
+    every well's archives."""
+    import review.data.image_discovery as idisc
+
+    calls = {"n": 0}
+
+    def _scan(*_a, **_kw):
+        calls["n"] += 1
+        return {}, {}, {}, {}
+
+    monkeypatch.setattr(idisc, "find_well_images_and_masks", _scan)
+    (tmp_path / "in").mkdir()
+    ctx = _ctx(data_dir=tmp_path, in_dir=tmp_path / "in")
+    cache: dict = {}
+    assert IC._load_well_channel(ctx, cache, "A01", "gfp") == {}
+    IC.reset_scan_misses(ctx)                      # the next Generate
+    assert IC._load_well_channel(ctx, cache, "A01", "gfp") == {}
+    assert calls["n"] == 1, "a definitive empty scan was repeated on the next pass"
+
+
+@pytest.mark.parametrize("why", ["folder missing", "walk cut short", "scan raised"])
+def test_an_empty_scan_that_might_be_momentary_is_retried(monkeypatch, tmp_path, why):
+    """The three ways an empty answer can be about the moment rather than the
+    dataset, each of which the next Generate must ask again."""
+    import review.data.image_discovery as idisc
+    from review.data.zip_members import ScanResult
+
+    calls = {"n": 0}
+
+    def _scan(*_a, **_kw):
+        calls["n"] += 1
+        if why == "scan raised":
+            raise OSError("share dropped")
+        empty = ScanResult()
+        if why == "walk cut short":
+            empty.mark_partial("archive could not be opened")
+        return empty, {}, {}, {}
+
+    monkeypatch.setattr(idisc, "find_well_images_and_masks", _scan)
+    data_dir = tmp_path / ("gone" if why == "folder missing" else "")
+    ctx = _ctx(data_dir=data_dir)
+    cache: dict = {}
+    IC._load_well_channel(ctx, cache, "A01", "gfp")
+    IC.reset_scan_misses(ctx)
+    IC._load_well_channel(ctx, cache, "A01", "gfp")
+    assert calls["n"] == 2, f"an empty scan ({why}) was kept instead of retried"
+    assert ("A01", "gfp", "raw") not in cache
 
 
 def test_empty_mask_scan_does_not_pin_the_well(monkeypatch):

@@ -351,6 +351,10 @@ class AnalyzePipelineInfoMixin:
         forced = d.get("force_wells")
         if forced is not None and hasattr(self, "_force_wells_edit"):
             self._force_wells_edit.setText(", ".join(str(w) for w in forced))
+        # ``only_wells`` is deliberately NOT restored, though the sidecar
+        # records it: re-applying a previous run's subset from a folder someone
+        # opened would quietly narrow the next run to wells nobody chose. It is
+        # a per-run decision (analyze/well_scope.py), like ``allow_low_disk``.
 
         # Scratch disk — a recorded value pins the field; absent, it stays blank
         # so the pipeline default (~/.allwell/scratch) applies.

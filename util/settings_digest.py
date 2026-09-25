@@ -128,6 +128,7 @@ NOT_KEYED_ON: dict[str, str] = {
     "force":                 "asks for a re-run; it does not change the result",
     "force_wells":           "the same, for named wells",
     "incremental":           "asks for reuse; it does not change the result",
+    "only_wells":            "which wells run, not how any one is computed",
     "incremental_prior_dir": "where reuse looks, not what is computed",
     "suspend_file":          "where a request to stop early may appear; what "
                              "is computed for the groups that run is unchanged",

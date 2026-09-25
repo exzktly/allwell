@@ -25,7 +25,8 @@ from tests.fixtures.dataset_builder import build_dataset  # noqa: E402
 def _handoff_recorder() -> tuple[dict, object]:
     calls: dict = {}
 
-    def _open(path, pipeline_info=None, *, incremental=False, force_wells=None):
+    def _open(path, pipeline_info=None, *, incremental=False, force_wells=None,
+              only_wells=None):
         calls["path"] = path
         calls["info"] = pipeline_info
         calls["incremental"] = incremental

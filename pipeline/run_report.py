@@ -105,14 +105,22 @@ def collect_run_report(output_dir: Path | str) -> dict:
                 continue
             well = str(rec.get("well") or path.stem)
             wells[well] = rec
-    incomplete = sorted(w for w, r in wells.items() if is_incomplete(r))
-    empty = sorted(w for w, r in wells.items() if found_nothing(r))
+    return block_of(wells)
+
+
+def block_of(wells: dict) -> dict:
+    """The report block for a ``wells`` map, derived fields computed from it.
+
+    The one place the derived fields are built, so a block assembled from this
+    run's files, one merged with a prior run's records, and one restored after
+    a remote fetch cannot summarise their ``wells`` map differently.
+    """
     return {
         "wells": wells,
-        "incomplete_wells": incomplete,
-        "empty_wells": empty,
-        "groups_total": sum(int(r.get("groups_total", 0)) for r in wells.values()),
-        "groups_covered": sum(int(r.get("groups_covered", 0)) for r in wells.values()),
+        "incomplete_wells": sorted(w for w, r in wells.items() if is_incomplete(r)),
+        "empty_wells": sorted(w for w, r in wells.items() if found_nothing(r)),
+        "groups_total": sum(int((r or {}).get("groups_total", 0)) for r in wells.values()),
+        "groups_covered": sum(int((r or {}).get("groups_covered", 0)) for r in wells.values()),
     }
 
 
@@ -264,14 +272,35 @@ def merge_into_pipeline_info(info_path, block: dict, *, atomic_writer) -> None:
         json.dump(existing, fh, indent=2)
 
 
-def finalize_run_report(output_dir, info_path, *, atomic_writer, log) -> None:
+def finalize_run_report(output_dir, info_path, *, atomic_writer, log,
+                        prior_block: dict | None = None,
+                        ran_wells=()) -> None:
     """Fold the per-well records into ``pipeline_info.json`` and log the gap.
 
     Called once at the end of a run. Best-effort throughout: a run must not fail
     because it could not describe itself.
+
+    *prior_block* is the block a ``--only_wells`` run found in the sidecar
+    before rewriting it. That run processes a subset of the plate into a
+    directory holding the rest, so its own records describe only the subset;
+    written alone they would replace the whole plate's record with a handful,
+    and every well outside the subset would lose the record that says whether
+    its output is whole. The prior records survive only for wells outside
+    *ran_wells* (the wells this run processed): a well it ran and that died
+    before writing its own record must end up with **no** record rather than
+    inherit the previous run's — see ``pipeline.sidecar.USER_SIDE_BLOCKS`` on
+    why a stale description is worse than a missing one.
     """
     try:
         report = collect_run_report(output_dir)
+        prior_wells = (prior_block or {}).get("wells")
+        if isinstance(prior_wells, dict):
+            ran = set(ran_wells)
+            prior_wells = {w: r for w, r in prior_wells.items() if w not in ran}
+            # Even when this run recorded nothing: the sidecar rewrite at its
+            # start has already dropped the block, so skipping the write here
+            # would lose the prior records rather than keep them.
+            report = block_of({**prior_wells, **report["wells"]})
         if report.get("wells"):
             merge_into_pipeline_info(
                 info_path, {"run_report": report}, atomic_writer=atomic_writer)
@@ -335,15 +364,7 @@ def merge_fetched_run_report(info_path, prior_block: dict | None) -> bool:
         merged.update(fetched_wells)
     if merged == fetched_wells:
         return False
-    info["run_report"] = {
-        "wells": merged,
-        "incomplete_wells": sorted(
-            w for w, r in merged.items() if is_incomplete(r)),
-        "empty_wells": sorted(
-            w for w, r in merged.items() if found_nothing(r)),
-        "groups_total": sum(int((r or {}).get("groups_total", 0)) for r in merged.values()),
-        "groups_covered": sum(int((r or {}).get("groups_covered", 0)) for r in merged.values()),
-    }
+    info["run_report"] = block_of(merged)
     try:
         write_json_atomic(path, info)
     except OSError:

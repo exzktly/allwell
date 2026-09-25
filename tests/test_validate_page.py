@@ -270,7 +270,8 @@ def test_check_reports_missing_fov_and_offers_completion(qapp, tmp_path):
 
     seen = []
 
-    def _open(path, pipeline_info=None, *, incremental=False, force_wells=None):
+    def _open(path, pipeline_info=None, *, incremental=False, force_wells=None,
+              only_wells=None):
         seen.append(path)
 
     ctrl = ValidateController(on_open_in_analyze=_open)

@@ -486,6 +486,7 @@ class DatasetsTab(QWidget):
     def _open_in_analyze(
         self, dataset_root: str, pipeline_info: dict | None = None,
         *, incremental: bool = False, force_wells: list[str] | None = None,
+        only_wells: list[str] | None = None,
     ) -> None:
         """Hand a folder to the Analyze pane.
 
@@ -494,12 +495,14 @@ class DatasetsTab(QWidget):
         assigned, Validate & Repair passes the dataset's whole recorded
         sidecar. *incremental* asks Analyze for the run mode that fills in a
         partial run's missing FOV-groups rather than skipping wells that
-        already have output.
+        already have output. *only_wells* limits that run to the wells that
+        need it; ``None`` hands over no subset, and the field is cleared.
         """
         if self._on_open_in_analyze is not None and dataset_root:
             self._on_open_in_analyze(
                 Path(dataset_root), pipeline_info or {}, incremental=incremental,
-                force_wells=list(force_wells or []))
+                force_wells=list(force_wells or []),
+                only_wells=list(only_wells or []))
 
     def shutdown(self) -> None:
         """Stop any running feature workers (called on app close)."""

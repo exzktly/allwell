@@ -255,7 +255,8 @@ def summarize(block: dict | None) -> str:
 
 
 def finalize_field_quality(output_dir, info_path, *, atomic_writer, log,
-                           prior_block: dict | None = None) -> None:
+                           prior_block: dict | None = None,
+                           incremental: bool = True, replaced_wells=()) -> None:
     """Fold the per-well quality files into ``pipeline_info.json``.
 
     Called once at the end of a run, mirroring
@@ -274,13 +275,19 @@ def finalize_field_quality(output_dir, info_path, *, atomic_writer, log,
     *prior_block* is the block an incremental run found in the sidecar before
     rewriting it; this run's records are added to it (:func:`merge_wells`)
     before anything is written or summarised, so the log line describes the
-    plate rather than the resumed handful.
+    plate rather than the resumed handful. A ``--only_wells`` run passes its
+    prior block too, for the same reason; unless it is also *incremental* its
+    records re-measured their wells whole, so the prior records of the wells it
+    ran (*replaced_wells*) are dropped first — replaced by this run's, or by
+    nothing if a well died before writing one, never left standing as stale.
     """
     try:
         block = collect_field_quality(output_dir)
         if isinstance(prior_block, dict) and isinstance(prior_block.get("wells"), dict):
-            block = block_of(merge_wells(prior_block["wells"], block["wells"],
-                                         incremental=True))
+            prior = {w: r for w, r in prior_block["wells"].items()
+                     if w not in set(replaced_wells)}
+            block = block_of(merge_wells(prior, block["wells"],
+                                         incremental=incremental))
         if block.get("wells"):
             merge_into_pipeline_info(
                 info_path, {FIELD_QUALITY_BLOCK: block},

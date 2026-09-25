@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from pipeline.well_skip import _canonical_force_wells
 from services.subprocess_text import TEXT_UTF8
 
 HERE = Path(__file__).resolve().parent.parent
@@ -257,6 +258,13 @@ def build_pipeline_args(
     force_wells = [str(w).strip() for w in (opts.get("force_wells") or []) if str(w).strip()]
     if force_wells:
         args += ["--force_wells", *force_wells]
+    # A subset of the plate. Emitted canonical and sorted, so the same subset
+    # typed two ways ("C8, A1" / "a01 c08") is the same argv — the remote run
+    # address hashes the argv, and a spelling must not decide whether a run
+    # reattaches to its own earlier directory.
+    only_wells = sorted(_canonical_force_wells(opts.get("only_wells") or []))
+    if only_wells:
+        args += ["--only_wells", *only_wells]
     # Input/output well compression is always on (no longer a flag) — the
     # pipeline always produces per-well .zip files.
     smfish = opts.get("smfish_tokens", [])

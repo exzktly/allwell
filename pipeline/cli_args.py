@@ -398,6 +398,16 @@ def build_parser() -> argparse.ArgumentParser:
                        "and C08 name the same well."
                    ))
 
+    p.add_argument("--only_wells", nargs="+", default=None, metavar="WELL",
+                   help=(
+                       "Process only these wells and leave every other well's "
+                       "output, and its records in pipeline_info.json, as they "
+                       "are. The run refuses to start if a named well is not in "
+                       "the input. Combine with --incremental to finish partial "
+                       "wells, and with --force_wells to regenerate named ones. "
+                       "Well labels are matched canonically (C8 == C08)."
+                   ))
+
     p.add_argument("--incremental_prior_dir", default=None,
                    help=(
                        "Directory holding the prior per-well CSVs used to build "
@@ -466,3 +476,37 @@ def build_parser() -> argparse.ArgumentParser:
                    ))
 
     return p
+
+
+def qc_options_from_args(args) -> dict:
+    """The ``qc_options`` block ``pipeline_info.json`` records for a run.
+
+    The correction and QC choices a reader needs in order to know how a plate's
+    numbers were produced, taken from the parsed arguments with the defaults the
+    pipeline applies stated explicitly, so an absent flag and its default record
+    the same value.
+    """
+    return {
+        "flatfield": args.flatfield,
+        "background": args.background,
+        "background_well": args.background_well or "",
+        "background_well_map": args.background_well_map or "",
+        "fft_small_nir": int(args.fft_small_nir or 0),
+        "fft_small_fluor": int(args.fft_small_fluor or 0),
+        "mesh_ratio": float(args.mesh_ratio or 3.0),
+        "mesh_sigma": float(args.mesh_sigma or 3.0),
+        "remove_debris": bool(args.qc_remove_debris),
+        "min_area": float(args.qc_min_area or 0.0),
+        "max_area": float(args.qc_max_area or 0.0),
+        "min_solidity": float(args.qc_min_solidity or 0.0),
+        "measure_focus": not args.no_focus_metric,
+        # RECORDED, not applied. The run measures the column and states
+        # the dataset's own cut; Review's Cell Gating tab is what acts
+        # on it, so a cut chosen wrongly costs a tick rather than a
+        # re-run. 0.0 means the run stated none -- which is the default,
+        # because the number depends mostly on the microscope and
+        # nothing in a run can guess it (Review's Cell Gating tab draws
+        # a well's own distribution, which is where a user finds
+        # theirs).
+        "focus_min": float(args.focus_min or 0.0),
+    }

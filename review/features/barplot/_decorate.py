@@ -27,7 +27,7 @@ from review.domain.variable_series import (
 _TRAILING_BANDS = (MIXED_LABEL, UNASSIGNED_LABEL)
 
 
-def decorate_bar_items(ctx, items, *, wells_by_key=None):
+def decorate_bar_items(ctx, items, *, wells_by_key=None, group_mode="well"):
     """``(items, notice)`` — re-inked, re-banded, and what that cost.
 
     *wells_by_key* is the caller's own member key space, or ``None`` for the
@@ -43,6 +43,14 @@ def decorate_bar_items(ctx, items, *, wells_by_key=None):
     mode, one per timepoint in the other. Overwriting either silently would
     take the headers off a figure the user had arranged that way, with nothing
     saying where they went.
+
+    *group_mode* is the collector's ``bar_group_mode`` — which of the two the
+    displaced band was. It decides how that band is folded back into each bar's
+    tick label (:func:`_carry_displaced_band`), because the band is not simply
+    dropped: in multi-timepoint "Group by well" mode every tick reads only
+    ``t=…`` and the sample is named by the header alone, so replacing the header
+    with the variable's value left a figure where no bar said which sample it
+    was.
     """
     colour_id = _setting(ctx, "colour_by_variable")
     split_id = _setting(ctx, "split_by_variable")
@@ -68,6 +76,7 @@ def decorate_bar_items(ctx, items, *, wells_by_key=None):
             notice = _displacement_notice(items, bands)
             for item in items:
                 if item.key in bands:
+                    _carry_displaced_band(item, bands[item.key], group_mode)
                     item.group_key = bands[item.key]
             items = _sorted_into_bands(ctx, items, split_id)
     _record(ctx, notice)
@@ -133,7 +142,33 @@ def _displacement_notice(items, bands) -> str:
         return ""
     return (f"Split by replaced the existing {len(displaced)} band(s) "
             f"({', '.join(sorted(displaced)[:3])}"
-            f"{'…' if len(displaced) > 3 else ''}) — one layout at a time.")
+            f"{'…' if len(displaced) > 3 else ''}) — each bar's label now "
+            f"carries it.")
+
+
+def _carry_displaced_band(item, new_band: str, group_mode: str) -> None:
+    """Fold the band *item* is leaving into its tick label, in place.
+
+    The collector splits a bar's identity across two rows so the tick row stays
+    single-line: in multi-timepoint "Group by well" mode the header is the
+    sample and the tick is ``t=…``; in "Group by timepoint" mode the header is
+    the timepoint and the tick is the sample. Overwriting the header with the
+    variable's value therefore deletes half of every bar's name — in the first
+    mode every bar in a band reads ``t=0``, ``t=24``, ``t=0``, ``t=24`` with
+    nothing saying whose. Both modes come out as ``<sample> t=<timepoint>``, so
+    the figure reads the same whichever arrangement the user split from.
+
+    Nothing to carry when the bar had no band, when the band is the one it is
+    moving to, or when the band only repeated the tick (a single-timepoint
+    "Group by well" figure, where header and tick are both the sample).
+    """
+    old = item.group_key
+    if not old or old == new_band or old == item.display:
+        return
+    if group_mode == "timepoint":
+        item.display = f"{item.display} t={old}"
+    else:
+        item.display = f"{old} {item.display}"
 
 
 def _sorted_into_bands(ctx, items, split_id: str):

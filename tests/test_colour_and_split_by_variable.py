@@ -454,6 +454,81 @@ def test_the_notice_is_cleared_on_a_pass_that_has_nothing_to_say():
     assert slice_.split_notice == ""
 
 
+def _two_tp_ctx(*, group_mode, pool_reps=True):
+    """Two timepoints, CTRL -> HeLa and TREAT -> U2OS, split by cell line."""
+    variable = _line()
+    app = MockApp(
+        per_well_pts={w: [make_agg(0.0, 100.0 + i), make_agg(24.0, 200.0 + i)]
+                      for i, w in enumerate(_WELLS)},
+        selections=_TWO_SETS,
+    )
+    ctx = app._ctx
+    ctx.state.plot.bar_pool_replicates = pool_reps
+    ctx.state.plot.bar_group_mode = group_mode
+    ctx.state.plot.split_by_variable = variable.id
+    ctx.state.selection.variables = sv.VariableSet(
+        variables=(variable,),
+        assignments={variable.id: {"A01": "C0", "A02": "C0",
+                                   "B01": "C1", "B02": "C1"}})
+    return ctx
+
+
+@pytest.mark.parametrize("group_mode, pool_reps, expected", [
+    ("well", True, [("HeLa", "CTRL t=0"), ("HeLa", "CTRL t=24"),
+                    ("U2OS", "TREAT t=0"), ("U2OS", "TREAT t=24")]),
+    ("timepoint", True, [("HeLa", "CTRL t=0"), ("HeLa", "CTRL t=24"),
+                         ("U2OS", "TREAT t=0"), ("U2OS", "TREAT t=24")]),
+    ("well", False, [("HeLa", "A01 [CTRL] t=0"), ("HeLa", "A01 [CTRL] t=24"),
+                     ("HeLa", "A02 [CTRL] t=0"), ("HeLa", "A02 [CTRL] t=24"),
+                     ("U2OS", "B01 [TREAT] t=0"), ("U2OS", "B01 [TREAT] t=24"),
+                     ("U2OS", "B02 [TREAT] t=0"), ("U2OS", "B02 [TREAT] t=24")]),
+])
+def test_a_split_multi_timepoint_figure_keeps_every_bar_named(
+        group_mode, pool_reps, expected):
+    """The reported bug: split a multi-timepoint figure and every bar read only
+    its timepoint.
+
+    In "Group by well" mode the collector puts the sample in the band header and
+    only ``t=…`` on the tick; *Split by* overwrote the header with the value, so
+    the bars read ``t=0, t=24, t=0, t=24`` with nothing naming whose. "Group by
+    timepoint" lost the other half — two bars both called ``CTRL``. Asserted on
+    the exact ``(band, tick)`` pairs, which the pre-fix code fails in both
+    modes: a property like "the ticks differ" is satisfied by ``t=0``/``t=24``.
+    """
+    _use_groups, items, _band = collect_bar_items(
+        _two_tp_ctx(group_mode=group_mode, pool_reps=pool_reps), [0.0, 24.0])
+
+    assert [(i.group_key, i.display) for i in items] == expected
+
+
+def test_a_split_batch_figure_keeps_every_bar_named():
+    """Batch Export builds the same two-row labels, so it has the same hole."""
+    from review.features.barplot.collect import (
+        FC_STATE_OFF, collect_bar_items_for_group,
+    )
+
+    ctx = _two_tp_ctx(group_mode="well")
+    group = _group(members=[("CTRL", ["A01", "A02"]), ("TREAT", ["B01", "B02"])])
+    items = collect_bar_items_for_group(
+        ctx, group, [0.0, 24.0], val_col="gfp_mean_intensity", threshold=0.0,
+        use_sem=True, per_fov_spread=False, fc_state=FC_STATE_OFF,
+        pool_replicates=True, group_mode="well")
+
+    assert [(i.group_key, i.display) for i in items] == [
+        ("HeLa", "CTRL t=0"), ("HeLa", "CTRL t=24"),
+        ("U2OS", "TREAT t=0"), ("U2OS", "TREAT t=24")]
+
+
+def test_a_single_timepoint_split_leaves_the_ticks_alone():
+    """With one timepoint the header only repeated the tick; nothing to carry."""
+    variable = _line()
+    ctx = _ctx(variable=variable, split_by=variable.id,
+               assignments={"A01": "C0", "A02": "C0",
+                            "B01": "C1", "B02": "C1"})
+
+    assert [i.display for i in _items(ctx)] == ["CTRL", "TREAT"]
+
+
 # ── every branch of the collector is decorated ──────────────────────────────
 
 @pytest.mark.parametrize("pool_reps", [True, False])

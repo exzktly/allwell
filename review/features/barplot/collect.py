@@ -761,7 +761,7 @@ def collect_bar_items(
     # the four construction branches above. A sweep that edited the branches
     # would be a sweep with a branch left out, and a figure where some bars
     # honour the control and some do not is worse than one where none does.
-    items, _notice = decorate_bar_items(ctx, items)
+    items, _notice = decorate_bar_items(ctx, items, group_mode=group_mode)
     return use_groups, items, band_lbl
 
 
@@ -1042,7 +1042,8 @@ def collect_bar_items_for_group(
     # would colour the members whose names happened to coincide and leave the
     # rest, which is the half-decorated figure that is worse than none.
     items, _notice = decorate_bar_items(
-        ctx, items, wells_by_key=batch_wells_by_key(members))
+        ctx, items, wells_by_key=batch_wells_by_key(members),
+        group_mode=group_mode)
     return items
 
 

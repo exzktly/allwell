@@ -2084,8 +2084,10 @@ containing a well you have not filled in yet gets `no value`. Those are
 different mistakes with different fixes, so they are never the same colour.
 
 The bar tab already uses bands for timepoints and for wells, so if **Split by**
-replaces a layout you had, it says so on the figure rather than quietly taking
-your headers away.
+replaces a layout you had, it says so on the figure — and the header it took
+away moves onto each bar's own label rather than disappearing. With several
+timepoints selected every bar reads `<sample> t=<timepoint>` (`CTRL t=24`)
+inside its variable band, whether you had grouped by well or by timepoint.
 
 **Batch Export draws them the same way.** A plate exported group by group gets
 the same inks and the same bands as the tab on screen, so a figure you check

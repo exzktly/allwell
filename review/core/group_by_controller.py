@@ -183,11 +183,10 @@ def _gate_sub_split(ctx) -> None:
     figure ignores. Disabled rather than hidden: greying out states a rule the
     user can act on — pick a *Split by* first.
     """
-    if ctx.state.plot.split_by_variable:
-        enabled = True
-    else:
-        enabled = False
-        ctx.state.plot.sub_split_by_variable = ""
+    plot = ctx.state.plot
+    enabled = bool(getattr(plot, "split_by_variable", "") or "")
+    if not enabled and getattr(plot, "sub_split_by_variable", ""):
+        plot.sub_split_by_variable = ""
     combo = ctx.widgets.get_or_none("_plotting_subsplitby_cb")
     if combo is None:
         return

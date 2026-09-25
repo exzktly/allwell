@@ -465,8 +465,8 @@ because the recorded values describe the remote host.
 output — from the run's own record where there is one, otherwise from the
 `pipeline_info.json` beside it, so it works on plates you ran long ago. Nothing
 changes until you press it, so anything you have already typed is safe. The
-reprocessing options — **force**, the per-well force list, and **incremental** —
-are deliberately *not* restored: they describe what the last run was told to do,
+reprocessing options — **force**, the per-well force list, **incremental**, and
+**Only these wells** — are deliberately *not* restored: they describe what the last run was told to do,
 not what you want this one to do. A plate that was forced once would otherwise
 be forced again the moment you loaded its settings back. Both buttons sit on
 their own row beneath the report, so the text has the full width of the sidebar.
@@ -953,6 +953,17 @@ archives and outputs are always written as per-well `.zip` archives. See
   that predates that record carry no such marker and are still treated as up to
   date, so for those — a plate you last analysed some time ago — Force is still
   how you make a settings change take effect.
+- **Only these wells.** Comma-separated wells to process — and no others. Every
+  other well's output, and its records in `pipeline_info.json`, are left
+  exactly as they are, so you can re-run part of a plate without touching the
+  rest. Empty means the whole plate. The run refuses to start if you name a
+  well the input does not hold, and when it starts it says on the run panel
+  which wells it is limited to. Combine it with **Incremental** to finish
+  partial wells and with **Force these wells** to regenerate named ones. It
+  also works for remote runs: only the named wells are uploaded (plus an
+  empty-well blank the correction needs). It is never filled in from a previous
+  run's settings — a subset is a decision for one run. The pipeline flag is
+  `--only_wells`.
 - **Force these wells.** Comma-separated wells to reprocess in full, whatever
   else the run decides. This is the only thing that recovers a well whose
   `<WELL>_out.zip` exists but whose measurements CSV is missing: its own
@@ -1472,7 +1483,8 @@ never processed — all of them open **Analyze** already set up to complete this
 dataset: pointed at the project folder, configured from the run's own recorded
 settings, with *Incremental* on so only the missing fields are processed, and
 with the wells an incremental run would otherwise skip forever listed for a full
-reprocess. You do not have to remember what the original run was told to do; the
+reprocess — and limited, through **Only these wells**, to the wells that need
+work, so nothing already complete is touched. You do not have to remember what the original run was told to do; the
 handoff carries it, and Analyze says on its dashboard what it just set up.
 
 **Opening a dataset always brings you here first**, whichever page you were on
@@ -5912,8 +5924,10 @@ say — the raw log says so and the findings are unaffected.
    across the top of the run panel naming the dataset and confirming what was
    set up, including any wells listed under **Force these wells** — those are
    wells whose images exist but whose measurements CSV is gone, which an
-   incremental run would skip forever, so they are re-segmented in full. Press
-   Run and only the missing `(FOV, timepoint)` pairs are
+   incremental run would skip forever, so they are re-segmented in full.
+   **Only these wells** is filled with the wells that need work — the partial
+   ones and the forced ones — so the run touches nothing that is already
+   whole. Press Run and only the missing `(FOV, timepoint)` pairs are
    processed, merged into the existing per-well CSVs and `<WELL>_out.zip`
    archives; wells that are already complete are left untouched. Without that
    tick a plain re-run would skip every well that already has any output at

@@ -224,7 +224,7 @@ allwell/
 │
 │  ── packages ──
 ├── analyze/                     ← Analyze pane: the form, the run controls, the live log.
-│   │                              Every module but `remote_dialog` is a mixin of the one
+│   │                              Every module but `remote_dialog` and `well_scope` is a mixin of the one
 │   │                              `AnalyzeTab`; the split answers the line budgets in
 │   │                              `tests/test_monolith_budgets.py`, not a division of
 │   │                              responsibility callers can see (§6.1)
@@ -236,13 +236,17 @@ allwell/
 │   │   ├── fields.py           ← entry-boundary numeric validation + the field tables
 │   │   ├── input.py            ← run-dir resolver, OME-TIFF redirect, channel rows,
 │   │   │                          browse-time folder scan
-│   │   └── job_edit.py         ← the inverse of collect_spec, for the queue's edit flow
+│   │   ├── job_edit.py         ← the inverse of collect_spec, for the queue's edit flow
+│   │   └── well_list.py        ← the one parse of a typed well list, and the sentence a
+│   │                              --only_wells run announces itself with
 │   ├── qc_section.py           ← the Quality Control section: the pixel
 │   │                              corrections, the debris gate, and the
 │   │                              per-cell focus measurement and its cut
 │   ├── schema_section.py       ← the Filename Schema section: picker, detection,
 │   │                            readout, and the preview that refreshes them
 │   ├── seg_params.py           ← per-method segmentation params + StarDist thresholds
+│   ├── well_scope.py           ← the Only these wells / Force these wells rows and the
+│   │                              run options they contribute
 │   ├── log_pane.py             ← the output pane — log view, raw-log toggle,
 │   │                              run-outcome surfacing, "Last run ·" card
 │   ├── pinfo.py                ← restore a prior run's pipeline_info into the form
@@ -2988,15 +2992,19 @@ which is what keeps both the removability contract and
 Failures, partial wells, images without measurements, staged-but-never-processed
 — all four route to `run_home_action(ctx, "complete")`, which hands the dataset
 to Analyze through the shell's `_open_dataset_in_analyze`, the same entry point
-Validate & Repair's *Complete this run in Analyze* uses. That carries three
+Validate & Repair's *Complete this run in Analyze* uses. That carries four
 things a bare folder path does not: the dataset's own recorded sidecar (so the
 schema, separator and `csv_prefix` match the run being finished — a mismatched
 prefix reads its done-set from files that do not exist and silently reprocesses
-the plate), FOV-level incremental mode, and the per-well force list. The last is
-`collect.wells_needing_force`, the same rule Validate applies: a well with
-images and no CSV has nothing missing by the incremental diff, so it is skipped
-forever unless named, while a merely partial well the diff does fix. Sending the
-reader to a page that shows them the gap a second time is not a next step.
+the plate), FOV-level incremental mode, the per-well force list, and the subset
+the run is limited to. The force list is `collect.wells_needing_force`, the same
+rule Validate applies: a well with images and no CSV has nothing missing by the
+incremental diff, so it is skipped forever unless named, while a merely partial
+well the diff does fix. The subset is `collect.wells_needing_work` — the partial
+wells plus the forced ones, mirroring `validate_compute.wells_needing_work` —
+sent as `only_wells`, so the completion run touches no well that is already
+whole. Sending the reader to a page that shows them the gap a second time is not
+a next step.
 
 **A Datasets tool is handed the project folder, not the loaded one.** Review's
 `data_dir` is where the CSVs are, which for the pipeline's layout is `out/`;
@@ -5856,9 +5864,13 @@ settings behind the existing output are restored only when the user presses
 *Load these settings*, through the same `_apply_pipeline_info` the manual **Open
 pipeline_info.json** path uses — the journal's `RunSpec` when there is one, the
 sidecar otherwise, so it works on datasets that predate the journal. The
-run-scope knobs (`force`, `force_wells`, `incremental`) are never restored: they
-say what the *last* run was told to do, and silently re-forcing a plate because
-the previous run was forced is the most expensive kind of surprise. **And it
+run-scope knobs (`force`, `force_wells`, `incremental`, `only_wells`) are never
+restored: they say what the *last* run was told to do, and silently re-forcing a
+plate because the previous run was forced — or narrowing the next run to the
+previous run's subset — is the most expensive kind of surprise.
+`_apply_pipeline_info` does not restore `only_wells` from any source either
+(`analyze/pinfo.py`), and does not clear the field: loading settings leaves the
+scope fields as the user had them. **And it
 reports; it does not decide.** Every *claim* in the readout comes back verbatim
 from whatever owns it — `ScopePlan.preview` for what the run will do about
 images added since last time, `completeness`'s own counts for coverage, the
@@ -10053,6 +10065,59 @@ pre-flight cache-hit check that decides whether to launch the pipeline at all,
 the Fetcher's decision to skip a well whose local copy looks complete, and
 verify's judgement of whether the output arrived — so `_RemoteRun` carries
 `force` / `force_wells` and all three consult it. §6.4 has the mechanics.
+
+**Running a subset: `--only_wells`.** `process_microscopy --only_wells W1 W2 …`
+processes the named wells and no others, into a directory that still holds the
+rest of the plate. `pipeline.well_skip.scope_to_only_wells` narrows the run's
+well list once everything that needs the whole plate has had it (the blank
+pairing, the uncovered-well refusal); the flat-field and background models are
+still built from the whole input, so a blank outside the subset still corrects
+it. A named well the input does not hold refuses the run before any image is
+read — a well asked for and silently not run would read afterwards exactly like
+one that ran and was fine. Labels match canonically, as `--force_wells` does.
+`settings_digest` lists it under `NOT_KEYED_ON`: it chooses which wells run, not
+how any one is computed.
+
+The hazard is the end-of-run records. The sidecar is rewritten at the start of
+every run, and `run_report` and `field_quality` are rebuilt at its end from the
+wells *this* run processed — on a subset run, a handful that would replace the
+whole plate's record. So a subset run reads both blocks before the rewrite and
+`finalize_run_report` / `finalize_field_quality` lay its records over them:
+records of wells outside the subset survive; records of the wells it ran are
+dropped first (`ran_wells` / `replaced_wells`), so a well that died before
+describing itself ends with no record rather than inheriting the previous run's
+(`pipeline.sidecar` explains why a stale description is worse than a missing
+one). An incremental subset adds to its wells' field-quality records instead,
+as any incremental run does. `run_check` is handed the whole input's container
+map, not the subset's: it describes the directory the run leaves behind.
+
+The Analyze form carries it as **Only these wells** beside **Force these wells**
+(`analyze/well_scope.py`; `analyze.domain.well_list.parse_well_list` is the one
+parse for both). `build_pipeline_args` emits it canonical and sorted, because
+the remote run address hashes the argv and a spelling must not decide whether a
+run reattaches to its own directory. A run started with a subset says so in the
+log and on the dashboard (`only_wells_note`), since it otherwise looks exactly
+like a whole-plate run with most wells not moving. The processing denominator
+needs no change — the pipeline's own `Zip mode: N well zip(s)` banner is logged
+after the subset is applied — while the Group stage keeps counting the whole
+plate, which is what the local zipper groups.
+
+Remotely, `services.pipeline_runner.scope_staged_to_only_wells` narrows whatever
+`stage_local_zips` returns — applied once to its result rather than inside it,
+because it returns from several branches. The empty-well blanks are uploaded
+whatever the subset says (the host builds its correction from them); the journal
+then tallies such a blank "uploaded only", which is what happened. A named well
+missing locally fails before anything is sent. Incremental staging can keep a
+named well back as already whole, and the host's pipeline would refuse a subset
+naming a well its input lacks, so the argv the host receives is rewritten
+(`argv_with_only_wells`) to the wells actually sent; a subset that is entirely up
+to date ends the run with "nothing to run" rather than launching an empty host
+run. The subset rides in `pipeline_argv_digest`, so a different subset is a
+different run address and never reattaches to another run's directory. The
+fetch's `merge_fetched_run_report` / `merge_fetched_field_quality` keep every
+local record the fetched block does not name — which also means a subset well
+that dies on the host without writing any record keeps its earlier local one;
+the local path does not have that gap.
 
 **What the end-of-run sweep brings back.** Two things beyond the per-well
 outputs, both because a remote run's records are useless if they stay on the

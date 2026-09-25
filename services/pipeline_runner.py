@@ -38,6 +38,7 @@ from pathlib import Path
 from collections.abc import Callable
 
 from util.well_token import blank_wells_for_run
+from pipeline.well_skip import _canonical_force_wells
 from services.input_resolution_service import has_well_zip
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
 from services.remote_config import RemoteHost
@@ -605,6 +606,63 @@ class RunEventQueue(queue.Queue):
             self._on_error()
         super().put(item, block, timeout)
 
+
+
+def scope_staged_to_only_wells(zipped, only_wells, *, keep=()):
+    """Narrow a staged remote upload to a ``--only_wells`` subset.
+
+    Returns ``(zipped, scoped)``: the staged input with every well outside the
+    subset dropped from ``well_zips`` and ``up_to_date_wells``, and the subset's
+    wells actually present (``None`` when there is no subset). Applied once to
+    whatever :func:`stage_local_zips` returns, rather than inside it, because it
+    returns from several branches and a filter placed in only some of them is a
+    subset that uploads the whole plate on the others.
+
+    *keep* names wells that are uploaded whatever the subset says: the
+    empty-well blanks, which the remote pipeline builds its correction from
+    while running none of them as a well. A named well the staged input does
+    not hold raises ``ValueError`` before anything is uploaded — the pipeline
+    would refuse it on the host anyway, after the upload had been paid for.
+    """
+    if not only_wells:
+        return zipped, None
+    from dataclasses import replace
+
+    from util.well_token import canonical_well_label
+
+    wanted = _canonical_force_wells(only_wells)
+    kept_blanks = _canonical_force_wells(keep)
+    present = ({canonical_well_label(Path(p).stem) for p in zipped.well_zips}
+               | {canonical_well_label(w) for w in zipped.up_to_date_wells})
+    missing = sorted(wanted - present)
+    if missing:
+        raise ValueError(
+            f"--only_wells names well(s) not in the input: {', '.join(missing)}")
+    zips = tuple(p for p in zipped.well_zips
+                 if canonical_well_label(Path(p).stem) in wanted | kept_blanks)
+    current = tuple(w for w in zipped.up_to_date_wells
+                    if canonical_well_label(w) in wanted)
+    return (replace(zipped, well_zips=zips, up_to_date_wells=current),
+            sorted(wanted & present))
+
+
+def argv_with_only_wells(argv, wells):
+    """*argv* with its ``--only_wells`` values replaced by *wells*.
+
+    Values run from the flag to the next ``--`` option, which is how argparse
+    reads a ``nargs="+"`` list. Returns a new list.
+    """
+    out, i = [], 0
+    while i < len(argv):
+        if argv[i] == "--only_wells":
+            out += ["--only_wells", *sorted(wells)]
+            i += 1
+            while i < len(argv) and not str(argv[i]).startswith("--"):
+                i += 1
+            continue
+        out.append(argv[i])
+        i += 1
+    return out
 
 class PipelineRunner:
     """Run the pipeline subprocess on a daemon thread and report progress.
@@ -1481,6 +1539,42 @@ class PipelineRunner:
         except Exception as exc:  # surface any failure to the GUI
             self._enqueue_error(f"Failed to start pipeline: {exc}\n")
 
+    def _scope_remote_run(self, zipped, opts: dict, args: list):
+        """Apply a ``--only_wells`` subset to a staged remote run.
+
+        Returns ``(zipped, args, grouped, download_n)``: the staged input
+        narrowed to the subset (the empty-well blanks kept); the argv the host
+        is to run, naming only the wells that were actually sent — incremental
+        staging may keep a named well back as already whole, and the host's
+        pipeline refuses a subset naming a well its input lacks; the wells the
+        Group stage counts, which are the whole plate that was grouped, taken
+        before the subset narrows it; and the Download stage's count, which is
+        the run's own wells. ``None`` when every named well is already whole
+        locally: the run has been ended with a "nothing to run" and the caller
+        returns. Without a subset the input and argv come back unchanged.
+        """
+        grouped = [wz.stem for wz in zipped.well_zips]
+        grouped += [w for w in zipped.up_to_date_wells if w not in grouped]
+        blanks = ()
+        if "empty_well" in (opts.get("background"), opts.get("flatfield")):
+            blanks = blank_wells_for_run(opts.get("background_well", ""),
+                                         opts.get("background_well_map", ""))
+        zipped, scoped = scope_staged_to_only_wells(
+            zipped, opts.get("only_wells"), keep=blanks)
+        if scoped is None:
+            return zipped, args, grouped, len(grouped)
+        current = set(zipped.up_to_date_wells)
+        sent = [w for w in scoped if w not in current]
+        if not sent:
+            # Launching the host with an empty subset would be refused there,
+            # after an upload of nothing had been paid for.
+            for tok in zipped.up_to_date_wells:
+                self._enqueue(("line", f"[remote] ✓ {tok}: up to date (local)\n"))
+            self._enqueue(("done", "Nothing to run: every named well is "
+                                   "already up to date locally.\n"))
+            return None
+        return zipped, argv_with_only_wells(args, sent), grouped, len(scoped)
+
     def _run_pipeline_remote(
         self,
         input_dir: Path,
@@ -1526,6 +1620,10 @@ class PipelineRunner:
                                         opts.get("flatfield"))
                     else ""),
             )
+            scope = self._scope_remote_run(zipped, opts, args)
+            if scope is None:
+                return
+            zipped, args, grouped, download_n = scope
             # Incremental: wells whose local output already covers every input
             # FOV were dropped from the upload. Surface a synthetic per-well
             # marker so the dashboard shows them complete (they're already
@@ -1547,8 +1645,6 @@ class PipelineRunner:
             # survivors narrowed the rail's shared denominator while the set of
             # grouped wells kept all of them, which is how the rail came to read
             # "Group 40/6".
-            grouped = [wz.stem for wz in zipped.well_zips]
-            grouped += [w for w in zipped.up_to_date_wells if w not in grouped]
             self._enqueue(("zipper_start", len(grouped)))
             for stem in grouped:
                 self._enqueue(("zipper_well", stem))
@@ -1562,8 +1658,10 @@ class PipelineRunner:
             # upload is over, so until then the Upload rail row (and the
             # headline naming the same count) divided the wells being sent by
             # the whole plate.
+            # Download is the run's wells, which on a --only_wells run is the
+            # subset rather than the plate that was grouped.
             for _stage, _n in (("group", len(grouped)),
-                               ("download", len(grouped)),
+                               ("download", download_n),
                                ("upload", len(zipped.well_zips))):
                 self._enqueue(("stage_total", (_stage, _n)))
 

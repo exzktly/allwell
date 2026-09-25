@@ -1503,6 +1503,7 @@ class AllWellApp(QMainWindow):
     def _open_dataset_in_analyze(
         self, dataset_path: Path, pipeline_info: dict | None = None,
         *, incremental: bool = False, force_wells: list[str] | None = None,
+        only_wells: list[str] | None = None,
     ) -> None:
         """Point the Analyze pane at a dataset folder and switch to it.
 
@@ -1517,7 +1518,8 @@ class AllWellApp(QMainWindow):
           finishes a partial one is configured exactly as the run that started
           it — together with ``incremental=True``, the run mode that processes
           the missing FOV-groups instead of skipping every well that already
-          has output.
+          has output, and ``only_wells`` — the wells that still need work — so
+          the run touches nothing that is already whole.
 
         The input field is written **after** the settings are applied, not
         before: a full sidecar's ``execution_options`` carries the ``input_dir``
@@ -1549,7 +1551,14 @@ class AllWellApp(QMainWindow):
         force_edit = getattr(self._analyze, "_force_wells_edit", None)
         if force_edit is not None and forced:
             force_edit.setText(", ".join(forced))
-        if incremental or forced:
+        only = [str(w).strip() for w in (only_wells or []) if str(w).strip()]
+        only_edit = getattr(self._analyze, "_only_wells_edit", None)
+        if only_edit is not None:
+            # Always written — cleared when the caller names no subset. A
+            # subset left in the field from earlier would otherwise quietly
+            # narrow the run this handoff is setting up.
+            only_edit.setText(", ".join(only))
+        if incremental or forced or only:
             reveal = getattr(self._analyze, "reveal_section", None)
             if callable(reveal):
                 reveal("Compute Options")
@@ -1557,11 +1566,11 @@ class AllWellApp(QMainWindow):
         if callable(refresh):
             refresh()
         self._announce_analyze_handoff(
-            dataset_path, bool(pipeline_info), incremental, forced)
+            dataset_path, bool(pipeline_info), incremental, forced, only)
 
     def _announce_analyze_handoff(
         self, dataset_path: Path, applied_settings: bool, incremental: bool,
-        force_wells: list[str] | None = None,
+        force_wells: list[str] | None = None, only_wells: list[str] | None = None,
     ) -> None:
         """State on the Analyze dashboard what the handoff just configured.
 
@@ -1576,6 +1585,11 @@ class AllWellApp(QMainWindow):
             else "settings NOT loaded — check the schema, channel tokens and "
                  "CSV prefix before running"
         )
+        if only_wells:
+            bits.append(
+                f"only the {len(only_wells)} well(s) that need work will run "
+                f"({', '.join(only_wells[:6])}{'…' if len(only_wells) > 6 else ''})"
+                " — every other well is left as it is")
         if incremental:
             bits.append("Incremental is on, so only missing FOVs are processed")
         if force_wells:

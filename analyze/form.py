@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from analyze.form_chrome import AnalyzeFormChromeMixin
+from analyze.well_scope import build_well_scope_rows, well_scope_options
 from analyze.domain.fields import (  # noqa: F401 — re-exported for analyze.tab
     _INT_FIELDS,
     _numeric_option_errors,
@@ -339,22 +340,9 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
             "all process in full; wells that are already complete are left "
             "untouched.")
         sec.layout().addWidget(self._incremental_cb)
-        # Per-well force, as a visible field rather than hidden run state: it
-        # re-segments the named wells from scratch, which is expensive and
-        # overwrites their outputs, so it must never be something the user
-        # cannot see or clear. Validate & Repair's completion handoff fills it
-        # with the wells an incremental run would otherwise skip forever.
-        fw_row = self._row(sec, "Force these wells")
-        self._force_wells_edit = QLineEdit(fw_row)
-        self._force_wells_edit.setPlaceholderText("(none)")
-        self._force_wells_edit.setToolTip(
-            "Comma-separated wells to reprocess in full, whatever else the run "
-            "decides. A well whose <WELL>_out.zip exists but whose measurements "
-            "CSV is missing looks complete to an incremental run — its archive "
-            "members are counted as already done — so only forcing it "
-            "regenerates the CSV. Re-segments those wells and overwrites their "
-            "outputs; everything else is unaffected.")
-        fw_row.layout().addWidget(self._force_wells_edit, 1)
+        # Per-well scope — Only these wells / Force these wells — as visible
+        # fields; see analyze/well_scope.py.
+        build_well_scope_rows(self, sec)
 
     def _build_scratch_section(self, parent: QWidget) -> None:
         """Scratch-disk picker — the very last option before the Run controls.
@@ -687,9 +675,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
             # background model), but it never clears a True the form set: with
             # nothing appended it returns before touching the key.
             incremental=self._incremental_cb.isChecked(),
-            force_wells=[w.strip() for w in
-                         self._force_wells_edit.text().replace(";", ",").split(",")
-                         if w.strip()],
+            **well_scope_options(self),
             cpu_only=self._cpu_only_cb.isChecked(),
             allow_low_disk=self._allow_low_disk_cb.isChecked(),
             tf_threads=self._tf_threads_edit.text(),

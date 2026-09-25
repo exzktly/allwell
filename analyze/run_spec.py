@@ -26,6 +26,7 @@ from PySide6.QtWidgets import QMessageBox, QPushButton, QWidget
 
 from analyze.domain.fields import _numeric_option_errors
 from analyze.domain.job_edit import AnalyzeJobEditMixin
+from analyze.domain.well_list import only_wells_note
 from core.safe import swallowed
 from services.pipeline_service import find_pipeline_script
 from services.run_detect import (
@@ -107,6 +108,12 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
             # under the layout the form shows.
             self._log_line(self._detection_note, "INFO")
             self._dashboard.set_status(self._detection_note)
+        scope = only_wells_note(spec.opts)
+        if scope:
+            # Same reason, and the status names both when both apply.
+            self._log_line(scope, "INFO")
+            self._dashboard.set_status(
+                " — ".join(n for n in (self._detection_note, scope) if n))
         self._runner.start(
             pipeline,
             spec.runner_opts(),

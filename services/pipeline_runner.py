@@ -1539,7 +1539,7 @@ class PipelineRunner:
         except Exception as exc:  # surface any failure to the GUI
             self._enqueue_error(f"Failed to start pipeline: {exc}\n")
 
-    def _scope_remote_run(self, zipped, opts: dict, args: list):
+    def _scope_remote_run(self, zipped, opts: dict, args: list) -> tuple | None:
         """Apply a ``--only_wells`` subset to a staged remote run.
 
         Returns ``(zipped, args, grouped, download_n)``: the staged input

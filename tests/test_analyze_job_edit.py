@@ -43,6 +43,7 @@ _OPTS = {
     "force": True,
     "incremental": True,
     "force_wells": ["A1", "B2"],
+    "only_wells": ["A1", "B2", "C3"],
     "cpu_only": True,
     "allow_low_disk": True,
     "tf_threads": "4",

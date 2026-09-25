@@ -212,6 +212,7 @@ def snapshot(ctx) -> dict:
         "group_by_variable": str(ctx.state.plot.group_by_variable or ""),
         "colour_by_variable": str(ctx.state.plot.colour_by_variable or ""),
         "split_by_variable": str(ctx.state.plot.split_by_variable or ""),
+        "sub_split_by_variable": str(ctx.state.plot.sub_split_by_variable or ""),
         "fold_change": _snapshot_fold_change(ctx),
         "export_style_prefs": _nondefault_export_prefs(ctx),
         "export_axis_prefs": _snapshot_axis_prefs(ctx),
@@ -682,7 +683,8 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> list[str]:
             failed.append("focus timepoint")
             swallowed()
 
-    for _key in ("group_by_variable", "colour_by_variable", "split_by_variable"):
+    for _key in ("group_by_variable", "colour_by_variable", "split_by_variable",
+                 "sub_split_by_variable"):
         if _key in state:
             try:
                 setattr(ctx.state.plot, _key, str(state.get(_key) or ""))

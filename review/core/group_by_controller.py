@@ -33,6 +33,7 @@ NO_VARIABLE_LABEL = "Wells / groups"
 #: What the two popover combos call "do not do this".
 NO_COLOUR_LABEL = "Plate colours"
 NO_SPLIT_LABEL = "One band"
+NO_SUBSPLIT_LABEL = "No sub-bands"
 
 #: The centre tabs whose renderer actually reads *Colour by* and *Split by*.
 #:
@@ -66,10 +67,26 @@ DECORATED_TABS = frozenset({"Bar Plots"})
 #: rather than the shared Decorate button, and its visibility does not depend on
 #: which tab is showing. Folding it in would mean a fourth and fifth column used
 #: by one row each — the registry-for-two-things shape, one row further on.
+#:
+#: The third row is the second level of *Split by*: bands within each band.
+#: It is only meaningful inside a first split, so :func:`refresh_decoration_combos`
+#: disables it while *Split by* reads "One band" and :func:`set_decoration_variable`
+#: clears it when the first split is cleared — a sub-split held in state with no
+#: split to nest inside would be a setting the figure silently ignores.
 DECORATION_CONTROLS = (
     ("colour_by_variable", "_plotting_colourby_cb", NO_COLOUR_LABEL),
     ("split_by_variable", "_plotting_splitby_cb", NO_SPLIT_LABEL),
+    ("sub_split_by_variable", "_plotting_subsplitby_cb", NO_SUBSPLIT_LABEL),
 )
+
+#: The caption each decoration combo carries in the Decorate popover, keyed by
+#: its state field. Beside the roster rather than in it: five call sites unpack
+#: the roster's three columns, and only the popover builder needs this one.
+DECORATION_TITLES = {
+    "colour_by_variable": "Colour by",
+    "split_by_variable": "Split by",
+    "sub_split_by_variable": "Then by",
+}
 
 
 def _combo(ctx):
@@ -149,11 +166,38 @@ def refresh_decoration_combos(ctx) -> None:
             # next redraw decorates by a variable nothing offers.
             setattr(ctx.state.plot, field, "")
 
+    _gate_sub_split(ctx)
+
     button = ctx.widgets.get_or_none("_plotting_decorate_btn")
     if button is not None:
         vset = getattr(ctx.state.selection, "variables", None)
         has_variables = bool(getattr(vset, "variables", ()) or ())
         button.setVisible(has_variables and _current_tab_decorates(ctx))
+
+
+def _gate_sub_split(ctx) -> None:
+    """Keep the second split level inside a first one.
+
+    With no first split there is nothing to nest bands inside, so the setting
+    is cleared and its combo disabled rather than left holding a value the
+    figure ignores. Disabled rather than hidden: greying out states a rule the
+    user can act on — pick a *Split by* first.
+    """
+    if ctx.state.plot.split_by_variable:
+        enabled = True
+    else:
+        enabled = False
+        ctx.state.plot.sub_split_by_variable = ""
+    combo = ctx.widgets.get_or_none("_plotting_subsplitby_cb")
+    if combo is None:
+        return
+    if not enabled:
+        combo.blockSignals(True)
+        combo.setCurrentIndex(0)
+        combo.blockSignals(False)
+    combo.setEnabled(enabled)
+    combo.setToolTip("" if enabled else "Choose a Split by variable first — "
+                     "these bands are drawn inside its bands.")
 
 
 def _current_tab_decorates(ctx) -> bool:
@@ -171,7 +215,7 @@ def _current_tab_decorates(ctx) -> bool:
 
 
 def set_decoration_variable(ctx, field: str, variable_id: str) -> None:
-    """Apply *Colour by* or *Split by* and redraw every tab.
+    """Apply *Colour by*, *Split by* or *Then by* and redraw every tab.
 
     Through the bus for the same reason *Group by* is: these are cross-tab
     settings, and a direct redraw would leave the other tabs coloured the
@@ -187,6 +231,11 @@ def set_decoration_variable(ctx, field: str, variable_id: str) -> None:
     if field not in {name for name, _widget, _label in DECORATION_CONTROLS}:
         return
     setattr(ctx.state.plot, field, str(variable_id or ""))
+    if field in ("split_by_variable", "sub_split_by_variable"):
+        # Either side can break the nesting rule: clearing the first split
+        # orphans the second, and a second chosen with no first has nothing
+        # to sit inside.
+        _gate_sub_split(ctx)
     with swallow("request a redraw after a plot decoration change"):
         ctx.bus.plot_options_changed.emit(ctx.state.plot)
 

@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from review.core.tab_controller import on_tab_change
 from review.core.group_by_controller import (
     DECORATION_CONTROLS as _DECORATION_CONTROLS,
+    DECORATION_TITLES as _DECORATION_TITLES,
 )
 from core.safe import swallow, swallowed
 from ui import theme
@@ -376,7 +377,7 @@ def build_centre(win, parent: QWidget) -> None:
         win._ctx.widgets.register("_plotting_decorate_btn", _dec_btn)
         for _field, _name, _label in _DECORATION_CONTROLS:
             _cb = win._ctx.widgets.register(_name, _QComboBox(
-                "Colour by" if _field == "colour_by_variable" else "Split by"))
+                _DECORATION_TITLES[_field]))
 
             def _on_decorate(_idx: int, field=_field, combo=_cb) -> None:
                 from review.core.group_by_controller import (

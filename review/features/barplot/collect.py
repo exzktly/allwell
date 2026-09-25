@@ -130,6 +130,11 @@ class BarItem:
     # this item is itself a pooled column).
     tp: float = 0.0
     group_key: str = ""
+    # The second band level, inside ``group_key``: set only by the *Then by*
+    # decoration (``_decorate.decorate_bar_items``), "" otherwise. A sub-band
+    # is identified by the ``(group_key, subgroup_key)`` pair, never by
+    # ``subgroup_key`` alone — the same dose sits inside every cell line.
+    subgroup_key: str = ""
 
 
 def _bar_debug(msg: str) -> None:
@@ -1328,30 +1333,74 @@ def drop_redundant_cluster_keys(items: list[BarItem]) -> None:
             it.group_key = ""
 
 
+#: The extra x-distance between two adjacent sub-bands of one band — and the
+#: amount the gap between bands grows by when they hold sub-bands, so that gap
+#: (1.5 units) stays three times this one. The hierarchy then reads from
+#: spacing alone: a wide gap separates cell lines, a narrow one separates doses
+#: within a line.
+SUBGROUP_GAP = 0.5
+
+
 def clustered_x_positions(items: list[BarItem]) -> list[float]:
-    """Compute clustered integer x-positions from ``BarItem.group_key``.
+    """Compute clustered x-positions from ``BarItem.group_key``.
 
     Items sharing the same ``group_key`` get contiguous adjacent positions; a
     one-unit gap is inserted between clusters. When every item has an empty
     or unique ``group_key``, this reduces to ``list(range(len(items)))`` —
     matching the legacy single-tp single-cluster layout exactly.
+
+    Inside a band, a change of ``subgroup_key`` inserts the narrower
+    :data:`SUBGROUP_GAP`, and the gap between two sub-banded bands grows by the
+    same amount so it stays the wider of the two. Positions are no longer integers once a second
+    split level is on. Every consumer already takes these positions as given
+    (``bar_idx_at_x`` / ``bar_guide_x`` exist because gaps made them
+    non-consecutive), so nothing downstream rounds them.
     """
     xs: list[float] = []
     cur_x = 0.0
     last_gk: str | None = None
+    last_sub = ""
     for i, item in enumerate(items):
         gk = item.group_key or ""
+        sub = item.subgroup_key or ""
         if i == 0:
             xs.append(cur_x)
-            last_gk = gk
+            last_gk, last_sub = gk, sub
             continue
         if gk and gk == last_gk:
-            cur_x += 1.0
+            cur_x += 1.0 + (SUBGROUP_GAP if sub != last_sub else 0.0)
+        elif gk and last_gk:
+            # Between bands. Widened by the sub-band gap when either side is
+            # sub-banded, so the band gap stays visibly the larger of the two
+            # rather than half a unit away from it.
+            cur_x += 2.0 + (SUBGROUP_GAP if (sub or last_sub) else 0.0)
         else:
-            cur_x += 2.0 if gk and last_gk and gk != last_gk else 1.0
+            cur_x += 1.0
         xs.append(cur_x)
-        last_gk = gk
+        last_gk, last_sub = gk, sub
     return xs
+
+
+def subcluster_centers(items, xs: list[float]):
+    """Yield ``(subgroup_key, centre_x)`` for each contiguous sub-band.
+
+    Keyed on the ``(group_key, subgroup_key)`` pair and on contiguity rather
+    than on the label: ``1 µM`` inside HeLa and ``1 µM`` inside U2OS are two
+    sub-bands with one name, and :func:`cluster_centers`' label-keyed pooling
+    would draw a single header between them, over the wrong bars.
+    """
+    run_key = None
+    run: list[float] = []
+    for it, x in zip(items, xs):
+        sub = getattr(it, "subgroup_key", "") or ""
+        key = (it.group_key or "", sub)
+        if key != run_key:
+            if run_key is not None and run_key[1] and run:
+                yield run_key[1], sum(run) / len(run)
+            run_key, run = key, []
+        run.append(x)
+    if run_key is not None and run_key[1] and run:
+        yield run_key[1], sum(run) / len(run)
 
 
 def bar_idx_at_x(xdata: float, n: int, xs: list[float] | None = None) -> int:

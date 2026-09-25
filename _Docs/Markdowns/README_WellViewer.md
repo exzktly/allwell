@@ -2068,7 +2068,8 @@ one well selected can be four drawn. That is what "group the plate by this
 variable" has to mean, and the note on the figure counts the wells it brought in
 so it is not a silent change to every number on screen.
 
-Group by, Colour by and Split by are cleared when you open a different dataset.
+Group by, Colour by, Split by and Then by are cleared when you open a different
+dataset.
 They name that plate's variables, and the next plate's are different ones.
 
 **Colour by and Split by**, in the band's **Decorate** popover beside it, use a
@@ -2088,6 +2089,14 @@ replaces a layout you had, it says so on the figure — and the header it took
 away moves onto each bar's own label rather than disappearing. With several
 timepoints selected every bar reads `<sample> t=<timepoint>` (`CTRL t=24`)
 inside its variable band, whether you had grouped by well or by timepoint.
+
+**Then by** adds a second level of bands *inside* each Split-by band. Split by
+`Cell line` and then by `Dose`, and each cell line's band is divided into one
+sub-band per dose, in the order you gave the doses: the cell lines are named on
+a row above the doses, and a wider gap separates two cell lines than two doses
+within one. Then by is greyed out until Split by holds a variable, and clearing
+Split by clears it too — bands inside nothing would just be bands. Like the
+first split, it moves no number and drops no bar.
 
 **Batch Export draws them the same way.** A plate exported group by group gets
 the same inks and the same bands as the tab on screen, so a figure you check

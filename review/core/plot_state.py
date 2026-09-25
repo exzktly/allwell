@@ -111,6 +111,10 @@ class PlotState:
     # by cell line and the other by dose.
     colour_by_variable: str = ""
     split_by_variable: str = ""
+    # A second level of bands inside each *Split by* band — cell line, then
+    # dose within it. Inert without ``split_by_variable``, which the controller
+    # enforces by clearing this whenever that one is cleared.
+    sub_split_by_variable: str = ""
     legend_visible: dict[str, bool] = field(default_factory=_default_legend)
     # Show the ON/OFF threshold marker overlaid on plots (the vertical line /
     # shaded band at ThreshFracOn on the Distribution, line-plot CDF, and smFISH

@@ -1088,8 +1088,17 @@ def draw_grouped_bar_mode(
         bar_color=mono_bar_color(ctx.state.plot),
         ctx=ctx,
     )
+    # Not when *Split by* displaced the clusters: the split has replaced each
+    # cluster's well/rset identity with the variable's value and moved the
+    # sample onto every tick (``_decorate._carry_displaced_band``), so a footer
+    # here would only repeat the band header already drawn above the panel,
+    # once per panel. Keyed on the notice the decorator records exactly when it
+    # displaced a band, not on the setting: a split whose variable produced no
+    # bands left the well clusters in place, and they still want their footer.
+    _slice = ctx.state.feature_slice("bar")
     if (str(getattr(ctx.state.plot, "bar_group_mode", "well") or "well") == "well"
-            and len(target_ts) > 1):
+            and len(target_ts) > 1
+            and not str(getattr(_slice, "split_notice", "") or "")):
         # Group-label size is scoped per-axis by the Properties "Axis #" selector
         # (like the other Axes-section controls), so resolve it per panel from the
         # figure's buckets rather than one flat global size for every panel.
@@ -1119,11 +1128,14 @@ def draw_grouped_bar_mode(
     # Cluster headers (_annotate_cluster_headers) sit at y≈1.02 on ax_mean only;
     # when any survive normalization, push the title up so it clears them rather
     # than overlapping. items were normalized in place by render_bar_items.
+    # A second split level (*Then by*) stacks a second header row, so the title
+    # clears both.
     _has_cluster_headers = any(getattr(it, "group_key", "") for it in items)
+    _has_sub_headers = any(getattr(it, "subgroup_key", "") for it in items)
     ax_mean.set_title(
         f"{_ch} {_metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold",
-        pad=18 if _has_cluster_headers else 6,
+        pad=(30 if _has_sub_headers else 18) if _has_cluster_headers else 6,
     )
     ax_mean.set_ylabel(f"{_ch} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(

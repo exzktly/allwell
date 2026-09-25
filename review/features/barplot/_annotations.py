@@ -23,7 +23,7 @@ from review.core.plot_annotations import (
     annotate_value,
 )
 from review.features.barplot._decorate import bar_legend_entries
-from review.features.barplot.collect import cluster_centers
+from review.features.barplot.collect import cluster_centers, subcluster_centers
 from core.safe import swallowed
 from review.domain.numeric import is_number
 
@@ -62,16 +62,35 @@ def user_y_ceiling(ctx, ax) -> float | None:
         return None
 
 
+#: How far above the sub-band row the band row sits, in points, when a second
+#: split level is on. One 8 pt line plus a little air.
+_BAND_ROW_LIFT_PT = 11
+
+
 def annotate_cluster_headers(items, xs: list[float], ax) -> None:
-    """Per-cluster label centred above the mean panel."""
+    """Per-cluster label centred above the mean panel.
+
+    With a second split level (*Then by*), two rows: the sub-band labels sit
+    where the band labels normally do, directly over their bars, and the band
+    labels move up a line above them — outer above inner, the way a nested
+    table header reads.
+    """
     if not items or not xs:
         return
     from review.core.plot_style import follows_theme, tokens_for
-    _fg = tokens_for(ax)[1]
+    _fg, _muted = tokens_for(ax)[1], tokens_for(ax)[2]
+    subs = list(subcluster_centers(items, xs))
+    lift = _BAND_ROW_LIFT_PT if subs else 0
     for gk, cx in cluster_centers(items, xs):
-        follows_theme(ax.text(cx, 1.02, gk, transform=ax.get_xaxis_transform(),
-                              ha="center", va="bottom", fontsize=8,
-                              fontweight="bold", color=_fg))
+        follows_theme(ax.annotate(
+            gk, xy=(cx, 1.02), xycoords=ax.get_xaxis_transform(),
+            xytext=(0, lift), textcoords="offset points",
+            ha="center", va="bottom", fontsize=8, fontweight="bold",
+            color=_fg, annotation_clip=False))
+    for sub, cx in subs:
+        follows_theme(ax.text(cx, 1.02, sub, transform=ax.get_xaxis_transform(),
+                              ha="center", va="bottom", fontsize=7,
+                              color=_muted), muted=True)
 
 
 def mark_undefined_spread(ax, x: float, y: float, color: str) -> None:

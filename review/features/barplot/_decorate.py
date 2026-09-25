@@ -54,6 +54,11 @@ def decorate_bar_items(ctx, items, *, wells_by_key=None, group_mode="well"):
     """
     colour_id = _setting(ctx, "colour_by_variable")
     split_id = _setting(ctx, "split_by_variable")
+    # Only ever inside a first split: bands within nothing are just bands, and
+    # promoting the second level to the first would draw a layout the user did
+    # not choose. The controller clears it alongside the first; this is the
+    # same rule for a state that reached here some other way (a restored file).
+    sub_id = _setting(ctx, "sub_split_by_variable") if split_id else ""
     if not colour_id and not split_id:
         _record(ctx, "")
         return items, ""
@@ -78,7 +83,15 @@ def decorate_bar_items(ctx, items, *, wells_by_key=None, group_mode="well"):
                 if item.key in bands:
                     _carry_displaced_band(item, bands[item.key], group_mode)
                     item.group_key = bands[item.key]
-            items = _sorted_into_bands(ctx, items, split_id)
+            sub_bands = (member_bands(ctx, "bar", sub_id, wells_by_key)
+                         if sub_id else {})
+            for item in items:
+                # Only bars that joined a band get a sub-band. A bar outside
+                # the split's key space keeps its own layout whole.
+                item.subgroup_key = (sub_bands.get(item.key, "")
+                                     if item.key in bands else "")
+            items = _sorted_into_bands(ctx, items, split_id,
+                                       sub_id if sub_bands else "")
     _record(ctx, notice)
     return items, notice
 
@@ -171,7 +184,7 @@ def _carry_displaced_band(item, new_band: str, group_mode: str) -> None:
         item.display = f"{old} {item.display}"
 
 
-def _sorted_into_bands(ctx, items, split_id: str):
+def _sorted_into_bands(ctx, items, split_id: str, sub_id: str = ""):
     """The items re-ordered so each band is contiguous, in the user's order.
 
     Contiguous because ``clustered_x_positions`` gives adjacent positions to
@@ -182,7 +195,16 @@ def _sorted_into_bands(ctx, items, split_id: str):
     **Stable within a band**, so the drag order the user set is preserved
     inside each one. Sorting on the band alone would be a second ordering rule
     silently overriding theirs.
+
+    With *sub_id*, the same again one level down: each band's bars are sorted
+    into contiguous sub-bands in that variable's own order, still stably, so
+    within a sub-band the drag order survives too.
     """
     order = {label: i for i, label in enumerate(band_order(ctx, split_id))}
     fallback = len(order) + 1
-    return sorted(items, key=lambda item: order.get(item.group_key, fallback))
+    sub_order = ({label: i for i, label in enumerate(band_order(ctx, sub_id))}
+                 if sub_id else {})
+    sub_fallback = len(sub_order) + 1
+    return sorted(items, key=lambda item: (
+        order.get(item.group_key, fallback),
+        sub_order.get(item.subgroup_key, sub_fallback) if sub_order else 0))

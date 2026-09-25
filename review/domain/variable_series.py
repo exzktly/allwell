@@ -306,11 +306,17 @@ def band_order(ctx, variable_id: str) -> list:
     Used to lay the clusters out. The two non-values sort last, because they are
     not part of the series: a `no value` band wedged between 1 µM and 3 µM
     would read as a dose.
+
+    **In the drawn spelling** — :func:`value_label`, unit included — because
+    that is what :func:`member_bands` hands the decorator and what this list is
+    looked up with. Listing the bare ``value.label`` matched only unitless
+    variables: every band of a ``Dose (µM)`` split missed the lookup, fell to
+    the fallback rank, and the bands came out in member order instead.
     """
     variable = _variable(ctx, variable_id)
     if variable is None:
         return []
-    return [value.label for value in (variable.values or ())] + [
+    return [value_label(variable, value.id) for value in (variable.values or ())] + [
         MIXED_LABEL, UNASSIGNED_LABEL]
 
 
@@ -319,14 +325,21 @@ def legend_entries(ctx, variable_id: str, used_labels) -> list:
 
     Only the ones drawn: a legend listing six doses over a figure showing two
     is a claim about what is on screen, and the reader counts the legend.
+
+    *used_labels* arrive in :func:`value_label`'s spelling (they come from
+    :func:`member_bands`), so the match and the entry are made in that spelling
+    too. Matching the bare ``value.label`` left the legend of any variable with
+    a unit empty — a figure inked by dose with no key to the inks.
     """
     variable = _variable(ctx, variable_id)
     if variable is None:
         return []
     used = set(used_labels or ())
     palette = colors_for(_vset(ctx), variable_id)
-    entries = [(value.label, palette[value.id])
-               for value in (variable.values or ()) if value.label in used]
+    entries = [(label, palette[value.id])
+               for value in (variable.values or ())
+               for label in (value_label(variable, value.id),)
+               if label in used]
     if MIXED_LABEL in used:
         entries.append((MIXED_LABEL, MIXED_COLOR))
     if UNASSIGNED_LABEL in used:

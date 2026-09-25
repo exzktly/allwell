@@ -81,6 +81,43 @@ def test_choosing_a_variable_in_the_band_reaches_the_state(viewer_app, widget_na
     )
 
 
+def test_the_then_by_combo_nests_inside_split_by(viewer_app):
+    """*Then by* on the real app: disabled until *Split by* holds a variable,
+    wired to its own field once it does, and cleared with *Split by*.
+
+    The wrong implementations this excludes: a combo connected to nothing (the
+    field stays empty), one connected to ``split_by_variable`` (that field
+    changes instead), and one left holding its value after the first split is
+    cleared — a setting the figure then silently ignores.
+    """
+    from PySide6.QtCore import Qt
+
+    def disabled_itself(widget):
+        # The combo's *own* flag. ``isEnabled`` also reads every ancestor, and
+        # on an app with no dataset open the whole plotting band is disabled —
+        # so ``not isEnabled()`` held whatever this combo did, which is how the
+        # first version of this test passed on its opening assertion vacuously.
+        return widget.testAttribute(Qt.WidgetAttribute.WA_ForceDisabled)
+
+    ctx = _with_variables(viewer_app)
+    split = ctx.widgets.get_or_none("_plotting_splitby_cb")
+    then = ctx.widgets.get_or_none("_plotting_subsplitby_cb")
+    assert then is not None, "_plotting_subsplitby_cb was never registered"
+    assert ctx.state.plot.split_by_variable == ""
+    assert disabled_itself(then)
+
+    split.setCurrentIndex(split.findData("line"))
+    assert not disabled_itself(then)
+    then.setCurrentIndex(then.findData("dose"))
+    assert ctx.state.plot.sub_split_by_variable == "dose"
+    assert ctx.state.plot.split_by_variable == "line"
+
+    split.setCurrentIndex(0)
+    assert ctx.state.plot.sub_split_by_variable == ""
+    assert then.currentIndex() == 0
+    assert disabled_itself(then)
+
+
 def test_choosing_the_first_entry_clears_the_setting(viewer_app):
     """The other direction. A connection that only ever *set* a value would
     leave the plot grouped after the user chose "Wells / groups"."""

@@ -72,7 +72,7 @@ from util.fov import sort_key as _fov_sort_key
 from pipeline.cli_args import (  # noqa: F401 — re-exported for callers/tests
     DEFAULT_SEGMENTATION_METHOD,
     FLATFIELD_MODES,
-    build_parser,
+    build_parser, qc_options_from_args,
 )
 from pipeline.input_layout import (  # noqa: F401 — re-exported for callers/tests
     find_well_folders,
@@ -208,14 +208,14 @@ from pipeline.settings_record import (
 )
 from util.settings_digest import settings_digest
 from pipeline.well_skip import (
-    _canonical_force_wells,
+    _canonical_force_wells, scope_to_only_wells,
     incremental_for_well as _incremental_for_well,
     output_exists_for_well,
     output_exists_for_well_folder,
 )
 from pipeline.run_report import (
     clear_run_report,
-    finalize_run_report,
+    finalize_run_report, read_run_report_block,
     record_well_completeness,
 )
 from pipeline.completeness import record_run_check
@@ -3373,9 +3373,13 @@ def main() -> None:
     # Write the pipeline_info.json sidecar before any image work so the
     # well-viewer / image-resolver have schema metadata available even if
     # processing crashes partway through. That rewrite drops the field-quality
-    # block; an incremental run adds to it, so it is read first (see the end).
+    # and run-report blocks; an incremental or --only_wells run adds to them
+    # rather than replacing the plate's, so they are read first (see the end).
+    carry = bool(args.incremental or args.only_wells)
     prior_quality = (_field_quality.read_field_quality_block(
-        output_dir / PIPELINE_INFO_FILENAME) if args.incremental else None)
+        output_dir / PIPELINE_INFO_FILENAME) if carry else None)
+    prior_report = (read_run_report_block(output_dir / PIPELINE_INFO_FILENAME)
+                    if args.only_wells else None)
     try:
         info_path = write_pipeline_info(
             output_dir,
@@ -3389,30 +3393,7 @@ def main() -> None:
             cytoplasm_token=args.cytoplasm_token or "",
             min_nucleus_area_px=args.min_nucleus_area_px,
             shape_features=list(args.shape_features or []),
-            qc_options={
-                "flatfield": args.flatfield,
-                "background": args.background,
-                "background_well": args.background_well or "",
-                "background_well_map": args.background_well_map or "",
-                "fft_small_nir": int(args.fft_small_nir or 0),
-                "fft_small_fluor": int(args.fft_small_fluor or 0),
-                "mesh_ratio": float(args.mesh_ratio or 3.0),
-                "mesh_sigma": float(args.mesh_sigma or 3.0),
-                "remove_debris": bool(args.qc_remove_debris),
-                "min_area": float(args.qc_min_area or 0.0),
-                "max_area": float(args.qc_max_area or 0.0),
-                "min_solidity": float(args.qc_min_solidity or 0.0),
-                "measure_focus": not args.no_focus_metric,
-                # RECORDED, not applied. The run measures the column and states
-                # the dataset's own cut; Review's Cell Gating tab is what acts
-                # on it, so a cut chosen wrongly costs a tick rather than a
-                # re-run. 0.0 means the run stated none -- which is the default,
-                # because the number depends mostly on the microscope and
-                # nothing in a run can guess it (Review's Cell Gating tab draws
-                # a well's own distribution, which is where a user finds
-                # theirs).
-                "focus_min": float(args.focus_min or 0.0),
-            },
+            qc_options=qc_options_from_args(args),
             phase_token=args.phase_token or "",
             execution_options=vars(args),
         )
@@ -3599,6 +3580,10 @@ def main() -> None:
     if well_zips:
         refuse_images_only_in_ignored_folders(input_dir, well_zips)
     refuse_uncovered_wells(blank_groups, well_zips, well_folders)
+    plate_containers = dict(well_zips or well_folders or [])  # run_check's, below
+    well_zips, well_folders = scope_to_only_wells(
+        well_zips, well_folders, args.only_wells, refuse=parser.error, log=log)
+    ran_wells = [w for w, _p in well_zips or well_folders or []]
 
     # Precompute per-channel flat-field models once (basic / empty_well). The
     # gaussian mode needs no precompute (estimated per image in the worker), and
@@ -3743,7 +3728,8 @@ def main() -> None:
     # pipeline/run_report.py.
     finalize_run_report(
         output_dir, output_dir / PIPELINE_INFO_FILENAME,
-        atomic_writer=_safe_atomic_text_write, log=log,
+        atomic_writer=_safe_atomic_text_write, log=log, prior_block=prior_report,
+        ran_wells=ran_wells,
     )
 
     # And each well's per-field quality metrics, the same way and for a
@@ -3753,6 +3739,8 @@ def main() -> None:
     _field_quality.finalize_field_quality(
         output_dir, output_dir / PIPELINE_INFO_FILENAME,
         atomic_writer=_safe_atomic_text_write, log=log, prior_block=prior_quality,
+        incremental=bool(args.incremental),
+        replaced_wells=() if args.incremental else ran_wells,
     )
 
     # Auto-threshold: every well is processed and the output zips, per-well CSVs
@@ -3771,7 +3759,7 @@ def main() -> None:
     record_run_check(
         info_path=output_dir / PIPELINE_INFO_FILENAME,
         output_dir=output_dir,
-        in_containers=dict(well_zips or well_folders or []),
+        in_containers=plate_containers,
         schema=schema,
         sep=sep,
         csv_prefix=args.csv_prefix,

@@ -10,7 +10,8 @@ Three decisions live here, and they are the same three every run makes per well:
   folder-mode twin), so a plain re-run can skip it;
 * is this well on the caller's per-well force list
   (``_canonical_force_wells`` normalises that list, since ``C8`` and ``C08``
-  name the same well and the two sides come from different places);
+  name the same well and the two sides come from different places), or
+  outside the caller's ``--only_wells`` subset (``select_only_wells``);
 * and therefore, does *this* well run incrementally (``incremental_for_well``).
 """
 
@@ -66,6 +67,47 @@ def _canonical_force_wells(force_wells) -> frozenset[str]:
         if label:
             out.add(label)
     return frozenset(out)
+
+
+def select_only_wells(items, only_wells):
+    """The ``(well_label, path)`` pairs a ``--only_wells`` run processes.
+
+    *only_wells* ``None`` means the whole plate and returns *items* unchanged.
+    Otherwise the pairs whose well is named — matched canonically, for the
+    same reason as :func:`_canonical_force_wells` — are returned together with
+    the named wells the input does not hold. The caller refuses the run on the
+    second list: a well that was asked for and silently not run would read,
+    afterwards, exactly like one that ran and was fine.
+    """
+    if only_wells is None:
+        return list(items), []
+    wanted = _canonical_force_wells(only_wells)
+    kept = [(w, p) for w, p in items if _canonical_well_label(w) in wanted]
+    present = {_canonical_well_label(w) for w, _p in items}
+    return kept, sorted(wanted - present)
+
+
+def scope_to_only_wells(well_zips, well_folders, only_wells, *, refuse, log):
+    """Narrow a run's ``(well_zips, well_folders)`` to its ``--only_wells``.
+
+    Called once the plate's own well list has served everything that needs the
+    whole plate (the blank pairing, the uncovered-well refusal); the flat-field
+    and background models are then still built from the whole input, because a
+    blank outside the subset is a reference, not a well whose output is wanted.
+    *refuse* is the parser's ``error`` — a named well missing from the input
+    stops the run before any image is read.
+    """
+    if only_wells is None:
+        return well_zips, well_folders
+    zips, missing_z = select_only_wells(well_zips, only_wells)
+    folders, missing_f = select_only_wells(well_folders, only_wells)
+    missing = missing_z if well_zips else missing_f
+    if missing:
+        refuse(f"--only_wells names well(s) not in the input: {', '.join(missing)}")
+    log.info("Only wells: %d of %d well(s) — %s. Every other well's output and "
+             "records are left as they are.", len(zips or folders),
+             len(well_zips or well_folders), ", ".join(w for w, _p in zips or folders))
+    return zips, folders
 
 
 def incremental_for_well(incremental: bool, well_label: str, forced) -> bool:

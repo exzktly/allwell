@@ -179,6 +179,15 @@ class PlotState:
     # beeswarm path).
     bar_err_kind: str = "sem"
     bar_show_mode: str = "mean_spread"
+    # Bar plot Properties → Bars. ``bar_width``: each bar's width as a fraction
+    # of one x slot, or 0.0 for the automatic width, which narrows as bars
+    # multiply. ``bar_group_spacing``: with more than one timepoint selected,
+    # the gap between the bars of one timepoint group as a fraction of the bar
+    # width, so each group reads as one block. Read by the tab and the Batch
+    # Export bar figures through ``barplot.collect.bar_geometry_settings``.
+    # Preferences rather than plate facts, so a new dataset keeps them.
+    bar_width: float = 0.0
+    bar_group_spacing: float = 0.2
     # ``bar_color_mode``: what the bar / violin / beeswarm fills are coloured
     # by — "plate" (the default: each column takes the plate-picker colour of
     # its well or replicate group, so the plate is the legend) or "grey" (one

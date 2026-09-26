@@ -46,7 +46,7 @@ from review.features.barplot.collect import (  # noqa: F401
     FC_STATE_OFF,
     _bar_debug,
     bar_drag_xs,
-    bar_err_settings,
+    bar_err_settings, bar_geometry_settings, bar_layout,
     bar_guide_x,
     bar_idx_at_x,
     bar_well_display_label,
@@ -108,6 +108,7 @@ def render_bar_items(
     n_axis_integer: bool | None = None,
     bar_color: str | None = None,
     value_labels: tuple[bool, str] | None = None,
+    bar_geometry=None,
     ctx=None,
 ) -> None:
     """Draw mean / fraction / events-above-threshold bar panels.
@@ -115,8 +116,8 @@ def render_bar_items(
     Consumes ``BarItem`` records emitted by :func:`collect_bar_items`. All
     per-bar state (display label, colour, value, spread, has-flags) lives on
     the item, so the renderer doesn't second-guess what to draw. ``use_groups``
-    only governs the bar-width preset — grouped mode draws slightly wider
-    bars to differentiate visually from the per-well view.
+    only picks the automatic width; *bar_geometry* (Properties → Bars) overrides
+    it and spaces timepoint groups — read off *ctx* unless Batch Export passes it.
 
     *bar_color* is the Properties → Colours mode resolved by the caller
     (``domain.bar_colors.mono_bar_color``): a colour string paints every bar
@@ -144,7 +145,7 @@ def render_bar_items(
         f"render_bar_items use_groups={use_groups} n={n} keys={keys!r} xlabels={xlabels!r}"
     )
 
-    xs = clustered_x_positions(items)
+    bar_w, xs = bar_layout(items, use_groups, bar_geometry or bar_geometry_settings(ctx))
     # Stash the real positions (aligned to the key order) so the drag-reorder
     # hit-test maps clicks to the right column when clusters insert gaps.
     if ctx is not None:
@@ -164,7 +165,6 @@ def render_bar_items(
                  round(it.n_above_spread, 4)) for it in items])
     )
     has_clusters = bool(xs and any(_ != i for i, _ in enumerate(xs)))
-    bar_w = min(0.65 if use_groups else 0.6, 5.0 / max(n, 1))
     for i, item in enumerate(items):
         x = xs[i] if i < len(xs) else i
         # The placeholder / undefined-spread marks below deliberately keep

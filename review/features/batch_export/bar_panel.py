@@ -517,6 +517,7 @@ class BarBatchExportPanel(BatchExportPanel):
         # rather than opening three more.
         from review.features.barplot.controller import (
             annotate_decorations,
+            bar_geometry_settings,
             batch_members,
             cluster_header_pad,
             batch_wells_by_key,
@@ -685,6 +686,10 @@ class BarBatchExportPanel(BatchExportPanel):
             # missing the value labels the on-tab plot carries is a different
             # figure of the same data.
             value_labels=_value_label_settings(self._ctx),
+            # Properties → Bars (width, timepoint-group spacing), for the same
+            # reason: ctx=None here, and a batch figure laid out differently
+            # from the tab it mirrors is a different figure of the same data.
+            bar_geometry=bar_geometry_settings(self._ctx),
         )
         # Room for the cluster header rows. ``apply_ax_style`` above set the
         # standard 6 pt title pad, which the on-tab renderer raises past its

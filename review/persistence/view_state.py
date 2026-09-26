@@ -367,6 +367,14 @@ def _snapshot_bar(ctx) -> dict:
             out["bar_show_mode"] = str(plot.bar_show_mode)
         if hasattr(plot, "bar_color_mode"):
             out["bar_color_mode"] = str(plot.bar_color_mode)
+        # Properties → Bars: the bar width (0.0 = automatic) and the spacing
+        # inside a timepoint group. A saved figure reopened at another width
+        # is the same data drawn differently, which is what a view file exists
+        # to prevent.
+        if hasattr(plot, "bar_width"):
+            out["bar_width"] = float(plot.bar_width)
+        if hasattr(plot, "bar_group_spacing"):
+            out["bar_group_spacing"] = float(plot.bar_group_spacing)
         # The user's drag-to-reorder bar layout. ``ordered_bar_keys``
         # falls back to the canonical order when the saved list doesn't
         # cover the current dataset's keys, so an empty / stale list is
@@ -1078,8 +1086,29 @@ def _apply_bar(ctx, state: dict) -> None:
             plot.bar_show_mode = str(state["bar_show_mode"])
         if str(state.get("bar_color_mode")) in BAR_COLOR_MODES:
             plot.bar_color_mode = str(state["bar_color_mode"])
+        _restore_bar_geometry(plot, state)
         if "bar_order" in state and isinstance(state["bar_order"], list):
             plot.bar_order = [str(k) for k in state["bar_order"]]
+
+
+def _restore_bar_geometry(plot, state: dict) -> None:
+    """Properties → Bars from a saved view, keeping only values that can be drawn.
+
+    A width outside ``[0, 1]`` or a spacing outside ``[0, 5]`` is not a
+    layout, it is a damaged file; each is dropped on its own so a bad width
+    does not also take a good spacing with it, and the field keeps its current
+    value.
+    """
+    for key, lo, hi in (("bar_width", 0.0, 1.0), ("bar_group_spacing", 0.0, 5.0)):
+        if key not in state:
+            continue
+        try:
+            value = float(state[key])
+        except (TypeError, ValueError):
+            swallowed()
+            continue
+        if lo <= value <= hi:
+            setattr(plot, key, value)
 
 
 def _apply_distribution(ctx, state: dict) -> None:

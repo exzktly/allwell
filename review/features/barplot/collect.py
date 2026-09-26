@@ -135,6 +135,79 @@ class BarItem:
     # is identified by the ``(group_key, subgroup_key)`` pair, never by
     # ``subgroup_key`` alone — the same dose sits inside every cell line.
     subgroup_key: str = ""
+    # The timepoint group this bar belongs to: with more than one timepoint
+    # selected, the collector's own cluster identity (the sample under "Group
+    # by well", the timepoint under "Group by timepoint"), "" otherwise. Set
+    # once by :func:`mark_timepoint_runs` and never touched by the decorator,
+    # so it survives *Split by* replacing ``group_key``. Adjacent bars sharing
+    # it are drawn :attr:`BarGeometry.group_spacing` apart rather than a full
+    # slot, so the group reads as one.
+    run_key: str = ""
+
+
+#: The gap between the bars of one timepoint group, as a fraction of the bar
+#: width, when the Properties → Bars setting has not been touched.
+DEFAULT_GROUP_SPACING = 0.2
+
+
+@dataclass(frozen=True)
+class BarGeometry:
+    """The Properties → Bars settings, resolved for one render.
+
+    *width* is a bar's width as a fraction of one x slot, or ``0.0`` for the
+    automatic width (:func:`bar_width_for`). *group_spacing* is the gap between
+    the bars of one timepoint group as a fraction of the bar width. A value
+    object rather than two loose arguments because the tab renderer and Batch
+    Export must lay out the same figure the same way, and Batch Export renders
+    with ``ctx=None`` — so it resolves these once, from the same state, and
+    hands them over, exactly as it does the colour mode.
+    """
+    width: float = 0.0
+    group_spacing: float = DEFAULT_GROUP_SPACING
+
+
+def bar_geometry_settings(ctx) -> BarGeometry:
+    """The Bars settings from *ctx*'s plot state, or the defaults without one."""
+    plot = getattr(getattr(ctx, "state", None), "plot", None)
+    if plot is None:
+        return BarGeometry()
+    return BarGeometry(
+        width=float(getattr(plot, "bar_width", 0.0) or 0.0),
+        group_spacing=float(getattr(plot, "bar_group_spacing",
+                                    DEFAULT_GROUP_SPACING)),
+    )
+
+
+def bar_width_for(n: int, use_groups: bool, geometry: BarGeometry) -> float:
+    """The drawn bar width: the user's, or the automatic one for *n* bars.
+
+    Automatic narrows as bars multiply (five slots' worth shared out) so a
+    crowded figure does not read as a solid block, capped a little wider for
+    pooled groups than for single wells. A user width is clamped to one slot:
+    wider and neighbouring bars would overlap, which draws values on top of
+    each other rather than beside each other.
+    """
+    if geometry.width > 0:
+        return min(1.0, max(0.05, float(geometry.width)))
+    return min(0.65 if use_groups else 0.6, 5.0 / max(n, 1))
+
+
+def mark_timepoint_runs(items, multi_tp: bool) -> None:
+    """Record each bar's timepoint group, in place, before decoration.
+
+    One pass over the finished list for the reason ``_decorate`` is one pass:
+    the collectors build items in several branches, and a rule applied in some
+    of them draws a figure where some groups are tight and some are not.
+    """
+    for item in items:
+        item.run_key = (item.group_key or "") if multi_tp else ""
+
+
+def bar_layout(items, use_groups: bool, geometry: BarGeometry):
+    """``(bar width, x positions)`` for a finished, decorated item list."""
+    bar_w = bar_width_for(len(items), use_groups, geometry)
+    return bar_w, clustered_x_positions(
+        items, bar_w=bar_w, group_spacing=geometry.group_spacing)
 
 
 def _bar_debug(msg: str) -> None:
@@ -766,6 +839,7 @@ def collect_bar_items(
     # the four construction branches above. A sweep that edited the branches
     # would be a sweep with a branch left out, and a figure where some bars
     # honour the control and some do not is worse than one where none does.
+    mark_timepoint_runs(items, len(target_ts) > 1)
     items, _notice = decorate_bar_items(ctx, items, group_mode=group_mode)
     return use_groups, items, band_lbl
 
@@ -1046,6 +1120,7 @@ def collect_bar_items_for_group(
     # already does with ``scope_wells``. Matching against the tab's keys instead
     # would colour the members whose names happened to coincide and leave the
     # rest, which is the half-decorated figure that is worse than none.
+    mark_timepoint_runs(items, len(target_ts) > 1)
     items, _notice = decorate_bar_items(
         ctx, items, wells_by_key=batch_wells_by_key(members),
         group_mode=group_mode)
@@ -1346,7 +1421,9 @@ def drop_redundant_cluster_keys(items: list[BarItem]) -> None:
 SUBGROUP_GAP = 0.5
 
 
-def clustered_x_positions(items: list[BarItem]) -> list[float]:
+def clustered_x_positions(items: list[BarItem], *, bar_w: float | None = None,
+                          group_spacing: float = DEFAULT_GROUP_SPACING
+                          ) -> list[float]:
     """Compute clustered x-positions from ``BarItem.group_key``.
 
     Items sharing the same ``group_key`` get contiguous adjacent positions; a
@@ -1356,23 +1433,37 @@ def clustered_x_positions(items: list[BarItem]) -> list[float]:
 
     Inside a band, a change of ``subgroup_key`` inserts the narrower
     :data:`SUBGROUP_GAP`, and the gap between two sub-banded bands grows by the
-    same amount so it stays the wider of the two. Positions are no longer integers once a second
-    split level is on. Every consumer already takes these positions as given
+    same amount so it stays the wider of the two. Positions are therefore not
+    always integers. Every consumer already takes these positions as given
     (``bar_idx_at_x`` / ``bar_guide_x`` exist because gaps made them
     non-consecutive), so nothing downstream rounds them.
+
+    Adjacent bars of one timepoint group — the same ``run_key`` inside the
+    same band and sub-band — are drawn ``bar_w × (1 + group_spacing)`` apart
+    rather than a full slot, capped at one slot, so the group reads as one
+    block with a sliver between its bars. *bar_w* defaults to the automatic
+    width for these items; the renderer passes the width it will actually
+    draw, through :func:`bar_layout`, so the sliver is measured against the
+    real bars.
     """
+    if bar_w is None:
+        bar_w = bar_width_for(len(items), False, BarGeometry())
+    tight = min(1.0, bar_w * (1.0 + max(0.0, float(group_spacing))))
     xs: list[float] = []
     cur_x = 0.0
-    last_gk: str | None = None
-    last_sub = ""
-    for i, item in enumerate(items):
-        gk = item.group_key or ""
-        sub = item.subgroup_key or ""
-        if i == 0:
+    prev = None
+    for item in items:
+        if prev is None:
             xs.append(cur_x)
-            last_gk, last_sub = gk, sub
+            prev = item
             continue
-        if gk and gk == last_gk:
+        gk, last_gk = item.group_key or "", prev.group_key or ""
+        sub, last_sub = item.subgroup_key or "", prev.subgroup_key or ""
+        run = getattr(item, "run_key", "") or ""
+        if gk and gk == last_gk and sub == last_sub and run and \
+                run == (getattr(prev, "run_key", "") or ""):
+            cur_x += tight
+        elif gk and gk == last_gk:
             cur_x += 1.0 + (SUBGROUP_GAP if sub != last_sub else 0.0)
         elif gk and last_gk:
             # Between bands. Widened by the sub-band gap when either side is
@@ -1382,7 +1473,7 @@ def clustered_x_positions(items: list[BarItem]) -> list[float]:
         else:
             cur_x += 1.0
         xs.append(cur_x)
-        last_gk, last_sub = gk, sub
+        prev = item
     return xs
 
 

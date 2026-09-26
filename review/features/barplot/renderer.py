@@ -73,7 +73,7 @@ from review.features.barplot.controller import (
 )
 
 
-def _annotate_cluster_footers(items, axes, fontsize=8) -> None:
+def _annotate_cluster_footers(items, axes, fontsize=8, xs=None) -> None:
     """Per-cluster well/rset label centred under each axis's xtick row.
 
     Group-by-well multi-tp shows ``t=0`` / ``t=1`` / ... as the per-bar
@@ -84,11 +84,17 @@ def _annotate_cluster_footers(items, axes, fontsize=8) -> None:
     ``fontsize`` may be a number (same size on every panel) or a
     ``callable(ax) -> float`` so the caller can honour a per-axis "Group label
     size" set via the Properties "Axis #" selector.
+
+    *xs* are the positions the bars were drawn at, which the caller passes from
+    the renderer's stash: they depend on the Properties → Bars width and
+    spacing, and a footer laid out on positions computed afresh here would sit
+    off-centre under its own bars.
     """
     if not items or not axes:
         return
     from review.core.plot_style import tokens_for
-    xs = _clustered_x_positions(items)
+    if not xs or len(xs) != len(items):
+        xs = _clustered_x_positions(items)
     for ax in axes:
         _muted_fg = tokens_for(ax)[2]
         _fs = fontsize(ax) if callable(fontsize) else fontsize
@@ -1112,7 +1118,8 @@ def draw_grouped_bar_mode(
             idx = (_axes_order.index(ax) + 1) if ax in _axes_order else 1
             return float(axis_scoped_value(_prefs, idx, "group_label_size", 8))
         _xtick_axes = [ax_mean, ax_frac] + ([ax_n] if ax_n is not None else [])
-        _annotate_cluster_footers(items, _xtick_axes, fontsize=_grp_size)
+        _annotate_cluster_footers(items, _xtick_axes, fontsize=_grp_size,
+                                  xs=list(getattr(ctx.runtime.barplot, "xs", None) or []))
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     _ch = ctx.state.channel.active_channel.upper()
     from review.data.metric_labels import (

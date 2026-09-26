@@ -2494,6 +2494,31 @@ bars are unchanged as well.
 The mode is saved with the rest of the view state, so a dataset reopens in the
 mode you left it in.
 
+#### Bar width and timepoint groups
+
+With more than one timepoint selected, the bars of one timepoint group sit
+close together, a sliver apart, so each group reads as one block:
+
+- under **Group by well**, each sample's bars across the timepoints (`A01 t=0`,
+  `A01 t=24`);
+- under **Group by timepoint**, each timepoint's bars across the samples
+  (`A01 t=0`, `A02 t=0`).
+
+Groups themselves stay a full bar apart, and bands from **Split by** and
+**Then by** keep their wider gaps. With one timepoint nothing changes.
+
+The Bar Plots tab's Properties sidebar has a **Bars** section with two
+settings for this:
+
+- **Width** — **Auto** (the default) narrows the bars as more of them share the
+  plot. Switch Auto off to set a width yourself, as a fraction of one bar's
+  slot: 1.0 makes neighbouring bars touch.
+- **Group spacing** — the gap between the bars of one timepoint group, as a
+  fraction of the bar width. 0 makes them touch; the default is 0.20.
+
+Both apply to the Batch Export bar figures too, and are saved with the view
+state.
+
 #### Line colours — Plate or Grey
 
 The Line Graphs tab has the same **Colours** section, with the same two modes,

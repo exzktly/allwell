@@ -59,6 +59,10 @@ def decorate_bar_items(ctx, items, *, wells_by_key=None, group_mode="well"):
     # not choose. The controller clears it alongside the first; this is the
     # same rule for a state that reached here some other way (a restored file).
     sub_id = _setting(ctx, "sub_split_by_variable") if split_id else ""
+    if sub_id == split_id:
+        # Sub-bands by the band's own variable repeat its header row; the combo
+        # never offers this, so it only arrives from a saved file.
+        sub_id = ""
     if not colour_id and not split_id:
         _record(ctx, "")
         return items, ""
@@ -86,10 +90,9 @@ def decorate_bar_items(ctx, items, *, wells_by_key=None, group_mode="well"):
             sub_bands = (member_bands(ctx, "bar", sub_id, wells_by_key)
                          if sub_id else {})
             for item in items:
-                # Only bars that joined a band get a sub-band. A bar outside
-                # the split's key space keeps its own layout whole.
-                item.subgroup_key = (sub_bands.get(item.key, "")
-                                     if item.key in bands else "")
+                # Both maps cover the same member key space, so a bar gets a
+                # sub-band exactly when it joined a band.
+                item.subgroup_key = sub_bands.get(item.key, "")
             items = _sorted_into_bands(ctx, items, split_id,
                                        sub_id if sub_bands else "")
     _record(ctx, notice)

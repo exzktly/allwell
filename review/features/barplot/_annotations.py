@@ -66,6 +66,26 @@ def user_y_ceiling(ctx, ax) -> float | None:
 #: split level is on. One 8 pt line plus a little air.
 _BAND_ROW_LIFT_PT = 11
 
+#: The mean panel's title pad, in points, for none / one / two header rows.
+#: The standard pad is ``apply_ax_style``'s; each header row adds a line.
+_TITLE_PAD_PT = (6, 18, 30)
+
+
+def cluster_header_pad(items) -> int:
+    """The title pad the mean panel needs to clear its cluster header rows.
+
+    One answer for both figures that draw these headers — the Bar tab and
+    Batch Export's bar panel — because Batch Export styles its title through
+    ``apply_ax_style`` and never reached the renderer's own pad, so its header
+    rows were printed over the panel title and, with a second split level,
+    over the figure's suptitle as well. Call it on the items *after*
+    ``render_bar_items`` has normalised them: that is when a redundant header
+    has been dropped and the rows left are the ones actually drawn.
+    """
+    rows = (1 if any(getattr(it, "group_key", "") for it in items) else 0) + (
+        1 if any(getattr(it, "subgroup_key", "") for it in items) else 0)
+    return _TITLE_PAD_PT[rows]
+
 
 def annotate_cluster_headers(items, xs: list[float], ax) -> None:
     """Per-cluster label centred above the mean panel.

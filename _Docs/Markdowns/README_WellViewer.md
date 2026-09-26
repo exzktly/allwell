@@ -2095,7 +2095,10 @@ inside its variable band, whether you had grouped by well or by timepoint.
 sub-band per dose, in the order you gave the doses: the cell lines are named on
 a row above the doses, and a wider gap separates two cell lines than two doses
 within one. Then by is greyed out until Split by holds a variable, and clearing
-Split by clears it too — bands inside nothing would just be bands. Like the
+Split by clears it too — bands inside nothing would just be bands. It never
+offers the variable Split by is using, since sub-bands by the same variable
+would only repeat the band names. Batch Export draws both header rows too, with
+the panel title moved up to clear them. Like the
 first split, it moves no number and drops no bar.
 
 **Batch Export draws them the same way.** A plate exported group by group gets

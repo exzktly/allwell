@@ -61,6 +61,7 @@ from review.core.plot_annotations import (
 )
 from domain.tp_match import tp_close, tp_close_mask
 from review.features.barplot._annotations import (
+    cluster_header_pad,
     label_bar,
     user_y_ceiling as _user_y_ceiling,
 )
@@ -1129,13 +1130,11 @@ def draw_grouped_bar_mode(
     # when any survive normalization, push the title up so it clears them rather
     # than overlapping. items were normalized in place by render_bar_items.
     # A second split level (*Then by*) stacks a second header row, so the title
-    # clears both.
-    _has_cluster_headers = any(getattr(it, "group_key", "") for it in items)
-    _has_sub_headers = any(getattr(it, "subgroup_key", "") for it in items)
+    # clears both; ``cluster_header_pad`` is shared with Batch Export's figure.
     ax_mean.set_title(
         f"{_ch} {_metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold",
-        pad=(30 if _has_sub_headers else 18) if _has_cluster_headers else 6,
+        pad=cluster_header_pad(items),
     )
     ax_mean.set_ylabel(f"{_ch} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(

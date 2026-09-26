@@ -1260,8 +1260,13 @@ def collect_bar_items_for_app(ctx, target_t: float, *,
 
 
 def cluster_x_for_group_keys(group_keys: list[str]) -> list[float]:
-    """Same cluster-position arithmetic as :func:`clustered_x_positions`
-    but from a parallel list of group_key strings rather than ``BarItem``s.
+    """The one-level cluster-position arithmetic of :func:`clustered_x_positions`,
+    from a parallel list of group_key strings rather than ``BarItem``s.
+
+    One level only: it has no sub-band keys, so it matches
+    :func:`clustered_x_positions` exactly when no item carries a
+    ``subgroup_key``. That holds for every caller, because the per-cell paths
+    build their own keys and are never decorated.
 
     Used by the per-cell renderers (violin / beeswarm) and the batch
     export to compute matching x positions for non-``BarItem`` callers.

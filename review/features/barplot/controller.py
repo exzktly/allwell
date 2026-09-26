@@ -6,7 +6,7 @@ from review.core.plot_annotations import value_label_settings
 from review.features.barplot._annotations import (
     annotate_bar_values,
     mark_undefined_spread as _mark_undefined_spread,
-    annotate_decorations,  # noqa: F401  (also re-exported for batch_export)
+    annotate_decorations, cluster_header_pad,  # noqa: F401  (re-exported for batch_export)
 )
 from review.features.barplot._axis_fit import fit_bar_panels
 from review.domain.numeric import is_number

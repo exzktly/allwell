@@ -691,6 +691,13 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> list[str]:
             except Exception:
                 failed.append(_key.replace("_", " "))
                 swallowed()
+    # A snapshot that states its Split by but predates *Then by* describes a
+    # one-level figure. Keeping whatever sub-split is live now would reopen it
+    # with a second level of bands nobody saved — the stale-setting failure the
+    # present-key rule above otherwise guards against, reached through a key
+    # the older file could not have written.
+    if "split_by_variable" in state and "sub_split_by_variable" not in state:
+        ctx.state.plot.sub_split_by_variable = ""
 
     if "use_fov_replicates" in state:
         # The FOV-spread toggle on Line Graphs / Bar Plots. Set the field, then

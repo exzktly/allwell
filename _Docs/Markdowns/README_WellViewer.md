@@ -2068,7 +2068,8 @@ one well selected can be four drawn. That is what "group the plate by this
 variable" has to mean, and the note on the figure counts the wells it brought in
 so it is not a silent change to every number on screen.
 
-Group by, Colour by and Split by are cleared when you open a different dataset.
+Group by, Colour by, Split by and Then by are cleared when you open a different
+dataset.
 They name that plate's variables, and the next plate's are different ones.
 
 **Colour by and Split by**, in the band's **Decorate** popover beside it, use a
@@ -2088,6 +2089,17 @@ replaces a layout you had, it says so on the figure — and the header it took
 away moves onto each bar's own label rather than disappearing. With several
 timepoints selected every bar reads `<sample> t=<timepoint>` (`CTRL t=24`)
 inside its variable band, whether you had grouped by well or by timepoint.
+
+**Then by** adds a second level of bands *inside* each Split-by band. Split by
+`Cell line` and then by `Dose`, and each cell line's band is divided into one
+sub-band per dose, in the order you gave the doses: the cell lines are named on
+a row above the doses, and a wider gap separates two cell lines than two doses
+within one. Then by is greyed out until Split by holds a variable, and clearing
+Split by clears it too — bands inside nothing would just be bands. It never
+offers the variable Split by is using, since sub-bands by the same variable
+would only repeat the band names. Batch Export draws both header rows too, with
+the panel title moved up to clear them. Like the
+first split, it moves no number and drops no bar.
 
 **Batch Export draws them the same way.** A plate exported group by group gets
 the same inks and the same bands as the tab on screen, so a figure you check
@@ -2481,6 +2493,31 @@ bars are unchanged as well.
 
 The mode is saved with the rest of the view state, so a dataset reopens in the
 mode you left it in.
+
+#### Bar width and timepoint groups
+
+With more than one timepoint selected, the bars of one timepoint group sit
+close together, a sliver apart, so each group reads as one block:
+
+- under **Group by well**, each sample's bars across the timepoints (`A01 t=0`,
+  `A01 t=24`);
+- under **Group by timepoint**, each timepoint's bars across the samples
+  (`A01 t=0`, `A02 t=0`).
+
+Groups themselves stay a full bar apart, and bands from **Split by** and
+**Then by** keep their wider gaps. With one timepoint nothing changes.
+
+The Bar Plots tab's Properties sidebar has a **Bars** section with two
+settings for this:
+
+- **Width** — **Auto** (the default) narrows the bars as more of them share the
+  plot. Switch Auto off to set a width yourself, as a fraction of one bar's
+  slot: 1.0 makes neighbouring bars touch.
+- **Group spacing** — the gap between the bars of one timepoint group, as a
+  fraction of the bar width. 0 makes them touch; the default is 0.20.
+
+Both apply to the Batch Export bar figures too, and are saved with the view
+state.
 
 #### Line colours — Plate or Grey
 

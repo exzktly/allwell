@@ -33,10 +33,12 @@ NO_VARIABLE_LABEL = "Wells / groups"
 #: What the two popover combos call "do not do this".
 NO_COLOUR_LABEL = "Plate colours"
 NO_SPLIT_LABEL = "One band"
+NO_SUBSPLIT_LABEL = "No sub-bands"
 
-#: The centre tabs whose renderer actually reads *Colour by* and *Split by*.
+#: The centre tabs whose renderer actually reads the decoration controls
+#: (*Colour by*, *Split by*, *Then by*).
 #:
-#: The two combos live on the page-level plotting band, which every Plotting
+#: The combos live on the page-level plotting band, which every Plotting
 #: leaf shares — and a control added to the band directly is never hidden by the
 #: per-leaf slot machinery. So they appeared on Bar Plots, Line Graphs, Response
 #: Curves, Scatter, Distribution and Heat Map, and exactly one of those six
@@ -53,8 +55,8 @@ NO_SPLIT_LABEL = "One band"
 #: ``plot_replicate_sets``, so it really does do something everywhere.
 DECORATED_TABS = frozenset({"Bar Plots"})
 
-#: ``(state field, widget name, "no" label)`` for the two decoration controls.
-#: A roster rather than two hand-written blocks: they differ only in those three
+#: ``(state field, widget name, "no" label)`` for the decoration controls.
+#: A roster rather than hand-written blocks: they differ only in those three
 #: strings, and the version that had two blocks grew a difference in the third
 #: — one of them cleared its state when its variable was deleted and the other
 #: did not, so a deleted variable stayed live in the plot with nothing offering
@@ -66,10 +68,26 @@ DECORATED_TABS = frozenset({"Bar Plots"})
 #: rather than the shared Decorate button, and its visibility does not depend on
 #: which tab is showing. Folding it in would mean a fourth and fifth column used
 #: by one row each — the registry-for-two-things shape, one row further on.
+#:
+#: The third row is the second level of *Split by*: bands within each band.
+#: It is only meaningful inside a first split, so :func:`refresh_decoration_combos`
+#: disables it while *Split by* reads "One band" and :func:`set_decoration_variable`
+#: clears it when the first split is cleared — a sub-split held in state with no
+#: split to nest inside would be a setting the figure silently ignores.
 DECORATION_CONTROLS = (
     ("colour_by_variable", "_plotting_colourby_cb", NO_COLOUR_LABEL),
     ("split_by_variable", "_plotting_splitby_cb", NO_SPLIT_LABEL),
+    ("sub_split_by_variable", "_plotting_subsplitby_cb", NO_SUBSPLIT_LABEL),
 )
+
+#: The caption each decoration combo carries in the Decorate popover, keyed by
+#: its state field. Beside the roster rather than in it: five call sites unpack
+#: the roster's three columns, and only the popover builder needs this one.
+DECORATION_TITLES = {
+    "colour_by_variable": "Colour by",
+    "split_by_variable": "Split by",
+    "sub_split_by_variable": "Then by",
+}
 
 
 def _combo(ctx):
@@ -119,22 +137,49 @@ def refresh_group_by_combo(ctx) -> None:
 
 
 def refresh_decoration_combos(ctx) -> None:
-    """Fill *Colour by* and *Split by*, and hide the popover with no variables.
+    """Fill the three decoration combos, and hide the popover with no variables.
 
-    Both list every variable, including the one *Group by* holds. Colouring a
+    Each lists every variable, including the one *Group by* holds. Colouring a
     dose series by dose is redundant rather than wrong, and splitting by the
     variable already grouped on gives one member per band — a legible, if
     pointless, figure. Refusing the combination would be this module deciding
     what a user may look at; there is nothing incorrect to prevent.
+
+    The one exception is *Then by*, which never offers the variable *Split by*
+    holds: sub-bands by the same variable as their bands are one sub-band per
+    band carrying the band's own name — two identical header rows, which is not
+    a figure anyone chose but a repeated label. That is left to
+    :func:`_gate_sub_split`, which runs last so it sees the first split's
+    final value.
     """
     for field, name, no_label in DECORATION_CONTROLS:
-        combo = ctx.widgets.get_or_none(name)
-        if combo is None:
-            continue
-        vset = getattr(ctx.state.selection, "variables", None)
-        variables = list(getattr(vset, "variables", ()) or ())
-        keep = str(getattr(ctx.state.plot, field, "") or "")
+        if field != "sub_split_by_variable":
+            _fill_decoration_combo(ctx, field, name, no_label)
 
+    _gate_sub_split(ctx)
+
+    button = ctx.widgets.get_or_none("_plotting_decorate_btn")
+    if button is not None:
+        vset = getattr(ctx.state.selection, "variables", None)
+        has_variables = bool(getattr(vset, "variables", ()) or ())
+        button.setVisible(has_variables and _current_tab_decorates(ctx))
+
+
+def _fill_decoration_combo(ctx, field: str, name: str, no_label: str,
+                           exclude: str = "") -> None:
+    """List the plate's variables in one decoration combo, keeping its choice.
+
+    *exclude* is a variable id left off the list. A choice that is gone — the
+    variable deleted, or now excluded — falls back to the first entry and is
+    cleared from the state too, or the next redraw decorates by a variable
+    nothing offers.
+    """
+    combo = ctx.widgets.get_or_none(name)
+    keep = str(getattr(ctx.state.plot, field, "") or "")
+    vset = getattr(ctx.state.selection, "variables", None)
+    variables = [v for v in (getattr(vset, "variables", ()) or ())
+                 if not exclude or v.id != exclude]
+    if combo is not None:
         combo.blockSignals(True)
         combo.clear()
         combo.addItem(no_label, "")
@@ -143,17 +188,39 @@ def refresh_decoration_combos(ctx) -> None:
         index = combo.findData(keep)
         combo.setCurrentIndex(index if index >= 0 else 0)
         combo.blockSignals(False)
+    if keep and keep not in {v.id for v in variables}:
+        setattr(ctx.state.plot, field, "")
 
-        if index < 0 and keep:
-            # The variable is gone. Cleared here as well as in the combo, or the
-            # next redraw decorates by a variable nothing offers.
-            setattr(ctx.state.plot, field, "")
 
-    button = ctx.widgets.get_or_none("_plotting_decorate_btn")
-    if button is not None:
-        vset = getattr(ctx.state.selection, "variables", None)
-        has_variables = bool(getattr(vset, "variables", ()) or ())
-        button.setVisible(has_variables and _current_tab_decorates(ctx))
+def _gate_sub_split(ctx) -> None:
+    """Keep the second split level inside a first one, and off the first's variable.
+
+    With no first split there is nothing to nest bands inside, so the setting
+    is cleared and its combo disabled rather than left holding a value the
+    figure ignores. Disabled rather than hidden: greying out states a rule the
+    user can act on — pick a *Split by* first.
+
+    With one, the combo is refilled without the first split's variable, so the
+    list follows *Split by* as it changes; a *Then by* that now names the same
+    variable is cleared by the refill.
+    """
+    plot = ctx.state.plot
+    split = str(getattr(plot, "split_by_variable", "") or "")
+    if not split and getattr(plot, "sub_split_by_variable", ""):
+        plot.sub_split_by_variable = ""
+    if split:
+        _fill_decoration_combo(ctx, "sub_split_by_variable",
+                               "_plotting_subsplitby_cb", NO_SUBSPLIT_LABEL,
+                               exclude=split)
+    combo = ctx.widgets.get_or_none("_plotting_subsplitby_cb")
+    if combo is None:
+        return
+    if not split:
+        _fill_decoration_combo(ctx, "sub_split_by_variable",
+                               "_plotting_subsplitby_cb", NO_SUBSPLIT_LABEL)
+    combo.setEnabled(bool(split))
+    combo.setToolTip("" if split else "Choose a Split by variable first — "
+                     "these bands are drawn inside its bands.")
 
 
 def _current_tab_decorates(ctx) -> bool:
@@ -171,7 +238,7 @@ def _current_tab_decorates(ctx) -> bool:
 
 
 def set_decoration_variable(ctx, field: str, variable_id: str) -> None:
-    """Apply *Colour by* or *Split by* and redraw every tab.
+    """Apply *Colour by*, *Split by* or *Then by* and redraw every tab.
 
     Through the bus for the same reason *Group by* is: these are cross-tab
     settings, and a direct redraw would leave the other tabs coloured the
@@ -187,6 +254,11 @@ def set_decoration_variable(ctx, field: str, variable_id: str) -> None:
     if field not in {name for name, _widget, _label in DECORATION_CONTROLS}:
         return
     setattr(ctx.state.plot, field, str(variable_id or ""))
+    if field in ("split_by_variable", "sub_split_by_variable"):
+        # Either side can break the nesting rule: clearing the first split
+        # orphans the second, and a second chosen with no first has nothing
+        # to sit inside.
+        _gate_sub_split(ctx)
     with swallow("request a redraw after a plot decoration change"):
         ctx.bus.plot_options_changed.emit(ctx.state.plot)
 

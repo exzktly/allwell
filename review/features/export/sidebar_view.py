@@ -545,6 +545,14 @@ class ExportStyleSidebar(QWidget):
                 color_sc.currentChanged.connect(_on_color_mode_change)
                 add_stacked(s_colors, _color_label, color_sc)
 
+        # ── Bars ───────────────────────────────────────────────────────────
+        # Bar width and the spacing inside a timepoint group. Global PlotState
+        # fields like the colour mode above, so the Batch Export bar figures
+        # draw at the same geometry. Only on the Bar plot: no other figure
+        # reads them.
+        if self._is_bar_fig():
+            self._build_bars_section(section, add_row, hrow)
+
         # File format selector intentionally omitted — the Save As… dialog
         # offers PDF / SVG / EPS / PNG via the file filter, so picking the
         # format up front was redundant. The "format" pref (read by
@@ -1816,6 +1824,114 @@ class ExportStyleSidebar(QWidget):
                 return facet not in missing
         return True
 
+    def _build_bars_section(self, section, add_row, hrow) -> None:
+        """Properties → Bars: the bar width and the timepoint-group spacing.
+
+        Both write ``PlotState`` and redraw, the way the Overlays toggles do:
+        they change where bars are placed and how wide they are drawn, which a
+        restyle of the existing artists cannot reach.
+
+        *Width* is either **Auto** — narrower as bars multiply, the layout the
+        plot has always had — or a fixed fraction of one x slot. An explicit
+        toggle rather than a magic ``0`` in the stepper, so the control never
+        shows a number that is not the width being drawn.
+        """
+        from widgets.stepper import Stepper as _Stepper
+
+        plot = self._app._app_state.plot
+        s_bars = section("Bars", expanded=False)
+        preview = QLabel("")
+        preview.setObjectName("Muted")
+        s_bars.setValueWidget(preview)
+
+        width = float(getattr(plot, "bar_width", 0.0) or 0.0)
+        auto_tog = ToggleSwitch("Auto")
+        auto_tog.setChecked(width <= 0)
+        auto_tog.setToolTip(
+            "Automatic width: bars narrow as more of them share the plot. "
+            "Switch off to set the width yourself.")
+        width_step = _Stepper(minimum=0.05, maximum=1.0, single_step=0.05,
+                              value=width if width > 0 else 0.6, decimals=2)
+        width_step.setEnabled(width > 0)
+        width_step.setToolTip(
+            "Bar width as a fraction of one bar's slot — 1.0 makes neighbouring "
+            "bars touch.")
+        spacing_step = _Stepper(
+            minimum=0.0, maximum=2.0, single_step=0.05, decimals=2,
+            value=float(getattr(plot, "bar_group_spacing", 0.2)))
+        spacing_step.setToolTip(
+            "With more than one timepoint selected: the gap between the bars of "
+            "one timepoint group, as a fraction of the bar width — 0 makes them "
+            "touch. The groups themselves stay a full slot apart.")
+
+        def _refresh_preview() -> None:
+            w = float(getattr(plot, "bar_width", 0.0) or 0.0)
+            preview.setText(
+                f"{'Auto' if w <= 0 else f'{w:.2f}'} · "
+                f"{float(getattr(plot, 'bar_group_spacing', 0.2)):.2f}")
+
+        def _redraw() -> None:
+            _refresh_preview()
+            try:
+                self._redraw_active_plot()
+            except Exception:
+                swallowed()
+
+        def _on_auto(on: bool) -> None:
+            plot.bar_width = 0.0 if on else float(width_step.value())
+            width_step.setEnabled(not on)
+            _redraw()
+
+        def _on_width(v: float) -> None:
+            if auto_tog.isChecked():
+                return
+            plot.bar_width = float(v)
+            _redraw()
+
+        def _on_spacing(v: float) -> None:
+            plot.bar_group_spacing = float(v)
+            _redraw()
+
+        auto_tog.toggled.connect(_on_auto)
+        width_step.valueChanged.connect(_on_width)
+        spacing_step.valueChanged.connect(_on_spacing)
+        add_row(s_bars, "Width", hrow(auto_tog, width_step))
+        add_row(s_bars, "Group spacing", spacing_step)
+        self._bars_auto_tog = auto_tog
+        self._bars_width_step = width_step
+        self._bars_spacing_step = spacing_step
+        self._bars_refresh_preview = _refresh_preview
+        _refresh_preview()
+
+    def _resync_bar_geometry(self) -> None:
+        """Re-seed the Bars controls from ``PlotState`` on a panel open.
+
+        The panel is cached per figure, and a view restore or a reset can move
+        these fields without going through it; a control left showing the old
+        width would then write that width back the moment it was touched.
+        Signals blocked for the reason ``_resync_plot_state_segments`` gives.
+        """
+        tog = getattr(self, "_bars_auto_tog", None)
+        if tog is None:
+            return
+        plot = self._app._app_state.plot
+        width = float(getattr(plot, "bar_width", 0.0) or 0.0)
+        for widget, apply in (
+            (tog, lambda: tog.setChecked(width <= 0)),
+            (self._bars_width_step,
+             lambda: self._bars_width_step.setValue(width if width > 0 else 0.6)),
+            (self._bars_spacing_step,
+             lambda: self._bars_spacing_step.setValue(
+                 float(getattr(plot, "bar_group_spacing", 0.2)))),
+        ):
+            widget.blockSignals(True)
+            try:
+                apply()
+            finally:
+                widget.blockSignals(False)
+        self._bars_width_step.setEnabled(width > 0)
+        self._bars_refresh_preview()
+
     def _is_bar_fig(self) -> bool:
         """True only for the Bar plot figure (the colour mode applies there)."""
         return getattr(self._app, "_bar_fig", None) is self._fig
@@ -2112,6 +2228,7 @@ class ExportStyleSidebar(QWidget):
         the handler and redraw on every panel open.
         """
         self._resync_time_interval()
+        self._resync_bar_geometry()
         plot = getattr(self._app._app_state, "plot", None)
         if plot is None:
             return

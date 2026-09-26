@@ -23,7 +23,7 @@ from review.core.plot_annotations import (
     annotate_value,
 )
 from review.features.barplot._decorate import bar_legend_entries
-from review.features.barplot.collect import cluster_centers
+from review.features.barplot.collect import cluster_centers, subcluster_centers
 from core.safe import swallowed
 from review.domain.numeric import is_number
 
@@ -62,16 +62,55 @@ def user_y_ceiling(ctx, ax) -> float | None:
         return None
 
 
+#: How far above the sub-band row the band row sits, in points, when a second
+#: split level is on. One 8 pt line plus a little air.
+_BAND_ROW_LIFT_PT = 11
+
+#: The mean panel's title pad, in points, for none / one / two header rows.
+#: The standard pad is ``apply_ax_style``'s; each header row adds a line.
+_TITLE_PAD_PT = (6, 18, 30)
+
+
+def cluster_header_pad(items) -> int:
+    """The title pad the mean panel needs to clear its cluster header rows.
+
+    One answer for both figures that draw these headers — the Bar tab and
+    Batch Export's bar panel — because Batch Export styles its title through
+    ``apply_ax_style`` and never reached the renderer's own pad, so its header
+    rows were printed over the panel title and, with a second split level,
+    over the figure's suptitle as well. Call it on the items *after*
+    ``render_bar_items`` has normalised them: that is when a redundant header
+    has been dropped and the rows left are the ones actually drawn.
+    """
+    rows = (1 if any(getattr(it, "group_key", "") for it in items) else 0) + (
+        1 if any(getattr(it, "subgroup_key", "") for it in items) else 0)
+    return _TITLE_PAD_PT[rows]
+
+
 def annotate_cluster_headers(items, xs: list[float], ax) -> None:
-    """Per-cluster label centred above the mean panel."""
+    """Per-cluster label centred above the mean panel.
+
+    With a second split level (*Then by*), two rows: the sub-band labels sit
+    where the band labels normally do, directly over their bars, and the band
+    labels move up a line above them — outer above inner, the way a nested
+    table header reads.
+    """
     if not items or not xs:
         return
     from review.core.plot_style import follows_theme, tokens_for
-    _fg = tokens_for(ax)[1]
+    _fg, _muted = tokens_for(ax)[1], tokens_for(ax)[2]
+    subs = list(subcluster_centers(items, xs))
+    lift = _BAND_ROW_LIFT_PT if subs else 0
     for gk, cx in cluster_centers(items, xs):
-        follows_theme(ax.text(cx, 1.02, gk, transform=ax.get_xaxis_transform(),
-                              ha="center", va="bottom", fontsize=8,
-                              fontweight="bold", color=_fg))
+        follows_theme(ax.annotate(
+            gk, xy=(cx, 1.02), xycoords=ax.get_xaxis_transform(),
+            xytext=(0, lift), textcoords="offset points",
+            ha="center", va="bottom", fontsize=8, fontweight="bold",
+            color=_fg, annotation_clip=False))
+    for sub, cx in subs:
+        follows_theme(ax.text(cx, 1.02, sub, transform=ax.get_xaxis_transform(),
+                              ha="center", va="bottom", fontsize=7,
+                              color=_muted), muted=True)
 
 
 def mark_undefined_spread(ax, x: float, y: float, color: str) -> None:

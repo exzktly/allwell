@@ -529,6 +529,348 @@ def test_a_single_timepoint_split_leaves_the_ticks_alone():
     assert [i.display for i in _items(ctx)] == ["CTRL", "TREAT"]
 
 
+# ── a second split level ────────────────────────────────────────────────────
+#
+# The fixture is built so the right and wrong answers differ (§7.8 rule 2):
+# the dose values are declared low-first, but the wells are assigned
+# high-dose-first in member order. A decorator that skipped the inner sort
+# keeps member order (A01 before B01) and is caught; one that sorted the inner
+# level by label or by member order is caught too.
+
+def _nested_ctx(*, split=True, then=True, timepoints=(0.0,)):
+    line = _line()
+    dose = sv.Variable(id="dose", name="Dose", kind=sv.NUMBER, unit="µM",
+                       values=(sv.VariableValue("d0", "0", 0.0),
+                               sv.VariableValue("d1", "10", 10.0)))
+    app = MockApp(
+        per_well_pts={w: [make_agg(t, 100.0 + 10 * i + t) for t in timepoints]
+                      for i, w in enumerate(_WELLS)},
+        selections=[{"name": w, "wells": [w], "hidden": False}
+                    for w in _WELLS],
+    )
+    ctx = app._ctx
+    ctx.state.plot.bar_pool_replicates = True
+    ctx.state.plot.split_by_variable = line.id if split else ""
+    ctx.state.plot.sub_split_by_variable = dose.id if then else ""
+    ctx.state.selection.variables = sv.VariableSet(
+        variables=(line, dose),
+        assignments={
+            line.id: {"A01": "C0", "B01": "C0", "A02": "C1", "B02": "C1"},
+            dose.id: {"A01": "d1", "A02": "d1", "B01": "d0", "B02": "d0"},
+        })
+    return ctx
+
+
+def test_then_by_nests_bands_inside_each_split_band():
+    """Every bar in its line band, then its dose sub-band, in the variables'
+    own orders — HeLa before U2OS, 0 µM before 10 µM inside each."""
+    items = _items(_nested_ctx())
+
+    assert [(i.group_key, i.subgroup_key, i.key) for i in items] == [
+        ("HeLa", "0 µM", "B01"), ("HeLa", "10 µM", "A01"),
+        ("U2OS", "0 µM", "B02"), ("U2OS", "10 µM", "A02"),
+    ]
+
+
+def test_a_variable_with_a_unit_is_banded_in_its_own_order():
+    """``band_order`` listed bare labels (``0``) while the bands are drawn with
+    the unit (``0 µM``), so every lookup missed and a Dose split came out in
+    member order — 10 µM before 0 µM on this fixture."""
+    ctx = _nested_ctx(then=False)
+    ctx.state.plot.split_by_variable = "dose"
+
+    assert [(i.group_key, i.key) for i in _items(ctx)] == [
+        ("0 µM", "B01"), ("0 µM", "B02"), ("10 µM", "A01"), ("10 µM", "A02")]
+
+
+def test_a_variable_with_a_unit_gets_a_legend():
+    """The same mismatch emptied the Colour-by legend for any variable with a
+    unit: bars inked by dose, and no key to the inks."""
+    ctx = _nested_ctx(split=False, then=False)
+    ctx.state.plot.colour_by_variable = "dose"
+    palette = vs.colors_for(ctx.state.selection.variables, "dose")
+
+    assert bar_legend_entries(ctx, _items(ctx)) == [
+        ("0 µM", palette["d0"]), ("10 µM", palette["d1"])]
+
+
+def test_then_by_changes_no_value():
+    """Decoration, not grouping: the same bars with the same numbers."""
+    plain = _items(_nested_ctx(split=False, then=False))
+    nested = _items(_nested_ctx())
+
+    assert ({i.key: i.mean for i in plain}
+            == {i.key: i.mean for i in nested})
+
+
+def test_then_by_without_split_by_is_inert():
+    """Bands inside nothing are just bands; promoting the second level to the
+    first would draw a layout nobody chose."""
+    plain = _items(_nested_ctx(split=False, then=False))
+    items = _items(_nested_ctx(split=False))
+
+    assert [i.subgroup_key for i in items] == [""] * 4
+    assert ([(i.key, i.group_key, i.display) for i in items]
+            == [(i.key, i.group_key, i.display) for i in plain])
+
+
+def test_sub_bands_get_a_narrower_gap_than_bands():
+    """Half a unit between sub-bands inside a band, and the band gap widened by
+    the same half unit so it stays the larger: 1.5 against 0.5."""
+    from review.features.barplot.collect import SUBGROUP_GAP
+
+    xs = clustered_x_positions(_items(_nested_ctx()))
+
+    assert SUBGROUP_GAP == 0.5
+    assert xs == [0.0, 1.5, 4.0, 5.5]
+
+
+def test_a_sub_band_label_repeated_across_bands_gets_a_header_in_each():
+    """``0 µM`` inside HeLa and ``0 µM`` inside U2OS are two sub-bands with one
+    name. Pooling by label — what ``cluster_centers`` does for bands — would
+    centre one header between them, over U2OS's 10 µM bar."""
+    from review.features.barplot.collect import subcluster_centers
+
+    items = _items(_nested_ctx())
+    xs = clustered_x_positions(items)
+
+    assert list(subcluster_centers(items, xs)) == [
+        ("0 µM", 0.0), ("10 µM", 1.5), ("0 µM", 4.0), ("10 µM", 5.5)]
+    assert list(cluster_centers(items, xs)) == [("HeLa", 0.75), ("U2OS", 4.75)]
+
+
+def test_a_sub_band_label_straddling_two_bands_is_two_headers():
+    """The case where keying a sub-band on its label alone goes wrong: HeLa
+    ends with ``0 µM`` and U2OS begins with it, so the two runs sit side by
+    side. Keyed without the band, they merge into one header centred in the
+    gap between the bands."""
+    from review.features.barplot.collect import (
+        BarItem, clustered_x_positions, subcluster_centers,
+    )
+
+    def bar(key, band, sub):
+        return BarItem(key=key, display=key, color="#888888", mean=1.0,
+                       spread=0.0, has_mean=True, frac=0.5, frac_spread=0.0,
+                       has_frac=True, n_above=1.0, n_above_spread=0.0,
+                       group_key=band, subgroup_key=sub)
+
+    items = [bar("B01", "HeLa", "0 µM"),
+             bar("B02", "U2OS", "0 µM"), bar("A02", "U2OS", "10 µM")]
+    xs = clustered_x_positions(items)
+
+    assert xs == [0.0, 2.5, 4.0]
+    assert list(subcluster_centers(items, xs)) == [
+        ("0 µM", 0.0), ("0 µM", 2.5), ("10 µM", 4.0)]
+
+
+def test_then_by_naming_the_split_variable_draws_no_second_row():
+    """Only a saved file can carry it — the combo never offers it — and it
+    would repeat the band row word for word."""
+    ctx = _nested_ctx(then=False)
+    ctx.state.plot.sub_split_by_variable = ctx.state.plot.split_by_variable
+
+    assert [i.subgroup_key for i in _items(ctx)] == [""] * 4
+
+
+def test_the_band_row_is_drawn_above_the_sub_band_row():
+    """Both rows reach the axes, band labels lifted a line above sub-band
+    labels — asserted on the artists, not on the centres behind them."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from review.features.barplot._annotations import annotate_cluster_headers
+
+    items = _items(_nested_ctx())
+    xs = clustered_x_positions(items)
+    fig, ax = plt.subplots()
+    try:
+        annotate_cluster_headers(items, xs, ax)
+        # An Annotation's ``get_position`` is its text offset, not its anchor,
+        # so the anchor is read from ``xy`` where there is one.
+        drawn = {(t.get_text(),
+                  round(float(getattr(t, "xy", t.get_position())[0]), 2),
+                  tuple(getattr(t, "xyann", (0, 0))))
+                 for t in ax.texts}
+    finally:
+        plt.close(fig)
+
+    assert drawn == {
+        ("HeLa", 0.75, (0, 11)), ("U2OS", 4.75, (0, 11)),
+        ("0 µM", 0.0, (0, 0)), ("10 µM", 1.5, (0, 0)),
+        ("0 µM", 4.0, (0, 0)), ("10 µM", 5.5, (0, 0)),
+    }
+
+
+def test_one_split_level_draws_one_header_row():
+    """No sub-bands, no lift: the single-level figure is unchanged."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from review.features.barplot._annotations import annotate_cluster_headers
+
+    items = _items(_nested_ctx(then=False))
+    xs = clustered_x_positions(items)
+    fig, ax = plt.subplots()
+    try:
+        annotate_cluster_headers(items, xs, ax)
+        drawn = sorted((t.get_text(), tuple(getattr(t, "xyann", (0, 0))))
+                       for t in ax.texts)
+    finally:
+        plt.close(fig)
+
+    assert drawn == [("HeLa", (0, 0)), ("U2OS", (0, 0))]
+
+
+def _draw_tab(ctx):
+    """The tab's own grouped-bar renderer on Agg axes; returns what it drew.
+
+    ``draw_grouped_bar_mode`` is the entry point the Bar tab calls, so this
+    covers the figure-level half the collector tests cannot: the title's
+    clearance over the header rows and the per-panel cluster footers. The two
+    stubs are the only Qt it reaches — a widget registry with nothing in it and
+    a canvas whose repaint is a no-op.
+    """
+    from types import SimpleNamespace
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from review.features.barplot.renderer import draw_grouped_bar_mode
+
+    ctx.widgets = SimpleNamespace(get_or_none=lambda _name: None)
+    ctx.state.plot.bar_group_mode = "well"
+    fig, (ax_mean, ax_frac, ax_n) = plt.subplots(3)
+    ctx.runtime.barplot.fig = fig
+    ctx.runtime.barplot.canvas = SimpleNamespace(draw_idle=lambda: None)
+    try:
+        draw_grouped_bar_mode(
+            ctx, ax_mean=ax_mean, ax_frac=ax_frac, ax_n=ax_n, active_rsets=[],
+            target_ts=[0.0, 24.0], tp_str="0", threshold=0.5, band_lbl="SEM",
+            use_sem=True)
+        footers = [t.get_text() for ax in (ax_mean, ax_frac, ax_n)
+                   for t in ax.texts
+                   if tuple(getattr(t, "xyann", (0, 0))) == (0, -32)]
+        pad_pt = ax_mean.titleOffsetTrans.get_matrix()[1][2] * 72 / fig.dpi
+        headers = [t.get_text() for t in ax_mean.texts
+                   if getattr(t, "xy", t.get_position())[1] == 1.02]
+    finally:
+        plt.close(fig)
+    return SimpleNamespace(footers=footers, pad_pt=round(pad_pt, 3),
+                           headers=headers)
+
+
+def test_a_nested_split_figure_clears_both_header_rows_and_drops_footers():
+    """Two header rows need the title lifted past both (30 pt, not 18). And
+    the well footers under each panel go: the split displaced those clusters
+    and moved each sample onto its own tick, so a footer would only repeat the
+    band header once per panel."""
+    drawn = _draw_tab(_nested_ctx(timepoints=(0.0, 24.0)))
+
+    assert drawn.pad_pt == 30.0
+    assert drawn.footers == []
+    assert drawn.headers == ["HeLa", "U2OS",
+                             "0 µM", "10 µM", "0 µM", "10 µM"]
+
+
+def test_a_split_that_produced_no_bands_keeps_the_footers():
+    """The footers go only when the split actually displaced the well clusters.
+    A *Split by* naming a variable the plate no longer has (a saved file, a
+    deleted variable not yet refreshed away) produces no bands, so the wells
+    are still the clusters and still want their footers. Keying the gate on
+    the setting rather than on what the decorator did would drop them."""
+    ctx = _nested_ctx(split=False, then=False, timepoints=(0.0, 24.0))
+    ctx.state.plot.split_by_variable = "a-variable-this-plate-does-not-have"
+
+    drawn = _draw_tab(ctx)
+
+    assert drawn.footers == ["A01", "A02", "B01", "B02"] * 3
+
+
+def test_an_unsplit_multi_timepoint_figure_keeps_its_footers():
+    """The other side of the gate: with no split the well clusters are the
+    user's own layout and each keeps its footer on every panel."""
+    drawn = _draw_tab(_nested_ctx(split=False, then=False,
+                                  timepoints=(0.0, 24.0)))
+
+    assert drawn.pad_pt == 18.0
+    assert drawn.footers == ["A01", "A02", "B01", "B02"] * 3
+
+
+def test_restoring_a_view_saved_before_then_by_clears_it():
+    """A snapshot written before *Then by* existed has ``split_by_variable``
+    and no ``sub_split_by_variable``. Restore assigns only the keys present, so
+    the live sub-split survived and a saved one-level figure reopened with two
+    levels. Saved Plots replays views through this same call."""
+    from review.persistence import view_state
+
+    ctx = _nested_ctx()
+    view_state.restore(ctx, {"group_by_variable": "", "colour_by_variable": "",
+                             "split_by_variable": "cell_line"})
+
+    assert ctx.state.plot.sub_split_by_variable == ""
+    assert [i.subgroup_key for i in _items(ctx)] == [""] * 4
+
+
+def test_a_restore_that_names_no_split_leaves_then_by_to_its_own_key():
+    """The other side: a snapshot that is silent on both keys says nothing
+    about the layout, and must not clear a setting it never described."""
+    from review.persistence import view_state
+
+    ctx = _nested_ctx()
+    view_state.restore(ctx, {"group_by_variable": ""})
+
+    assert ctx.state.plot.sub_split_by_variable == "dose"
+
+
+def _batch_figure(ctx):
+    """Batch Export's real ``_render_bar_group_figure`` for the nested
+    fixture, on a panel built without its Qt form — the method reads only the
+    ctx, the run's axes spec and three form accessors, stubbed here."""
+    from types import SimpleNamespace
+
+    from review.features.batch_export.bar_panel import BarBatchExportPanel
+
+    ctx.widgets = SimpleNamespace(get_or_none=lambda _name: None)
+    panel = BarBatchExportPanel.__new__(BarBatchExportPanel)
+    panel._ctx = ctx
+    panel._run_axes = None
+    panel._selected_export_channel = lambda: "gfp"
+    panel._selected_export_metric_key = lambda *_a: "mean_intensity"
+    panel._export_val_col_for = lambda *_a: "gfp_mean_intensity"
+    group = _group(name="Plate 1 group",
+                   members=[(w, [w]) for w in _WELLS])
+    return panel._render_bar_group_figure(
+        group, [0.0, 24.0], ["0", "24"], 0.5, True, "SEM",
+        pool_replicates=True, group_mode="well")
+
+
+@pytest.mark.parametrize("then", [False, True])
+def test_batch_header_rows_clear_the_panel_title_and_the_suptitle(then):
+    """Batch Export styles its panel title with ``apply_ax_style``'s 6 pt pad
+    and never reached the tab renderer's, so the header rows were printed over
+    the title — and *Then by*'s lifted band row went up into the suptitle.
+    Measured on the rendered extents of the real figure."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    fig = _batch_figure(_nested_ctx(then=then, timepoints=(0.0, 24.0)))
+    FigureCanvasAgg(fig).draw()
+    renderer = fig.canvas.get_renderer()
+    ax = fig.axes[0]
+    headers = {"HeLa", "U2OS", "0 µM", "10 µM"}
+    header_boxes = [t.get_window_extent(renderer) for t in ax.texts
+                    if t.get_text() in headers]
+    title = ax.title.get_window_extent(renderer)
+    suptitle = fig._suptitle.get_window_extent(renderer)
+
+    assert len(header_boxes) == (6 if then else 2)
+    top_of_headers = max(b.y1 for b in header_boxes)
+    assert top_of_headers < title.y0, (top_of_headers, title.y0)
+    assert top_of_headers < suptitle.y0
+
+
 # ── every branch of the collector is decorated ──────────────────────────────
 
 @pytest.mark.parametrize("pool_reps", [True, False])
@@ -563,9 +905,9 @@ def test_a_plate_with_no_groups_is_decorated_too():
 # are combos whose ``currentIndexChanged`` is the whole mechanism, and this
 # repository has shipped a control connected to nothing.
 
-@pytest.fixture
-def band(qtbot):
-    """The two real combos, wired the way ``centre_view`` wires them."""
+def _wire_band(qtbot, ctx):
+    """Real decoration combos on *ctx*, wired the way ``centre_view`` wires
+    them; returns ``(combos by field, emitted redraw requests)``."""
     from types import SimpleNamespace
 
     from widgets.labeled_combo import LabeledComboBox
@@ -574,8 +916,6 @@ def band(qtbot):
         DECORATION_CONTROLS, refresh_decoration_combos, set_decoration_variable,
     )
 
-    variable = _line()
-    ctx = _ctx(variable=variable)
     emitted = []
     ctx.bus = SimpleNamespace(
         plot_options_changed=SimpleNamespace(emit=emitted.append))
@@ -597,8 +937,33 @@ def band(qtbot):
                 ctx, f, c.currentData() or ""))
         combos[field] = combo
     refresh_decoration_combos(ctx)
+    return combos, emitted
+
+
+@pytest.fixture
+def band(qtbot):
+    """The real combos over a one-variable plate."""
+    from types import SimpleNamespace
+
+    variable = _line()
+    ctx = _ctx(variable=variable)
+    combos, emitted = _wire_band(qtbot, ctx)
     return SimpleNamespace(ctx=ctx, combos=combos, variable=variable,
                            emitted=emitted)
+
+
+@pytest.fixture
+def two_variable_band(qtbot):
+    """The real combos over a plate with a cell line and a dose, nothing set."""
+    from types import SimpleNamespace
+
+    ctx = _nested_ctx(split=False, then=False)
+    combos, emitted = _wire_band(qtbot, ctx)
+    return SimpleNamespace(ctx=ctx, combos=combos, emitted=emitted)
+
+
+def _offered(combo):
+    return [combo.itemData(i) for i in range(combo.count())]
 
 
 def test_both_combos_list_the_plates_variables(band):
@@ -623,6 +988,47 @@ def test_the_split_combo_is_wired_to_its_own_field(band):
 
     assert band.ctx.state.plot.split_by_variable == band.variable.id
     assert band.ctx.state.plot.colour_by_variable == ""
+
+
+def test_then_by_is_disabled_and_cleared_without_split_by(two_variable_band):
+    """The second level only exists inside the first. Clearing *Split by*
+    clears *Then by* and greys it out; choosing *Then by* with no *Split by*
+    does not stick. Driven through the combos' own signals."""
+    ctx, combos = two_variable_band.ctx, two_variable_band.combos
+    split, then = combos["split_by_variable"], combos["sub_split_by_variable"]
+    assert not then.isEnabled()
+
+    split.setCurrentIndex(split.findData("cell_line"))
+    assert then.isEnabled()
+    then.setCurrentIndex(then.findData("dose"))
+    assert ctx.state.plot.sub_split_by_variable == "dose"
+
+    split.setCurrentIndex(0)
+    assert ctx.state.plot.sub_split_by_variable == ""
+    assert then.currentIndex() == 0
+    assert not then.isEnabled()
+
+    then.setEnabled(True)  # reach it anyway, as a stale signal would
+    then.setCurrentIndex(then.findData("dose"))
+    assert ctx.state.plot.sub_split_by_variable == ""
+
+
+def test_then_by_never_offers_the_split_by_variable(two_variable_band):
+    """Sub-bands by the band's own variable are one sub-band per band with the
+    band's own name — a second header row repeating the first. The list follows
+    *Split by* as it changes, and a *Then by* that ends up naming the same
+    variable is cleared rather than drawn."""
+    ctx, combos = two_variable_band.ctx, two_variable_band.combos
+    split, then = combos["split_by_variable"], combos["sub_split_by_variable"]
+
+    split.setCurrentIndex(split.findData("cell_line"))
+    assert _offered(then) == ["", "dose"]
+    then.setCurrentIndex(then.findData("dose"))
+
+    split.setCurrentIndex(split.findData("dose"))
+    assert _offered(then) == ["", "cell_line"]
+    assert ctx.state.plot.sub_split_by_variable == ""
+    assert then.currentIndex() == 0
 
 
 def test_a_deleted_variable_is_cleared_from_both_controls(band):

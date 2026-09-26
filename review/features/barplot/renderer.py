@@ -61,6 +61,7 @@ from review.core.plot_annotations import (
 )
 from domain.tp_match import tp_close, tp_close_mask
 from review.features.barplot._annotations import (
+    cluster_header_pad,
     label_bar,
     user_y_ceiling as _user_y_ceiling,
 )
@@ -72,7 +73,7 @@ from review.features.barplot.controller import (
 )
 
 
-def _annotate_cluster_footers(items, axes, fontsize=8) -> None:
+def _annotate_cluster_footers(items, axes, fontsize=8, xs=None) -> None:
     """Per-cluster well/rset label centred under each axis's xtick row.
 
     Group-by-well multi-tp shows ``t=0`` / ``t=1`` / ... as the per-bar
@@ -83,11 +84,17 @@ def _annotate_cluster_footers(items, axes, fontsize=8) -> None:
     ``fontsize`` may be a number (same size on every panel) or a
     ``callable(ax) -> float`` so the caller can honour a per-axis "Group label
     size" set via the Properties "Axis #" selector.
+
+    *xs* are the positions the bars were drawn at, which the caller passes from
+    the renderer's stash: they depend on the Properties → Bars width and
+    spacing, and a footer laid out on positions computed afresh here would sit
+    off-centre under its own bars.
     """
     if not items or not axes:
         return
     from review.core.plot_style import tokens_for
-    xs = _clustered_x_positions(items)
+    if not xs or len(xs) != len(items):
+        xs = _clustered_x_positions(items)
     for ax in axes:
         _muted_fg = tokens_for(ax)[2]
         _fs = fontsize(ax) if callable(fontsize) else fontsize
@@ -1088,8 +1095,17 @@ def draw_grouped_bar_mode(
         bar_color=mono_bar_color(ctx.state.plot),
         ctx=ctx,
     )
+    # Not when *Split by* displaced the clusters: the split has replaced each
+    # cluster's well/rset identity with the variable's value and moved the
+    # sample onto every tick (``_decorate._carry_displaced_band``), so a footer
+    # here would only repeat the band header already drawn above the panel,
+    # once per panel. Keyed on the notice the decorator records exactly when it
+    # displaced a band, not on the setting: a split whose variable produced no
+    # bands left the well clusters in place, and they still want their footer.
+    _slice = ctx.state.feature_slice("bar")
     if (str(getattr(ctx.state.plot, "bar_group_mode", "well") or "well") == "well"
-            and len(target_ts) > 1):
+            and len(target_ts) > 1
+            and not str(getattr(_slice, "split_notice", "") or "")):
         # Group-label size is scoped per-axis by the Properties "Axis #" selector
         # (like the other Axes-section controls), so resolve it per panel from the
         # figure's buckets rather than one flat global size for every panel.
@@ -1102,7 +1118,8 @@ def draw_grouped_bar_mode(
             idx = (_axes_order.index(ax) + 1) if ax in _axes_order else 1
             return float(axis_scoped_value(_prefs, idx, "group_label_size", 8))
         _xtick_axes = [ax_mean, ax_frac] + ([ax_n] if ax_n is not None else [])
-        _annotate_cluster_footers(items, _xtick_axes, fontsize=_grp_size)
+        _annotate_cluster_footers(items, _xtick_axes, fontsize=_grp_size,
+                                  xs=list(getattr(ctx.runtime.barplot, "xs", None) or []))
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     _ch = ctx.state.channel.active_channel.upper()
     from review.data.metric_labels import (
@@ -1119,11 +1136,12 @@ def draw_grouped_bar_mode(
     # Cluster headers (_annotate_cluster_headers) sit at y≈1.02 on ax_mean only;
     # when any survive normalization, push the title up so it clears them rather
     # than overlapping. items were normalized in place by render_bar_items.
-    _has_cluster_headers = any(getattr(it, "group_key", "") for it in items)
+    # A second split level (*Then by*) stacks a second header row, so the title
+    # clears both; ``cluster_header_pad`` is shared with Batch Export's figure.
     ax_mean.set_title(
         f"{_ch} {_metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold",
-        pad=18 if _has_cluster_headers else 6,
+        pad=cluster_header_pad(items),
     )
     ax_mean.set_ylabel(f"{_ch} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(

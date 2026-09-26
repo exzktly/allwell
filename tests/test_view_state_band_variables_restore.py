@@ -34,10 +34,11 @@ VALUES = {
     "group_by_variable": "var-dose",
     "colour_by_variable": "var-cell-line",
     "split_by_variable": "var-timepoint",
+    "sub_split_by_variable": "var-passage",
 }
 
 
-def test_the_three_band_variables_round_trip(loaded_app):
+def test_the_band_variables_round_trip(loaded_app):
     app = loaded_app
     plot = app._app_state.plot
 

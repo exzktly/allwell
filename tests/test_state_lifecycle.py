@@ -820,9 +820,11 @@ def test_the_variable_band_does_not_survive_a_dataset_swap():
     st.group_by_variable = "variable-1111"
     st.colour_by_variable = "variable-2222"
     st.split_by_variable = "variable-3333"
+    st.sub_split_by_variable = "variable-4444"
 
     st.reset_for_new_dataset()
 
     assert st.group_by_variable == ""
     assert st.colour_by_variable == ""
     assert st.split_by_variable == ""
+    assert st.sub_split_by_variable == ""

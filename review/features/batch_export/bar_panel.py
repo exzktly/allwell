@@ -517,7 +517,9 @@ class BarBatchExportPanel(BatchExportPanel):
         # rather than opening three more.
         from review.features.barplot.controller import (
             annotate_decorations,
+            bar_geometry_settings,
             batch_members,
+            cluster_header_pad,
             batch_wells_by_key,
             collect_bar_items_for_group,
         )
@@ -684,7 +686,23 @@ class BarBatchExportPanel(BatchExportPanel):
             # missing the value labels the on-tab plot carries is a different
             # figure of the same data.
             value_labels=_value_label_settings(self._ctx),
+            # Properties → Bars (width, timepoint-group spacing), for the same
+            # reason: ctx=None here, and a batch figure laid out differently
+            # from the tab it mirrors is a different figure of the same data.
+            bar_geometry=bar_geometry_settings(self._ctx),
         )
+        # Room for the cluster header rows. ``apply_ax_style`` above set the
+        # standard 6 pt title pad, which the on-tab renderer raises past its
+        # headers and this path never did — so the header rows were printed over
+        # the panel title and, with *Then by*'s second row, up into the
+        # suptitle. The same pad the tab uses, and the axes top lowered by what
+        # the pad added so the title keeps its distance from the suptitle.
+        _pad = cluster_header_pad(draw_items)
+        if _pad > 6:
+            ax_mean.set_title(ax_mean.get_title(), color=ax_mean.title.get_color(),
+                              fontsize=9, fontweight="bold", pad=_pad)
+            fig.subplots_adjust(
+                top=0.94 - (_pad - 6) / 72.0 / fig.get_figheight())
         # Colour by / Split by, said on the exported figure as well as inked
         # into it. ``collect_bar_items_for_group`` already decorated these
         # items, so the bars come out re-inked and re-banded — but the legend

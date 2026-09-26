@@ -212,6 +212,7 @@ def snapshot(ctx) -> dict:
         "group_by_variable": str(ctx.state.plot.group_by_variable or ""),
         "colour_by_variable": str(ctx.state.plot.colour_by_variable or ""),
         "split_by_variable": str(ctx.state.plot.split_by_variable or ""),
+        "sub_split_by_variable": str(ctx.state.plot.sub_split_by_variable or ""),
         "fold_change": _snapshot_fold_change(ctx),
         "export_style_prefs": _nondefault_export_prefs(ctx),
         "export_axis_prefs": _snapshot_axis_prefs(ctx),
@@ -366,6 +367,14 @@ def _snapshot_bar(ctx) -> dict:
             out["bar_show_mode"] = str(plot.bar_show_mode)
         if hasattr(plot, "bar_color_mode"):
             out["bar_color_mode"] = str(plot.bar_color_mode)
+        # Properties → Bars: the bar width (0.0 = automatic) and the spacing
+        # inside a timepoint group. A saved figure reopened at another width
+        # is the same data drawn differently, which is what a view file exists
+        # to prevent.
+        if hasattr(plot, "bar_width"):
+            out["bar_width"] = float(plot.bar_width)
+        if hasattr(plot, "bar_group_spacing"):
+            out["bar_group_spacing"] = float(plot.bar_group_spacing)
         # The user's drag-to-reorder bar layout. ``ordered_bar_keys``
         # falls back to the canonical order when the saved list doesn't
         # cover the current dataset's keys, so an empty / stale list is
@@ -682,13 +691,21 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> list[str]:
             failed.append("focus timepoint")
             swallowed()
 
-    for _key in ("group_by_variable", "colour_by_variable", "split_by_variable"):
+    for _key in ("group_by_variable", "colour_by_variable", "split_by_variable",
+                 "sub_split_by_variable"):
         if _key in state:
             try:
                 setattr(ctx.state.plot, _key, str(state.get(_key) or ""))
             except Exception:
                 failed.append(_key.replace("_", " "))
                 swallowed()
+    # A snapshot that states its Split by but predates *Then by* describes a
+    # one-level figure. Keeping whatever sub-split is live now would reopen it
+    # with a second level of bands nobody saved — the stale-setting failure the
+    # present-key rule above otherwise guards against, reached through a key
+    # the older file could not have written.
+    if "split_by_variable" in state and "sub_split_by_variable" not in state:
+        ctx.state.plot.sub_split_by_variable = ""
 
     if "use_fov_replicates" in state:
         # The FOV-spread toggle on Line Graphs / Bar Plots. Set the field, then
@@ -1069,8 +1086,29 @@ def _apply_bar(ctx, state: dict) -> None:
             plot.bar_show_mode = str(state["bar_show_mode"])
         if str(state.get("bar_color_mode")) in BAR_COLOR_MODES:
             plot.bar_color_mode = str(state["bar_color_mode"])
+        _restore_bar_geometry(plot, state)
         if "bar_order" in state and isinstance(state["bar_order"], list):
             plot.bar_order = [str(k) for k in state["bar_order"]]
+
+
+def _restore_bar_geometry(plot, state: dict) -> None:
+    """Properties → Bars from a saved view, keeping only values that can be drawn.
+
+    A width outside ``[0, 1]`` or a spacing outside ``[0, 5]`` is not a
+    layout, it is a damaged file; each is dropped on its own so a bad width
+    does not also take a good spacing with it, and the field keeps its current
+    value.
+    """
+    for key, lo, hi in (("bar_width", 0.0, 1.0), ("bar_group_spacing", 0.0, 5.0)):
+        if key not in state:
+            continue
+        try:
+            value = float(state[key])
+        except (TypeError, ValueError):
+            swallowed()
+            continue
+        if lo <= value <= hi:
+            setattr(plot, key, value)
 
 
 def _apply_distribution(ctx, state: dict) -> None:

@@ -4,8 +4,8 @@ This tab is the reason the export is defined as a *population plus markers*
 rather than as the rows behind a drawn point. Its cells are not one statistic
 over one row set: ``controller._cell_stat`` dispatches on metric, and the
 metrics disagree about what they are computed from. The count metric is a
-pooled total over every well in the cell; the mean, fraction and ratio metrics
-go through ``_repset_mean_of_means``, which is a mean of **per-well means** and
+pooled total over every well in the cell; the mean, fraction, events and ratio
+metrics go through ``_repset_mean_of_means``, which is a mean of **per-well means** and
 therefore not a function of a row set at all; and the mean-of-all metric uses a
 different cell population again, with no per-channel ON filter.
 
@@ -61,7 +61,8 @@ def cell_scope(ctx) -> CellScope | None:
              "the group column names the (row, col) grid cell each row feeds; a "
              "cell may pool several wells"),
             ("averaging",
-             "for the mean / fraction / ratio metrics a cell is the mean of its "
-             "wells' means, not a pooled mean — group by well_label first"),
+             "for the mean / fraction / events / ratio metrics a cell is the mean "
+             "of its wells' values, not a pooled value — group by well_label "
+             "first; events counts cells above the ON cutoff per well"),
         ),
     )

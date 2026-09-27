@@ -133,7 +133,7 @@ from review.domain.ratio_models import RatioMetric
 
 # Aliased to avoid collision with the ReviewApp._extract_well_token method below.
 from review.data.data_loading import extract_well_token as _extract_well_token
-from review.data.metric_labels import FRACTION_LABEL, FRACTION_METRIC_KEY
+from review.data.metric_labels import SYNTHETIC_METRIC_LABEL_TO_KEY
 
 
 # =============================================================================
@@ -779,13 +779,13 @@ class ReviewApp(QWidget):
 
     # ── Per-axis scatter metric helpers ────────────────────────────────────
 
-    #: The one Property label that is not an intensity column, paired with the
-    #: key it resolves to. Both come from the shared metric vocabulary rather
+    #: The Property labels that are not intensity columns, paired with the
+    #: keys they resolve to. Both come from the shared metric vocabulary rather
     #: than being spelled here: the aggregate Scatter tab, its batch export and
     #: this shim all compare against the same string, and a copy per site is how
     #: one of them silently stops matching. Not imported from the Scatter
     #: feature, which is removable and reached only through lazy proxies.
-    _SCATTER_AGG_METRIC_EXTRA = {FRACTION_LABEL: FRACTION_METRIC_KEY}
+    _SCATTER_AGG_METRIC_EXTRA = dict(SYNTHETIC_METRIC_LABEL_TO_KEY)
 
     def _scatter_axis_metric_key(self, axis: str, *, agg = False) -> str:
         return scatter_axis_metric_key(self._ctx, axis, agg=agg)

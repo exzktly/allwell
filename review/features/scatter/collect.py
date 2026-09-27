@@ -420,8 +420,8 @@ def collect_scatter_agg_data(
         """Parse statistic strings.
 
         Returns ``(channel_or_label, metric, intensity_metric)`` where
-        ``metric`` is one of ``"mean"`` | ``"frac"`` | ``"smfish"`` |
-        ``"ratio"`` and ``intensity_metric`` is one of the
+        ``metric`` is one of ``"mean"`` | ``"frac"`` | ``"events"`` |
+        ``"smfish"`` | ``"ratio"`` and ``intensity_metric`` is one of the
         ``metric_labels.INTENSITY_METRIC_KEYS`` values (defaults to
         ``"mean_intensity"`` when the stat string doesn't carry a
         property suffix). ``intensity_metric`` is ignored for the
@@ -449,6 +449,9 @@ def collect_scatter_agg_data(
         elif body.startswith("Fraction On"):
             channel = body.replace("Fraction On ", "").lower()
             return channel, "frac", suffix_metric
+        elif body.startswith("Events On"):
+            channel = body.replace("Events On ", "").lower()
+            return channel, "events", suffix_metric
         elif body.startswith("smFISH Count"):
             channel = body.replace("smFISH Count ", "").lower()
             return channel, "smfish", suffix_metric
@@ -519,10 +522,10 @@ def collect_scatter_agg_data(
         val_col_x = f"{ch_x}_smfish_count"
     elif metric_x == "ratio":
         val_col_x = label_to_key.get(ch_x, "")
-    elif metric_x == "frac":
-        # Fraction-on always uses MFI as the underlying gate column;
-        # the aggregation reports the fraction passing the channel's
-        # ThreshFracOn cut.
+    elif metric_x in ("frac", "events"):
+        # Fraction-on and events-above always use MFI as the underlying gate
+        # column; the aggregation reports the fraction (or the count) of
+        # cells passing the channel's ThreshFracOn cut.
         val_col_x = f"{ch_x}_mean_intensity"
     else:
         val_col_x = f"{ch_x}_{intensity_x}"
@@ -531,7 +534,7 @@ def collect_scatter_agg_data(
         val_col_y = f"{ch_y}_smfish_count"
     elif metric_y == "ratio":
         val_col_y = label_to_key.get(ch_y, "")
-    elif metric_y == "frac":
+    elif metric_y in ("frac", "events"):
         val_col_y = f"{ch_y}_mean_intensity"
     else:
         val_col_y = f"{ch_y}_{intensity_y}"
@@ -586,7 +589,9 @@ def collect_scatter_agg_data(
         well-mode; every FOV across all of the group's wells is one replicate
         when ``per_fov`` (the "Across FOV" toggle) is on — so a rep-set's FOV
         spread pools FOVs across wells rather than averaging per-well spreads.
-        Returns ``(value, err)`` picking ``frac`` when ``metric == "frac"`` and
+        Returns ``(value, err)`` picking ``frac`` when ``metric == "frac"``,
+        ``n_above`` (the per-replicate count above the ON cutoff — the Bar and
+        Line Events panels' statistic) when ``metric == "events"``, and
         ``mean`` otherwise.
         """
         if not val_col:
@@ -598,7 +603,7 @@ def collect_scatter_agg_data(
             threshold=threshold,
             fluor_gates=fluor_gates,
         )
-        field = "frac" if metric == "frac" else "mean"
+        field = {"frac": "frac", "events": "n_above"}.get(metric, "mean")
         value, err = _reduce_reps(reps, field, use_sem)
         if math.isnan(value):
             _record_cut(axis, val_col, channel, threshold, reps, metric)

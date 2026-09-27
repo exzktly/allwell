@@ -50,10 +50,10 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     # ``_update_scatter_menus`` still populates them so older code paths
     # (export_service, plot_orchestrator) keep working.
     from review.data.metric_labels import (
-        FRACTION_LABEL as _FRACTION_LABEL,
+        SYNTHETIC_METRIC_LABEL_TO_KEY as _SYNTHETIC,
         METRIC_ORDER as _BASE_METRIC_ORDER,
     )
-    AGG_METRIC_ORDER = list(_BASE_METRIC_ORDER) + [_FRACTION_LABEL]
+    AGG_METRIC_ORDER = list(_BASE_METRIC_ORDER) + list(_SYNTHETIC)
 
     agg_ch_x_cb = reg.register("_scatter_agg_ch_x_cb", QComboBox())
     agg_ch_x_cb.addItems(["GFP"])

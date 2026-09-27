@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 from review.data.data_loading import resolve_value_series
-from review.data.metric_labels import FRACTION_METRIC_KEY
+from review.data.metric_labels import SYNTHETIC_METRIC_KEYS
 from review.domain.metric_registry import column_gating_exempt
 from review.features.export.cell_scope_compute import CellScope, scope_from_ctx
 from review.features.scatter.collect import gates_for_axes
@@ -194,12 +194,13 @@ def agg_cell_scope(ctx, *, entry_x: str | None = None,
     if not entry_x:
         return None
 
-    # ``fraction_above_threshold`` is the agg tab's synthetic metric key: the
-    # aggregation treats it as a Fraction-On over the channel's mean-intensity
-    # column, so that is the column the exported cells are measured on.
+    # ``fraction_above_threshold`` / ``events_above_threshold`` are the agg
+    # tab's synthetic metric keys: the aggregation treats them as a Fraction-On
+    # or an events-above count over the channel's mean-intensity column, so
+    # that is the column the exported cells are measured on.
     if metric_x is None:
         metric_x = scatter_axis_metric_key(ctx, "x", agg=True)
-    if metric_x == FRACTION_METRIC_KEY:
+    if metric_x in SYNTHETIC_METRIC_KEYS:
         metric_x = "mean_intensity"
     col_x = col_for_scatter_axis(ctx, entry_x, metric_x)
 

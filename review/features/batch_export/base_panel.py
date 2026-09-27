@@ -714,7 +714,8 @@ class BatchExportPanel(QWidget):
             cb.setCurrentIndex(0)
         cb.setMinimumWidth(theme.Metrics.combo_min_w)
         # Whether this row's Property combo offers ``Fraction above threshold``
-        # — the one entry that is not an intensity column. Stashed on the combo
+        # and ``Events above threshold`` — the entries that are not intensity
+        # columns. Stashed on the combo
         # rather than passed to ``_refresh_property_combo_for``, because that
         # method is also called from the channel's own ``currentIndexChanged``
         # and from ``_refresh_channel_combos``, neither of which is holding the
@@ -783,7 +784,7 @@ class BatchExportPanel(QWidget):
         """
         from review.data.metric_labels import (
             METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
-            FRACTION_LABEL,
+            SYNTHETIC_METRIC_LABEL_TO_KEY,
         )
         ch_cb = getattr(self, channel_attr, None)
         prop_cb = getattr(self, f"{channel_attr}_metric", None)
@@ -807,7 +808,7 @@ class BatchExportPanel(QWidget):
                 return
             items = list(METRIC_ORDER)
             if getattr(ch_cb, "_include_fraction", False):
-                items.append(FRACTION_LABEL)
+                items += list(SYNTHETIC_METRIC_LABEL_TO_KEY)
             prop_cb.addItems(items)
             prop_cb.setEnabled(True)
             if prev in items:
@@ -843,20 +844,21 @@ class BatchExportPanel(QWidget):
         ``Calculated Val`` (ratio path — caller resolves the column via
         :py:meth:`_export_val_col_for`)."""
         from review.data.metric_labels import (
-            FRACTION_LABEL, FRACTION_METRIC_KEY, METRIC_LABEL_TO_KEY,
+            METRIC_LABEL_TO_KEY, SYNTHETIC_METRIC_LABEL_TO_KEY,
         )
         prop_cb = getattr(self, f"{channel_attr}_metric", None)
         if prop_cb is None:
             return self._ctx.state.channel.active_metric or "mean_intensity"
         label = str(prop_cb.currentText() or "")
-        # The fraction is not one of the intensity flavours and is absent from
+        # The fraction (and the events count beside it) is not one of the
+        # intensity flavours and is absent from
         # ``METRIC_LABEL_TO_KEY`` by design, so a plain ``.get`` on it falls
         # through to the *shared band's* metric — a row reading "Fraction above
         # threshold" exporting mean intensity, in a file titled for the
         # fraction. Only the rows that offer it can produce it, so nothing else
         # changes for the modes that do not.
-        if label == FRACTION_LABEL:
-            return FRACTION_METRIC_KEY
+        if label in SYNTHETIC_METRIC_LABEL_TO_KEY:
+            return SYNTHETIC_METRIC_LABEL_TO_KEY[label]
         return METRIC_LABEL_TO_KEY.get(
             label, self._ctx.state.channel.active_metric or "mean_intensity",
         )

@@ -58,6 +58,32 @@ FRACTION_LABEL = "Fraction above threshold"
 #: and cannot read.
 FRACTION_METRIC_KEY = "fraction_above_threshold"
 
+#: The second Property entry that is not a column: how many cells clear the ON
+#: cutoff — the number the Bar and Line tabs' Events panels draw. Offered
+#: wherever :data:`FRACTION_LABEL` is, and resolved the same way (to the
+#: channel's mean-intensity column, which the ON cutoff is defined on). Its
+#: value for a group is the mean of the per-replicate counts, with the spread
+#: across those replicates — ``ReplicateStat.n_above`` reduced like every other
+#: field — never the cross-well total, so a set of two wells counting 27 and 33
+#: plots 30 here exactly as it does on the Bar tab.
+EVENTS_LABEL = "Events above threshold"
+
+#: The key :data:`EVENTS_LABEL` resolves to — kept out of
+#: ``METRIC_LABEL_TO_KEY`` for the reason given under
+#: :data:`FRACTION_METRIC_KEY`.
+EVENTS_METRIC_KEY = "events_above_threshold"
+
+#: Every synthetic (non-column) Property label paired with its key, in the order
+#: a Property combo lists them after the intensity flavours.
+SYNTHETIC_METRIC_LABEL_TO_KEY = {
+    FRACTION_LABEL: FRACTION_METRIC_KEY,
+    EVENTS_LABEL: EVENTS_METRIC_KEY,
+}
+
+#: The synthetic keys, for the column resolvers that map each back to the
+#: channel's mean-intensity column.
+SYNTHETIC_METRIC_KEYS = tuple(SYNTHETIC_METRIC_LABEL_TO_KEY.values())
+
 
 def split_metric_col(col: str) -> tuple[str, str, str] | None:
     """Split ``<channel>_<metric_suffix>`` into ``(channel, metric_key, label)``.

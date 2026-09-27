@@ -70,10 +70,11 @@ def build_response_tab(ctx, parent: QWidget) -> None:
 
     # This tab's **own** Channel and Property, as the aggregate Scatter tab has
     # its own: only a tab that owns the pair can offer `Fraction above
-    # threshold`, which is not a column and which the shared band's consumers
-    # would resolve to `f"{channel}_{metric}"` and fail to read. They fall back
-    # to the shared choice until the user touches them, so a tab nobody has
-    # configured still follows the plate they picked on the band.
+    # threshold` and `Events above threshold`, which are not columns and which
+    # the shared band's consumers would resolve to `f"{channel}_{metric}"` and
+    # fail to read. They fall back to the shared choice until the user touches
+    # them, so a tab nobody has configured still follows the plate they picked
+    # on the band.
     ch_combo = reg.register("_response_ch_cb", LabeledComboBox("Channel"))
     ch_combo.setToolTip("The channel this tab measures — its own, not the band's")
     ch_combo.currentIndexChanged.connect(
@@ -82,8 +83,8 @@ def build_response_tab(ctx, parent: QWidget) -> None:
 
     metric_combo = reg.register("_response_metric_cb", LabeledComboBox("Property"))
     metric_combo.setToolTip(
-        "What the curves measure, including the fraction of cells above the "
-        "ON cutoff — which is set on Home → Cell Gating, since this tab "
+        "What the curves measure, including the fraction and the number of "
+        "cells above the ON cutoff — which is set on Home → Cell Gating, since this tab "
         "measures its own channel rather than the band's")
     metric_combo.currentIndexChanged.connect(
         lambda *_: on_response_metric_changed(ctx))

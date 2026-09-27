@@ -729,6 +729,11 @@ def populate_metric_combo(
 ) -> None:
     """Repopulate a Property combo to match the channel context.
 
+    ``include_fraction`` appends both synthetic entries — ``Fraction above
+    threshold`` and ``Events above threshold`` — because every surface that
+    can plot one can plot the other: both are counts over the same ON cutoff
+    and resolve to the same column.
+
     Ratio channels (resolved via ``_label_to_channel_key``) collapse the
     combo to a single ``Calculated Val`` entry — ratios are a single
     computed value per cell, so the intensity flavours don't exist for
@@ -749,7 +754,7 @@ def populate_metric_combo(
     channel = ctx.state.channel
     from review.data.metric_labels import (
         METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
-        FRACTION_LABEL,
+        FRACTION_LABEL, EVENTS_LABEL,
     )
     mapped_key = channel.label_to_channel_key.get(channel_entry)
     is_ratio = bool(mapped_key and is_ratio_key(mapped_key))
@@ -769,7 +774,7 @@ def populate_metric_combo(
             return
         items = list(METRIC_ORDER)
         if include_fraction:
-            items.append(FRACTION_LABEL)
+            items += [FRACTION_LABEL, EVENTS_LABEL]
         cb.addItems(items)
         cb.setEnabled(True)
         if prev in items:
@@ -983,11 +988,12 @@ def col_for_scatter_axis(ctx, channel_entry: str, metric_key: str) -> str:
 
     Ratio channels collapse to the ratio key regardless of metric (ratios
     don't carry a metric suffix). Otherwise builds ``<channel>_<metric>``.
-    ``metric_key`` may be ``fraction_above_threshold`` for the agg scatter
-    — that's a synthetic key that downstream aggregation code treats as a
-    Fraction-On aggregation against the channel's mean-intensity column.
+    ``metric_key`` may be ``fraction_above_threshold`` or
+    ``events_above_threshold`` (the synthetic keys the agg scatter and Response
+    Curves offer) — downstream aggregation treats them as a Fraction-On or an
+    events-above count against the channel's mean-intensity column.
     """
-    from review.data.metric_labels import FRACTION_METRIC_KEY
+    from review.data.metric_labels import SYNTHETIC_METRIC_KEYS
 
     mapped_key = ctx.state.channel.label_to_channel_key.get(channel_entry)
     if mapped_key and is_ratio_key(mapped_key):
@@ -996,8 +1002,9 @@ def col_for_scatter_axis(ctx, channel_entry: str, metric_key: str) -> str:
     # they carry no metric suffix, like ratios.
     if mapped_key and is_shape_column(mapped_key):
         return mapped_key
-    if metric_key in (FRACTION_METRIC_KEY, "smfish_count"):
-        # Fraction-on uses MFI as the underlying value column; smFISH
+    if metric_key in (*SYNTHETIC_METRIC_KEYS, "smfish_count"):
+        # Fraction-on and events-above use MFI as the underlying value
+        # column (the ON cutoff is defined on it); smFISH
         # uses the dedicated count column. (.lower(): CSV cols are lower-case.)
         if metric_key == "smfish_count":
             return f"{channel_entry.lower()}_smfish_count"

@@ -38,7 +38,11 @@ from review.features.scatter.gating import (
 )
 
 from review.core.plot_annotations import value_label_settings
-from review.data.metric_labels import FRACTION_LABEL, FRACTION_METRIC_KEY
+from review.data.metric_labels import (
+    EVENTS_LABEL,
+    FRACTION_LABEL,
+    SYNTHETIC_METRIC_LABEL_TO_KEY,
+)
 from review.features.scatter._annotations import (
     annotate_agg_points,
     draw_scatter_agg_legends,
@@ -53,7 +57,7 @@ EMPTY_SELECTION_EXPORT_NOTE = "No wells selected — nothing to plot."
 
 #: Agg-scatter Property labels that map to a synthetic aggregation key rather
 #: than a metric-intensity column (mirrors ``ReviewApp._SCATTER_AGG_METRIC_EXTRA``).
-SCATTER_AGG_METRIC_EXTRA = {FRACTION_LABEL: FRACTION_METRIC_KEY}
+SCATTER_AGG_METRIC_EXTRA = dict(SYNTHETIC_METRIC_LABEL_TO_KEY)
 
 
 def redraw_scatter(
@@ -657,6 +661,7 @@ def update_scatter_menus(ctx) -> None:
     for ch in channels:
         statistics.append(f"Mean Fluorescence {ch.upper()}")
         statistics.append(f"Fraction On {ch.upper()}")
+        statistics.append(f"Events On {ch.upper()}")
         if ch in ctx.state.channel.smfish_channels:
             statistics.append(f"smFISH Count {ch.upper()}")
     for ratio_label in ratio_labels:
@@ -745,6 +750,8 @@ def compose_scatter_agg_stat(ctx, channel_entry: str, metric_label: str) -> str:
     ch_upper = (channel_entry or "").upper()
     if metric_label == FRACTION_LABEL:
         return f"Fraction On {ch_upper}"
+    if metric_label == EVENTS_LABEL:
+        return f"Events On {ch_upper}"
     if metric_label == "smFISH Count":
         return f"smFISH Count {ch_upper}"
     # All intensity flavours map to the per-cell mean of values above
@@ -758,7 +765,7 @@ def refresh_scatter_agg_metric_for_axis(ctx, axis: str) -> None:
     """Reshape the agg-scatter Property combo for the selected channel.
 
     Real channels get the full intensity set plus ``Fraction above
-    threshold``; ratio channels collapse to ``Calculated Val``.
+    threshold`` and ``Events above threshold``; ratio channels collapse to ``Calculated Val``.
     """
     ch_cb = ctx.widgets.get_or_none(f"_scatter_agg_ch_{axis}_cb")
     m_cb = ctx.widgets.get_or_none(f"_scatter_agg_metric_{axis}_cb")

@@ -37,7 +37,7 @@ from review.features.batch_export.response_panel import (  # noqa: E402
     _parse_bound,
 )
 from review.features.response.collect import (  # noqa: E402
-    ResponseCurve, ResponseData, ResponsePoint, Y_FRACTION, Y_MEAN,
+    ResponseCurve, ResponseData, ResponsePoint, Y_EVENTS, Y_FRACTION, Y_MEAN,
 )
 from review.features.response.response_compute import (  # noqa: E402
     FIT_4PL, FIT_NONE,
@@ -288,8 +288,10 @@ def test_the_metric_decides_what_the_curves_plot():
     panel = _PanelStub()
     assert panel._draws_fraction("fraction_above_threshold") is True
     assert panel._draws_fraction("mean_intensity") is False
-    assert panel._y_metric(True) == Y_FRACTION
-    assert panel._y_metric(False) == Y_MEAN
+    assert panel._y_metric("fraction_above_threshold") == Y_FRACTION
+    assert panel._y_metric("events_above_threshold") == Y_EVENTS
+    assert panel._y_metric("mean_intensity") == Y_MEAN
+    assert panel._y_metric("total_intensity") == Y_MEAN
 
 
 def test_an_unreadable_fit_bound_frees_the_parameter():
@@ -356,7 +358,9 @@ def test_the_property_row_offers_the_fraction_and_resolves_its_key(qapp):
     green when this test read source text instead.
     """
     from PySide6.QtWidgets import QVBoxLayout, QWidget
-    from review.data.metric_labels import FRACTION_LABEL, FRACTION_METRIC_KEY
+    from review.data.metric_labels import (
+        EVENTS_LABEL, EVENTS_METRIC_KEY, FRACTION_LABEL, FRACTION_METRIC_KEY,
+    )
 
     panel = _channel_row_stub(ResponseBatchExportPanel)
     host = QWidget()
@@ -367,9 +371,15 @@ def test_the_property_row_offers_the_fraction_and_resolves_its_key(qapp):
     combo = panel._response_channel_cb_metric
     items = [combo.itemText(i) for i in range(combo.count())]
     assert FRACTION_LABEL in items, items
-    # And it is the *last* entry rather than replacing the intensity flavours,
-    # which are what every other Property on this row means.
-    assert items[-1] == FRACTION_LABEL and len(items) > 1
+    # And the two counted entries — fraction, then events — come *last*
+    # rather than replacing the intensity flavours, which are what every
+    # other Property on this row means.
+    assert items[-2:] == [FRACTION_LABEL, EVENTS_LABEL] and len(items) > 2
+
+    combo.setCurrentText(EVENTS_LABEL)
+    assert panel._selected_export_metric_key("_response_channel_cb") == (
+        EVENTS_METRIC_KEY)
+    assert ResponseBatchExportPanel._y_metric(panel, EVENTS_METRIC_KEY) == Y_EVENTS
 
     combo.setCurrentText(FRACTION_LABEL)
     assert panel._selected_export_metric_key("_response_channel_cb") == (
@@ -459,3 +469,15 @@ def test_the_fit_model_offer_matches_the_tab_s():
     models = [model for _label, model in fit_model_labels()]
     assert models[0] == FIT_NONE, "off by default — a fit is an assertion"
     assert FIT_4PL in models
+
+
+def test_the_per_cell_notes_are_told_what_this_run_plotted():
+    """The run's own Property, not whatever the tab's combo says."""
+    # ``__new__`` rather than a namespace: the override calls ``super()``, which
+    # needs a real instance, and building the panel would need a whole app.
+    panel = ResponseBatchExportPanel.__new__(ResponseBatchExportPanel)
+    panel._run_metric_key = "events_above_threshold"
+    kwargs = panel._cell_scope_kwargs(val_col="rfp_mean_intensity",
+                                      timepoints=[24])
+    assert kwargs == {"val_col": "rfp_mean_intensity", "timepoints": (24.0,),
+                      "metric_key": "events_above_threshold"}

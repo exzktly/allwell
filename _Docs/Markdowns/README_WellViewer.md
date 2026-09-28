@@ -3246,10 +3246,15 @@ lone well is a single measurement and is drawn without one.
 
 **What the curves measure.** This tab has its **own** Channel and Property
 controls, like the aggregate Scatter tab — and its Property list includes
-**Fraction above threshold**, the proportion of cells above the ON cutoff,
-which the shared band cannot offer. The fraction is often the readout a dose
-response is really about. The axis label follows what you picked, and a fit
-works on either.
+two entries the shared band cannot offer: **Fraction above threshold**, the
+proportion of cells above the ON cutoff, and **Events above threshold**, the
+number of them. The events count is the same number the Bar and Line Events
+panels draw — for a group of wells, the mean of each well's count (or each
+field's, with the per-FOV spread on), with the error bar across them — so a
+two-well group counting 27 and 33 plots 30. The fraction or the count is often
+the readout a dose response is really about. The axis label follows what you
+picked, and a fit works on any of them. Under fold change, a count is divided
+by the control's count.
 
 Because they are this tab's own, changing them here does not move Bar, Line,
 Distribution or Heat Map. Until you touch them they follow the channel and
@@ -3257,7 +3262,8 @@ property you picked on the band, so a tab you have never configured is showing
 the same measurement as everything else. The band's own Channel, Property and
 ON-cutoff controls step aside while this tab is on screen — as they do on the
 Scatter tabs — so the row carries one of each rather than two. The ON cutoff
-the **Fraction above threshold** property counts against is the one on
+the **Fraction above threshold** and **Events above threshold** properties
+count against is the one on
 [Home → Cell Gating](#cell-gating).
 
 If you also turn on fold change, note that a control with **nothing** above the
@@ -3507,8 +3513,11 @@ cells it kept.
   aiming at cannot vanish mid-drag. Gates drawn on a different X/Y metric pair
   are neither drawn nor applied here.
 - **Aggregate controls** — X-axis / Y-axis pickers over aggregate metrics
-  (e.g. *Mean Fluorescence*, *Fraction above threshold*) with an **error band**
-  (SEM / SD) on the points.
+  (e.g. *Mean Fluorescence*, *Fraction above threshold*, *Events above
+  threshold*) with an **error band** (SEM / SD) on the points. *Events above
+  threshold* is the number of cells above the ON cutoff — for a replicate set,
+  the mean of its wells' counts, as on the Bar tab — and a well with none is
+  plotted at 0 rather than left out, because zero is a measurement.
 - **What the Wells view exports.** One row per well (or replicate set) per
   timepoint, with each axis's value and its error — the error column is the
   value column's name plus the interval, `…_sem` or `…_sd` — and a
@@ -3532,7 +3541,10 @@ cells it kept.
 ### Distribution
 
 **What it shows.** The distribution of a per-cell metric at **one timepoint**,
-as a histogram, KDE, or violin.
+as a histogram, KDE, or violin. Every value on this tab belongs to one cell,
+so there is no *Events above threshold* option here: a count of cells above the
+ON cutoff is one number per well, not a value each cell has. Read it on Bar
+Plots, Line Graphs, Response Curves, the Scatter Wells view or the Heat Map.
 
 - **Needs** — a well selection, a channel, and a timepoint (**t (h)**).
 - **Controls** — **Mode** (*Histogram*, *Histogram + KDE*, or *Violin (per
@@ -3558,8 +3570,13 @@ place cells in a grid that mirrors your plate or your experimental design.
   dropdown.
 - **Controls** — on the controls row:
   - **Aggregation** — how multiple cells/wells in a grid cell combine (e.g.
-    *Rep-set avg*). **Mean above threshold** and **Fraction above threshold**
-    are offered only for a Property that has an ON cutoff of its own — Mean
+    *Rep-set avg*). **Events above threshold** colours each cell by how many
+    cells clear the ON cutoff — for a rep-set cell, the mean of its wells'
+    counts, the number the Bar tab's Events panel draws, not their total.
+    With the per-FOV spread on, the fields are the replicates, so a cell shows
+    the mean count per field instead, and the colour scale follows.
+    **Mean above threshold**, **Fraction above threshold** and **Events above
+    threshold** are offered only for a Property that has an ON cutoff of its own — Mean
     Intensity (ThreshFracOn) and smFISH Count (ThreshCountOn). They grey out for
     Total / Max / Min / Std intensity, because the cutoff is a *mean* intensity
     and cutting a total with it would compare two different scales; those fall

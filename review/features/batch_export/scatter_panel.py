@@ -307,8 +307,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
     ) -> tuple:
         """Add a "{axis}: Channel <combo>  Property <combo>" row.
 
-        The Property combo gets full ``METRIC_ORDER`` plus an optional
-        ``Fraction above threshold`` entry; it dynamically collapses to
+        The Property combo gets full ``METRIC_ORDER`` plus optional
+        ``Fraction above threshold`` / ``Events above threshold`` entries; it dynamically collapses to
         ``Calculated Val`` when the channel resolves to a ratio key,
         matching the per-tab scatter UI behaviour.
 
@@ -345,10 +345,10 @@ class ScatterBatchExportPanel(BatchExportPanel):
         """Reshape the Property combo paired with ``ch_cb`` based on its
         currently-selected channel (ratio → ``Calculated Val``, real
         channel → full intensity set, optionally + ``Fraction above
-        threshold`` for the agg axis)."""
+        threshold`` and ``Events above threshold`` for the agg axis)."""
         from review.data.metric_labels import (
             METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
-            FRACTION_LABEL,
+            SYNTHETIC_METRIC_LABEL_TO_KEY,
         )
         from review.domain.ratio_models import is_ratio_key as _is_ratio_key
         prop_cb = getattr(ch_cb, "_paired_property_cb", None)
@@ -372,7 +372,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 return
             items = list(METRIC_ORDER)
             if include_fraction:
-                items.append(FRACTION_LABEL)
+                items += list(SYNTHETIC_METRIC_LABEL_TO_KEY)
             prop_cb.addItems(items)
             prop_cb.setEnabled(True)
             if prev in items:
@@ -481,19 +481,20 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
         Returns one of: ``mean_intensity``, ``total_intensity``,
         ``max_intensity``, ``min_intensity``, ``std_intensity``,
-        ``smfish_count``, ``fraction_above_threshold`` (agg only),
+        ``smfish_count``, ``fraction_above_threshold`` /
+        ``events_above_threshold`` (agg only),
         ``calculated_val`` (ratio path — caller is expected to resolve the
         column via ``_col_for_scatter_axis`` instead).
         """
         from review.data.metric_labels import (
             METRIC_LABEL_TO_KEY, CALCULATED_VAL_LABEL,
-            FRACTION_LABEL, FRACTION_METRIC_KEY,
+            SYNTHETIC_METRIC_LABEL_TO_KEY,
         )
         label = str(prop_cb.currentText() or "")
         if label == CALCULATED_VAL_LABEL:
             return "calculated_val"
-        if label == FRACTION_LABEL:
-            return FRACTION_METRIC_KEY
+        if label in SYNTHETIC_METRIC_LABEL_TO_KEY:
+            return SYNTHETIC_METRIC_LABEL_TO_KEY[label]
         return METRIC_LABEL_TO_KEY.get(label, "mean_intensity")
 
     def _warn_if_live_gates_ignored(self) -> None:

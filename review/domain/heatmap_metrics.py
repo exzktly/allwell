@@ -1,6 +1,6 @@
 """The heat map's aggregation-metric labels, and which of them take a cutoff.
 
-The four labels the heat map's aggregation combo offers. They live here rather
+The five labels the heat map's aggregation combo offers. They live here rather
 than in the feature because they are **vocabulary**, not behaviour: the labels
 are the values stored in view state and read back, the text
 ``core/channel_state_controller`` enables and disables as the active Property
@@ -18,6 +18,13 @@ METRIC_MEAN = "Mean above threshold"
 METRIC_MEAN_ALL = "Mean (all cells)"
 METRIC_FRACTION = "Fraction above threshold"
 METRIC_COUNT = "Cell count"
+#: How many cells cleared the ON cutoff — the quantity the Bar and Line tabs'
+#: Events panels draw, and reduced the same way: the mean of each replicate's
+#: count (per well, or per FOV with the per-FOV spread toggle on), not a total
+#: across the set. A cell holding one well shows that well's own count — or,
+#: with the per-FOV spread on, the mean of its fields' counts, since the fields
+#: are then its replicates.
+METRIC_EVENTS = "Events above threshold"
 #: Legacy; not exposed in :data:`METRIC_OPTIONS` — ratios are picked via the
 #: channel dropdown.
 METRIC_RATIO = "Ratio value"
@@ -26,10 +33,11 @@ METRIC_RATIO = "Ratio value"
 # meaningful for MFI-based columns); "Mean (all cells)" pools every cell
 # that passes cell-area + FluorGating without the per-channel threshold
 # filter, which is the right default when the active Property isn't MFI.
-METRIC_OPTIONS = [METRIC_MEAN, METRIC_MEAN_ALL, METRIC_FRACTION, METRIC_COUNT]
+METRIC_OPTIONS = [METRIC_MEAN, METRIC_MEAN_ALL, METRIC_FRACTION, METRIC_EVENTS,
+                  METRIC_COUNT]
 
 #: The metrics whose value depends on the active Property's ON cutoff, so they
-#: are offered only while that Property carries one. The pair is named here
+#: are offered only while that Property carries one. The set is named here
 #: rather than spelled out at the two places that gate on it, because a list
 #: that drifts from :data:`METRIC_OPTIONS` disables the wrong row.
-METRICS_NEEDING_CUTOFF = (METRIC_MEAN, METRIC_FRACTION)
+METRICS_NEEDING_CUTOFF = (METRIC_MEAN, METRIC_FRACTION, METRIC_EVENTS)

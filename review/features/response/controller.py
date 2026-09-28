@@ -16,7 +16,8 @@ from review.domain.numeric import is_number
 from core.safe import swallow
 from review.domain.sample_variables import NAME_JOIN, NUMBER
 from review.features.response.collect import (
-    Y_FRACTION, Y_MEAN, ResponseData, collect_response, empty_reason, fit_curves,
+    Y_EVENTS, Y_FRACTION, Y_MEAN, ResponseData, collect_response, empty_reason,
+    fit_curves, y_metric_for_key,
 )
 from review.features.response.renderer import draw_response
 from review.features.response.response_compute import (
@@ -198,6 +199,7 @@ def open_series_selector(ctx) -> None:
 #: beside it; the name stays importable from here because this tab's readers use
 #: it under that name.
 from review.data.metric_labels import FRACTION_LABEL  # noqa: E402
+from review.data.metric_labels import SYNTHETIC_METRIC_LABEL_TO_KEY  # noqa: E402
 
 
 def response_channel_label(ctx) -> str:
@@ -283,21 +285,20 @@ def response_val_col(ctx) -> str:
 def response_metric_key(ctx) -> str:
     """The tab's Property as a **key** — what the column resolvers take.
 
-    The combo holds display labels, and the fraction is the one entry with no
-    metric of its own: it is the share of cells whose *mean intensity* clears
-    the ON cutoff, so it carries its own key and the column resolver maps it
-    back to the mean-intensity column. Named here because two callers want it —
+    The combo holds display labels, and the fraction and the events count are
+    the entries with no metric of their own: each counts cells whose *mean
+    intensity* clears the ON cutoff, so each carries its own key and the column
+    resolver maps it back to the mean-intensity column. Named here because two callers want it —
     the column and the title's threshold qualifier — and a second inline
     ``METRIC_LABEL_TO_KEY.get`` beside the first is how the two come to disagree
     about what the tab is drawing.
     """
-    from review.data.metric_labels import (
-        FRACTION_METRIC_KEY, METRIC_LABEL_TO_KEY,
-    )
+    from review.data.metric_labels import METRIC_LABEL_TO_KEY
 
     label = response_metric_label(ctx)
-    return (FRACTION_METRIC_KEY if label == FRACTION_LABEL
-            else METRIC_LABEL_TO_KEY.get(label, "mean_intensity"))
+    if label in SYNTHETIC_METRIC_LABEL_TO_KEY:
+        return SYNTHETIC_METRIC_LABEL_TO_KEY[label]
+    return METRIC_LABEL_TO_KEY.get(label, "mean_intensity")
 
 
 def response_channel_key(ctx) -> str:
@@ -586,7 +587,7 @@ def response_data(ctx):
 
     return collect_response(
         ctx, variable_id, timepoints_for(ctx), response_split_variables(ctx),
-        Y_FRACTION if response_draws_fraction(ctx) else Y_MEAN,
+        y_metric_for_key(response_metric_key(ctx)),
         val_col=response_val_col(ctx))
 
 
@@ -826,6 +827,11 @@ def response_y_label(data=None, *, channel: str, metric_label: str) -> str:
         # thing a figure must never do.
         label = " ".join(part for part in (channel, "fraction above threshold")
                          if part)
+    elif getattr(data, "y_metric", Y_MEAN) == Y_EVENTS:
+        # A count of cells over the ON cutoff, for the same reason: not the
+        # Property the combo would otherwise name.
+        label = " ".join(part for part in (channel, "events above threshold (N)")
+                         if part)
     else:
         label = " ".join(part for part in (channel, (metric_label or "").lower())
                          if part)
@@ -879,8 +885,12 @@ def response_measurement_title(data, *, channel: str, metric_label: str,
     from review.data.metric_labels import spread_label, threshold_qualifier
 
     channel = (channel or "").upper()
-    if draws_fraction:
-        measure = " ".join(part for part in (channel, FRACTION_LABEL) if part)
+    if draws_fraction or metric_label in SYNTHETIC_METRIC_LABEL_TO_KEY:
+        # The fraction and the events count are both defined against the ON
+        # cutoff already, so neither takes the "(above threshold)" qualifier.
+        measure = " ".join(part for part in (
+            channel, metric_label if metric_label in SYNTHETIC_METRIC_LABEL_TO_KEY
+            else FRACTION_LABEL) if part)
     else:
         qualifier = threshold_qualifier(metric_key)
         measure = " ".join(

@@ -76,7 +76,7 @@ _fit_model_labels = _lazy("review.features.response.controller",
                           "fit_model_labels")
 _blank_if_undefined = _lazy("review.features.response.controller",
                             "blank_if_undefined")
-_y_metric_for = _lazy("review.features.response.collect", "y_metric_for")
+_y_metric_for_key = _lazy("review.features.response.collect", "y_metric_for_key")
 
 _logger = logging.getLogger("review")
 
@@ -165,7 +165,8 @@ class ResponseBatchExportPanel(BatchExportPanel):
     def _build_output_panel(self, layout: QVBoxLayout) -> None:
         self._build_output_header_and_io(
             layout, title="OUTPUT SETTINGS — RESPONSE CURVES")
-        # ``include_fraction``: the fraction above the ON cutoff is often the
+        # ``include_fraction`` (which also offers the events count beside it):
+        # the fraction above the ON cutoff is often the
         # readout a dose response is actually about, and an EC50 fitted to it is
         # well defined — which is why the tab offers it and why an export that
         # could not would be the tab's figure minus its point.
@@ -451,6 +452,10 @@ class ResponseBatchExportPanel(BatchExportPanel):
         fit_model, fit_top, fit_bottom = self._selected_fit()
         use_sem = bool(self._ctx.state.plot.use_sem)
         draws_fraction = self._draws_fraction(metric_key)
+        # Read by ``_cell_scope_kwargs`` for each group's per-cell file, from
+        # this snapshot rather than the live combo, so the notes describe the
+        # quantity this run plotted even if the combo moves mid-run.
+        self._run_metric_key = metric_key
         variable_name = self._variable_name(variable_id)
         used_stems: set = set()
 
@@ -471,7 +476,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
                 try:
                     data = _collect_response(
                         self._ctx, variable_id, timepoints,
-                        series_id, self._y_metric(draws_fraction),
+                        series_id, self._y_metric(metric_key),
                         val_col=val_col)
                 except Exception as exc:
                     return f"{grp.name} response data: {exc}"
@@ -538,6 +543,21 @@ class ResponseBatchExportPanel(BatchExportPanel):
             _logger.warning(
                 "Response batch export: could not remove the empty CSV %s", path)
 
+    def _cell_scope_kwargs(self, *, val_col: str | None,
+                           timepoints=None) -> dict:
+        """The base overrides, plus the Property this run plotted.
+
+        The per-cell file's notes name the drawn statistic, and a Response
+        figure draws one of three — the mean, the fraction or the count — so
+        the scope has to be told which, or it describes the tab's choice.
+        """
+        kwargs = super()._cell_scope_kwargs(val_col=val_col,
+                                            timepoints=timepoints)
+        metric_key = getattr(self, "_run_metric_key", None)
+        if metric_key is not None:
+            kwargs["metric_key"] = metric_key
+        return kwargs
+
     def _selected_metric_label(self) -> str:
         combo = getattr(self, "_response_channel_cb_metric", None)
         if combo is None:
@@ -549,8 +569,8 @@ class ResponseBatchExportPanel(BatchExportPanel):
 
         return metric_key == FRACTION_METRIC_KEY
 
-    def _y_metric(self, draws_fraction: bool) -> str:
-        return _y_metric_for(draws_fraction)
+    def _y_metric(self, metric_key: str) -> str:
+        return _y_metric_for_key(metric_key)
 
     def _variable_name(self, variable_id: str) -> str:
         vset = self._variable_set()

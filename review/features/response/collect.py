@@ -45,9 +45,13 @@ NOT_NUMERIC = "value is not a number"
 #: ``compute_rep_stats`` already returns beside the mean and which this tab
 #: used to discard. For a dose response the fraction is often the readout the
 #: experiment is actually about, and an EC50 fitted to it is well defined.
+#: ``EVENTS`` is how many cells clear that same cutoff — the Bar and Line tabs'
+#: Events statistic: the mean of each replicate's count with the spread across
+#: them, so a set of two wells counting 27 and 33 plots 30, not 60.
 Y_MEAN = "mean"
 Y_FRACTION = "fraction"
-Y_METRICS = (Y_MEAN, Y_FRACTION)
+Y_EVENTS = "events"
+Y_METRICS = (Y_MEAN, Y_FRACTION, Y_EVENTS)
 
 #: Series buckets for members the series variable cannot place. Named rather
 #: than dropped, and kept apart from each other: "these wells disagree about
@@ -177,7 +181,7 @@ class ResponseData:
     #: applied here: with one timepoint drawn, every point is its own baseline
     #: and the whole figure would be a flat line at 1.0.
     t0_declined: str = ""
-    #: ``Y_MEAN`` or ``Y_FRACTION`` — what the curves plot. Carried so the axis
+    #: ``Y_MEAN``, ``Y_FRACTION`` or ``Y_EVENTS`` — what the curves plot. Carried so the axis
     #: label and the caption describe the numbers actually drawn; an axis
     #: labelled with the mean above a curve of fractions is the one thing a
     #: figure must never do.
@@ -205,15 +209,21 @@ class ResponseData:
         return any(c.points for c in self.curves)
 
 
-def y_metric_for(draws_fraction: bool) -> str:
-    """Which quantity the curves plot: :data:`Y_FRACTION` or :data:`Y_MEAN`.
+def y_metric_for_key(metric_key: str) -> str:
+    """Which quantity the curves plot, from the Property's metric **key**.
 
-    A function rather than two constants a caller picks between, so the tab and
-    Batch Export cannot disagree about which Property means "plot the fraction"
-    — and so a caller outside this feature asks a question instead of importing
-    a pair of string constants it would then compare for itself.
+    :data:`Y_FRACTION` for ``fraction_above_threshold``, :data:`Y_EVENTS` for
+    ``events_above_threshold``, :data:`Y_MEAN` for every intensity flavour.
+
+    A function rather than constants a caller picks between, so the tab and
+    Batch Export — which both resolve through here — cannot disagree about
+    which Property means which curve, and a caller outside this feature asks a
+    question instead of importing string constants it would compare itself.
     """
-    return Y_FRACTION if draws_fraction else Y_MEAN
+    from review.data.metric_labels import EVENTS_METRIC_KEY, FRACTION_METRIC_KEY
+
+    return {FRACTION_METRIC_KEY: Y_FRACTION,
+            EVENTS_METRIC_KEY: Y_EVENTS}.get(metric_key, Y_MEAN)
 
 
 def omission_caption(data: ResponseData, *, rescale=None) -> str:
@@ -498,28 +508,16 @@ def collect_response(ctx, variable_id: str, timepoints,
         # replicate is.
         raw_spread_defined: dict[float, bool] = {}
         for target_t in targets:
-            mean, err, frac, frac_err = stats_for(
-                ctx, rset, target_t, threshold, use_sem, val_col=column)[:4]
-            drawn = frac if data.y_metric == Y_FRACTION else mean
-            drawn_err = frac_err if data.y_metric == Y_FRACTION else err
+            drawn, drawn_err, point = _member_sample(
+                ctx, stats_for, rset, target_t, threshold, use_sem, column,
+                data.y_metric, per_fov)
             raw_spread_defined[float(target_t)] = _is_number(drawn_err)
             if not _is_number(drawn):
                 # No sample at this timepoint. Not a zero — a member that was
                 # not measured then — so it leaves a gap in the curve rather
                 # than a point on the floor.
                 continue
-            # The **real** fraction in the fraction slots, not the ``0.0`` that
-            # used to sit there. Nothing read it while the tab only ever drew
-            # means, but a hardcoded zero for something never computed is §7's
-            # own example of the bug — and it becomes live the moment the y
-            # metric can be the fraction, because ``normalize_pts`` divides
-            # index 3 by the control's *fraction* series. Putting the fraction
-            # in the mean slot instead would have divided it by the control's
-            # mean intensity: a ratio of two different quantities, drawn under
-            # a fold-change label with nothing to say so.
-            raw.append((target_t, _num_or_nan(mean), _spread_or_zero(err),
-                        _num_or_nan(frac), 0, 0, _spread_or_zero(frac_err),
-                        0.0, 0.0))
+            raw.append(point)
         # The member's loaded wells, which is what ``ResponsePoint.n`` has
         # always meant. Deliberately **not** relabelled as a replicate count:
         # under Spread: FOV the replicates are the pooled FOVs and this is not
@@ -537,6 +535,8 @@ def collect_response(ctx, variable_id: str, timepoints,
             # happened to be first in the tuple.
             if data.y_metric == Y_FRACTION:
                 mean, err = point[3], point[6]
+            elif data.y_metric == Y_EVENTS:
+                mean, err = point[4], point[9]
             else:
                 mean, err = point[1], point[2]
             if not _is_number(mean):
@@ -596,6 +596,53 @@ def collect_response(ctx, variable_id: str, timepoints,
                                      points=tuple(by_curve.get((t, ""), ())))
                        for t in targets]
     return data
+
+
+def _member_sample(ctx, stats_for, rset, target_t, threshold, use_sem, column,
+                   y_metric: str, per_fov: bool) -> tuple:
+    """``(drawn, drawn_err, AggPoint)`` for one member at one timepoint.
+
+    *drawn* / *drawn_err* are the quantity on the y axis before normalisation
+    — what the caller tests for "measured at all" and "spread defined". The
+    AggPoint is what ``normalize_member_pts`` rescales, and it carries each
+    quantity **in its own slot**: the mean at 1/2, the fraction at 3/6, and —
+    for an events curve — the count at 4 with its replicate spread at 9, the
+    slots the Line tab's Events panel is normalised through. Each slot is
+    divided by the control's series *for that quantity*; a count put in the
+    mean slot would be divided by the control's mean intensity, a ratio of two
+    different things under a fold-change label.
+
+    The **real** fraction goes in the fraction slots, not the ``0.0`` that used
+    to sit there. Nothing read it while the tab only ever drew means, but a
+    hardcoded zero for something never computed is §7's own example of the bug.
+    The events slots stay ``0`` when the curve is not drawing events, which is
+    what they always held here — so a mean or fraction curve is normalised
+    exactly as before — and are filled with the count, or NaN when it could not
+    be computed, when it is.
+
+    The count is the Bar and Line statistic: the mean of each replicate's count
+    with the cross-replicate spread. With Spread: FOV on, the replicates are the
+    pooled fields, which ``compute_rep_per_fov_stats`` already returns beside
+    the mean and fraction; otherwise the wells, through
+    ``compute_rep_n_above_stats`` on this tab's own column.
+    """
+    from review.domain.stats_compute import compute_rep_n_above_stats
+
+    mean, err, frac, frac_err, *per_fov_n = stats_for(
+        ctx, rset, target_t, threshold, use_sem, val_col=column)
+    point = (target_t, _num_or_nan(mean), _spread_or_zero(err),
+             _num_or_nan(frac), 0, 0, _spread_or_zero(frac_err), 0.0, 0.0)
+    if y_metric == Y_FRACTION:
+        return frac, frac_err, point
+    if y_metric != Y_EVENTS:
+        return mean, err, point
+    if per_fov and len(per_fov_n) >= 2:
+        n, n_err = per_fov_n[0], per_fov_n[1]
+    else:
+        n, n_err = compute_rep_n_above_stats(
+            ctx, rset, target_t, use_sem, threshold, val_col=column)
+    point = (*point[:4], _num_or_nan(n), *point[5:], _spread_or_zero(n_err))
+    return n, n_err, point
 
 
 def _place_on_x(vset, variable, variable_id, members, well_paths,
@@ -832,10 +879,10 @@ def _control_reads_zero(normalise, member: str, target_t: float,
     if denominators is None or getattr(normalise, "op_ctrl", "") != "ratio":
         return False
     with swallow("ask the control denominator what it held"):
-        _ref, outcome, stats, frac, _n = denominators.series_for(member)
+        _ref, outcome, stats, frac, n = denominators.series_for(member)
         if not outcome:
             return False
-        series = frac if y_metric == Y_FRACTION else stats
+        series = {Y_FRACTION: frac, Y_EVENTS: n}.get(y_metric, stats)
         value = (series or {}).get(target_t)
         # ``series_for`` yields ``{t: (value, spread)}``; a control that never
         # resolved yields empty dicts, which is ``control_gaps``, not this.

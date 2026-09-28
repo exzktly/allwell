@@ -1011,7 +1011,7 @@ def member_n_series(
     def rset_stat(rset, t):
         if per_fov_spread:
             _, _, _, _, n_mean, n_spread = compute_rep_per_fov_stats(ctx,
-                rset, t, threshold, use_sem,
+                rset, t, threshold, use_sem, val_col=val_col,
             )
             # ``_finite_spread`` is safe here now. It used to be stricter than
             # this site — it required ``isinstance(value, (int, float))``, which
@@ -1025,7 +1025,8 @@ def member_n_series(
         # This used to be ``compute_rep_n_above``, a *total* across the set's
         # wells, so a set normalised against itself came out at 1/n rather than
         # 1.0: a per-well mean of 5 over a total of 10 reads 0.5.
-        n_mean, n_spread = compute_rep_n_above_stats(ctx, rset, t, use_sem, threshold)
+        n_mean, n_spread = compute_rep_n_above_stats(ctx, rset, t, use_sem, threshold,
+                                                     val_col=val_col)
         return (float(n_mean),
                 float(n_spread) if math.isfinite(n_spread) else 0.0)
 
@@ -1756,7 +1757,10 @@ def member_stats_series(
     """
     def rset_stat(rset, t) -> tuple | None:
         compute = compute_rep_per_fov_stats if per_fov_spread else compute_rep_stats
-        gm, gerr, *_ = compute(ctx, rset, t, threshold, use_sem)
+        # ``val_col`` for a rep-set control as well as a solo well: Response
+        # Curves owns its own Property, and a control read on the band's column
+        # would divide one channel's curve by another channel's control.
+        gm, gerr, *_ = compute(ctx, rset, t, threshold, use_sem, val_col=val_col)
         if not math.isfinite(gm):
             return None
         return (float(gm), _finite_spread(gerr))
@@ -1791,7 +1795,7 @@ def member_frac_stats_series(
     """
     def rset_stat(rset, t) -> tuple | None:
         compute = compute_rep_per_fov_stats if per_fov_spread else compute_rep_stats
-        res = compute(ctx, rset, t, threshold, use_sem)
+        res = compute(ctx, rset, t, threshold, use_sem, val_col=val_col)
         gf, ferr = res[2], res[3]
         if not is_number(gf):
             return None
@@ -1916,10 +1920,11 @@ def member_frac_series(
     def rset_stat(rset, t) -> tuple | None:
         if per_fov_spread:
             _, _, gf, gerr_f, *_ = compute_rep_per_fov_stats(ctx,
-                rset, t, threshold, use_sem,
+                rset, t, threshold, use_sem, val_col=val_col,
             )
         else:
-            _, _, gf, gerr_f = compute_rep_stats(ctx, rset, t, threshold, use_sem)
+            _, _, gf, gerr_f = compute_rep_stats(ctx, rset, t, threshold, use_sem,
+                                                 val_col=val_col)
         if not is_number(gf):
             return None
         return (float(gf), _finite_spread(gerr_f))

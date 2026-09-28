@@ -18,6 +18,7 @@ import pytest
 
 from review.domain import sample_variables as sv
 from review.features.registry import build_feature_registry
+from review.features.response import collect as rcollect
 from review.features.response import controller as rctl
 
 
@@ -86,7 +87,8 @@ def tab(qtbot, monkeypatch):
         lambda *_: rctl.on_response_channel_changed(ctx))
     y_combo = LabeledComboBox("Property")
     qtbot.addWidget(y_combo)
-    y_combo.addItems(["Mean Intensity", rctl.FRACTION_LABEL])
+    y_combo.addItems(["Mean Intensity", rctl.FRACTION_LABEL,
+                      "Events above threshold"])
     y_combo.currentIndexChanged.connect(
         lambda *_: rctl.on_response_metric_changed(ctx))
     tp_button = QPushButton("Timepoints: 0 selected")
@@ -1994,3 +1996,133 @@ def test_the_figure_says_when_a_grouping_could_not_be_crossed(tab):
     assert titles, "the renderer never styled the axes"
     assert "No well holds both Cell line and Dose" in titles[-1], (
         f"the figure does not say the grouping was not applied: {titles[-1]!r}")
+
+
+# ── Events above threshold, through the tab's own Property combo ────────────
+#
+# The collector tests pin what an events curve holds once ``y_metric`` is
+# ``Y_EVENTS``. These pin that the tab ever asks for it: choosing the entry on
+# the real combo, and normalising through the real control path. Reverting
+# ``response_data`` to the fraction-or-mean choice drew mean intensity under an
+# "Events above threshold" title with every other test green.
+
+def _stub_counts(tab, *, per_well, per_fov=None):
+    """Counts per member, distinct from the stubbed mean (10) and fraction (0.5).
+
+    Patched on ``fold_change`` too: the control series are built there, from
+    the names that module imported, and a denominator read from the unpatched
+    producer would measure nothing here.
+    """
+    import review.domain.fold_change as fc
+    import review.domain.stats_compute as sc
+
+    def _n(ctx, rset, t, use_sem, threshold=None, *, val_col=None):
+        return per_well[rset.name]
+
+    def _pf(ctx, rset, t, thr, sem, *, val_col=None):
+        n, spread = (per_fov or {}).get(rset.name, (float("nan"), float("nan")))
+        return (10.0, 1.0, 0.5, 0.1, n, spread)
+
+    def _stats(ctx, rset, t, thr, sem, **kw):
+        return (10.0, 1.0, 0.5, 0.1)
+
+    for mod in (sc, fc):
+        tab.monkeypatch.setattr(mod, "compute_rep_n_above_stats", _n)
+        tab.monkeypatch.setattr(mod, "compute_rep_per_fov_stats", _pf)
+        tab.monkeypatch.setattr(mod, "compute_rep_stats", _stats)
+    # The control's timepoints are enumerated from its wells' aggregated points.
+    tab.monkeypatch.setattr(fc, "aggregate_well",
+                            lambda *a, **k: [(24.0, 10.0, 1.0, 0.5, 0, 0, 0.1)])
+
+
+def _dosed(tab):
+    variable = _variable(pairs=(("1", 1.0), ("10", 10.0)))
+    _load(tab, variable, {"A01": "v0", "A02": "v1"},
+          [("ctrl", ["A01"]), ("drug", ["A02"])])
+
+
+def test_choosing_events_on_the_property_combo_plots_the_count(tab):
+    _dosed(tab)
+    _stub_counts(tab, per_well={"ctrl": (4.0, 1.0), "drug": (17.0, 2.0)})
+    rctl.redraw_response(tab.ctx)
+
+    tab.y.setCurrentText("Events above threshold")
+    data = rctl.response_data(tab.ctx)
+
+    assert data.y_metric == rcollect.Y_EVENTS
+    assert [(p.member, p.y) for p in data.curves[0].points] == [
+        ("ctrl", 4.0), ("drug", 17.0)]
+
+
+@pytest.mark.parametrize("per_fov, expected", [(False, 17.0 / 4.0),
+                                               (True, 2.0 / 8.0)])
+def test_an_events_curve_is_normalised_by_the_controls_count(tab, per_fov,
+                                                             expected):
+    """Through ``_member_normaliser`` and a real ``ControlSeriesCache``.
+
+    Every candidate wrong answer is a different number: the raw count (17 or
+    2), the count over the control's mean (0.17 / 0.02), and the well-mode
+    count over the per-FOV control or the reverse.
+    """
+    from review.domain.control_ref import ControlRef
+
+    _dosed(tab)
+    _stub_counts(tab, per_well={"ctrl": (4.0, 0.0), "drug": (17.0, 0.0)},
+                 per_fov={"ctrl": (8.0, 0.0), "drug": (2.0, 0.0)})
+    tab.ctx.state.plot.use_fov_replicates = per_fov
+    tab.ctx.state.plot.fc_vs_control_on = True
+    tab.ctx.state.plot.fc_control = ControlRef("set", "ctrl")
+    rctl.redraw_response(tab.ctx)
+    tab.y.setCurrentText("Events above threshold")
+
+    data = rctl.response_data(tab.ctx)
+
+    ys = {p.member: p.y for p in data.curves[0].points}
+    assert ys["ctrl"] == pytest.approx(1.0)
+    assert ys["drug"] == pytest.approx(expected)
+    assert data.normalised
+
+
+def test_an_events_control_counting_zero_is_named_as_zero(tab):
+    """Not as a missing control: the control resolved and counted nothing."""
+    from review.domain.control_ref import ControlRef
+
+    _dosed(tab)
+    _stub_counts(tab, per_well={"ctrl": (0.0, 0.0), "drug": (17.0, 0.0)})
+    tab.ctx.state.plot.fc_vs_control_on = True
+    tab.ctx.state.plot.fc_control = ControlRef("set", "ctrl")
+    rctl.redraw_response(tab.ctx)
+    tab.y.setCurrentText("Events above threshold")
+
+    data = rctl.response_data(tab.ctx)
+
+    assert ("drug", 24.0) in data.zero_control
+    assert ("drug", 24.0) not in data.control_gaps
+
+
+@pytest.mark.parametrize("label, fragment", [
+    ("Events above threshold", "count of the cells"),
+    (rctl.FRACTION_LABEL, "fraction of the cells"),
+    ("Mean Intensity", "mean of the value column"),
+])
+def test_the_cell_export_notes_name_the_quantity_the_curve_draws(tab, label,
+                                                                 fragment):
+    """A per-cell file saved from a curve of counts must not say "mean".
+
+    ``scope_from_ctx`` is replaced with a recorder: what is measured is the
+    notes this module hands to it, and building the whole population (which
+    reads slices this fixture does not carry) would measure nothing more.
+    """
+    import review.features.response.cell_scope_compute as rcs
+
+    _dosed(tab)
+    _stub_counts(tab, per_well={"ctrl": (4.0, 0.0), "drug": (17.0, 0.0)})
+    tab.y.setCurrentText(label)
+    tab.monkeypatch.setattr(rcs, "scope_from_ctx",
+                            lambda ctx, **kw: dict(kw["notes"]))
+    tab.monkeypatch.setattr(rcs, "_thresh_on_col", lambda ctx: None)
+    notes = rcs.cell_scope(tab.ctx)
+    assert fragment in notes["drawn statistic"]
+    # And the batch override wins over the tab's own combo.
+    assert "count of the cells" in rcs.cell_scope(
+        tab.ctx, metric_key="events_above_threshold")["drawn statistic"]

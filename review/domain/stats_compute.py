@@ -811,7 +811,8 @@ def compute_rep_n_above_total(ctx, rset: ReplicateSet, target_t: float,
 
 def compute_rep_n_above_stats(ctx, rset: ReplicateSet, target_t: float,
                               use_sem: bool,
-                              threshold: float | None = None) -> tuple:
+                              threshold: float | None = None, *,
+                              val_col: str | None = None) -> tuple:
     """Mean and SD/SEM of events-above-threshold *across the set's wells*.
 
     Each loaded well contributes one ``n_above`` value (AggPoint index 4); the
@@ -820,18 +821,24 @@ def compute_rep_n_above_stats(ctx, rset: ReplicateSet, target_t: float,
     Events panel, mirroring how :func:`compute_rep_stats` aggregates the Mean
     and Fraction panels (a per-well mean with a cross-well spread), so the
     Events panel gets replicate error bars instead of a spread-less total.
+
+    *val_col* overrides the shared active column, exactly as in
+    :func:`compute_rep_stats` — Response Curves owns its own Property, and an
+    events curve counted on the band's column would describe a different
+    channel from the axis label above it. ``None`` keeps the shared column.
     """
     threshold = _on_cutoff(ctx, threshold)
     fluor_gates = get_all_fluor_gates(ctx)
+    col = val_col or ctx.state.channel.active_val_col
     cache_key = ("rep_n_above_stats", rset.name, tuple(rset.wells), target_t,
-                 threshold, use_sem, ctx.state.channel.active_val_col,
+                 threshold, use_sem, col,
                  tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx), _ratio_cache_sig(ctx))
     if cache_key in ctx.state.stats_cache.cache:
         return ctx.state.stats_cache.cache[cache_key]
 
     reps = group_replicate_stats(
         ctx, rset.wells, target_t, use_fov=False,
-        val_col=ctx.state.channel.active_val_col,
+        val_col=col,
         threshold=threshold, fluor_gates=fluor_gates,
     )
     mean, spread = _reduce_reps(reps, "n_above", use_sem)

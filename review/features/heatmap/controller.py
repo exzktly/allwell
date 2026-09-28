@@ -1,7 +1,8 @@
 """Heatmap tab rendering.
 
 Renders an arbitrary R×C grid colored by a chosen metric (mean above
-threshold, fraction above threshold, cell count, or ratio mean) at a
+threshold, fraction above threshold, events above threshold, cell count, or
+ratio mean) at a
 single timepoint. Supports click-to-select wells and modifier-aware
 selection.
 """
@@ -55,6 +56,7 @@ from domain.tp_match import tp_close
 # feature's own callers are unchanged.
 from review.domain.heatmap_metrics import (  # noqa: F401
     METRIC_COUNT,
+    METRIC_EVENTS,
     METRIC_FRACTION,
     METRIC_MEAN,
     METRIC_MEAN_ALL,
@@ -253,6 +255,10 @@ _METRIC_FIELD = {
     METRIC_MEAN: "mean",
     METRIC_MEAN_ALL: "mean_all",
     METRIC_FRACTION: "frac",
+    # The per-replicate count of cells above the ON cutoff — so a set's cell
+    # is the mean of its wells' counts, the number the Bar and Line Events
+    # panels draw for the same set, not the cross-well total.
+    METRIC_EVENTS: "n_above",
     METRIC_RATIO: "mean_all",
 }
 
@@ -361,7 +367,8 @@ def _cell_stat(
     if metric == METRIC_RATIO and not is_ratio_key(val_col):
         return float("nan"), float("nan")
 
-    # METRIC_FRACTION, METRIC_RATIO, METRIC_MEAN_ALL and METRIC_MEAN all reduce
+    # METRIC_FRACTION, METRIC_EVENTS, METRIC_RATIO, METRIC_MEAN_ALL and
+    # METRIC_MEAN all reduce
     # the one replicate list; only the ``ReplicateStat`` field differs, and
     # ``_METRIC_FIELD`` holds that mapping. ``METRIC_MEAN_ALL`` reads the mean
     # across every included cell — no per-channel ThreshFracOn filter — which is
@@ -588,6 +595,12 @@ def _compute_global_range(
         tuple(tps),
         bool(ctx.state.heatmap.repset_avg),
         bool(ctx.state.heatmap.log_scale),
+        # The replicate unit. ``_cell_stat`` follows the per-FOV toggle, so
+        # switching it changes every cell — for Events above threshold by
+        # roughly the number of fields, a per-well count becoming a per-field
+        # one — while no field above moves, and the Auto scale kept the
+        # previous unit's range and coloured the whole map at its floor.
+        bool(getattr(ctx.state.plot, "use_fov_replicates", False)),
         # The scatter-gate signature. The colour range is computed from gated
         # cell values, so editing or resizing a gate changes every cell in the
         # map without moving any of the fields above it — and the cache is
@@ -1004,6 +1017,11 @@ def _format_cell_value(v: float, metric: str, fmt: str = "") -> str:
         return f"{int(round(v))}"
     if metric == METRIC_FRACTION:
         return f"{v:.2f}"
+    if metric == METRIC_EVENTS:
+        # A count, averaged over replicates: a whole number reads as one
+        # (``310``, not ``310.00``), and a mean that is not whole keeps one
+        # place rather than being rounded to a count nobody measured.
+        return f"{int(round(v))}" if float(v).is_integer() else f"{v:.1f}"
     if abs(v) >= 100:
         return f"{v:.0f}"
     if abs(v) >= 1:
@@ -1067,6 +1085,8 @@ def _metric_axis_label(metric: str, ctx) -> str:
         # Every metric is cut by some ON cutoff — ThreshFracOn or
         # ThreshCountOn — so the generic "above threshold" wording holds.
         return f"{label} fraction above threshold"
+    if metric == METRIC_EVENTS:
+        return f"{label} events above threshold (N)"
     if metric == METRIC_RATIO:
         return f"{label} (mean ratio)"
     if metric == METRIC_MEAN_ALL:

@@ -3573,6 +3573,8 @@ place cells in a grid that mirrors your plate or your experimental design.
     *Rep-set avg*). **Events above threshold** colours each cell by how many
     cells clear the ON cutoff — for a rep-set cell, the mean of its wells'
     counts, the number the Bar tab's Events panel draws, not their total.
+    With the per-FOV spread on, the fields are the replicates, so a cell shows
+    the mean count per field instead, and the colour scale follows.
     **Mean above threshold**, **Fraction above threshold** and **Events above
     threshold** are offered only for a Property that has an ON cutoff of its own — Mean
     Intensity (ThreshFracOn) and smFISH Count (ThreshCountOn). They grey out for

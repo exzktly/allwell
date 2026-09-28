@@ -209,24 +209,16 @@ class ResponseData:
         return any(c.points for c in self.curves)
 
 
-def y_metric_for(draws_fraction: bool) -> str:
-    """Which quantity the curves plot: :data:`Y_FRACTION` or :data:`Y_MEAN`.
-
-    A function rather than two constants a caller picks between, so the tab and
-    Batch Export cannot disagree about which Property means "plot the fraction"
-    — and so a caller outside this feature asks a question instead of importing
-    a pair of string constants it would then compare for itself.
-    """
-    return Y_FRACTION if draws_fraction else Y_MEAN
-
-
 def y_metric_for_key(metric_key: str) -> str:
     """Which quantity the curves plot, from the Property's metric **key**.
 
     :data:`Y_FRACTION` for ``fraction_above_threshold``, :data:`Y_EVENTS` for
     ``events_above_threshold``, :data:`Y_MEAN` for every intensity flavour.
-    The tab and Batch Export both resolve through here, for the reason
-    :func:`y_metric_for` gives.
+
+    A function rather than constants a caller picks between, so the tab and
+    Batch Export — which both resolve through here — cannot disagree about
+    which Property means which curve, and a caller outside this feature asks a
+    question instead of importing string constants it would compare itself.
     """
     from review.data.metric_labels import EVENTS_METRIC_KEY, FRACTION_METRIC_KEY
 

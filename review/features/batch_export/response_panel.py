@@ -452,6 +452,10 @@ class ResponseBatchExportPanel(BatchExportPanel):
         fit_model, fit_top, fit_bottom = self._selected_fit()
         use_sem = bool(self._ctx.state.plot.use_sem)
         draws_fraction = self._draws_fraction(metric_key)
+        # Read by ``_cell_scope_kwargs`` for each group's per-cell file, from
+        # this snapshot rather than the live combo, so the notes describe the
+        # quantity this run plotted even if the combo moves mid-run.
+        self._run_metric_key = metric_key
         variable_name = self._variable_name(variable_id)
         used_stems: set = set()
 
@@ -538,6 +542,21 @@ class ResponseBatchExportPanel(BatchExportPanel):
         except OSError:
             _logger.warning(
                 "Response batch export: could not remove the empty CSV %s", path)
+
+    def _cell_scope_kwargs(self, *, val_col: str | None,
+                           timepoints=None) -> dict:
+        """The base overrides, plus the Property this run plotted.
+
+        The per-cell file's notes name the drawn statistic, and a Response
+        figure draws one of three — the mean, the fraction or the count — so
+        the scope has to be told which, or it describes the tab's choice.
+        """
+        kwargs = super()._cell_scope_kwargs(val_col=val_col,
+                                            timepoints=timepoints)
+        metric_key = getattr(self, "_run_metric_key", None)
+        if metric_key is not None:
+            kwargs["metric_key"] = metric_key
+        return kwargs
 
     def _selected_metric_label(self) -> str:
         combo = getattr(self, "_response_channel_cb_metric", None)

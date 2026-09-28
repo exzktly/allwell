@@ -595,6 +595,12 @@ def _compute_global_range(
         tuple(tps),
         bool(ctx.state.heatmap.repset_avg),
         bool(ctx.state.heatmap.log_scale),
+        # The replicate unit. ``_cell_stat`` follows the per-FOV toggle, so
+        # switching it changes every cell — for Events above threshold by
+        # roughly the number of fields, a per-well count becoming a per-field
+        # one — while no field above moves, and the Auto scale kept the
+        # previous unit's range and coloured the whole map at its floor.
+        bool(getattr(ctx.state.plot, "use_fov_replicates", False)),
         # The scatter-gate signature. The colour range is computed from gated
         # cell values, so editing or resizing a gate changes every cell in the
         # map without moving any of the fields above it — and the cache is

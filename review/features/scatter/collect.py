@@ -565,6 +565,18 @@ def collect_scatter_agg_data(
             # about a control that does not affect this axis.
             return
         n_total = sum(int(r.n_total) for r in reps)
+        if any(not math.isfinite(float(r.n_above)) for r in reps):
+            # A per-field count that is undefined — a well whose FOV labels are
+            # unusable, under Spread: FOV — is not a count of zero. Tallying
+            # only the finite ones read it as "every cell was cut" and told the
+            # user to lower a cutoff that had cut nothing: an Events axis on
+            # such a well plotted nothing under that sentence while the same
+            # well's Fraction drew 0.75. Say what actually happened instead.
+            cut_sink.setdefault(axis, {
+                "channel": channel, "col": val_col, "cutoff": threshold,
+                "n_total": n_total, "undefined_count": True,
+            })
+            return
         # ``n_above`` is a float and can be NaN — a well whose FOV labels are
         # provably wrong has no defined per-field count — so ``int()`` on it
         # raises rather than returning a number. Undefined counts are excluded

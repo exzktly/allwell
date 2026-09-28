@@ -731,15 +731,16 @@ def populate_metric_combo(
 
     ``include_fraction`` appends both synthetic entries — ``Fraction above
     threshold`` and ``Events above threshold`` — because every surface that
-    can plot one can plot the other: both are counts over the same ON cutoff
-    and resolve to the same column.
+    can plot one can plot the other: both are taken over the same ON cutoff
+    (the share of cells above it, and how many there are) and resolve to the
+    same column.
 
     Ratio channels (resolved via ``_label_to_channel_key``) collapse the
     combo to a single ``Calculated Val`` entry — ratios are a single
     computed value per cell, so the intensity flavours don't exist for
     them. Real channels get the full ``METRIC_ORDER`` set (optionally
-    appended with ``Fraction above threshold`` for the agg-scatter
-    combos) with ``smFISH Count`` greyed out unless ``smfish_channel``
+    appended with those two synthetic entries) with ``smFISH Count`` greyed
+    out unless ``smfish_channel``
     names a channel in ``_smfish_channels``.
 
     The current selection is preserved when the previous label still

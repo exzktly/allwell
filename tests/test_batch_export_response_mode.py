@@ -469,3 +469,15 @@ def test_the_fit_model_offer_matches_the_tab_s():
     models = [model for _label, model in fit_model_labels()]
     assert models[0] == FIT_NONE, "off by default — a fit is an assertion"
     assert FIT_4PL in models
+
+
+def test_the_per_cell_notes_are_told_what_this_run_plotted():
+    """The run's own Property, not whatever the tab's combo says."""
+    # ``__new__`` rather than a namespace: the override calls ``super()``, which
+    # needs a real instance, and building the panel would need a whole app.
+    panel = ResponseBatchExportPanel.__new__(ResponseBatchExportPanel)
+    panel._run_metric_key = "events_above_threshold"
+    kwargs = panel._cell_scope_kwargs(val_col="rfp_mean_intensity",
+                                      timepoints=[24])
+    assert kwargs == {"val_col": "rfp_mean_intensity", "timepoints": (24.0,),
+                      "metric_key": "events_above_threshold"}

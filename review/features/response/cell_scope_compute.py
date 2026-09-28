@@ -18,16 +18,35 @@ from __future__ import annotations
 from review.core.channel_state_controller import on_cutoff_for_column
 from review.domain.stats_compute import _thresh_on_col
 from review.features.export.cell_scope_compute import CellScope, scope_from_ctx
+from review.data.metric_labels import EVENTS_METRIC_KEY, FRACTION_METRIC_KEY
 from review.features.response.controller import (
-    response_val_col, timepoints_for,
+    response_metric_key, response_val_col, timepoints_for,
 )
+
+#: What a point *is*, per Property, in the words the notes use. The curve draws
+#: one of three quantities of the same cells, and a file whose notes describe
+#: the mean beside a figure of counts tells its reader to reproduce the wrong
+#: number.
+_DRAWN = {
+    FRACTION_METRIC_KEY: (
+        "fraction of the cells with plot_above_threshold=1, per timepoint",
+        "a member's point is the mean of its wells' fractions"),
+    EVENTS_METRIC_KEY: (
+        "count of the cells with plot_above_threshold=1, per timepoint",
+        "a member's point is the mean of its wells' counts (of its fields' "
+        "counts with Spread: FOV on)"),
+}
+_DRAWN_MEAN = (
+    "mean of the value column over plot_above_threshold=1, per timepoint",
+    "a member's point is the mean of its wells' means")
 
 
 def cell_scope(ctx, *, val_col: str | None = None,
-               timepoints: tuple[float, ...] | None = None) -> CellScope:
+               timepoints: tuple[float, ...] | None = None,
+               metric_key: str | None = None) -> CellScope:
     """
-    *val_col* and *timepoints* override what this tab would read off its own
-    controls. They exist for Batch Export, which draws the same figure from its
+    *val_col*, *timepoints* and *metric_key* override what this tab would read
+    off its own controls. They exist for Batch Export, which draws the same figure from its
     **own** column and its own ticked timepoints: reading the tab's there wrote
     a per-cell file describing the plot on screen, filed beside — and named
     for — a figure of something else. Both default to the tab's own answer, so
@@ -39,10 +58,11 @@ def cell_scope(ctx, *, val_col: str | None = None,
     # Property became tab-local: left reading the band, "Export cell data" on a
     # Response figure of RFP fractions wrote GFP mean intensity at GFP's cutoff.
     val_col = val_col or response_val_col(ctx) or ctx.state.channel.active_val_col
-    rep_note = (
-        "a member's point is the mean of its wells' means with a cross-well SD "
-        "(ddof=1); group by well_label to reproduce it"
-    )
+    drawn, rep_head = _DRAWN.get(
+        metric_key if metric_key is not None else response_metric_key(ctx),
+        _DRAWN_MEAN)
+    rep_note = (f"{rep_head} with a cross-well SD (ddof=1); group by "
+                "well_label to reproduce it")
     x_note = (
         "one point per member per timepoint, placed on x by the member's value "
         "of the chosen Number variable; members whose wells disagree, or that "
@@ -59,8 +79,7 @@ def cell_scope(ctx, *, val_col: str | None = None,
         tp_fallback=True,
         on_col=_thresh_on_col(ctx),
         required_columns=("area_px",),
-        notes=(("drawn statistic",
-                "mean of the value column over plot_above_threshold=1, per timepoint"),
+        notes=(("drawn statistic", drawn),
                ("replicate sets", rep_note),
                ("x axis", x_note)),
     )

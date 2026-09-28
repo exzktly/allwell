@@ -422,3 +422,122 @@ def test_a_rep_set_controls_count_is_taken_on_the_tabs_own_column(
                              per_fov_spread=per_fov, fluor_gates={})
     assert out == {24.0: (4.0, 1.0)}
     assert seen == ["rfp_mean_intensity"]
+
+
+@pytest.mark.parametrize("builder", ["member_stats_series", "member_frac_series"])
+def test_a_rep_set_controls_mean_and_fraction_use_the_tabs_column(monkeypatch,
+                                                                 builder):
+    """The same seam as the count's, for the other two quantities."""
+    from review.domain import fold_change as fc
+
+    seen = []
+
+    def _stats(*a, val_col=None, **k):
+        seen.append(val_col)
+        return (1.0, 0.0, 0.5, 0.0)
+
+    monkeypatch.setattr(fc, "compute_rep_stats", _stats)
+    monkeypatch.setattr(fc, "_member_series",
+                        lambda ctx, label, *, rset_stat, **k: {24.0: rset_stat(None, 24.0)})
+    getattr(fc, builder)(None, "ctrl", threshold=0.0,
+                         val_col="rfp_mean_intensity", use_sem=True,
+                         per_fov_spread=False, fluor_gates={})
+    assert seen == ["rfp_mean_intensity"]
+
+
+# ── an undefined per-field count is not a cut ───────────────────────────────
+
+def test_an_undefined_per_field_count_is_not_reported_as_a_cut(monkeypatch):
+    """Spread: FOV on a well whose FOV labels are unusable.
+
+    ``group_replicate_stats`` keeps such a well's mean and fraction and NaNs
+    its per-field count. The Events axis then has nothing to plot, and the
+    empty message used to say every cell was cut by the ON cutoff — of a well
+    three of whose four cells clear it — sending the user to lower a cutoff
+    that was not the cause.
+    """
+    import review.domain.stats_compute as sc
+    from review.features.scatter._messages import agg_empty_message
+    from review.features.scatter.collect import collect_scatter_agg_data
+
+    ctx = _scatter_ctx({"A01": _well_df([60.0, 70.0, 80.0, 10.0])})
+    ctx.state.plot.use_fov_replicates = True
+    monkeypatch.setattr(sc, "_fov_verdict", lambda ctx, lbl, df: SimpleNamespace(
+        trusted=False, reason="schema mismatch"))
+
+    frac = collect_scatter_agg_data(
+        ctx, "Fraction On GFP", "Mean Fluorescence GFP", [24.0],
+        well_colors=["#000000"])
+    assert [v["x"] for v in frac.values()] == [[0.75]]
+
+    sink = {}
+    out = collect_scatter_agg_data(
+        ctx, "Events On GFP", "Mean Fluorescence GFP", [24.0],
+        well_colors=["#000000"], cut_sink=sink)
+    assert out == {}
+    statuses = []
+    ctx.notify = SimpleNamespace(set_status=statuses.append)
+    message = agg_empty_message(ctx, sink)
+    assert "cut by the ON cutoff" not in message
+    assert "FOV labels" in message and "Spread: FOV" in message
+    # Nothing to lower, so nothing is pushed to the status line either.
+    assert statuses == []
+
+
+def test_a_real_cut_on_an_events_axis_still_says_so():
+    """The other half: an undefined count must not swallow a genuine cut."""
+    from review.features.scatter._messages import agg_empty_message
+    from review.features.scatter.collect import collect_scatter_agg_data
+
+    ctx = _scatter_ctx({"A01": _well_df([10.0, 20.0])})
+    sink = {}
+    # Fraction, not Events: a zero count is a point, so it is the fraction's
+    # undefined-free path that reaches the sink with every cell below 50.
+    collect_scatter_agg_data(ctx, "Mean Fluorescence GFP (Mean Intensity)",
+                             "Mean Fluorescence GFP (Mean Intensity)", [24.0],
+                             well_colors=["#000000"], cut_sink=sink)
+    ctx.notify = SimpleNamespace(set_status=lambda _s: None)
+    ctx.state.scatter = SimpleNamespace(cut_status_posted=False)
+    assert "cut by the ON cutoff" in agg_empty_message(ctx, sink)
+
+
+# ── the heat map's colour range follows the replicate unit ──────────────────
+
+def _fov_df(per_fov_counts, *, tp_hours=24.0):
+    rows = []
+    for fov, n in per_fov_counts.items():
+        rows += [{"Included": 1, "area_px": 200.0, "timepoint_hours": tp_hours,
+                  "timepoint": f"{int(tp_hours):02d}h", "fov": str(fov),
+                  "nucleus_id": f"{fov}-{i}", "gfp_mean_intensity": 60.0}
+                 for i in range(n)]
+    return pd.DataFrame(rows)
+
+
+def test_the_heat_map_colour_range_follows_the_per_fov_toggle():
+    """30 and 60 per well are 10 and 20 per field; the Auto range must move.
+
+    The range cache ignored the toggle, so after switching it every cell sat
+    below the previous unit's floor and the map drew in one colour.
+    """
+    from review.features.heatmap import controller as HM
+
+    dfs = {"A01": _fov_df({1: 10, 2: 10, 3: 10}),
+           "A02": _fov_df({1: 20, 2: 20, 3: 20})}
+    ctx = _scatter_ctx(dfs)
+    ctx.state.channel.active_val_col = "gfp_mean_intensity"
+    ctx.state.cell_gating.use_scatter_gates = False
+    ctx.state.cell_gating.selected_gate = None
+    ctx.state.heatmap = SimpleNamespace(repset_avg=False, tp_values=[24.0],
+                                        log_scale=False)
+    ctx.runtime.aggregate.group = None
+    ctx.runtime.heatmap = SimpleNamespace(global_range_cache=None)
+    layout = SimpleNamespace(name="L", rows=1, cols=2,
+                             cells={(0, 0): ["A01"], (0, 1): ["A02"]})
+
+    def _range():
+        return HM._compute_global_range(ctx, layout, HM.METRIC_EVENTS,
+                                        "gfp_mean_intensity", 50.0, {}, {})
+
+    assert _range() == (30.0, 60.0)
+    ctx.state.plot.use_fov_replicates = True
+    assert _range() == (10.0, 20.0)

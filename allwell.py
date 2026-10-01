@@ -1758,13 +1758,11 @@ def _install_combobox_popup_widener() -> None:
 
 
 def main() -> None:
-    # Restrict matplotlib to the bundled fonts BEFORE anything imports it (the
-    # first plot pulls matplotlib.figure -> font_manager). Skips matplotlib's
-    # full system-font enumeration, which can cost minutes on first launch on a
-    # Windows 365 Cloud PC. Defensive: never blocks startup. (This is the #1
-    # suspect for a silent "hangs on launch" — the boot log brackets it so a
-    # stall here is visible as the last-reached milestone.)
-    _boot_diag.boot("mpl_bootstrap.configure() — limiting matplotlib font scan …")
+    # Set the persistent cache path, but do not import matplotlib.font_manager
+    # here. That module constructs FontManager during its import, so trying to
+    # patch discovery afterwards already paid the system-font scan and held up
+    # the whole application launch on Windows and macOS.
+    _boot_diag.boot("mpl_bootstrap.configure() — setting matplotlib cache …")
     try:
         from startup import mpl_bootstrap
         mpl_bootstrap.configure()

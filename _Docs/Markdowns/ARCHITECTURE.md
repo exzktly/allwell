@@ -797,16 +797,12 @@ all_well_launcher.main()                       (PyInstaller bundle only)
     │
     ▼ regular Python run jumps in here:
 allwell.main()
-    ├── startup.mpl_bootstrap.configure()  ← FIRST, before anything imports matplotlib:
-    │       restricts font_manager.findSystemFonts to the bundled fonts (+ DejaVu)
-    │       and pins MPLCONFIGDIR, so the system-font scan (minutes on a Windows 365
-    │       Cloud PC) never runs. Defensive — failure leaves matplotlib untouched.
-    │       Both `assets/fonts` and the cache resolve against the *repository*
-    │       root (the bundle root when frozen), not against the module's own
-    │       directory one level down in `startup/` — a font directory resolved
-    │       beside the module finds nothing, and configure() then leaves
-    │       matplotlib unrestricted with no error, which is the whole cost this
-    │       step exists to remove. From source the cache is `.mplcache` at the
+    ├── startup.mpl_bootstrap.configure()  ← before any plotting import:
+    │       pins MPLCONFIGDIR but deliberately does not import font_manager.
+    │       font_manager constructs its global manager during import; the old
+    │       attempt to patch findSystemFonts afterwards had already paid the
+    │       minutes-long system-font scan during every cold application launch.
+    │       From source the cache is `.mplcache` at the
     │       repository root; a frozen build uses startup.boot_diag.user_state_dir()
     │       instead, because PyInstaller unpacks the bundle into sys._MEIPASS, a
     │       fresh temp tree per launch, so a cache pinned there was thrown away

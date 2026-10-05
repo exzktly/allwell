@@ -106,7 +106,11 @@ def test_each_entry_carries_a_path_and_not_image_bytes(tmp_path):
     ctx = _ctx(tmp_path)
     _save(ctx, 1)
     entry = hc.saved_plots_strip(ctx)["shown"][0]
-    assert set(entry) == {"id", "title", "tab", "created_at", "image"}
+    # ``copied_from`` lets the tile say "not drawn here yet" for a plot copied
+    # from another dataset, which has no image by design — a different fact
+    # from a file that went missing.
+    assert set(entry) == {"id", "title", "tab", "created_at", "image", "copied_from"}
+    assert entry["copied_from"] == ""
     assert entry["image"].name == "p0.png"
     assert entry["image"].exists()
 

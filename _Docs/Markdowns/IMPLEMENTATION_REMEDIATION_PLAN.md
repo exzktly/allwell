@@ -11,13 +11,13 @@
 
 **Planning baseline:** `main` at `1127c41` (All-Well 9.10.14)
 
-**Current state:** R0, C0 and Q0 done; the rest `todo`. Workstream branch:
+**Current state:** R0, C0, Q0, Q1 and Q2 done; the rest `todo`. Workstream branch:
 `implementation-remediation-plan` (one pull request at the end of the whole
 plan, so one version bump: 9.10.14 → 9.10.15). Row commits are found with
 `git log --grep '^<ROW>:'`.
 
-**Next action:** Q1 — attribute what keeps a closed `ReviewApp` alive
-(batch-1 fast lane running against R0 + C0)
+**Next action:** batch-2 fast lane (Q0–Q2), then Q3 — minimal-shell
+fixtures, re-scoped by what Q2 changed about full-app tests under pytest
 
 ## 1. Objective and scope
 
@@ -661,8 +661,8 @@ commit still owns one row.
 | C2 | `todo` | C0 | `ExportStyleSidebar._build_ui` CC ≤ 40 | Control contract + `tests/visual/render_views.py` capture |
 | C3 | `todo` | C0 | `collect_bar_items` and `_items_for_tp` CC ≤ 40 | Numerical parity + selection benchmark |
 | C4 | `todo` | C1, C2, C3 | Stale entries removed; total CC lowered | Complexity guard family |
-| Q1 | `todo` | Q0 | Retaining-root classification | Attribute ≥80% of surviving wrappers or explain limit |
-| Q2 | `todo` | Q1 | Idempotent explicit shutdown for proven roots | Lifecycle tests + bounded app-close test, run locally |
+| Q1 | `done` | Q0 | Retaining-root classification | `git log --grep '^Q1, Q2:'`. Method: list valid QObjects and top-level widgets left after teardown; walk referrers backward from the surviving `ReviewApp`, reporting module-global and class-attribute holders (a frame/type-skipping walk hid them at first). Roots, all **removable**: (1) four parentless hidden channel combos `_chan_cb_{line,bar,heatmap,distribution}` — top-level widgets nothing deleted, each connected to a lambda over `ctx`; (2) the Home notes box, a `QPlainTextEdit` subclass declared inside `_build_notes` whose wrapper outlived its deleted C++ object via a reference gc cannot see — isolated reproductions were freed, so the Shiboken path is not pinned down; (3) the deferred-tab drain's static `QTimer.singleShot(0, _drain)` closing over the window. Not roots: `EventBus` (parenting it changed nothing; reverted), `GuiLogRelay` (its handler never reaches the app). Effect: 739 of 746 surviving wrappers per construction removed (99%); residue 7 wrappers, outside the 12 commonest PySide types, unclassified |
+| Q2 | `done` | Q1 | Ownership fixes for the proven roots | `git log --grep '^Q1, Q2:'`. Fixes are ownership corrections, not `dispose` methods, because each root was a missing owner: combos parented to their tab frame; `_HomeNotes` at module scope holding `ctx`; drain timer a child of the window. The same function-local-Qt-class shape was removed at its three other sites (`_CellEventFilter`, `_QssRefreshFilter`, `_ModeBarWidthSync`) and `tests/test_qt_subclasses_live_at_module_scope.py` rules it out (proven on `main`: 4 sites, matching the 4 converted; 5 bite cases). Lifecycle tests: `tests/test_a_closed_review_app_is_freed.py` (slow lane, 3 tests); reverting each fix alone failed its test (home notes → collected; bar combo → collected + no-top-level; static drain → 9 "Deferred build failed" after close). Re-measured: 0 apps alive, 0 widgets, 0 app objects per construction; RSS +4.1 / +4.9 MB loaded (was +31.1), +0.3 MB empty (was +4.9). No teardown fixture added |
 | Q3 | `todo` | Q0 | Minimal-shell fixture and safe test migrations | Mutation-tested assertions |
 | Q4 | `todo` | Q2, Q3 | Before/after result and stable regression budget | Fresh-process benchmark runs |
 | A1 | `todo` | R1, R2, R3 | First-party imports point to owners | Private facade access count decreases to zero |
@@ -807,3 +807,4 @@ down; the clone is simply what removes the shared state.
 | Batch | Rows | Commit | Result |
 |---|---|---|---|
 | 0 (baseline) | — | `main` at `1127c41`, in an independent clone | 10,462 passed, 10 skipped, 0 failed (7 min 50 s); exit 139 is the expected PySide6 teardown SIGSEGV after a green run |
+| 1 | R0, C0 | `e243f561`, independent clone | 10,511 passed, 10 skipped, 0 failed (7 min 40 s); exit 139 is the expected teardown SIGSEGV |

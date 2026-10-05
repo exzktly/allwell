@@ -25,8 +25,8 @@ from pathlib import Path
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-    QTabWidget, QVBoxLayout, QWidget,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+    QScrollArea, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -358,6 +358,36 @@ def _legend(parent: QWidget) -> QWidget:
     return host
 
 
+class _HomeNotes(QPlainTextEdit):
+    """The Home notes box: commits on focus-out and says that it did.
+
+    Defined at module scope and handed ``ctx``, never declared inside the
+    builder with methods that close over it. Measured with
+    ``tests/perf/bench_app_retention.py``: declared inside the builder, this
+    widget's Python wrapper outlived its deleted C++ object, held by a reference
+    the garbage collector cannot see, and its methods' closures kept the whole
+    closed ``ReviewApp`` alive — about 24 MB per window. At module scope the
+    wrapper is freed with the window. Isolated reproductions of a per-call Qt
+    subclass were all freed, so the precise Shiboken mechanism is not pinned
+    down; the shape is what ``tests/test_qt_subclasses_live_at_module_scope.py``
+    rules out.
+    """
+
+    def __init__(self, ctx, parent: QWidget) -> None:
+        super().__init__(parent)
+        self._ctx = ctx
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        from core.safe import swallowed
+        try:
+            notes_schedule_save(self._ctx, widget_key=_NOTES_KEY)
+        except Exception:
+            swallowed("home notes commit")
+        else:
+            _set_notes_status(self._ctx, "saved")
+
+
 def _build_notes(ctx, page: QWidget, reg) -> QWidget:
     """The one editable thing on an otherwise read-only page.
 
@@ -367,22 +397,9 @@ def _build_notes(ctx, page: QWidget, reg) -> QWidget:
     focus-out, the same rule the long-form editor follows, and mirrors into that
     editor so the two can never hold different text.
     """
-    from PySide6.QtWidgets import QPlainTextEdit
-
     frame, layout = _card(page, "Notes")
 
-    class _HomeNotes(QPlainTextEdit):
-        def focusOutEvent(self, event):
-            super().focusOutEvent(event)
-            from core.safe import swallowed
-            try:
-                notes_schedule_save(ctx, widget_key=_NOTES_KEY)
-            except Exception:
-                swallowed("home notes commit")
-            else:
-                _set_notes_status(ctx, "saved")
-
-    edit = reg.register(_NOTES_KEY, _HomeNotes(frame))
+    edit = reg.register(_NOTES_KEY, _HomeNotes(ctx, frame))
     edit.setObjectName("HomeNotes")
     edit.setPlaceholderText(
         "What happened on this plate? Anything the numbers won't tell you later.")

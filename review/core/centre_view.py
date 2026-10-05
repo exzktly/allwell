@@ -724,15 +724,27 @@ def build_centre(win, parent: QWidget) -> None:
                 return title
         return None
 
+    # The drain's timer is a child of the window rather than a
+    # ``QTimer.singleShot(0, callable)``. A static single-shot holds its Python
+    # callable in C++ until it fires, and this one closes over ``win``: a window
+    # closed while tabs were still draining stayed alive for as long as the
+    # chain did, and each later tick ran a builder against widgets that had
+    # already been deleted. Owned by the window, the timer — and its connection
+    # — goes when the window does.
+    drain_timer = QTimer(win)
+    drain_timer.setSingleShot(True)
+    drain_timer.setInterval(0)
+
     def _drain() -> None:
         title = _next_drain_title()
         if title is None:
             return
         _build_pending(title)
         if _next_drain_title() is not None:
-            QTimer.singleShot(0, _drain)
+            drain_timer.start()
 
-    QTimer.singleShot(0, _drain)
+    drain_timer.timeout.connect(_drain)
+    drain_timer.start()
 
 
 def drain_pending_centre_builders(ctx) -> None:

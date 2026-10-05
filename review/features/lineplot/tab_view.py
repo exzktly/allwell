@@ -53,7 +53,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # still read/write the per-renderer channel through ``app._chan_cb_line``
     # and ``_plot_chan_var``; Plotting's band combo is the only visible
     # channel control.
-    chan_cb = reg.register("_chan_cb_line", QComboBox())
+    chan_cb = reg.register("_chan_cb_line", QComboBox(parent))
     chan_cb.addItems(["GFP"])
     chan_cb.currentIndexChanged.connect(
         lambda _i, _src=chan_cb: on_plot_channel_selected(ctx, _src)

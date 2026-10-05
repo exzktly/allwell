@@ -74,7 +74,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # Channel combo hidden — Plotting's band combo is the only visible
     # channel control. See line_graphs_tab_view.py for rationale.
-    chan_cb = reg.register("_chan_cb_bar", QComboBox())
+    chan_cb = reg.register("_chan_cb_bar", QComboBox(parent))
     chan_cb.addItems(["GFP"])
     chan_cb.currentIndexChanged.connect(
         lambda _i, _src=chan_cb: on_plot_channel_selected(ctx, _src)

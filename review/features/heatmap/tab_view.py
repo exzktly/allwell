@@ -78,7 +78,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 
     # Channel combo hidden — the Plotting band's channel combo is the only
     # visible channel control. See line_graphs_tab_view.py for rationale.
-    chan_cb = reg.register("_chan_cb_heatmap", QComboBox())
+    chan_cb = reg.register("_chan_cb_heatmap", QComboBox(parent))
     chan_cb.addItems(["GFP"])
     chan_cb.setMinimumWidth(_CHAN_CB_MIN_W)
     chan_cb.currentIndexChanged.connect(

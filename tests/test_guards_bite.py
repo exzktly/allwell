@@ -4773,3 +4773,56 @@ def test_total_cc_guard_clears_the_real_tree():
     module = importlib.import_module("tests.test_complexity_ratchet")
     module.test_total_allowlisted_complexity_does_not_grow()
     module.test_complexity_debt_budget_is_not_slack()
+
+
+# ── Qt subclasses live at module scope ──────────────────────────────────────
+
+QT_LOCAL_CLASS_VIOLATIONS = {
+    # The shape that kept every closed ReviewApp alive (Home notes).
+    "builder_local_widget": ("from PySide6.QtWidgets import QPlainTextEdit\n"
+                             "def build(ctx, frame):\n"
+                             "    class _Notes(QPlainTextEdit):\n"
+                             "        def focusOutEvent(self, e):\n"
+                             "            ctx.save()\n"
+                             "    return _Notes(frame)\n"),
+    "method_local_filter": ("from PySide6.QtCore import QObject\n"
+                            "class Window:\n"
+                            "    def install(self):\n"
+                            "        class _Sync(QObject):\n"
+                            "            pass\n"
+                            "        return _Sync()\n"),
+    "module_attribute_base": ("from PySide6 import QtWidgets\n"
+                              "def build():\n"
+                              "    class _W(QtWidgets.QWidget):\n"
+                              "        pass\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(QT_LOCAL_CLASS_VIOLATIONS))
+def test_qt_local_class_guard_catches_a_function_local_subclass(
+        tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_qt_local.py", QT_LOCAL_CLASS_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_qt_subclasses_live_at_module_scope",
+                    "test_no_qt_subclass_is_declared_inside_a_function", [bad])
+    assert exc is not None, f"the {shape} case slipped past"
+
+
+QT_LOCAL_CLASS_CLEAN = {
+    "module_scope_widget": ("from PySide6.QtWidgets import QPlainTextEdit\n"
+                            "class _Notes(QPlainTextEdit):\n"
+                            "    def __init__(self, ctx, parent):\n"
+                            "        super().__init__(parent)\n"
+                            "        self._ctx = ctx\n"),
+    "function_local_plain_class": ("import logging\n"
+                                   "def capture():\n"
+                                   "    class _Collect(logging.Handler):\n"
+                                   "        pass\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(QT_LOCAL_CLASS_CLEAN))
+def test_qt_local_class_guard_clears_what_it_should(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_qt_local.py", QT_LOCAL_CLASS_CLEAN[shape])
+    assert _run_scan(monkeypatch, "tests.test_qt_subclasses_live_at_module_scope",
+                     "test_no_qt_subclass_is_declared_inside_a_function",
+                     [good]) is None, f"the {shape} case was wrongly flagged"

@@ -13617,23 +13617,27 @@ applied later and wins.
 
 **Why the full-app tests are dangerous in bulk.** Constructing the app builds
 about 1,260 QObjects under the window, and about 3,850 once the mini dataset is
-loaded and the centre tabs drain, wired together with signal→bound-method connections
-(`signal.connect(app._method)`), closures that capture `app`, and child widgets
-that keep an `_app` back-reference (coordinators, `LabelGrid`,
+loaded and the centre tabs drain, wired together with signal→bound-method
+connections (`signal.connect(app._method)`), closures that capture `app`, and
+child widgets that keep an `_app` back-reference (coordinators, `LabelGrid`,
 `RatioMetricsPanel`, the `WidgetRegistry` / `ViewerContext` / `PersistenceRegistry`).
-That web of Qt-C++ ↔ Python references **is not reclaimed within the process**:
-`close()` + `deleteLater()` + `gc.collect()` do **not** free it. Measured by
-`tests/perf/bench_app_retention.py` in one plain process (no pytest), every
-closed `ReviewApp` instance survives, and each construction with the mini
-dataset loaded leaves about 31 MB of RSS, 40 live `QWidget`s (8 of them
-top-level), roughly 750 PySide wrappers and 455 objects of the app's own
-classes behind it; an unloaded construction leaves about 5 MB and 20 widgets.
-Two clean-process runs agree exactly on the counts and within 2% on RSS. Under
-pytest the per-test cost is higher still, because `qtbot` holds every app it
-was handed. Either way the growth is monotonic. Nor can it
-be forced: deleting the app's top-level widgets from a teardown fixture
-segfaults the interpreter *after* the tests themselves have passed, which is
-why `conftest.py`'s widget reaper (below) exempts anything marked `slow`.
+**A closed window is freed in a plain process.** `tests/perf/bench_app_retention.py`
+constructs, closes and collects the app repeatedly; with the mini dataset loaded
+no `ReviewApp` survives, no widget or app-class object is left behind, and RSS
+grows by about 4–5 MB per construction (allocator and C-level caches; nothing
+Python-attributable). Three roots used to hold every closed window, about 31 MB
+each, and each is now pinned by `tests/test_a_closed_review_app_is_freed.py`:
+a Qt subclass declared inside a builder with methods closing over `ctx` (the Home
+notes box — `tests/test_qt_subclasses_live_at_module_scope.py` rules the shape
+out everywhere), four hidden per-tab channel combos built with no parent and so
+never deleted, and the deferred-tab drain re-arming a static
+`QTimer.singleShot(0, callable)` that closed over the window (its timer is now a
+child of the window, so a window closed mid-drain takes the drain with it).
+**Under pytest the full-app fixtures still accumulate**, because `qtbot` holds
+every app it is handed for the life of the test, and deleting the app's widgets
+from a teardown fixture segfaults the interpreter *after* the tests themselves
+have passed — which is why `conftest.py`'s widget reaper (below) exempts anything
+marked `slow`.
 pytest runs every test in **one process**, and the container has **no swap**, so
 a big slow run:
 - **hangs** — the ever-growing live-widget count makes each later test's Qt work
@@ -13641,9 +13645,9 @@ a big slow run:
 - **gets OOM-killed** — RSS climbs unbounded until the orchestrator kills the
   container (which looks like a mid-run "restart").
 
-This is an inherent property of tearing a large PySide app up and down in-process,
-not a bug in any one test — do not try to "fix" it by adding `gc.collect()` to a
-fixture (it doesn't help).
+Under pytest this is a property of the full-app fixtures rather than of any one
+test — do not try to "fix" it by adding `gc.collect()` to a fixture (it doesn't
+help while `qtbot` still holds the app).
 
 **Rules for running tests here:**
 
@@ -14416,6 +14420,8 @@ The map (each rule links to the test that holds it):
 | No function crosses cyclomatic complexity 40 unless it is on the allowlist, and the allowlisted functions' **total** cannot grow — the per-function check alone let an existing debt function grow without limit, and the total's not-slack twin banks every decomposition's saving so it cannot be spent later | `tests/test_complexity_ratchet.py` (`TOTAL_ALLOWLISTED_CC_BUDGET`), with bite cases in `tests/test_guards_bite.py` |
 | `services.remote_runner`'s import surface is its `__all__`; every other name reached through it, by any of four access forms, is classified migration debt that only shrinks (§6.4) | `tests/test_remote_runner_facade.py`, scan in `tests/_facade_scan.py`, bite cases in `tests/test_guards_bite.py` |
 | Every control the Properties panel binds to a pref key is in the measured roster for its figure, is bound once, shows the stored value when the panel is rebuilt, and writes its own key and no other when moved; the hand-wired Error bars control reaches `PlotState` | `tests/test_properties_control_contract.py` |
+| A Python subclass of a Qt class is declared at module scope, never inside a function: declared inside a builder with methods closing over `ctx`, the Home notes box kept every closed `ReviewApp` alive (§10.4) | `tests/test_qt_subclasses_live_at_module_scope.py`, with bite cases in `tests/test_guards_bite.py` |
+| A closed `ReviewApp` is collected, leaves no top-level widget behind, and a window closed mid-drain runs no deferred builder after it is gone (§10.4) — slow lane, run by hand | `tests/test_a_closed_review_app_is_freed.py` |
 | Split View is one-line removable — uninstalled, the resolvers collapse to single-tab (§5.10) | `tests/test_split_view.py::test_not_installed_is_single_tab` |
 | Build profiles: a subset boots + loads, the strip plan matches the runtime filter, and the binary drops the excluded features' deps (§5.3 *Build profiles*) | `tests/test_feature_profile.py`, `tests/test_derive_profile.py`, `tests/test_profile_build.py` |
 | CSV / batch export produces the expected values, and the single-plot and batch paths agree byte-for-byte | `tests/test_csv_batch_export_eval.py` (drives a real headless `ReviewApp`) |

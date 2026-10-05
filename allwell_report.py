@@ -75,7 +75,8 @@ class PlotEntry:
     title: str
     tab: str
     status: str                 # "drawn" | "not_drawn"
-    reason: str = ""
+    reason: str = ""            # why it was not drawn
+    note: str = ""              # what is different about a drawn one
     png: str = ""               # relative to the output folder
     svg: str = ""
     copied_from: str = ""
@@ -163,6 +164,7 @@ def _draw_all(ctx, manifest: Manifest, out_dir: Path) -> list:
                 (figures / f"{stem}.svg").write_bytes(result.svg)
                 entry.svg = f"figures/{stem}.svg"
             entry.status = "drawn"
+            entry.note = getattr(result, "note", "") or ""
             drawn.append((rec, out_dir / entry.png))
         manifest.plots.append(entry)
     return drawn

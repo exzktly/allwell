@@ -4758,7 +4758,8 @@ pressing Restore on each — without opening a window, and writes:
 
 A plot that cannot be redrawn — an Image Table grid, or one panel of a
 multi-panel figure — is listed in `manifest.json` with the reason rather than
-left out. The command's exit code says how it went: `0` everything drawn, `3`
+left out, and one drawn from fewer wells than it names (a plot copied from
+another plate, say) carries a note naming them. The command's exit code says how it went: `0` everything drawn, `3`
 some drawn (the manifest names the rest), `1` nothing drawn, `2` the folder is
 not a dataset (or this build has no Saved Plots), `4` the dataset has no saved
 plots. The dataset itself is not changed; the run is noted in its history
@@ -5065,8 +5066,8 @@ spot counts already written into that plate's CSVs).
 plate's data, so they arrive without one, marked *Copied from … and not yet
 drawn on this dataset* on the gallery card, in the Home strip, and in the PDF
 and PowerPoint exports. **Restore** replays a copied plot's settings on this
-plate's data; if it names wells or channels this plate does not have, check
-what it draws before saving it again.
+plate's data; if they name wells this plate does not have, the plot is drawn
+from the wells that are here and the status line names the ones left out.
 
 Every copy is recorded in the dataset's history (`provenance.jsonl`).
 

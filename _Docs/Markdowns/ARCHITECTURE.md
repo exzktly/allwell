@@ -2507,8 +2507,9 @@ gallery's own builder (`saved_plots.report_pdf`); the report names no
 feature and reaches all three through services, so a profile without Saved
 Plots gets an exit code and a sentence rather than an `ImportError`.
 
-**A plot that is not drawn is a manifest entry with the reason**, never an
-absence: an Image Table grid (no chart to redraw), a record saved as one panel
+**A plot that is not drawn is a manifest entry with the reason**, and a plot
+drawn from fewer wells than it names carries a `note` saying which; neither is
+ever an absence: an Image Table grid (no chart to redraw), a record saved as one panel
 of a multi-panel figure (a redraw would draw every panel), a replay that raised.
 Copied plots (`copied_from`) are drawn from this dataset's data like any other,
 and the entry keeps their origin. Exit codes distinguish complete (0), failed
@@ -4740,8 +4741,16 @@ plot — the gallery card, Home's strip, the PDF report, the PowerPoint deck —
 shows `saved_plots.state.undrawn_note` in its place, so a copied plot cannot
 pass for a missing file or for a figure of this dataset. Restoring it replays
 its parameters against this dataset's data, which is the only way it acquires a
-picture here; what that draws when the parameters name wells or channels this
-dataset lacks has not yet been checked in the running app (tracker R6a).
+picture here. **A restore names the wells it cannot draw.** A record that names
+wells this dataset lacks — a copied plot, typically, or one saved before a
+well's files were removed — is drawn from the wells that are here, and the rest
+used to drop out with nothing said (measured: a record naming `H12` restored
+on a plate without it, drew from `A01` alone, and the status line read only
+"1 replicate set(s) · 1 well(s)"). `saved_plots.controller.absent_wells` reads
+the record's selected wells, soloed wells and replicate sets against the loaded
+wells, and `restore_saved_plot` puts the sentence on the status line — with the
+group-drift sentence when there is one, since two calls would leave only the
+second — and the headless report puts it in that plot's manifest `note`.
 
 **Resetting saved state — the scope model.** `persistence/reset_scopes.py` is
 the one map from what a user names to the state that name owns. State is

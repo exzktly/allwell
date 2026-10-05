@@ -21,6 +21,7 @@ import logging
 from dataclasses import dataclass
 
 from .controller import (
+    absent_wells_sentence,
     _card_for_tab, _gating_recompute_now, _reapply_target_tab,
     _redraw_keeps_the_scope, gallery_order, restore_saved_plot,
 )
@@ -31,11 +32,16 @@ _logger = logging.getLogger("review")
 
 @dataclass(frozen=True)
 class RenderedPlot:
-    """A drawn plot's PNG and SVG, or the reason it was not drawn."""
+    """A drawn plot's PNG and SVG, or the reason it was not drawn.
+
+    ``note`` is set on a drawn plot that is not quite the one saved — it names
+    wells this dataset does not have, so the figure shows only those that are.
+    """
 
     png: bytes = b""
     svg: bytes = b""
     reason: str = ""
+    note: str = ""
 
 
 def gallery(ctx) -> list:
@@ -71,4 +77,4 @@ def render_saved_plot(ctx, rec) -> RenderedPlot:
     png = buf.getvalue()
     if not png:
         return RenderedPlot(reason="the figure rendered no image")
-    return RenderedPlot(png=png, svg=svg or b"")
+    return RenderedPlot(png=png, svg=svg or b"", note=absent_wells_sentence(ctx, rec))

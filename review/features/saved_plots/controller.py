@@ -223,10 +223,45 @@ def restore_saved_plot(ctx, plot_id: str, *, adopt_groups: bool = False) -> None
     _report_batch_export_origin(ctx, rec)
     # Last of the three, because it is the one that describes the figure the
     # user is now looking at rather than the record behind it. Nothing to
-    # report when the caller adopted the record's groups: the figure is then
-    # drawn from exactly what the record carried.
+    # report about groups when the caller adopted the record's: the figure is
+    # then drawn from exactly what the record carried — except for wells this
+    # dataset does not have, which no adoption can supply.
+    absent = absent_wells_sentence(ctx, rec)
     if not adopt_groups:
-        _report_group_drift(ctx, rec)
+        _report_group_drift(ctx, rec, also=absent)
+    elif absent:
+        ctx.notify.set_status(f"Restored “{rec.title}”. {absent}")
+
+
+def absent_wells(ctx, rec) -> list[str]:
+    """Wells *rec* was drawn with that the open dataset does not have, sorted.
+
+    Read from the three places a record names wells — the selected wells, the
+    soloed wells and the replicate sets. A plot copied from another plate is
+    the usual source (``copied_from``), but a well deleted from this plate's
+    own folder since the plot was saved is the same fact. The restore draws
+    from the wells that are here and drops the rest without a word, so the
+    figure is a different one; this is what lets the status line say so.
+    """
+    params = rec.params or {}
+    named: set[str] = set()
+    for key in ("selected_wells", "active_solo_wells"):
+        named.update(str(w) for w in (params.get(key) or []) if w)
+    for sel in params.get("selections") or []:
+        if isinstance(sel, dict):
+            named.update(str(w) for w in (sel.get("wells") or []) if w)
+    loaded = set(getattr(ctx.state.dataset, "well_paths", {}) or {})
+    return sorted(named - loaded)
+
+
+def absent_wells_sentence(ctx, rec) -> str:
+    """One sentence naming :func:`absent_wells`, or ``""`` when there are none."""
+    missing = absent_wells(ctx, rec)
+    if not missing:
+        return ""
+    return (f"It names {len(missing)} well(s) this dataset does not have "
+            f"({_named(missing)}), so the figure shows only the wells that are "
+            f"here.")
 
 
 def _report_batch_export_origin(ctx, rec) -> None:
@@ -389,7 +424,7 @@ def _adopt_record_groups(ctx, sels) -> None:
                       exc_info=True)
 
 
-def _report_group_drift(ctx, rec) -> None:
+def _report_group_drift(ctx, rec, *, also: str = "") -> None:
     """Say so when the record's own groups no longer describe this dataset.
 
     **A restore reproduces a view; it must never rewrite a declaration.** This
@@ -410,6 +445,10 @@ def _report_group_drift(ctx, rec) -> None:
     Named per group rather than counted, up to :data:`_DRIFT_NAMED`, because
     "2 groups differ" tells a reader to go and diff two lists by hand while
     "“Dose 10” holds different wells" is the whole answer.
+
+    *also* is a further sentence about the same restore (the wells it names
+    that this dataset lacks), said with the drift on the one status line, or
+    alone when there is no drift — two calls would leave only the second.
     """
     from review.domain.selections_model import group_drift
 
@@ -417,6 +456,8 @@ def _report_group_drift(ctx, rec) -> None:
         missing, changed = group_drift(
             rec.params.get("selections"), ctx.state.selection.selections)
         if not missing and not changed:
+            if also:
+                ctx.notify.set_status(f"Restored “{rec.title}”. {also}")
             return
         parts = []
         if missing:
@@ -428,7 +469,8 @@ def _report_group_drift(ctx, rec) -> None:
         ctx.notify.set_status(
             f"Restored “{rec.title}” — it was saved with "
             f"{' and '.join(parts)}. The figure is drawn from your current "
-            f"groups; your sample definitions were left as they are.")
+            f"groups; your sample definitions were left as they are."
+            + (f" {also}" if also else ""))
 
 
 #: How many group names the drift sentence spells out before it counts the

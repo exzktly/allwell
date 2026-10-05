@@ -635,8 +635,8 @@ def parse_filename(
 # Image helpers
 # ---------------------------------------------------------------------------
 
-# The one image reader lives beside the writers in ``pipeline.io``, re-exported
-# so ``pm.load_2d_gray`` — the Playground's own frame reader — is unchanged.
+# The one image reader lives beside the writers in ``pipeline.io``; the
+# Playground imports it from there too, so a preview reads a frame as a run does.
 from pipeline.io import (  # noqa: E402
     load_2d_gray, load_2d_gray_with_ceiling,
 )

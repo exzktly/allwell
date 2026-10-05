@@ -33,7 +33,7 @@ def _batched_log(*, leftover_inputs: bool) -> list[str]:
     """A 40-well / 4-batch remote run, as the GUI receives it.
 
     Line wording is copied from the emission sites: the synthetic banner in
-    ``remote_runner._run_batches`` and the per-well markers in
+    ``remote_process._run_batches`` and the per-well markers in
     ``process_microscopy`` (which carry the logging formatter's timestamp +
     level prefix).
 

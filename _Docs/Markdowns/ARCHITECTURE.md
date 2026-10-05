@@ -806,14 +806,20 @@ allwell.main()
     │       `fontlist-v<N>.json` or, with none (first launch, a fresh state dir,
     │       any matplotlib upgrade), from a full system scan — so a patch
     │       applied after it came too late on every cold cache, which is what
-    │       stalled launch. On a cold cache configure() therefore writes an
-    │       empty placeholder list under that name first (`<N>` read from the
-    │       module's code object, which a frozen build has where it has no
-    │       source), lets the import load it, then builds the bundled-only list
-    │       over it and rebinds `font_manager.findfont` / `get_font_names`, which
-    │       the import bound to whichever manager it loaded.
-    │       `tests/test_mpl_bootstrap.py` launches a cold-cache process and
-    │       counts matplotlib's system-wide `findSystemFonts` calls: zero.
+    │       stalled launch. On a cold cache — no list, or a truncated, empty or
+    │       other-version one — configure() points the import, and only the
+    │       import, at an empty placeholder list in a private temporary
+    │       directory (`<N>` read from the module's code object, which a frozen
+    │       build has where it has no source), then builds the bundled-only list
+    │       and writes it into the shared cache atomically, and rebinds
+    │       `font_manager.findfont` / `get_font_names`, which the import bound to
+    │       whichever manager it loaded. The placeholder never enters the shared
+    │       cache: any process importing matplotlib there without configure()
+    │       would take an empty list as valid and have no fonts.
+    │       `tests/test_mpl_bootstrap.py` launches cold-cache processes and
+    │       counts matplotlib's system-wide `findSystemFonts` calls (zero), and
+    │       kills one mid-build to check a plain matplotlib process can still
+    │       render text against what it left.
     │       Both `assets/fonts` and the cache resolve against the *repository*
     │       root (the bundle root when frozen), not against the module's own
     │       directory one level down in `startup/` — a font directory resolved
@@ -823,7 +829,11 @@ allwell.main()
     │       repository root; a frozen build uses startup.boot_diag.user_state_dir()
     │       instead, because PyInstaller unpacks the bundle into sys._MEIPASS, a
     │       fresh temp tree per launch, so a cache pinned there was thrown away
-    │       and rebuilt every single start.
+    │       and rebuilt every single start. A frozen build also overrides a
+    │       preset MPLCONFIGDIR: PyInstaller's matplotlib runtime hook
+    │       (`pyi_rth_mplconfig`) sets it to a new temporary directory on every
+    │       launch before any app code runs, so deferring to it made every
+    │       frozen launch a cold cache. From source a caller's value stands.
     ├── QApplication(sys.argv)
     ├── app_fonts.register_qt_fonts() → theme_v2.Typography.family/_mono
     │       ← register bundled Inter / JetBrains Mono (static instances),
@@ -8090,7 +8100,7 @@ way round.
 
 Batched remote runs suppress the per-batch pass (partial-plate data would write
 misleading defaults) and re-run it once locally over the full downloaded output
-— `services/remote_runner._run_local_auto_threshold`, which rebuilds an args
+— `services/remote_process._run_local_auto_threshold`, which rebuilds an args
 object from the pipeline argv and calls the same `run_auto_threshold_pass` so
 the two paths cannot drift. That rebuild forces `no_auto_threshold=False` on
 purpose: when the pass is wanted it must ignore the batcher's copy of the flag.
@@ -8585,7 +8595,7 @@ survive an unreliable output volume.
 channel filter or `--incremental` cannot use the user's archives directly — both
 paths rewrite the zip (dropping unused channels / already-done FOV-groups), and
 rewriting in place would corrupt the user's dataset. So it stages. The staging is
-**plan-then-materialise** (`remote_runner._plan_staging` / `_materialize_staging`):
+**plan-then-materialise** (`remote_staging._plan_staging` / `_materialize_staging`):
 the plan pass reads each archive's *member list* only — that comes from the zip's
 central directory, a small read at the end of the file, so planning a whole plate
 costs a handful of seeks even across a network mount — and the materialise pass
@@ -9183,7 +9193,7 @@ exactly the files that went into the archive and removes the directory only when
 nothing is left in it. A folder still holding something survives carrying just
 that remainder, and the caller's log line names what it kept rather than
 reporting the folder gone. Four paths route through it —
-`remote_runner._zip_well_folder`'s two callers (plus the post-success hook, which
+`remote_staging._zip_well_folder`'s two callers (plus the post-success hook, which
 skips any folder the pass preserved),
 `pipeline.mixed_input.consolidate_mixed_to_zips`, the Datasets pane's
 `_zip_well_folders`, and
@@ -9331,8 +9341,8 @@ shield covers each of those crossings:
 
 | Where | What it protects |
 |---|---|
-| `remote_runner._copy_into_staging` | Copying each `<WELL>.zip` off the input volume into the upload staging dir — a whole plate, back to back, and an unguarded fault here failed the run before a byte was uploaded. |
-| `remote_runner._zip_well_folder` | Packing a leftover well folder read off the input volume. |
+| `remote_staging._materialize_staging` | Rewriting each `<WELL>.zip` the upload plan trims, reading it off the input volume into the upload staging dir — possibly a whole plate, back to back, and an unguarded fault here failed the run before a byte was uploaded. An archive that needs no rewrite is uploaded from where it is and never copied. |
+| `remote_staging._zip_well_folder` | Packing a leftover well folder read off the input volume. |
 | `input_resolution_service` | The mixed-input consolidation and the loose-image append, both of which rewrite archives *on* the input volume. |
 | `Fetcher._materialize` | Publishing `<well>_out.zip` into the output dir — the remote run's equivalent of the pipeline's out-zip write. |
 | `refresh_pipeline_info_available_from_outputs` | The `pipeline_info.json` rewrite, so one blip can't cost Review its timepoint/FOV lists. |
@@ -10072,7 +10082,7 @@ current out-zip mtime (silently dropped on load regardless — see
 CSV or a well archive. It read-modify-writes the already-loaded sidecar dict
 (replacing only `available_timepoints`/`available_fovs` with what's actually
 on disk), prunes stale `cell_overrides.json` entries, and sweeps leftover
-`__aw_tmp_*` staging files. `services.remote_runner.refresh_pipeline_info_available_from_outputs`
+`__aw_tmp_*` staging files. `services.remote_fetch.refresh_pipeline_info_available_from_outputs`
 is deliberately not reused here — it only ever *unions* into the existing
 availability lists, so a stale entry can never be dropped, which is the
 opposite of what a repair needs to do. Resolves `schema_fields` through
@@ -10120,7 +10130,7 @@ must be something the user can see and clear.
 
 **A remote run needs telling twice.** The flag on the remote command line is not
 enough on its own, because the client decides what to upload before the remote
-sees anything. `remote_runner._plan_staging` computes its own done-set — the
+sees anything. `remote_staging._plan_staging` computes its own done-set — the
 local CSV's rows unioned with the local `<WELL>_out.zip`'s members — and drops a
 well whose input it considers covered, logging `✓ <well>: up to date (local) —
 not uploaded`. For the well this whole path exists to recover (images present,

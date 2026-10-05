@@ -4,7 +4,7 @@ Two modules used to answer it separately, and they disagreed:
 
 * ``process_microscopy._GROUP_IMAGE_EXTS`` — what the pipeline will actually
   group and segment out of an archive.
-* ``services.remote_runner._IMAGE_MEMBER_EXTS`` — what the upload planner counts
+* ``services.remote_staging._IMAGE_MEMBER_EXTS`` — what the upload planner counts
   as an image when deciding whether a well archive has to be rewritten, and
   therefore which members survive that rewrite.
 

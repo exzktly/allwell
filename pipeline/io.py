@@ -7,15 +7,15 @@ would pack into a corrupt archive), the per-well CSV writers, the completeness
 check, the boundary overlay, and the scratch-base + staging-directory lifecycle
 (``scratch_base_for`` / ``remove_directory`` / the stale sweeps / the staging
 commit) that decides *which volume* all of that lands on.
-``process_microscopy`` re-exports every name so its many ``_safe_imwrite`` /
-``write_csvs_per_well`` / ``remove_directory`` call sites are unchanged.
+Every caller imports these names from here; ``process_microscopy`` imports the
+ones it calls, and re-exports none of them.
 
 ``load_2d_gray`` is the one reader here, and it is here rather than in a module
 of its own because it is the counterpart of the writers beside it: every frame
 the pipeline measures comes through it, so a second spelling of "open a TIFF as
-2-D float32" is the kind of drift this file exists to prevent. It is reached as
-``pm.load_2d_gray`` by the Playground, which is what makes an interactive
-preview read a frame exactly as a batch run does.
+2-D float32" is the kind of drift this file exists to prevent. The Playground
+imports it from here too, which is what makes an interactive preview read a
+frame exactly as a batch run does.
 
 Depends only on numpy + tifffile/imageio/scikit-image + stdlib — no
 ``process_microscopy`` internals — so there is no import cycle.

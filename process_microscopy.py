@@ -85,10 +85,8 @@ from util.well_token import (  # noqa: F401 — _bg_well_key re-exported for tes
     split_background_wells as _split_background_wells,
     background_well_key as _bg_well_key,
     canonical_well_label as _canonical_well_label,
-    parse_background_well_map,
 )
 from util.schema import (  # noqa: F401  (re-exported for call sites and tests)
-    SCHEMA_FIELDS,
     DEFAULT_SCHEMA,
     DEFAULT_SEP,
     parse_schema,
@@ -173,7 +171,6 @@ _LABELFREE_METHODS = ("cellpose_labelfree",)
 # remote worker) are unchanged. See that module for the implementations + the
 # tmp -> fsync -> rename rationale.
 from pipeline.io import (  # noqa: F401
-    _AtomicTextHandle, _fsync_path,
     _commit_staging_dir,
     _compress_images_to_zip,
     compress_images_to_zip,
@@ -181,8 +178,6 @@ from pipeline.io import (  # noqa: F401
     _safe_atomic_text_write,
     _safe_imwrite,
     _safe_well,
-    _sweep_stale_scratch_dirs,
-    _verify_files_complete,
     _write_single_csv,
     incremental_done_fov_keys,
     OutputCapacityMonitor,
@@ -190,10 +185,8 @@ from pipeline.io import (  # noqa: F401
     merge_images_into_zip,
     merge_records_into_csv,
     remove_directory,
-    retry_write,
     save_overlay,
     scratch_base_for,
-    write_csvs_per_well,
 )
 from pipeline.fov_checkpoint import (
     _fov_stem,
@@ -669,8 +662,6 @@ from pipeline.io import (  # noqa: F401,E402
 from pipeline.empty_well import (  # noqa: F401,E402
     GROUPED_BACKGROUND_KEY,
     GROUPED_FLATFIELD_KEY,
-    WELL_GROUP_KEY,
-    BlankGroups,
     _POOLED_TP,
     _empty_well_field,
     _empty_well_tp_key,
@@ -678,12 +669,9 @@ from pipeline.empty_well import (  # noqa: F401,E402
     _require_empty_well_models,
     build_background_models,
     build_flatfield_models,
-    build_grouped_models,
-    models_for_well,
     plan_blank_groups,
     prepare_models,
     refuse_uncovered_wells,
-    require_grouped_models,
     sample_empty_well_images,
     shared_kwargs_for_well,
 )
@@ -697,11 +685,8 @@ from pipeline.background import (  # noqa: F401
     combined_empty_well_correct,
     estimate_background_field,
     subtract_background,
-    _floor_after_subtract,
-    _fft_butterworth_bandpass,
     _isotropic_disk_tophat,
     _match_background_scale,
-    _robust_grid_background,
 )
 def _subtract_background_step(img: np.ndarray, *, radius: int,
                               background_method: str, bg_field, fft_small: float = 0.0,
@@ -944,15 +929,7 @@ def _segment_classical(image: np.ndarray) -> np.ndarray:
 # ``pipeline.auto_threshold_pass``. Both depend only on ``numpy`` + stdlib so
 # the pipeline-only deployment story is preserved.
 
-from pipeline.auto_threshold import (
-    DEFAULT_CELLS_PER_IMAGE_CAP as _AUTO_THRESHOLD_CELLS_PER_IMAGE_CAP,  # noqa: F401
-    estimate_thresholds_from_outputs,  # noqa: F401
-    pick_endpoint_timepoints as _pick_endpoint_timepoints,  # noqa: F401
-    sample_cell_and_bg as _sample_cell_and_bg,  # noqa: F401
-)
-from pipeline.threshold_optimize import estimate_thresholds_from_controls  # noqa: F401
 from pipeline.auto_threshold_pass import (  # noqa: F401
-    _apply_thresholds_to_pipeline_info,
     _segmentation_tokens,
     run_auto_threshold_pass,
 )
@@ -1811,10 +1788,7 @@ from pipeline.stardist_cache import (  # noqa: E402,F401 — re-exported
     _ensure_pkg_resources_shim,
     _load_stardist_pretrained,
     _purge_stardist_cache,
-    _pid_alive,
     _stardist_cache_models_dir,
-    _stardist_download_lock,
-    _stardist_lock_is_dead,
 )
 
 

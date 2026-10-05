@@ -4826,3 +4826,87 @@ def test_qt_local_class_guard_clears_what_it_should(tmp_path, monkeypatch, shape
     assert _run_scan(monkeypatch, "tests.test_qt_subclasses_live_at_module_scope",
                      "test_no_qt_subclass_is_declared_inside_a_function",
                      [good]) is None, f"the {shape} case was wrongly flagged"
+
+
+# ── a patch reaches the module whose code reads the name ────────────────────
+
+def _inert_patch_tree(tmp_path: Path, test_body: str, extra_app: str = ""):
+    _write(tmp_path, "pkg/__init__.py", "")
+    owner = _write(tmp_path, "pkg/owner.py", "def is_alive(pid):\n    return True\n")
+    facade = _write(tmp_path, "pkg/facade.py",
+                    "from pkg.owner import is_alive  # noqa: F401\n")
+    app = [owner, facade]
+    if extra_app:
+        app.append(_write(tmp_path, "pkg/caller.py", extra_app))
+    test = _write(tmp_path, "tests/test_synthetic.py", test_body)
+    return app, [test]
+
+
+def _run_inert_patch_guard(monkeypatch, tmp_path, app, tests):
+    module = importlib.import_module("tests.test_no_patch_misses_its_target")
+    for fn in (module._module_paths, module._reexports_of, module._read_at_call_time):
+        fn.cache_clear()
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(module, "python_sources", lambda **kw: list(app))
+    monkeypatch.setattr(module, "_test_files", lambda: list(tests))
+    try:
+        module.test_no_test_patches_a_name_its_module_only_re_exports()
+    except AssertionError as exc:
+        return exc
+    finally:
+        for fn in (module._module_paths, module._reexports_of, module._read_at_call_time):
+            fn.cache_clear()
+    return None
+
+
+INERT_PATCHES = {
+    "named_setattr": ("import pkg.facade as fa\n"
+                      "def test_x(monkeypatch):\n"
+                      "    monkeypatch.setattr(fa, 'is_alive', lambda p: False)\n"),
+    "patch_object": ("from unittest.mock import patch\n"
+                     "from pkg import facade\n"
+                     "def test_x():\n"
+                     "    with patch.object(facade, 'is_alive'):\n"
+                     "        pass\n"),
+    "string_target": ("from unittest.mock import patch\n"
+                      "def test_x():\n"
+                      "    with patch('pkg.facade.is_alive'):\n"
+                      "        pass\n"),
+    "attribute_store": ("import pkg.facade as fa\n"
+                        "def test_x():\n"
+                        "    fa.is_alive = lambda p: False\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(INERT_PATCHES))
+def test_inert_patch_guard_catches_a_patch_of_a_bare_re_export(
+        tmp_path, monkeypatch, shape):
+    app, tests = _inert_patch_tree(tmp_path, INERT_PATCHES[shape])
+    assert _run_inert_patch_guard(monkeypatch, tmp_path, app, tests) is not None, (
+        f"the {shape} patch of a re-export slipped past")
+
+
+LIVE_PATCHES = {
+    # The owner is patched: its own code reads the name.
+    "patch_the_owner": ("import pkg.owner as ow\n"
+                        "def test_x(monkeypatch):\n"
+                        "    monkeypatch.setattr(ow, 'is_alive', lambda p: False)\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(LIVE_PATCHES))
+def test_inert_patch_guard_clears_a_patch_that_reaches_the_code(
+        tmp_path, monkeypatch, shape):
+    app, tests = _inert_patch_tree(tmp_path, LIVE_PATCHES[shape])
+    assert _run_inert_patch_guard(monkeypatch, tmp_path, app, tests) is None
+
+
+def test_inert_patch_guard_clears_a_re_export_read_at_call_time(tmp_path, monkeypatch):
+    """A caller that looks the name up through the facade when it runs makes
+    the facade's binding live, so patching it there is real."""
+    app, tests = _inert_patch_tree(
+        tmp_path, INERT_PATCHES["named_setattr"],
+        extra_app=("def check(pid):\n"
+                   "    from pkg.facade import is_alive\n"
+                   "    return is_alive(pid)\n"))
+    assert _run_inert_patch_guard(monkeypatch, tmp_path, app, tests) is None

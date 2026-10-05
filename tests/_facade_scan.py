@@ -25,11 +25,23 @@ from pathlib import Path
 
 from tests._repo_scan import REPO_ROOT, parse_source, python_sources
 
-#: The four access forms, as recorded against each consumer.
+#: The four access forms, as recorded against each consumer. ``ATTRIBUTE`` is
+#: a read (``m.X``, ``getattr(m, "X")``); the other three *write* the module's
+#: binding and are recorded apart, because a write to a pure re-export reaches
+#: nothing that runs (see :data:`PATCH_FORMS`).
 FROM_IMPORT = "from-import"
 ATTRIBUTE = "attribute"
+ATTRIBUTE_STORE = "attribute-store"
 NAMED_SETATTR = "named-setattr"
 STRING_TARGET = "string-target"
+
+#: The forms that replace a module attribute. Applied to a name the module
+#: only re-exports, a patch rebinds the alias and leaves the owner — which is
+#: what the code calls — untouched, so the patched test measures nothing.
+PATCH_FORMS = frozenset({ATTRIBUTE_STORE, NAMED_SETATTR, STRING_TARGET})
+
+#: Call names that write the attribute their second argument names.
+_SETTERS = {"setattr", "delattr", "object"}
 
 
 def consumer_sources() -> list[Path]:
@@ -124,12 +136,17 @@ def consumers_of(module: str, sources: Iterable[Path] | None = None,
                     add(alias.name, path, FROM_IMPORT)
             elif isinstance(node, ast.Attribute) and _refers_to_module(
                     node.value, aliases, dotted, module):
-                add(node.attr, path, ATTRIBUTE)
+                store = isinstance(node.ctx, (ast.Store, ast.Del))
+                add(node.attr, path, ATTRIBUTE_STORE if store else ATTRIBUTE)
             elif (isinstance(node, ast.Call) and len(node.args) >= 2
                   and isinstance(node.args[1], ast.Constant)
                   and isinstance(node.args[1].value, str)
                   and _refers_to_module(node.args[0], aliases, dotted, module)):
-                add(node.args[1].value, path, NAMED_SETATTR)
+                func = node.func
+                fname = func.attr if isinstance(func, ast.Attribute) else (
+                    func.id if isinstance(func, ast.Name) else "")
+                add(node.args[1].value, path,
+                    NAMED_SETATTR if fname in _SETTERS else ATTRIBUTE)
             elif isinstance(node, ast.Constant) and isinstance(node.value, str):
                 match = pattern.match(node.value)
                 if match:

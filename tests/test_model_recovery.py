@@ -146,7 +146,11 @@ def test_lock_dead_holder_reclaimed_instantly(tmp_path, monkeypatch):
     monkeypatch.setenv("KERAS_HOME", str(tmp_path))
     monkeypatch.setattr(sd_cache, "_STARDIST_LOCK_STALE", 1e9)  # disable mtime fallback
     monkeypatch.setattr(sd_cache, "_STARDIST_LOCK_TIMEOUT", 30.0)  # would be slow if it waited
-    monkeypatch.setattr(pm, "_pid_alive", lambda pid: False)  # recorded holder is dead
+    # Patched on the module that reads it. Patched on ``process_microscopy``,
+    # which only re-exported the name, it changed nothing: the test passed
+    # because PID 999999 is really dead, and went on passing with the patch
+    # saying the holder was alive.
+    monkeypatch.setattr(sd_cache, "_pid_alive", lambda pid: False)  # recorded holder is dead
     lockdir = pm._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
     lockdir.mkdir(parents=True)
     (lockdir / "pid.999999").touch()

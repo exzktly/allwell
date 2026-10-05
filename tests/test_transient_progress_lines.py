@@ -29,6 +29,7 @@ from services.pipeline_runner import (
     ProgressTracker,
     is_transient_progress,
 )
+from services import remote_upload
 
 
 def test_a_marked_line_is_transient():
@@ -123,9 +124,8 @@ def test_the_heartbeat_emits_both_cadences():
 def test_rsync_progress_no_longer_goes_to_the_log():
     import inspect
 
-    import services.remote_runner as rr
 
-    src = inspect.getsource(rr._run_rsync_streaming)
+    src = inspect.getsource(remote_upload._run_rsync_streaming)
     assert "TRANSIENT_PREFIX}{line}" in src
     assert 'log_fn(f"[remote] ↑ {line}' not in src
 

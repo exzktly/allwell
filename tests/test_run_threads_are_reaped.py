@@ -50,7 +50,7 @@ def test_every_rostered_owner_still_exists_and_answers_the_roster():
 
 def test_the_heartbeat_is_swept_and_a_stopped_one_is_not_a_leak():
     """The two halves of the predicate, on the type that was missing from it."""
-    from services.remote_runner import _UploadHeartbeat
+    from services.remote_process import _UploadHeartbeat
 
     class _Cache:
         def _ssh_run(self, *_a, **_k):
@@ -75,7 +75,7 @@ def test_the_heartbeat_is_swept_and_a_stopped_one_is_not_a_leak():
 
 #: The remote client's modules: the orchestrator and the owners extracted from
 #: it. A thread-starting class moved into a new one is found only if it is here.
-_REMOTE_CLIENT_MODULES = ("remote_runner", "remote_fetch")
+_REMOTE_CLIENT_MODULES = ("remote_runner", "remote_fetch", "remote_process", "remote_upload")
 
 
 def _threaded_worker_classes() -> set[str]:

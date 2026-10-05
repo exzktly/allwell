@@ -260,7 +260,7 @@ def test_the_pipeline_is_told_where_the_blank_is(tmp_path):
     (["--background", "empty_well"], ()),
 ])
 def test_which_wells_are_treated_as_blanks(argv, expected, tmp_path):
-    from services.remote_runner import _empty_well_blanks
+    from services.remote_process import _empty_well_blanks
 
     zips = [tmp_path / f"{w}.zip" for w in ("A01", "G12", "H12")]
     assert tuple(sorted(_empty_well_blanks(argv, zips))) == expected
@@ -304,7 +304,7 @@ import queue  # noqa: E402
 import threading  # noqa: E402
 import types  # noqa: E402
 
-from services.remote_runner import _BatchedRemoteProcess  # noqa: E402
+from services.remote_process import _BatchedRemoteProcess
 
 
 class _FakeProc:
@@ -535,7 +535,7 @@ def test_the_blank_list_is_parsed_the_way_the_pipeline_parses_it(tmp_path):
     pipeline's own `split_background_wells` reads it as one — so batched mode
     held out and uploaded two archives the pipeline then matched neither of, and
     the run died on the guard in every batch. One parser, one answer."""
-    from services.remote_runner import _empty_well_blanks
+    from services.remote_process import _empty_well_blanks
     from util.well_token import background_well_key, split_background_wells
 
     zips = [tmp_path / f"{w}.zip" for w in ("A01", "G12", "H12")]

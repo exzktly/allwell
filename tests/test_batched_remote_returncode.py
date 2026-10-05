@@ -16,13 +16,13 @@ from __future__ import annotations
 import queue
 import types
 
-import services.remote_runner as rr
+from services import remote_process
 
 
-def _bare_batched() -> rr._BatchedRemoteProcess:
+def _bare_batched() -> remote_process._BatchedRemoteProcess:
     # Bypass the heavy __init__ (needs ssh config, staging, a Fetcher, …); we
     # only exercise wait()/_run_batches, so set just the attributes they touch.
-    p = object.__new__(rr._BatchedRemoteProcess)
+    p = object.__new__(remote_process._BatchedRemoteProcess)
     p._returncode = None
     return p
 
@@ -84,4 +84,4 @@ def test_sys_is_imported_for_local_auto_threshold():
     # must actually import sys (it previously did not → NameError, swallowed).
     import sys as _sys
 
-    assert rr.sys is _sys
+    assert remote_process.sys is _sys

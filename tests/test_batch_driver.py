@@ -25,13 +25,13 @@ from services.remote_config import (
     render_slurm_time,
     scale_launcher_time,
 )
-from services.remote_runner import (
+from services.remote_commands import (
     BATCH_DONE,
     BATCH_READY,
     _batch_driver_snippet,
-    _BatchedRemoteProcess,
     _compose_driver_cmd,
 )
+from services.remote_process import _BatchedRemoteProcess
 
 _ARGV = ["python", "process_microscopy.py", "--input_dir", "/r/run-x/in"]
 

@@ -51,7 +51,6 @@ from services import run_journal as J
 from services.remote_runner import (
     UPLOAD_HEARTBEAT,
     UPLOAD_SENTINEL,
-    DatasetCache,
     LocalInputMode,
     OutputFilter,
     RemoteHost,
@@ -60,6 +59,7 @@ from services.remote_runner import (
     pipeline_argv_digest,
     source_fingerprint,
 )
+from services.remote_upload import DatasetCache
 from services.remote_fetch import FetchedOutputVerifier
 
 #: A previous run's output directory, under a different ``run_id`` than the one

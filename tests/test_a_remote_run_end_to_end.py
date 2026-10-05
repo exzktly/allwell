@@ -88,8 +88,12 @@ def spawn(stop_fetchers):
     """
     def _spawn(host, plate, remote, monkeypatch, *, completed=(), **kw):
         from services.remote_runner import (
-            DatasetCache, LocalInputMode, OutputFilter, RemoteRunner, ZippedInput,
+            LocalInputMode,
+            OutputFilter,
+            RemoteRunner,
+            ZippedInput,
         )
+        from services.remote_upload import DatasetCache
         def _launched(_argv):
             m = MagicMock()
             m.stdout = MagicMock()
@@ -301,7 +305,7 @@ def test_a_failing_remote_command_aborts_the_run(host, plate, remote, monkeypatc
     ``check=False`` — a silent continue with no directories, in production —
     passed every other test here.
     """
-    from services.remote_runner import DatasetCache
+    from services.remote_upload import DatasetCache
 
     # A staging dir that cannot be created: a file sits where the directory
     # would go, which is what a stale artefact on a worker host looks like.

@@ -55,8 +55,12 @@ def incremental_spawn(host, tmp_path, monkeypatch, stop_fetchers):
     """Spawn incremental runs of one plate; keys and journal are real."""
     from services import run_journal as J
     from services.remote_runner import (
-        DatasetCache, LocalInputMode, OutputFilter, RemoteRunner, ZippedInput,
+        LocalInputMode,
+        OutputFilter,
+        RemoteRunner,
+        ZippedInput,
     )
+    from services.remote_upload import DatasetCache
 
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "state" / "idx.json")
     remote = FakeRemote(tmp_path / "remote-host")

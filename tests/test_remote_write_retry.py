@@ -25,10 +25,8 @@ from pathlib import Path
 import pytest
 
 import util.retry_io as rio
-from services.remote_runner import (
-    _RSYNC_RETRY_CODES,
-    OutputFilter,
-)
+from services.remote_runner import OutputFilter
+from services.remote_transport import _RSYNC_RETRY_CODES
 from services.remote_staging import (
     _materialize_staging,
     _StagePlan,

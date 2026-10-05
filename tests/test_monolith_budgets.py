@@ -169,7 +169,15 @@ PROCESS_MICROSCOPY_BUDGET = 3766
 # 4760 -> 3497: local input staging — layout detection, the zip-up, the
 # channel filter and the incremental split — moved to
 # `services/remote_staging.py`.
-REMOTE_RUNNER_BUDGET = 3497
+# 3497 -> 1356: the remote process wrappers (single launch and batched), the
+# run heartbeat and their helpers moved to `services/remote_process.py`, and
+# the upload cache with its rsync streaming to `services/remote_upload.py`.
+# What is left is the orchestrator and the facade.
+REMOTE_RUNNER_BUDGET = 1356
+# Set at extraction: the process wrappers and the batch driver's loop.
+REMOTE_PROCESS_BUDGET = 1400
+# Set at extraction: the upload cache and its rsync streaming.
+REMOTE_UPLOAD_BUDGET = 703
 # Set at extraction: the Fetcher and its verifier, moved out of the runner.
 REMOTE_FETCH_BUDGET = 2052
 # Set at extraction: staging the user's input, moved out of the runner.
@@ -320,6 +328,24 @@ def test_remote_staging_line_budget():
         f"{REMOTE_STAGING_BUDGET} budget. It owns turning the user's input into "
         "the archives a run uploads; anything else belongs beside the stage "
         "that does it. The ratchet only moves down."
+    )
+
+
+def test_remote_process_line_budget():
+    n = _line_count("services/remote_process.py")
+    assert n <= REMOTE_PROCESS_BUDGET, (
+        f"services/remote_process.py is {n} lines, over the "
+        f"{REMOTE_PROCESS_BUDGET} budget. It owns the run as a process the GUI "
+        "can read, wait on and stop. The ratchet only moves down."
+    )
+
+
+def test_remote_upload_line_budget():
+    n = _line_count("services/remote_upload.py")
+    assert n <= REMOTE_UPLOAD_BUDGET, (
+        f"services/remote_upload.py is {n} lines, over the "
+        f"{REMOTE_UPLOAD_BUDGET} budget. It owns getting input onto the host "
+        "once. The ratchet only moves down."
     )
 
 

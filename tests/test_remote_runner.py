@@ -18,7 +18,6 @@ import pytest
 
 from services.remote_config import RemoteHost
 from services.remote_runner import (
-    DatasetCache,
     LocalInputMode,
     OutputFilter,
     RemoteRunner,
@@ -31,6 +30,7 @@ from services.remote_runner import (
     repo_root,
     stage_local_zips,
 )
+from services.remote_upload import DatasetCache
 from services.remote_staging import (
     _detect_local_input_mode,
     _filter_channels_in_staging,
@@ -1254,7 +1254,7 @@ def test_ensure_uploaded_raises_on_nonzero_rsync_rc(host, tmp_path, monkeypatch)
     monkeypatch.setattr(DatasetCache, "_ssh_run", lambda self, argv, *, check: MagicMock(stdout="", returncode=0))
     # rsync reports rc=23 ("partial transfer due to error") — non-retry.
     monkeypatch.setattr(
-        "services.remote_runner._run_rsync_streaming",
+        "services.remote_upload._run_rsync_streaming",
         lambda *a, **kw: (0, 23),
     )
 
@@ -1282,7 +1282,7 @@ def test_ensure_uploaded_raises_when_remote_file_count_mismatches(host, tmp_path
     )
     # rsync says success but lied.
     monkeypatch.setattr(
-        "services.remote_runner._run_rsync_streaming",
+        "services.remote_upload._run_rsync_streaming",
         lambda *a, **kw: (1024, 0),
     )
 
@@ -1305,7 +1305,7 @@ def test_ensure_uploaded_succeeds_when_count_matches(host, tmp_path, monkeypatch
         lambda self, script, *, check: MagicMock(stdout="2\n", returncode=0),
     )
     monkeypatch.setattr(
-        "services.remote_runner._run_rsync_streaming",
+        "services.remote_upload._run_rsync_streaming",
         lambda *a, **kw: (2048, 0),
     )
 
@@ -1339,7 +1339,7 @@ def test_ensure_uploaded_verification_preserves_tilde_in_script(host, tmp_path, 
     )
     monkeypatch.setattr(DatasetCache, "_ssh_script", fake_ssh_script)
     monkeypatch.setattr(
-        "services.remote_runner._run_rsync_streaming",
+        "services.remote_upload._run_rsync_streaming",
         lambda *a, **kw: (1024, 0),
     )
 
@@ -1378,7 +1378,7 @@ def _run_fake_rsync(tmp_path, sizes):
     the reader handed to ``log_fn``."""
     import stat as _stat
 
-    from services.remote_runner import _run_rsync_streaming
+    from services.remote_upload import _run_rsync_streaming
 
     fake = tmp_path / "fakersync.sh"
     fake.write_text(_FAKE_RSYNC)
@@ -1433,7 +1433,7 @@ def test_well_zip_sizes_skips_an_archive_that_vanished(tmp_path):
     """A missing archive gets no entry rather than a guessed size: the
     transfer will fail on its own and say so, and a dial on a well that is
     not moving is worse than no dial."""
-    from services.remote_runner import _well_zip_sizes
+    from services.remote_upload import _well_zip_sizes
 
     real = tmp_path / "A01.zip"
     real.write_bytes(b"\0" * 4096)
@@ -2280,7 +2280,7 @@ def test_sync_required_files_surfaces_rsync_failure(host, monkeypatch):
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr("services.remote_runner.subprocess.run", fail_rsync)
-    monkeypatch.setattr("services.remote_runner.time.sleep", lambda _s: None)
+    monkeypatch.setattr("services.remote_transport.time.sleep", lambda _s: None)
 
     with pytest.raises(RuntimeError, match="connection refused"):
         runner.sync_required_files()
@@ -2799,7 +2799,8 @@ def test_sync_required_files_includes_info_flag_on_modern_rsync(host, monkeypatc
 def test_rsync_supports_append_verify_recognises_modern_rsync(monkeypatch):
     """--append-verify lands in rsync 3.0.0 (2008). Anything newer
     must be detected as supporting it."""
-    from services.remote_runner import _rsync_supports_append_verify, _rsync_version
+    from services.remote_runner import _rsync_version
+    from services.remote_transport import _rsync_supports_append_verify
     _rsync_version.cache_clear()
     monkeypatch.setattr(
         "services.remote_runner.subprocess.run",
@@ -2817,7 +2818,8 @@ def test_rsync_supports_append_verify_rejects_legacy_rsync(monkeypatch):
     'Unrecognized option --append-verify' → exit 1. This was the
     failure that motivated v5.2.15 (user's well-zip upload died
     with exit 1 right after the v5.2.13 conda-run fix landed)."""
-    from services.remote_runner import _rsync_supports_append_verify, _rsync_version
+    from services.remote_runner import _rsync_version
+    from services.remote_transport import _rsync_supports_append_verify
     _rsync_version.cache_clear()
     monkeypatch.setattr(
         "services.remote_runner.subprocess.run",
@@ -2861,7 +2863,7 @@ def test_ensure_uploaded_omits_append_verify_on_legacy_rsync(host, tmp_path, mon
         captured["cmd"] = list(cmd)
         return (1024, 0)
 
-    monkeypatch.setattr("services.remote_runner._run_rsync_streaming", capture_streaming)
+    monkeypatch.setattr("services.remote_upload._run_rsync_streaming", capture_streaming)
 
     cache.ensure_uploaded(zipped)
     assert "--append-verify" not in captured["cmd"], (
@@ -2900,7 +2902,7 @@ def test_ensure_uploaded_includes_append_verify_on_modern_rsync(host, tmp_path, 
         captured["cmd"] = list(cmd)
         return (1024, 0)
 
-    monkeypatch.setattr("services.remote_runner._run_rsync_streaming", capture_streaming)
+    monkeypatch.setattr("services.remote_upload._run_rsync_streaming", capture_streaming)
 
     cache.ensure_uploaded(zipped)
     assert "--append-verify" in captured["cmd"]
@@ -2931,7 +2933,7 @@ def test_ensure_uploaded_error_message_uses_actual_attempt_count(host, tmp_path,
     )
     # rc=1 is non-retry — must break on the first attempt.
     monkeypatch.setattr(
-        "services.remote_runner._run_rsync_streaming",
+        "services.remote_upload._run_rsync_streaming",
         lambda *a, **kw: (0, 1),
     )
 
@@ -2986,7 +2988,7 @@ def test_looks_like_rsync_filename_accepts_zip_paths():
     line. The heuristic must accept paths a user would actually see
     (well zips, required-files like process_microscopy.py and
     subfolder/file.txt)."""
-    from services.remote_runner import _looks_like_rsync_filename
+    from services.remote_transport import _looks_like_rsync_filename
     assert _looks_like_rsync_filename("A01.zip") is True
     assert _looks_like_rsync_filename("process_microscopy.py") is True
     assert _looks_like_rsync_filename("requirements-remote.txt") is True
@@ -2997,7 +2999,7 @@ def test_looks_like_rsync_filename_rejects_progress_and_status_lines():
     filename lines — progress percentages, byte stats, error
     markers, the file-list announcement, blanks, and the wider
     stats2 / status surface that pre-cleanup leaked through."""
-    from services.remote_runner import _looks_like_rsync_filename
+    from services.remote_transport import _looks_like_rsync_filename
     # Empties.
     assert _looks_like_rsync_filename("") is False
     assert _looks_like_rsync_filename(" ") is False
@@ -3065,7 +3067,7 @@ def test_ensure_uploaded_upload_cmd_includes_name1_on_modern_rsync(host, tmp_pat
         captured["cmd"] = list(cmd)
         return (1024, 0)
 
-    monkeypatch.setattr("services.remote_runner._run_rsync_streaming", capture_streaming)
+    monkeypatch.setattr("services.remote_upload._run_rsync_streaming", capture_streaming)
 
     cache.ensure_uploaded(zipped)
     info_flag = next((a for a in captured["cmd"] if a.startswith("--info=")), "")
@@ -3585,7 +3587,7 @@ def test_legacy_rsync_output_shapes_still_parse():
     filename per transferred file, and a per-file percentage line."""
     import re
 
-    from services.remote_runner import _looks_like_rsync_filename
+    from services.remote_transport import _looks_like_rsync_filename
 
     assert _looks_like_rsync_filename("C08.zip")
     assert not _looks_like_rsync_filename("sending incremental file list")

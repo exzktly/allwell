@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 import pytest
 from review.domain.stats_compute import compute_rep_stats
 from services import remote_fetch
+from services import remote_upload
 
 
 # ── AggPoint helpers ────────────────────────────────────────────────────────
@@ -678,7 +679,7 @@ def offline_transport(monkeypatch):
     """
     import subprocess
 
-    from services import remote_runner, remote_transport
+    from services import remote_transport
 
     def unreachable_script(self, script: str, *, check: bool):
         cmd = ["ssh", "<offline in tests>"]
@@ -686,7 +687,7 @@ def offline_transport(monkeypatch):
             raise subprocess.CalledProcessError(255, cmd, "", _OFFLINE_STDERR)
         return subprocess.CompletedProcess(cmd, 255, "", _OFFLINE_STDERR)
 
-    monkeypatch.setattr(remote_runner.DatasetCache, "_ssh_script",
+    monkeypatch.setattr(remote_upload.DatasetCache, "_ssh_script",
                         unreachable_script)
     # The Fetcher's CSV listing runs its own ssh rather than going through
     # `DatasetCache`, so patching the one above does not cover it. A `None`

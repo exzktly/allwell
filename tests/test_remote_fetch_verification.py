@@ -25,11 +25,11 @@ import pytest
 
 from services.remote_config import RemoteHost
 from services.remote_runner import (
-    DatasetCache,
     LocalInputMode,
     OutputFilter,
     RemoteRunner,
 )
+from services.remote_upload import DatasetCache
 from services.remote_fetch import Fetcher
 from services.remote_run_state import _RemoteRun
 from services.remote_fetch import FetchedOutputVerifier

@@ -368,7 +368,7 @@ def test_local_auto_threshold_records_reach_the_line_stream():
     would break them exactly as a missing progress flag does."""
     import logging
 
-    from services.remote_runner import _LogToLineStream
+    from services.remote_process import _LogToLineStream
 
     lines = []
     log = logging.getLogger("allwell.test_auto_threshold_forward")

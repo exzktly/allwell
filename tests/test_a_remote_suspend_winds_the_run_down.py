@@ -99,7 +99,10 @@ def _run_driver(tmp_path, *, suspend_during_batch_1: bool,
                 timeout: float = 8) -> subprocess.CompletedProcess:
     """Run the real driver snippet in bash, with batch 1 ready and batch 2 not."""
     from services.remote_run_id import SUSPEND_REQUEST
-    from services.remote_runner import BATCH_READY, _batch_driver_snippet
+    from services.remote_commands import (
+        BATCH_READY,
+        _batch_driver_snippet,
+    )
 
     run_dir = tmp_path / "run"
     (run_dir / "b1").mkdir(parents=True)
@@ -161,8 +164,12 @@ def plate(tmp_path):
 def spawned(host, plate, tmp_path, monkeypatch, stop_fetchers):
     """Spawn a real run against the fake host; return ``(runner, remote)``."""
     from services.remote_runner import (
-        DatasetCache, LocalInputMode, OutputFilter, RemoteRunner, ZippedInput,
+        LocalInputMode,
+        OutputFilter,
+        RemoteRunner,
+        ZippedInput,
     )
+    from services.remote_upload import DatasetCache
 
     remote = FakeRemote(tmp_path / "remote-host")
 
@@ -366,7 +373,7 @@ def test_a_local_run_is_still_signalled(runner):
 def _batched(n_batches: int):
     import threading
 
-    from services.remote_runner import _BatchedRemoteProcess
+    from services.remote_process import _BatchedRemoteProcess
 
     b = _BatchedRemoteProcess.__new__(_BatchedRemoteProcess)
     b._stop = threading.Event()
@@ -601,7 +608,7 @@ def test_a_well_that_starts_after_the_request_leaves_nothing(tmp_path):
 def test_the_request_path_exists_only_once_the_upload_is_done(
         spawned, monkeypatch):
     """A suspend during the upload stops it; asked of the real spawn's ordering."""
-    from services.remote_runner import DatasetCache
+    from services.remote_upload import DatasetCache
 
     spawn, _remote = spawned
     seen: list[bool] = []

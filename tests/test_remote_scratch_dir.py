@@ -23,10 +23,12 @@ import pytest
 
 from services.remote_config import RemoteHost, _format_block, _parse_entry
 from services.remote_runner import (
-    _batch_driver_snippet,
-    _compose_driver_cmd,
     _compose_remote_cmd,
     _remote_scratch_export,
+)
+from services.remote_commands import (
+    _batch_driver_snippet,
+    _compose_driver_cmd,
 )
 
 _ARGV = ["python", "process_microscopy.py", "--input_dir", "/r/in"]

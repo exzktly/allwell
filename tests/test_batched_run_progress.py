@@ -21,8 +21,8 @@ from pathlib import Path
 
 import pytest
 
-import services.remote_runner as rr
 from services.pipeline_runner import ProgressTracker
+from services import remote_process
 
 TS = "2026-08-01 10:00:00  INFO      "
 WELLS = [f"{row}{col:02d}" for row in "ABCD" for col in range(1, 11)]  # 40
@@ -135,10 +135,10 @@ def test_announced_total_is_a_floor_not_a_ceiling():
 
 # ── the batched runner's own denominator ─────────────────────────────────────
 
-def _bare_batched(tmp_path: Path, wells: list[str]) -> rr._BatchedRemoteProcess:
+def _bare_batched(tmp_path: Path, wells: list[str]) -> remote_process._BatchedRemoteProcess:
     """A ``_BatchedRemoteProcess`` with just the attributes ``_run_batches``
     touches — the real ``__init__`` needs ssh, staging, and a Fetcher."""
-    p = object.__new__(rr._BatchedRemoteProcess)
+    p = object.__new__(remote_process._BatchedRemoteProcess)
     zip_dir = tmp_path / "in"
     zip_dir.mkdir()
     zips = []
@@ -400,7 +400,7 @@ def test_an_unknown_csv_total_leaves_the_dial_alone(tmp_path):
 # silent at the precise moment it began waiting.
 
 def test_the_handoff_lines_name_the_launcher_and_the_batch():
-    from services.remote_runner import _scheduler_handoff_lines
+    from services.remote_process import _scheduler_handoff_lines
 
     lines = _scheduler_handoff_lines("srun -p gpu --time=4:00:00", batch=2)
     assert "batch 2" in lines
@@ -411,7 +411,7 @@ def test_the_handoff_lines_name_the_launcher_and_the_batch():
 def test_a_host_with_no_launcher_is_not_told_it_is_waiting():
     """A direct-ssh host queues for nothing. Returning "" lets every caller
     emit unconditionally without inventing a wait that does not exist."""
-    from services.remote_runner import _scheduler_handoff_lines
+    from services.remote_process import _scheduler_handoff_lines
 
     assert _scheduler_handoff_lines("") == ""
     assert _scheduler_handoff_lines("   ") == ""
@@ -427,14 +427,17 @@ def test_both_launch_paths_announce_the_handoff():
     """
     import inspect
 
+    import services.remote_process as rp
     import services.remote_runner as rr
 
-    src = inspect.getsource(rr)
+    # The single-launch path is the runner's, the batched one the process
+    # wrapper's; the helper is defined beside the latter.
+    src = inspect.getsource(rr) + inspect.getsource(rp)
     # Once as the definition, once per launch site.
     assert src.count("_scheduler_handoff_lines") >= 3
-    batched = inspect.getsource(rr._BatchedRemoteProcess._start_driver)
+    batched = inspect.getsource(remote_process._BatchedRemoteProcess._start_driver)
     assert "_scheduler_handoff_lines" in batched, "the batched path went quiet"
-    loop = inspect.getsource(rr._BatchedRemoteProcess._run_batches)
+    loop = inspect.getsource(remote_process._BatchedRemoteProcess._run_batches)
     assert "_scheduler_handoff_lines" not in loop, (
         "one allocation for the run means one hand-off announcement")
 

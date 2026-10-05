@@ -28,13 +28,13 @@ from services.remote_runner import (
     UPLOAD_HEARTBEAT,
     UPLOAD_SENTINEL,
     UPLOAD_WAIT_TIMEOUT_S,
-    DatasetCache,
     LocalInputMode,
     RemoteHost,
     RemoteRunner,
     ZippedInput,
     _compose_remote_cmd,
 )
+from services.remote_upload import DatasetCache
 from services.remote_fetch import FetchedOutputVerifier
 
 _PIDFILE = "/scratch/runs/run-abc/run.pid"
@@ -262,7 +262,7 @@ def test_the_job_gives_up_on_a_dead_uploader_not_just_a_slow_one():
 def test_the_heartbeat_stops_when_the_upload_does(monkeypatch):
     """Whatever ends the upload has to end the beat, or a crashed app would go
     on reassuring the job that its input is coming."""
-    from services.remote_runner import _UploadHeartbeat
+    from services.remote_process import _UploadHeartbeat
 
     beats = []
 

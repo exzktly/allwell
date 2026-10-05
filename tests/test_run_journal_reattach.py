@@ -33,14 +33,15 @@ import pytest
 
 from services import run_journal as J
 from services.remote_runner import (
-    DatasetCache,
     _choose_remote_output_dir,
     _compute_run_id,
     pipeline_argv_digest,
     stage_local_zips,
 )
+from services.remote_upload import DatasetCache
 from services import remote_run_state
 from services import remote_fetch
+from services import remote_upload
 
 def _make_host():
     from services.remote_runner import RemoteHost
@@ -356,11 +357,11 @@ def _cleanup_deletions(tmp_path, monkeypatch, *, reattached: bool) -> list[str]:
             removed.extend(argv[2:])
         return None
 
-    monkeypatch.setattr(rr.DatasetCache, "_ssh_run", _ssh_run)
+    monkeypatch.setattr(remote_upload.DatasetCache, "_ssh_run", _ssh_run)
 
     runner = rr.RemoteRunner.__new__(rr.RemoteRunner)
     runner._run = run
-    runner._cache = rr.DatasetCache.__new__(rr.DatasetCache)
+    runner._cache = remote_upload.DatasetCache.__new__(remote_upload.DatasetCache)
     runner._cancelled = __import__("threading").Event()
     runner.host = _make_host()
     # Nothing is missing, so verify passes and cleanup is reached.

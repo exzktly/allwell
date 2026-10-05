@@ -257,11 +257,11 @@ class FakeRemote:
         monkeypatch.setattr(rr.subprocess, "run", _run)
         monkeypatch.setattr(rr.subprocess, "Popen", _popen)
         # `_rsync_with_retry` is patched on every module that holds one of its
-        # callers: the uploader in `remote_runner`, the Fetcher and the
-        # end-of-run verifier in `remote_fetch`. The same holds for the
-        # transport's other names (`_rsync_ssh_transport`, `resolve_rsync_binary`,
-        # `resolve_ssh_for_rsync`): patch the module that holds the *caller*,
-        # not the module that holds the definition.
+        # callers: the runner's file sync, the Fetcher and the end-of-run
+        # verifier in `remote_fetch`. The same holds
+        # for the transport's other names (`_rsync_ssh_transport`,
+        # `resolve_rsync_binary`, `resolve_ssh_for_rsync`): patch the module
+        # that holds the *caller*, not the module that holds the definition.
         monkeypatch.setattr(rr, "_rsync_with_retry", _rsync)
         monkeypatch.setattr(remote_fetch, "_rsync_with_retry", _rsync)
         # ``_rsync_run_cancellable`` is called from inside

@@ -1262,8 +1262,27 @@ and by `remote_fetch_report.txt` in the output folder.
 │                              gating thresholds + saved selections +
 │                              the completeness record, etc.
 ├── errors/                 ← one traceback per failed field, when any fail
+├── provenance.jsonl        ← the dataset's history (see below)
 └── (transient tmp_<well>/  ← deleted on success)
 ```
+
+**The dataset's history.** `provenance.jsonl`, beside `pipeline_info.json`,
+grows by one line each time something meaningful is done to the dataset: an
+Analyze run starts or finishes (with what it was told to do — including *Only
+these wells* / *Force these wells* — and how it ended), a piece of your analysis
+reaches disk with a different value (gating, sample definitions, variables,
+ratios, the QC gate, the crop, cell curation, smFISH thresholds, Batch Export
+groups), a reset clears something, a Datasets tool builds this dataset from
+others, or Validate & Repair fixes it. Each line is plain JSON with a UTC
+timestamp and the All-Well version that wrote it. Lines are only ever added,
+never rewritten.
+
+It records *that* something changed and when, not the values themselves — the
+other files hold the current values. Nothing in All-Well reads it to make a
+decision, so deleting it loses the history and nothing else. A run launched by
+typing `python process_microscopy.py …` in a terminal, rather than from the
+Analyze pane, is not recorded; neither is a folder produced by one of the
+importers until its first Analyze run.
 
 **The completeness record.** `pipeline_info.json` gains a `run_check` block at
 the end of every run, holding one entry per well: how many

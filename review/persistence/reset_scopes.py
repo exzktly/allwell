@@ -440,6 +440,12 @@ def clear_analysis(ctx, keys) -> list[str]:
             continue
         done.append(key)
     if done:
+        # After the clears, and naming only the scopes that completed: each
+        # scope's write has already recorded what it changed on disk, and this
+        # line says why.
+        with _swallow("record the reset in the provenance log"):
+            from review.persistence.provenance import record_reset
+            record_reset(ctx, done)
         try:
             from review.core.selection_controller import invalidate_stats_cache
             invalidate_stats_cache(ctx)

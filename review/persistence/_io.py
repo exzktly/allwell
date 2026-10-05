@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from core.safe import swallowed
+from review.persistence import provenance as _provenance
 
 _logger = logging.getLogger("review")
 
@@ -129,7 +130,13 @@ def _replace_with_text(path: Path, text: str, *, durable: bool) -> None:
     The half of :func:`atomic_write_json` that touches the filesystem, split out
     so the serialisation can stay on the calling thread while this runs on the
     background writer. Raises ``OSError`` exactly as before.
+
+    It is also where the dataset's provenance log learns what changed
+    (:mod:`review.persistence.provenance`): the file is read just before the
+    replace and compared with *text* just after it, on this same thread, so a
+    write that fails records nothing.
     """
+    before = _provenance.before_write(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _unique_tmp_path(path)
 
@@ -159,6 +166,7 @@ def _replace_with_text(path: Path, text: str, *, durable: bool) -> None:
                 _retry_on_permission_error("unlink", tmp.unlink)
         except OSError:
             swallowed("atomic_write_json: tmp cleanup unlink failed")
+    _provenance.after_write(path, before, text)
 
 
 def atomic_write_json(path: Path, data: Any, *, indent: int = 2,

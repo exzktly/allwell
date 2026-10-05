@@ -4566,8 +4566,24 @@ Each plot tab pre-allocates a right-side dock via
 `make_plot_with_right_dock(parent)`. The dock is hidden by default and a
 **Properties** button on the tab's controls row toggles it. When opened, the
 dock hosts an `ExportStyleSidebar` (from `features/export/sidebar_view.py`)
-backed by a `plot_style.figure_prefs(ctx, fig)` view. The widget binds to that
-view via `_bind_getter_setter`, so changes flow:
+backed by a `plot_style.figure_prefs(ctx, fig)` view. `_build_ui` assembles
+the panel from one builder per section — `_build_header`, then
+`_build_profile_section`, `_build_scatter_sections`, `_build_cell_values_section`,
+`_build_colours_section`, `_build_bars_section`, `_build_axes_section`,
+`_build_statistics_section`, `_build_legend_section`, `_build_overlays_section`,
+`_build_time_section`, `_build_lines_markers_section`, `_build_grid_section`,
+`_build_limits_section`, `_build_layout_section`, and `_build_footer` — in the
+order the panel shows them. A builder behind a facet (`_supports`, or one of the
+`_is_*_fig` checks) adds nothing on a figure that lacks it. The rows go through
+`_SectionGrid`, which owns the scrolling column and each section's two-column
+grid (a fixed 96 px label column and an expanding control column) and applies
+the pref binding when a row names its key. Builders keep on `self` exactly the
+controls the rest of the class reads, and nothing else.
+`tests/test_properties_control_contract.py` holds every binding,
+`tests/test_properties_hides_what_it_cannot_do.py` which sections each figure
+gets, and `tests/test_properties_panel_frame.py` the header and footer buttons
+(pressed, not looked for) and the grid's geometry. The widget binds to the
+prefs view via `_bind_getter_setter`, so changes flow:
 
 ```
 Properties widget → figure_prefs(ctx, fig)  ── shared style ─→ export_prefs.style_prefs
@@ -14230,6 +14246,18 @@ a `SegmentedControl` rather than an inner `QTabWidget` needs its own capture pas
 since the generic `_capture_inner` walker cannot see them. Multivariate is the
 case in point — its four analysis modes swap different option groups into the
 control row, so only a per-mode pass exercises the one that makes the row wrap.
+
+`render_views.py` never opens the Properties dock, so a refactor of the panel
+gets its own capture: `tests/visual/render_properties_panel.py <out_dir>` builds
+the real `ExportStyleSidebar` for each figure kind whose panel differs, against
+the Properties tests' stub app, and writes each panel as opened and fully
+expanded plus one JSON fingerprint (widget tree, grid positions, instance
+attributes, bound keys, sections, registered observers). Both outputs are
+deterministic on one machine — the grabs wait out the toggle-switch animation,
+which otherwise leaves a few hundred pixels different between two runs of the
+same code — so running it on both trees and comparing with `cmp` and a pixel
+diff shows exactly what changed. It takes an output directory rather than
+writing into the repository.
 
 ---
 

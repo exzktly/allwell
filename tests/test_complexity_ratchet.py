@@ -27,7 +27,8 @@ THRESHOLD = 40
 # existing debt function growing from (say) 50 to 90. This aggregate ratchet
 # makes that growth visible and only moves down as debt is decomposed.
 # 1192 -> 1088: apply_export_style_prefs (104) left the allowlist (C1).
-TOTAL_ALLOWLISTED_CC_BUDGET = 1088
+# 1088 -> 985: ExportStyleSidebar._build_ui (103) left the allowlist (C2).
+TOTAL_ALLOWLISTED_CC_BUDGET = 985
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
@@ -119,7 +120,9 @@ ALLOWLIST = {
     # grid, scale + limits, ticks, legends, layout); coordinator CC 6, every
     # pass <= 13. Removed from the allowlist.
     "review/core/centre_view.py::build_centre",
-    "review/features/export/sidebar_view.py::ExportStyleSidebar._build_ui",
+    # C2 DONE: ExportStyleSidebar._build_ui (was CC 103) split into one builder
+    # per Properties section over a module-level _SectionGrid; coordinator
+    # CC 2, the largest builder (Statistics) 32. Removed from the allowlist.
     "review/persistence/view_state.py::restore",
     "process_microscopy.py::main",
     # A5 DONE: redraw_line_plots (was CC 69) decomposed — the per-series painter

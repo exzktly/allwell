@@ -262,9 +262,15 @@ def test_the_response_figure_predicate_is_defined_once(qtbot, monkeypatch):
 
     from review.features.export import sidebar_view
 
+    # Per namespace: a later ``def`` shadows an earlier one only within the
+    # same class body (or the module). Two classes each defining ``__init__``
+    # is not shadowing, and counting names module-wide would say it was.
     tree = ast.parse(inspect.getsource(sidebar_view))
-    names = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
-    dupes = {n for n in names if names.count(n) > 1}
+    dupes = set()
+    for scope in [tree, *(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef))]:
+        names = [n.name for n in scope.body if isinstance(n, ast.FunctionDef)]
+        owner = getattr(scope, "name", "<module>")
+        dupes |= {f"{owner}.{n}" for n in names if names.count(n) > 1}
     assert not dupes, f"defined more than once in sidebar_view: {sorted(dupes)}"
 
 

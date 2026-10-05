@@ -84,7 +84,10 @@ _HARD_FAIL = True
 # The simplification audit deleted three delegators that no caller had left —
 # _sel_set_composition, _sel_select and _rank_color_wells, whose backing
 # functions the Groups views already call through ctx directly: 856 -> 849.
-RUNTIME_APP_LINE_BUDGET = 849
+# Freezing the plotting facades pointed the bar lazy binds at the modules that
+# own their names, and deleted the nine lazy binds nothing read (five bar
+# helpers, two figure-save orchestrators, two review-image handlers): 849 -> 844.
+RUNTIME_APP_LINE_BUDGET = 844
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
 # Code-review X13: removed 3 dead never-read attrs (_montage_chan_cb,

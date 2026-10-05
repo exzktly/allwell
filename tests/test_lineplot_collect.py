@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 
 
-from review.features.barplot.controller import FC_STATE_OFF
+from review.features.barplot.collect import FC_STATE_OFF
 from review.features.lineplot.controller import (
     LinePoint, collect_line_series,
 )

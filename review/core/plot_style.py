@@ -87,9 +87,8 @@ def tokens_for(ax) -> tuple:
 # Re-exported so a renderer takes its ink and its "this is ink" marker from one
 # import. ``follows_theme`` lives in ``widgets`` because the repaint that honours
 # it is ``PlotCard.setPlotTheme``'s, and ``widgets`` carries no app coupling.
-from widgets.plot_card import follows_theme  # noqa: E402  (re-export)
-
-__all__ = [*globals().get("__all__", []), "follows_theme"]
+# The module's one declared re-export (``tests/test_plotting_facades_are_frozen.py``).
+from widgets.plot_card import follows_theme  # noqa: E402, F401
 
 
 # Internal alias (was the original name).
@@ -255,13 +254,12 @@ def style_legend(leg, ax) -> None:
 
 
 # ── export-style prefs → figure application ──────────────────────────────────
-# These were relocated from ``features/export/style.py`` (T2). They are neutral
-# matplotlib figure styling — applying a prefs dict to a figure's axes — and are
+# Neutral matplotlib figure styling — applying a prefs dict to a figure's axes —
 # shared by every plot controller (line / bar / scatter / distribution / heatmap)
 # plus the export panel. Living here (core, foundational) lets each feature import
-# them *downward* instead of reaching sideways into the export feature, which had
-# created a scatter↔export import cycle. ``features/export/style.py`` re-exports
-# them for backwards compatibility (profiles + the export editor stay there).
+# it *downward* instead of reaching sideways into the export feature, which had
+# created a scatter↔export import cycle. Profiles and the export editor stay in
+# ``features/export/style.py``; callers import these names from here.
 
 DEFAULT_EXPORT_STYLE_PREFS = {
     "axis_label_size": 18,

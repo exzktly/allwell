@@ -20,13 +20,12 @@ from PySide6.QtWidgets import (
 )
 
 from review.features.export.style import (
-    DEFAULT_EXPORT_STYLE_PREFS,
     EXPORT_PROFILES,
     _ensure_custom_export_profiles,
     _get_all_profile_names,
     _resolve_export_dock,
-    apply_export_style_to_current,
 )
+from review.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS, apply_export_style_to_current
 from review.core.plot_style import (
     AXIS_LIMIT_PREF_KEYS, FIGURE_SCOPED_PREF_KEYS, LOG_BASE_CHOICES,
     drop_bucket_limits, figure_pref_is_set, figure_prefs,

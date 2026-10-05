@@ -715,7 +715,7 @@ def image_table_copy_svg(ctx) -> None:
     pastes true editable vector; elsewhere a Qt clipboard payload is used (see
     ``copy_figure_to_clipboard``).
     """
-    from review.features.export.style import copy_figure_to_clipboard
+    from widgets.fig_clipboard import copy_figure_to_clipboard
 
     fig, save_kwargs = _build_export_figure(ctx)
     if fig is None:

@@ -20,7 +20,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pytest
 
-from review.features.export.style import (
+from widgets.fig_clipboard import (
     _macos_pasteboard_write,
     _render_figure,
     copy_figure_to_clipboard,

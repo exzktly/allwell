@@ -78,13 +78,7 @@ _bar_ordered_keys = _lazy("review.features.barplot.controller", "ordered_bar_key
 
 _load_directory_controller = _lazy("review.core.load_controller", "load_directory")
 
-_plot_save_bar_figure_orchestrator = _lazy("review.core.plot_orchestrator", "save_bar_figure")
-_plot_save_line_figure_orchestrator = _lazy("review.core.plot_orchestrator", "save_line_figure")
 _plot_save_matplotlib_fig_orchestrator = _lazy("review.core.plot_orchestrator", "save_matplotlib_fig")
-
-
-_on_review_image_click_controller = _lazy("review.features.image_browser.review_image.controller", "on_review_image_click")
-_select_review_csv_row_for_cell_controller = _lazy("review.features.image_browser.review_image.controller", "select_review_csv_row_for_cell")
 
 _stats_collect_group_values = _lazy("review.features.stats.controller", "collect_group_values")
 _stats_draw_ks_cdf = _lazy("review.features.stats.controller", "draw_ks_cdf")
@@ -159,7 +153,8 @@ redraw_scatter_agg_orchestrate = _lazy("review.features.scatter.controller", "re
 redraw_scatter_orchestrate = _lazy("review.features.scatter.controller", "redraw_scatter_orchestrate")
 stats_refresh_map = _lazy("review.features.stats.controller", "stats_refresh_map")
 from review.core.ui_helpers import refresh_plot_empty_states
-update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app, refresh_bar_layout_btn_state, update_bar_tp_selection_display = _lazy_names("review.features.barplot.controller", "update_bar_tp_menu", "bar_event_xdata", "on_bar_drag_motion", "toggle_swarm", "toggle_violin", "bar_well_display_label", "rep_sets_active", "collect_bar_items_for_app", "refresh_bar_layout_btn_state", "update_bar_tp_selection_display")
+update_bar_tp_menu, rep_sets_active, refresh_bar_layout_btn_state = _lazy_names("review.features.barplot.controller", "update_bar_tp_menu", "rep_sets_active", "refresh_bar_layout_btn_state")
+bar_well_display_label, collect_bar_items_for_app = _lazy_names("review.features.barplot.collect", "bar_well_display_label", "collect_bar_items_for_app")
 from review.core.channel_state_controller import get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, set_thresh_frac_on, refresh_thresh_frac_quick_edit, ratio_label_for, active_channel_label, set_ratio_metrics, on_plot_channel_selected, on_metric_selected_global
 from review.domain.selections_model import color_for_replicate_set, replicate_display_label, well_display_label
 from review.core.load_controller import load_path_shim

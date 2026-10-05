@@ -1,45 +1,27 @@
 """Export-style profile management + figure export pipeline.
 
 The right-side sidebar widget that hosts the editor lives in
-``review.views.export_style_sidebar_view`` so the GUI portion is
-swappable. This module owns profile lookups (``EXPORT_PROFILES``) and
-``launch_export_editor``; the figure render / clipboard-write pipeline moved to
-``widgets.fig_clipboard`` (re-exported below).
+``review.features.export.sidebar_view`` so the GUI portion is swappable. This
+module owns profile lookups (``EXPORT_PROFILES``) and opening the editor.
 
-The neutral figure-styling engine (``DEFAULT_EXPORT_STYLE_PREFS``,
-``apply_export_style_prefs``, ``apply_export_style_to_current``) moved to
-``review.core.plot_style`` (T2) so every plot feature can import it
-*downward* instead of reaching sideways into this export feature — that
-sideways edge had formed a scatter↔export import cycle. The names are
-re-exported below so existing
-``from review.features.export.style import …`` call sites keep working.
+Two things it does not own, and callers import them from their owners:
+
+* the neutral figure-styling engine (``DEFAULT_EXPORT_STYLE_PREFS``,
+  ``apply_export_style_prefs``, ``apply_export_style_to_current``) lives in
+  ``review.core.plot_style`` so every plot feature imports it *downward*
+  instead of reaching sideways into this export feature;
+* the figure render / clipboard-write pipeline lives in
+  ``widgets.fig_clipboard`` so ``widgets.plot_card`` can share it.
+
+Nothing is re-exported here; ``tests/test_plotting_facades_are_frozen.py``
+keeps it that way.
 """
 
 from __future__ import annotations
 
 from PySide6.QtWidgets import QMessageBox, QWidget
 from core.safe import swallowed
-from review.core.plot_style import (  # noqa: F401  (re-export for compat)
-    DEFAULT_EXPORT_STYLE_PREFS,
-    _ensure_export_style_prefs,
-    apply_export_style_prefs,
-    apply_export_style_to_current,
-)
-
-
-# The figure→clipboard pipeline moved to ``widgets/fig_clipboard.py`` (T3) so the
-# ``widgets/`` layer (PlotCard's per-axis "copy this panel") can share it without a
-# widget importing ``review.features.*`` (guardrail G8). Re-exported here so
-# existing ``from review.features.export.style import copy_figure_to_clipboard``
-# call sites (e.g. core/centre_view.py) keep working — same pattern as the
-# plot_style re-exports above.
-from widgets.fig_clipboard import (  # noqa: F401 (re-export for back-compat)
-    _macos_pasteboard_write,
-    _png_to_tiff,
-    _render_figure,
-    axis_tight_bbox_inches,
-    copy_figure_to_clipboard,
-)
+from review.core.plot_style import apply_export_style_to_current
 
 
 EXPORT_PROFILES = {

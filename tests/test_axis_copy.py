@@ -1,9 +1,9 @@
 """Per-axis "copy this panel" support.
 
 Covers the two load-bearing facts behind the PlotCard hover-copy overlay:
-1. ``copy_figure_to_clipboard`` relocated to ``widgets.fig_clipboard`` is still
-   re-exported from ``review.features.export.style`` (the existing call
-   sites import it from there), and is the *same* object.
+1. The registry's ``export_style.copy_figure`` service — the route every plot
+   card's Copy takes — resolves to ``widgets.fig_clipboard``'s
+   ``copy_figure_to_clipboard``, the module that owns it.
 2. ``axis_tight_bbox_inches`` crops to a single subplot — its bbox is strictly
    smaller than the whole figure's tight bbox, with positive extent.
 """
@@ -16,11 +16,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 
-def test_copy_figure_reexport_is_same_object():
+def test_copy_service_resolves_to_the_clipboard_owner():
     import widgets.fig_clipboard as fc
-    from review.features.export.style import copy_figure_to_clipboard
+    from review.features.registry import _SUPPORT_SERVICES
 
-    assert copy_figure_to_clipboard is fc.copy_figure_to_clipboard
+    assert _SUPPORT_SERVICES["export_style.copy_figure"]() is fc.copy_figure_to_clipboard
 
 
 def test_axis_tight_bbox_is_smaller_than_figure():

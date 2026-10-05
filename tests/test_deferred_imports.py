@@ -126,7 +126,13 @@ FEATURE_PREFIX = "review.features"
 # importing anything. `export/service.py` also stopped deferring its two
 # intra-package imports (`cell_scope_compute`, `worker`), which were never a
 # cycle to begin with.
-MAX_DEFERRED_FEATURE_IMPORTS = 72
+# 72 -> 71: freezing the plotting facades moved every consumer of a name
+# ``export.style`` only re-exported to ``review.core.plot_style`` or
+# ``widgets.fig_clipboard``, which a feature may import at module scope; two
+# deferred ``export.style`` imports went with it. ``bar_panel``'s render method
+# gained one, because its bar helpers now come from the two modules that own
+# them instead of through ``barplot.controller``.
+MAX_DEFERRED_FEATURE_IMPORTS = 71
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

@@ -2,10 +2,10 @@
 
 The pure data-gathering half of the bar-plot feature: walk the loaded wells /
 replicate sets, apply fold-change scaling + the cell-gating thresholds, and
-return :class:`BarItem` rows. Mirrors ``scatter/collect.py`` — split out of
-``barplot/controller.py`` (T4) so the controller keeps state/interaction wiring
-while this module owns collection. ``barplot/controller`` and the CSV exporters
-re-export these names.
+return :class:`BarItem` rows. Mirrors ``scatter/collect.py``: the controller
+keeps state and interaction wiring while this module owns collection, and every
+caller — the renderer, Batch Export, the CSV exporters — imports these names
+from here.
 """
 
 from __future__ import annotations
@@ -1436,7 +1436,7 @@ def collect_bar_items_for_app(ctx, target_t: float, *,
     )
 
 
-# ── Bar layout + drag-reorder hit-test (Qt-free; re-exported by controller) ──
+# ── Bar layout + drag-reorder hit-test (Qt-free) ──
 
 
 def cluster_x_for_group_keys(group_keys: list[str]) -> list[float]:

@@ -4964,3 +4964,81 @@ def test_the_connected_action_guard_clears_safe_shapes(shape):
     import ast as _ast
     from tests.test_connected_actions_are_owned import connected_unowned_actions
     assert connected_unowned_actions(_ast.parse(CONNECTED_ACTION_CLEAN[shape])) == []
+
+
+# ── lazy targets resolve ─────────────────────────────────────────────────────
+#
+# `tests/test_lazy_targets_resolve.py` reads `lazy` / `lazy_names` calls by
+# their literal strings; each spelling the codebase uses must be seen, and a
+# call built from variables is not a target it can resolve.
+
+LAZY_TARGET_SHAPES = {
+    "lazy": ("_x = lazy('review.core.lazy', 'gone')\n", ["gone"]),
+    "private_lazy": ("_x = _lazy('review.core.lazy', 'gone')\n", ["gone"]),
+    "lazy_names": ("a, b = lazy_names('review.core.lazy', 'lazy', 'gone')\n",
+                   ["lazy", "gone"]),
+    "module_attribute": ("import review.core.lazy as L\n"
+                         "_x = L.lazy('review.core.lazy', 'gone')\n", ["gone"]),
+    "built_from_variables": ("m = 'review.core.lazy'\n_x = lazy(m, 'gone')\n", []),
+    "registry_hook": ("h = lambda: _import_attr('review.core.lazy', 'gone')\n",
+                      ["gone"]),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(LAZY_TARGET_SHAPES))
+def test_the_lazy_target_scan_sees_each_spelling(shape):
+    import ast as _ast
+    from tests.test_lazy_targets_resolve import lazy_targets
+    src, names = LAZY_TARGET_SHAPES[shape]
+    assert [n for _l, _m, n in lazy_targets(_ast.parse(src))] == names
+
+
+# ── frozen facades ───────────────────────────────────────────────────────────
+#
+# `tests/test_plotting_facades_are_frozen.py` lets a facade serve a name it
+# imports only as a declared re-export, but lets a test patch one the facade
+# itself calls (a binding seam). Each consumer below reaches `helper`, which the
+# synthetic facade imports from `pkg.owner`; `called` is imported and called.
+
+FROZEN_FACADE_SRC = (
+    "from pkg.owner import helper, called\n"
+    "def run():\n"
+    "    return called()\n"
+)
+
+FROZEN_FACADE_REACHES = {
+    "from_import": ("from pkg.facade import helper\n", True),
+    "attribute_read": ("import pkg.facade as f\nf.helper()\n", True),
+    "lazy_target": ("x = lazy('pkg.facade', 'helper')\n", True),
+    "patch_of_a_name_it_never_calls": (
+        "import pkg.facade as f\n"
+        "def test(monkeypatch):\n"
+        "    monkeypatch.setattr(f, 'helper', None)\n", True),
+    "string_patch_of_a_name_it_never_calls": (
+        "p = patch('pkg.facade.helper')\n", True),
+    "binding_seam_patch": (
+        "import pkg.facade as f\n"
+        "def test(monkeypatch):\n"
+        "    monkeypatch.setattr(f, 'called', None)\n", False),
+    "binding_seam_string_patch": ("p = patch('pkg.facade.called')\n", False),
+    "from_the_owner": ("from pkg.owner import helper\n", False),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FROZEN_FACADE_REACHES))
+def test_the_frozen_facade_guard_judges_each_reach(tmp_path, shape):
+    from tests.test_plotting_facades_are_frozen import (
+        _reaches, undeclared_reaches)
+    facade = _write(tmp_path, "facade.py", FROZEN_FACADE_SRC)
+    src, flagged = FROZEN_FACADE_REACHES[shape]
+    consumer = _write(tmp_path, "consumer.py", src)
+    reaches = _reaches("pkg.facade", [facade, consumer], facade)
+    assert bool(undeclared_reaches(facade, (), reaches)) is flagged
+    # Declaring the name is the one way to serve a read of it.
+    assert not undeclared_reaches(facade, ("helper", "called"), reaches)
+
+
+def test_the_frozen_facade_guard_finds_an_undeclared_reexport(tmp_path):
+    from tests._facade_scan import reexports
+    facade = _write(tmp_path, "facade.py", FROZEN_FACADE_SRC)
+    assert reexports(facade) == {"helper"}

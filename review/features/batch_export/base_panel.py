@@ -1127,10 +1127,8 @@ class BatchExportPanel(QWidget):
         return names or ["Custom"]
 
     def _apply_export_profile_to_prefs(self, profile_name: str) -> None:
-        from review.features.export.style import (
-            EXPORT_PROFILES,
-            _ensure_export_style_prefs,
-        )
+        from review.features.export.style import EXPORT_PROFILES
+        from review.core.plot_style import _ensure_export_style_prefs
 
         name = str(profile_name or "Custom")
         prefs = _ensure_export_style_prefs(self._ctx)
@@ -2992,7 +2990,7 @@ class BatchExportPanel(QWidget):
         name. ``tests/test_batch_export_destinations.py`` holds every call site
         to passing both.
         """
-        from review.features.export.style import _ensure_export_style_prefs
+        from review.core.plot_style import _ensure_export_style_prefs
 
         spec = self._axes_spec()
         # Pinned on the axes; the limits ride in the preferences below. Two

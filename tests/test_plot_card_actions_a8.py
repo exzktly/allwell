@@ -80,8 +80,9 @@ def test_save_noop_when_no_visible_card():
 
 def test_copy_sets_publication_theme_and_pushes_status(monkeypatch):
     # Stub the clipboard helper so the test stays Qt-free.
-    import review.features.export.style as style
-    monkeypatch.setattr(style, "copy_figure_to_clipboard", lambda fig: "Copied ✓")
+    import widgets.fig_clipboard as fig_clipboard
+    monkeypatch.setattr(fig_clipboard, "copy_figure_to_clipboard",
+                        lambda fig: "Copied ✓")
     statuses = []
     app = SimpleNamespace(_set_status=lambda s: statuses.append(s))
     card = _FakeCard("theFig")

@@ -11,10 +11,13 @@
 
 **Planning baseline:** `main` at `1127c41` (All-Well 9.10.14)
 
-**Current state:** not started; every row is `todo`
+**Current state:** R0 done; the rest `todo`. Workstream branch:
+`implementation-remediation-plan` (one pull request at the end of the whole
+plan, so one version bump: 9.10.14 → 9.10.15). Row commits are found with
+`git log --grep '^<ROW>:'`.
 
-**Next action:** R0 — freeze the `services.remote_runner` facade and build a
-coupling inventory that sees every access form
+**Next action:** C0 — total allowlisted-CC ratchet, then mutation-verified
+characterization of the three complexity seams
 
 ## 1. Objective and scope
 
@@ -613,7 +616,7 @@ commit still owns one row.
 
 | ID | Status | Depends on | Deliverable / proof | Evidence |
 |---|---|---|---|---|
-| R0 | `todo` | — | Facade inventory, four-form liveness guard with bite cases, seeded ratchets | Not started. Eleven removal candidates listed in R0; `_transit_refused` already known live |
+| R0 | `done` | — | Facade inventory, four-form liveness guard with bite cases, seeded ratchets | `git log --grep '^R0:'`. `__all__` = the 10 supported names; `tests/test_remote_runner_facade.py` inventories the 85 other names reached through the runner (13 alias, 41 binding, 31 owned) under all four access forms via `tests/_facade_scan.py`. Of the 11 candidates, 10 confirmed dead and removed; `_transit_refused` is live (`tests/test_remote_transit_volume.py:120`) and kept. Bite cases: 8 reach shapes + 3 non-reaches; mutating out the attribute, named-setattr and string-target branches failed 4, 2 and 1 of them respectively. Runner 6,810 lines after adding `__all__` (budget 6,810, unchanged). Ran: ruff; guard family + `test_guards_bite` + facade guard (554 passed); remote group + all 55 runner-reaching test files (1,418 passed). Fast lane: see the batch-1 entry in section 11 |
 | C0 | `todo` | — | Total allowlisted-CC ratchet + mutation-verified characterization per behavior class | Not started. Baseline total 1,192 |
 | Q0 | `todo` | — | Reproducible `bench_app_retention.py` + JSON output | Not started. Requires PySide6 (installed by the cloud session-start hook) |
 | A0 | `todo` | R0 | Classified re-export inventory for `remote_runner` and `process_microscopy` | Not started |
@@ -754,3 +757,13 @@ Terminal evidence belongs below and is filled only when the work closes:
 | Guard family | pending |
 | Full fast lane | pending |
 | Bounded full-app files | pending |
+
+## 11. Fast-lane log
+
+The full fast lane (`scripts/test.sh`) is run locally after each batch of work,
+against a tree with no edits in flight, and recorded here with the commit it ran
+against. A run that straddled an edit is not recorded.
+
+| Batch | Rows | Commit | Result |
+|---|---|---|---|
+| 0 (baseline) | — | `main` at `1127c41`, in a separate worktree | running |

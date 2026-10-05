@@ -4679,3 +4679,62 @@ def test_focus_claim_guard_clears_what_it_should(tmp_path, monkeypatch, shape):
         monkeypatch, "tests.test_focus_claims_stay_measured",
         "test_no_source_file_claims_comparability_without_the_clipping_caveat",
         [good]) is None, f"the {shape} case was wrongly flagged"
+
+
+# ── facade consumer scan ────────────────────────────────────────────────────
+#
+# `tests/_facade_scan.consumers_of` decides which names a facade still has to
+# carry. An import-only version of it once reported eleven remote-runner
+# re-exports as unused while a test still cleared `rr._transit_refused`
+# through the module. Each access form below must be seen; dropping any one
+# from the scan reopens that hole.
+
+FACADE_REACHES = {
+    "from_import": "from services.remote_runner import _target\n",
+    "aliased_attribute": ("import services.remote_runner as rr\n"
+                          "rr._target.clear()\n"),
+    "from_package_attribute": ("from services import remote_runner\n"
+                               "remote_runner._target = 1\n"),
+    "dotted_attribute": ("import services.remote_runner\n"
+                         "services.remote_runner._target()\n"),
+    "named_setattr": ("import services.remote_runner as rr\n"
+                      "def test(monkeypatch):\n"
+                      "    monkeypatch.setattr(rr, '_target', None)\n"),
+    "patch_object": ("from unittest.mock import patch\n"
+                     "from services import remote_runner as RR\n"
+                     "with patch.object(RR, '_target'):\n"
+                     "    pass\n"),
+    "string_target": ("from unittest.mock import patch\n"
+                      "with patch('services.remote_runner._target'):\n"
+                      "    pass\n"),
+    "import_module": ("import importlib\n"
+                      "m = importlib.import_module('services.remote_runner')\n"
+                      "m._target\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FACADE_REACHES))
+def test_facade_scan_sees_every_access_form(tmp_path, shape):
+    from tests._facade_scan import consumers_of
+    path = _write(tmp_path, "reach.py", FACADE_REACHES[shape])
+    users = consumers_of("services.remote_runner", [path])
+    assert "_target" in users, f"the {shape} reach was not seen: {users}"
+
+
+FACADE_NON_REACHES = {
+    "other_module_attribute": ("import services.remote_transport as rr\n"
+                               "rr._target.clear()\n"),
+    "prefix_named_module": ("from unittest.mock import patch\n"
+                            "with patch('services.remote_runner_extra._target'):\n"
+                            "    pass\n"),
+    "setattr_on_other_object": ("def test(monkeypatch, obj):\n"
+                                "    monkeypatch.setattr(obj, '_target', 1)\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FACADE_NON_REACHES))
+def test_facade_scan_clears_what_is_not_a_reach(tmp_path, shape):
+    from tests._facade_scan import consumers_of
+    path = _write(tmp_path, "not_reach.py", FACADE_NON_REACHES[shape])
+    users = consumers_of("services.remote_runner", [path])
+    assert "_target" not in users, f"the {shape} case was wrongly counted"

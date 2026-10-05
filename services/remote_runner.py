@@ -72,10 +72,7 @@ from util.timepoint import sort_key as tp_sort_key
 # The conda-environment resolution cluster, re-exported so every call site in
 # this module (and the tests that reach for it) is unchanged by the move.
 from services.remote_conda import (  # noqa: F401
-    CONDA_ENV_SHELL_HELPERS,
     _CONDA_ACTIVATE_SNIPPET,
-    DEFAULT_ENV_SELECTOR,
-    EnvSelector,
     _conda_env_guard,
     _conda_env_selector,
     _conda_run_prefix,
@@ -176,14 +173,9 @@ _WELL_XFER_INTERVAL_S = 1.0
 from services.remote_wait_snippets import (  # noqa: F401
     UPLOAD_HEARTBEAT_S,
     UPLOAD_HEARTBEAT_STALE_S,
-    UPLOAD_WAIT_POLL_S,
     UPLOAD_WAIT_TIMEOUT_S,
-    _UPLOAD_WAIT_EXIT,
-    _heartbeat_stale_snippet,
-    _wait_for_upload_snippet,
 )
 from services.remote_transport import (  # noqa: F401
-    _RSYNC_FILENAME_RE,
     _RSYNC_RETRY_CODES,
     _RSYNC_RETRY_DELAYS,
     _fmt_bytes,
@@ -208,7 +200,6 @@ from services.remote_transport import (  # noqa: F401
 # module because it is pure, which is what lets the reuse predicate be tested
 # directly rather than through a harness. Re-exported so existing imports work.
 from services.remote_suspend import (  # noqa: F401 — re-exported
-    SUSPEND_REQUEST_TIMEOUT_S,
     _AnySet,
 )
 from services.remote_suspend import request_suspend as _request_suspend
@@ -226,7 +217,6 @@ from services.remote_run_id import (  # noqa: F401
     _pipeline_launch_is_pointless,
     UPLOAD_HEARTBEAT,
     UPLOAD_SENTINEL,
-    RemoteRunPaths,
     _choose_remote_output_dir,
     _compute_run_id,
     _forced_from_argv,
@@ -310,6 +300,17 @@ _CSV_ONLY_GLOBS: tuple[str, ...] = ("*.csv", "pipeline_info.json")
 # collide with this module's line budget. Re-exported because a dozen call
 # sites, the PyInstaller spec and several docstrings name it by this path.
 from services.remote_manifest import _REQUIRED_REMOTE_FILES  # noqa: E402
+
+# The supported import surface for application and command-line callers.
+# Every other name reached through this module is migration debt, classified
+# in ``tests/test_remote_runner_facade.py::COMPAT_INVENTORY`` and only allowed
+# to shrink. The private manifest name is deliberate: the bootstrap and the
+# PyInstaller spec read it by this path as their packaging contract.
+__all__ = (
+    "LocalInputMode", "OutputFilter", "RemoteRunner", "TRANSIENT_PREFIX",
+    "WELL_XFER_PREFIX", "ZippedInput", "_REQUIRED_REMOTE_FILES",
+    "input_well_containers", "repo_root", "stage_local_zips",
+)
 
 
 

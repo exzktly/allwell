@@ -177,9 +177,9 @@ def _import_reads_a_placeholder(matplotlib, version: int):
     try:
         try:
             tmp = tempfile.mkdtemp(prefix="allwell-mplfonts-")
-            with open(os.path.join(tmp, f"fontlist-v{version}.json"), "w",
-                      encoding="utf-8") as fh:
-                json.dump(placeholder, fh)
+            from util.json_write import write_json_atomic
+            write_json_atomic(os.path.join(tmp, f"fontlist-v{version}.json"),
+                              placeholder, durable=False)
             matplotlib.get_cachedir = lambda: tmp
         except OSError:
             pass  # no placeholder: the import scans, as matplotlib would on its own

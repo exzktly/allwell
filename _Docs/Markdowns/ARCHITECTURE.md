@@ -655,7 +655,11 @@ review/
 │   │   ├── sample_map/   tab_view.py, controller.py  ← the layered tab the
 │   │   │                                 three editors above are pages of
 │   │   ├── ratios/       tab_view.py   ← the ratio-metric editor [removable]
-│   │   └── pipeline_info/ tab_view.py  ← read-only run parameters [removable]
+│   │   ├── pipeline_info/ tab_view.py  ← read-only run parameters [removable]
+│   │   └── triage/       collect.py, controller.py, tab_view.py ← QC triage:
+│   │                                 every problem the plate's records report,
+│   │                                 one row each, with the action each admits
+│   │                                 [removable]
 │   ├── spatial/      controller.py, collect.py, renderer.py, state.py, tab_view.py
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
 │   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
@@ -2413,6 +2417,66 @@ gated on `view_state.owns_tab_block`, which separates "this tab keeps no block"
 (true of most tabs, and not worth a warning) from "this record has none of the
 block this tab keeps" (worth one — the fix is to re-save the plot, and a user
 who is told nothing re-clicks Restore instead).
+
+#### QC Triage (`features/home/triage/`)
+
+The last Home sub-tab is one table of every problem the dataset's own records
+report, so a user does not have to read Validate, the Cell Gating panel, the
+Segmentation overlay and `errors/` separately to learn what is wrong with a
+plate. **It measures nothing.** `collect.triage_rows` reads three records other
+parts of the app already wrote: the completeness record (`run_check` — wells
+whose CSV is missing, wells staged and never processed, the field groups the
+run recorded as failed, the groups found missing, and dataset-wide findings),
+the traceback files in `errors/` written since the recorded run began
+(`pipeline.completeness.error_files_since`, the listing `errors_since` counts,
+so the two cannot disagree about which files belong to the run), and the run's
+field-quality verdicts scored by `domain/field_quality_scores`. A source that
+cannot speak is a row saying so — no record, a check switched off or stopped, a
+plate too partly measured to score — so an empty table means nothing is known to
+be wrong and can mean nothing else. The completeness record keeps only the first
+few missing groups per well; the rest are one row naming how many were not
+listed, rather than a table that silently understates the well.
+
+**What a row offers follows from where the problem arose.** A *processing* row
+(missing, failed, no CSV, never processed, a traceback) offers **Re-run wells**,
+which goes through Home's one Review-side door into Analyze
+(`home.controller.open_in_analyze`, also what *Finish this run* uses) with the
+selected wells both forced and the only wells run, so nothing else on the plate
+is touched; Analyze opens configured and the user presses Run. An *acquisition*
+row (a field the run measured as unlike the plate) offers **Exclude field…**,
+which asks for a reason. Neither offers the other: a missing field has no rows
+to exclude, and re-segmenting blurred pictures produces the same blurred
+numbers. **Accept** marks a finding seen; **Reopen** undoes Accept and puts an
+excluded field back. Every button is enabled only when a selected row supports
+it. **Open in Segmentation** calls the `image_browser.show_field` service, the
+same jump the Cell Browser's click uses (`review_image/_navigate.py`), placed
+beside Segmentation because that sub-tab is the one no profile removes.
+
+**The exclusion is an inclusion layer, not a triage feature.**
+`review/data/field_exclusions.py` projects `Excluded_Field_Pass` from
+`DatasetState.field_exclusions` (`(well, fov, timepoint)` → reason and time) and
+is registered with the other cache projectors unconditionally, so a build that
+strips the triage tab still honours exclusions a previous session wrote. It
+refuses the wells `Field_Pass` refuses — those whose FOV labels do not identify
+their fields — because a per-field key on such a well matches the wrong rows or
+none; the triage row says so in its Decision column instead of offering the
+button. A well with nothing excluded carries no column. Excluding saves
+immediately (`persistence.save`, not the debounce, because a decision to remove
+data must not wait on a timer the user can quit through), re-projects every
+layer through `qc.recompute_all`, and redraws through `redraw_app`. The
+exclusions and the accepted findings are two persistence domains,
+`field_exclusions` and `triage_decisions`, both cleared by the *Curation* reset
+scope and both recorded in the provenance log (§5.7). A decision is keyed by the
+finding's identity (kind, well, field, timepoint, file name) and never by its
+sentence, so a count that changes as a rerun recovers groups does not orphan the
+decision; decisions for findings no longer reported are kept rather than pruned,
+because a finding also disappears when its evidence is briefly unavailable.
+
+Field-level rerun is not offered. `pipeline.io.merge_records_into_csv` keeps
+existing rows and drops new ones with the same key, so re-processing an
+already-processed field through the incremental path would leave the old numbers
+and report success; a field-level rerun needs a replace-merge and is tracked in
+`_Docs/Markdowns/WORKFLOW_FEATURES_TRACKER.md` (rows Q10–Q14).
 
 #### Exporting the gallery (`features/saved_plots/_report.py`, `_deck.py`)
 
@@ -4336,6 +4400,8 @@ Every "save state into the dataset folder" path lives under
 | `persistence.json::view_state` | `view_state.py` | Active tab, selected wells, channel/metric, fold-change scopes, per-tab combos, export-style prefs. Saved on dataset switch + app close. **The two "absent" stashes are per-plate and are cleared before the section is read.** `restore` remembers the wells a saved view names that the plate in front of it does not hold, so `snapshot` can union them back and a subset load does not prune them — but those sets describe one particular `persistence.json`, and they are the only piece of view state written by `restore` and read by `snapshot` without either being keyed to a data directory. `restore` reassigns both, and it only runs when the new plate *has* a `view_state` section; when it has none the assignment never happens and the previous plate's wells were unioned into this plate's saved selection. `forget_absent_wells(ctx)` empties them, called at the top of `load_from_data_dir` before the section is read and therefore ahead of every path that returns without reaching `restore` — no saved block, a section that is not a dict, a document that cannot be migrated. |
 | `persistence.json::qc_params` | `qc_params.py` | QC debris-gating thresholds edited on the Home → Cell Gating tab (the fundamental always-applied inclusion layer); seeded from `pipeline_info.json` `qc_options` when unset. |
 | `cell_overrides.json` | `cell_overrides.py` | Per-cell `Included` overrides set on the Segmentation tab (kept separate — large + write-heavy). |
+| `persistence.json::field_exclusions` | `field_exclusions.py` | Fields excluded by hand from QC triage, as a list of `{well, fov, timepoint, reason, at}` records, read into `DatasetState.field_exclusions`. Feeds the `Excluded_Field_Pass` layer (`data/field_exclusions.py`). A record that cannot be read is dropped and logged rather than guessed at, because a half-read exclusion could remove the wrong field. Written sorted, so an unchanged set writes identical bytes. |
+| `persistence.json::triage_decisions` | `triage_decisions.py` | QC triage findings the user accepted, keyed by the finding's stable key → `{state, note, at}`. Only `accepted` is stored: an excluded field's state is read from the exclusion itself, so the two cannot disagree. |
 | `bar_groups.json` | `bar_groups.py` | User-picked file for Batch Export's `BarGroup` state (no auto-save). |
 
 `persistence.json` is a single consolidated viewer-state document managed by
@@ -11598,8 +11664,8 @@ checks) — and a refusal leaves the session open on the form.
 
 ### 6.6b Why a cell is gone: the Segmentation overlay
 
-Inclusion is the AND of six verdict layers (`Included`, `QC_Pass`, `Crop_Pass`,
-`Gate_Pass`, `Field_Pass`, `Focus_Pass`), and the picture that shows a user
+Inclusion is the AND of seven verdict layers (`Included`, `QC_Pass`, `Crop_Pass`,
+`Gate_Pass`, `Field_Pass`, `Focus_Pass`, `Excluded_Field_Pass`), and the picture that shows a user
 their cells is the one place that AND is invisible by construction: an excluded
 cell simply has no outline. The **Why removed** toggle
 (`renderer.toggle_review_image_exclusion_layers`) outlines each excluded cell in
@@ -11615,7 +11681,7 @@ quietly wrong.
   precedence: the composition is an AND, so a cell failing three layers is out
   for all three and none of them is "the" cause. Manual comes first because it
   is the one a click undoes.
-* **Six answers need six colours.** `_layer_inks` maps each label to a design
+* **Each answer needs its own colour.** `_layer_inks` maps each label to a design
   token, chosen by measurement: every pairwise CIE76 ΔE is at least 31 and every
   relative luminance at least 0.28, which is what a one-pixel stroke needs on
   this plot surface. Two layers once shared `text_muted` — ΔE of exactly 0, and
@@ -11784,7 +11850,10 @@ drives `main` twice through the real well task.
 as a `Field_Pass` column — the fourth in the same family as `Included`,
 `QC_Pass` and `Crop_Pass`, ANDed at the same chokepoint, registered as a cache
 projector like the other three. `review/data/focus_gate.py` is the fifth,
-`Focus_Pass`, and the two are **not alternatives**: the field verdict removes a
+`Focus_Pass`, and `review/data/field_exclusions.py` the sixth,
+`Excluded_Field_Pass` — a field the user excluded by hand from QC triage, which
+refuses the same untrusted wells this layer does. The first two are **not
+alternatives**: the field verdict removes a
 whole field or none of it, while the per-cell cut removes the soft *part* of a
 field — a focus gradient, a coverslip tilt — which is not a whole-field fact
 and is not a rectangle either, so it is a column rather than a crop. A field

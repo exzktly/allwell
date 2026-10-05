@@ -40,7 +40,7 @@ to add features, how to debug, and build / environment troubleshooting), see
 3. [Quick start](#quick-start)
 4. [Analyze mode — running the pipeline](#analyze-mode--running-the-pipeline)
 5. [Review mode — exploring results](#review-mode--exploring-results)
-   - [Home](#home) (Overview · Cell Gating · Sample Map — Replicates · Variables · Well Labels — · Ratios · Pipeline Info)
+   - [Home](#home) (Overview · Cell Gating · Sample Map — Replicates · Variables · Well Labels — · Ratios · Pipeline Info · QC Triage)
    - [The Review window at a glance](#the-review-window-at-a-glance)
    - [Controls shared by every tab](#controls-shared-by-every-tab)
    - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Response Curves](#response-curves) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
@@ -2183,6 +2183,47 @@ dataset.
 Read the schema + channel tokens + FOVs + timepoints the dataset was built with.
 It is read-only — it reports what the run recorded, not something you set here.
 
+#### QC Triage
+
+Every problem the dataset's own records know about, one row each, so you do
+not have to read Validate & Repair, the Cell Gating panel, the Segmentation
+overlay and the `errors/` folder separately. The columns are **Stage**
+(*processing* — something went wrong running the pipeline — or *acquisition* —
+the run measured a field as unlike the rest of the plate), **Well**, **Field**,
+**Time**, **Problem**, and **Decision**. The line above the table counts how
+many findings there are and how many are still open.
+
+It reports the dataset's existing records and measures nothing new: the
+completeness record the run writes at its end (wells with missing or failed
+field groups, missing measurements, wells never processed, folder-level
+findings), the traceback files the *last* run left in `errors/` (older files
+are not listed, because that folder is never emptied), and the run's
+field-quality flags. When one of those cannot answer — no completeness record,
+a check that was turned off, a plate too partly measured to score — that is a
+row too, so an empty table really does mean nothing is known to be wrong. The
+completeness record names only the first few missing field groups per well; the
+rest appear as one row saying how many more there are.
+
+What you can do depends on the row:
+
+- **Re-run wells…** (processing rows) opens Analyze set up to re-segment just
+  the selected wells from scratch — *Only these wells* and *Force these wells*
+  both filled in — and leaves every other well alone. Nothing runs until you
+  press **Run** there. Re-running replaces those wells' results; it cannot be
+  undone.
+- **Exclude field…** (acquisition rows) asks why, then leaves that field out of
+  every plot, statistic and export. The reason is shown in the Decision column,
+  the Segmentation overlay outlines the field's cells in white, and **Reopen**
+  puts the field back. A field in a well whose filenames do not identify its
+  fields cannot be excluded; the Decision column says so.
+- **Accept** marks a finding as seen and acceptable; **Reopen** undoes it.
+- **Open in Segmentation** shows the row's field in Image Browser.
+
+Exclusions and accepted findings are saved with the dataset, are cleared by
+**Reset analysis → Curation**, and are recorded in the dataset's history
+(`provenance.jsonl`). Re-running a single field rather than a whole well is not
+offered yet.
+
 ### The Review window at a glance
 
 ```
@@ -4053,13 +4094,14 @@ reviewing and curating individual cells.
   channel (the same per-cell readout the Image Table shows).
 - **Why removed** — a toggle on the control row that outlines every *excluded*
   cell in the colour of the layer that removed it: you deleted it, the debris
-  gate, the crop, the scatter gates, the run's field verdict, or the focus cut.
+  gate, the crop, the scatter gates, the run's field verdict, the focus cut, or
+  a field you excluded in **Home → QC Triage** (white).
   A colour key appears under the picture, listing only the layers this field
   actually has cells for, and if the toggle is on and nothing here is excluded
   the line says that rather than leaving you with an unchanged picture and no
   way to tell whether the control worked.
 
-  Being *included* is the AND of all six layers, so a cell can fail more than
+  Being *included* is the AND of all seven layers, so a cell can fail more than
   one and an outline can only be one colour — it shows the first, and hovering
   the cell names every layer that dropped it. That is also why clicking a cell
   back in cannot restore one a verdict column removed: raise that threshold, or
@@ -4948,7 +4990,7 @@ leave ticked, then reloads the dataset:
 |---|---|
 | **Sample definitions** | Well labels, groups, notes, saved selections. |
 | **Gating** | FluorGating floors, ThreshFracOn cutoffs, drawn scatter gates, and the QC debris gate — the last returning to the settings the pipeline run itself used, not to no gate at all. |
-| **Curation** | The crop region and every manual include/exclude on individual cells. |
+| **Curation** | The crop region, every manual include/exclude on individual cells, and every field excluded or finding accepted in QC Triage. |
 | **Ratio metrics** | Every ratio channel you defined. |
 | **smFISH thresholds** | The saved per-channel thresholds. |
 | **Batch Export groups** | The export groups on each Batch Export panel. |

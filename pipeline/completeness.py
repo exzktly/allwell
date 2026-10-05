@@ -396,6 +396,62 @@ def csv_keys_and_state(path: Path) -> tuple[set[tuple[str, str]], str]:
     return keys, "ok"
 
 
+def error_file_type(path: Path) -> str:
+    """The exception type a traceback file names in its header, or ``""``.
+
+    Read from the ``Exception type:`` line the pipeline writes into every
+    trace, not from the traceback body: the writer already knows the answer,
+    and a regex over a traceback finds whatever exception names the *source
+    lines* happen to mention. ``""`` for a file with no such header or one
+    that cannot be read.
+    """
+    try:
+        with Path(path).open() as handle:
+            for line in handle:
+                if line.startswith(_EXCEPTION_TYPE_PREFIX):
+                    return line[len(_EXCEPTION_TYPE_PREFIX):].strip()
+    except (OSError, UnicodeDecodeError):
+        return ""
+    return ""
+
+
+@dataclass(frozen=True)
+class ErrorFile:
+    """One traceback file a run left in ``errors/``."""
+
+    path: Path
+    exception_type: str
+
+
+def error_files_since(output_dir: Path, since_ts: float | None) -> list[ErrorFile]:
+    """The traceback files written at or after *since_ts*, oldest name first.
+
+    The listing :func:`errors_since` counts, for a caller that needs the files
+    themselves — QC triage names each one. ``errors/`` is never cleared and its
+    filenames carry no run id, so the start time is what separates this run's
+    failures from an earlier run's; ``None`` lists everything, and the caller
+    must say that it could not tell. At most ``_MAX_ERROR_FILES_TYPED`` files
+    have their type read, the same bound :func:`errors_since` applies; the rest
+    are listed with an empty type rather than dropped.
+    """
+    err_dir = Path(output_dir) / _ERRORS_DIRNAME
+    try:
+        entries = sorted(err_dir.glob("*.txt"))
+    except OSError:
+        return []
+    found: list[ErrorFile] = []
+    for path in entries:
+        try:
+            if since_ts is not None and path.stat().st_mtime < since_ts:
+                continue
+        except OSError:
+            continue
+        typed = len(found) < _MAX_ERROR_FILES_TYPED
+        found.append(ErrorFile(path=path,
+                               exception_type=error_file_type(path) if typed else ""))
+    return found
+
+
 def errors_since(output_dir: Path, since_ts: float | None) -> tuple[int, dict[str, int]]:
     """Count the run's own traceback files, and name their exception types.
 
@@ -405,40 +461,14 @@ def errors_since(output_dir: Path, since_ts: float | None) -> tuple[int, dict[st
     modification time against the run's start is what keeps a block called
     ``run_check`` describing this run. Pass ``None`` to count everything, which
     is what a caller with no start time should do — an over-count that says so
-    beats a silent under-count.
-
-    The type comes from the ``Exception type:`` header the pipeline writes into
-    every trace, not from parsing the traceback body: the writer already knows
-    the answer, and a regex over a traceback finds whatever exception names the
-    *source lines* happen to mention.
+    beats a silent under-count. The types come from :func:`error_file_type`.
     """
-    err_dir = Path(output_dir) / _ERRORS_DIRNAME
-    try:
-        entries = sorted(err_dir.glob("*.txt"))
-    except OSError:
-        return 0, {}
-    count = 0
+    files = error_files_since(output_dir, since_ts)
     by_type: dict[str, int] = {}
-    for path in entries:
-        try:
-            if since_ts is not None and path.stat().st_mtime < since_ts:
-                continue
-        except OSError:
-            continue
-        count += 1
-        if count > _MAX_ERROR_FILES_TYPED:
-            continue
-        try:
-            with path.open() as handle:
-                for line in handle:
-                    if line.startswith(_EXCEPTION_TYPE_PREFIX):
-                        name = line[len(_EXCEPTION_TYPE_PREFIX):].strip()
-                        if name:
-                            by_type[name] = by_type.get(name, 0) + 1
-                        break
-        except (OSError, UnicodeDecodeError):
-            continue
-    return count, by_type
+    for err in files:
+        if err.exception_type:
+            by_type[err.exception_type] = by_type.get(err.exception_type, 0) + 1
+    return len(files), by_type
 
 
 def wells_with_output(output_dir: Path, csv_prefix: str) -> set[str]:

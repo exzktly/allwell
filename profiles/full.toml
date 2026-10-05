@@ -108,6 +108,18 @@ name = "Pipeline Info"
 parent = "Home"
 paths = ["review/features/home/pipeline_info"]
 tests = ["tests/test_pipeline_info_view.py"]
+[[feature]]
+# Home's QC triage table. Strippable whole: what it *writes* — field exclusions
+# and accepted findings — is persisted and projected by `review/data/` and
+# `review/persistence/`, which stay, so a build without the tab still honours
+# exclusions a previous session made. Home reaches it by descriptor and calls
+# its refresh closure only when `callable()`; the Segmentation jump is a
+# service on Image Browser. Its layer and persistence tests live in
+# `tests/test_field_exclusions.py`, which this glob does not reach.
+name = "QC Triage"
+parent = "Home"
+paths = ["review/features/home/triage"]
+tests = ["tests/test_qc_triage*.py"]
 
 [[feature]]
 # Pipeline-side removable unit (NOT a Qt tab): the Cellpose segmenter. StarDist

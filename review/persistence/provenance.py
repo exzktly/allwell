@@ -63,6 +63,8 @@ STORED_AT: dict[tuple[str, str | None], str] = {
     ("persistence.json", "crop_region"): "crop_region",
     ("persistence.json", "ratios"): "ratios",
     ("persistence.json", "export_groups"): "export_groups",
+    ("persistence.json", "field_exclusions"): "field_exclusions",
+    ("persistence.json", "triage_decisions"): "triage_decisions",
     ("cell_overrides.json", None): "cell_overrides",
 }
 

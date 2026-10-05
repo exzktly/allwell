@@ -191,7 +191,8 @@ def _clear_gating(ctx) -> None:
 
 
 def clear_curation(ctx) -> None:
-    """The crop region and every manual include/exclude on individual cells.
+    """The crop region, every manual include/exclude on individual cells, and
+    every field excluded or finding accepted in QC triage.
 
     Manual curation lives in its own ``cell_overrides.json`` — not in
     ``persistence.json`` — which is why deleting that one file never cleared it.
@@ -213,8 +214,14 @@ def clear_curation(ctx) -> None:
     # _get_rows then re-applies the now-empty crop/QC layers.
     ctx.state.dataset.cache.clear()
     ctx.state.review_image.override_version += 1
+    # Fields excluded from QC triage, and the findings accepted there: the same
+    # kind of decision as a per-cell override, made a field at a time.
+    ctx.state.dataset.field_exclusions.clear()
+    ctx.state.dataset.triage_decisions.clear()
     _save(ctx, "cell_overrides")
     _save(ctx, "crop_region")
+    _save(ctx, "field_exclusions")
+    _save(ctx, "triage_decisions")
 
 
 def _clear_ratios(ctx) -> None:
@@ -309,8 +316,10 @@ ANALYSIS_SCOPES: tuple[ResetScope, ...] = (
     ResetScope(
         key="curation",
         title="Curation",
-        detail="The crop region and every manual include/exclude on individual cells.",
-        domains=("crop_region", "cell_overrides"),
+        detail="The crop region, every manual include/exclude on individual "
+               "cells, and every field excluded or finding accepted in QC triage.",
+        domains=("crop_region", "cell_overrides", "field_exclusions",
+                 "triage_decisions"),
         clear=clear_curation,
     ),
     ResetScope(

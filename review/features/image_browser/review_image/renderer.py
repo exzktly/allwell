@@ -1115,7 +1115,7 @@ def toggle_review_image_binary_mask(ctx) -> None:
 #: ``collect.EXCLUSION_LAYERS`` gives it. Design tokens, never literals
 #: (ARCHITECTURE §8).
 #:
-#: **Six answers need six colours, and the first draft had five.** "Outside the
+#: **Each answer needs its own colour, and the first draft had five for six.** "Outside the
 #: crop" and "outside the scatter gates" were both ``text_muted`` — the same
 #: pixel value, CIE76 ΔE of exactly 0 — so the overlay could not distinguish
 #: the two layers its own button promises to distinguish. ``text_muted`` is
@@ -1140,6 +1140,11 @@ def toggle_review_image_binary_mask(ctx) -> None:
 #: the palette, which is stated here so the borrowing is visible: the first is
 #: a neutral grey for the one verdict neither the user nor a threshold on this
 #: panel made, and the second is the most separated remaining hue.
+#:
+#: The seventh, a field excluded by hand in QC triage, is ``ink_light`` (white),
+#: and it was chosen the same way: of every theme token not already used and
+#: not reserved, it is the only one whose ΔE to all six others clears the 31
+#: floor (35.1; the next best, ``accent_fg``, is 30.1). Its luminance is 1.0.
 def _layer_inks():
     from ui import theme
     return {
@@ -1149,6 +1154,7 @@ def _layer_inks():
         "outside the scatter gates": theme.Colors.accent,
         "field flagged by the run": theme.Colors.text_secondary,
         "out of focus": theme.Colors.heatmap_selection,
+        "field excluded in QC triage": theme.Colors.ink_light,
     }
 
 

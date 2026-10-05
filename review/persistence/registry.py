@@ -189,9 +189,9 @@ class PersistenceRegistry:
 def build_persistence_registry(ctx) -> PersistenceRegistry:
     """Create the registry and register every data-dir persistence domain."""
     from review.persistence import (
-        cell_overrides, crop_region, heatmap_layouts, line_order,
-        qc_params, plot_groups, ratios, sample_definitions,
-        sample_variables, view_state,
+        cell_overrides, crop_region, field_exclusions, heatmap_layouts,
+        line_order, qc_params, plot_groups, ratios, sample_definitions,
+        sample_variables, triage_decisions, view_state,
     )
 
     registry = PersistenceRegistry(ctx)
@@ -225,6 +225,12 @@ def build_persistence_registry(ctx) -> PersistenceRegistry:
     registry.register("crop_region",
                       save=crop_region.save_to_data_dir,
                       load=crop_region.load_from_data_dir)
+    registry.register("field_exclusions",
+                      save=field_exclusions.save_to_data_dir,
+                      load=field_exclusions.load_from_data_dir)
+    registry.register("triage_decisions",
+                      save=triage_decisions.save_to_data_dir,
+                      load=triage_decisions.load_from_data_dir)
 
     # Feature-owned removable domains. Their modules (persistence/export_groups.py
     # → Batch Export, persistence/multivariate.py → Multivariate) are physically

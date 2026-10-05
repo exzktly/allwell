@@ -243,6 +243,7 @@ def test_home_enumerates_its_tabs_from_the_registry():
     ctx = SimpleNamespace(features=full)
     assert active_subtabs(ctx) == (
         "Overview", "Cell Gating", "Sample Map", "Ratios", "Pipeline Info",
+        "QC Triage",
     )
 
     # The sanctioned manifest line keeps the two load-bearing editors and drops

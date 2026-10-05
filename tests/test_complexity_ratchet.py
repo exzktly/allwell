@@ -22,6 +22,11 @@ from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 THRESHOLD = 40
+# Sum of the allowlisted functions' scores at the C0 baseline. The existing
+# per-function guard prevents a new function crossing 40, but did not stop an
+# existing debt function growing from (say) 50 to 90. This aggregate ratchet
+# makes that growth visible and only moves down as debt is decomposed.
+TOTAL_ALLOWLISTED_CC_BUDGET = 1192
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
@@ -166,4 +171,35 @@ def test_complexity_allowlist_has_no_stale_entries():
         "These allowlisted functions are now under the threshold (or were "
         "renamed/removed) — delete them from ALLOWLIST so the ratchet stays "
         "tight:\n" + "\n".join(f"  {k}" for k in sorted(resolved))
+    )
+
+
+def _allowlisted_cc_total() -> int:
+    over = _functions_over_threshold()
+    # The stale-entry test gives the normal diagnostic. Keep this helper strict
+    # too so invoking either total-budget test alone cannot undercount a renamed
+    # or newly-resolved allowlist entry.
+    missing = ALLOWLIST - set(over)
+    assert not missing, (
+        "Allowlisted complexity entries are missing:\n  "
+        + "\n  ".join(sorted(missing))
+    )
+    return sum(over[name] for name in ALLOWLIST)
+
+
+def test_total_allowlisted_complexity_does_not_grow():
+    total = _allowlisted_cc_total()
+    assert total <= TOTAL_ALLOWLISTED_CC_BUDGET, (
+        "Allowlisted cyclomatic-complexity debt grew from "
+        f"{TOTAL_ALLOWLISTED_CC_BUDGET} to {total}. Decompose the function "
+        "rather than spending another debt function's improvement."
+    )
+
+
+def test_complexity_debt_budget_is_not_slack():
+    total = _allowlisted_cc_total()
+    assert total >= TOTAL_ALLOWLISTED_CC_BUDGET, (
+        f"Allowlisted complexity fell to {total}; lower "
+        f"TOTAL_ALLOWLISTED_CC_BUDGET from {TOTAL_ALLOWLISTED_CC_BUDGET} so "
+        "the improvement cannot be spent later."
     )

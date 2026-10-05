@@ -159,7 +159,10 @@ PROCESS_MICROSCOPY_BUDGET = 3804
 # and the full-cache-hit predicate that decides it moved to
 # `services/remote_run_id.py`, whose subject is exactly whether an earlier
 # run's work may be reused.
-REMOTE_RUNNER_BUDGET = 6810
+# 6810 -> 6807: R0 froze the supported facade before the next extraction. Nine
+# stale re-exports with no caller were removed, ``__all__`` now states the
+# actual application/CLI contract. Resume from the resulting measured size.
+REMOTE_RUNNER_BUDGET = 6807
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis

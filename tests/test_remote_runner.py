@@ -25,20 +25,24 @@ from services.remote_runner import (
     ZippedInput,
     _REQUIRED_REMOTE_FILES,
     _compose_remote_cmd,
-    _detect_local_input_mode,
     _CONDA_ACTIVATE_SNIPPET,
     _conda_run_prefix,
-    _filter_channels_in_staging,
-    _member_matches,
-    _required_tokens,
     _rsync_ssh_transport,
     repo_root,
     stage_local_zips,
+)
+from services.remote_staging import (
+    _detect_local_input_mode,
+    _filter_channels_in_staging,
+    _member_matches,
+    _required_tokens,
 )
 from services.remote_fetch import Fetcher
 from tests._repo_scan import parse_source
 from services.remote_fetch import FetchedOutputVerifier
 from services import remote_fetch
+from services import remote_staging
+from services import remote_scratch
 
 # Every test here drives real `RemoteRunner` / `Fetcher` code against a host
 # that does not exist. Answer the ssh and rsync primitives directly rather than
@@ -253,13 +257,12 @@ def test_stage_local_zips_mixed_mode_preserves_user_zips_on_error(tmp_path):
     (tmp_path / "B02").mkdir()
     (tmp_path / "B02" / "NIR.tif").write_bytes(b"\xff" * 32)
 
-    import services.remote_runner as rr
 
     def fake_zip_well_folder(folder: Path, out_zip: Path) -> int:
         raise PermissionError("drive yanked mid-zip")
 
-    original = rr._zip_well_folder
-    rr._zip_well_folder = fake_zip_well_folder
+    original = remote_staging._zip_well_folder
+    remote_staging._zip_well_folder = fake_zip_well_folder
     try:
         with pytest.raises(PermissionError, match="drive yanked"):
             stage_local_zips(
@@ -268,7 +271,7 @@ def test_stage_local_zips_mixed_mode_preserves_user_zips_on_error(tmp_path):
                 filename_sep="_",
             )
     finally:
-        rr._zip_well_folder = original
+        remote_staging._zip_well_folder = original
 
     # User's existing zip is byte-for-byte unchanged.
     assert (tmp_path / "A01.zip").read_bytes() == original_bytes
@@ -3313,7 +3316,7 @@ def test_scratch_dir_honors_env_override(tmp_path, monkeypatch):
     base = rr._scratch_dir()
     assert base == tmp_path / "scratch"
     assert base.is_dir()
-    d = rr._new_scratch_dir("allwell-stage-")
+    d = remote_scratch._new_scratch_dir("allwell-stage-")
     assert d.parent == base and d.name.startswith("allwell-stage-")
 
 
@@ -3345,13 +3348,12 @@ def test_scratch_dir_falls_back_to_os_temp_when_home_is_unwritable(
 
 def test_sweep_stale_scratch_removes_old_only(tmp_path, monkeypatch):
     import time as _time
-    from services import remote_runner as rr
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path))
     old = tmp_path / "allwell-stage-OLD"; old.mkdir()
     os.utime(old, (_time.time() - 7 * 3600, _time.time() - 7 * 3600))
     fresh = tmp_path / "allwell-stage-NEW"; fresh.mkdir()
     other = tmp_path / "not-ours"; other.mkdir()
-    n = rr.sweep_stale_scratch(max_age_h=6.0)
+    n = remote_scratch.sweep_stale_scratch(max_age_h=6.0)
     assert n == 1
     assert not old.exists()      # stale leftover removed
     assert fresh.exists()        # a concurrent run's live staging is kept

@@ -51,7 +51,8 @@ class _Stats:
 
 
 def test_detecting_the_input_mode_does_not_stat_every_loose_image(tmp_path):
-    from services.remote_runner import LocalInputMode, _detect_local_input_mode
+    from services.remote_runner import LocalInputMode
+    from services.remote_staging import _detect_local_input_mode
 
     small = _flat_plate(tmp_path / "small", 40)
     large = _flat_plate(tmp_path / "large", 160)
@@ -77,7 +78,8 @@ def test_the_mode_is_still_detected_for_every_layout(tmp_path):
     """The counting test above passes for a function that answers FLAT always."""
     import zipfile
 
-    from services.remote_runner import LocalInputMode, _detect_local_input_mode
+    from services.remote_runner import LocalInputMode
+    from services.remote_staging import _detect_local_input_mode
 
     zipped = tmp_path / "zipped"
     zipped.mkdir()

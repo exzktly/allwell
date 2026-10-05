@@ -85,7 +85,7 @@ _SCRATCH_DIR_ALLOWLIST = frozenset({
     # visible when the block moved out of `stage_local_zips`, which the check
     # passes wholesale because its folder zip-up elsewhere calls the safe
     # helper.
-    ("services/remote_runner.py", "_planned"),
+    ("services/remote_staging.py", "_planned"),
 })
 
 

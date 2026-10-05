@@ -166,9 +166,14 @@ PROCESS_MICROSCOPY_BUDGET = 3766
 # and the line vocabulary to `services/remote_wire.py`; ten re-exports nothing
 # reached were deleted and `__all__` states the supported facade. Tests import
 # what moved from its owner (`tests/test_remote_runner_facade.py`).
-REMOTE_RUNNER_BUDGET = 4760
+# 4760 -> 3497: local input staging — layout detection, the zip-up, the
+# channel filter and the incremental split — moved to
+# `services/remote_staging.py`.
+REMOTE_RUNNER_BUDGET = 3497
 # Set at extraction: the Fetcher and its verifier, moved out of the runner.
 REMOTE_FETCH_BUDGET = 2052
+# Set at extraction: staging the user's input, moved out of the runner.
+REMOTE_STAGING_BUDGET = 1348
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis
@@ -305,6 +310,16 @@ def test_remote_runner_line_budget():
         "staging, rsync/ssh transport and argv/run-id derivation are each a "
         "self-contained cluster — instead of appending. The ratchet only "
         "moves down."
+    )
+
+
+def test_remote_staging_line_budget():
+    n = _line_count("services/remote_staging.py")
+    assert n <= REMOTE_STAGING_BUDGET, (
+        f"services/remote_staging.py is {n} lines, over the "
+        f"{REMOTE_STAGING_BUDGET} budget. It owns turning the user's input into "
+        "the archives a run uploads; anything else belongs beside the stage "
+        "that does it. The ratchet only moves down."
     )
 
 

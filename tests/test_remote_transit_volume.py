@@ -33,8 +33,8 @@ from services.remote_runner import (
     LocalInputMode,
     OutputFilter,
     _scratch_dir,
-    sweep_stale_scratch,
 )
+from services.remote_scratch import sweep_stale_scratch
 from services.remote_fetch import Fetcher
 from services import remote_scratch
 

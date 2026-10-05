@@ -19,7 +19,7 @@ from pathlib import Path
 
 import json
 
-from services.remote_runner import _filter_new_fovs_in_staging
+from services.remote_staging import _filter_new_fovs_in_staging
 from services.remote_fetch import refresh_pipeline_info_available_from_outputs
 
 SCHEMA = "experiment:channel:well:fov:timepoint"
@@ -181,7 +181,7 @@ def test_plan_staging_uploads_a_forced_well_in_full(tmp_path):
     line has nothing to act on — the one well that most needs reprocessing is
     the one guaranteed not to be.
     """
-    from services.remote_runner import _plan_staging
+    from services.remote_staging import _plan_staging
 
     in_dir = tmp_path / "in"
     out_dir = tmp_path / "out"
@@ -216,7 +216,7 @@ def test_plan_staging_uploads_a_forced_well_in_full(tmp_path):
 
 def test_plan_staging_force_list_matches_wells_canonically(tmp_path):
     """``C8`` typed in the GUI and ``C08.zip`` on disk are one well."""
-    from services.remote_runner import _plan_staging
+    from services.remote_staging import _plan_staging
     from pipeline.well_skip import _canonical_force_wells
 
     in_dir = tmp_path / "in"

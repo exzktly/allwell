@@ -37,7 +37,10 @@ import pytest
 # the file die of an ImportError when run against pre-fix code, which reads in a
 # terminal exactly like "it failed on the base branch" while measuring nothing
 # (CLAUDE.md §7.5 #1).
-from services.remote_runner import _plan_staging, _required_tokens
+from services.remote_staging import (
+    _plan_staging,
+    _required_tokens,
+)
 
 _SCHEMA = "experiment:channel:well:fov:timepoint"
 _BIG = 400_000
@@ -240,7 +243,7 @@ def test_a_png_survives_a_rewrite(tmp_path):
 def test_the_planner_and_the_pipeline_agree_on_what_an_image_is(name, is_image):
     """One question, one answer. These two lists drifted apart once already."""
     from process_microscopy import _GROUP_IMAGE_EXTS
-    from services.remote_runner import _is_image_member
+    from services.remote_staging import _is_image_member
 
     assert _is_image_member(name) is is_image
     if is_image:

@@ -123,7 +123,7 @@ ALLOWLIST = {
     # extracted; the function is now CC 28. Removed from the allowlist.
     "review/core/centre_view.py::build_centre._build_plotting",
     "review/features/barplot/collect.py::collect_bar_items_for_group",
-    "services/remote_runner.py::stage_local_zips",
+    "services/remote_staging.py::stage_local_zips",
     "review/features/heatmap/controller.py::redraw_heatmap",
     "review/features/image_browser/cell_browser/collect.py::collect_cells",
     # DONE: the pipeline's Otsu estimator (was CC 55) moved to

@@ -28,6 +28,8 @@ import util.retry_io as rio
 from services.remote_runner import (
     _RSYNC_RETRY_CODES,
     OutputFilter,
+)
+from services.remote_staging import (
     _materialize_staging,
     _StagePlan,
 )
@@ -36,6 +38,7 @@ from services.remote_fetch import (
     refresh_pipeline_info_available_from_outputs,
 )
 from services import remote_fetch
+from services import remote_staging
 
 
 @pytest.fixture(autouse=True)
@@ -136,14 +139,13 @@ def _rewrite_plan(tmp_path) -> tuple[Path, _StagePlan]:
 
 
 def test_staging_rewrite_survives_a_transient_fault(monkeypatch, tmp_path):
-    import services.remote_runner as rr
 
     src, plan = _rewrite_plan(tmp_path)
     staging = tmp_path / "staging"
     staging.mkdir()
 
-    flaky = _flaky(2, rr.atomic_zip)
-    monkeypatch.setattr(rr, "atomic_zip", flaky)
+    flaky = _flaky(2, remote_staging.atomic_zip)
+    monkeypatch.setattr(remote_staging, "atomic_zip", flaky)
 
     staged = _materialize_staging([plan], staging)
 
@@ -159,13 +161,12 @@ def test_staging_rewrite_survives_a_transient_fault(monkeypatch, tmp_path):
 def test_staging_rewrite_reports_the_volume_when_the_budget_runs_out(
     monkeypatch, tmp_path,
 ):
-    import services.remote_runner as rr
 
     _src, plan = _rewrite_plan(tmp_path)
     staging = tmp_path / "staging"
     staging.mkdir()
     monkeypatch.setattr(
-        rr, "atomic_zip", lambda *a, **k: (_ for _ in ()).throw(_ebadf()))
+        remote_staging, "atomic_zip", lambda *a, **k: (_ for _ in ()).throw(_ebadf()))
 
     with pytest.raises(OSError) as ei:
         _materialize_staging([plan], staging)

@@ -418,7 +418,10 @@ def test_an_incremental_re_run_stages_the_blank_whole(tmp_path):
     has *some* new FOVs down to those members, so the field would be estimated
     from a fraction of the reference while the log reported it as built.
     """
-    from services.remote_runner import _plan_staging, _required_tokens
+    from services.remote_staging import (
+        _plan_staging,
+        _required_tokens,
+    )
     from util.well_token import background_well_key
 
     prior = tmp_path / "prior"

@@ -32,6 +32,7 @@ from pipeline.run_report import (
     summarize,
     write_well_report,
 )
+from services import remote_staging
 
 
 # ── The completeness record ─────────────────────────────────────────────────
@@ -275,7 +276,7 @@ def test_staging_writes_only_the_members_that_will_be_uploaded(tmp_path, monkeyp
                     for tp in ("t0", "t1"):
                         w.writerow({"well": well, "fov": fov, "timepoint": tp})
 
-    monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
+    monkeypatch.setattr(remote_staging, "sweep_stale_scratch", lambda **kw: 0)
 
     lines: list[str] = []
     out = rr.stage_local_zips(
@@ -339,8 +340,8 @@ def test_a_fully_processed_well_is_never_staged_at_all(tmp_path, monkeypatch):
 
     staging = tmp_path / "stage"
     staging.mkdir()
-    monkeypatch.setattr(rr, "_new_scratch_dir", lambda prefix: staging)
-    monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
+    monkeypatch.setattr(remote_staging, "_new_scratch_dir", lambda prefix: staging)
+    monkeypatch.setattr(remote_staging, "sweep_stale_scratch", lambda **kw: 0)
 
     lines: list[str] = []
     out = rr.stage_local_zips(
@@ -367,8 +368,8 @@ def test_a_typo_d_channel_filter_names_every_offending_well(tmp_path, monkeypatc
 
     staging = tmp_path / "stage"
     staging.mkdir()
-    monkeypatch.setattr(rr, "_new_scratch_dir", lambda prefix: staging)
-    monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
+    monkeypatch.setattr(remote_staging, "_new_scratch_dir", lambda prefix: staging)
+    monkeypatch.setattr(remote_staging, "sweep_stale_scratch", lambda **kw: 0)
 
     with pytest.raises(RuntimeError) as exc:
         rr.stage_local_zips(
@@ -400,9 +401,9 @@ def test_mixed_mode_stages_the_same_way_as_zip_mode(tmp_path, monkeypatch):
     for chan in ("RFP", "GFP", "DAPI"):
         (folder / f"Exp_{chan}_C03_f0_t0.tif").write_bytes(b"x" * 4096)
 
-    assert rr._detect_local_input_mode(src) is rr.LocalInputMode.MIXED
+    assert remote_staging._detect_local_input_mode(src) is rr.LocalInputMode.MIXED
 
-    monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
+    monkeypatch.setattr(remote_staging, "sweep_stale_scratch", lambda **kw: 0)
 
     lines: list[str] = []
     out = rr.stage_local_zips(
@@ -441,7 +442,7 @@ def test_mixed_mode_with_no_filter_uploads_from_the_input_dir(tmp_path, monkeypa
     for chan in ("RFP", "GFP"):
         (folder / f"Exp_{chan}_C03_f0_t0.tif").write_bytes(b"x" * 4096)
 
-    monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
+    monkeypatch.setattr(remote_staging, "sweep_stale_scratch", lambda **kw: 0)
     out = rr.stage_local_zips(
         src, filename_schema="experiment:channel:well:fov:timepoint",
         filename_sep="_", log_fn=lambda m: None,

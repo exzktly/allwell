@@ -79,6 +79,7 @@ from services.remote_run_state import (
     _RemoteRun,
     _canonical_well_from_path,
 )
+from services.remote_staging import input_well_containers
 from services.remote_wire import (
     TRANSIENT_PREFIX,
     _BREADCRUMB_INTERVAL_S,
@@ -307,10 +308,6 @@ def run_client_side_completeness_check(
     try:
         from pipeline.completeness import record_run_check
         from pipeline.io import _safe_atomic_text_write
-        # Which wells the user's input holds is the staging side's question.
-        # Imported when this runs, not at module scope: the runner imports this
-        # module, so a module-scope import back would be a cycle.
-        from services.remote_runner import input_well_containers
 
         info = json.loads(info_path.read_text()) if info_path.exists() else {}
         if not isinstance(info, dict):

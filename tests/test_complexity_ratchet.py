@@ -26,7 +26,8 @@ THRESHOLD = 40
 # per-function guard prevents a new function crossing 40, but did not stop an
 # existing debt function growing from (say) 50 to 90. This aggregate ratchet
 # makes that growth visible and only moves down as debt is decomposed.
-TOTAL_ALLOWLISTED_CC_BUDGET = 1192
+# 1192 -> 1088: apply_export_style_prefs (104) left the allowlist (C1).
+TOTAL_ALLOWLISTED_CC_BUDGET = 1088
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
@@ -113,7 +114,10 @@ ALLOWLIST = {
     # feature now owns its own view-state serialization via the ``view_state_io``
     # registry hook); CC unchanged, so it stays allowlisted at the new path.
     "review/features/image_browser/image_table/view_state_io.py::apply_image_table",
-    "review/core/plot_style.py::apply_export_style_prefs",
+    # C1 DONE: apply_export_style_prefs (was CC 104) split into one pass per
+    # preference family (typography, tick angle, lines, marker collections,
+    # grid, scale + limits, ticks, legends, layout); coordinator CC 6, every
+    # pass <= 13. Removed from the allowlist.
     "review/core/centre_view.py::build_centre",
     "review/features/export/sidebar_view.py::ExportStyleSidebar._build_ui",
     "review/persistence/view_state.py::restore",

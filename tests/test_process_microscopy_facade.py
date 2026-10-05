@@ -19,7 +19,7 @@ What this holds now:
 * no application code reaches, through ``process_microscopy``, a name the
   module merely imports — it imports it from the owner;
 * a test reaches such a name only to patch a binding the orchestrator itself
-  calls. Patching the owner would not reach that call, because the
+  calls, and never reads one through it. Patching the owner would not reach that call, because the
   orchestrator holds its own binding of the name; each seam is listed with the
   test that needs it, and an entry nobody reaches any more fails.
 
@@ -31,7 +31,7 @@ from __future__ import annotations
 import functools
 from pathlib import Path
 
-from tests._facade_scan import consumers_of, module_level_names, reexports
+from tests._facade_scan import PATCH_FORMS, consumers_of, module_level_names, reexports
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODULE_PATH = REPO_ROOT / "process_microscopy.py"
@@ -47,7 +47,6 @@ SIDE_EFFECT_IMPORTS = {
 BINDING_SEAMS = {
     "ProcessPoolExecutor": "tests/test_well_worker_pool.py runs the pool in-process",
     "as_completed": "tests/test_well_worker_pool.py, paired with the executor",
-    "_safe_atomic_text_write": "tests/test_run_check_pass.py fails the record write",
     "preflight_scratch_for_run": "tests/test_capacity.py stubs the scratch preflight",
     "prepare_models": "tests/test_only_wells_run.py wraps the model build",
 }
@@ -94,3 +93,16 @@ def test_tests_reach_an_imported_name_only_to_patch_a_binding():
         "belongs here, listed in BINDING_SEAMS with its reason:\n  "
         + "\n  ".join(f"{n}: {sorted(reached[n])}" for n in unexpected))
     assert not stale, f"BINDING_SEAMS entries nobody reaches any more: {stale}"
+
+
+def test_a_binding_seam_is_only_ever_patched_through_it():
+    """A seam is listed because patching the orchestrator's binding is the one
+    way to steer the call it makes. Reading one through the orchestrator is a
+    read of a name it only imports, which belongs on the owner."""
+    reads = sorted(f"{name}: {shown} ({form})"
+                   for name, users in _consumers().items() if name in BINDING_SEAMS
+                   for shown, form in users if form not in PATCH_FORMS)
+    assert not reads, (
+        "These read a binding seam through process_microscopy; read it from the "
+        "module that defines it and keep only the patch here:\n  "
+        + "\n  ".join(reads))

@@ -313,7 +313,7 @@ def test_a_blank_outside_the_subset_still_corrects_it(
     it, nor start processing B02 as a well."""
     plate = _plate(tmp_path)
     built: list[object] = []
-    real = pm.prepare_models
+    from pipeline.empty_well import prepare_models as real
 
     def _spy(shared_kwargs, **kw):
         built.append(kw.get("groups"))

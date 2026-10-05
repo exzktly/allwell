@@ -2,9 +2,12 @@
 
 A *recipe* here is the analysis decisions one dataset holds — its sample
 variables and definitions, its gating, its ratio channels, its Batch Export
-groups, its saved plots — applied to a second dataset. The first cut copies
-from one dataset folder to the dataset open in Review; there is no standalone
-recipe file yet (``_Docs/Markdowns/WORKFLOW_FEATURES_TRACKER.md`` R12).
+groups, its saved plots — applied to a second dataset. The source is either
+another dataset folder or a **recipe file**: the same blocks written to one
+JSON document (:func:`recipe_document`) so they can be kept, shared and applied
+without the dataset they came from. A recipe file is read back into the same
+:class:`DatasetBlocks` a folder is (:func:`blocks_from_document`), so the fit
+check and the copy cannot tell the two sources apart.
 
 This module is the pure half: the roster of what can be copied, and the check of
 how well each piece fits the target, run **before anything is written**. The
@@ -247,3 +250,60 @@ def check_fit(source: DatasetBlocks, target: DatasetBlocks,
                              missing_channels=missing_channels,
                              replaces=replaces, notes=notes))
     return fits
+
+
+#: What a recipe file says it is. A file without it is not a recipe file.
+RECIPE_FILE_KIND = "allwell-recipe"
+#: Bumped when the document's shape changes incompatibly; a reader meeting a
+#: higher number refuses the file rather than guessing at it.
+RECIPE_FILE_SCHEMA = 1
+#: The suffix the save dialog offers and the open dialog filters on.
+RECIPE_FILE_SUFFIX = ".allwell-recipe.json"
+
+
+def recipe_document(source: DatasetBlocks, *, app_version: str | None = None) -> dict:
+    """*source*'s blocks as a recipe file's document.
+
+    Only blocks the source holds are written — an absent block says nothing, and
+    writing it as ``null`` would read back the same as absent anyway. The source
+    channels go with them, because :func:`check_fit` needs them to recognise a
+    channel name inside a block.
+    """
+    return {
+        "kind": RECIPE_FILE_KIND,
+        "schema_version": RECIPE_FILE_SCHEMA,
+        "app_version": app_version,
+        "label": source.label,
+        "channels": sorted(source.channels),
+        "blocks": [{"file": f, "key": k, "value": source.blocks[(f, k)]}
+                   for scope in RECIPE_SCOPES for f, k in scope.blocks
+                   if source.blocks.get((f, k)) is not None],
+    }
+
+
+def blocks_from_document(doc, *, path: str = "") -> DatasetBlocks:
+    """A recipe file's document as the :class:`DatasetBlocks` a folder would give.
+
+    Raises ``ValueError`` naming what is wrong: not a recipe file, a schema
+    this build does not read, or a block naming a file or key no recipe scope
+    owns — the last because applying an unknown block would write somewhere
+    no reset, no fit check and no provenance domain knows about.
+    """
+    if not isinstance(doc, dict) or doc.get("kind") != RECIPE_FILE_KIND:
+        raise ValueError("not an All-Well recipe file")
+    version = doc.get("schema_version")
+    if not isinstance(version, int) or version > RECIPE_FILE_SCHEMA:
+        raise ValueError(f"written under recipe schema {version!r}, which this "
+                         f"build does not read")
+    known = {b for scope in RECIPE_SCOPES for b in scope.blocks}
+    blocks: dict = dict.fromkeys(known)
+    for entry in doc.get("blocks") or []:
+        if not isinstance(entry, dict):
+            raise ValueError("a block entry is not an object")
+        where = (entry.get("file"), entry.get("key"))
+        if where not in known:
+            raise ValueError(f"names a block no recipe scope owns: {where[0]}::{where[1]}")
+        blocks[where] = entry.get("value")
+    label = str(doc.get("label") or "recipe file")
+    return DatasetBlocks(label=label, root=path, blocks=blocks,
+                         channels=frozenset(str(c) for c in doc.get("channels") or ()))

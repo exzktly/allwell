@@ -2484,11 +2484,15 @@ sentence, so a count that changes as a rerun recovers groups does not orphan the
 decision; decisions for findings no longer reported are kept rather than pruned,
 because a finding also disappears when its evidence is briefly unavailable.
 
-Field-level rerun is not offered. `pipeline.io.merge_records_into_csv` keeps
-existing rows and drops new ones with the same key, so re-processing an
+Field-level rerun is not offered, by decision. `pipeline.io.merge_records_into_csv`
+keeps existing rows and drops new ones with the same key, so re-processing an
 already-processed field through the incremental path would leave the old numbers
-and report success; a field-level rerun needs a replace-merge and is tracked in
-`_Docs/Markdowns/WORKFLOW_FEATURES_TRACKER.md` (rows Q10–Q14).
+and report success. Doing it properly means replacing the field's CSV rows,
+archive members and field-quality record, carrying that replacement through the
+remote upload split and fetch, and invalidating per-cell overrides keyed by the
+old nucleus ids — a body of work out of proportion to the case it serves. A
+field whose pictures are suspect is excluded instead, and a well that needs
+processing again is re-run whole.
 
 #### The headless report (`allwell_report.py`)
 
@@ -4704,8 +4708,11 @@ Measured growth: an `analysis_changed` line is about 240 bytes and a
 0.12 s, so the file is not rotated.
 
 **Copying analysis from another dataset — a recipe.** The title bar's copy
-button (`allwell._on_copy_analysis_clicked` → `review/core/recipe_view.prompt_copy_analysis`)
-copies chosen analysis decisions from another dataset folder into the one open
+button (`allwell._on_copy_analysis_clicked`) pops a menu
+(`review/core/recipe_view.copy_analysis_menu`, shown with `popup`, never `exec`)
+with three actions: copy from another dataset folder, copy from a **recipe
+file**, and save the open dataset's analysis as a recipe file. Copying
+(`prompt_copy_analysis`) brings chosen analysis decisions into the dataset open
 in Review. Three modules, split by layer:
 
 - `review/domain/recipe_compute.py` — the roster and the fit, pure.
@@ -4726,7 +4733,14 @@ in Review. Three modules, split by layer:
   the prefix of a `<channel>_…` column name, is a channel — because a reader
   per block shape would be a second definition of six formats. It reports and
   never rewrites: a gate on a channel the target lacks is inert there, and a
-  definition naming a missing well attaches to nothing.
+  definition naming a missing well attaches to nothing. A recipe file is one
+  JSON document (`recipe_document`: `kind` `allwell-recipe`, `schema_version`,
+  the source label and channels, and each block the source holds as
+  `{file, key, value}`); `blocks_from_document` reads it back into the same
+  `DatasetBlocks` a folder gives, so the fit check and the copy cannot tell the
+  two sources apart. It refuses, by name, a document of another kind, a newer
+  schema, and a block no recipe scope owns — applying one would write somewhere
+  no reset, fit check or provenance domain knows about.
 - `review/persistence/recipe.py` — the I/O, Qt-free. `read_dataset_blocks`
   reads a folder as a user picks it (`out/` when present) without loading it,
   and **refuses** a file that exists and cannot be read, or a `persistence.json`
@@ -4742,8 +4756,12 @@ in Review. Three modules, split by layer:
   scope is isolated; a failure is reported and the rest run. Every block
   written is an `analysis_changed` in the provenance log by the usual route,
   and the copy as a whole is one `recipe_applied` line naming the source, the
-  scopes, what failed, and how many plots were added.
-- `review/core/recipe_view.py` — the dialog: pick a folder, flush, show one
+  scopes, what failed, and how many plots were added. `write_recipe_file`
+  writes a recipe file atomically and refuses a source with an unreadable file
+  (it would read back as a dataset with nothing for those scopes);
+  `read_recipe_file` reads one.
+- `review/core/recipe_view.py` — the menu and the dialog: pick a folder or a
+  recipe file, flush, show one
   checkbox per scope with `ScopeFit.describe()` beneath it (a scope with
   nothing to copy, or unreadable, is shown disabled with its reason rather than
   omitted), copy what is ticked, reload through the same

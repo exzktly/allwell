@@ -13,6 +13,10 @@ without loading the dataset. A file that exists and cannot be read, or a
 copied as "nothing", and a refused one is reported as "could not be read",
 which is what is true.
 
+A **recipe file** (:func:`write_recipe_file`, :func:`read_recipe_file`) holds
+the same blocks without the dataset: it is read into the same
+:class:`DatasetBlocks`, so everything below treats it exactly as a folder.
+
 **Writing** (:func:`apply_recipe`) goes into the dataset open in Review, through
 the same primitives every other analysis write uses, so each copied block is
 recorded in the provenance log by the route every analysis change takes:
@@ -40,7 +44,8 @@ from datetime import datetime
 from pathlib import Path
 
 from review.domain.recipe_compute import (
-    PERSISTENCE, PIPELINE_INFO, DatasetBlocks, RECIPE_SCOPES, scope_by_key,
+    PERSISTENCE, PIPELINE_INFO, DatasetBlocks, RECIPE_SCOPES, blocks_from_document,
+    recipe_document, scope_by_key,
 )
 
 _logger = logging.getLogger("review")
@@ -114,6 +119,35 @@ def read_dataset_blocks(folder: Path | str, *, label: str = "",
                          root=str(folder), blocks=blocks,
                          channels=_channels(info or {}), wells=frozenset(wells),
                          refused=refused)
+
+
+def write_recipe_file(source: DatasetBlocks, path: Path | str) -> Path:
+    """Write *source*'s blocks to a recipe file at *path*, atomically.
+
+    Refuses (``ValueError``) a source whose files could not be read: a recipe
+    written from an unreadable sidecar would carry nothing for its scopes and
+    read back as a dataset that has no gating, which is not what is true.
+    """
+    from util.json_write import write_json_atomic
+
+    if source.refused:
+        raise ValueError("; ".join(f"{name} could not be read ({why})"
+                                   for name, why in sorted(source.refused.items())))
+    try:
+        from version import __version__ as app_version
+    except ImportError:
+        app_version = None
+    path = Path(path)
+    write_json_atomic(path, recipe_document(source, app_version=app_version))
+    return path
+
+
+def read_recipe_file(path: Path | str) -> DatasetBlocks:
+    """A recipe file as :class:`DatasetBlocks`. ``ValueError`` names what is wrong."""
+    doc, refusal = _read_json(Path(path))
+    if doc is None:
+        raise ValueError(refusal or "the file does not exist")
+    return blocks_from_document(doc, path=str(path))
 
 
 def read_open_dataset(ctx) -> DatasetBlocks:

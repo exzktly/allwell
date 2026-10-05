@@ -43,3 +43,22 @@ def test_copying_from_another_dataset_lands_and_reloads(loaded_app, mini_dataset
     info = json.loads((mini_dataset / "pipeline_info.json").read_text())
     assert info["cell_gating"]["fluor_gates"] == {"gfp": 123.0}
     assert ctx.state.cell_gating.fluor_gates.get("gfp") == 123.0
+
+    # A recipe file goes through the same prompt, dialog and reload: save the
+    # dataset's analysis out, then copy a file whose ratio is new to it.
+    from review.persistence.recipe import read_recipe_file, write_recipe_file, read_dataset_blocks
+    saved = recipe_view.prompt_export_recipe(ctx, path=tmp_path / "plate.json")
+    assert read_recipe_file(saved).blocks[("pipeline_info.json", "cell_gating")][
+        "fluor_gates"] == {"gfp": 123.0}
+
+    other = tmp_path / "plateC"
+    other.mkdir()
+    (other / "pipeline_info.json").write_text(json.dumps(
+        {"fluor_tokens": ["gfp", "mcherry"], "nuclear_token": "dapi"}))
+    (other / "persistence.json").write_text(json.dumps(
+        {"schema_version": 1, "ratios": [dict(RATIO, name="from a file")]}))
+    recipe = write_recipe_file(read_dataset_blocks(other), tmp_path / "c.json")
+    done = recipe_view.prompt_copy_analysis(
+        ctx, recipe_file=str(recipe), reload_after=lambda: app._load_path(mini_dataset))
+    assert done == ["ratios"]
+    assert "from a file" in [r.name for r in ctx.state.channel.ratio_metrics]

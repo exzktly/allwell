@@ -350,9 +350,10 @@ class AllWellApp(QMainWindow):
         # check live in review/domain/recipe_compute.py.
         self._copy_analysis_btn = IconButton("copy")
         self._copy_analysis_btn.setToolTip(
-            "Copy analysis from another dataset — sample definitions, gating, "
-            "ratio metrics, Batch Export groups and saved plots, with a preview "
-            "of what fits before anything is written."
+            "Copy analysis from another dataset or a recipe file — sample "
+            "definitions, gating, ratio metrics, Batch Export groups and saved "
+            "plots, with a preview of what fits before anything is written — "
+            "or save this dataset's analysis as a recipe file."
         )
         self._copy_analysis_btn.clicked.connect(self._on_copy_analysis_clicked)
         ra.addWidget(self._copy_analysis_btn)
@@ -1282,16 +1283,21 @@ class AllWellApp(QMainWindow):
             review._load_path(Path(root))
 
     def _on_copy_analysis_clicked(self) -> None:
-        """Copy analysis from another dataset into the open one, then reload.
+        """Offer copying analysis in (from a dataset or a recipe file) or saving it out.
 
-        The dialog, the fit check and the write live in
-        ``review/core/recipe_view.py``; this handler only supplies the reload.
+        The menu, the dialogs, the fit check and the writes live in
+        ``review/core/recipe_view.py``; this handler only supplies the reload
+        and where the menu appears.
         """
         review = self._review
         if review is None:
             return
-        from review.core.recipe_view import prompt_copy_analysis
-        prompt_copy_analysis(review._ctx, reload_after=self._reload_current_dataset)
+        from review.core.recipe_view import copy_analysis_menu
+        btn = self._copy_analysis_btn
+        menu = copy_analysis_menu(review._ctx, self,
+                                  reload_after=self._reload_current_dataset)
+        # ``popup``, not ``exec``: the menu must not block the event loop.
+        menu.popup(btn.mapToGlobal(btn.rect().bottomLeft()))
 
     def _toggle_log_drawer(self) -> None:
         if self._log_drawer is None:

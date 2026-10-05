@@ -13,7 +13,7 @@ pane. A module inside ``review/`` may not import ``ReviewApp``
 (``tests/test_architecture_contracts.py::test_nothing_imports_reviewapp_at_runtime``),
 and the launcher may not reach into a pane for its dispatch.
 
-**The real app, offscreen.** Measured before choosing this route (tracker H0):
+**The real app, offscreen.** Measured before choosing this route:
 constructing ``ReviewApp`` under the offscreen platform and loading the mini
 dataset takes about 7 s and 400 MB, shows no window, and raises no modal — and
 it draws every plot exactly as the app does, because it *is* the app. Each saved

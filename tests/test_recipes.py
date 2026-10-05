@@ -15,6 +15,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 from review.core.dataset_state import DatasetState
 from review.domain import recipe_compute as rc
@@ -303,3 +305,106 @@ def test_a_scope_that_fails_on_its_second_block_says_what_landed(tmp_path, monke
     monkeypatch.setattr(_doc, "atomic_write_json", _full_disk)
     result = rp.apply_recipe(ctx, rp.read_dataset_blocks(_source(tmp_path)), ["gating"])
     assert "already copied: cell_gating" in result.failed["gating"]
+
+
+# ── recipe files ───────────────────────────────────────────────────────────
+
+def test_a_recipe_file_is_the_folder_it_was_saved_from(tmp_path):
+    """Read back, a recipe file gives the fit check exactly what its folder did.
+
+    The fixture's blocks name a channel the target lacks (cy5) and a well it
+    lacks (H12), so a file that dropped the channel list or a block would
+    produce a different fit, not an equal one.
+    """
+    ctx, _data, _calls = _target(tmp_path)
+    folder = rp.read_dataset_blocks(_source(tmp_path))
+    path = rp.write_recipe_file(folder, tmp_path / f"plateA{rc.RECIPE_FILE_SUFFIX}")
+    from_file = rp.read_recipe_file(path)
+    target = rp.read_open_dataset(ctx)
+    assert rc.check_fit(from_file, target) == rc.check_fit(folder, target)
+    assert from_file.label == "plateA" and from_file.root == str(path)
+
+
+def test_a_recipe_file_applies_as_its_folder_does(tmp_path):
+    keys = ["gating", "ratios", "sample_definitions", "saved_plots"]
+    source = rp.read_dataset_blocks(_source(tmp_path))
+    via_folder, data_a, _ = _target(tmp_path / "a")
+    rp.apply_recipe(via_folder, source, keys)
+    via_file, data_b, _ = _target(tmp_path / "b")
+    path = rp.write_recipe_file(source, tmp_path / "r.json")
+    rp.apply_recipe(via_file, rp.read_recipe_file(path), keys)
+
+    def _landed(data):
+        info = json.loads((data / "pipeline_info.json").read_text())
+        doc = json.loads((data / "persistence.json").read_text())
+        plots = [{k: v for k, v in p.items() if k != "id"} for p in doc["saved_plots"]]
+        return info["cell_gating"], info["sample_definitions"], doc["ratios"], plots
+    assert _landed(data_a) == _landed(data_b)
+
+
+def test_the_document_holds_only_what_the_source_holds(tmp_path):
+    doc = rc.recipe_document(rp.read_dataset_blocks(_source(tmp_path)), app_version="x")
+    assert (doc["kind"], doc["schema_version"], doc["app_version"]) == (
+        rc.RECIPE_FILE_KIND, rc.RECIPE_FILE_SCHEMA, "x")
+    assert doc["channels"] == ["cy5", "dapi", "gfp"]
+    assert sorted(b["key"] for b in doc["blocks"]) == [
+        "cell_gating", "qc_params", "ratios", "sample_definitions", "saved_plots"]
+
+
+@pytest.mark.parametrize("doc, says", [
+    ({"kind": "something-else", "schema_version": 1}, "not an All-Well recipe file"),
+    ({"kind": rc.RECIPE_FILE_KIND, "schema_version": rc.RECIPE_FILE_SCHEMA + 1},
+     "does not read"),
+    ({"kind": rc.RECIPE_FILE_KIND, "schema_version": 1,
+      "blocks": [{"file": "pipeline_info.json", "key": "run_check", "value": {}}]},
+     "no recipe scope owns: pipeline_info.json::run_check"),
+    ({"kind": rc.RECIPE_FILE_KIND, "schema_version": 1, "blocks": ["x"]},
+     "not an object"),
+], ids=["kind", "newer-schema", "unknown-block", "malformed-entry"])
+def test_a_file_that_is_not_a_readable_recipe_is_refused_by_name(tmp_path, doc, says):
+    path = tmp_path / "r.json"
+    path.write_text(json.dumps(doc))
+    with pytest.raises(ValueError, match=says):
+        rp.read_recipe_file(path)
+
+
+def test_a_source_that_could_not_be_read_is_not_saved_as_a_recipe(tmp_path):
+    root = _source(tmp_path)
+    (rp.data_dir_of(root) / "persistence.json").write_text("{not json")
+    with pytest.raises(ValueError, match="persistence.json could not be read"):
+        rp.write_recipe_file(rp.read_dataset_blocks(root), tmp_path / "r.json")
+    assert not (tmp_path / "r.json").exists()
+
+
+def test_saving_the_open_dataset_flushes_first_and_says_where(tmp_path):
+    from review.core import recipe_view
+    ctx, data, calls = _target(tmp_path)
+    said = []
+    ctx.notify = SimpleNamespace(set_status=said.append)
+    ctx.window = None
+    path = recipe_view.prompt_export_recipe(ctx, path=tmp_path / "out.json")
+    assert calls == ["flush"]
+    assert said == ["Saved this dataset's analysis to out.json."]
+    assert rp.read_recipe_file(path).blocks[(rc.PIPELINE_INFO, "cell_gating")] == {
+        "thresh_frac_on": {"gfp": 30.0}}
+
+
+def test_each_menu_action_reaches_its_prompt(qtbot, tmp_path, monkeypatch):
+    """The copy button's menu: three actions, each wired to what it names."""
+    from PySide6.QtWidgets import QWidget
+    from review.core import recipe_view
+    seen = []
+    monkeypatch.setattr(recipe_view, "prompt_copy_analysis",
+                        lambda ctx, **kw: seen.append(("copy", kw.get("recipe_file"))))
+    monkeypatch.setattr(recipe_view, "prompt_export_recipe",
+                        lambda ctx, **kw: seen.append(("export", None)))
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    menu = recipe_view.copy_analysis_menu(SimpleNamespace(), parent)
+    actions = [a for a in menu.actions() if not a.isSeparator()]
+    assert [a.text() for a in actions] == [
+        "Copy analysis from another dataset…", "Copy analysis from a recipe file…",
+        "Save this dataset's analysis as a recipe file…"]
+    for a in actions:
+        a.trigger()
+    assert seen == [("copy", None), ("copy", ""), ("export", None)]

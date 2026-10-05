@@ -5038,9 +5038,16 @@ tab's Edit menu, which is the same action as the Curation checkbox above.
 
 The **copy** button beside the trash can copies what you decided about one
 plate onto the plate that is open — useful when the next plate in a series has
-the same layout and the same gates. Pick the other dataset's folder; before
-anything is written, a checklist shows each item and how well it fits this
-plate:
+the same layout and the same gates. It opens a menu:
+
+- **Copy analysis from another dataset…** — pick the other dataset's folder.
+- **Copy analysis from a recipe file…** — pick a recipe file saved earlier.
+- **Save this dataset's analysis as a recipe file…** — write the open
+  dataset's analysis to one file (`<name>.allwell-recipe.json`) you can keep,
+  share, and apply to other plates without the dataset it came from.
+
+Whichever source you pick, before anything is written a checklist shows each
+item and how well it fits this plate:
 
 | Item | What is copied |
 |---|---|
@@ -5070,6 +5077,11 @@ drawn on this dataset* on the gallery card, in the Home strip, and in the PDF
 and PowerPoint exports. **Restore** replays a copied plot's settings on this
 plate's data; if they name wells this plate does not have, the plot is drawn
 from the wells that are here and the status line names the ones left out.
+
+A recipe file holds the same items a dataset does and is checked the same way.
+A file that is not an All-Well recipe, or was saved by a newer version, is
+refused with the reason; a dataset whose files cannot be read is not saved as a
+recipe, because the file would claim it had nothing to copy.
 
 Every copy is recorded in the dataset's history (`provenance.jsonl`).
 

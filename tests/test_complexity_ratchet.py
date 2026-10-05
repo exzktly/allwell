@@ -28,7 +28,8 @@ THRESHOLD = 40
 # makes that growth visible and only moves down as debt is decomposed.
 # 1192 -> 1088: apply_export_style_prefs (104) left the allowlist (C1).
 # 1088 -> 985: ExportStyleSidebar._build_ui (103) left the allowlist (C2).
-TOTAL_ALLOWLISTED_CC_BUDGET = 985
+# 985 -> 813: collect_bar_items (95) and its _items_for_tp (77) left it (C3).
+TOTAL_ALLOWLISTED_CC_BUDGET = 813
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
@@ -105,8 +106,10 @@ def _functions_over_threshold() -> dict[str, int]:
 # A5 (redraw_line_plots, run_stats) — are all DONE (see notes below). Remove an
 # entry when you take it under 40.
 ALLOWLIST = {
-    "review/features/barplot/collect.py::collect_bar_items",
-    "review/features/barplot/collect.py::collect_bar_items._items_for_tp",
+    # C3 DONE: collect_bar_items (was CC 95) and its nested _items_for_tp
+    # (was 77) split into a request snapshot, a per-redraw _BarCollector and
+    # typed intermediates (_Panels, _Denominators) with one shared fold-change
+    # step; collect_bar_items is CC 2, the largest stage 15. Both removed.
     # A4 DONE: find_well_images_and_masks (was CC 98) decomposed into
     # _merge_scan / _discover_from_layouts / _scan_raw_disk_files /
     # _raw_file_well_passes / _log_find_result — main orchestrator now CC 13,

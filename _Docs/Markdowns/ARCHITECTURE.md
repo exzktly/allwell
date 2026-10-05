@@ -12927,6 +12927,24 @@ Bar tab — barplot_controller.collect_bar_items(ctx, target_t,
       an unresolved one raised a TypeError rather than drawing a
       placeholder.
 
+   The collector is staged so each step above has one home.
+   ``_bar_request`` reads everything the redraw needs off the context
+   once, into a frozen ``_BarRequest``. ``_BarCollector`` owns what is
+   valid for exactly one redraw — the control-series cache, the memoised
+   member baselines and the pairing — and builds one bar at a time:
+   ``_rset_panels`` / ``_well_panels`` collect the raw Value, Fraction and
+   Events panels (a frozen ``_Panels``), ``_Denominators`` carries the
+   control and baseline denominators while ``_rset_baselines`` /
+   ``_well_baselines`` resolve and stack them, and ``_fold_panels`` is the
+   single place a bar is folded or marked undefined, for grouped and
+   per-well bars alike. ``_in_emission_order`` lays the bars out tp-major
+   or well-major. The Events panel's own NaN flag cannot fire by itself
+   today: ``member_n_series`` never omits a timepoint the mean series
+   has, so a missing Events denominator always comes with a missing mean.
+   ``tests/test_bar_collect_stages.py`` holds the two outputs the split's
+   mutation pass found unpinned: an unpooled well taking its set's
+   colour, and a well's Events panel stacking both fold-change axes.
+
 Bar tab violin / beeswarm — barplot.renderer.draw_per_cell_bar_mode →
 fold_change.build_cell_scaling(…) → {well: factor}, where each cell
 value is divided by factor before plotting. factor = control_mean ×

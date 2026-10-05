@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
-from review.domain.recipe_compute import RECIPE_FILE_SUFFIX, check_fit
+from review.domain.recipe_compute import RECIPE_FILE_SUFFIX, DatasetBlocks, check_fit
 from review.persistence.recipe import (
     apply_recipe, data_dir_of, read_dataset_blocks, read_open_dataset,
     read_recipe_file, write_recipe_file,
@@ -145,7 +145,7 @@ def prompt_export_recipe(ctx, *, path=None) -> Path | None:
     return written
 
 
-def _pick_source(ctx, folder, recipe_file):
+def _pick_source(ctx, folder, recipe_file) -> DatasetBlocks | None:
     """The source the user chose, as blocks, or ``None`` after saying why not."""
     if recipe_file is not None:
         if not recipe_file:

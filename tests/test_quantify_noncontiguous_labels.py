@@ -29,7 +29,8 @@ pytest.importorskip("tifffile")
 
 import numpy as np
 
-from process_microscopy import _quantify_image_group, parse_schema
+from process_microscopy import _quantify_image_group
+from util.schema import parse_schema
 
 
 def _gapped_label_image():

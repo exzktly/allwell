@@ -7815,12 +7815,16 @@ boxes).
 
 **Decomposition.** `process_microscopy.py` is the orchestrator + CLI; the heavy
 cohesive clusters were extracted into the Qt-free **`pipeline/` package** (at
-a top-level package, so the pipeline can import it without the GUI). A name the
-orchestrator imports and never reads itself is re-exported only while something
-still reaches it through `pm` — a GUI call site or a test — and each such name
-is classified in `tests/test_process_microscopy_facade.py` (side-effect import,
-first-party transitional alias, or test-only alias); one nobody reaches is
-deleted rather than kept for compatibility. The packages:
+a top-level package, so the pipeline can import it without the GUI). The
+orchestrator **re-exports nothing**: every caller, GUI and test alike, imports
+a `pipeline.*` name from the module that defines it, and the orchestrator
+imports only what it calls. The one exception runs the other way — a test that
+steers a call the orchestrator itself makes patches the orchestrator's own
+binding of the name (patching the owner would not reach that call), and each
+such seam is listed with its reason. `tests/test_process_microscopy_facade.py`
+holds all three: no unused import beyond the `tifffile` side-effect import, no
+application code reaching an imported name through `pm`, and no test doing so
+except at a listed seam. The packages:
 `pipeline.background` (background/illumination math), `pipeline.cellpose`
 (Cellpose segmenters; Torch lazy), `pipeline.stardist` (StarDist segmenters +
 per-worker model state behind `set_model`/`set_fov_label`; TensorFlow lazy), and
@@ -14477,7 +14481,7 @@ The map (each rule links to the test that holds it):
 | No function crosses cyclomatic complexity 40 unless it is on the allowlist, and the allowlisted functions' **total** cannot grow — the per-function check alone let an existing debt function grow without limit, and the total's not-slack twin banks every decomposition's saving so it cannot be spent later | `tests/test_complexity_ratchet.py` (`TOTAL_ALLOWLISTED_CC_BUDGET`), with bite cases in `tests/test_guards_bite.py` |
 | `services.remote_runner`'s import surface is its `__all__`: no file reaches any other name through it, by any of four access forms, and it re-exports nothing outside it (§6.4) | `tests/test_remote_runner_facade.py`, scan in `tests/_facade_scan.py`, bite cases in `tests/test_guards_bite.py` |
 | Every control the Properties panel binds to a pref key is in the measured roster for its figure, is bound once, shows the stored value when the panel is rebuilt, and writes its own key and no other when moved; the hand-wired Error bars control reaches `PlotState` | `tests/test_properties_control_contract.py` |
-| `process_microscopy`'s re-exports are each classified and still reached; one nobody reaches is deleted (§6.2) | `tests/test_process_microscopy_facade.py`, scan in `tests/_facade_scan.py` |
+| `process_microscopy` re-exports nothing; callers import a `pipeline.*` name from its owner, and tests patch the orchestrator's own binding only at a listed seam (§6.2) | `tests/test_process_microscopy_facade.py`, scan in `tests/_facade_scan.py` |
 | No test patches a name on a module that only re-exports it — the patch rebinds an alias nothing reads and the test measures nothing. A re-export application code looks up at call time (through a module alias, or a function-local `from … import`) is a live target and is not flagged | `tests/test_no_patch_misses_its_target.py`, with bite cases in `tests/test_guards_bite.py` |
 | A Python subclass of a Qt class is declared at module scope, never inside a function: declared inside a builder with methods closing over `ctx`, the Home notes box kept every closed `ReviewApp` alive (§10.4) | `tests/test_qt_subclasses_live_at_module_scope.py`, with bite cases in `tests/test_guards_bite.py` |
 | A closed `ReviewApp` is collected, leaves no top-level widget behind, and a window closed mid-drain runs no deferred builder after it is gone (§10.4) — slow lane, run by hand | `tests/test_a_closed_review_app_is_freed.py` |

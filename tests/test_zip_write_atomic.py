@@ -189,7 +189,7 @@ def test_merge_images_into_zip_writes_nothing_when_there_are_no_images(tmp_path)
 
 def test_compress_images_to_zip_publishes_a_readable_archive(tmp_path):
     pytest.importorskip("numpy")
-    from process_microscopy import compress_images_to_zip
+    from pipeline.io import compress_images_to_zip
 
     image_dir = tmp_path / "images"
     image_dir.mkdir()

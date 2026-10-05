@@ -14,6 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from pathlib import Path
 
 import pytest
+from pipeline import cli_args
 
 
 @pytest.fixture(scope="module")
@@ -59,8 +60,7 @@ def test_build_pipeline_args_never_disables_compression(qapp, tmp_path):
 def test_pipeline_arg_parser_has_no_compress_flags():
     # The pipeline must only ever emit .zip — there's no flag to turn it off.
     pytest.importorskip("scipy")
-    import process_microscopy as pm
-    parser = pm.build_parser()
+    parser = cli_args.build_parser()
     actions = {
         opt for a in parser._actions for opt in a.option_strings
     }

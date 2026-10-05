@@ -32,9 +32,9 @@ import numpy as np
 import pytest
 import tifffile
 
-from process_microscopy import (
+from process_microscopy import correct_single_frame
+from pipeline.empty_well import (
     build_background_models,
-    correct_single_frame,
     _empty_well_field,
 )
 
@@ -272,7 +272,7 @@ def test_a_requested_correction_that_cannot_be_built_stops_the_run():
     """Uncorrected output that looks corrected is the one thing this codebase
     is not allowed to emit, so a model that comes back empty is fatal rather
     than a log line nobody reads."""
-    from process_microscopy import _require_empty_well_models
+    from pipeline.empty_well import _require_empty_well_models
 
     with pytest.raises(SystemExit) as exc:
         _require_empty_well_models("background", "empty_well", {},
@@ -286,7 +286,7 @@ def test_a_requested_correction_that_cannot_be_built_stops_the_run():
 def test_a_built_model_and_the_unrelated_modes_pass(tmp_path):
     """The gate must not fire on a healthy run, nor on a mode that never had a
     blank to look for."""
-    from process_microscopy import _require_empty_well_models
+    from pipeline.empty_well import _require_empty_well_models
 
     _require_empty_well_models("background", "empty_well", {"gfp": {}},
                                ["H12"], tmp_path)          # built: fine

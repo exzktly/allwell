@@ -18,10 +18,10 @@ import types
 import numpy as np
 import pytest
 
-import process_microscopy as pm
 # The StarDist segmenters + per-worker model state moved here (pm re-exports the
 # functions); the model global must be patched where it actually lives.
 import pipeline.stardist as _stardist
+from pipeline import stardist
 
 
 @pytest.fixture(autouse=True)
@@ -76,7 +76,7 @@ def test_nan_input_is_scrubbed(fake_model):
     img[7, 7] = np.nan          # one NaN would poison percentile normalization
     img[1, 1] = np.inf
     img[2, 2] = -np.inf
-    labels = pm._segment_stardist_nuclei(img)       # must NOT raise/abort
+    labels = stardist._segment_stardist_nuclei(img)       # must NOT raise/abort
     assert labels.dtype == np.int32
     assert np.all(np.isfinite(fake_model.seen))
     assert labels.max() == 1
@@ -86,7 +86,7 @@ def test_all_nan_input_skips_prediction(fake_model):
     # All-NaN scrubs to all-zero → near-constant → the degenerate-field guard
     # returns empty labels WITHOUT calling StarDist (avoids the ClipperLib abort).
     img = np.full((12, 12), np.nan, dtype=np.float32)
-    labels = pm._segment_stardist_nuclei(img)
+    labels = stardist._segment_stardist_nuclei(img)
     assert labels.shape == img.shape
     assert labels.max() == 0
     assert fake_model.seen is None          # prediction skipped
@@ -96,14 +96,14 @@ def test_constant_field_skips_prediction(fake_model):
     # A near-constant field (e.g. an empty-well over-subtracted nuclear channel)
     # has no nuclei and is the classic ClipperLib trigger — skip it.
     img = np.full((20, 20), 123.0, dtype=np.float32)
-    labels = pm._segment_stardist_nuclei(img)
+    labels = stardist._segment_stardist_nuclei(img)
     assert labels.max() == 0
     assert fake_model.seen is None
 
 
 def test_finite_structured_input_reaches_model(fake_model):
     img = np.random.default_rng(1).random((10, 10)).astype(np.float32)
-    pm._segment_stardist_nuclei(img)
+    stardist._segment_stardist_nuclei(img)
     assert fake_model.seen is not None and np.all(np.isfinite(fake_model.seen))
 
 
@@ -115,7 +115,7 @@ def test_ood_amplified_spike_is_clamped(fake_model):
     img = (rng.random((24, 24)).astype(np.float32) * 0.5 + 0.25)   # structured
     img[5, 5] = 1e6           # amplified outlier
     img[6, 6] = 5e5
-    labels = pm._segment_stardist_nuclei(img)      # must NOT raise/abort
+    labels = stardist._segment_stardist_nuclei(img)      # must NOT raise/abort
     assert labels.dtype == np.int32
     assert fake_model.seen is not None
     assert fake_model.seen.min() >= -1e-6 and fake_model.seen.max() <= 1.0 + 1e-6

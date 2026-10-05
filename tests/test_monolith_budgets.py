@@ -106,9 +106,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # FOV-group's quality record moved beside the metrics it composes, as
 # `pipeline.field_quality.group_record`. Every name is re-exported, so no call
 # site moved with either.
-# 3804 -> 3766: twenty-five re-exports nothing reached any more were deleted
-# (`tests/test_process_microscopy_facade.py` classifies the rest).
-PROCESS_MICROSCOPY_BUDGET = 3766
+# 3804 -> 3766: twenty-five re-exports nothing reached any more were deleted.
+# 3766 -> 3733: every caller moved to the owning module and the remaining
+# re-exports went, with the Cellpose ``__getattr__`` shim
+# (`tests/test_process_microscopy_facade.py`).
+PROCESS_MICROSCOPY_BUDGET = 3733
 
 # `services/remote_runner.py` is the largest module in the repo — nearly twice
 # `process_microscopy.py` — and until now the only large one with nothing

@@ -1336,11 +1336,10 @@ class _BatchedRemoteProcess:
         onto the same stream closes it, and the regexes that were always there
         start matching."""
         try:
-            # Late import: ``process_microscopy`` is a heavy module
-            # (pulls TensorFlow indirectly). Don't pay that cost on
-            # every import of remote_runner.
+            # Late import: the threshold pass pulls in the imaging stack.
+            # Don't pay that cost on every import of the remote client.
             sys.path.insert(0, str(repo_root()))
-            from process_microscopy import run_auto_threshold_pass
+            from pipeline.auto_threshold_pass import run_auto_threshold_pass
             import logging
             log_pylog = logging.getLogger("allwell.local_auto_threshold")
             self._log(

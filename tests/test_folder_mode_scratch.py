@@ -18,7 +18,6 @@ from pathlib import Path
 import pytest
 
 import pipeline.io as pio
-import process_microscopy as pm
 
 
 def test_commit_staging_dir_renames_when_same_filesystem(tmp_path):
@@ -27,7 +26,7 @@ def test_commit_staging_dir_renames_when_same_filesystem(tmp_path):
     (stage / "a_labels.tif").write_bytes(b"x")
     final = tmp_path / "A01"
 
-    pm._commit_staging_dir(stage, final)
+    pio._commit_staging_dir(stage, final)
 
     assert not stage.exists()
     assert (final / "a_labels.tif").read_bytes() == b"x"
@@ -47,7 +46,7 @@ def test_commit_staging_dir_copies_across_filesystems(monkeypatch, tmp_path):
 
     monkeypatch.setattr(Path, "rename", _exdev)
 
-    pm._commit_staging_dir(stage, final)
+    pio._commit_staging_dir(stage, final)
 
     assert (final / "a_labels.tif").read_bytes() == b"x"
     assert (final / "sub" / "b.tif").read_bytes() == b"y"
@@ -66,7 +65,7 @@ def test_commit_staging_dir_propagates_other_oserrors(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "rename", _eacces)
 
     with pytest.raises(OSError) as ei:
-        pm._commit_staging_dir(stage, final)
+        pio._commit_staging_dir(stage, final)
     assert ei.value.errno == errno.EACCES
 
 

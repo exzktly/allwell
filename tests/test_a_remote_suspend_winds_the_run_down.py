@@ -32,6 +32,7 @@ import pytest
 
 from tests._fake_remote import FakeRemote
 from services.remote_fetch import FetchedOutputVerifier
+import pipeline.suspend as _suspend
 
 _REPO = Path(__file__).resolve().parent.parent
 
@@ -81,8 +82,8 @@ def test_the_pipeline_watches_the_file_it_is_given(monkeypatch, tmp_path):
     import process_microscopy as pm
 
     seen: list[object] = []
-    monkeypatch.setattr(pm._suspend, "install_handlers", lambda **k: None)
-    monkeypatch.setattr(pm._suspend, "watch_request_file",
+    monkeypatch.setattr(_suspend, "install_handlers", lambda **k: None)
+    monkeypatch.setattr(_suspend, "watch_request_file",
                         lambda path, **k: seen.append(path))
     request = tmp_path / "req"
     monkeypatch.setattr(sys, "argv", [

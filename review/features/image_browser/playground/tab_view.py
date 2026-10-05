@@ -22,7 +22,8 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from pipeline.stardist import NMS_THRESH_HELP, PROB_THRESH_HELP
-from process_microscopy import BACKGROUND_METHODS, FLATFIELD_MODES
+from pipeline.background import BACKGROUND_METHODS
+from pipeline.cli_args import FLATFIELD_MODES
 from widgets.info_icon import info_icon
 from widgets.page_body import build_page_body
 from widgets.separator import build_hline_separator

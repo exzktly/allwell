@@ -20,7 +20,8 @@ pytest.importorskip("tifffile")
 
 import numpy as np
 
-from process_microscopy import _correct_image_group, parse_schema
+from process_microscopy import _correct_image_group
+from util.schema import parse_schema
 
 _SCHEMA = parse_schema("experiment:channel:well:fov:timepoint")
 

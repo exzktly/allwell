@@ -52,6 +52,7 @@ from review.features.image_browser.playground import (
 from review.features.image_browser.playground.worker import (
     request_reference_fields, request_stardist_labels,
 )
+from pipeline.io import load_2d_gray
 
 
 def _st(ctx):
@@ -500,7 +501,7 @@ def _load_loose_frame(ctx, path: str) -> np.ndarray | None:
     if key in cache:
         return cache[key]
     try:
-        arr = pm.load_2d_gray(Path(path))
+        arr = load_2d_gray(Path(path))
     except Exception as exc:
         # Deliberately broad: the user can point this at any file, and each
         # imaging library raises its own type for "that is not an image I can

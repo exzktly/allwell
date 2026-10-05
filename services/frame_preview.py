@@ -38,7 +38,7 @@ _GUI_STARDIST_MODEL = None
 #: a sweep started a second daemon thread into the same object. Two things go
 #: wrong there and the first is the worse one. On the **first** load of a
 #: session both threads find ``_GUI_STARDIST_MODEL is None`` and both call
-#: ``pm._load_stardist_pretrained``, whose body runs under a *cross-process*
+#: ``stardist_cache._load_stardist_pretrained``, whose body runs under a *cross-process*
 #: advisory lock keyed on the holder's pid. That lock is not reentrant within
 #: one process and its dead-holder reclaim asks whether the holder is alive —
 #: the holder being this very process, it never is reclaimed, so the second
@@ -101,7 +101,7 @@ def segment_frame(arr, *, prob_thresh=None, nms_thresh=None, tile_px: int = 0,
         raise RuntimeError(_MISSING_DEPS_MSG.format(missing=", ".join(missing)))
 
     global _GUI_STARDIST_MODEL
-    import process_microscopy as pm
+    import pipeline.stardist_cache as stardist_cache
     from pipeline.stardist import StarDistParams, segment_nuclei
 
     # Everything that touches the session's one model is serialised — see
@@ -112,12 +112,12 @@ def segment_frame(arr, *, prob_thresh=None, nms_thresh=None, tile_px: int = 0,
         if _GUI_STARDIST_MODEL is None:
             if on_stage is not None:
                 on_stage(STAGE_LOADING)
-            pm._ensure_pkg_resources_shim()
+            stardist_cache._ensure_pkg_resources_shim()
             from stardist.models import StarDist2D
             # The pipeline workers' loader: recovers from a cache left
             # truncated by an interrupted download, and serialises against a
             # pipeline run that is fetching the same weights right now.
-            _GUI_STARDIST_MODEL = pm._load_stardist_pretrained(
+            _GUI_STARDIST_MODEL = stardist_cache._load_stardist_pretrained(
                 StarDist2D, "2D_versatile_fluo")
 
         if on_stage is not None:
@@ -147,10 +147,10 @@ def ensure_model():
         raise RuntimeError(_MISSING_DEPS_MSG.format(missing=", ".join(missing)))
     with _MODEL_LOCK:
         if _GUI_STARDIST_MODEL is None:
-            import process_microscopy as pm
-            pm._ensure_pkg_resources_shim()
+            import pipeline.stardist_cache as stardist_cache
+            stardist_cache._ensure_pkg_resources_shim()
             from stardist.models import StarDist2D
-            _GUI_STARDIST_MODEL = pm._load_stardist_pretrained(
+            _GUI_STARDIST_MODEL = stardist_cache._load_stardist_pretrained(
                 StarDist2D, "2D_versatile_fluo")
         return _GUI_STARDIST_MODEL
 

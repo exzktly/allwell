@@ -89,12 +89,12 @@ def test_the_model_is_loaded_at_most_once_per_session(monkeypatch):
     """
     pytest.importorskip("stardist")
     import pipeline.stardist as sd
-    import process_microscopy as pm
+    import pipeline.stardist_cache as stardist_cache
 
     monkeypatch.setattr(FP, "_GUI_STARDIST_MODEL", None)
     loads: list[str] = []
-    monkeypatch.setattr(pm, "_ensure_pkg_resources_shim", lambda: None)
-    monkeypatch.setattr(pm, "_load_stardist_pretrained",
+    monkeypatch.setattr(stardist_cache, "_ensure_pkg_resources_shim", lambda: None)
+    monkeypatch.setattr(stardist_cache, "_load_stardist_pretrained",
                         lambda cls, name: loads.append(name) or object())
     monkeypatch.setattr(sd, "segment_nuclei",
                         lambda arr, *, model, params: np.zeros(arr.shape, dtype=np.int32))

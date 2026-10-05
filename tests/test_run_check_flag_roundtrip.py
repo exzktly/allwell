@@ -22,6 +22,7 @@ from analyze.domain.job_edit import _opts_as_pinfo_keys
 from analyze.log_pane import _completeness_line
 from services.pipeline_service import build_pipeline_args
 from services import remote_run_id
+from pipeline import cli_args
 
 
 def _args(**opts):
@@ -54,10 +55,9 @@ def test_an_opts_dict_from_before_the_checkbox_means_on():
 
 
 def test_the_pipeline_parser_accepts_what_the_form_emits():
-    import process_microscopy as pm
 
     argv = _args(run_check=False)
-    parsed = pm.build_parser().parse_args(argv[2:])
+    parsed = cli_args.build_parser().parse_args(argv[2:])
     assert parsed.no_run_check is True
 
 

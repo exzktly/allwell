@@ -41,7 +41,7 @@ def test_every_background_method_declares_its_parameters():
 
 
 def test_every_flatfield_mode_declares_its_parameters():
-    from process_microscopy import FLATFIELD_MODES
+    from pipeline.cli_args import FLATFIELD_MODES
 
     from pipeline.flatfield import FLATFIELD_MODE_PARAMS
 

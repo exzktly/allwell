@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from process_microscopy import build_parser
+from pipeline.cli_args import build_parser
 from services.pipeline_service import find_pipeline_script
 from services.remote_config import get_remote, load_remotes
 from services.remote_runner import (

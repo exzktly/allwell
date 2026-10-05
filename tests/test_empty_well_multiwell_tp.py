@@ -18,13 +18,15 @@ pytest.importorskip("scipy")
 pytest.importorskip("skimage")
 import tifffile
 
-from process_microscopy import (
-    sample_empty_well_images,
+from util.well_token import split_background_wells as _split_background_wells
+from pipeline.empty_well import (
     build_background_models,
     build_flatfield_models,
-    _split_background_wells,
     _empty_well_tp_key,
     _empty_well_field,
+)
+from pipeline.empty_well import (
+    sample_empty_well_images,
     _POOLED_TP,
 )
 
@@ -93,7 +95,7 @@ def test_sample_pools_multiple_wells_grouped_by_timepoint(tmp_path):
 
 
 def test_bg_well_key_tolerates_zero_padding():
-    from process_microscopy import _bg_well_key
+    from util.well_token import background_well_key as _bg_well_key
     # A1 and A01 are the same 96-well position → same match key.
     assert _bg_well_key("A1") == _bg_well_key("A01") == "a01"
     assert _bg_well_key("h12") == "h12"

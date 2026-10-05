@@ -1,113 +1,95 @@
-"""``process_microscopy``'s re-exports are classified, live, and only shrink.
+"""``process_microscopy`` re-exports nothing, and nobody reaches through it for
+what it imports.
 
-The pipeline orchestrator re-exported most of what moved out of it into
+The pipeline orchestrator used to re-export most of what moved out of it into
 ``pipeline/`` so that tests and a few GUI call sites did not have to change.
 Row A0 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` measured 45
-pure re-exports — names imported and never read by the module itself — with
-``tests/_facade_scan.py``, which sees every access form (``from … import``,
-attribute reads and writes under any alias, named setattr/patch calls, string
-patch targets), and checked every file type for the rest. Twenty-five had no
-consumer at all and were removed; one more went when the only test reaching it
-turned out to patch an alias nothing read
-(``tests/test_no_patch_misses_its_target.py``).
+pure re-exports with ``tests/_facade_scan.py`` — which sees every access form:
+``from … import``, attribute reads and writes under any alias, named
+setattr/patch calls and string patch targets — and removed the 26 nothing
+reached. Row A1 moved every remaining caller to the module that owns the name
+and removed the rest, along with a PEP 562 ``__getattr__`` that re-exported
+three Cellpose names for two tests.
 
-What is left is classified here. A first-party alias is a GUI module importing a
-pipeline name through the orchestrator rather than from its owner; a test-only
-alias is a test doing the same. Both are migration debt (row A1 takes them to the
-owners); a side-effect import is not a re-export at all and stays.
+What this holds now:
+
+* the module's only import that is not used by the module is a side-effect
+  import;
+* no application code reaches, through ``process_microscopy``, a name the
+  module merely imports — it imports it from the owner;
+* a test reaches such a name only to patch a binding the orchestrator itself
+  calls. Patching the owner would not reach that call, because the
+  orchestrator holds its own binding of the name; each seam is listed with the
+  test that needs it, and an entry nobody reaches any more fails.
+
+Names the orchestrator *defines* are its own and are not policed here.
 """
 
 from __future__ import annotations
 
-import ast
-import importlib
+import functools
 from pathlib import Path
 
-from tests._facade_scan import consumers_of, reexports
-from tests._repo_scan import parse_source
+from tests._facade_scan import consumers_of, module_level_names, reexports
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODULE_PATH = REPO_ROOT / "process_microscopy.py"
 MODULE = "process_microscopy"
 
-SIDE_EFFECT = "side-effect import"
-FIRST_PARTY = "first-party transitional alias"
-TEST_ONLY = "test-only alias"
+#: Imported for what importing it does, never re-exported as a name.
+SIDE_EFFECT_IMPORTS = {
+    "tifffile": "registers the TIFF codecs the image readers rely on",
+}
 
-INVENTORY: dict[str, str] = {
-    # Imported for what importing it does, never re-exported as a name.
-    "tifffile": SIDE_EFFECT,
-    # The Image Browser Playground reaches the pipeline's background code
-    # through the orchestrator.
-    "BACKGROUND_METHODS": FIRST_PARTY,
-    "FLATFIELD_MODES": FIRST_PARTY,
-    "estimate_background_field": FIRST_PARTY,
-    # Reached only by tests.
-    "_FLATFIELD_FLOOR": TEST_ONLY,
-    "_FLATFIELD_SIGMA": TEST_ONLY,
-    "_POOLED_TP": TEST_ONLY,
-    "_bg_well_key": TEST_ONLY,
-    "_isotropic_disk_tophat": TEST_ONLY,
-    "_load_image_source": TEST_ONLY,
-    "_match_background_scale": TEST_ONLY,
-    "_normalize_flatfield": TEST_ONLY,
-    "_purge_stardist_cache": TEST_ONLY,
-    "_require_empty_well_models": TEST_ONLY,
-    "_segmentation_tokens": TEST_ONLY,
-    "_split_background_wells": TEST_ONLY,
-    "_stardist_cache_models_dir": TEST_ONLY,
-    "apply_tophat": TEST_ONLY,
-    "estimate_basic_flatfield": TEST_ONLY,
-    "sample_empty_well_images": TEST_ONLY,
+#: Imported names the orchestrator calls, patched on it by tests that steer
+#: that call.
+BINDING_SEAMS = {
+    "ProcessPoolExecutor": "tests/test_well_worker_pool.py runs the pool in-process",
+    "as_completed": "tests/test_well_worker_pool.py, paired with the executor",
+    "_safe_atomic_text_write": "tests/test_run_check_pass.py fails the record write",
+    "preflight_scratch_for_run": "tests/test_capacity.py stubs the scratch preflight",
+    "prepare_models": "tests/test_only_wells_run.py wraps the model build",
 }
 
 
+@functools.cache
 def _consumers():
     return consumers_of(MODULE, exclude=[MODULE_PATH])
 
 
-def test_every_re_export_is_classified():
-    pure = reexports(MODULE_PATH)
-    unclassified = sorted(pure - set(INVENTORY))
-    gone = sorted(set(INVENTORY) - pure)
-    assert not unclassified, (
-        "process_microscopy re-exports names nobody classified. If nothing "
-        "reaches one, delete the import; otherwise import it from its owner:\n  "
-        + "\n  ".join(unclassified))
-    assert not gone, f"inventoried names that are no longer re-exported: {gone}"
+def _imported_names_reached() -> dict[str, set[str]]:
+    """``name -> files`` for every name the module imports (rather than
+    defines) that some other file reaches through it."""
+    bound = module_level_names(MODULE_PATH)
+    return {name: {f for f, _form in users}
+            for name, users in _consumers().items()
+            if name in bound and bound[name] != "defined"}
 
 
-def test_each_alias_is_reached_by_the_kind_of_caller_it_claims():
-    users = _consumers()
-    wrong = []
-    for name, kind in INVENTORY.items():
-        if kind == SIDE_EFFECT:
-            continue
-        files = {f for f, _form in users.get(name, ())}
-        app = {f for f in files if not f.startswith("tests/")}
-        tests = files - app
-        if kind == FIRST_PARTY and not app:
-            wrong.append(f"{name}: no first-party caller any more — reclassify or delete")
-        if kind == TEST_ONLY and app:
-            wrong.append(f"{name}: reached by application code {sorted(app)}")
-        if kind == TEST_ONLY and not tests:
-            wrong.append(f"{name}: no test reaches it — delete the alias")
-    assert not wrong, "\n".join(wrong)
+def test_the_only_unused_import_is_a_side_effect_import():
+    extra = sorted(reexports(MODULE_PATH) - set(SIDE_EFFECT_IMPORTS))
+    assert not extra, (
+        "process_microscopy imports names it does not use. If something reaches "
+        "one through it, import it from the owner instead; then delete the "
+        "import:\n  " + "\n  ".join(extra))
 
 
-def test_aliases_are_the_owner_s_object():
-    module = importlib.import_module(MODULE)
-    bound_from = {}
-    for node in parse_source(MODULE_PATH).body:
-        if isinstance(node, ast.ImportFrom) and node.module:
-            for alias in node.names:
-                bound_from[alias.asname or alias.name] = (node.module, alias.name)
-    wrong = []
-    for name, kind in INVENTORY.items():
-        if kind == SIDE_EFFECT:
-            continue
-        owner_mod, original = bound_from[name]
-        owner = importlib.import_module(owner_mod)
-        if getattr(module, name) is not getattr(owner, original):
-            wrong.append(f"{name}: not {owner_mod}.{original}")
-    assert not wrong, "\n".join(wrong)
+def test_no_application_code_reaches_an_imported_name_through_it():
+    wrong = {name: sorted(f for f in files if not f.startswith("tests/"))
+             for name, files in _imported_names_reached().items()}
+    wrong = {n: f for n, f in wrong.items() if f}
+    assert not wrong, (
+        "Import these from the module that defines them, not through "
+        "process_microscopy:\n  " + "\n  ".join(f"{n}: {f}" for n, f in sorted(wrong.items())))
+
+
+def test_tests_reach_an_imported_name_only_to_patch_a_binding():
+    reached = _imported_names_reached()
+    unexpected = sorted(set(reached) - set(BINDING_SEAMS))
+    stale = sorted(set(BINDING_SEAMS) - set(reached))
+    assert not unexpected, (
+        "Tests reach these imported names through process_microscopy. Read them "
+        "from their owner; only a patch of a binding the orchestrator calls "
+        "belongs here, listed in BINDING_SEAMS with its reason:\n  "
+        + "\n  ".join(f"{n}: {sorted(reached[n])}" for n in unexpected))
+    assert not stale, f"BINDING_SEAMS entries nobody reaches any more: {stale}"

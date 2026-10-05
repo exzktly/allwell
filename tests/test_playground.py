@@ -14,6 +14,8 @@ import numpy as np
 import pytest
 
 import process_microscopy as pm
+from pipeline import background
+from pipeline import flatfield
 
 # Heavy: builds the Qt Playground worker/UI; ~4 min. Excluded from the fast CI
 # lane (`-m "not slow"`); run explicitly in the local/manual full pass.
@@ -32,14 +34,14 @@ def test_correct_single_frame_parity_per_image():
     # gaussian flatfield + sliding_disk == compose the primitives directly
     got = pm.correct_single_frame(img, flatfield_mode="gaussian",
                                   background_method="sliding_disk", radius=15)
-    want = pm.subtract_background(
-        pm.apply_flatfield(img, pm.estimate_gaussian_flatfield(img)), 15,
+    want = background.subtract_background(
+        flatfield.apply_flatfield(img, flatfield.estimate_gaussian_flatfield(img)), 15,
         "sliding_disk")
     assert np.allclose(got, want)
     # robust_mesh params flow through unchanged
     got2 = pm.correct_single_frame(img, background_method="robust_mesh",
                                    radius=20, mesh_ratio=4.0, mesh_sigma=2.0)
-    want2 = pm.subtract_background(img, 20, "robust_mesh", mesh_ratio=4.0,
+    want2 = background.subtract_background(img, 20, "robust_mesh", mesh_ratio=4.0,
                                    mesh_sigma=2.0)
     assert np.allclose(got2, want2)
 
@@ -47,12 +49,12 @@ def test_correct_single_frame_parity_per_image():
 def test_correct_single_frame_parity_combined_empty_well():
     img = _frame(1)
     from pipeline.flatfield import normalize_flatfield
-    B = pm.estimate_background_field([img, img * 0.9 + 5, img * 1.1])
+    B = background.estimate_background_field([img, img * 0.9 + 5, img * 1.1])
     normB = normalize_flatfield(B)
     got = pm.correct_single_frame(img, flatfield_mode="empty_well",
                                   background_method="empty_well",
                                   bg_field=B, ff_field=normB)
-    want = pm.combined_empty_well_correct(img, B, normB)
+    want = background.combined_empty_well_correct(img, B, normB)
     assert np.allclose(got, want)
 
 

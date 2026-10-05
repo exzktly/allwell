@@ -16,7 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from process_microscopy import _segmentation_tokens, run_auto_threshold_pass
+from pipeline.auto_threshold_pass import run_auto_threshold_pass
+from pipeline.auto_threshold_pass import _segmentation_tokens
 from services import remote_process
 
 
@@ -213,7 +214,7 @@ def test_argv_parse_applies_the_labelfree_phase_remap():
     segmented, so the pass zeroed the wrong channel's threshold and derived a
     real one from the brightfield image.
     """
-    from process_microscopy import _segmentation_tokens
+    from pipeline.auto_threshold_pass import _segmentation_tokens
     from services.remote_process import _auto_threshold_args_from_argv
 
     argv = [
@@ -234,7 +235,7 @@ def test_argv_parse_applies_the_labelfree_phase_remap():
 
 
 def test_argv_parse_leaves_the_nuclear_token_alone_for_other_methods():
-    from process_microscopy import _segmentation_tokens
+    from pipeline.auto_threshold_pass import _segmentation_tokens
     from services.remote_process import _auto_threshold_args_from_argv
 
     args = _auto_threshold_args_from_argv([

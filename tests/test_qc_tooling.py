@@ -12,30 +12,35 @@ import pytest
 pytest.importorskip("scipy")
 pytest.importorskip("skimage")
 
-from process_microscopy import (
-    apply_flatfield,
+from process_microscopy import compute_region_areas
+from pipeline.background import (
+    BACKGROUND_METHODS,
     apply_tophat,
-    estimate_gaussian_flatfield,
-    estimate_basic_flatfield,
+    combined_empty_well_correct,
     estimate_background_field,
     subtract_background,
-    combined_empty_well_correct,
-    BACKGROUND_METHODS,
-    compute_region_areas,
-    build_flatfield_models,
-    build_background_models,
-    sample_empty_well_images,
-    _normalize_flatfield,
-    _FLATFIELD_FLOOR,
+)
+from pipeline.empty_well import (
     _POOLED_TP,
     _empty_well_field,
-    _split_background_wells,
+    build_background_models,
+    build_flatfield_models,
+    sample_empty_well_images,
 )
+from pipeline.flatfield import (
+    _FLATFIELD_FLOOR,
+    _normalize_flatfield,
+    apply_flatfield,
+    estimate_basic_flatfield,
+    estimate_gaussian_flatfield,
+)
+from util.well_token import split_background_wells as _split_background_wells
 from services.pipeline_service import build_pipeline_args
 from pathlib import Path
 import io
 import zipfile
 import tifffile
+from pipeline import cli_args
 
 
 # ── bright-region area (debris StarDist shatters into many small cells) ──────
@@ -165,9 +170,8 @@ def test_qc_bounds_still_reach_the_sidecar():
     """The CLI ``--qc_*`` bounds are NOT dead: ``build_parser`` still accepts
     them so they flow into ``pipeline_info``'s ``qc_options`` for the Review
     QC layer."""
-    import process_microscopy as pm
 
-    args = pm.build_parser().parse_args([
+    args = cli_args.build_parser().parse_args([
         "--input_dir", ".", "--output_dir", ".",
         "--qc_min_area", "12", "--qc_max_area", "34", "--qc_min_solidity", "0.5",
     ])
@@ -267,7 +271,7 @@ def _base_opts(**over):
 # ── background-subtraction methods ───────────────────────────────────────────
 
 def test_subtract_background_method_dispatch_and_default():
-    from process_microscopy import _isotropic_disk_tophat
+    from pipeline.background import _isotropic_disk_tophat
     img = (np.random.default_rng(1).random((48, 48)) * 100).astype(np.float32)
     # explicit top_hat is still byte-for-byte the legacy square top-hat
     assert np.allclose(subtract_background(img, 8, "top_hat"), apply_tophat(img, 8))

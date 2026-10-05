@@ -141,6 +141,27 @@ class PersistenceRegistry:
                 "persistence: debounced autosave for %r failed; the edit was "
                 "not written to disk", name)
 
+    # -- for a caller outside the pane ------------------------------------
+    #
+    # The headless report (``allwell_report.py``) builds the pane and must
+    # reach these without importing the pane's internals; the registry is the
+    # object the app already hands out for the dataset's files.
+
+    def writes_suspended(self, root):
+        """``_io.writes_suspended`` — no dataset JSON written under *root*."""
+        from review.persistence._io import writes_suspended
+        return writes_suspended(root)
+
+    def suppressed_writes(self) -> int:
+        """How many writes a suspension has dropped in this process."""
+        from review.persistence._io import suppressed_writes
+        return suppressed_writes()
+
+    def record_event(self, event: str, *, source: str, detail: dict) -> bool:
+        """Append *event* to the open dataset's provenance log."""
+        from review.persistence.provenance import record_event
+        return record_event(self._ctx, event, source=source, detail=detail)
+
     # -- the background writer -------------------------------------------
 
     def _enqueue(self, name: str, job) -> None:

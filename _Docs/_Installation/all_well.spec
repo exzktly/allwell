@@ -296,6 +296,9 @@ hiddenimports = [
     # missed by PyInstaller's static analysis, unlike the top-level
     # pipeline.auto_threshold / util.well_token).
     "pipeline.shape_features",
+    # The headless report entry point, reached only through the launcher's
+    # --run-report dispatch (a function-level import).
+    "allwell_report",
     # Qt-free flat-field estimators shared by pipeline + viewer (imported lazily
     # inside the review-image controller, so static analysis can miss it).
     "pipeline.flatfield",

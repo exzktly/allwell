@@ -437,6 +437,21 @@ def _svc_heatmap_well_dropped():
 
 
 
+def _svc_saved_plots_gallery():
+    from review.features.saved_plots._render import gallery
+    return gallery
+
+
+def _svc_saved_plots_report_pdf():
+    from review.features.saved_plots._report import build_saved_plots_report
+    return build_saved_plots_report
+
+
+def _svc_saved_plots_render():
+    from review.features.saved_plots._render import render_saved_plot
+    return render_saved_plot
+
+
 def _svc_image_browser_show_field():
     from review.features.image_browser.review_image._navigate import show_field
     return show_field
@@ -1034,6 +1049,11 @@ def _features() -> list[FeatureDescriptor]:
             lazy_only=True,
             on_activate=_activate_saved_plots,
             plot_card_decorator=_saved_plots_card_decorator,
+            # The headless report reads the gallery and draws each plot
+            # through these, so the report names no feature.
+            services={"saved_plots.gallery": _svc_saved_plots_gallery,
+                      "saved_plots.render": _svc_saved_plots_render,
+                      "saved_plots.report_pdf": _svc_saved_plots_report_pdf},
         ),
         FeatureDescriptor(
             name="Batch Export", group="Data", build=_build_batch_export,

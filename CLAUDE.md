@@ -257,11 +257,12 @@ each with its guard):
    holds plates and wells.
 
 ```
-── entry points (the three commands a person runs) ──
+── entry points (the four commands a person runs) ──
 allwell.py              app entry + title-bar shell (Review / Analyze / Datasets)
 process_microscopy.py   pipeline orchestrator + CLI (Qt-free, self-sufficient)
+allwell_report.py       headless report: draw a dataset's saved plots, no window
 all_well_launcher.py    the module PyInstaller boots (+ --run-pipeline / --run-zipper
-                        / --run-bootstrap dispatch)
+                        / --run-bootstrap / --run-report dispatch)
 
 ── repo config ──
 version.py              SINGLE source of truth for the app version

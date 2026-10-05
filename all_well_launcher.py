@@ -17,7 +17,9 @@ This launcher ensures:
     instead of the GUI. The Analyze tab uses that path to spawn the
     pipeline subprocess from inside the frozen bundle, where
     ``sys.executable`` points at the .app binary and not a Python
-    interpreter.
+    interpreter. ``--run-report`` dispatches the same way to the headless
+    report (``allwell_report.main``), which from source is
+    ``python allwell_report.py``.
 
 When running from source (not bundled), sys._MEIPASS is not set, so
 modules are loaded from the repository root instead.
@@ -211,6 +213,15 @@ def _dispatch() -> None:
         sys.modules["remote_bootstrap"] = _mod
         _spec.loader.exec_module(_mod)
         sys.exit(_mod.main())
+    if len(sys.argv) > 1 and sys.argv[1] == "--run-report":
+        # The headless report (``python allwell_report.py …`` from source). In
+        # a frozen bundle that script is not runnable on its own, so it gets
+        # the same sentinel dispatch as the three above; the rest of argv is
+        # the report's own flags.
+        from util.frozen_io import ensure_std_streams
+        ensure_std_streams()
+        from allwell_report import main as report_main
+        sys.exit(report_main(sys.argv[2:]))
     _apply_baked_theme()
     from allwell import main
     main()

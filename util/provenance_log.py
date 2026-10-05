@@ -94,6 +94,8 @@ EVENT_FIELDS: dict[str, tuple[str, ...]] = {
     # wrote is also an ``analysis_changed``; this line says where they came
     # from and what did not copy.
     "recipe_applied": ("source", "scopes", "failed"),
+    # The headless report drew this dataset's saved plots into a folder.
+    "report_generated": ("output", "status", "drawn", "not_drawn"),
 }
 
 

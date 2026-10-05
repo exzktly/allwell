@@ -4740,6 +4740,31 @@ rather than a single panel.
   one PDF to hand off alongside your analysis, or as a PowerPoint deck when the
   figures still need restyling for a talk or a thesis.
 
+#### Drawing the gallery without opening the app
+
+```bash
+python allwell_report.py --dataset /data/plate-01 --output /reports/plate-01
+```
+
+draws every saved plot of a dataset from its **current** data — the same as
+pressing Restore on each — without opening a window, and writes:
+
+```
+/reports/plate-01/
+├── figures/01_<title>.png  (+ .svg)   ← one per plot that could be drawn
+├── report.pdf                         ← the drawn plots, one per page
+└── manifest.json                      ← every saved plot, drawn or not, and why
+```
+
+A plot that cannot be redrawn — an Image Table grid, or one panel of a
+multi-panel figure — is listed in `manifest.json` with the reason rather than
+left out. The command's exit code says how it went: `0` everything drawn, `3`
+some drawn (the manifest names the rest), `1` nothing drawn, `2` the folder is
+not a dataset (or this build has no Saved Plots), `4` the dataset has no saved
+plots. The dataset itself is not changed; the run is noted in its history
+(`provenance.jsonl`). In the packaged app, run the app's executable with
+`--run-report` as its first argument, followed by the same flags.
+
 ### Batch export
 
 Define one or more groups (replicate sets + solo wells), pick a set of

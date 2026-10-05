@@ -124,6 +124,59 @@ def _retry_on_permission_error(op_name: str, op):
     raise last_exc
 
 
+# --------------------------------------------------------------------------
+# Suspending writes under a directory
+# --------------------------------------------------------------------------
+#
+# The headless report (``allwell_report.py``) loads a dataset into the real app
+# and replays each saved plot, which moves gating, groups and view state the
+# way a user restoring a plot would — and every one of those moves schedules a
+# save. A report must change nothing about the dataset it reports on, so while
+# it runs every JSON write under that dataset's folder is dropped here, at the
+# one function that lands them, and counted. Process-wide rather than
+# thread-local, because the background writer is another thread.
+_suspended_roots: list[Path] = []
+_suspended_count = 0
+_suspend_lock = threading.Lock()
+
+
+@contextmanager
+def writes_suspended(root: Path) -> Iterator[None]:
+    """Within this block, no dataset JSON file under *root* is written.
+
+    Each dropped write is counted (:func:`suppressed_writes`) and logged at
+    INFO, so a caller can say in its own output how many it suppressed.
+    """
+    resolved = Path(root).resolve()
+    with _suspend_lock:
+        _suspended_roots.append(resolved)
+    try:
+        yield
+    finally:
+        with _suspend_lock:
+            _suspended_roots.remove(resolved)
+
+
+def suppressed_writes() -> int:
+    """How many writes :func:`writes_suspended` has dropped in this process."""
+    return _suspended_count
+
+
+def _is_suspended(path: Path) -> bool:
+    global _suspended_count
+    with _suspend_lock:
+        if not _suspended_roots:
+            return False
+        try:
+            target = Path(path).resolve()
+        except OSError:
+            return False
+        if any(target == r or r in target.parents for r in _suspended_roots):
+            _suspended_count += 1
+            return True
+    return False
+
+
 def _replace_with_text(path: Path, text: str, *, durable: bool) -> None:
     """Land *text* at *path* through a uniquified tmp file + ``os.replace``.
 
@@ -136,6 +189,10 @@ def _replace_with_text(path: Path, text: str, *, durable: bool) -> None:
     replace and compared with *text* just after it, on this same thread, so a
     write that fails records nothing.
     """
+    if _is_suspended(path):
+        _logger.info("write to %s suppressed: writes are suspended under its "
+                     "dataset (a headless report is running)", path)
+        return
     before = _provenance.before_write(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _unique_tmp_path(path)

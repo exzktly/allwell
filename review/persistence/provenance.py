@@ -157,12 +157,23 @@ def after_write(path: Path, before: dict[str, object] | None, text: str) -> int:
     return recorded
 
 
-def record_reset(ctx, scopes) -> bool:
-    """Record that the named reset scopes were cleared. ``True`` when written."""
+def record_event(ctx, event: str, *, source: str, detail: dict) -> bool:
+    """Append *event* to the open dataset's log. ``False`` with no dataset open.
+
+    The log sits beside the dataset's sidecar, which for the Analyze layout is
+    one level above Review's data directory — the loader's own resolution
+    decides it, so every writer on the Review side lands in the same file.
+    """
     data_dir = getattr(ctx.state.dataset, "data_dir", None)
-    if not data_dir or not scopes:
+    if not data_dir:
         return False
     from review.domain.viewer_state import resolve_pipeline_info_path
     directory = resolve_pipeline_info_path(Path(data_dir)).parent
-    return append_event(directory, "reset", source="review",
-                        detail={"scopes": list(scopes)})
+    return append_event(directory, event, source=source, detail=detail)
+
+
+def record_reset(ctx, scopes) -> bool:
+    """Record that the named reset scopes were cleared. ``True`` when written."""
+    if not scopes:
+        return False
+    return record_event(ctx, "reset", source="review", detail={"scopes": list(scopes)})

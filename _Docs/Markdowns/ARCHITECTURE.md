@@ -207,11 +207,13 @@ months later.
 ```
 allwell/
 │
-│  ── entry points: the three commands a person runs ──
+│  ── entry points: the four commands a person runs ──
 ├── allwell.py                   ← `python allwell.py` — the GUI, plus the title-bar shell and help drawer
 ├── process_microscopy.py        ← the analysis pipeline orchestrator + its CLI (decomposed; see §6.2)
+├── allwell_report.py            ← `python allwell_report.py` — draw a dataset's saved plots without a
+│                                  window (Saved Plots → *The headless report*)
 ├── all_well_launcher.py         ← the module PyInstaller boots + the --run-pipeline / --run-zipper
-│                                  / --run-bootstrap dispatch. A helper the *app* spawns is not an entry
+│                                  / --run-bootstrap / --run-report dispatch. A helper the *app* spawns is not an entry
 │                                  point in this sense and does not belong here — it lives in the package
 │                                  whose work it does (see pipeline/well_plate_zipper.py below)
 │
@@ -663,7 +665,8 @@ review/
 │   ├── spatial/      controller.py, collect.py, renderer.py, state.py, tab_view.py
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
 │   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
-│   │                 + _svg_shapes.py (the PowerPoint export)
+│   │                 + _svg_shapes.py (the PowerPoint export),
+│   │                 _render.py (draw one record for the headless report)
 │   ├── crop/         controller.py, region.py        ← support lib (always present)
 │   ├── qc/           controller.py, params.py, tab_view.py   ← support lib
 │   ├── export/       service.py, style.py, sidebar_view.py
@@ -2477,6 +2480,59 @@ existing rows and drops new ones with the same key, so re-processing an
 already-processed field through the incremental path would leave the old numbers
 and report success; a field-level rerun needs a replace-merge and is tracked in
 `_Docs/Markdowns/WORKFLOW_FEATURES_TRACKER.md` (rows Q10–Q14).
+
+#### The headless report (`allwell_report.py`)
+
+`python allwell_report.py --dataset <folder> --output <folder>` draws every
+saved plot of a dataset from its current data without showing a window, and
+writes `figures/NN_<title>.png` + `.svg`, `report.pdf`, and `manifest.json`.
+
+**It is an entry point, beside `allwell.py`.** It constructs the Review pane,
+which only the shell may do — a module inside `review/` may not import
+`ReviewApp` (`test_nothing_imports_reviewapp_at_runtime`) — so it is a root
+module with its reason in `tests/test_root_holds_only_entry_points.py`, and the
+frozen app reaches it through the launcher's `--run-report` dispatch.
+
+**It is the real app, offscreen.** `allwell_report.run_report` constructs `ReviewApp`
+under the offscreen platform, loads the dataset, and replays each record through
+the `saved_plots.render` service (`features/saved_plots/_render.py`): restore the
+record onto its tab, finish the gating pass on this thread, capture the figure
+in publication mode — the replay the PowerPoint export's vector repair already
+performs. Measured before choosing this route: construction and load of the mini
+dataset take about 7 s and 400 MB, no window is shown and no modal is raised.
+The alternative — a widget-free context driving collectors and renderers —
+would need Batch Export's orchestration lifted out of its panels first and
+would be a second definition of how every plot is drawn. The PDF is the
+gallery's own builder (`saved_plots.report_pdf`); the report names no
+feature and reaches all three through services, so a profile without Saved
+Plots gets an exit code and a sentence rather than an `ImportError`.
+
+**A plot that is not drawn is a manifest entry with the reason**, never an
+absence: an Image Table grid (no chart to redraw), a record saved as one panel
+of a multi-panel figure (a redraw would draw every panel), a replay that raised.
+Copied plots (`copied_from`) are drawn from this dataset's data like any other,
+and the entry keeps their origin. Exit codes distinguish complete (0), failed
+(1), invalid input (2 — no folder, no wells, or no Saved Plots in this build),
+partial (3) and nothing to report (4); the manifest carries the same status as a
+word, and is written on every path, including invalid input.
+
+**It does not change the dataset.** The run sits inside
+`persistence/_io.writes_suspended(dataset)` — reached as
+`ctx.persistence.writes_suspended`, with `suppressed_writes` and `record_event`
+beside it on the registry, so the report imports nothing from the pane except
+`ReviewApp` — which drops every JSON write under
+the dataset folder at `_replace_with_text` — the one function that lands them —
+and counts it; pending debounced saves are flushed inside the block so none
+fires afterwards, and the count is in the manifest. Measured, replays that
+re-adopt a plot's groups or move its gating schedule no save at all, so this is
+defence in depth rather than a path the end-to-end test exercises: that test
+pins the outcome (the dataset is byte-identical afterwards) and
+`tests/test_headless_report.py` pins the suspension itself. The one write to
+the dataset is a `report_generated` line in its provenance log (§5.7).
+
+Batch Export groups are not drawn by the report yet: their orchestration lives
+in the panels. Nor does the report apply a recipe first — that would change the
+dataset; copy the analysis in the app, then report.
 
 #### Exporting the gallery (`features/saved_plots/_report.py`, `_deck.py`)
 
@@ -8718,8 +8774,11 @@ PyInstaller entry point. Two responsibilities:
    when running inside a frozen `.app` bundle — there's no Python
    interpreter on `sys.executable`, so re-exec'ing the launcher with the
    sentinel argv routes the same Python process into the pipeline.
-   `--run-zipper` and `--run-bootstrap` are the same trick for
-   `well_plate_zipper.main()` and `services/remote_bootstrap.main()`.
+   `--run-zipper`, `--run-bootstrap` and `--run-report` are the same trick
+   for `well_plate_zipper.main()`, `services/remote_bootstrap.main()` and the
+   headless report's `allwell_report.main()` (which from source is
+   `python allwell_report.py`; the spec lists it as a hidden import, since the
+   launcher reaches it through a function-level import).
 
 A frozen **windowed** (`console=False`) build leaves `sys.stdout` /
 `sys.stderr` — and `sys.__stdout__` / `sys.__stderr__` — set to None even

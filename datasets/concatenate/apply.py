@@ -32,6 +32,7 @@ from util.timepoint import parse_hours
 from util.aw_safe import swallow
 from domain.tp_match import tp_close
 from datasets.core.concurrency import pick_workers
+from datasets.core.provenance import record_derivation
 from datasets.core.containers import (
     FILENAME_COLUMN as _FILENAME_COLUMN,
     OVERRIDES_FILENAME as _OVERRIDES_FILENAME,
@@ -716,6 +717,8 @@ def execute_plan(
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)
     emit("Wrote merged pipeline_info.json.")
+    record_derivation(plan.dest, tool="concatenate", sources=(plan.ds1, plan.ds2),
+                      offset_hours=plan.offset_hours)
 
     return (
         f"Concatenated {len(all_wells)} well(s) into {plan.dest.root} "

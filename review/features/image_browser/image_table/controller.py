@@ -26,9 +26,9 @@ if TYPE_CHECKING:
 import logging
 from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
-    QLabel, QVBoxLayout, QWidget,
+    QLabel, QToolTip, QVBoxLayout, QWidget,
 )
 from core.safe import swallow, swallowed
 from review.core.ui_helpers import set_combo_values
@@ -501,6 +501,60 @@ def _hover_array(ctx, well: str, chan: str, tp: str, fov: str, r: int) -> np.nda
     return arr
 
 
+class _CellEventFilter(QObject):
+    """One image-table cell's hover readout and crop-drag events.
+
+    Declared at module scope with its collaborators held on the instance,
+    rather than inside :func:`_install_cell_events` closing over them: see
+    ``tests/test_qt_subclasses_live_at_module_scope.py``.
+    """
+
+    def __init__(self, parent, *, update_hover, hover_text, show_tip,
+                 crop_tool) -> None:
+        super().__init__(parent)
+        self._update_hover = update_hover
+        self._hover_text = hover_text
+        self._show_tip = show_tip
+        self._crop_tool = crop_tool
+
+    def eventFilter(self, obj, ev):
+        t = ev.type()
+        if t == QEvent.MouseMove:
+            self._update_hover(obj, ev)
+            if self._crop_tool is not None:
+                self._crop_tool.update_drag(ev)
+        elif t == QEvent.ToolTip:
+            # The label carries a static combo-title tooltip (setToolTip).
+            # Without this branch, Qt shows *that* when the cursor rests,
+            # replacing the live pixel readout — so the intensity value
+            # appears only while the mouse moves and vanishes the moment it
+            # stops. Re-show the readout (a superset of the combo title) at
+            # the hover point and swallow the event so the static tooltip
+            # never fires; the value now stays put while the cursor is still.
+            try:
+                lp = ev.pos()
+                text = self._hover_text(obj, int(lp.x()), int(lp.y()))
+            except Exception:
+                text = ""
+            if text:
+                try:
+                    gp = ev.globalPos()
+                except Exception:
+                    gp = None
+                self._show_tip(obj, gp, text)
+                return True
+            return False
+        elif t == QEvent.MouseButtonPress:
+            if self._crop_tool is not None:
+                self._crop_tool.begin_drag(obj, ev)
+        elif t == QEvent.MouseButtonRelease:
+            if self._crop_tool is not None:
+                self._crop_tool.end_drag(ev)
+        elif t == QEvent.Leave:
+            QToolTip.hideText()
+        return False
+
+
 def _install_cell_events(
     ctx, label, crop_tool, well: str, chan: str, tp: str, fov: str, r: int = 0,
     readout_chan: str | None = None,
@@ -526,9 +580,7 @@ def _install_cell_events(
     hit, and the result is held for the cell currently under the cursor
     (:func:`_hover_array`) so moving within one cell never decodes twice.
     """
-    from PySide6.QtCore import QObject, QEvent
     from PySide6.QtCore import Qt as _Qt
-    from PySide6.QtWidgets import QToolTip
 
     readout = readout_chan or chan
     label.setMouseTracking(True)
@@ -626,45 +678,9 @@ def _install_cell_events(
         except Exception:
             QToolTip.hideText()
 
-    class _CellEventFilter(QObject):
-        def eventFilter(self, obj, ev):
-            t = ev.type()
-            if t == QEvent.MouseMove:
-                _update_hover(obj, ev)
-                if crop_tool is not None:
-                    crop_tool.update_drag(ev)
-            elif t == QEvent.ToolTip:
-                # The label carries a static combo-title tooltip (setToolTip).
-                # Without this branch, Qt shows *that* when the cursor rests,
-                # replacing the live pixel readout — so the intensity value
-                # appears only while the mouse moves and vanishes the moment it
-                # stops. Re-show the readout (a superset of the combo title) at
-                # the hover point and swallow the event so the static tooltip
-                # never fires; the value now stays put while the cursor is still.
-                try:
-                    lp = ev.pos()
-                    text = _hover_text(obj, int(lp.x()), int(lp.y()))
-                except Exception:
-                    text = ""
-                if text:
-                    try:
-                        gp = ev.globalPos()
-                    except Exception:
-                        gp = None
-                    _show_tip(obj, gp, text)
-                    return True
-                return False
-            elif t == QEvent.MouseButtonPress:
-                if crop_tool is not None:
-                    crop_tool.begin_drag(obj, ev)
-            elif t == QEvent.MouseButtonRelease:
-                if crop_tool is not None:
-                    crop_tool.end_drag(ev)
-            elif t == QEvent.Leave:
-                QToolTip.hideText()
-            return False
-
-    filt = _CellEventFilter(label)
+    filt = _CellEventFilter(label, update_hover=_update_hover,
+                            hover_text=_hover_text, show_tip=_show_tip,
+                            crop_tool=crop_tool)
     label.installEventFilter(filt)
     # Keep a reference so the filter isn't garbage-collected.
     label._image_table_event_filter = filt  # type: ignore[attr-defined]

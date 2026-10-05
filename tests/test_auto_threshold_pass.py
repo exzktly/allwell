@@ -16,7 +16,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from process_microscopy import _segmentation_tokens, run_auto_threshold_pass
+from pipeline.auto_threshold_pass import run_auto_threshold_pass
+from pipeline.auto_threshold_pass import _segmentation_tokens
+from services import remote_process
 
 
 LOG = logging.getLogger("test_auto_threshold_pass")
@@ -173,7 +175,7 @@ def test_the_pass_never_raises(tmp_path):
 def test_argv_parse_reads_every_fluor_token():
     """``--fluor_tokens`` is multi-valued; reading it with a single ``next()``
     picked up only the first, so a batched remote run thresholded one channel."""
-    from services.remote_runner import _auto_threshold_args_from_argv
+    from services.remote_process import _auto_threshold_args_from_argv
 
     args = _auto_threshold_args_from_argv([
         "process_microscopy.py",
@@ -199,7 +201,7 @@ def test_argv_parse_reads_every_fluor_token():
     (["--csv_prefix", "cells"], "cells"),
 ])
 def test_argv_parse_defaults(argv, expected):
-    from services.remote_runner import _auto_threshold_args_from_argv
+    from services.remote_process import _auto_threshold_args_from_argv
     assert _auto_threshold_args_from_argv(argv).csv_prefix == expected
 
 
@@ -212,8 +214,8 @@ def test_argv_parse_applies_the_labelfree_phase_remap():
     segmented, so the pass zeroed the wrong channel's threshold and derived a
     real one from the brightfield image.
     """
-    from process_microscopy import _segmentation_tokens
-    from services.remote_runner import _auto_threshold_args_from_argv
+    from pipeline.auto_threshold_pass import _segmentation_tokens
+    from services.remote_process import _auto_threshold_args_from_argv
 
     argv = [
         "process_microscopy.py",
@@ -233,8 +235,8 @@ def test_argv_parse_applies_the_labelfree_phase_remap():
 
 
 def test_argv_parse_leaves_the_nuclear_token_alone_for_other_methods():
-    from process_microscopy import _segmentation_tokens
-    from services.remote_runner import _auto_threshold_args_from_argv
+    from pipeline.auto_threshold_pass import _segmentation_tokens
+    from services.remote_process import _auto_threshold_args_from_argv
 
     args = _auto_threshold_args_from_argv([
         "process_microscopy.py",
@@ -458,9 +460,8 @@ def test_batched_remote_honours_an_unchecked_box():
     Once appended they look identical, and the local end-of-run re-run treated
     every batched run as "the batcher did it", writing thresholds for operators
     who had explicitly asked for none."""
-    import services.remote_runner as rr
 
-    p = object.__new__(rr._BatchedRemoteProcess)
+    p = object.__new__(remote_process._BatchedRemoteProcess)
 
     p._pipeline_argv = ["--csv_prefix", "measurements"]
     assert p._auto_threshold_off_by_user() is False
@@ -481,9 +482,8 @@ def _batched_that_will_skip_every_well(tmp_path, argv):
     import threading
     import types
 
-    import services.remote_runner as rr
 
-    p = object.__new__(rr._BatchedRemoteProcess)
+    p = object.__new__(remote_process._BatchedRemoteProcess)
     zip_dir = tmp_path / "in"
     zip_dir.mkdir()
     out_dir = tmp_path / "out"

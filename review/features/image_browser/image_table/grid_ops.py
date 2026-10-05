@@ -18,6 +18,7 @@ from review.features.image_browser.image_table.controller import (
 from review.features.image_browser.image_table.grid_layout import (
     _all_dim_options,
 )
+from widgets.owned_action import owned_action
 
 # (menu label, dimension name, render-model cell key)
 _OVERRIDE_DIMS = (
@@ -52,7 +53,7 @@ def image_table_cell_override_menu(ctx, r: int, c: int, global_pos) -> None:
         cur = cell.get(cell_key, "")
         sub = menu.addMenu(f"{label}: {cur or '—'}")
         for val in _all_dim_options(ctx, dim):
-            act = sub.addAction(val)
+            act = owned_action(sub, val)
             act.setCheckable(True)
             act.setChecked(val == cur)
             act.triggered.connect(lambda _c=False, k=cell_key, v=val: _set(k, v))

@@ -11,11 +11,11 @@ Extracted from ``process_microscopy``, which is at its line budget
 (``tests/test_monolith_budgets.py``) and could not otherwise grow. The budget
 ratchets down to what this leaves.
 
-``process_microscopy`` re-exports every name, because its callers reach them
-through it: ``services/frame_preview`` calls ``pm._ensure_pkg_resources_shim()``
-and ``pm._load_stardist_pretrained(...)`` by attribute at call time — which is
-also how the tests patch them — and ``tests/test_model_recovery.py`` drives all
-five through ``pm``.
+Callers reach these here. ``services/frame_preview`` calls
+``_ensure_pkg_resources_shim`` and ``_load_stardist_pretrained`` on this module by
+attribute at call time, which is also where its tests patch them, and
+``tests/test_model_recovery.py`` drives them here too. ``process_microscopy``
+imports the two it calls for its own workers.
 
 Stdlib only, Qt-free and free of ``review`` / ``widgets``, like every
 ``pipeline`` module. TensorFlow and StarDist are **not** imported here: the

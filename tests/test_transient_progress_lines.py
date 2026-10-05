@@ -29,6 +29,7 @@ from services.pipeline_runner import (
     ProgressTracker,
     is_transient_progress,
 )
+from services import remote_upload
 
 
 def test_a_marked_line_is_transient():
@@ -112,7 +113,7 @@ def test_the_heartbeat_emits_both_cadences():
     """A fast live sample and a slow durable breadcrumb, from one loop."""
     import inspect
 
-    from services.remote_runner import Fetcher
+    from services.remote_fetch import Fetcher
 
     src = inspect.getsource(Fetcher._transfer_heartbeat)
     assert "TRANSIENT_PREFIX" in src, "the live sample must be marked transient"
@@ -123,14 +124,13 @@ def test_the_heartbeat_emits_both_cadences():
 def test_rsync_progress_no_longer_goes_to_the_log():
     import inspect
 
-    import services.remote_runner as rr
 
-    src = inspect.getsource(rr._run_rsync_streaming)
+    src = inspect.getsource(remote_upload._run_rsync_streaming)
     assert "TRANSIENT_PREFIX}{line}" in src
     assert 'log_fn(f"[remote] ↑ {line}' not in src
 
 
 def test_the_breadcrumb_is_a_minute_not_seconds():
-    from services.remote_runner import _BREADCRUMB_INTERVAL_S
+    from services.remote_wire import _BREADCRUMB_INTERVAL_S
 
     assert _BREADCRUMB_INTERVAL_S >= 60.0

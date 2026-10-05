@@ -10,8 +10,7 @@ background. When both are on they are folded into one physically-correct step,
 Everything that decides *which frames the blank contributes and what field they
 make* lives here: the sampler, the two model builders, the per-image lookup, and
 the guard that stops a run whose requested correction could not be built.
-``process_microscopy`` re-exports every name, so its call sites and the tests
-that reach them through ``pm.<name>`` are unchanged.
+Callers import from here; ``process_microscopy`` imports what it calls.
 
 **The model shape is ``{channel_token: {tp_key: field, _POOLED_TP: field}}``.**
 Background drifts over time, so a field is built per timepoint and each

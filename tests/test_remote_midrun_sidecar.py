@@ -32,8 +32,13 @@ from pathlib import Path
 import pytest
 
 from services.remote_config import RemoteHost
-from services.remote_runner import Fetcher, LocalInputMode, OutputFilter
+from services.remote_runner import (
+    LocalInputMode,
+    OutputFilter,
+)
+from services.remote_fetch import Fetcher
 from tests._repo_scan import parse_source
+from services import remote_fetch
 
 
 @pytest.fixture
@@ -47,7 +52,7 @@ def host():
 
 
 def _make_run(tmp_path: Path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
     return _RemoteRun(
         run_id="run-abc", cache_key="k", remote_input_dir="/r/in",
         remote_output_dir="/r/out", remote_pidfile="/r/pid",
@@ -81,7 +86,6 @@ def _fake_rsync(monkeypatch, payload: dict | None):
     destination and succeeds, ``None`` means the remote has not written the
     file yet and rsync fails the way it does for a missing source.
     """
-    import services.remote_runner as RR
     calls: list[str] = []
 
     def _run(cmd, **kwargs):
@@ -92,7 +96,7 @@ def _fake_rsync(monkeypatch, payload: dict | None):
         Path(cmd[-1]).write_text(json.dumps(payload))
         return subprocess.CompletedProcess(cmd, returncode=0)
 
-    monkeypatch.setattr(RR, "_rsync_with_retry", _run)
+    monkeypatch.setattr(remote_fetch, "_rsync_with_retry", _run)
     return calls
 
 
@@ -182,11 +186,10 @@ def test_the_first_attempt_waits_rather_than_firing_at_launch(
     pull is a round trip guaranteed to miss. It is also what made three
     spawn-path tests fail: a background rsync landing in the middle of them."""
     import threading
-    import services.remote_runner as RR
 
     f = _fetcher(host, tmp_path)
     calls = _fake_rsync(monkeypatch, REMOTE_SIDECAR)
-    monkeypatch.setattr(RR, "SIDECAR_POLL_S", 30.0)
+    monkeypatch.setattr(remote_fetch, "SIDECAR_POLL_S", 30.0)
 
     t = threading.Thread(target=f._sidecar_loop, daemon=True)
     t.start()

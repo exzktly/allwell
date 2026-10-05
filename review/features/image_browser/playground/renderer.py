@@ -24,15 +24,16 @@ from review.core.frame_render import (  # noqa: F401 — re-exported
 )
 
 
-def render_playground_display(win) -> None:
-    """Blit ``win._app_state.playground.base_rgb`` onto the Playground canvas,
+def render_playground_display(ctx) -> None:
+    """Blit ``ctx.state.playground.base_rgb`` onto the Playground canvas,
     fit-to-viewport × zoom, honouring pan. Modelled on
     ``render_review_image_display`` but isolated to the Playground widgets."""
+    win = ctx.window
     label = getattr(win, "_playground_image_label", None)
     canvas = getattr(win, "_playground_image_canvas", None)
     if label is None or canvas is None:
         return
-    st = win._app_state.playground
+    st = ctx.state.playground
     rgb = st.base_rgb
     if rgb is None:
         label.clear()

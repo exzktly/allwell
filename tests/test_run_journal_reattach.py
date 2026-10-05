@@ -32,16 +32,19 @@ import zipfile
 import pytest
 
 from services import run_journal as J
-from services.remote_runner import (
-    DatasetCache,
+from services.remote_runner import stage_local_zips
+from services.remote_run_id import (
     _choose_remote_output_dir,
     _compute_run_id,
     pipeline_argv_digest,
-    stage_local_zips,
 )
+from services.remote_upload import DatasetCache
+from services import remote_run_state
+from services import remote_fetch
+from services import remote_upload
 
 def _make_host():
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     return RemoteHost(
         name="test", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
@@ -291,7 +294,7 @@ def test_the_fetch_report_prefers_the_journal(tmp_path, monkeypatch):
     The in-memory state cannot say this: to it, a well that failed to
     materialise and a well nobody mentioned look the same — absent.
     """
-    from services.remote_runner import _classify_fetched_wells
+    from services.remote_fetch import _classify_fetched_wells
 
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "state" / "idx.json")
     out = tmp_path / "out"
@@ -314,7 +317,7 @@ def test_the_fetch_report_falls_back_to_the_in_memory_state(tmp_path):
     maps, so a fallback that consulted only one of them would turn a well the
     Fetcher deliberately skipped into one it had never heard of.
     """
-    from services.remote_runner import _classify_fetched_wells
+    from services.remote_fetch import _classify_fetched_wells
 
     out = tmp_path / "out"
     out.mkdir()
@@ -338,7 +341,7 @@ def _cleanup_deletions(tmp_path, monkeypatch, *, reattached: bool) -> list[str]:
     """
     from services import remote_runner as rr
 
-    run = rr._RemoteRun(
+    run = remote_run_state._RemoteRun(
         run_id="run-new", cache_key="k" * 32, remote_input_dir="/r/in",
         remote_output_dir=(STORED if reattached
                            else "~/.allwell-staging/runs/run-new/out"),
@@ -354,20 +357,21 @@ def _cleanup_deletions(tmp_path, monkeypatch, *, reattached: bool) -> list[str]:
             removed.extend(argv[2:])
         return None
 
-    monkeypatch.setattr(rr.DatasetCache, "_ssh_run", _ssh_run)
+    monkeypatch.setattr(remote_upload.DatasetCache, "_ssh_run", _ssh_run)
 
     runner = rr.RemoteRunner.__new__(rr.RemoteRunner)
     runner._run = run
-    runner._cache = rr.DatasetCache.__new__(rr.DatasetCache)
+    runner._cache = remote_upload.DatasetCache.__new__(remote_upload.DatasetCache)
+    runner._cancelled = __import__("threading").Event()
     runner.host = _make_host()
     # Nothing is missing, so verify passes and cleanup is reached.
-    monkeypatch.setattr(rr.RemoteRunner, "_verify_local_manifest",
+    monkeypatch.setattr(remote_fetch.FetchedOutputVerifier, "_verify_local_manifest",
                         lambda self, *, log: [])
-    monkeypatch.setattr(rr.RemoteRunner, "_reconcile_fetch",
+    monkeypatch.setattr(remote_fetch.FetchedOutputVerifier, "_reconcile_fetch",
                         lambda self, *, log: "")
     # Real rsync attempts, with the retry ladder behind them — a minute of
     # timeouts for artefacts this test does not look at.
-    monkeypatch.setattr(rr.RemoteRunner, "_rsync_optional",
+    monkeypatch.setattr(remote_fetch.FetchedOutputVerifier, "_rsync_optional",
                         lambda self, *a, **kw: None)
     rr.RemoteRunner.verify_and_cleanup(
         runner, True, cleanup_mode="run", log_fn=lambda _m: None)
@@ -409,7 +413,7 @@ def test_an_ordinary_run_still_removes_its_run_dir(tmp_path, monkeypatch):
 # ── the discrimination the whole re-attach rests on ─────────────────────────
 
 def _record_run_one(out_dir, in_dir):
-    from services.remote_runner import source_fingerprint
+    from services.remote_scratch import source_fingerprint
     J.open_run(out_dir, spec={}, mode="remote", input_dir=in_dir, argv=[])
     J.record_remote(
         out_dir, run_id="run-OLD", cache_key="keyOLD", host_alias="hpc",
@@ -419,7 +423,7 @@ def _record_run_one(out_dir, in_dir):
 
 
 def _run_two_chooses(out_dir, in_dir):
-    from services.remote_runner import source_fingerprint
+    from services.remote_scratch import source_fingerprint
     J.open_run(out_dir, spec={}, mode="remote", input_dir=in_dir, argv=[])
     stored = J.stored_remote_address(
         out_dir, argv_digest="d1", source_key=source_fingerprint(in_dir),
@@ -482,7 +486,7 @@ def test_the_stored_address_survives_the_app_s_real_call_order(tmp_path, monkeyp
     something a unit test of either end can see.
     """
     from services import pipeline_runner as PR
-    from services.remote_runner import source_fingerprint
+    from services.remote_scratch import source_fingerprint
 
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
     out = tmp_path / "out"

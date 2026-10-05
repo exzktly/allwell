@@ -648,7 +648,7 @@ def export_plot_data(ctx) -> None:
 
 def export_bar_plot_data(ctx) -> None:
     from review.domain import fold_change as _fc
-    from review.features.barplot.controller import FC_STATE_OFF
+    from review.features.barplot.collect import FC_STATE_OFF
 
     # Pull EVERY selected timepoint from the multi-select popup, falling
     # back to the hidden single-tp combo only when the popup hasn't been

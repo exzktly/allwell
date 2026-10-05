@@ -184,3 +184,25 @@ def test_per_axis_style_controls_apply_to_each_panel():
         assert round(lbl.get_rotation()) == 0
         assert lbl.get_ha() == "center"
         assert other.xaxis.get_major_ticks()[0].tick1line.get_markersize() == 4.0
+
+
+def test_a_flat_limit_reaches_only_the_targeted_panel():
+    """With an "Axis #" target and no per-panel bucket, the flat limit belongs
+    to the targeted panel alone; every other panel keeps its own autoscale.
+
+    Measured: with the target check in ``_axis_limit`` replaced by ``True`` the
+    rest of this file stayed green (C0 of the implementation remediation plan),
+    so the flat-limit fallback had no test of its scope.
+    """
+    fig = Figure()
+    first = fig.add_subplot(2, 1, 1)
+    second = fig.add_subplot(2, 1, 2)
+    first.plot([0, 1], [0, 100])
+    second.plot([0, 1], [0, 100])
+    second_before = second.get_ylim()
+
+    PS.apply_export_style_prefs(
+        fig, {"axis_target": "1", "y_lim_min": "0", "y_lim_max": "5"})
+
+    assert first.get_ylim() == (0.0, 5.0)
+    assert second.get_ylim() == second_before

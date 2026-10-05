@@ -25,13 +25,13 @@ from services.remote_config import (
     render_slurm_time,
     scale_launcher_time,
 )
-from services.remote_runner import (
+from services.remote_commands import (
     BATCH_DONE,
     BATCH_READY,
     _batch_driver_snippet,
-    _BatchedRemoteProcess,
     _compose_driver_cmd,
 )
+from services.remote_process import _BatchedRemoteProcess
 
 _ARGV = ["python", "process_microscopy.py", "--input_dir", "/r/run-x/in"]
 
@@ -82,10 +82,8 @@ def test_one_batch_may_not_outlive_the_budget_meant_for_one_batch():
 
 
 def test_the_driver_gives_the_node_back_when_the_app_goes_away():
-    from services.remote_runner import (
-        UPLOAD_HEARTBEAT_STALE_S,
-        UPLOAD_WAIT_TIMEOUT_S,
-    )
+    from services.remote_wait_snippets import UPLOAD_WAIT_TIMEOUT_S
+    from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
 
     script = _batch_driver_snippet("/r/run-x", 2, _ARGV, "/r/run-x/.hb")
     assert "stopped responding" in script
@@ -302,7 +300,7 @@ def test_one_allocation_serves_every_batch(tmp_path, monkeypatch):
     _stub_runner(p, proc, ordering)
 
     spawns = []
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+    monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: spawns.append(argv) or proc)
 
     worker = threading.Thread(target=p._run_batches, daemon=True)
@@ -324,7 +322,7 @@ def test_a_failed_batch_is_tallied_and_the_run_continues(tmp_path, monkeypatch):
     proc = _FakeProc()
     p = _batched(tmp_path, ["A01", "A02", "A03"])
     _stub_runner(p, proc, [])
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+    monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
 
     worker = threading.Thread(target=p._run_batches, daemon=True)
@@ -359,7 +357,7 @@ def test_a_suspend_finishes_the_batch_in_flight_and_sends_no_more(
     _stub_runner(p, proc, ordering)
     closed = []
     p._runner.close_remote_job = lambda **kw: closed.append(True)
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+    monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
 
     worker = threading.Thread(target=p._run_batches, daemon=True)
@@ -411,7 +409,7 @@ def test_a_suspend_during_a_batch_upload_ends_the_upload(tmp_path, monkeypatch):
         return (0, 0.0, 20 if stopped else 0)
 
     p._runner._cache.upload_subset = upload
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+    monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
@@ -448,7 +446,7 @@ def test_a_suspend_while_the_job_is_queued_gives_the_allocation_back(
         return (0, 0.0, 20)                 # the transfer the suspend cut short
 
     p._runner._cache.upload_subset = upload
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+    monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
@@ -473,7 +471,7 @@ def test_a_suspended_plate_gets_no_thresholds_from_its_fraction(tmp_path, monkey
     ran = []
     p._auto_threshold_off_by_user = lambda: False
     p._run_local_auto_threshold = lambda: ran.append(True)
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+    monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
@@ -491,7 +489,7 @@ def test_the_markers_never_reach_the_log(tmp_path, monkeypatch):
     proc = _FakeProc()
     p = _batched(tmp_path, ["A01"])
     _stub_runner(p, proc, [])
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+    monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
 
     worker = threading.Thread(target=p._run_batches, daemon=True)
@@ -518,7 +516,7 @@ def test_a_dead_driver_stops_the_run_and_the_downloads(tmp_path, monkeypatch):
     ordering: list[str] = []
     p = _batched(tmp_path, ["A01", "A02", "A03"])
     _stub_runner(p, proc, ordering)
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+    monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
 
     worker = threading.Thread(target=p._run_batches, daemon=True)
@@ -562,7 +560,7 @@ def test_a_stop_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
         return (0, 0.0, 0 if not stop_event.is_set() else 20)
 
     p._runner._cache.upload_subset = blocking_upload
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+    monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
 
     worker = threading.Thread(target=p._run_batches, daemon=True)
@@ -603,7 +601,7 @@ def test_a_second_session_on_the_same_plate_does_not_clear_the_first_s_input(
     p._runner._sweep_orphaned_allocation = lambda *a, **k: "owned"
 
     spawns = []
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+    monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: spawns.append(argv) or proc)
 
     p._run_batches()

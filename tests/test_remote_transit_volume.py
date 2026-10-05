@@ -30,12 +30,14 @@ from services.remote_config import RemoteHost
 # against pre-fix code and fail on its *assertion* rather than on an ImportError
 # raised before it measured anything (CLAUDE.md §7.5).
 from services.remote_runner import (
-    Fetcher,
     LocalInputMode,
     OutputFilter,
-    _scratch_dir,
-    sweep_stale_scratch,
 )
+from services.remote_scratch import _scratch_dir
+from services.remote_scratch import sweep_stale_scratch
+from services.remote_fetch import Fetcher
+from services import remote_scratch
+from services import remote_scratch
 
 # Every test here drives real `RemoteRunner` / `Fetcher` code against a host
 # that does not exist. Answer the ssh and rsync primitives directly rather than
@@ -49,7 +51,7 @@ def host() -> RemoteHost:
 
 
 def _run(tmp_path: Path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
     out = tmp_path / "out"
     out.mkdir()
     return _RemoteRun(
@@ -96,7 +98,8 @@ def test_the_transit_directory_is_hidden_from_every_dataset_scan(host, tmp_path)
     """It lives inside the user's output folder, which Review reads back. Every
     scan in the app drops a name starting with a dot (`image_discovery`,
     `auto_threshold`, `zip_members`), so the name has to keep its dot."""
-    from services.remote_runner import TRANSIT_SUBDIR, _transit_dir
+    from services.remote_scratch import TRANSIT_SUBDIR
+    from services.remote_scratch import _transit_dir
     assert TRANSIT_SUBDIR.startswith(".")
     run = _run(tmp_path)
     got = _transit_dir(run.local_output_dir)
@@ -116,14 +119,13 @@ def test_a_volume_that_refuses_falls_back_and_says_which(tmp_path):
     the same `OSError` a read-only or quota'd output folder does, and unlike a
     chmod it behaves the same for a root-owned CI container.
     """
-    import services.remote_runner as rr
-    rr._transit_refused.clear()
+    remote_scratch._transit_refused.clear()
 
     blocked = tmp_path / "not-a-directory"
     blocked.write_text("")
     logs: list[str] = []
 
-    got = rr._transit_dir(blocked, log_fn=logs.append)
+    got = remote_scratch._transit_dir(blocked, log_fn=logs.append)
     assert got == _scratch_dir()
     first = "".join(logs)
     assert str(blocked) in first
@@ -131,7 +133,7 @@ def test_a_volume_that_refuses_falls_back_and_says_which(tmp_path):
 
     # Once per volume, not once per well: a plate would otherwise repeat it for
     # every one of its wells.
-    rr._transit_dir(blocked, log_fn=logs.append)
+    remote_scratch._transit_dir(blocked, log_fn=logs.append)
     assert "".join(logs).count("falling back") == first.count("falling back") == 1
 
 
@@ -143,7 +145,7 @@ def test_the_stale_sweep_reaches_the_new_location(tmp_path):
     the home scratch would not have fixed that leak, only relocated it."""
     out = tmp_path / "out"
     out.mkdir()
-    from services.remote_runner import _transit_dir
+    from services.remote_scratch import _transit_dir
     leaked = _transit_dir(out) / "allwell-stage-dead"
     leaked.mkdir()
     old = 0.0                                  # epoch: older than any cutoff
@@ -157,7 +159,7 @@ def test_a_live_transit_dir_is_never_swept(tmp_path):
     """The age gate is what keeps a concurrent run's in-flight staging safe."""
     out = tmp_path / "out"
     out.mkdir()
-    from services.remote_runner import _transit_dir
+    from services.remote_scratch import _transit_dir
     live = _transit_dir(out) / "allwell-stage-live"
     live.mkdir()
 
@@ -172,7 +174,7 @@ def test_a_completed_fetch_leaves_nothing_behind(host, tmp_path):
     logs: list[str] = []
     fetcher = _fetcher(host, run, logs)
     well = "A01"
-    from services.remote_runner import _transit_dir
+    from services.remote_scratch import _transit_dir
     tmp_zip = (_transit_dir(run.local_output_dir)
                / f"allwell-{run.run_id}-{well}_out.zip")
     with zipfile.ZipFile(tmp_zip, "w") as z:

@@ -13,9 +13,8 @@ from __future__ import annotations
 from util.json_write import write_json_atomic
 from pathlib import Path
 
-# ``apply_export_style_prefs`` lives in the Qt-free core layer (``export.style``
-# only re-exports it); import it from there so this module stays Qt-free and adds
-# no deferred *feature* import.
+# ``apply_export_style_prefs`` lives in the Qt-free core layer; importing it from
+# there keeps this module Qt-free and adds no deferred *feature* import.
 from review.core.plot_style import apply_export_style_prefs
 
 

@@ -110,7 +110,7 @@ def test_segment_classical_splits_objects():
 def test_segment_cellpose_guarded():
     if importlib.util.find_spec("cellpose") is not None:
         pytest.skip("cellpose installed in this env")
-    from process_microscopy import _segment_cellpose
+    from pipeline.cellpose import _segment_cellpose
     with pytest.raises(RuntimeError, match="[Cc]ellpose"):
         _segment_cellpose(np.zeros((16, 16), np.float32))
 

@@ -13,11 +13,11 @@ import types
 
 import pytest
 
-import services.remote_runner as rr
+from services import remote_process
 
 
 def _bare_batched():
-    p = object.__new__(rr._BatchedRemoteProcess)
+    p = object.__new__(remote_process._BatchedRemoteProcess)
     p._returncode = None
     p._current_proc_lock = threading.Lock()
     p._stop = threading.Event()

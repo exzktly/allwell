@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from services.remote_runner import LocalInputMode, stage_local_zips
+from services import remote_staging
 
 
 def _well_folder(root: Path, well: str, channels=("NIR", "GFP")) -> Path:
@@ -61,12 +62,11 @@ def test_the_plate_is_never_duplicated_beyond_the_well_in_hand(tmp_path, monkeyp
     archive — the one just written, and only until the next statement removes
     it. Deferred deletion made that count climb to the whole plate.
     """
-    import services.remote_runner as rr
 
     for well in ("A01", "A02", "A03"):
         _well_folder(tmp_path, well)
 
-    real = rr._zip_well_folder
+    real = remote_staging._zip_well_folder
     both_seen: list[int] = []
 
     def _spy(folder: Path, target: Path) -> int:
@@ -77,7 +77,7 @@ def test_the_plate_is_never_duplicated_beyond_the_well_in_hand(tmp_path, monkeyp
         ))
         return n
 
-    monkeypatch.setattr(rr, "_zip_well_folder", _spy)
+    monkeypatch.setattr(remote_staging, "_zip_well_folder", _spy)
     _stage(tmp_path)
 
     assert both_seen == [1, 1, 1], both_seen
@@ -119,19 +119,18 @@ def test_a_failure_partway_keeps_the_wells_already_archived(tmp_path, monkeypatc
     had already succeeded. A part-zipped plate is the correct resume state: the
     finished wells read as ZIP mode next time.
     """
-    import services.remote_runner as rr
 
     for well in ("A01", "A02", "A03"):
         _well_folder(tmp_path, well)
 
-    real = rr._zip_well_folder
+    real = remote_staging._zip_well_folder
 
     def _boom(folder: Path, target: Path) -> int:
         if folder.name == "A03":
             raise OSError("drive yanked mid-zip")
         return real(folder, target)
 
-    monkeypatch.setattr(rr, "_zip_well_folder", _boom)
+    monkeypatch.setattr(remote_staging, "_zip_well_folder", _boom)
     with pytest.raises(OSError, match="drive yanked"):
         _stage(tmp_path)
 

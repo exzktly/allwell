@@ -65,11 +65,11 @@ from review.features.barplot._annotations import (
     label_bar,
     user_y_ceiling as _user_y_ceiling,
 )
-from review.features.barplot.controller import (
+from review.features.barplot.controller import render_bar_items as _render_bar_items
+from review.features.barplot.collect import (
     cluster_centers as _cluster_centers,
     cluster_x_for_group_keys,
     clustered_x_positions as _clustered_x_positions,
-    render_bar_items as _render_bar_items,
 )
 
 

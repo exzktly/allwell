@@ -40,7 +40,8 @@ from review.core.plot_annotations import (  # noqa: E402
     value_label_settings,
 )
 from review.core.plot_state import PlotState  # noqa: E402
-from review.features.barplot.controller import BarItem, render_bar_items  # noqa: E402
+from review.features.barplot.collect import BarItem  # noqa: E402
+from review.features.barplot.controller import render_bar_items  # noqa: E402
 
 
 # ── defaults ─────────────────────────────────────────────────────────────────

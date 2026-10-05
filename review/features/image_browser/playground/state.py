@@ -3,7 +3,7 @@
 Per ARCHITECTURE.md §5.9 the Playground's runtime *data* (the chosen frame, the
 selected correction method + parameters, the cached reference-well fields, and
 the view/display options) lives here as a typed dataclass aggregated on
-``AppState`` (``app._app_state.playground``), rather than as loose
+``AppState`` (``ctx.state.playground``), rather than as loose
 ``app._playground_*`` data attributes. Qt widget handles (the selector combos,
 the canvas QLabel, LUT QLineEdits, the ``LutSelector``) stay on ``app`` as
 residual coupling — only plain data moves here.

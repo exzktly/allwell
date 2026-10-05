@@ -25,11 +25,12 @@ import pytest
 
 from services import run_journal as J
 from tests._fake_remote import FakeRemote
+from services.remote_fetch import FetchedOutputVerifier
 
 
 @pytest.fixture
 def host():
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     return RemoteHost(
         name="test", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
@@ -87,8 +88,12 @@ def spawn(stop_fetchers):
     """
     def _spawn(host, plate, remote, monkeypatch, *, completed=(), **kw):
         from services.remote_runner import (
-            DatasetCache, LocalInputMode, OutputFilter, RemoteRunner, ZippedInput,
+            LocalInputMode,
+            OutputFilter,
+            RemoteRunner,
+            ZippedInput,
         )
+        from services.remote_upload import DatasetCache
         def _launched(_argv):
             m = MagicMock()
             m.stdout = MagicMock()
@@ -106,7 +111,7 @@ def spawn(stop_fetchers):
                             lambda self, z, **k: (_KEY, 0, 0.01))
         monkeypatch.setattr(RemoteRunner, "sync_required_files",
                             lambda self, **k: None)
-        monkeypatch.setattr(RemoteRunner, "_list_remote_completed_wells",
+        monkeypatch.setattr(FetchedOutputVerifier, "_list_remote_completed_wells",
                             lambda self: set(completed))
 
         in_dir = plate / "in"
@@ -171,11 +176,11 @@ def test_cleanup_removes_the_run_dir_and_leaves_the_dataset_cache(
     own = str(Path(run.remote_pidfile).parent)
     assert remote.exists(own)
 
-    monkeypatch.setattr(type(runner), "_verify_local_manifest",
+    monkeypatch.setattr(FetchedOutputVerifier, "_verify_local_manifest",
                         lambda self, *, log: [])
-    monkeypatch.setattr(type(runner), "_reconcile_fetch",
+    monkeypatch.setattr(FetchedOutputVerifier, "_reconcile_fetch",
                         lambda self, *, log: "")
-    monkeypatch.setattr(type(runner), "_rsync_optional",
+    monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
                         lambda self, *a, **k: None)
     runner.verify_and_cleanup(True, cleanup_mode="run", log_fn=lambda _m: None)
 
@@ -189,11 +194,11 @@ def test_a_dry_run_cleanup_removes_nothing(host, plate, remote, monkeypatch, spa
                           completed=("A01", "B02"))
     own = str(Path(runner._run.remote_pidfile).parent)
 
-    monkeypatch.setattr(type(runner), "_verify_local_manifest",
+    monkeypatch.setattr(FetchedOutputVerifier, "_verify_local_manifest",
                         lambda self, *, log: [])
-    monkeypatch.setattr(type(runner), "_reconcile_fetch",
+    monkeypatch.setattr(FetchedOutputVerifier, "_reconcile_fetch",
                         lambda self, *, log: "")
-    monkeypatch.setattr(type(runner), "_rsync_optional",
+    monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
                         lambda self, *a, **k: None)
     runner.verify_and_cleanup(True, cleanup_mode="run", dry_run=True,
                               log_fn=lambda _m: None)
@@ -224,7 +229,8 @@ STORED_OUT = "~/.allwell-staging/runs/run-previous/out"
 def _record_a_previous_run(plate, remote):
     """A journal naming an address under a *different* run id, and a host that
     really holds output there — so the re-attach both fires and is verified."""
-    from services.remote_runner import pipeline_argv_digest, source_fingerprint
+    from services.remote_run_id import pipeline_argv_digest
+    from services.remote_scratch import source_fingerprint
 
     remote.path(STORED_OUT).mkdir(parents=True, exist_ok=True)
     for well in ("A01", "B02"):
@@ -278,11 +284,11 @@ def test_a_re_attached_run_leaves_the_borrowed_directory_alone(
     assert "re-attaching" in log
     own = str(Path(runner._run.remote_pidfile).parent)
 
-    monkeypatch.setattr(type(runner), "_verify_local_manifest",
+    monkeypatch.setattr(FetchedOutputVerifier, "_verify_local_manifest",
                         lambda self, *, log: [])
-    monkeypatch.setattr(type(runner), "_reconcile_fetch",
+    monkeypatch.setattr(FetchedOutputVerifier, "_reconcile_fetch",
                         lambda self, *, log: "")
-    monkeypatch.setattr(type(runner), "_rsync_optional",
+    monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
                         lambda self, *a, **k: None)
     runner.verify_and_cleanup(True, cleanup_mode="run", log_fn=lambda _m: None)
 
@@ -300,7 +306,7 @@ def test_a_failing_remote_command_aborts_the_run(host, plate, remote, monkeypatc
     ``check=False`` — a silent continue with no directories, in production —
     passed every other test here.
     """
-    from services.remote_runner import DatasetCache
+    from services.remote_upload import DatasetCache
 
     # A staging dir that cannot be created: a file sits where the directory
     # would go, which is what a stale artefact on a worker host looks like.
@@ -360,9 +366,9 @@ def test_the_transfer_model_honours_the_argv_shapes_the_runner_builds(
     Each rule below is one the runner actually depends on, and each was wrong
     in the first version of this file.
     """
-    import services.remote_runner as rr
+    from services import remote_fetch
 
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     host = RemoteHost(
         name="t", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
@@ -373,7 +379,7 @@ def test_the_transfer_model_honours_the_argv_shapes_the_runner_builds(
     # leaves ``Popen`` replaced for every later test in the session — which is
     # what it did, breaking the local-run harness three files away.
     remote.install(monkeypatch, host)
-    rsync = rr._rsync_with_retry
+    rsync = remote_fetch._rsync_with_retry
 
     # 1. `-aR`, as `sync_required_files` uses: the source path is
     #    reproduced under the destination.
@@ -439,7 +445,7 @@ def test_the_fake_refuses_a_host_it_cannot_contain(tmp_path, remote):
 
     Refusing is the honest answer while nothing rewrites paths inside `_bash`.
     """
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     host = RemoteHost(
         name="t", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="/scratch/someone/staging",
@@ -462,7 +468,7 @@ def test_an_unrelated_subprocess_is_not_mistaken_for_a_pipeline_launch(
     end-to-end tests above assert on. Nothing in the suite reaches it today
     only because those call sites happen to be stubbed.
     """
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     host = RemoteHost(
         name="t", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",

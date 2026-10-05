@@ -4679,3 +4679,366 @@ def test_focus_claim_guard_clears_what_it_should(tmp_path, monkeypatch, shape):
         monkeypatch, "tests.test_focus_claims_stay_measured",
         "test_no_source_file_claims_comparability_without_the_clipping_caveat",
         [good]) is None, f"the {shape} case was wrongly flagged"
+
+
+# ── facade consumer scan ────────────────────────────────────────────────────
+#
+# `tests/_facade_scan.consumers_of` decides which names a facade still has to
+# carry. An import-only version of it once reported eleven remote-runner
+# re-exports as unused while a test still cleared `rr._transit_refused`
+# through the module. Each access form below must be seen; dropping any one
+# from the scan reopens that hole.
+
+FACADE_REACHES = {
+    "from_import": "from services.remote_runner import _target\n",
+    "aliased_attribute": ("import services.remote_runner as rr\n"
+                          "rr._target.clear()\n"),
+    "from_package_attribute": ("from services import remote_runner\n"
+                               "remote_runner._target = 1\n"),
+    "dotted_attribute": ("import services.remote_runner\n"
+                         "services.remote_runner._target()\n"),
+    "named_setattr": ("import services.remote_runner as rr\n"
+                      "def test(monkeypatch):\n"
+                      "    monkeypatch.setattr(rr, '_target', None)\n"),
+    "patch_object": ("from unittest.mock import patch\n"
+                     "from services import remote_runner as RR\n"
+                     "with patch.object(RR, '_target'):\n"
+                     "    pass\n"),
+    "string_target": ("from unittest.mock import patch\n"
+                      "with patch('services.remote_runner._target'):\n"
+                      "    pass\n"),
+    "import_module": ("import importlib\n"
+                      "m = importlib.import_module('services.remote_runner')\n"
+                      "m._target\n"),
+    # Reaches `_target` and walks on: how forty patches of
+    # `"services.remote_runner.subprocess.run"` went unseen by the scan.
+    "deep_string_target": ("def test(monkeypatch):\n"
+                           "    monkeypatch.setattr("
+                           "'services.remote_runner._target.run', None)\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FACADE_REACHES))
+def test_facade_scan_sees_every_access_form(tmp_path, shape):
+    from tests._facade_scan import consumers_of
+    path = _write(tmp_path, "reach.py", FACADE_REACHES[shape])
+    users = consumers_of("services.remote_runner", [path])
+    assert "_target" in users, f"the {shape} reach was not seen: {users}"
+
+
+FACADE_NON_REACHES = {
+    "other_module_attribute": ("import services.remote_transport as rr\n"
+                               "rr._target.clear()\n"),
+    "prefix_named_module": ("from unittest.mock import patch\n"
+                            "with patch('services.remote_runner_extra._target'):\n"
+                            "    pass\n"),
+    "setattr_on_other_object": ("def test(monkeypatch, obj):\n"
+                                "    monkeypatch.setattr(obj, '_target', 1)\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FACADE_NON_REACHES))
+def test_facade_scan_clears_what_is_not_a_reach(tmp_path, shape):
+    from tests._facade_scan import consumers_of
+    path = _write(tmp_path, "not_reach.py", FACADE_NON_REACHES[shape])
+    users = consumers_of("services.remote_runner", [path])
+    assert "_target" not in users, f"the {shape} case was wrongly counted"
+
+
+# ── total allowlisted complexity ────────────────────────────────────────────
+#
+# The per-function ratchet stops a new function crossing CC 40 but let an
+# allowlisted one grow without limit. The total-debt ceiling is what notices
+# an existing debt function gaining a branch, and its not-slack twin is what
+# stops a decomposition's saving being spent later.
+
+def _scores_shifted(module, delta: int):
+    real = module._functions_over_threshold()
+    victim = sorted(module.ALLOWLIST)[0]
+    shifted = dict(real)
+    shifted[victim] = real[victim] + delta
+    return lambda: shifted
+
+
+def test_total_cc_guard_catches_an_allowlisted_function_growing(monkeypatch):
+    module = importlib.import_module("tests.test_complexity_ratchet")
+    monkeypatch.setattr(module, "_functions_over_threshold", _scores_shifted(module, +1))
+    with pytest.raises(AssertionError, match="grew from"):
+        module.test_total_allowlisted_complexity_does_not_grow()
+
+
+def test_total_cc_guard_catches_an_unbanked_saving(monkeypatch):
+    module = importlib.import_module("tests.test_complexity_ratchet")
+    monkeypatch.setattr(module, "_functions_over_threshold", _scores_shifted(module, -1))
+    with pytest.raises(AssertionError, match="lower"):
+        module.test_complexity_debt_budget_is_not_slack()
+
+
+def test_total_cc_guard_clears_the_real_tree():
+    module = importlib.import_module("tests.test_complexity_ratchet")
+    module.test_total_allowlisted_complexity_does_not_grow()
+    module.test_complexity_debt_budget_is_not_slack()
+
+
+# ── Qt subclasses live at module scope ──────────────────────────────────────
+
+QT_LOCAL_CLASS_VIOLATIONS = {
+    # The shape that kept every closed ReviewApp alive (Home notes).
+    "builder_local_widget": ("from PySide6.QtWidgets import QPlainTextEdit\n"
+                             "def build(ctx, frame):\n"
+                             "    class _Notes(QPlainTextEdit):\n"
+                             "        def focusOutEvent(self, e):\n"
+                             "            ctx.save()\n"
+                             "    return _Notes(frame)\n"),
+    "method_local_filter": ("from PySide6.QtCore import QObject\n"
+                            "class Window:\n"
+                            "    def install(self):\n"
+                            "        class _Sync(QObject):\n"
+                            "            pass\n"
+                            "        return _Sync()\n"),
+    "module_attribute_base": ("from PySide6 import QtWidgets\n"
+                              "def build():\n"
+                              "    class _W(QtWidgets.QWidget):\n"
+                              "        pass\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(QT_LOCAL_CLASS_VIOLATIONS))
+def test_qt_local_class_guard_catches_a_function_local_subclass(
+        tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_qt_local.py", QT_LOCAL_CLASS_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_qt_subclasses_live_at_module_scope",
+                    "test_no_qt_subclass_is_declared_inside_a_function", [bad])
+    assert exc is not None, f"the {shape} case slipped past"
+
+
+QT_LOCAL_CLASS_CLEAN = {
+    "module_scope_widget": ("from PySide6.QtWidgets import QPlainTextEdit\n"
+                            "class _Notes(QPlainTextEdit):\n"
+                            "    def __init__(self, ctx, parent):\n"
+                            "        super().__init__(parent)\n"
+                            "        self._ctx = ctx\n"),
+    "function_local_plain_class": ("import logging\n"
+                                   "def capture():\n"
+                                   "    class _Collect(logging.Handler):\n"
+                                   "        pass\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(QT_LOCAL_CLASS_CLEAN))
+def test_qt_local_class_guard_clears_what_it_should(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_qt_local.py", QT_LOCAL_CLASS_CLEAN[shape])
+    assert _run_scan(monkeypatch, "tests.test_qt_subclasses_live_at_module_scope",
+                     "test_no_qt_subclass_is_declared_inside_a_function",
+                     [good]) is None, f"the {shape} case was wrongly flagged"
+
+
+# ── a patch reaches the module whose code reads the name ────────────────────
+
+def _inert_patch_tree(tmp_path: Path, test_body: str, extra_app: str = ""):
+    _write(tmp_path, "pkg/__init__.py", "")
+    owner = _write(tmp_path, "pkg/owner.py", "def is_alive(pid):\n    return True\n")
+    facade = _write(tmp_path, "pkg/facade.py",
+                    "from pkg.owner import is_alive  # noqa: F401\n")
+    app = [owner, facade]
+    if extra_app:
+        app.append(_write(tmp_path, "pkg/caller.py", extra_app))
+    test = _write(tmp_path, "tests/test_synthetic.py", test_body)
+    return app, [test]
+
+
+def _run_inert_patch_guard(monkeypatch, tmp_path, app, tests):
+    module = importlib.import_module("tests.test_no_patch_misses_its_target")
+    for fn in (module._module_paths, module._reexports_of, module._read_at_call_time):
+        fn.cache_clear()
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(module, "python_sources", lambda **kw: list(app))
+    monkeypatch.setattr(module, "_test_files", lambda: list(tests))
+    try:
+        module.test_no_test_patches_a_name_its_module_only_re_exports()
+    except AssertionError as exc:
+        return exc
+    finally:
+        for fn in (module._module_paths, module._reexports_of, module._read_at_call_time):
+            fn.cache_clear()
+    return None
+
+
+INERT_PATCHES = {
+    "named_setattr": ("import pkg.facade as fa\n"
+                      "def test_x(monkeypatch):\n"
+                      "    monkeypatch.setattr(fa, 'is_alive', lambda p: False)\n"),
+    "patch_object": ("from unittest.mock import patch\n"
+                     "from pkg import facade\n"
+                     "def test_x():\n"
+                     "    with patch.object(facade, 'is_alive'):\n"
+                     "        pass\n"),
+    "string_target": ("from unittest.mock import patch\n"
+                      "def test_x():\n"
+                      "    with patch('pkg.facade.is_alive'):\n"
+                      "        pass\n"),
+    "attribute_store": ("import pkg.facade as fa\n"
+                        "def test_x():\n"
+                        "    fa.is_alive = lambda p: False\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(INERT_PATCHES))
+def test_inert_patch_guard_catches_a_patch_of_a_bare_re_export(
+        tmp_path, monkeypatch, shape):
+    app, tests = _inert_patch_tree(tmp_path, INERT_PATCHES[shape])
+    assert _run_inert_patch_guard(monkeypatch, tmp_path, app, tests) is not None, (
+        f"the {shape} patch of a re-export slipped past")
+
+
+LIVE_PATCHES = {
+    # The owner is patched: its own code reads the name.
+    "patch_the_owner": ("import pkg.owner as ow\n"
+                        "def test_x(monkeypatch):\n"
+                        "    monkeypatch.setattr(ow, 'is_alive', lambda p: False)\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(LIVE_PATCHES))
+def test_inert_patch_guard_clears_a_patch_that_reaches_the_code(
+        tmp_path, monkeypatch, shape):
+    app, tests = _inert_patch_tree(tmp_path, LIVE_PATCHES[shape])
+    assert _run_inert_patch_guard(monkeypatch, tmp_path, app, tests) is None
+
+
+def test_inert_patch_guard_clears_a_re_export_read_at_call_time(tmp_path, monkeypatch):
+    """A caller that looks the name up through the facade when it runs makes
+    the facade's binding live, so patching it there is real."""
+    app, tests = _inert_patch_tree(
+        tmp_path, INERT_PATCHES["named_setattr"],
+        extra_app=("def check(pid):\n"
+                   "    from pkg.facade import is_alive\n"
+                   "    return is_alive(pid)\n"))
+    assert _run_inert_patch_guard(monkeypatch, tmp_path, app, tests) is None
+
+
+# ── connected actions are created on the Python side ─────────────────────────
+#
+# `tests/test_connected_actions_are_owned.py`: an `addAction(text)` result whose
+# signal is connected leaks its wrapper after the menu is gone. The rebound
+# shape is the one that slipped past the first version, which kept only the last
+# binding of each name.
+
+CONNECTED_ACTION_SHAPES = {
+    "chained": ("def f(menu):\n"
+                "    menu.addAction('x').triggered.connect(lambda: None)\n"),
+    "bound": ("def f(menu):\n"
+              "    a = menu.addAction('x')\n"
+              "    a.triggered.connect(lambda: None)\n"),
+    "rebound": ("def f(menu, other):\n"
+                "    a = menu.addAction('x')\n"
+                "    a.triggered.connect(lambda: None)\n"
+                "    a = other.addAction('y')\n"
+                "    a.toggled.connect(lambda: None)\n"),
+}
+
+CONNECTED_ACTION_CLEAN = {
+    "owned": ("from widgets.owned_action import owned_action\n"
+              "def f(menu):\n"
+              "    owned_action(menu, 'x').triggered.connect(lambda: None)\n"),
+    "slot_overload": ("def f(menu):\n"
+                      "    menu.addAction('x', lambda: None)\n"),
+    "compared_after_exec": ("def f(menu):\n"
+                            "    a = menu.addAction('x')\n"
+                            "    return menu.exec() is a\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(CONNECTED_ACTION_SHAPES))
+def test_the_connected_action_guard_fires(shape):
+    import ast as _ast
+    from tests.test_connected_actions_are_owned import connected_unowned_actions
+    src = CONNECTED_ACTION_SHAPES[shape]
+    found = connected_unowned_actions(_ast.parse(src))
+    expected = [i for i, line in enumerate(src.splitlines(), 1) if "addAction" in line]
+    assert found == expected, f"the {shape} shape reported {found}, not {expected}"
+
+
+@pytest.mark.parametrize("shape", sorted(CONNECTED_ACTION_CLEAN))
+def test_the_connected_action_guard_clears_safe_shapes(shape):
+    import ast as _ast
+    from tests.test_connected_actions_are_owned import connected_unowned_actions
+    assert connected_unowned_actions(_ast.parse(CONNECTED_ACTION_CLEAN[shape])) == []
+
+
+# ── lazy targets resolve ─────────────────────────────────────────────────────
+#
+# `tests/test_lazy_targets_resolve.py` reads `lazy` / `lazy_names` calls by
+# their literal strings; each spelling the codebase uses must be seen, and a
+# call built from variables is not a target it can resolve.
+
+LAZY_TARGET_SHAPES = {
+    "lazy": ("_x = lazy('review.core.lazy', 'gone')\n", ["gone"]),
+    "private_lazy": ("_x = _lazy('review.core.lazy', 'gone')\n", ["gone"]),
+    "lazy_names": ("a, b = lazy_names('review.core.lazy', 'lazy', 'gone')\n",
+                   ["lazy", "gone"]),
+    "module_attribute": ("import review.core.lazy as L\n"
+                         "_x = L.lazy('review.core.lazy', 'gone')\n", ["gone"]),
+    "built_from_variables": ("m = 'review.core.lazy'\n_x = lazy(m, 'gone')\n", []),
+    "registry_hook": ("h = lambda: _import_attr('review.core.lazy', 'gone')\n",
+                      ["gone"]),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(LAZY_TARGET_SHAPES))
+def test_the_lazy_target_scan_sees_each_spelling(shape):
+    import ast as _ast
+    from tests.test_lazy_targets_resolve import lazy_targets
+    src, names = LAZY_TARGET_SHAPES[shape]
+    assert [n for _l, _m, n in lazy_targets(_ast.parse(src))] == names
+
+
+# ── frozen facades ───────────────────────────────────────────────────────────
+#
+# `tests/test_plotting_facades_are_frozen.py` lets a facade serve a name it
+# imports only as a declared re-export, but lets a test patch one the facade
+# itself calls (a binding seam). Each consumer below reaches `helper`, which the
+# synthetic facade imports from `pkg.owner`; `called` is imported and called.
+
+FROZEN_FACADE_SRC = (
+    "from pkg.owner import helper, called\n"
+    "def run():\n"
+    "    return called()\n"
+)
+
+FROZEN_FACADE_REACHES = {
+    "from_import": ("from pkg.facade import helper\n", True),
+    "attribute_read": ("import pkg.facade as f\nf.helper()\n", True),
+    "lazy_target": ("x = lazy('pkg.facade', 'helper')\n", True),
+    "patch_of_a_name_it_never_calls": (
+        "import pkg.facade as f\n"
+        "def test(monkeypatch):\n"
+        "    monkeypatch.setattr(f, 'helper', None)\n", True),
+    "string_patch_of_a_name_it_never_calls": (
+        "p = patch('pkg.facade.helper')\n", True),
+    "binding_seam_patch": (
+        "import pkg.facade as f\n"
+        "def test(monkeypatch):\n"
+        "    monkeypatch.setattr(f, 'called', None)\n", False),
+    "binding_seam_string_patch": ("p = patch('pkg.facade.called')\n", False),
+    "from_the_owner": ("from pkg.owner import helper\n", False),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FROZEN_FACADE_REACHES))
+def test_the_frozen_facade_guard_judges_each_reach(tmp_path, shape):
+    from tests.test_plotting_facades_are_frozen import (
+        _reaches, undeclared_reaches)
+    facade = _write(tmp_path, "facade.py", FROZEN_FACADE_SRC)
+    src, flagged = FROZEN_FACADE_REACHES[shape]
+    consumer = _write(tmp_path, "consumer.py", src)
+    reaches = _reaches("pkg.facade", [facade, consumer], facade)
+    assert bool(undeclared_reaches(facade, (), reaches)) is flagged
+    # Declaring the name is the one way to serve a read of it.
+    assert not undeclared_reaches(facade, ("helper", "called"), reaches)
+
+
+def test_the_frozen_facade_guard_finds_an_undeclared_reexport(tmp_path):
+    from tests._facade_scan import reexports
+    facade = _write(tmp_path, "facade.py", FROZEN_FACADE_SRC)
+    assert reexports(facade) == {"helper"}

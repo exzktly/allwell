@@ -1224,7 +1224,7 @@ _SUPPORT_SERVICES = {
     "export_style.open_panel": lambda: _import_attr(
         "review.features.export.style", "open_export_style_panel"),
     "export_style.copy_figure": lambda: _import_attr(
-        "review.features.export.style", "copy_figure_to_clipboard"),
+        "widgets.fig_clipboard", "copy_figure_to_clipboard"),
 }
 
 

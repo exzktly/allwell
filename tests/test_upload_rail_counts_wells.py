@@ -22,7 +22,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from services.pipeline_runner import ProgressTracker
-from services.remote_runner import _log_wells_uploaded
+from services.remote_upload import _log_wells_uploaded
 from widgets.run_dashboard import RunDashboard
 
 
@@ -94,7 +94,7 @@ def test_the_helper_is_reached_from_both_upload_paths():
     """Wiring guard: the batched path is the one that had no compensator."""
     import inspect
 
-    from services.remote_runner import DatasetCache
+    from services.remote_upload import DatasetCache
 
     for method in (DatasetCache.ensure_uploaded, DatasetCache.upload_subset):
         src = inspect.getsource(method)
@@ -106,7 +106,7 @@ def test_a_failed_batch_upload_announces_nothing():
     an Upload rail that is ahead of the data."""
     import inspect
 
-    from services.remote_runner import DatasetCache
+    from services.remote_upload import DatasetCache
 
     src = inspect.getsource(DatasetCache.upload_subset)
     guard = re.search(r"if rc == 0 and log_fn:\s*\n\s*_log_wells_uploaded", src)

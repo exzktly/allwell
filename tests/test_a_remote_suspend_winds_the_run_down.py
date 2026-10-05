@@ -31,6 +31,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests._fake_remote import FakeRemote
+from services.remote_fetch import FetchedOutputVerifier
+import pipeline.suspend as _suspend
 
 _REPO = Path(__file__).resolve().parent.parent
 
@@ -80,8 +82,8 @@ def test_the_pipeline_watches_the_file_it_is_given(monkeypatch, tmp_path):
     import process_microscopy as pm
 
     seen: list[object] = []
-    monkeypatch.setattr(pm._suspend, "install_handlers", lambda **k: None)
-    monkeypatch.setattr(pm._suspend, "watch_request_file",
+    monkeypatch.setattr(_suspend, "install_handlers", lambda **k: None)
+    monkeypatch.setattr(_suspend, "watch_request_file",
                         lambda path, **k: seen.append(path))
     request = tmp_path / "req"
     monkeypatch.setattr(sys, "argv", [
@@ -98,7 +100,10 @@ def _run_driver(tmp_path, *, suspend_during_batch_1: bool,
                 timeout: float = 8) -> subprocess.CompletedProcess:
     """Run the real driver snippet in bash, with batch 1 ready and batch 2 not."""
     from services.remote_run_id import SUSPEND_REQUEST
-    from services.remote_runner import BATCH_READY, _batch_driver_snippet
+    from services.remote_commands import (
+        BATCH_READY,
+        _batch_driver_snippet,
+    )
 
     run_dir = tmp_path / "run"
     (run_dir / "b1").mkdir(parents=True)
@@ -136,7 +141,7 @@ def test_without_a_request_the_driver_waits_for_the_next_batch(tmp_path):
 
 @pytest.fixture
 def host():
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     return RemoteHost(
         name="test", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
@@ -160,8 +165,12 @@ def plate(tmp_path):
 def spawned(host, plate, tmp_path, monkeypatch, stop_fetchers):
     """Spawn a real run against the fake host; return ``(runner, remote)``."""
     from services.remote_runner import (
-        DatasetCache, LocalInputMode, OutputFilter, RemoteRunner, ZippedInput,
+        LocalInputMode,
+        OutputFilter,
+        RemoteRunner,
+        ZippedInput,
     )
+    from services.remote_upload import DatasetCache
 
     remote = FakeRemote(tmp_path / "remote-host")
 
@@ -180,7 +189,7 @@ def spawned(host, plate, tmp_path, monkeypatch, stop_fetchers):
     monkeypatch.setattr(DatasetCache, "ensure_uploaded",
                         lambda self, z, **k: (key, 0, 0.01))
     monkeypatch.setattr(RemoteRunner, "sync_required_files", lambda self, **k: None)
-    monkeypatch.setattr(RemoteRunner, "_list_remote_completed_wells",
+    monkeypatch.setattr(FetchedOutputVerifier, "_list_remote_completed_wells",
                         lambda self: set())
 
     def _spawn():
@@ -365,7 +374,7 @@ def test_a_local_run_is_still_signalled(runner):
 def _batched(n_batches: int):
     import threading
 
-    from services.remote_runner import _BatchedRemoteProcess
+    from services.remote_process import _BatchedRemoteProcess
 
     b = _BatchedRemoteProcess.__new__(_BatchedRemoteProcess)
     b._stop = threading.Event()
@@ -389,7 +398,7 @@ def _driver_output(*lines: str):
 
 def test_a_driver_that_stops_for_a_suspend_is_not_a_lost_node():
     """Read as a lost node, the early exit would cancel the last batch's downloads."""
-    from services.remote_runner import BATCH_DONE_MARKER
+    from services.remote_commands import BATCH_DONE_MARKER
 
     b = _batched(3)
     b.note_suspend_requested()
@@ -403,7 +412,7 @@ def test_a_driver_that_stops_for_a_suspend_is_not_a_lost_node():
 
 def test_a_driver_that_stops_without_a_suspend_is_still_a_lost_node():
     """The control: the lost-node rule itself is unchanged."""
-    from services.remote_runner import BATCH_DONE_MARKER
+    from services.remote_commands import BATCH_DONE_MARKER
 
     b = _batched(3)
     b._read_driver(_driver_output(BATCH_DONE_MARKER.format(i=1, rc=0) + "\n"))
@@ -600,7 +609,7 @@ def test_a_well_that_starts_after_the_request_leaves_nothing(tmp_path):
 def test_the_request_path_exists_only_once_the_upload_is_done(
         spawned, monkeypatch):
     """A suspend during the upload stops it; asked of the real spawn's ordering."""
-    from services.remote_runner import DatasetCache
+    from services.remote_upload import DatasetCache
 
     spawn, _remote = spawned
     seen: list[bool] = []

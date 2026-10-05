@@ -20,13 +20,12 @@ from PySide6.QtWidgets import (
 )
 
 from review.features.export.style import (
-    DEFAULT_EXPORT_STYLE_PREFS,
     EXPORT_PROFILES,
     _ensure_custom_export_profiles,
     _get_all_profile_names,
     _resolve_export_dock,
-    apply_export_style_to_current,
 )
+from review.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS, apply_export_style_to_current
 from review.core.plot_style import (
     AXIS_LIMIT_PREF_KEYS, FIGURE_SCOPED_PREF_KEYS, LOG_BASE_CHOICES,
     drop_bucket_limits, figure_pref_is_set, figure_prefs,
@@ -208,6 +207,80 @@ _SEGMENT_LABELS = {
 }
 
 
+class _SectionGrid:
+    """The Properties panel's scrolling column of sections, and the rows in each.
+
+    Every section is a two-column grid: a fixed narrow label column and an
+    expanding control column. Without the fixed column the longest label
+    dictates the width and pushes controls past the panel's fixed width.
+    ``bind`` is the panel's getter/setter registrar, applied when a row names
+    the pref key its control writes.
+    """
+
+    def __init__(self, body_layout: QVBoxLayout,
+                 bind: Callable[[str, QWidget], None]) -> None:
+        self._body_layout = body_layout
+        self._bind = bind
+        # Per-section grid bookkeeping: {section: [grid, next_row]}.
+        self._grids: dict[CollapsibleSection, list] = {}
+
+    def section(self, name: str, *, expanded: bool = True) -> CollapsibleSection:
+        sp = theme.Spacing
+        sec = CollapsibleSection(name, expanded=expanded)
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(sp.sm)
+        grid.setVerticalSpacing(sp.xs)
+        grid.setColumnMinimumWidth(0, 96)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        sec.addLayout(grid)
+        self._grids[sec] = [grid, 0]
+        self._body_layout.addWidget(sec)
+        return sec
+
+    def add_row(self, sec: CollapsibleSection, label: str, widget: QWidget,
+                key: str | None = None) -> None:
+        grid, r = self._grids[sec]
+        if label:
+            grid.addWidget(QLabel(label), r, 0)
+            grid.addWidget(widget, r, 1)
+        else:
+            grid.addWidget(widget, r, 0, 1, 2)
+        if key is not None:
+            self._bind(key, widget)
+        self._grids[sec][1] = r + 1
+
+    def add_full(self, sec: CollapsibleSection, widget: QWidget) -> None:
+        grid, r = self._grids[sec]
+        grid.addWidget(widget, r, 0, 1, 2)
+        self._grids[sec][1] = r + 1
+
+    def add_stacked(self, sec: CollapsibleSection, label: str, widget: QWidget,
+                    key: str | None = None) -> None:
+        """Label on its own row above the widget — for wide controls (e.g.
+        three-segment SegmentedControls) that overflow the 2-column grid."""
+        grid, r = self._grids[sec]
+        lbl = QLabel(label)
+        lbl.setProperty("variant", "muted")
+        grid.addWidget(lbl, r, 0, 1, 2)
+        grid.addWidget(widget, r + 1, 0, 1, 2)
+        if key is not None:
+            self._bind(key, widget)
+        self._grids[sec][1] = r + 2
+
+    @staticmethod
+    def hrow(*items, spacing: int | None = None) -> QWidget:
+        host = QWidget()
+        hb = QHBoxLayout(host)
+        hb.setContentsMargins(0, 0, 0, 0)
+        hb.setSpacing(spacing if spacing is not None else theme.Spacing.md)
+        for w in items:
+            hb.addWidget(w)
+        hb.addStretch(1)
+        return host
+
+
 class ExportStyleSidebar(QWidget):
     def __init__(self, app, parent, fig, canvas, default_name: str):
         super().__init__(parent)
@@ -267,11 +340,69 @@ class ExportStyleSidebar(QWidget):
             widget.textChanged.connect(lambda _t: self._on_fields_changed())
 
     def _build_ui(self) -> None:
+        """Assemble the panel: header, one builder per section, footer.
+
+        Each builder adds its section (or, behind a facet check, nothing) to
+        the scrolling column in the order the panel has always shown them, and
+        keeps on ``self`` exactly the controls the rest of the class reads.
+        """
         sp = theme.Spacing
         root = QVBoxLayout(self)
         root.setContentsMargins(sp.sm, sp.sm, sp.sm, sp.sm)
         root.setSpacing(sp.sm)
+        self._build_header(root)
 
+        # ── scrollable stack of CollapsibleSections ─────────────────────────
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(sp.sm)
+        scroll.setWidget(body)
+        root.addWidget(scroll, 1)
+
+        kit = _SectionGrid(body_layout, self._bind_getter_setter)
+
+        self._build_profile_section(kit)
+        self._build_scatter_sections(kit)
+        self._build_cell_values_section(kit)
+        self._build_colours_section(kit)
+
+        # ── Bars ───────────────────────────────────────────────────────────
+        # Bar width and the spacing inside a timepoint group. Global PlotState
+        # fields like the colour mode above, so the Batch Export bar figures
+        # draw at the same geometry. Only on the Bar plot: no other figure
+        # reads them.
+        if self._is_bar_fig():
+            self._build_bars_section(kit.section, kit.add_row, kit.hrow)
+
+        # File format selector intentionally omitted — the Save As… dialog
+        # offers PDF / SVG / EPS / PNG via the file filter, so picking the
+        # format up front was redundant. The "format" pref (read by
+        # ``_export`` when the dedicated Export… button is used) still
+        # falls back to "png" if absent.
+
+        self._init_axis_targets()
+        self._build_axes_section(kit)
+        self._build_statistics_section(kit)
+        self._build_legend_section(kit)
+        self._build_overlays_section(kit)
+        self._build_time_section(kit)
+        self._build_lines_markers_section(kit)
+        self._build_grid_section(kit)
+        self._build_limits_section(kit)
+        self._build_layout_section(kit)
+
+        body_layout.addStretch(1)
+
+        self._build_footer(root)
+
+    def _build_header(self, root: QVBoxLayout) -> None:
+        """The panel's title row and its close button."""
+        sp = theme.Spacing
         # ── header ──────────────────────────────────────────────────────────
         hdr = QWidget(self)
         hl = QHBoxLayout(hdr)
@@ -287,92 +418,24 @@ class ExportStyleSidebar(QWidget):
         hl.addWidget(close_btn)
         root.addWidget(hdr)
 
-        # ── scrollable stack of CollapsibleSections ─────────────────────────
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        body = QWidget()
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(sp.sm)
-        scroll.setWidget(body)
-        root.addWidget(scroll, 1)
-
-        # Per-section grid bookkeeping: {section: [grid, next_row]}.
-        grids: dict[CollapsibleSection, list] = {}
-
-        def section(name: str, *, expanded: bool = True) -> CollapsibleSection:
-            sec = CollapsibleSection(name, expanded=expanded)
-            grid = QGridLayout()
-            grid.setContentsMargins(0, 0, 0, 0)
-            grid.setHorizontalSpacing(sp.sm)
-            grid.setVerticalSpacing(sp.xs)
-            # Fixed narrow label column + expanding control column. Without
-            # this, the longest label dictates the column width and pushes
-            # controls past the panel's fixed width.
-            grid.setColumnMinimumWidth(0, 96)
-            grid.setColumnStretch(0, 0)
-            grid.setColumnStretch(1, 1)
-            sec.addLayout(grid)
-            grids[sec] = [grid, 0]
-            body_layout.addWidget(sec)
-            return sec
-
-        def add_row(sec: CollapsibleSection, label: str, widget: QWidget,
-                    key: str | None = None) -> None:
-            grid, r = grids[sec]
-            if label:
-                grid.addWidget(QLabel(label), r, 0)
-                grid.addWidget(widget, r, 1)
-            else:
-                grid.addWidget(widget, r, 0, 1, 2)
-            if key is not None:
-                self._bind_getter_setter(key, widget)
-            grids[sec][1] = r + 1
-
-        def add_full(sec: CollapsibleSection, widget: QWidget) -> None:
-            grid, r = grids[sec]
-            grid.addWidget(widget, r, 0, 1, 2)
-            grids[sec][1] = r + 1
-
-        def add_stacked(sec: CollapsibleSection, label: str, widget: QWidget,
-                        key: str | None = None) -> None:
-            """Label on its own row above the widget — for wide controls (e.g.
-            three-segment SegmentedControls) that overflow the 2-column grid."""
-            grid, r = grids[sec]
-            lbl = QLabel(label)
-            lbl.setProperty("variant", "muted")
-            grid.addWidget(lbl, r, 0, 1, 2)
-            grid.addWidget(widget, r + 1, 0, 1, 2)
-            if key is not None:
-                self._bind_getter_setter(key, widget)
-            grids[sec][1] = r + 2
-
-        def hrow(*items, spacing: int | None = None) -> QWidget:
-            host = QWidget()
-            hb = QHBoxLayout(host)
-            hb.setContentsMargins(0, 0, 0, 0)
-            hb.setSpacing(spacing if spacing is not None else sp.md)
-            for w in items:
-                hb.addWidget(w)
-            hb.addStretch(1)
-            return host
-
+    def _build_profile_section(self, kit: _SectionGrid) -> None:
+        """Properties → Profile & Format."""
         # ── Profile & Format ────────────────────────────────────────────────
-        s_profile = section("Profile & Format", expanded=True)
+        s_profile = kit.section("Profile & Format", expanded=True)
         self._profile_combo = QComboBox()
         self._profile_combo.addItems(_get_all_profile_names(self._app))
         self._profile_combo.setCurrentText(str(self._prefs.get("export_profile", "Custom")))
         self._profile_combo.currentTextChanged.connect(lambda _t: self._on_profile_selected())
-        add_row(s_profile, "Profile", self._profile_combo, "export_profile")
+        kit.add_row(s_profile, "Profile", self._profile_combo, "export_profile")
 
+    def _build_scatter_sections(self, kit: _SectionGrid) -> None:
+        """Properties → Density and Gates, on the per-cell scatter only."""
         # ── Scatter: Density + Gates (per-cell scatter only) ─────────────────
         if self._is_scatter_cells_fig():
-            s_density = section("Density", expanded=True)
+            s_density = kit.section("Density", expanded=True)
             dens_tog = ToggleSwitch("Color by density")
             dens_tog.setChecked(bool(self._prefs.get("scatter_density", False)))
-            add_row(s_density, "", dens_tog)
+            kit.add_row(s_density, "", dens_tog)
             # Manual getter/setter (no key= auto-wire): density changes which
             # artists exist, not just their style, so a single handler must both
             # persist and trigger a real redraw (the auto-wire only restyles).
@@ -388,11 +451,11 @@ class ExportStyleSidebar(QWidget):
                 lambda on, _l=_dens_preview: _l.setText("On" if on else "Off")
             )
 
-            s_gates = section("Gates", expanded=True)
+            s_gates = kit.section("Gates", expanded=True)
             show_tog = ToggleSwitch("Show gates")
             show_tog.setChecked(not bool(self._app._app_state.scatter.gates_hidden))
             show_tog.toggled.connect(lambda on: self._on_show_gates_toggled(on))
-            add_row(s_gates, "", show_tog)
+            kit.add_row(s_gates, "", show_tog)
             # One-shot "Draw gate" button (not a toggle): clicking arms a
             # single drag-to-draw on the plot; gating.py disarms after the gate
             # is drawn and calls _scatter_gate_draw_sync(False) to restore the
@@ -403,7 +466,7 @@ class ExportStyleSidebar(QWidget):
                 set_gate_draw_mode(self._app._ctx, True)
                 _b.setText("Drag on the plot…")
             draw_btn.clicked.connect(_arm_draw)
-            add_full(s_gates, draw_btn)
+            kit.add_full(s_gates, draw_btn)
             self._gate_draw_btn = draw_btn
 
             def _sync_draw_toggle(on: bool, _b=draw_btn) -> None:
@@ -413,24 +476,26 @@ class ExportStyleSidebar(QWidget):
             self._app._ctx.runtime.scatter.gate_draw_sync = _sync_draw_toggle
             clear_btn = QPushButton("Clear gates")
             clear_btn.clicked.connect(lambda _=False: self._on_clear_gates())
-            add_full(s_gates, clear_btn)
+            kit.add_full(s_gates, clear_btn)
             self._gate_count_label = QLabel(self._gate_count_text())
             self._gate_count_label.setObjectName("Muted")
-            add_full(s_gates, self._gate_count_label)
+            kit.add_full(s_gates, self._gate_count_label)
             # Editable per-gate name list (auto-named Gate N on draw; rename here).
             self._gate_list_box = QWidget()
             self._gate_list_layout = QVBoxLayout(self._gate_list_box)
             self._gate_list_layout.setContentsMargins(0, 0, 0, 0)
             self._gate_list_layout.setSpacing(2)
-            add_full(s_gates, self._gate_list_box)
+            kit.add_full(s_gates, self._gate_list_box)
             self._rebuild_gate_list()
             # Keep the gate-count label + name list live when a gate is drawn on
             # the plot (gating.py calls this after appending/clearing a gate).
             self._app._ctx.runtime.scatter.gate_count_cb = self._refresh_gate_count
 
+    def _build_cell_values_section(self, kit: _SectionGrid) -> None:
+        """Properties → Cell values, on the Heat Map only."""
         # ── Heat Map: the number drawn in each cell ─────────────────────────
         if self._is_heatmap_fig():
-            s_cells = section("Cell values", expanded=True)
+            s_cells = kit.section("Cell values", expanded=True)
             fmt_edit = QLineEdit(str(self._prefs.get("heatmap_value_format", "")))
             fmt_edit.setPlaceholderText("%.2f")
             fmt_edit.setToolTip(
@@ -446,8 +511,10 @@ class ExportStyleSidebar(QWidget):
                 lambda v, w=fmt_edit: w.setText(str(v or ""))
             )
             fmt_edit.editingFinished.connect(self._on_cell_format_changed)
-            add_row(s_cells, "Value format", fmt_edit)
+            kit.add_row(s_cells, "Value format", fmt_edit)
 
+    def _build_colours_section(self, kit: _SectionGrid) -> None:
+        """Properties → Colours: what the data ink is coloured by, on the Bar, Line and Response figures."""
         # ── What the plot's data ink is coloured by ─────────────────────────
         # "Plate" is the historical behaviour on both tabs — each column or
         # trace takes the colour its well or replicate group carries on the
@@ -492,7 +559,7 @@ class ExportStyleSidebar(QWidget):
             from widgets.plot_card import _make_segmented as _seg_color
             (_color_field, _color_label, _color_resolver,
              _color_default) = _color_target
-            s_colors = section("Colours", expanded=True)
+            s_colors = kit.section("Colours", expanded=True)
             _color_init = _color_resolver(self._app._app_state.plot)
             color_sc = _seg_color(
                 [(_SEGMENT_LABELS[_color_default], _color_default),
@@ -543,22 +610,10 @@ class ExportStyleSidebar(QWidget):
                             )
 
                 color_sc.currentChanged.connect(_on_color_mode_change)
-                add_stacked(s_colors, _color_label, color_sc)
+                kit.add_stacked(s_colors, _color_label, color_sc)
 
-        # ── Bars ───────────────────────────────────────────────────────────
-        # Bar width and the spacing inside a timepoint group. Global PlotState
-        # fields like the colour mode above, so the Batch Export bar figures
-        # draw at the same geometry. Only on the Bar plot: no other figure
-        # reads them.
-        if self._is_bar_fig():
-            self._build_bars_section(section, add_row, hrow)
-
-        # File format selector intentionally omitted — the Save As… dialog
-        # offers PDF / SVG / EPS / PNG via the file filter, so picking the
-        # format up front was redundant. The "format" pref (read by
-        # ``_export`` when the dedicated Export… button is used) still
-        # falls back to "png" if absent.
-
+    def _init_axis_targets(self) -> None:
+        """The per-axis pref buckets and the axis the panel opens targeting."""
         # Per-axis xlim/ylim/log buckets so each axis keeps its own values when
         # the Axis # dropdown is flipped. Unchanged from the legacy panel — the
         # flat ``_prefs`` keys reflect whatever axis is currently selected.
@@ -581,8 +636,10 @@ class ExportStyleSidebar(QWidget):
             self._current_axis, {k: self._prefs.get(k) for k in self._axis_keys},
         )
 
+    def _build_axes_section(self, kit: _SectionGrid) -> None:
+        """Properties → Axes: the Axis # target, sizes, tick angle and ticks."""
         # ── Axes (incl. ticks) ──────────────────────────────────────────────
-        s_axes = section("Axes", expanded=True)
+        s_axes = kit.section("Axes", expanded=True)
         axis_cb = QComboBox()
         # **The colour bar is not a panel to target.** ``fig.axes`` includes it,
         # so the Heat Map offered an "Axis 2" that selected the bar — and every
@@ -595,7 +652,7 @@ class ExportStyleSidebar(QWidget):
         axis_cb.setCurrentText(self._current_axis)
         # Getter/setter only (no auto-apply): switching the target axis must
         # not push the currently displayed limits onto the new one.
-        add_row(s_axes, "Axis #", axis_cb)
+        kit.add_row(s_axes, "Axis #", axis_cb)
         self._axis_cb = axis_cb
         self._getters["axis_target"] = axis_cb.currentText
         self._setters["axis_target"] = lambda v, w=axis_cb: w.setCurrentText(str(v))
@@ -625,22 +682,30 @@ class ExportStyleSidebar(QWidget):
         for key, label, lo, hi in _axis_size_rows:
             spin = _Stepper(minimum=lo, maximum=hi, single_step=1,
                             value=float(self._prefs[key]), decimals=0)
-            add_row(s_axes, label, spin, key)
+            kit.add_row(s_axes, label, spin, key)
         maj_cb = ToggleSwitch("Major")
         maj_cb.setChecked(bool(self._prefs["tick_major"]))
         min_cb = ToggleSwitch("Minor")
         min_cb.setChecked(bool(self._prefs["tick_minor"]))
         self._bind_getter_setter("tick_major", maj_cb)
         self._bind_getter_setter("tick_minor", min_cb)
-        add_row(s_axes, "Tick visibility", hrow(maj_cb, min_cb))
+        kit.add_row(s_axes, "Tick visibility", kit.hrow(maj_cb, min_cb))
         tlen = _Stepper(minimum=0.0, maximum=20.0, single_step=0.5,
                         value=float(self._prefs["tick_length"]), decimals=1)
-        add_row(s_axes, "Tick length", tlen, "tick_length")
+        kit.add_row(s_axes, "Tick length", tlen, "tick_length")
         tdir = QComboBox()
         tdir.addItems(["out", "in", "inout"])
         tdir.setCurrentText(str(self._prefs["tick_direction"]))
-        add_row(s_axes, "Tick direction", tdir, "tick_direction")
+        kit.add_row(s_axes, "Tick direction", tdir, "tick_direction")
 
+        # Axes preview: shows the current axis target on the section header.
+        _axes_preview = QLabel(self._current_axis)
+        _axes_preview.setObjectName("Muted")
+        s_axes.setValueWidget(_axes_preview)
+        axis_cb.currentTextChanged.connect(lambda t, _l=_axes_preview: _l.setText(t))
+
+    def _build_statistics_section(self, kit: _SectionGrid) -> None:
+        """Properties → Statistics: error bars, the replicate unit, and the bar show mode."""
         # ── Statistics (v2 §6.2) ────────────────────────────────────────────
         # Writes through to app state (_use_sem / _toggle_fov_replicates) so the
         # error band / spread on the *plots* updates immediately. NOTE: the
@@ -648,7 +713,7 @@ class ExportStyleSidebar(QWidget):
         # there don't auto-refresh this section's segments until the sidebar
         # is reopened — sync is one-way (sidebar → app).
         from widgets.plot_card import _make_segmented as _seg
-        s_stats = section("Statistics", expanded=False)
+        s_stats = kit.section("Statistics", expanded=False)
         self._stats_preview = QLabel("")
         self._stats_preview.setObjectName("Muted")
         s_stats.setValueWidget(self._stats_preview)
@@ -691,7 +756,7 @@ class ExportStyleSidebar(QWidget):
                     swallowed()
 
             err_sc.currentChanged.connect(_on_err_change)
-            add_stacked(s_stats, "Error bars", err_sc)
+            kit.add_stacked(s_stats, "Error bars", err_sc)
 
             # Auto-sync: when _use_sem flips elsewhere (the band-controls row on
             # any plot card), update this segment too.
@@ -750,7 +815,7 @@ class ExportStyleSidebar(QWidget):
                         swallowed()  # was: pass (silent except)
 
             across_sc.currentChanged.connect(_on_across_change)
-            add_stacked(s_stats, "Across", across_sc)
+            kit.add_stacked(s_stats, "Across", across_sc)
 
             def _sync_across_from_app(use_fov: bool, _sc=across_sc) -> None:
                 try:
@@ -795,37 +860,36 @@ class ExportStyleSidebar(QWidget):
                 except Exception:
                     swallowed()
             show_sc.currentChanged.connect(_on_show_change)
-            add_stacked(s_stats, "Show", show_sc)
+            kit.add_stacked(s_stats, "Show", show_sc)
             self._show_seg = show_sc
 
         _update_stats_preview()
 
-        # Axes preview: shows the current axis target on the section header.
-        _axes_preview = QLabel(self._current_axis)
-        _axes_preview.setObjectName("Muted")
-        s_axes.setValueWidget(_axes_preview)
-        axis_cb.currentTextChanged.connect(lambda t, _l=_axes_preview: _l.setText(t))
-
+    def _build_legend_section(self, kit: _SectionGrid) -> None:
+        """Properties → Legend, where the figure draws one this panel can reach."""
+        from widgets.stepper import Stepper as _Stepper
         # ── Legend ──────────────────────────────────────────────────────────
         # Only where the figure draws a legend this section can reach —
         # see the facet table.
         if self._supports("legend"):
-            s_leg = section("Legend", expanded=False)
+            s_leg = kit.section("Legend", expanded=False)
             leg_show = ToggleSwitch("Show legend")
             leg_show.setChecked(bool(self._prefs["legend_show"]))
-            add_row(s_leg, "", leg_show, "legend_show")
+            kit.add_row(s_leg, "", leg_show, "legend_show")
             _leg_preview = QLabel("On" if leg_show.isChecked() else "Off")
             _leg_preview.setObjectName("Muted")
             s_leg.setValueWidget(_leg_preview)
             leg_show.toggled.connect(lambda on, _l=_leg_preview: _l.setText("On" if on else "Off"))
             leg_sz = _Stepper(minimum=6, maximum=24, single_step=1,
                               value=float(self._prefs["legend_font_size"]), decimals=0)
-            add_row(s_leg, "Font size", leg_sz, "legend_font_size")
+            kit.add_row(s_leg, "Font size", leg_sz, "legend_font_size")
             leg_loc = QComboBox()
             leg_loc.addItems(["best", "upper right", "upper left", "lower right", "lower left"])
             leg_loc.setCurrentText(str(self._prefs["legend_loc"]))
-            add_row(s_leg, "Location", leg_loc, "legend_loc")
+            kit.add_row(s_leg, "Location", leg_loc, "legend_loc")
 
+    def _build_overlays_section(self, kit: _SectionGrid) -> None:
+        """Properties → Overlays: the threshold marker and the value labels."""
         # ── Overlays ────────────────────────────────────────────────────────
         # Cross-plot threshold marker (off by default). Drives
         # PlotState.show_threshold_line, read by the Distribution / line-CDF /
@@ -834,7 +898,7 @@ class ExportStyleSidebar(QWidget):
         # ``PlotState``; a figure whose renderer reads neither shows
         # neither — see the facet table.
         if self._supports("plot_overlays"):
-            s_over = section("Overlays", expanded=False)
+            s_over = kit.section("Overlays", expanded=False)
             thr_tog = ToggleSwitch("Show threshold line")
             thr_tog.setChecked(bool(getattr(
                 self._app._app_state.plot, "show_threshold_line", False)))
@@ -851,7 +915,7 @@ class ExportStyleSidebar(QWidget):
                 except Exception:
                     swallowed()
             thr_tog.toggled.connect(_on_threshold_line_toggle)
-            add_row(s_over, "", thr_tog)
+            kit.add_row(s_over, "", thr_tog)
 
             # Value labels: the "12.34 ± 1.20" text above each bar / marker. Drives
             # PlotState.show_value_labels + .value_label_format, read by the Bar,
@@ -880,7 +944,7 @@ class ExportStyleSidebar(QWidget):
                 except Exception:
                     swallowed()
             val_tog.toggled.connect(_on_value_labels_toggle)
-            add_row(s_over, "", val_tog)
+            kit.add_row(s_over, "", val_tog)
 
             val_fmt = QLineEdit(str(getattr(
                 self._app._app_state.plot, "value_label_format", "") or ""))
@@ -903,8 +967,11 @@ class ExportStyleSidebar(QWidget):
                 except Exception:
                     swallowed()
             val_fmt.editingFinished.connect(_on_value_label_format)
-            add_row(s_over, "Value format", val_fmt)
+            kit.add_row(s_over, "Value format", val_fmt)
 
+    def _build_time_section(self, kit: _SectionGrid) -> None:
+        """Properties → Time: the time-axis label correction."""
+        from widgets.stepper import Stepper as _Stepper
         # ── Time ─────────────────────────────────────────────────────
         # The time-axis label correction: an interval multiplier and a fixed
         # offset, together the map ``filename hours × scale + offset``. Drives
@@ -919,7 +986,7 @@ class ExportStyleSidebar(QWidget):
         # Two controls rather than one because they answer two independent
         # questions about the plate — how far apart the images are, and where
         # the first one sits — and a plate can need either without the other.
-        s_time = section("Time", expanded=False)
+        s_time = kit.section("Time", expanded=False)
         _time_preview = QLabel("")
         _time_preview.setObjectName("Muted")
         s_time.setValueWidget(_time_preview)
@@ -1016,7 +1083,7 @@ class ExportStyleSidebar(QWidget):
             except Exception:
                 swallowed()
         time_scale.valueChanged.connect(_on_time_scale)
-        add_row(s_time, "Interval per timepoint", time_scale)
+        kit.add_row(s_time, "Interval per timepoint", time_scale)
 
         # Applied *after* the multiplier, and stated that way in the tooltip:
         # the interval turns a filename index into hours, so a shift typed in
@@ -1047,16 +1114,19 @@ class ExportStyleSidebar(QWidget):
             except Exception:
                 swallowed()
         time_offset.valueChanged.connect(_on_time_offset)
-        add_row(s_time, "Offset", time_offset)
+        kit.add_row(s_time, "Offset", time_offset)
 
         _time_preview.setText(_time_preview_text())
 
+    def _build_lines_markers_section(self, kit: _SectionGrid) -> None:
+        """Properties → Lines & Markers."""
+        from widgets.stepper import Stepper as _Stepper
         # ── Lines & Markers ─────────────────────────────────────────────────
         # Everything here styles ``ax.lines`` and the marker collections
         # tagged for it; a figure holding neither shows none of it —
         # see the facet table.
         if self._supports("marks"):
-            s_lm = section("Lines & Markers", expanded=False)
+            s_lm = kit.section("Lines & Markers", expanded=False)
             ls_cb = QComboBox()
             # Pair each matplotlib value with a glyphic preview so the combo
             # doesn't show bare punctuation. Items carry the mpl token in
@@ -1075,7 +1145,7 @@ class ExportStyleSidebar(QWidget):
                 (i for i, (_, v) in enumerate(_LINE_STYLES) if v == _ls_cur), 0,
             )
             ls_cb.setCurrentIndex(_ls_idx)
-            add_row(s_lm, "Line style", ls_cb)
+            kit.add_row(s_lm, "Line style", ls_cb)
             self._getters["line_style"] = lambda cb=ls_cb: cb.currentData() or "-"
             self._setters["line_style"] = lambda v, cb=ls_cb: cb.setCurrentIndex(
                 next((i for i in range(cb.count()) if cb.itemData(i) == v), 0)
@@ -1087,7 +1157,7 @@ class ExportStyleSidebar(QWidget):
             ]:
                 dsp = _Stepper(minimum=lo, maximum=hi, single_step=step,
                                value=float(self._prefs[key]), decimals=1)
-                add_row(s_lm, label, dsp, key)
+                kit.add_row(s_lm, label, dsp, key)
 
             ms_cb = QComboBox()
             _MARKER_STYLES = [
@@ -1112,7 +1182,7 @@ class ExportStyleSidebar(QWidget):
                 (i for i, (_, v) in enumerate(_MARKER_STYLES) if v == _ms_cur), 0,
             )
             ms_cb.setCurrentIndex(_ms_idx)
-            add_row(s_lm, "Marker style", ms_cb)
+            kit.add_row(s_lm, "Marker style", ms_cb)
             self._getters["marker_style"] = lambda cb=ms_cb: cb.currentData() or "o"
             self._setters["marker_style"] = lambda v, cb=ms_cb: cb.setCurrentIndex(
                 next((i for i in range(cb.count()) if cb.itemData(i) == v), 0)
@@ -1125,27 +1195,33 @@ class ExportStyleSidebar(QWidget):
             ]:
                 dsp = _Stepper(minimum=lo, maximum=hi, single_step=step,
                                value=float(self._prefs[key]), decimals=1)
-                add_row(s_lm, label, dsp, key)
+                kit.add_row(s_lm, label, dsp, key)
 
+    def _build_grid_section(self, kit: _SectionGrid) -> None:
+        """Properties → Grid."""
+        from widgets.stepper import Stepper as _Stepper
         # ── Grid ────────────────────────────────────────────────────────────
-        s_grid = section("Grid", expanded=False)
+        s_grid = kit.section("Grid", expanded=False)
         g_show = ToggleSwitch("Show grid")
         g_show.setChecked(bool(self._prefs["grid_show"]))
-        add_row(s_grid, "", g_show, "grid_show")
+        kit.add_row(s_grid, "", g_show, "grid_show")
         g_alpha = _Stepper(minimum=0.0, maximum=1.0, single_step=0.05,
                            value=float(self._prefs["grid_alpha"]), decimals=2)
-        add_row(s_grid, "Opacity", g_alpha, "grid_alpha")
+        kit.add_row(s_grid, "Opacity", g_alpha, "grid_alpha")
         g_style = QComboBox()
         g_style.addItems(["-", "--", ":", "-."])
         g_style.setCurrentText(str(self._prefs["grid_style"]))
-        add_row(s_grid, "Line style", g_style, "grid_style")
+        kit.add_row(s_grid, "Line style", g_style, "grid_style")
         _grid_preview = QLabel("On" if g_show.isChecked() else "Off")
         _grid_preview.setObjectName("Muted")
         s_grid.setValueWidget(_grid_preview)
         g_show.toggled.connect(lambda on, _l=_grid_preview: _l.setText("On" if on else "Off"))
 
+    def _build_limits_section(self, kit: _SectionGrid) -> None:
+        """Properties → Limits & Scale: typed limits, Auto scale, and the log axes."""
+        sp = theme.Spacing
         # ── Limits & Scale ──────────────────────────────────────────────────
-        s_lim = section("Limits & Scale", expanded=False)
+        s_lim = kit.section("Limits & Scale", expanded=False)
         for lim_key, label in [("x_lim", "X limits"), ("y_lim", "Y limits")]:
             lo_edit = QLineEdit(str(self._prefs[f"{lim_key}_min"]))
             lo_edit.setMaximumWidth(_LO_EDIT_MAX_W)
@@ -1153,7 +1229,7 @@ class ExportStyleSidebar(QWidget):
             hi_edit.setMaximumWidth(_HI_EDIT_MAX_W)
             self._bind_getter_setter(f"{lim_key}_min", lo_edit)
             self._bind_getter_setter(f"{lim_key}_max", hi_edit)
-            add_row(s_lim, label, hrow(lo_edit, QLabel("…"), hi_edit, spacing=sp.xs))
+            kit.add_row(s_lim, label, kit.hrow(lo_edit, QLabel("…"), hi_edit, spacing=sp.xs))
         # Give the limits back to the plot. Typing a limit is easy and undoing
         # it was not: blanking the four fields by hand leaves the axes exactly
         # where they were, because the style pass only ever *sets* limits and
@@ -1165,7 +1241,7 @@ class ExportStyleSidebar(QWidget):
             "Clear the typed limits on every panel of this figure and let the "
             "plot scale its own axes again.")
         auto_btn.clicked.connect(lambda _=False: self._autoscale_axes())
-        add_full(s_lim, hrow(auto_btn))
+        kit.add_full(s_lim, kit.hrow(auto_btn))
         # The log toggles, their bases, and the section summary that
         # reports them. A figure whose axes carry positions rather than
         # values shows none of the three — see the facet table. The
@@ -1197,7 +1273,7 @@ class ExportStyleSidebar(QWidget):
             # lost — it is merely no longer the only thing that runs.
             xlog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
             ylog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
-            add_stacked(s_lim, "Log scale", hrow(xlog_cb, ylog_cb))
+            kit.add_stacked(s_lim, "Log scale", kit.hrow(xlog_cb, ylog_cb))
 
             # The base each log axis is drawn in. Editable rather than a fixed list:
             # ``LOG_BASE_CHOICES`` are what almost everyone wants and are one click
@@ -1227,7 +1303,7 @@ class ExportStyleSidebar(QWidget):
                 lambda _t: self._redraw_for_a_user_edit())
             _ybase_cb.currentTextChanged.connect(
                 lambda _t: self._redraw_for_a_user_edit())
-            add_stacked(s_lim, "Log base", hrow(QLabel("X"), _xbase_cb,
+            kit.add_stacked(s_lim, "Log base", kit.hrow(QLabel("X"), _xbase_cb,
                                                 QLabel("Y"), _ybase_cb,
                                                 spacing=sp.xs))
 
@@ -1249,8 +1325,11 @@ class ExportStyleSidebar(QWidget):
                 _w.currentTextChanged.connect(
                     lambda *_a, _l=_lim_preview: _l.setText(_lim_preview_text()))
 
+    def _build_layout_section(self, kit: _SectionGrid) -> None:
+        """Properties → Layout: the layout engine and the draw-order lists."""
+        sp = theme.Spacing
         # ── Layout (+ draw order) ───────────────────────────────────────────
-        s_layout = section("Layout", expanded=False)
+        s_layout = kit.section("Layout", expanded=False)
         tight_cb = ToggleSwitch("Tight")
         tight_cb.setChecked(bool(self._prefs["layout_tight"]))
         cons_cb = ToggleSwitch("Constrained")
@@ -1260,7 +1339,7 @@ class ExportStyleSidebar(QWidget):
         # Stacked: "Figure layout" + "Tight + Constrained" toggle pair exceeded
         # the panel width as a single row, so the trailing "ed" of Constrained
         # was getting clipped. Label-above-widgets layout matches Stats rows.
-        add_stacked(s_layout, "Figure layout", hrow(tight_cb, cons_cb))
+        kit.add_stacked(s_layout, "Figure layout", kit.hrow(tight_cb, cons_cb))
 
         # Replicate-set OR well draw-order lists (only one shows at a time,
         # exactly as before). Behaviour lives in _move_list_item /
@@ -1305,19 +1384,20 @@ class ExportStyleSidebar(QWidget):
 
             rs_list = QListWidget()
             rs_block = _order_block("Replicate set order", rs_list)
-            add_full(s_layout, rs_block)
+            kit.add_full(s_layout, rs_block)
             self._line_order_rsets_list = rs_list
             self._line_order_rsets_section = rs_block
 
             w_list = QListWidget()
             w_block = _order_block("Well order", w_list)
-            add_full(s_layout, w_block)
+            kit.add_full(s_layout, w_block)
             self._line_order_wells_list = w_list
             self._line_order_wells_section = w_block
             self._refresh_line_order_lists()
 
-        body_layout.addStretch(1)
-
+    def _build_footer(self, root: QVBoxLayout) -> None:
+        """Reset / Save Preset / Export… under the sections."""
+        sp = theme.Spacing
         # ── footer: reset / save preset / export ────────────────────────────
         # The Copy PNG / Copy SVG / Save As… row that used to live here was
         # redundant — every plot card's controls row already exposes

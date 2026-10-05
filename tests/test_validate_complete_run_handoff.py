@@ -20,6 +20,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from pathlib import Path  # noqa: E402
 
 from tests.fixtures.dataset_builder import build_dataset  # noqa: E402
+from pipeline import cli_args
+from pipeline import well_skip
 
 
 def _handoff_recorder() -> tuple[dict, object]:
@@ -358,19 +360,18 @@ def test_handoff_forces_exactly_the_wells_incremental_would_skip(qtbot, tmp_path
 def test_force_wells_only_overrides_the_named_wells(tmp_path):
     """The pipeline-side decision, on its own: a forced well runs as if
     --incremental were off; every other well is untouched by the list."""
-    import process_microscopy as pm
 
-    forced = pm._canonical_force_wells(["c8", "F08"])
+    forced = well_skip._canonical_force_wells(["c8", "F08"])
     assert sorted(forced) == ["C08", "F08"]        # C8 and C08 are one well
-    assert pm._incremental_for_well(True, "C08", forced) is False
-    assert pm._incremental_for_well(True, "C8", forced) is False
-    assert pm._incremental_for_well(True, "B02", forced) is True
-    assert pm._incremental_for_well(True, "B02", frozenset()) is True
+    assert well_skip.incremental_for_well(True, "C08", forced) is False
+    assert well_skip.incremental_for_well(True, "C8", forced) is False
+    assert well_skip.incremental_for_well(True, "B02", forced) is True
+    assert well_skip.incremental_for_well(True, "B02", frozenset()) is True
 
-    args = pm.build_parser().parse_args(
+    args = cli_args.build_parser().parse_args(
         ["--input_dir", "in", "--output_dir", "out", "--force_wells", "c8"])
     assert args.force_wells == ["c8"]
-    assert pm.build_parser().parse_args(
+    assert cli_args.build_parser().parse_args(
         ["--input_dir", "in", "--output_dir", "out"]).force_wells is None
 
 

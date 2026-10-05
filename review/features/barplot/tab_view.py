@@ -23,15 +23,17 @@ from review.core.ui_helpers import (
 )
 from widgets.separator import build_hline_separator
 from review.features.barplot.controller import (
-    bar_reset_order,
-    on_bar_drag_motion,
-    on_bar_drag_press,
-    on_bar_drag_release,
     open_bar_timepoint_selector,
     toggle_bar_group_mode,
     toggle_bar_pool_replicates,
     toggle_swarm,
     toggle_violin,
+)
+from review.features.barplot._drag_reorder import (
+    bar_reset_order,
+    on_bar_drag_motion,
+    on_bar_drag_press,
+    on_bar_drag_release,
 )
 from review.features.barplot.renderer import redraw_bars
 from functools import partial
@@ -74,7 +76,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # Channel combo hidden — Plotting's band combo is the only visible
     # channel control. See line_graphs_tab_view.py for rationale.
-    chan_cb = reg.register("_chan_cb_bar", QComboBox())
+    chan_cb = reg.register("_chan_cb_bar", QComboBox(parent))
     chan_cb.addItems(["GFP"])
     chan_cb.currentIndexChanged.connect(
         lambda _i, _src=chan_cb: on_plot_channel_selected(ctx, _src)

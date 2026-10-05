@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 import pytest
+import pipeline.suspend as _suspend
 
 _REPO = Path(__file__).resolve().parent.parent
 
@@ -158,8 +159,8 @@ def test_the_pipeline_arms_the_watch_on_its_output_dir(monkeypatch, tmp_path):
     import process_microscopy as pm
 
     armed: list = []
-    monkeypatch.setattr(pm._suspend, "install_handlers", lambda **k: None)
-    monkeypatch.setattr(pm._suspend, "watch_parent",
+    monkeypatch.setattr(_suspend, "install_handlers", lambda **k: None)
+    monkeypatch.setattr(_suspend, "watch_parent",
                         lambda out, **k: armed.append(out))
     monkeypatch.setattr(sys, "argv", [
         "process_microscopy.py", "--input_dir", str(tmp_path / "missing"),

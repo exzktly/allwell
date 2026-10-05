@@ -2,9 +2,8 @@
 
 Extracted from ``process_microscopy.py`` so the correction algorithms live in
 one cohesive, Qt-free module that both the pipeline and the GUI's validation
-views can import. ``process_microscopy`` re-exports every public name here for
-backward compatibility, so existing ``pm.subtract_background(...)`` call sites
-(and the remote worker) are unchanged.
+views can import. Callers import from here; ``process_microscopy`` imports the
+two it calls.
 
 Module-level deps are intentionally minimal (numpy + one scipy morphology op);
 the heavier scikit-image / scipy helpers are imported lazily inside the

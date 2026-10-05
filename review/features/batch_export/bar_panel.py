@@ -331,8 +331,9 @@ class BarBatchExportPanel(BatchExportPanel):
             fig_path = self._out_path(write_dir, f"{base}.{fmt}")
 
             try:
-                from review.features.barplot.controller import (
-                    FC_STATE_OFF, collect_bar_items_for_group,
+                from review.features.barplot.collect import (
+                    FC_STATE_OFF,
+                    collect_bar_items_for_group,
                 )
                 from review.features.export.service import (
                     _control_cell, figure_names_map,
@@ -510,16 +511,18 @@ class BarBatchExportPanel(BatchExportPanel):
     ):
         from matplotlib.figure import Figure as _Figure
         from review.domain import fold_change as _fc
-        # One deferred import, not four. Bar Plots is a removable feature, so
-        # batch_export may not reach it at module scope — and the
-        # deferred-feature-import budget is a down-only ratchet, so the
-        # annotation helpers ride in through the door already open here
-        # rather than opening three more.
-        from review.features.barplot.controller import (
+        # Two deferred imports, one per owning module. Bar Plots is a removable
+        # feature, so batch_export may not reach it at module scope — and the
+        # deferred-feature-import budget is a down-only ratchet, so every bar
+        # helper this method needs rides in through these two doors rather
+        # than opening one per name.
+        from review.features.barplot._annotations import (
             annotate_decorations,
+            cluster_header_pad,
+        )
+        from review.features.barplot.collect import (
             bar_geometry_settings,
             batch_members,
-            cluster_header_pad,
             batch_wells_by_key,
             collect_bar_items_for_group,
         )
@@ -753,7 +756,7 @@ class BarBatchExportPanel(BatchExportPanel):
         solo wells, honouring the same pool-replicates and group-mode
         layout used by ``collect_bar_items_for_group``.
         """
-        from review.features.barplot.controller import cluster_x_for_group_keys
+        from review.features.barplot.collect import cluster_x_for_group_keys
         from review.features.barplot.renderer import (
             draw_beeswarm,
             draw_per_well_n_bars,

@@ -31,6 +31,7 @@ import string
 import textwrap
 
 import pytest
+from services import remote_fetch
 
 
 def _parsers():
@@ -177,7 +178,6 @@ class TestSortKey:
         that remain all resolve to the one implementation."""
         from util.timepoint import sort_key
         import pipeline.auto_threshold as at
-        import services.remote_runner as rr
         from review.features.image_browser.image_table import grid_layout
         from review.features.image_browser.review_image import collect
 
@@ -187,7 +187,7 @@ class TestSortKey:
         # remote_runner keeps a wrapper (its name is used as a bare callable in
         # a sorted() call); prove it delegates rather than reimplements.
         for token in ("2hpCh", "T01", "abc", "48h"):
-            assert rr._tp_sort_key(token) == sort_key(token)
+            assert remote_fetch._tp_sort_key(token) == sort_key(token)
 
 
 class TestCanonicalKeyForm:

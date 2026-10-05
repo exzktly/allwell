@@ -41,6 +41,7 @@ from pipeline.settings_record import (
 )
 from pipeline.well_skip import output_exists_for_well
 from util.settings_digest import KEYED_ON, NOT_KEYED_ON, settings_digest
+from pipeline import cli_args
 
 BASE = {
     "segmentation_method": "stardist_nuclei",
@@ -108,8 +109,7 @@ def _well_on_disk(out: Path, well: str = "A01") -> None:
 
 
 def _parser_dests() -> set[str]:
-    import process_microscopy as pm
-    return set(vars(pm.build_parser().parse_args(["--input_dir", "/tmp/in"])))
+    return set(vars(cli_args.build_parser().parse_args(["--input_dir", "/tmp/in"])))
 
 
 def test_every_keyed_option_is_an_option_the_pipeline_actually_has():
@@ -356,7 +356,7 @@ def test_a_remote_run_brings_the_settings_marker_back_with_the_well():
     """
     import inspect
 
-    from services.remote_runner import Fetcher
+    from services.remote_fetch import Fetcher
 
     src = inspect.getsource(Fetcher._fetch_one)
     assert "_pull_settings_marker" in src, (

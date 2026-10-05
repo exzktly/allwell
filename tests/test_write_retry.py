@@ -17,6 +17,7 @@ import pytest
 
 import pipeline.io as pio
 from pipeline.io import _write_single_csv, merge_records_into_csv, retry_write
+import os
 
 
 @pytest.fixture(autouse=True)
@@ -156,14 +157,13 @@ def test_merge_records_into_csv_is_retried(monkeypatch, tmp_path):
 # ── the output zip ──────────────────────────────────────────────────────────
 
 def test_out_zip_write_survives_a_transient_fault(monkeypatch, tmp_path):
-    import process_microscopy as pm
 
     img_dir = tmp_path / "stage"
     img_dir.mkdir()
     (img_dir / "a_labels.tif").write_bytes(b"not-really-a-tif-but-non-empty")
 
     out_zip = tmp_path / "A01_out.zip"
-    real_replace = pm.os.replace
+    real_replace = os.replace
     state = {"n": 0}
 
     def _flaky_replace(src, dst):
@@ -172,8 +172,8 @@ def test_out_zip_write_survives_a_transient_fault(monkeypatch, tmp_path):
             raise _ebadf()
         return real_replace(src, dst)
 
-    monkeypatch.setattr(pm.os, "replace", _flaky_replace)
-    n = pm.compress_images_to_zip(img_dir, out_zip)
+    monkeypatch.setattr(os, "replace", _flaky_replace)
+    n = pio.compress_images_to_zip(img_dir, out_zip)
 
     assert n == 1
     assert state["n"] == 2
@@ -183,16 +183,15 @@ def test_out_zip_write_survives_a_transient_fault(monkeypatch, tmp_path):
 
 
 def test_out_zip_failure_is_enriched_not_bare_errno(monkeypatch, tmp_path):
-    import process_microscopy as pm
 
     img_dir = tmp_path / "stage"
     img_dir.mkdir()
     (img_dir / "a_labels.tif").write_bytes(b"x")
 
     monkeypatch.setattr(
-        pm.os, "replace", lambda *a, **k: (_ for _ in ()).throw(_ebadf())
+        os, "replace", lambda *a, **k: (_ for _ in ()).throw(_ebadf())
     )
     with pytest.raises(OSError) as ei:
-        pm.compress_images_to_zip(img_dir, tmp_path / "A01_out.zip")
+        pio.compress_images_to_zip(img_dir, tmp_path / "A01_out.zip")
     assert "A01_out.zip" in str(ei.value)
     assert not list(tmp_path.glob("__aw_tmp_*"))

@@ -54,6 +54,7 @@ from review.features.image_browser.image_table.grid_layout import (
 from review.features.image_browser.image_table.image_compose import (
     LUT_COLOR_NAMES, LUT_COLORS, _is_binary_variant, _is_nuc_seg,
 )
+from widgets.owned_action import owned_action
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -1447,7 +1448,7 @@ def _fill_channel_menu(ctx, menu: QMenu, cs: ChannelSpec) -> QMenu:
     hdr = menu.addAction("Render")
     hdr.setEnabled(False)
     for key, label in _RENDER_MODES:
-        act = menu.addAction(label)
+        act = owned_action(menu, label)
         act.setCheckable(True)
         act.setChecked(cs.render == key)
         act.triggered.connect(lambda _c=False, k=key: (_set_render(cs, k), _edit(ctx)))
@@ -1457,7 +1458,7 @@ def _fill_channel_menu(ctx, menu: QMenu, cs: ChannelSpec) -> QMenu:
     # intensity image, where there is no per-cell distinction to make. Shown
     # greyed rather than hidden so the option does not appear and disappear as
     # the render is switched.
-    lc = menu.addAction("Colour cells")
+    lc = owned_action(menu, "Colour cells")
     lc.setCheckable(True)
     lc.setChecked(bool(cs.label_colors))
     lc.setEnabled(cs.render in ("mask", "threshold"))
@@ -1469,12 +1470,12 @@ def _fill_channel_menu(ctx, menu: QMenu, cs: ChannelSpec) -> QMenu:
     lc.triggered.connect(
         lambda c=False: (_set_attr(cs, "label_colors", bool(c)), _edit(ctx)))
 
-    b = menu.addAction("Boundary outline")
+    b = owned_action(menu, "Boundary outline")
     b.setCheckable(True)
     b.setChecked(bool(cs.boundary))
     b.triggered.connect(lambda c=False: (_set_attr(cs, "boundary", bool(c)), _edit(ctx)))
 
-    lg = menu.addAction("Log scale")
+    lg = owned_action(menu, "Log scale")
     lg.setCheckable(True)
     lg.setChecked(bool(cs.log))
     lg.triggered.connect(lambda c=False: (_set_attr(cs, "log", bool(c)), _edit(ctx)))
@@ -1483,7 +1484,7 @@ def _fill_channel_menu(ctx, menu: QMenu, cs: ChannelSpec) -> QMenu:
     chdr = menu.addAction("Colour / LUT")
     chdr.setEnabled(False)
     for name in ["Greys"] + [n for n in LUT_COLOR_NAMES if n != "Greys"]:
-        act = menu.addAction(name)
+        act = owned_action(menu, name)
         act.setCheckable(True)
         act.setChecked(cs.colormap == name)
         act.triggered.connect(lambda _c=False, n=name: (_set_attr(cs, "colormap", n), _edit(ctx)))
@@ -1556,16 +1557,16 @@ def _root_filter_menu(ctx, dim: str, anchor: QWidget) -> QMenu | None:
             a.blockSignals(False)
         _commit()
 
-    sel_all = menu.addAction("Select all")
+    sel_all = owned_action(menu, "Select all")
     sel_all.setProperty("stayOpen", True)
     sel_all.triggered.connect(lambda _c=False: _bulk(True))
-    sel_none = menu.addAction("Select none")
+    sel_none = owned_action(menu, "Select none")
     sel_none.setProperty("stayOpen", True)
     sel_none.triggered.connect(lambda _c=False: _bulk(False))
     menu.addSeparator()
 
     for val in all_vals:
-        a = menu.addAction(val)
+        a = owned_action(menu, val)
         a.setCheckable(True)
         a.setChecked((not active) or val in active)  # empty filter = all shown
         acts.append(a)

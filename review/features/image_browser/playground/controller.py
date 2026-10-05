@@ -9,7 +9,7 @@ renderer. Reference-well methods (empty_well / basic) build their per-channel
 field on a worker thread.
 
 Widget reads are all guarded (``getattr``) so the controller can be driven purely
-through ``app._app_state.playground`` in headless tests.
+through ``ctx.state.playground`` in headless tests.
 """
 
 from __future__ import annotations
@@ -52,6 +52,7 @@ from review.features.image_browser.playground import (
 from review.features.image_browser.playground.worker import (
     request_reference_fields, request_stardist_labels,
 )
+from pipeline.io import load_2d_gray
 
 
 def _st(ctx):
@@ -500,7 +501,7 @@ def _load_loose_frame(ctx, path: str) -> np.ndarray | None:
     if key in cache:
         return cache[key]
     try:
-        arr = pm.load_2d_gray(Path(path))
+        arr = load_2d_gray(Path(path))
     except Exception as exc:
         # Deliberately broad: the user can point this at any file, and each
         # imaging library raises its own type for "that is not an image I can
@@ -947,7 +948,7 @@ def _render(ctx, arr) -> None:
         above_ids=above_ids, threshold=thr,
         label_colors=bool(st.binary_label_colors))
     _set_count(ctx.window, _count_text(st.display_facts))
-    render_playground_display(ctx.window)
+    render_playground_display(ctx)
 
 
 def _build_reference_then_render(ctx, chan_lower: str, *, ff_mode: str,
@@ -1500,7 +1501,7 @@ def playground_pan_move(ctx, event) -> None:
     sx, sy, ox, oy = drag
     st.pan_x = ox + (mx - sx)
     st.pan_y = oy + (my - sy)
-    render_playground_display(ctx.window)
+    render_playground_display(ctx)
 
 
 def playground_hover(ctx, event) -> None:

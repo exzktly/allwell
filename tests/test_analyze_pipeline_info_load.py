@@ -169,8 +169,11 @@ def _remote_sidecar(tab, plate):
     from pipeline.cli_args import build_parser
     from services.pipeline_service import build_pipeline_args
     from services.remote_runner import (
-        LocalInputMode, OutputFilter, RemoteHost, RemoteRunner,
+        LocalInputMode,
+        OutputFilter,
+        RemoteRunner,
     )
+    from services.remote_config import RemoteHost
 
     host = RemoteHost(
         name="hpc", ssh_alias="hpc", remote_project_dir="~/allwell",

@@ -25,16 +25,19 @@ from unittest.mock import MagicMock
 import pytest
 
 from services.remote_runner import (
-    UPLOAD_HEARTBEAT,
-    UPLOAD_SENTINEL,
-    UPLOAD_WAIT_TIMEOUT_S,
-    DatasetCache,
     LocalInputMode,
-    RemoteHost,
     RemoteRunner,
     ZippedInput,
-    _compose_remote_cmd,
 )
+from services.remote_commands import _compose_remote_cmd
+from services.remote_config import RemoteHost
+from services.remote_run_id import (
+    UPLOAD_HEARTBEAT,
+    UPLOAD_SENTINEL,
+)
+from services.remote_wait_snippets import UPLOAD_WAIT_TIMEOUT_S
+from services.remote_upload import DatasetCache
+from services.remote_fetch import FetchedOutputVerifier
 
 _PIDFILE = "/scratch/runs/run-abc/run.pid"
 _ARGV = ["python", "process_microscopy.py", "--input_dir", "/scratch/in"]
@@ -153,7 +156,7 @@ def _spawn_recording_order(monkeypatch, tmp_path, stop_fetchers, launcher, *,
     monkeypatch.setattr(DatasetCache, "gc", lambda self, budget, **kw: None)
     monkeypatch.setattr(RemoteRunner, "sync_required_files",
                         lambda self, **kw: None)
-    monkeypatch.setattr(RemoteRunner, "_list_remote_completed_wells",
+    monkeypatch.setattr(FetchedOutputVerifier, "_list_remote_completed_wells",
                         lambda self: set())
     cancelled: list[str] = []
     monkeypatch.setattr(RemoteRunner, "cancel",
@@ -167,7 +170,7 @@ def _spawn_recording_order(monkeypatch, tmp_path, stop_fetchers, launcher, *,
         m.returncode = 0
         return m
 
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
 
     # ``subprocess.run`` is Popen underneath, so the fake above would answer the
     # sweep's ssh as though it were the pipeline launch. Give it its own stub:
@@ -176,7 +179,7 @@ def _spawn_recording_order(monkeypatch, tmp_path, stop_fetchers, launcher, *,
         order.append("sweep")
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
 
     zip_path = tmp_path / "A01.zip"
     zip_path.write_bytes(b"PK\x05\x06" + b"\0" * 18)
@@ -241,7 +244,7 @@ def test_the_job_gives_up_on_a_dead_uploader_not_just_a_slow_one():
     power gone — and waiting out two hours of idle, billed node for that is the
     wrong behaviour. A heartbeat that stops advancing frees the node in about a
     minute however long the upload legitimately needed."""
-    from services.remote_runner import UPLOAD_HEARTBEAT_STALE_S
+    from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
 
     cmd = _compose_remote_cmd(
         "srun -N1", _PIDFILE, _ARGV, cache_hit=False,
@@ -261,7 +264,7 @@ def test_the_job_gives_up_on_a_dead_uploader_not_just_a_slow_one():
 def test_the_heartbeat_stops_when_the_upload_does(monkeypatch):
     """Whatever ends the upload has to end the beat, or a crashed app would go
     on reassuring the job that its input is coming."""
-    from services.remote_runner import _UploadHeartbeat
+    from services.remote_process import _UploadHeartbeat
 
     beats = []
 
@@ -295,7 +298,7 @@ def test_a_leftover_job_is_cancelled_but_a_live_one_is_not(monkeypatch, tmp_path
         seen["script"] = argv[-1]
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     runner._sweep_orphaned_allocation("/r/run.pid", "/r/.aw_upload_alive")
 
     script = seen["script"]
@@ -310,7 +313,7 @@ def test_a_leftover_job_is_cancelled_but_a_live_one_is_not(monkeypatch, tmp_path
 
 def test_a_host_without_a_scheduler_has_nothing_to_sweep(monkeypatch, tmp_path):
     ran = []
-    monkeypatch.setattr("services.remote_runner.subprocess.run",
+    monkeypatch.setattr("subprocess.run",
                         lambda *a, **k: ran.append(a) or
                         subprocess.CompletedProcess([], 0, stdout=""))
     RemoteRunner(_host(""))._sweep_orphaned_allocation("/r/run.pid", "/r/.hb")
@@ -331,10 +334,10 @@ def test_neither_cancel_path_will_touch_another_user_s_job(monkeypatch):
         scripts.append(argv[-1])
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     runner._sweep_orphaned_allocation("/r/run.pid", "/r/.aw_upload_alive")
 
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner._run = _RemoteRun(
         run_id="run-x", cache_key="k", remote_input_dir="/r/in",
@@ -359,7 +362,7 @@ def test_a_job_owned_by_someone_else_is_reported_not_cancelled(monkeypatch):
     runner = RemoteRunner(_host("srun -N1"))
     said = []
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         lambda argv, **kw: subprocess.CompletedProcess(
             argv, 0, stdout="AW_NOTMINE 4242 alice\n", stderr=""),
     )
@@ -429,7 +432,7 @@ def _sweep_under_bash(monkeypatch, tmp_path, stat_shim, *, heartbeat_age,
             "timeout": 30,
         })
 
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     runner = RemoteRunner(_host("srun --time=1:00:00"))
     return runner._sweep_orphaned_allocation(pidfile, hb, log_fn=lambda _m: None)
 

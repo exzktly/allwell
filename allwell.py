@@ -28,7 +28,7 @@ _boot_diag.install_excepthook()
 _boot_diag.boot(f"start pid={__import__('os').getpid()} python={sys.version.split()[0]} platform={sys.platform}")
 
 _boot_diag.boot("importing PySide6 (Qt DLLs) …")
-from PySide6.QtCore import Qt, QTimer, QRectF
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QRectF
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
@@ -177,6 +177,24 @@ def _strip_install_help(md_text: str) -> str:
         i += 1
     return "".join(out)
 
+
+
+class _ModeBarWidthSync(QObject):
+    """Re-syncs the title bar whenever a mode's left panel is resized or toggled.
+
+    Declared at module scope and parented to the window it reports to, rather
+    than inside ``_install_mode_bar_sync`` closing over it: see
+    ``tests/test_qt_subclasses_live_at_module_scope.py``.
+    """
+
+    def __init__(self, window) -> None:
+        super().__init__(window)
+        self._window = window
+
+    def eventFilter(self, _obj, event) -> bool:  # Qt naming
+        if event.type() in (QEvent.Resize, QEvent.Show, QEvent.Hide):
+            self._window._sync_mode_bar()
+        return False
 
 class AllWellApp(QMainWindow):
     """Root window containing the Review and Analyze notebook tabs."""
@@ -1151,17 +1169,7 @@ class AllWellApp(QMainWindow):
 
     def _install_mode_bar_sync(self) -> None:
         """Re-sync the bar whenever a mode's left panel is resized or toggled."""
-        from PySide6.QtCore import QEvent, QObject
-
-        app = self
-
-        class _WidthSync(QObject):
-            def eventFilter(self, _obj, event) -> bool:  # Qt naming
-                if event.type() in (QEvent.Resize, QEvent.Show, QEvent.Hide):
-                    app._sync_mode_bar()
-                return False
-
-        watcher = _WidthSync(self)
+        watcher = _ModeBarWidthSync(self)
         self._mode_bar_sync = watcher   # keep a reference alive
         panels = [getattr(self._review, "_sidebar_root", None)]
         panels += [getattr(getattr(self, name, None), "_left_sidebar", None)
@@ -1761,9 +1769,10 @@ def main() -> None:
     # Restrict matplotlib to the bundled fonts BEFORE anything imports it (the
     # first plot pulls matplotlib.figure -> font_manager). Skips matplotlib's
     # full system-font enumeration, which can cost minutes on first launch on a
-    # Windows 365 Cloud PC. Defensive: never blocks startup. (This is the #1
-    # suspect for a silent "hangs on launch" — the boot log brackets it so a
-    # stall here is visible as the last-reached milestone.)
+    # Windows 365 Cloud PC. On a cold cache it seeds a placeholder font list so
+    # that importing font_manager does not scan before the restriction exists
+    # (see startup/mpl_bootstrap.py). Defensive: never blocks startup. The boot
+    # log brackets it, so a stall here is visible as the last-reached milestone.
     _boot_diag.boot("mpl_bootstrap.configure() — limiting matplotlib font scan …")
     try:
         from startup import mpl_bootstrap

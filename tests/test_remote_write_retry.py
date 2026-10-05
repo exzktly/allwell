@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import errno
 import json
+import os
+import subprocess
 import types
 import zipfile
 from pathlib import Path
@@ -25,14 +27,18 @@ from pathlib import Path
 import pytest
 
 import util.retry_io as rio
-from services.remote_runner import (
-    _RSYNC_RETRY_CODES,
-    Fetcher,
-    OutputFilter,
+from services.remote_runner import OutputFilter
+from services.remote_transport import _RSYNC_RETRY_CODES
+from services.remote_staging import (
     _materialize_staging,
     _StagePlan,
+)
+from services.remote_fetch import (
+    Fetcher,
     refresh_pipeline_info_available_from_outputs,
 )
+from services import remote_fetch
+from services import remote_staging
 
 
 @pytest.fixture(autouse=True)
@@ -133,14 +139,13 @@ def _rewrite_plan(tmp_path) -> tuple[Path, _StagePlan]:
 
 
 def test_staging_rewrite_survives_a_transient_fault(monkeypatch, tmp_path):
-    import services.remote_runner as rr
 
     src, plan = _rewrite_plan(tmp_path)
     staging = tmp_path / "staging"
     staging.mkdir()
 
-    flaky = _flaky(2, rr.atomic_zip)
-    monkeypatch.setattr(rr, "atomic_zip", flaky)
+    flaky = _flaky(2, remote_staging.atomic_zip)
+    monkeypatch.setattr(remote_staging, "atomic_zip", flaky)
 
     staged = _materialize_staging([plan], staging)
 
@@ -156,13 +161,12 @@ def test_staging_rewrite_survives_a_transient_fault(monkeypatch, tmp_path):
 def test_staging_rewrite_reports_the_volume_when_the_budget_runs_out(
     monkeypatch, tmp_path,
 ):
-    import services.remote_runner as rr
 
     _src, plan = _rewrite_plan(tmp_path)
     staging = tmp_path / "staging"
     staging.mkdir()
     monkeypatch.setattr(
-        rr, "atomic_zip", lambda *a, **k: (_ for _ in ()).throw(_ebadf()))
+        remote_staging, "atomic_zip", lambda *a, **k: (_ for _ in ()).throw(_ebadf()))
 
     with pytest.raises(OSError) as ei:
         _materialize_staging([plan], staging)
@@ -205,7 +209,6 @@ def _fetcher_stub(out_dir: Path, *, incremental: bool = False, log=None):
 
 
 def test_materialize_survives_a_transient_fault(monkeypatch, tmp_path):
-    import services.remote_runner as rr
 
     out_dir = tmp_path / "results"
     out_dir.mkdir()
@@ -213,8 +216,8 @@ def test_materialize_survives_a_transient_fault(monkeypatch, tmp_path):
     with zipfile.ZipFile(src_zip, "w") as zf:
         zf.writestr("a_labels.tif", b"x")
 
-    flaky = _flaky(1, rr.os.replace)
-    monkeypatch.setattr(rr.os, "replace", flaky)
+    flaky = _flaky(1, os.replace)
+    monkeypatch.setattr(os, "replace", flaky)
 
     assert Fetcher._materialize(_fetcher_stub(out_dir), "A01", src_zip) is True
     assert (out_dir / "A01_out.zip").is_file()
@@ -224,14 +227,13 @@ def test_materialize_survives_a_transient_fault(monkeypatch, tmp_path):
 
 
 def test_materialize_failure_names_the_output_volume(monkeypatch, tmp_path):
-    import services.remote_runner as rr
 
     out_dir = tmp_path / "results"
     out_dir.mkdir()
     src_zip = tmp_path / "transit.zip"
     src_zip.write_bytes(b"x")
     monkeypatch.setattr(
-        rr.os, "replace", lambda *a, **k: (_ for _ in ()).throw(_ebadf()))
+        os, "replace", lambda *a, **k: (_ for _ in ()).throw(_ebadf()))
 
     lines: list[str] = []
     stub = _fetcher_stub(out_dir, log=lines.append)
@@ -247,12 +249,11 @@ def test_materialize_failure_names_the_output_volume(monkeypatch, tmp_path):
 # ── telling a local write fault apart from an empty remote ──────────────────
 
 def _rsync_glob_stub(monkeypatch, *, listed: list[str], pull_ok: bool):
-    import services.remote_runner as rr
 
-    monkeypatch.setattr(rr, "resolve_rsync_binary", lambda: "rsync")
-    monkeypatch.setattr(rr, "_rsync_ssh_transport", lambda _host: [])
+    monkeypatch.setattr(remote_fetch, "resolve_rsync_binary", lambda: "rsync")
+    monkeypatch.setattr(remote_fetch, "_rsync_ssh_transport", lambda _host: [])
     monkeypatch.setattr(
-        rr.subprocess, "run",
+        subprocess, "run",
         lambda *a, **k: types.SimpleNamespace(
             returncode=0, stdout="\n".join(listed).encode(), stderr=b"",
         ),
@@ -264,7 +265,7 @@ def _rsync_glob_stub(monkeypatch, *, listed: list[str], pull_ok: bool):
     # ``_rsync_glob`` is now a two-line composition of the listing and the pull,
     # split so the CSV half of a well's fetch can learn its byte total before it
     # starts. Bind the real halves onto the stub so this still exercises them.
-    from services.remote_runner import Fetcher
+    from services.remote_fetch import Fetcher
     stub._list_remote_glob = lambda src: Fetcher._list_remote_glob(stub, src)
     stub._pull_listed = lambda h, f, d: Fetcher._pull_listed(stub, h, f, d)
     return stub
@@ -295,7 +296,6 @@ def test_rsync_retries_a_local_file_io_error():
 # ── the sidecar rewrite ─────────────────────────────────────────────────────
 
 def test_pipeline_info_refresh_survives_a_transient_fault(monkeypatch, tmp_path):
-    import services.remote_runner as rr
 
     out = tmp_path / "results"
     out.mkdir()
@@ -306,8 +306,8 @@ def test_pipeline_info_refresh_survives_a_transient_fault(monkeypatch, tmp_path)
     with zipfile.ZipFile(out / "A01_out.zip", "w") as zf:
         zf.writestr("A01_1_0_GFP_tophat.tif", b"x")
 
-    flaky = _flaky(1, rr.os.replace)
-    monkeypatch.setattr(rr.os, "replace", flaky)
+    flaky = _flaky(1, os.replace)
+    monkeypatch.setattr(os, "replace", flaky)
 
     assert refresh_pipeline_info_available_from_outputs(out) is True
     assert flaky.calls["n"] == 2

@@ -258,8 +258,9 @@ def test_batch_bar_group_uses_sample_labels(ctx):
     straight through to ``BarItem.display``, so a custom Home → Well Labels
     label never reached the batch-exported bar figure even though the
     on-tab collector (``collect_bar_items``) already resolved it."""
-    from review.features.barplot.controller import (
-        FC_STATE_OFF, collect_bar_items_for_group,
+    from review.features.barplot.collect import (
+        FC_STATE_OFF,
+        collect_bar_items_for_group,
     )
     from review.domain.batch_models import BarGroup, ReplicateSet
 

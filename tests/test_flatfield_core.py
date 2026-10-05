@@ -7,6 +7,7 @@ from __future__ import annotations
 import numpy as np
 
 import pipeline.flatfield as fc
+from pipeline import flatfield
 
 
 def test_normalize_is_mean_one_and_floored():
@@ -70,8 +71,7 @@ def test_gaussian_roundtrip_flattens_a_smooth_gradient():
 
 
 def test_pipeline_reexports_the_same_functions():
-    import process_microscopy as pm
-    assert pm.estimate_gaussian_flatfield is fc.estimate_gaussian_flatfield
-    assert pm.estimate_basic_flatfield is fc.estimate_basic_flatfield
-    assert pm.apply_flatfield is fc.apply_flatfield
-    assert pm._FLATFIELD_SIGMA == fc.FLATFIELD_SIGMA
+    assert flatfield.estimate_gaussian_flatfield is fc.estimate_gaussian_flatfield
+    assert flatfield.estimate_basic_flatfield is fc.estimate_basic_flatfield
+    assert flatfield.apply_flatfield is fc.apply_flatfield
+    assert flatfield._FLATFIELD_SIGMA == fc.FLATFIELD_SIGMA

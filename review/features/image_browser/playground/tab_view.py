@@ -22,7 +22,8 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from pipeline.stardist import NMS_THRESH_HELP, PROB_THRESH_HELP
-from process_microscopy import BACKGROUND_METHODS, FLATFIELD_MODES
+from pipeline.background import BACKGROUND_METHODS
+from pipeline.cli_args import FLATFIELD_MODES
 from widgets.info_icon import info_icon
 from widgets.page_body import build_page_body
 from widgets.separator import build_hline_separator
@@ -184,7 +185,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
 
     def _sync_frame_source() -> None:
         """Grey the dataset selectors while a loose file is the frame."""
-        loose = bool(str(app._app_state.playground.loose_image_path or "").strip())
+        loose = bool(str(ctx.state.playground.loose_image_path or "").strip())
         for cb in (chan_cb, tp_cb, fov_cb):
             cb.setEnabled(not loose)
         clear_btn.setEnabled(loose)
@@ -296,7 +297,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         "that each frame takes a few seconds.")
 
     def _on_seg_live(v: bool) -> None:
-        app._app_state.playground.seg_live = bool(v)
+        ctx.state.playground.seg_live = bool(v)
         on_change()
     seg_live_cb.toggled.connect(_on_seg_live)
     cl.addWidget(seg_live_cb)
@@ -445,11 +446,11 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
                 e.blockSignals(blocked)
 
     def _remember_lut() -> None:
-        st = app._app_state.playground
+        st = ctx.state.playground
         st.lut_by_source[st.source] = (lmin.text(), lmax.text())
 
     def _on_source(_i: int) -> None:
-        st = app._app_state.playground
+        st = ctx.state.playground
         new_source = source_seg.currentData() or "corrected"
         if new_source != st.source:
             _remember_lut()                       # save the stage we're leaving
@@ -498,7 +499,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         "change the app-wide ThreshFracOn.")
 
     def _on_threshold(v: float) -> None:
-        app._app_state.playground.threshold = float(v)
+        ctx.state.playground.threshold = float(v)
         on_change()
     thr_stepper.valueChanged.connect(_on_threshold)
     thr_row.layout().addWidget(thr_stepper)
@@ -540,15 +541,15 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     overlay_cb.setChecked(True)
 
     def _on_binary(v: bool) -> None:
-        app._app_state.playground.binary_mask = bool(v)
+        ctx.state.playground.binary_mask = bool(v)
         on_change()
 
     def _on_colors(v: bool) -> None:
-        app._app_state.playground.binary_label_colors = bool(v)
+        ctx.state.playground.binary_label_colors = bool(v)
         on_change()
 
     def _on_overlay(v: bool) -> None:
-        app._app_state.playground.show_overlay = bool(v)
+        ctx.state.playground.show_overlay = bool(v)
         on_change()
     binary_cb.toggled.connect(_on_binary)
     colors_cb.toggled.connect(_on_colors)
@@ -569,9 +570,9 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     zl.addWidget(QLabel("Zoom", zoom_row))
 
     def _zoom(delta: float) -> None:
-        st = app._app_state.playground
+        st = ctx.state.playground
         st.zoom = max(0.1, min(8.0, st.zoom * delta))
-        render_playground_display(app)
+        render_playground_display(ctx)
     zout = QPushButton("−", zoom_row)
     zout.setFixedWidth(theme.Metrics.icon_btn_w)
     zout.clicked.connect(lambda _=False: _zoom(1 / 1.25))
@@ -579,8 +580,8 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     zin.setFixedWidth(theme.Metrics.icon_btn_w)
     zin.clicked.connect(lambda _=False: _zoom(1.25))
     zfit = QPushButton("Fit", zoom_row)
-    zfit.clicked.connect(lambda _=False: (setattr(app._app_state.playground, "zoom", 1.0),
-                                          render_playground_display(app)))
+    zfit.clicked.connect(lambda _=False: (setattr(ctx.state.playground, "zoom", 1.0),
+                                          render_playground_display(ctx)))
     zl.addWidget(zout)
     zl.addWidget(zin)
     zl.addWidget(zfit)
@@ -622,7 +623,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
 
     def _on_canvas_resize(ev) -> None:
         _orig_canvas_resize(ev)
-        render_playground_display(app)
+        render_playground_display(ctx)
     canvas.resizeEvent = _on_canvas_resize
 
     # Click-drag to pan; hover (no button) shows the pixel intensity tooltip.
@@ -658,7 +659,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         bgwell_row.parentWidget().setVisible(
             ff in ("empty_well", "basic") or bg == "empty_well")
 
-        enabled = correction_controls_enabled(app._app_state.playground.source)
+        enabled = correction_controls_enabled(ctx.state.playground.source)
         ff_cb.setEnabled(enabled["flatfield"])
         bg_cb.setEnabled(enabled["background"])
         for r in (radius_row, fft_row, mesh_ratio_row, mesh_sigma_row):
@@ -669,7 +670,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     _sync_method_rows()
     _sync_frame_source()
 
-    playground_repopulate_dropdowns(app._ctx)
+    playground_repopulate_dropdowns(ctx)
     # No trailing on_change() here: build_playground_tab is only ever reached
     # through image_browser.controller.on_image_browser_subtab_changed, which
     # always follows with registry._activate_playground -> playground_activate

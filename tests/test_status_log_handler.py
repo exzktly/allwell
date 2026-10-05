@@ -26,7 +26,18 @@ from review.core import status_view as SV
 
 
 class _DeadWidget:
-    """Stands in for a QTextEdit whose C++ half has been deleted."""
+    """Stands in for a QTextEdit whose C++ half has been deleted.
+
+    Carries a ``destroyed`` signal because every widget does and the handler
+    connects to it; these tests are about the other route, a record that
+    arrives after the widget is gone, so the signal never fires here.
+    """
+
+    class _Signal:
+        def connect(self, _slot) -> None:
+            return None
+
+    destroyed = _Signal()
 
     def append(self, _html):
         raise RuntimeError("Internal C++ object (QTextEdit) already deleted.")

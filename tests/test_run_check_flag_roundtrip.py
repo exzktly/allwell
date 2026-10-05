@@ -21,6 +21,8 @@ import pytest
 from analyze.domain.job_edit import _opts_as_pinfo_keys
 from analyze.log_pane import _completeness_line
 from services.pipeline_service import build_pipeline_args
+from services import remote_run_id
+from pipeline import cli_args
 
 
 def _args(**opts):
@@ -53,10 +55,9 @@ def test_an_opts_dict_from_before_the_checkbox_means_on():
 
 
 def test_the_pipeline_parser_accepts_what_the_form_emits():
-    import process_microscopy as pm
 
     argv = _args(run_check=False)
-    parsed = pm.build_parser().parse_args(argv[2:])
+    parsed = cli_args.build_parser().parse_args(argv[2:])
     assert parsed.no_run_check is True
 
 
@@ -120,7 +121,7 @@ def test_the_client_check_drops_whatever_the_fetch_brought_back(tmp_path):
     turned the check off — and on a run whose client-side check then failed,
     that is the only thing they would be told.
     """
-    from services.remote_runner import run_client_side_completeness_check
+    from services.remote_fetch import run_client_side_completeness_check
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()
@@ -144,7 +145,7 @@ def test_a_sidecar_with_no_schema_leaves_no_misleading_record(tmp_path):
     """Nothing to compare against means no record — which reads as "not
     checked", the honest answer — rather than a record claiming everything is
     fine because nothing could be measured."""
-    from services.remote_runner import run_client_side_completeness_check
+    from services.remote_fetch import run_client_side_completeness_check
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()
@@ -160,12 +161,11 @@ def test_the_remote_argv_always_suppresses_the_check():
     """Every remote launch, single or batched. A record written on the far side
     would inventory the uploaded split rather than the plate, and would be
     overwritten by the fetch in any case."""
-    import services.remote_runner as rr
 
     argv = ["python", "process_microscopy.py",
             "--input_dir", "/local/in", "--output_dir", "/local/out",
             "--nuclear_token", "DAPI"]
-    assert rr._local_input_dir_from_argv(argv).name == "in"
-    assert rr._local_input_dir_from_argv(
+    assert remote_run_id._local_input_dir_from_argv(argv).name == "in"
+    assert remote_run_id._local_input_dir_from_argv(
         ["python", "x.py", "--input_dir=/local/plate"]).name == "plate"
-    assert rr._local_input_dir_from_argv(["python", "x.py"]) is None
+    assert remote_run_id._local_input_dir_from_argv(["python", "x.py"]) is None

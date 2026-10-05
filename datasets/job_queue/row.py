@@ -40,6 +40,7 @@ from widgets.icons import make_icon
 from widgets.status_dot import StatusDot
 from services.job_kinds import KIND_LABEL, describe, describe_detail
 from services.job_queue import JobSpec, JobState
+from widgets.owned_action import owned_action
 
 # Queue position number at the row's left edge.
 _ORDINAL_W = 20
@@ -251,17 +252,17 @@ class JobRow(QWidget):
         menu = QMenu(self)
         menu.setObjectName("JobRowMenu")
 
-        edit = menu.addAction("Edit…")
+        edit = owned_action(menu, "Edit…")
         edit.setEnabled(job.state != JobState.RUNNING)
         edit.triggered.connect(lambda: self.editClicked.emit(self.job_id))
 
-        menu.addAction("Duplicate").triggered.connect(
+        owned_action(menu, "Duplicate").triggered.connect(
             lambda: self.duplicateClicked.emit(self.job_id))
 
         # Only a finished job can be retried: a pending one is already waiting
         # and a running one is already going.
         if job.state in JobState.TERMINAL:
-            menu.addAction("Retry").triggered.connect(
+            owned_action(menu, "Retry").triggered.connect(
                 lambda: self.retryClicked.emit(self.job_id))
 
         self._add_chain_submenu(menu)
@@ -271,13 +272,13 @@ class JobRow(QWidget):
         # one could still change something.
         if job.state not in JobState.TERMINAL:
             menu.addSeparator()
-            menu.addAction("Move up").triggered.connect(
+            owned_action(menu, "Move up").triggered.connect(
                 lambda: self.moveUpClicked.emit(self.job_id))
-            menu.addAction("Move down").triggered.connect(
+            owned_action(menu, "Move down").triggered.connect(
                 lambda: self.moveDownClicked.emit(self.job_id))
 
         menu.addSeparator()
-        menu.addAction("Remove from queue").triggered.connect(
+        owned_action(menu, "Remove from queue").triggered.connect(
             lambda: self.removeClicked.emit(self.job_id))
         return menu
 
@@ -296,7 +297,7 @@ class JobRow(QWidget):
         sub = QMenu("Run after", menu)
         sub.setObjectName("JobRowChainMenu")
         menu.addMenu(sub)
-        none_action = sub.addAction("Nothing (run on its own)")
+        none_action = owned_action(sub, "Nothing (run on its own)")
         none_action.setCheckable(True)
         none_action.setChecked(not self._job.chain_from)
         none_action.triggered.connect(lambda: self.chainRequested.emit(self.job_id, ""))
@@ -305,7 +306,7 @@ class JobRow(QWidget):
             return
         sub.addSeparator()
         for pred_id, label in self._predecessors:
-            act = sub.addAction(label)
+            act = owned_action(sub, label)
             act.setCheckable(True)
             act.setChecked(self._job.chain_from == pred_id)
             act.triggered.connect(

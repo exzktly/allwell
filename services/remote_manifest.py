@@ -1,4 +1,4 @@
-"""The one list of files a remote run needs on the worker.
+"""The one list of files a remote run needs on the worker, and where they are.
 
 Lifted out of ``services/remote_runner`` because it is a *data* declaration
 with no behaviour, and because the two guards over it were in direct tension:
@@ -14,9 +14,24 @@ and the several ``util/`` and ``pipeline/`` docstrings that cite it by that
 path — keeps working unchanged. A re-export is a binding, though: a test that
 patches the name on ``remote_runner`` will not be seen by a reader that
 imports it from here (§6.4).
+
+:func:`repo_root` is the directory those paths are relative to. It lives beside
+the list because it is that list's other half, and because more than one stage
+of a remote run needs it — the runner syncs the files from it, the batched
+process puts it on ``sys.path`` to run the pipeline's threshold pass locally —
+so it cannot live in either without the other importing it.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
+
+
+def repo_root() -> Path:
+    """Absolute path to the repo root from which required-file paths
+    are resolved. Single source of truth used by the runner and the
+    bootstrap script's Python helpers."""
+    return Path(__file__).resolve().parent.parent
 
 # Files this framework needs on the remote in order to run the pipeline.
 # Kept minimal on purpose: process_microscopy.py plus its local-module

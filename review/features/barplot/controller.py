@@ -6,7 +6,7 @@ from review.core.plot_annotations import value_label_settings
 from review.features.barplot._annotations import (
     annotate_bar_values,
     mark_undefined_spread as _mark_undefined_spread,
-    annotate_decorations, cluster_header_pad,  # noqa: F401  (re-exported for batch_export)
+    annotate_decorations,
 )
 from review.features.barplot._axis_fit import fit_bar_panels
 from review.domain.numeric import is_number
@@ -21,7 +21,6 @@ from review.domain.batch_models import ReplicateSet
 from review.domain.fold_change_pairing import (
     tick_labels as _tick_labels,
 )
-from core import debug_flags as debug_flags
 from review.core.ui_helpers import set_combo_values as _set_combo_values
 from review.core.ui_helpers import multiselect_button_text
 
@@ -29,36 +28,12 @@ _logger = logging.getLogger(__name__)
 
 
 
-# ``bar_groups_to_dict`` / ``bar_groups_from_data`` are pure domain transforms;
-# they moved to ``review.domain.bar_groups`` so the domain layer can use
-# them without importing this feature. Re-exported here for existing callers.
-from review.domain.bar_groups import (  # noqa: F401
-    bar_groups_from_data,
-    bar_groups_to_dict,
-)
-
-# The pure data-collection cluster moved to ``barplot/collect.py`` (T4). The
-# renderer/state functions below still call ``collect_bar_items`` / ``BarItem``,
-# and external callers (runtime_app, batch_export, export.service, tests) import
-# these from here — so re-export them.
-from review.features.barplot.collect import (  # noqa: F401
+# The data-collection cluster lives in ``barplot/collect.py``; this module
+# imports what it calls, and every other caller imports from there.
+from review.features.barplot.collect import (
     BarItem,
-    FC_STATE_OFF,
     _bar_debug,
-    bar_drag_xs,
     bar_err_settings, bar_geometry_settings, bar_layout,
-    bar_guide_x,
-    bar_idx_at_x,
-    bar_well_display_label,
-    batch_members,
-    batch_wells_by_key,
-    cluster_x_for_group_keys,
-    cluster_centers,
-    clustered_x_positions,
-    collect_bar_items,
-    collect_bar_items_for_app,
-    collect_bar_items_for_group,
-    collect_bar_items_fov_pooled,
     drop_redundant_cluster_keys,
 )
 
@@ -85,10 +60,6 @@ def ordered_bar_keys(ctx) -> list:
     seen = set(ordered)
     ordered.extend(k for k in keys if k not in seen)
     return ordered
-
-
-# ``cluster_x_for_group_keys`` / ``clustered_x_positions`` moved to
-# ``barplot/collect.py`` (Qt-free layout math) and re-exported above.
 
 
 def render_bar_items(
@@ -282,17 +253,8 @@ def render_bar_items(
 
 # ── Drag-and-drop reordering ─────────────────────────────────────────────────
 #
-# The five handlers live in ``barplot/_drag_reorder.py`` and are re-exported
-# here: ``runtime_app`` and ``barplot/tab_view.py`` both reach them through this
-# module, and the split was made to hold a line budget, not to move the seam
-# every caller already uses.
-from review.features.barplot._drag_reorder import (  # noqa: E402,F401
-    bar_event_xdata,
-    bar_reset_order,
-    on_bar_drag_motion,
-    on_bar_drag_press,
-    on_bar_drag_release,
-)
+# The five handlers live in ``barplot/_drag_reorder.py``; ``barplot/tab_view.py``
+# wires them from there.
 
 
 def update_bar_tp_menu(ctx) -> None:

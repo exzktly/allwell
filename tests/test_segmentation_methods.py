@@ -124,9 +124,8 @@ def test_build_pipeline_args_general_cellpose():
 
 def test_segment_cellpose_honors_params(monkeypatch):
     pytest.importorskip("scipy")
-    import process_microscopy as pm
-    # The Cellpose segmenters + model cache live in pipeline.cellpose now
-    # (pm re-exports them). Patch the cache where it actually lives.
+    # The Cellpose segmenters and their model cache live in pipeline.cellpose;
+    # the cache is patched, and the segmenter driven, there.
     import pipeline.cellpose as mc
 
     calls: dict = {}
@@ -147,7 +146,7 @@ def test_segment_cellpose_honors_params(monkeypatch):
     monkeypatch.setattr(mc, "_CELLPOSE_MODELS", {}, raising=False)
 
     img = np.zeros((8, 8), np.float32)
-    pm._segment_cellpose(img, model_type="cyto2", diameter=20.0,
+    mc._segment_cellpose(img, model_type="cyto2", diameter=20.0,
                          flow_threshold=0.5, cellprob_threshold=-0.5)
     assert calls["model_type"] == "cyto2"
     assert calls["eval"]["diameter"] == 20.0
@@ -157,6 +156,6 @@ def test_segment_cellpose_honors_params(monkeypatch):
 
     # A nucleus channel → 2-channel stack + channels=[1, 2].
     mc._CELLPOSE_MODELS.clear()
-    pm._segment_cellpose(img, model_type="cyto2",
+    mc._segment_cellpose(img, model_type="cyto2",
                          nucleus_image=np.ones((8, 8), np.float32))
     assert calls["eval"]["channels"] == [1, 2]

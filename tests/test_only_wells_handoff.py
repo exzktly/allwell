@@ -28,6 +28,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest  # noqa: E402
 
 from tests.fixtures.dataset_builder import build_dataset  # noqa: E402
+from pipeline import cli_args
 
 
 def _plate_needing_work(root):
@@ -91,10 +92,9 @@ def _argv(tab, tmp_path):
 
 def _only(argv):
     """What the pipeline's own parser reads back out of *argv*."""
-    import process_microscopy as pm
 
     rest = [a for a in argv[2:]]
-    return pm.build_parser().parse_args(rest).only_wells
+    return cli_args.build_parser().parse_args(rest).only_wells
 
 
 # ── Validate: which wells it names ───────────────────────────────────────────

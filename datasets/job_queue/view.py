@@ -36,6 +36,7 @@ from services.job_kinds import KIND_LABEL
 from services.job_queue import JobSpec, JobState
 from datasets.job_queue.row import JobRow
 from widgets import menu_exec
+from widgets.owned_action import owned_action
 
 # The order the "+ Add job" menu offers the tools in — Analyze first because
 # it is the run everything else exists to prepare for or tidy up after, then
@@ -225,7 +226,7 @@ class JobQueuePage(QWidget):
         menu = QMenu(self)
         menu.setObjectName("AddJobMenu")
         for kind in ADD_KINDS:
-            act = menu.addAction(KIND_LABEL.get(kind, kind))
+            act = owned_action(menu, KIND_LABEL.get(kind, kind))
             act.triggered.connect(lambda _checked=False, k=kind:
                                   self.addKindRequested.emit(k))
         return menu

@@ -60,6 +60,7 @@ from ui import theme
 from util.well_token import canonical_well_label
 from util.aw_safe import swallowed
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
+from widgets.owned_action import owned_action
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -435,7 +436,7 @@ class _SelectionRow(QFrame):
 
         def _menu():
             m = QMenu(b)
-            m.addAction("✕ Remove").triggered.connect(
+            owned_action(m, "✕ Remove").triggered.connect(
                 lambda _=False, t=token: self._remove_well(t))
             m.exec(b.mapToGlobal(QPoint(0, b.height())))
         b.clicked.connect(_menu)

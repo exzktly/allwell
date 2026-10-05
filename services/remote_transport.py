@@ -12,8 +12,7 @@ again.
 
 Knows nothing about a *run*: no run id, no journal, no well, no plate. It moves
 bytes between two paths, one of which may be on another machine.
-``remote_runner`` re-exports every name, so call sites and tests keep importing
-them from where they always did.
+Callers import these names from here, never through ``remote_runner``.
 """
 
 from __future__ import annotations

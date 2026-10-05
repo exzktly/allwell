@@ -18,25 +18,34 @@ import pytest
 
 from services.remote_config import RemoteHost
 from services.remote_runner import (
-    DatasetCache,
-    Fetcher,
     LocalInputMode,
     OutputFilter,
     RemoteRunner,
     ZippedInput,
     _REQUIRED_REMOTE_FILES,
-    _compose_remote_cmd,
-    _detect_local_input_mode,
-    _CONDA_ACTIVATE_SNIPPET,
-    _conda_run_prefix,
-    _filter_channels_in_staging,
-    _member_matches,
-    _required_tokens,
-    _rsync_ssh_transport,
     repo_root,
     stage_local_zips,
 )
+from services.remote_commands import _compose_remote_cmd
+from services.remote_conda import (
+    _CONDA_ACTIVATE_SNIPPET,
+    _conda_run_prefix,
+)
+from services.remote_transport import _rsync_ssh_transport
+from services.remote_upload import DatasetCache
+from services.remote_staging import (
+    _detect_local_input_mode,
+    _filter_channels_in_staging,
+    _member_matches,
+    _required_tokens,
+)
+from services.remote_fetch import Fetcher
 from tests._repo_scan import parse_source
+from services.remote_fetch import FetchedOutputVerifier
+from services import remote_fetch
+from services import remote_staging
+from services import remote_scratch
+from services import remote_scratch
 
 # Every test here drives real `RemoteRunner` / `Fetcher` code against a host
 # that does not exist. Answer the ssh and rsync primitives directly rather than
@@ -251,13 +260,12 @@ def test_stage_local_zips_mixed_mode_preserves_user_zips_on_error(tmp_path):
     (tmp_path / "B02").mkdir()
     (tmp_path / "B02" / "NIR.tif").write_bytes(b"\xff" * 32)
 
-    import services.remote_runner as rr
 
     def fake_zip_well_folder(folder: Path, out_zip: Path) -> int:
         raise PermissionError("drive yanked mid-zip")
 
-    original = rr._zip_well_folder
-    rr._zip_well_folder = fake_zip_well_folder
+    original = remote_staging._zip_well_folder
+    remote_staging._zip_well_folder = fake_zip_well_folder
     try:
         with pytest.raises(PermissionError, match="drive yanked"):
             stage_local_zips(
@@ -266,7 +274,7 @@ def test_stage_local_zips_mixed_mode_preserves_user_zips_on_error(tmp_path):
                 filename_sep="_",
             )
     finally:
-        rr._zip_well_folder = original
+        remote_staging._zip_well_folder = original
 
     # User's existing zip is byte-for-byte unchanged.
     assert (tmp_path / "A01.zip").read_bytes() == original_bytes
@@ -467,7 +475,7 @@ def test_client_scratch_default_matches_the_pipelines(monkeypatch, tmp_path):
     had never chosen and could not find.
     """
     from pipeline.io import DEFAULT_SCRATCH_SUBDIR
-    from services.remote_runner import _scratch_dir
+    from services.remote_scratch import _scratch_dir
 
     monkeypatch.delenv("ALLWELL_SCRATCH_DIR", raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
@@ -475,7 +483,7 @@ def test_client_scratch_default_matches_the_pipelines(monkeypatch, tmp_path):
 
 
 def test_client_scratch_honours_the_override(monkeypatch, tmp_path):
-    from services.remote_runner import _scratch_dir
+    from services.remote_scratch import _scratch_dir
 
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path / "elsewhere"))
     assert _scratch_dir() == tmp_path / "elsewhere"
@@ -746,7 +754,7 @@ def test_rsync_with_retry_cancels_when_stop_event_set_before_call():
     entered, it short-circuits without spawning rsync at all and
     returns rc=130 (SIGINT-style)."""
     import threading
-    from services.remote_runner import _rsync_with_retry
+    from services.remote_transport import _rsync_with_retry
     stop = threading.Event()
     stop.set()
     log_lines: list[str] = []
@@ -765,7 +773,7 @@ def test_rsync_with_retry_cancels_during_in_flight_rsync():
     subprocess instead of waiting for it to finish on its own."""
     import threading
     import time
-    from services.remote_runner import _rsync_with_retry
+    from services.remote_transport import _rsync_with_retry
 
     stop = threading.Event()
 
@@ -793,7 +801,7 @@ def test_rsync_with_retry_cancels_during_in_flight_rsync():
 def test_rsync_with_retry_no_stop_event_behaves_normally():
     """When stop_event is None (the bootstrap path), behavior is
     unchanged from pre-v5.2.28 — just runs the command and returns."""
-    from services.remote_runner import _rsync_with_retry
+    from services.remote_transport import _rsync_with_retry
     result = _rsync_with_retry(["/bin/true"], log_fn=None)
     assert result.returncode == 0
 
@@ -833,7 +841,7 @@ def _make_spawn_test_runner(
     # Stub out the remote-completed-wells lister: the test parametrizes
     # how many wells "exist" on the remote.
     monkeypatch.setattr(
-        RemoteRunner, "_list_remote_completed_wells",
+        FetchedOutputVerifier, "_list_remote_completed_wells",
         lambda self: set(completed_remote_wells),
     )
     # Capture the ssh argv we'd launch so the test can inspect it.
@@ -849,7 +857,7 @@ def _make_spawn_test_runner(
         m.pid = 1234
         return m
 
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
     stop_fetchers(runner)
     return runner, captured
 
@@ -958,7 +966,7 @@ def test_compute_run_id_is_deterministic_for_same_inputs():
     """v5.2.25: same cache_key + same pipeline argv → same run_id.
     The whole point of the dedup is that re-running with the same
     config lands in the same remote output dir."""
-    from services.remote_runner import _compute_run_id
+    from services.remote_run_id import _compute_run_id
     argv = [
         "/usr/bin/python", "process_microscopy.py",
         "--input_dir", "/in", "--output_dir", "/out",
@@ -971,7 +979,7 @@ def test_compute_run_id_is_deterministic_for_same_inputs():
 
 def test_compute_run_id_changes_when_cache_key_changes():
     """Different input → different run_id."""
-    from services.remote_runner import _compute_run_id
+    from services.remote_run_id import _compute_run_id
     argv = ["--nuclear_token", "NIR"]
     a = _compute_run_id("aaaaaaaaaaaaaaaa", argv)
     b = _compute_run_id("bbbbbbbbbbbbbbbb", argv)
@@ -981,7 +989,7 @@ def test_compute_run_id_changes_when_cache_key_changes():
 def test_compute_run_id_changes_when_pipeline_args_change():
     """Different segmentation config → different run_id so the
     output cache doesn't serve stale results."""
-    from services.remote_runner import _compute_run_id
+    from services.remote_run_id import _compute_run_id
     a = _compute_run_id("abcd", ["--nuclear_token", "NIR"])
     b = _compute_run_id("abcd", ["--nuclear_token", "DAPI"])
     assert a != b
@@ -992,7 +1000,7 @@ def test_compute_run_id_ignores_input_output_dirs_and_force():
     already captured by cache_key, and ``--force`` is a re-run
     instruction (not a config change) — it should reuse the same
     cache slot and overwrite the previous outputs in place."""
-    from services.remote_runner import _compute_run_id
+    from services.remote_run_id import _compute_run_id
     base = ["--nuclear_token", "NIR"]
     with_paths = base + ["--input_dir", "/some/path", "--output_dir", "/other"]
     with_other_paths = base + ["--input_dir", "/different", "--output_dir", "/x"]
@@ -1021,7 +1029,7 @@ def test_list_remote_completed_wells_parses_out_zip_listing(runner_with_run, mon
             returncode=0,
         ),
     )
-    wells = runner_with_run._list_remote_completed_wells()
+    wells = runner_with_run._output_verifier()._list_remote_completed_wells()
     assert wells == {"A01", "B02", "H12"}
 
 
@@ -1031,7 +1039,7 @@ def test_list_remote_completed_wells_handles_empty_dir(runner_with_run, monkeypa
         DatasetCache, "_ssh_script",
         lambda self, script, *, check: MagicMock(stdout="", returncode=0),
     )
-    assert runner_with_run._list_remote_completed_wells() == set()
+    assert runner_with_run._output_verifier()._list_remote_completed_wells() == set()
 
 
 def test_list_remote_completed_wells_degrades_on_ssh_error(runner_with_run, monkeypatch):
@@ -1041,7 +1049,7 @@ def test_list_remote_completed_wells_degrades_on_ssh_error(runner_with_run, monk
     def fail(self, script, *, check):
         raise OSError("ssh: no such file")
     monkeypatch.setattr(DatasetCache, "_ssh_script", fail)
-    assert runner_with_run._list_remote_completed_wells() == set()
+    assert runner_with_run._output_verifier()._list_remote_completed_wells() == set()
 
 
 def test_verify_manifest_uses_remote_listing_as_backstop(runner_with_run, monkeypatch, tmp_path):
@@ -1063,7 +1071,7 @@ def test_verify_manifest_uses_remote_listing_as_backstop(runner_with_run, monkey
         ),
     )
     log_lines: list[str] = []
-    missing = runner_with_run._verify_local_manifest(
+    missing = runner_with_run._output_verifier()._verify_local_manifest(
         log=log_lines.append,
     )
     # A01 has its CSV (pre-created in the fixture). B02 doesn't —
@@ -1249,7 +1257,7 @@ def test_ensure_uploaded_raises_on_nonzero_rsync_rc(host, tmp_path, monkeypatch)
     monkeypatch.setattr(DatasetCache, "_ssh_run", lambda self, argv, *, check: MagicMock(stdout="", returncode=0))
     # rsync reports rc=23 ("partial transfer due to error") — non-retry.
     monkeypatch.setattr(
-        "services.remote_runner._run_rsync_streaming",
+        "services.remote_upload._run_rsync_streaming",
         lambda *a, **kw: (0, 23),
     )
 
@@ -1277,7 +1285,7 @@ def test_ensure_uploaded_raises_when_remote_file_count_mismatches(host, tmp_path
     )
     # rsync says success but lied.
     monkeypatch.setattr(
-        "services.remote_runner._run_rsync_streaming",
+        "services.remote_upload._run_rsync_streaming",
         lambda *a, **kw: (1024, 0),
     )
 
@@ -1300,7 +1308,7 @@ def test_ensure_uploaded_succeeds_when_count_matches(host, tmp_path, monkeypatch
         lambda self, script, *, check: MagicMock(stdout="2\n", returncode=0),
     )
     monkeypatch.setattr(
-        "services.remote_runner._run_rsync_streaming",
+        "services.remote_upload._run_rsync_streaming",
         lambda *a, **kw: (2048, 0),
     )
 
@@ -1334,7 +1342,7 @@ def test_ensure_uploaded_verification_preserves_tilde_in_script(host, tmp_path, 
     )
     monkeypatch.setattr(DatasetCache, "_ssh_script", fake_ssh_script)
     monkeypatch.setattr(
-        "services.remote_runner._run_rsync_streaming",
+        "services.remote_upload._run_rsync_streaming",
         lambda *a, **kw: (1024, 0),
     )
 
@@ -1373,7 +1381,7 @@ def _run_fake_rsync(tmp_path, sizes):
     the reader handed to ``log_fn``."""
     import stat as _stat
 
-    from services.remote_runner import _run_rsync_streaming
+    from services.remote_upload import _run_rsync_streaming
 
     fake = tmp_path / "fakersync.sh"
     fake.write_text(_FAKE_RSYNC)
@@ -1428,7 +1436,7 @@ def test_well_zip_sizes_skips_an_archive_that_vanished(tmp_path):
     """A missing archive gets no entry rather than a guessed size: the
     transfer will fail on its own and say so, and a dial on a well that is
     not moving is worse than no dial."""
-    from services.remote_runner import _well_zip_sizes
+    from services.remote_upload import _well_zip_sizes
 
     real = tmp_path / "A01.zip"
     real.write_bytes(b"\0" * 4096)
@@ -1440,7 +1448,7 @@ def test_well_zip_sizes_skips_an_archive_that_vanished(tmp_path):
 
 
 def test_fetcher_observes_well_done_marker(host, tmp_path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     run = _RemoteRun(
         run_id="x",
@@ -1464,7 +1472,7 @@ def test_fetcher_observes_well_done_marker(host, tmp_path):
 
 
 def _make_run(tmp_path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
     return _RemoteRun(
         run_id="x", cache_key="k", remote_input_dir="/r/in",
         remote_output_dir="/r/out", remote_pidfile="/r/pid",
@@ -1551,7 +1559,7 @@ def test_a_missing_remote_file_yields_no_size(host, tmp_path):
 
 def test_zip_is_complete(tmp_path):
     import zipfile
-    from services.remote_runner import _zip_is_complete
+    from services.remote_scratch import _zip_is_complete
     good = tmp_path / "good.zip"
     with zipfile.ZipFile(good, "w") as z:
         z.writestr("a.tif", b"data")
@@ -1576,7 +1584,7 @@ def test_fetch_one_keeps_complete_zip_despite_rsync_error(host, tmp_path):
     # the run's own output, not the home scratch volume. A remote run has no
     # reason to touch home, and writing a whole well's output there and then
     # copying it across is what used to fill it.
-    from services.remote_runner import _transit_dir
+    from services.remote_scratch import _transit_dir
     tmp_zip = (_transit_dir(run.local_output_dir)
                / f"allwell-{run.run_id}-{well}_out.zip")
     with zipfile.ZipFile(tmp_zip, "w") as z:            # a COMPLETE zip on disk
@@ -1643,7 +1651,7 @@ def test_fetcher_observes_well_done_with_logging_prefix(host, tmp_path):
 
     The fix uses .search() against an ``(?:Well\\s+)?`` substring
     pattern so the actual production log lines parse correctly."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     run = _RemoteRun(
         run_id="x",
@@ -1672,7 +1680,7 @@ def test_fetcher_triggers_on_mangled_em_dash(host, tmp_path):
     the em-dash mojibake'd ("Well A01 â€" done."). The Fetcher must still fire
     per-well — otherwise no download progress shows and the out dir only fills
     from the end-of-run backstop."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     run = _RemoteRun(
         run_id="x", cache_key="k", remote_input_dir="/r/in",
@@ -1688,7 +1696,7 @@ def test_fetcher_triggers_on_mangled_em_dash(host, tmp_path):
 
 
 def test_fetcher_ignores_unrelated_lines(host, tmp_path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     run = _RemoteRun(
         run_id="x",
@@ -1714,7 +1722,7 @@ def test_fetcher_fetch_one_logs_size_and_timing(host, tmp_path, monkeypatch):
     materialised confirmation. Pre-v5.2.18 the Fetcher was completely
     silent during downloads; the user couldn't tell whether the GUI
     had hung or was making progress."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     run = _RemoteRun(
         run_id="r",
@@ -1773,7 +1781,7 @@ def test_fetcher_fetch_one_logs_size_and_timing(host, tmp_path, monkeypatch):
 def test_fetcher_fetch_one_warns_when_zip_missing(host, tmp_path, monkeypatch):
     """If the remote well_out.zip can't be pulled, the warn line must
     include the remote output dir so the user can investigate."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     run = _RemoteRun(
         run_id="r",
@@ -1809,7 +1817,7 @@ def test_verify_passes_when_all_csvs_and_zips_present(host, tmp_path):
     """v5.2.29: verify now demands both the CSV AND the per-well
     out_zip when output_filter=FULL (the default). Pre-create both
     to confirm the happy path stays green."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -1830,7 +1838,7 @@ def test_verify_passes_when_all_csvs_and_zips_present(host, tmp_path):
     (tmp_path / "B02_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)
+    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing == []
     assert any("all 2 wells" in m for m in logs)
 
@@ -1842,7 +1850,7 @@ def test_verify_flags_missing_out_zip_even_when_csv_is_present(host, tmp_path):
     out_zip must also be present (under FULL filter + ZIP mode) for
     a well to count as complete, so the existing retry path re-pulls
     the missing zip."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -1864,7 +1872,7 @@ def test_verify_flags_missing_out_zip_even_when_csv_is_present(host, tmp_path):
     (tmp_path / "A01_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)
+    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert any("B02_out.zip" in m for m in missing)
     assert not any("A01" in m for m in missing)
 
@@ -1872,7 +1880,7 @@ def test_verify_flags_missing_out_zip_even_when_csv_is_present(host, tmp_path):
 def test_verify_skips_zip_check_when_csv_only_filter(host, tmp_path):
     """In CSV_ONLY mode the user has explicitly opted out of the
     per-well zip — verify must NOT flag the absent zip as missing."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -1892,7 +1900,7 @@ def test_verify_skips_zip_check_when_csv_only_filter(host, tmp_path):
     # No A01_out.zip — but CSV_ONLY user doesn't want it.
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)
+    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing == []
 
 
@@ -1902,7 +1910,7 @@ def test_verify_expects_out_zip_even_in_folder_mode(host, tmp_path):
     must expect the zip even when the local input was per-well folders. (The
     old behaviour expected an extracted <well>/ dir, which no longer exists —
     that mismatch failed verify and skipped the post-run local-folder cleanup.)"""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -1923,13 +1931,13 @@ def test_verify_expects_out_zip_even_in_folder_mode(host, tmp_path):
     (tmp_path / "A01_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)
+    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert any("B02" in m and "_out.zip" in m for m in missing)
     assert not any("A01" in m for m in missing)
 
 
 def test_verify_reports_missing_csv(host, tmp_path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -1948,13 +1956,13 @@ def test_verify_reports_missing_csv(host, tmp_path):
     # B02 missing on purpose.
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)
+    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing
     assert any("B02" in m for m in missing)
 
 
 def test_verify_reports_empty_csv(host, tmp_path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -1971,7 +1979,7 @@ def test_verify_reports_empty_csv(host, tmp_path):
 
     (tmp_path / "measurements_A01.csv").write_text("")  # empty
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)
+    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing == ["empty CSV for A01"]
 
 
@@ -2193,7 +2201,7 @@ def test_sync_required_files_rsync_argv_shape(host, monkeypatch):
         return MagicMock(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
 
     runner.sync_required_files()
 
@@ -2222,7 +2230,7 @@ def test_sync_required_files_mkdir_for_subdirs(host, monkeypatch):
         return MagicMock(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
 
     runner.sync_required_files()
 
@@ -2274,8 +2282,8 @@ def test_sync_required_files_surfaces_rsync_failure(host, monkeypatch):
         )
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fail_rsync)
-    monkeypatch.setattr("services.remote_runner.time.sleep", lambda _s: None)
+    monkeypatch.setattr("subprocess.run", fail_rsync)
+    monkeypatch.setattr("services.remote_transport.time.sleep", lambda _s: None)
 
     with pytest.raises(RuntimeError, match="connection refused"):
         runner.sync_required_files()
@@ -2325,7 +2333,7 @@ def test_sync_required_files_uses_bare_relative_sources_with_cwd(host, monkeypat
 
     monkeypatch.setattr(Path, "is_file", fake_is_file)
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
 
     runner.sync_required_files()
 
@@ -2351,7 +2359,7 @@ def test_sync_required_files_uses_bare_relative_sources_with_cwd(host, monkeypat
 
 @pytest.fixture
 def runner_with_run(host, tmp_path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -2384,7 +2392,7 @@ def test_verify_and_cleanup_run_mode_removes_run_dir_only(runner_with_run, monke
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     ok = runner.verify_and_cleanup(ok=True, cleanup_mode="run", log_fn=lambda _m: None)
@@ -2405,7 +2413,7 @@ def test_verify_and_cleanup_all_mode_removes_both(runner_with_run, monkeypatch):
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     runner.verify_and_cleanup(ok=True, cleanup_mode="all", log_fn=lambda _m: None)
@@ -2425,7 +2433,7 @@ def test_verify_and_cleanup_none_mode_removes_nothing(runner_with_run, monkeypat
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     runner.verify_and_cleanup(ok=True, cleanup_mode="none", log_fn=lambda _m: None)
@@ -2453,7 +2461,7 @@ def test_verify_and_cleanup_dry_run_does_not_rm(runner_with_run, monkeypatch):
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(DatasetCache, "_ssh_script", fake_ssh_script)
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     log_lines: list[str] = []
@@ -2499,7 +2507,7 @@ def test_verify_and_cleanup_dry_run_handles_missing_remote_path(runner_with_run,
         lambda self, script, *, check: MagicMock(stdout="MISSING\n", returncode=0),
     )
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     log_lines: list[str] = []
@@ -2531,7 +2539,7 @@ def test_verify_and_cleanup_dry_run_with_none_mode_is_a_noop(runner_with_run, mo
         ),
     )
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     log_lines: list[str] = []
@@ -2557,7 +2565,7 @@ def test_verify_and_cleanup_skips_when_failure(runner_with_run, monkeypatch):
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     ok = runner.verify_and_cleanup(ok=False, cleanup_mode="all", log_fn=lambda _m: None)
@@ -2580,7 +2588,7 @@ def test_verify_and_cleanup_skips_when_local_missing(runner_with_run, monkeypatc
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     # `_retry_missing_wells` runs against a host that does not exist: it lists
@@ -2588,11 +2596,11 @@ def test_verify_and_cleanup_skips_when_local_missing(runner_with_run, monkeypatc
     # three rsync attempts and 14 s of backoff to establish what these two
     # lines say outright (tests/conftest.py::_no_real_network_tools).
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         lambda *a, **kw: MagicMock(returncode=255, stdout=b"", stderr=b""),
     )
     monkeypatch.setattr(
-        "services.remote_runner._rsync_with_retry",
+        "services.remote_fetch._rsync_with_retry",
         lambda cmd, **kw: MagicMock(returncode=255, stdout="", stderr=""),
     )
     logs: list[str] = []
@@ -2669,7 +2677,7 @@ def test_sync_required_files_passes_e_flag_to_rsync(host, monkeypatch):
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run", fake_subprocess_run,
+        "subprocess.run", fake_subprocess_run,
     )
 
     runner.sync_required_files()
@@ -2688,10 +2696,13 @@ def test_sync_required_files_passes_e_flag_to_rsync(host, monkeypatch):
 def test_rsync_supports_info_flag_recognises_modern_rsync(monkeypatch):
     """rsync 3.2.7 (current default on most Linux + recent Git Bash)
     must be detected as supporting --info=...."""
-    from services.remote_runner import _rsync_supports_info_flag, _rsync_version
+    from services.remote_transport import (
+        _rsync_supports_info_flag,
+        _rsync_version,
+    )
     _rsync_version.cache_clear()
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess(
             [], 0,
             stdout="rsync  version 3.2.7  protocol version 31\n",
@@ -2704,10 +2715,13 @@ def test_rsync_supports_info_flag_recognises_modern_rsync(monkeypatch):
 def test_rsync_supports_info_flag_rejects_legacy_rsync(monkeypatch):
     """macOS bundles rsync 2.6.9. Detect it and skip --info=...
     rather than blowing up bootstrap with 'unknown option'."""
-    from services.remote_runner import _rsync_supports_info_flag, _rsync_version
+    from services.remote_transport import (
+        _rsync_supports_info_flag,
+        _rsync_version,
+    )
     _rsync_version.cache_clear()
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess(
             [], 0,
             stdout="rsync  version 2.6.9  protocol version 29\n",
@@ -2720,10 +2734,13 @@ def test_rsync_supports_info_flag_rejects_legacy_rsync(monkeypatch):
 def test_rsync_supports_info_flag_fails_safe_when_rsync_missing(monkeypatch):
     """If rsync isn't on PATH the version probe raises; fail-safe to
     False so the caller omits --info= and doesn't crash."""
-    from services.remote_runner import _rsync_supports_info_flag, _rsync_version
+    from services.remote_transport import (
+        _rsync_supports_info_flag,
+        _rsync_version,
+    )
     _rsync_version.cache_clear()
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         MagicMock(side_effect=FileNotFoundError("rsync")),
     )
     assert _rsync_supports_info_flag() is False
@@ -2733,7 +2750,7 @@ def test_sync_required_files_omits_info_flag_on_legacy_rsync(host, monkeypatch):
     """Integration: a host with legacy rsync gets the bare argv
     (no --info=stats0), avoiding the 'unknown option' exit 1 that
     blocked the user's bootstrap."""
-    from services.remote_runner import _rsync_version
+    from services.remote_transport import _rsync_version
     _rsync_version.cache_clear()
     captured = {}
 
@@ -2755,7 +2772,7 @@ def test_sync_required_files_omits_info_flag_on_legacy_rsync(host, monkeypatch):
         captured["cmd"] = list(cmd)
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     runner.sync_required_files()
     assert "--info=stats0" not in captured["cmd"], \
         f"--info=stats0 should be omitted on legacy rsync; argv: {captured['cmd']}"
@@ -2764,7 +2781,7 @@ def test_sync_required_files_omits_info_flag_on_legacy_rsync(host, monkeypatch):
 def test_sync_required_files_includes_info_flag_on_modern_rsync(host, monkeypatch):
     """Inverse of the above — modern rsync still gets the --info
     flag so the GUI's terser log output is preserved."""
-    from services.remote_runner import _rsync_version
+    from services.remote_transport import _rsync_version
     _rsync_version.cache_clear()
     captured = {}
     runner = RemoteRunner(host)
@@ -2783,7 +2800,7 @@ def test_sync_required_files_includes_info_flag_on_modern_rsync(host, monkeypatc
         captured["cmd"] = list(cmd)
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     runner.sync_required_files()
     assert "--info=stats0" in captured["cmd"]
 
@@ -2794,10 +2811,11 @@ def test_sync_required_files_includes_info_flag_on_modern_rsync(host, monkeypatc
 def test_rsync_supports_append_verify_recognises_modern_rsync(monkeypatch):
     """--append-verify lands in rsync 3.0.0 (2008). Anything newer
     must be detected as supporting it."""
-    from services.remote_runner import _rsync_supports_append_verify, _rsync_version
+    from services.remote_transport import _rsync_version
+    from services.remote_transport import _rsync_supports_append_verify
     _rsync_version.cache_clear()
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess(
             [], 0,
             stdout="rsync  version 3.2.7  protocol version 31\n",
@@ -2812,10 +2830,11 @@ def test_rsync_supports_append_verify_rejects_legacy_rsync(monkeypatch):
     'Unrecognized option --append-verify' → exit 1. This was the
     failure that motivated v5.2.15 (user's well-zip upload died
     with exit 1 right after the v5.2.13 conda-run fix landed)."""
-    from services.remote_runner import _rsync_supports_append_verify, _rsync_version
+    from services.remote_transport import _rsync_version
+    from services.remote_transport import _rsync_supports_append_verify
     _rsync_version.cache_clear()
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess(
             [], 0,
             stdout="rsync  version 2.6.9  protocol version 29\n",
@@ -2828,7 +2847,7 @@ def test_rsync_supports_append_verify_rejects_legacy_rsync(monkeypatch):
 def test_ensure_uploaded_omits_append_verify_on_legacy_rsync(host, tmp_path, monkeypatch):
     """Integration: rsync 2.6.9 must get a bare command WITHOUT
     --append-verify so it doesn't blow up with 'Unrecognized option'."""
-    from services.remote_runner import _rsync_version
+    from services.remote_transport import _rsync_version
     _rsync_version.cache_clear()
 
     zipped = _make_zipped(tmp_path, ["A01.zip"])
@@ -2844,7 +2863,7 @@ def test_ensure_uploaded_omits_append_verify_on_legacy_rsync(host, tmp_path, mon
         lambda self, script, *, check: MagicMock(stdout="1\n", returncode=0),
     )
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess(
             [], 0,
             stdout="rsync  version 2.6.9  protocol version 29\n",
@@ -2856,7 +2875,7 @@ def test_ensure_uploaded_omits_append_verify_on_legacy_rsync(host, tmp_path, mon
         captured["cmd"] = list(cmd)
         return (1024, 0)
 
-    monkeypatch.setattr("services.remote_runner._run_rsync_streaming", capture_streaming)
+    monkeypatch.setattr("services.remote_upload._run_rsync_streaming", capture_streaming)
 
     cache.ensure_uploaded(zipped)
     assert "--append-verify" not in captured["cmd"], (
@@ -2867,7 +2886,7 @@ def test_ensure_uploaded_omits_append_verify_on_legacy_rsync(host, tmp_path, mon
 def test_ensure_uploaded_includes_append_verify_on_modern_rsync(host, tmp_path, monkeypatch):
     """Inverse of the above — modern rsync keeps --append-verify so
     resumed transfers re-verify the existing tail by checksum."""
-    from services.remote_runner import _rsync_version
+    from services.remote_transport import _rsync_version
     _rsync_version.cache_clear()
 
     zipped = _make_zipped(tmp_path, ["A01.zip"])
@@ -2883,7 +2902,7 @@ def test_ensure_uploaded_includes_append_verify_on_modern_rsync(host, tmp_path, 
         lambda self, script, *, check: MagicMock(stdout="1\n", returncode=0),
     )
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess(
             [], 0,
             stdout="rsync  version 3.2.7  protocol version 31\n",
@@ -2895,7 +2914,7 @@ def test_ensure_uploaded_includes_append_verify_on_modern_rsync(host, tmp_path, 
         captured["cmd"] = list(cmd)
         return (1024, 0)
 
-    monkeypatch.setattr("services.remote_runner._run_rsync_streaming", capture_streaming)
+    monkeypatch.setattr("services.remote_upload._run_rsync_streaming", capture_streaming)
 
     cache.ensure_uploaded(zipped)
     assert "--append-verify" in captured["cmd"]
@@ -2906,7 +2925,7 @@ def test_ensure_uploaded_error_message_uses_actual_attempt_count(host, tmp_path,
     even when rc=1 (non-retry code) broke after a single try, which
     misled debugging. Verify the message now reflects the real count
     AND points to the rsync: log line as the diagnostic."""
-    from services.remote_runner import _rsync_version
+    from services.remote_transport import _rsync_version
     _rsync_version.cache_clear()
 
     zipped = _make_zipped(tmp_path, ["A01.zip"])
@@ -2917,7 +2936,7 @@ def test_ensure_uploaded_error_message_uses_actual_attempt_count(host, tmp_path,
         lambda self, argv, *, check: MagicMock(stdout="0\n", returncode=0),
     )
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess(
             [], 0,
             stdout="rsync  version 3.2.7  protocol version 31\n",
@@ -2926,7 +2945,7 @@ def test_ensure_uploaded_error_message_uses_actual_attempt_count(host, tmp_path,
     )
     # rc=1 is non-retry — must break on the first attempt.
     monkeypatch.setattr(
-        "services.remote_runner._run_rsync_streaming",
+        "services.remote_upload._run_rsync_streaming",
         lambda *a, **kw: (0, 1),
     )
 
@@ -2949,7 +2968,7 @@ def test_remote_quote_preserves_tilde_expansion():
     remainder may or may not single-quote depending on shell-special
     chars — what matters is that the LEADING ~ is replaced with the
     expanding form."""
-    from services.remote_runner import _remote_quote
+    from services.remote_transport import _remote_quote
     # Must start with "$HOME" so the remote shell expands it.
     assert _remote_quote("~/foo").startswith('"$HOME"')
     assert "foo" in _remote_quote("~/foo")
@@ -2966,7 +2985,7 @@ def test_remote_join_renders_full_command():
     """The full join: mkdir -p ~/.allwell-staging produces a command
     containing "$HOME" rather than a quoted literal ~ — the remote
     shell will then expand $HOME instead of creating a ~ directory."""
-    from services.remote_runner import _remote_join
+    from services.remote_transport import _remote_join
     cmd = _remote_join(["mkdir", "-p", "~/.allwell-staging"])
     assert cmd.startswith("mkdir -p ")
     assert '"$HOME"' in cmd
@@ -2981,7 +3000,7 @@ def test_looks_like_rsync_filename_accepts_zip_paths():
     line. The heuristic must accept paths a user would actually see
     (well zips, required-files like process_microscopy.py and
     subfolder/file.txt)."""
-    from services.remote_runner import _looks_like_rsync_filename
+    from services.remote_transport import _looks_like_rsync_filename
     assert _looks_like_rsync_filename("A01.zip") is True
     assert _looks_like_rsync_filename("process_microscopy.py") is True
     assert _looks_like_rsync_filename("requirements-remote.txt") is True
@@ -2992,7 +3011,7 @@ def test_looks_like_rsync_filename_rejects_progress_and_status_lines():
     filename lines — progress percentages, byte stats, error
     markers, the file-list announcement, blanks, and the wider
     stats2 / status surface that pre-cleanup leaked through."""
-    from services.remote_runner import _looks_like_rsync_filename
+    from services.remote_transport import _looks_like_rsync_filename
     # Empties.
     assert _looks_like_rsync_filename("") is False
     assert _looks_like_rsync_filename(" ") is False
@@ -3030,7 +3049,7 @@ def test_ensure_uploaded_upload_cmd_includes_name1_on_modern_rsync(host, tmp_pat
     """v5.2.20: per-file logging requires ``--info=name1`` so rsync
     emits filenames; assert the upload command actually includes
     that flag on rsync 3.1+."""
-    from services.remote_runner import _rsync_version
+    from services.remote_transport import _rsync_version
     _rsync_version.cache_clear()
 
     z = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
@@ -3048,7 +3067,7 @@ def test_ensure_uploaded_upload_cmd_includes_name1_on_modern_rsync(host, tmp_pat
         lambda self, script, *, check: MagicMock(stdout="1\n", returncode=0),
     )
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess(
             [], 0,
             stdout="rsync  version 3.2.7  protocol version 31\n",
@@ -3060,7 +3079,7 @@ def test_ensure_uploaded_upload_cmd_includes_name1_on_modern_rsync(host, tmp_pat
         captured["cmd"] = list(cmd)
         return (1024, 0)
 
-    monkeypatch.setattr("services.remote_runner._run_rsync_streaming", capture_streaming)
+    monkeypatch.setattr("services.remote_upload._run_rsync_streaming", capture_streaming)
 
     cache.ensure_uploaded(zipped)
     info_flag = next((a for a in captured["cmd"] if a.startswith("--info=")), "")
@@ -3148,7 +3167,7 @@ def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
     """v5.2.11: default cleanup_mode is 'none' (no auto-delete).
     User opts in explicitly via the GUI checkbox or
     --cleanup-remote=run / =all on the CLI."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
     runner = RemoteRunner(host)
     run = _RemoteRun(
         run_id="x", cache_key="k",
@@ -3168,7 +3187,7 @@ def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
         ) or MagicMock(stdout="", returncode=0),
     )
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     # `_retry_missing_wells` runs against a host that does not exist: it lists
@@ -3176,11 +3195,11 @@ def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
     # three rsync attempts and 14 s of backoff to establish what these two
     # lines say outright (tests/conftest.py::_no_real_network_tools).
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         lambda *a, **kw: MagicMock(returncode=255, stdout=b"", stderr=b""),
     )
     monkeypatch.setattr(
-        "services.remote_runner._rsync_with_retry",
+        "services.remote_fetch._rsync_with_retry",
         lambda cmd, **kw: MagicMock(returncode=255, stdout="", stderr=""),
     )
 
@@ -3230,10 +3249,10 @@ def _retry_runner(host, tmp_path, monkeypatch):
                        "timeout": timeout, "stop_event": stop_event})
         return MagicMock(returncode=0)
 
-    monkeypatch.setattr(rr, "_rsync_with_retry", _fake_rsync)
-    monkeypatch.setattr(rr, "resolve_rsync_binary", lambda: "rsync")
-    monkeypatch.setattr(rr, "_rsync_ssh_transport", lambda h: [])
-    monkeypatch.setattr(rr, "to_rsync_path", lambda p: str(p))
+    monkeypatch.setattr(remote_fetch, "_rsync_with_retry", _fake_rsync)
+    monkeypatch.setattr(remote_fetch, "resolve_rsync_binary", lambda: "rsync")
+    monkeypatch.setattr(remote_fetch, "_rsync_ssh_transport", lambda h: [])
+    monkeypatch.setattr(remote_fetch, "to_rsync_path", lambda p: str(p))
     return runner, pulled, rr
 
 
@@ -3243,7 +3262,7 @@ def test_retry_skips_artifacts_already_present(host, tmp_path, monkeypatch):
     runner, pulled, _ = _retry_runner(host, tmp_path, monkeypatch)
     (tmp_path / "data_A01.csv").write_text("x")
     (tmp_path / "A01_out.zip").write_text("zip")
-    runner._retry_missing_wells(["missing CSV for A01"], log=lambda _m: None)
+    runner._output_verifier()._retry_missing_wells(["missing CSV for A01"], log=lambda _m: None)
     assert pulled == []
 
 
@@ -3253,9 +3272,9 @@ def test_retry_csv_miss_does_not_drag_the_zip(host, tmp_path, monkeypatch):
     runner, pulled, rr = _retry_runner(host, tmp_path, monkeypatch)
     (tmp_path / "A01_out.zip").write_text("zip")  # zip present; CSV absent
     monkeypatch.setattr(
-        rr.subprocess, "run",
+        subprocess, "run",
         lambda *a, **k: MagicMock(stdout=b"/r/out/data_A01.csv\n", returncode=0))
-    runner._retry_missing_wells(["missing CSV for A01"], log=lambda _m: None)
+    runner._output_verifier()._retry_missing_wells(["missing CSV for A01"], log=lambda _m: None)
     assert any("data_A01.csv" in p["argv"] for p in pulled)
     assert not any("A01_out.zip" in p["argv"] for p in pulled)
 
@@ -3267,7 +3286,7 @@ def test_retry_zip_repull_has_no_walltimeout_and_is_stop_aware(host, tmp_path, m
     hang."""
     runner, pulled, _ = _retry_runner(host, tmp_path, monkeypatch)
     (tmp_path / "data_A01.csv").write_text("x")  # CSV present; zip absent
-    runner._retry_missing_wells(["missing A01_out.zip locally"], log=lambda _m: None)
+    runner._output_verifier()._retry_missing_wells(["missing A01_out.zip locally"], log=lambda _m: None)
     assert len(pulled) == 1
     assert "A01_out.zip" in pulled[0]["argv"]
     assert pulled[0]["timeout"] is None
@@ -3306,17 +3325,15 @@ def test_scratch_dir_honors_env_override(tmp_path, monkeypatch):
     """Local scratch (input staging, transit zips) must be redirectable off the
     OS temp drive — Windows %TEMP% on C: filled up when staging a NAS dataset
     for a remote run."""
-    from services import remote_runner as rr
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path / "scratch"))
-    base = rr._scratch_dir()
+    base = remote_scratch._scratch_dir()
     assert base == tmp_path / "scratch"
     assert base.is_dir()
-    d = rr._new_scratch_dir("allwell-stage-")
+    d = remote_scratch._new_scratch_dir("allwell-stage-")
     assert d.parent == base and d.name.startswith("allwell-stage-")
 
 
 def test_scratch_dir_falls_back_when_override_unusable(tmp_path, monkeypatch):
-    from services import remote_runner as rr
     # A path that can't be created (a file in the way) → fall back to the
     # default, which is the same ~/.allwell/scratch the pipeline uses.
     bad = tmp_path / "afile"
@@ -3325,7 +3342,7 @@ def test_scratch_dir_falls_back_when_override_unusable(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(bad / "nope"))
-    assert rr._scratch_dir() == home / ".allwell" / "scratch"
+    assert remote_scratch._scratch_dir() == home / ".allwell" / "scratch"
 
 
 def test_scratch_dir_falls_back_to_os_temp_when_home_is_unwritable(
@@ -3333,23 +3350,21 @@ def test_scratch_dir_falls_back_to_os_temp_when_home_is_unwritable(
 ):
     """Last resort. An unwritable home must not fail the run outright."""
     import tempfile as _t
-    from services import remote_runner as rr
     blocked = tmp_path / "afile"
     blocked.write_text("x")
     monkeypatch.delenv("ALLWELL_SCRATCH_DIR", raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: blocked))
-    assert rr._scratch_dir() == Path(_t.gettempdir())
+    assert remote_scratch._scratch_dir() == Path(_t.gettempdir())
 
 
 def test_sweep_stale_scratch_removes_old_only(tmp_path, monkeypatch):
     import time as _time
-    from services import remote_runner as rr
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path))
     old = tmp_path / "allwell-stage-OLD"; old.mkdir()
     os.utime(old, (_time.time() - 7 * 3600, _time.time() - 7 * 3600))
     fresh = tmp_path / "allwell-stage-NEW"; fresh.mkdir()
     other = tmp_path / "not-ours"; other.mkdir()
-    n = rr.sweep_stale_scratch(max_age_h=6.0)
+    n = remote_scratch.sweep_stale_scratch(max_age_h=6.0)
     assert n == 1
     assert not old.exists()      # stale leftover removed
     assert fresh.exists()        # a concurrent run's live staging is kept
@@ -3431,7 +3446,7 @@ def _runner_with_run(compute_launcher: str):
     """A RemoteRunner with a minimal _run set, no real ssh."""
     h = RemoteHost(name="c", ssh_alias="lobby", compute_launcher=compute_launcher)
     r = RemoteRunner(h)
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
     r._run = _RemoteRun(
         run_id="run-x",
         cache_key="k",
@@ -3449,7 +3464,7 @@ def _runner_with_run(compute_launcher: str):
 def test_close_remote_job_noop_on_direct_host():
     """Direct-execution host (no launcher) → never shells out to scancel."""
     r = _runner_with_run("")
-    with patch("services.remote_runner.subprocess.run") as run:
+    with patch("subprocess.run") as run:
         r.close_remote_job()
     run.assert_not_called()
 
@@ -3459,7 +3474,7 @@ def test_close_remote_job_scancels_scheduled_host():
     logs that a lingering job was cancelled."""
     r = _runner_with_run("srun --partition=gpu")
     logs: list[str] = []
-    with patch("services.remote_runner.subprocess.run") as run:
+    with patch("subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="AW_SCANCELLED 12345\n", stderr="",
         )
@@ -3476,7 +3491,7 @@ def test_close_remote_job_logs_clean_finish_when_nothing_to_cancel():
     still emit a definite end-of-job marker instead of silence."""
     r = _runner_with_run("srun --partition=gpu")
     logs: list[str] = []
-    with patch("services.remote_runner.subprocess.run") as run:
+    with patch("subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="", stderr="",
         )
@@ -3487,7 +3502,7 @@ def test_close_remote_job_logs_clean_finish_when_nothing_to_cancel():
 def test_close_remote_job_noop_before_run_starts():
     h = RemoteHost(name="c", ssh_alias="lobby", compute_launcher="srun -p gpu")
     r = RemoteRunner(h)  # no _run yet
-    with patch("services.remote_runner.subprocess.run") as run:
+    with patch("subprocess.run") as run:
         r.close_remote_job()
     run.assert_not_called()
 
@@ -3496,7 +3511,7 @@ def test_close_remote_job_swallows_ssh_errors():
     """Teardown is best-effort: an ssh timeout/OSError must not raise."""
     r = _runner_with_run("srun -p gpu")
     with patch(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         side_effect=subprocess.TimeoutExpired(cmd="ssh", timeout=10),
     ):
         r.close_remote_job()  # must not raise
@@ -3522,13 +3537,13 @@ def test_retry_repulls_out_zip_for_folder_mode(host, tmp_path, monkeypatch):
         pulled.append(" ".join(map(str, argv)))
         return MagicMock(returncode=0)
 
-    monkeypatch.setattr(rr, "_rsync_with_retry", _fake_rsync)
-    monkeypatch.setattr(rr, "resolve_rsync_binary", lambda: "rsync")
-    monkeypatch.setattr(rr, "_rsync_ssh_transport", lambda h: [])
-    monkeypatch.setattr(rr, "to_rsync_path", lambda p: str(p))
+    monkeypatch.setattr(remote_fetch, "_rsync_with_retry", _fake_rsync)
+    monkeypatch.setattr(remote_fetch, "resolve_rsync_binary", lambda: "rsync")
+    monkeypatch.setattr(remote_fetch, "_rsync_ssh_transport", lambda h: [])
+    monkeypatch.setattr(remote_fetch, "to_rsync_path", lambda p: str(p))
 
     (tmp_path / "data_A01.csv").write_text("x")   # CSV present; out-zip absent
-    runner._retry_missing_wells(["missing A01_out.zip locally"], log=lambda _m: None)
+    runner._output_verifier()._retry_missing_wells(["missing A01_out.zip locally"], log=lambda _m: None)
 
     assert any("A01_out.zip" in p for p in pulled), \
         "FOLDER-mode out-zip must be re-pulled (was silently skipped)"
@@ -3540,7 +3555,7 @@ def test_close_remote_job_warns_on_ssh_failure():
     r = _runner_with_run("srun -p gpu")
     logs: list[str] = []
     with patch(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         side_effect=subprocess.TimeoutExpired(cmd="ssh", timeout=10),
     ):
         r.close_remote_job(log_fn=logs.append)   # must not raise
@@ -3560,10 +3575,10 @@ def test_old_rsync_still_gets_progress_flags():
     parsers already accept."""
     from unittest import mock
 
-    # Patched on `remote_transport`, which is where both functions live now.
-    # `remote_runner` re-exports them, but a re-export is a *binding*: rebinding
-    # the name there leaves `_rsync_progress_flags` still reading the original
-    # out of its own module globals, so the patch would silently not apply.
+    # Patched on `remote_transport`, which is where both functions live. Any
+    # other module's import of them is a *binding*: rebinding the name there
+    # leaves `_rsync_progress_flags` still reading the original out of its own
+    # module globals, so the patch would silently not apply.
     from services import remote_transport as rt
 
     with mock.patch.object(rt, "_rsync_supports_info_flag", lambda: True):
@@ -3581,7 +3596,7 @@ def test_legacy_rsync_output_shapes_still_parse():
     filename per transferred file, and a per-file percentage line."""
     import re
 
-    from services.remote_runner import _looks_like_rsync_filename
+    from services.remote_transport import _looks_like_rsync_filename
 
     assert _looks_like_rsync_filename("C08.zip")
     assert not _looks_like_rsync_filename("sending incremental file list")

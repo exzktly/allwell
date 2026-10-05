@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from services.pipeline_service import _emit_num_flag, build_pipeline_args
+from pipeline import cli_args
+import pipeline.stardist as _stardist
 
 _P, _IN, _OUT = Path("/pipe.py"), Path("/in"), Path("/out")
 
@@ -237,15 +239,14 @@ def test_zero_threshold_is_emitted():
 def test_the_pipeline_accepts_what_the_form_emits():
     """The two halves must agree: every flag build_pipeline_args produces has to
     parse on the pipeline side, and the sentinel default has to survive."""
-    import process_microscopy as pm
 
     args = build_pipeline_args(_P, _IN, _OUT, _opts(
         stardist_prob_thresh="0.25", stardist_nms_thresh="0.5"))
-    parsed = pm.build_parser().parse_args(
+    parsed = cli_args.build_parser().parse_args(
         ["--input_dir", "/in", "--output_dir", "/out"] + args[2:])
-    assert pm._stardist.parse_threshold(parsed.stardist_prob_thresh) == 0.25
-    assert pm._stardist.parse_threshold(parsed.stardist_nms_thresh) == 0.5
+    assert _stardist.parse_threshold(parsed.stardist_prob_thresh) == 0.25
+    assert _stardist.parse_threshold(parsed.stardist_nms_thresh) == 0.5
 
-    default = pm.build_parser().parse_args(["--input_dir", "/in", "--output_dir", "/out"])
-    assert pm._stardist.parse_threshold(default.stardist_prob_thresh) is None
-    assert pm._stardist.parse_threshold(default.stardist_nms_thresh) is None
+    default = cli_args.build_parser().parse_args(["--input_dir", "/in", "--output_dir", "/out"])
+    assert _stardist.parse_threshold(default.stardist_prob_thresh) is None
+    assert _stardist.parse_threshold(default.stardist_nms_thresh) is None

@@ -87,9 +87,8 @@ def tokens_for(ax) -> tuple:
 # Re-exported so a renderer takes its ink and its "this is ink" marker from one
 # import. ``follows_theme`` lives in ``widgets`` because the repaint that honours
 # it is ``PlotCard.setPlotTheme``'s, and ``widgets`` carries no app coupling.
-from widgets.plot_card import follows_theme  # noqa: E402  (re-export)
-
-__all__ = [*globals().get("__all__", []), "follows_theme"]
+# The module's one declared re-export (``tests/test_plotting_facades_are_frozen.py``).
+from widgets.plot_card import follows_theme  # noqa: E402, F401
 
 
 # Internal alias (was the original name).
@@ -255,13 +254,12 @@ def style_legend(leg, ax) -> None:
 
 
 # ── export-style prefs → figure application ──────────────────────────────────
-# These were relocated from ``features/export/style.py`` (T2). They are neutral
-# matplotlib figure styling — applying a prefs dict to a figure's axes — and are
+# Neutral matplotlib figure styling — applying a prefs dict to a figure's axes —
 # shared by every plot controller (line / bar / scatter / distribution / heatmap)
 # plus the export panel. Living here (core, foundational) lets each feature import
-# them *downward* instead of reaching sideways into the export feature, which had
-# created a scatter↔export import cycle. ``features/export/style.py`` re-exports
-# them for backwards compatibility (profiles + the export editor stay there).
+# it *downward* instead of reaching sideways into the export feature, which had
+# created a scatter↔export import cycle. Profiles and the export editor stay in
+# ``features/export/style.py``; callers import these names from here.
 
 DEFAULT_EXPORT_STYLE_PREFS = {
     "axis_label_size": 18,
@@ -1018,80 +1016,112 @@ def _apply_axis_limits(lo, hi, *, setter) -> None:
     setter(lo, hi)
 
 
-def apply_export_style_prefs(fig, prefs: dict) -> None:
-    for ax in fig.axes:
-        if not hasattr(ax, "_fixed_axes_position"):
-            ax._fixed_axes_position = ax.get_position().frozen()
+class _AxisPrefs:
+    """How one figure's prefs resolve for each of its axes.
 
-    fig.patch.set_alpha(1.0)
+    Per-axis font sizes: an "Axis #" selection scopes tick / axis-label / title
+    sizes to that one panel (stored in that panel's ``axis_buckets`` entry by
+    the properties editor), falling back to the shared global size for panels
+    with no override. This is why editing a size no longer changes every panel
+    of a multi-panel figure (multivariate / spatial). Callers that pass a plain
+    dict without ``axis_buckets`` just get the global size everywhere.
+    """
 
-    axis_target = str(prefs.get("axis_target", "All"))
-    target_idx = None if axis_target == "All" else int(axis_target)
+    def __init__(self, prefs: dict) -> None:
+        self.prefs = prefs
+        self.buckets = prefs.get("axis_buckets") or {}
+        axis_target = str(prefs.get("axis_target", "All"))
+        self.target_idx = None if axis_target == "All" else int(axis_target)
 
-    # Per-axis font sizes: an "Axis #" selection scopes tick / axis-label / title
-    # sizes to that one panel (stored in that panel's ``axis_buckets`` entry by
-    # the properties editor), falling back to the shared global size for panels
-    # with no override. This is why editing a size no longer changes every panel
-    # of a multi-panel figure (multivariate / spatial). Callers that pass a plain
-    # dict without ``axis_buckets`` just get the global size everywhere.
-    _axis_buckets = prefs.get("axis_buckets") or {}
+    def targets(self, idx: int) -> bool:
+        """Whether the flat (un-bucketed) axis prefs apply to panel *idx*."""
+        return self.target_idx is None or idx == self.target_idx
 
-    def _axis_style(_idx, key, default):
+    def style(self, idx: int, key: str, default):
         # Per-axis value for a control grouped under the Properties "Axis #"
         # selector (tick rotation / tick length / direction / visibility / group
         # label size): the panel's own bucket entry wins, else the shared global
         # value. So an "Axis #" edit scopes these to one panel — the same
         # global-baseline-plus-bucket model the font sizes use — instead of the
         # old flat read that pushed one value onto every axis.
-        v = (_axis_buckets.get(str(_idx)) or {}).get(key)
+        v = (self.buckets.get(str(idx)) or {}).get(key)
         if v in (None, ""):
-            v = prefs.get(key, default)
+            v = self.prefs.get(key, default)
         return v
 
-    def _axis_font_size(_idx, key, default):
-        return int(float(_axis_style(_idx, key, default)))
+    def font_size(self, idx: int, key: str, default) -> int:
+        return int(float(self.style(idx, key, default)))
 
-    def _axis_limit(_idx, key) -> float | None:
+    def limit(self, idx: int, key: str) -> float | None:
         # Per-axis limit: a panel's own bucket entry wins so every subplot of a
         # multi-panel figure (e.g. the bar Value/Fraction/Events stack) keeps its
         # own x/y limits set via the "Axis #" picker. Fall back to the flat pref
         # only for the targeted axis (or an "All"/single-panel target, and the
         # plain-dict batch-export callers with no buckets), which preserves the
         # prior single-axis behaviour when no bucket entry exists.
-        raw = (_axis_buckets.get(str(_idx)) or {}).get(key)
+        raw = (self.buckets.get(str(idx)) or {}).get(key)
         if raw not in (None, ""):
             return _to_float_or_none(raw)
-        if target_idx is None or _idx == target_idx:
-            return _to_float_or_none(prefs.get(key, ""))
+        if self.targets(idx):
+            return _to_float_or_none(self.prefs.get(key, ""))
         return None
 
+
+class _MarkPrefs:
+    """The line and marker preferences.
+
+    The numeric ones are read when an artist needs them rather than up front,
+    so a figure with nothing to restyle never parses them — as before the
+    passes were split, when they were read inside the artist loops.
+    """
+
+    def __init__(self, prefs: dict) -> None:
+        self._prefs = prefs
+        self.line_style = str(prefs.get("line_style", "-"))
+        marker_style = str(prefs.get("marker_style", "o"))
+        # Open / hollow markers piggyback on the existing matplotlib token
+        # via an ``_open`` suffix so the combo stays a single dropdown.
+        self.marker_open = marker_style.endswith("_open")
+        if self.marker_open:
+            marker_style = marker_style[: -len("_open")] or "o"
+        self.marker_style = marker_style
+
+    @property
+    def line_width(self) -> float:
+        return float(self._prefs.get("line_width", 1.8))
+
+    @property
+    def marker_size(self) -> float:
+        return float(self._prefs.get("marker_size", 5.0))
+
+    @property
+    def marker_edge_width(self) -> float:
+        return float(self._prefs.get("marker_edge_width", 0.8))
+
+    @property
+    def restyles_markers(self) -> bool:
+        return bool(self.marker_style) and self.marker_style != "keep"
+
+
+def apply_export_style_prefs(fig, prefs: dict) -> None:
+    """Apply the Properties sidebar's prefs to every axes of *fig*.
+
+    The coordinator: each pass below owns one family of preferences and runs in
+    the order the families depend on each other — typography first (a colour
+    bar takes that and nothing else), then marks, grid, scale before limits,
+    ticks after the scale, legends after the marks they copy, and the typed
+    limits re-asserted last.
+    """
+    for ax in fig.axes:
+        if not hasattr(ax, "_fixed_axes_position"):
+            ax._fixed_axes_position = ax.get_position().frozen()
+
+    fig.patch.set_alpha(1.0)
+    axis_prefs = _AxisPrefs(prefs)
+    marks = _MarkPrefs(prefs)
+
     for idx, ax in enumerate(fig.axes, start=1):
-        _tick_sz = _axis_font_size(idx, "tick_label_size", 10)
-        _label_sz = _axis_font_size(idx, "axis_label_size", 12)
-        _title_sz = _axis_font_size(idx, "title_size", 14)
-        # Theme-aware chrome: this function used to hardcode "black" everywhere
-        # (publication-ink), which was correct on export but overrode the
-        # PlotCard's screen-theme styling whenever it was called from a redraw.
-        _bg, _title_fg, _muted_fg, _grid, _spine = tokens_for(ax)
-        ax.patch.set_alpha(1.0)
-        ax.xaxis.label.set_color(_muted_fg)
-        ax.yaxis.label.set_color(_muted_fg)
-        ax.xaxis.label.set_fontsize(_label_sz)
-        ax.yaxis.label.set_fontsize(_label_sz)
-        ax.tick_params(axis="x", labelsize=_tick_sz, colors=_muted_fg)
-        ax.tick_params(axis="y", labelsize=_tick_sz, colors=_muted_fg)
-        ax.title.set_fontsize(_title_sz)
-        ax.title.set_color(_title_fg)
-
-        _fam = _plot_font_family()
-        for tick in [*ax.get_xticklabels(), *ax.get_yticklabels()]:
-            tick.set_color(_muted_fg)
-            tick.set_fontfamily(_fam)
-            tick.set_fontsize(_tick_sz)
-
-        ax.xaxis.label.set_fontfamily(_fam)
-        ax.yaxis.label.set_fontfamily(_fam)
-        ax.title.set_fontfamily(_fam)
+        title_fg = _style_axis_typography(ax, idx, axis_prefs)
 
         # A colour bar is a legend for the plot's norm, not a plot axis of its
         # own: its scale, limits, ticks and the mesh that fills it all belong to
@@ -1104,368 +1134,431 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         if bool(getattr(ax, "_aw_colorbar", False)):
             continue
 
-        # Keep horizontal alignment in step with the applied angle: a
-        # horizontal label (0°) reads centered under its bar/tick, while an
-        # angled label anchors its right edge at the tick (the conventional
-        # slanted look). Without this the bar renderer's ``ha="right"`` (drawn
-        # alongside its own 45° rotation) survives even after this pass flattens
-        # the rotation back to 0°, leaving labels right-aligned under their bar.
-        _x_angle = int(_axis_style(idx, "x_tick_angle", 0))
-        _x_ha = "center" if _x_angle == 0 else "right"
-        for tick in ax.get_xticklabels():
-            tick.set_rotation(_x_angle)
-            tick.set_horizontalalignment(_x_ha)
-
-        line_style = str(prefs.get("line_style", "-"))
-        marker_style = str(prefs.get("marker_style", "o"))
-        # Open / hollow markers piggyback on the existing matplotlib token
-        # via an ``_open`` suffix so the combo stays a single dropdown.
-        marker_open = marker_style.endswith("_open")
-        if marker_open:
-            marker_style = marker_style[: -len("_open")] or "o"
-        # Error-bar caps live in ``ax.lines`` too — overriding their marker /
-        # linestyle replaces the tick at the top / bottom of each bar with
-        # the user's data-marker pick, which looks like the error bar is
-        # broken. Collect their ids so the override loop below skips them.
-        cap_ids: set = set()
-        for container in getattr(ax, "containers", []) or []:
-            cap_lines = getattr(container, "caplines", None)
-            if cap_lines is None:
-                children = getattr(container, "lines", None)
-                if isinstance(children, tuple) and len(children) >= 2:
-                    cap_lines = children[1]
-            for cap in (cap_lines or ()):
-                cap_ids.add(id(cap))
-        for ln in ax.lines:
-            if getattr(ln, "_aw_no_style_override", False):
-                # Decorative annotation lines (e.g. significance brackets) opt
-                # out entirely — stamping the data marker/linestyle on them turns
-                # a flat bracket into a row of circles.
-                continue
-            if id(ln) in cap_ids:
-                # Error-bar cap markers have their own intrinsic capsize-
-                # based sizing + a default "_" / "|" marker that signals
-                # the cap. Touching their markersize / markeredgewidth /
-                # marker / linestyle either makes the caps look like
-                # data points or stamps the user's data-marker onto the
-                # caps — both read as "error bars suddenly appeared".
-                continue
-            ln.set_linewidth(float(prefs.get("line_width", 1.8)))
-            ln.set_markersize(float(prefs.get("marker_size", 5.0)))
-            ln.set_markeredgewidth(float(prefs.get("marker_edge_width", 0.8)))
-            # ``"keep"`` lets a tab opt out of overriding the renderer's own
-            # marker / linestyle pick (e.g. distinct markers per replicate).
-            # Lines the renderer drew as markers-only (linestyle='None' +
-            # a marker — the scatter / aggregate pattern) keep their no-
-            # connecting-line behaviour; overriding it to "-" stamped
-            # diagonal lines that read as spurious error bars.
-            cur_ls = ln.get_linestyle()
-            cur_mk = ln.get_marker()
-            scatter_only = (
-                getattr(ln, "_scatter_only_artist", False)
-                or (
-                    cur_ls in ("None", "none", "", " ") and
-                    cur_mk not in ("None", "none", "", None)
-                )
-            )
-            # ``_aw_linestyle_is_data``: the Line tab's grey mode encodes a
-            # trace in its dash pattern, alongside the marker shape and face
-            # below. Stamping one pref pattern over every trace collapses that
-            # third cue on every redraw while the legend goes on showing four
-            # different dashes.
-            if (line_style and line_style != "keep" and not scatter_only
-                    and not getattr(ln, "_aw_linestyle_is_data", False)):
-                ln.set_linestyle(line_style if line_style != "none" else "None")
-            if marker_style and marker_style != "keep":
-                # ``_aw_marker_is_data``: renderers that encode a variable in the
-                # marker *shape* opt out of the shape override while still
-                # honouring size / open-vs-filled. The aggregate scatter gives
-                # each well its own shape and draws a legend keyed on those
-                # shapes — stamping one pref shape over every point collapsed
-                # them all onto the first well's marker while the legend went on
-                # advertising five different ones.
-                if not getattr(ln, "_aw_marker_is_data", False):
-                    ln.set_marker(marker_style if marker_style != "none" else "None")
-                # Force both edge and face explicitly. Some renderers
-                # (e.g. scatter cells) construct the line with
-                # ``markeredgecolor='none'`` for a clean filled-only
-                # look — that meant "open circle" set face='none' but
-                # the existing edge was 'none' too, producing a fully
-                # invisible marker. Pin the edge to the line colour in
-                # both modes so the ring is always visible.
-                #
-                # ``_aw_marker_face_is_data`` is the face's twin of the shape
-                # opt-out above, and it is a separate flag because the two are
-                # separate claims: the aggregate scatter encodes a well in the
-                # *shape* and is happy for the user to make every point hollow,
-                # while the Line tab's grey mode encodes a trace in the shape
-                # **and** the fill — half its cycle is the same six shapes
-                # open. Re-pinning the face here turned every open marker
-                # filled on the next redraw, which is every redraw, so six of
-                # the twelve traces stopped being distinguishable while the
-                # legend went on advertising them.
-                if getattr(ln, "_aw_marker_face_is_data", False):
-                    continue
-                ln_colour = ln.get_color()
-                if marker_open:
-                    ln.set_markerfacecolor("none")
-                    ln.set_markeredgecolor(ln_colour)
-                else:
-                    ln.set_markerfacecolor(ln_colour)
-                    ln.set_markeredgecolor(ln_colour)
-
-        # v5.2.31: ``ax.scatter`` produces a ``PathCollection`` rather
-        # than a ``Line2D`` — pre-v5.2.31 the loop above missed every
-        # scatter-based artist (notably the beeswarm dots), so changing
-        # Marker prefs had no visible effect on them. Renderers that
-        # want scatter artists controlled by the export-style panel
-        # tag their PathCollection with ``_aw_marker_collection =
-        # True``. Other PathCollections (contour, hexbin, errorbar
-        # caps, single-point placeholders) stay untouched.
-        marker_size = float(prefs.get("marker_size", 5.0))
-        marker_edge_width = float(prefs.get("marker_edge_width", 0.8))
-        for coll in ax.collections:
-            is_density = getattr(coll, "_aw_density_collection", False)
-            if not (getattr(coll, "_aw_marker_collection", False) or is_density):
-                continue
-            # PathCollection ``sizes`` are in points^2 (area), unlike
-            # Line2D ``markersize`` which is points (diameter). Square
-            # the diameter so the visual size matches between the
-            # line- and scatter-based artists on the same plot.
-            try:
-                coll.set_sizes([marker_size * marker_size])
-            except Exception:
-                swallowed()  # was: pass (silent except)
-            try:
-                coll.set_linewidths([marker_edge_width])
-            except Exception:
-                swallowed()  # was: pass (silent except)
-            # Density collections carry a per-point colormap (the whole point of
-            # the mode). The single-colour override below would collapse the
-            # gradient, so density gets its own handling: honor the marker shape
-            # and the open/filled (hollow-circle) choice while keeping the
-            # per-point colours — recomputed from the scalar array each time so
-            # repeated restyles never lose the gradient or get stuck "open".
-            if is_density:
-                if marker_style and marker_style != "keep":
-                    try:
-                        _arr = coll.get_array()
-                    except Exception:
-                        _arr = None
-                    if _arr is not None:
-                        try:
-                            coll.norm.autoscale_None(_arr)
-                            _rgba = coll.cmap(coll.norm(_arr))
-                            if marker_open:
-                                coll.set_facecolors("none")
-                                coll.set_edgecolors(_rgba)
-                            else:
-                                coll.set_facecolors(_rgba)
-                                coll.set_edgecolors("none")
-                        except Exception:
-                            swallowed()  # leave the gradient untouched on error
-                    if marker_style.lower() != "none":
-                        try:
-                            from matplotlib.markers import MarkerStyle
-                            ms = MarkerStyle(marker_style)
-                            coll.set_paths([ms.get_path().transformed(ms.get_transform())])
-                        except Exception:
-                            swallowed()  # was: pass (silent except)
-                continue
-            if marker_style and marker_style != "keep":
-                # Per-point face/edge: read the FIRST currently-set
-                # face colour so we preserve the renderer's per-well
-                # colour assignment. Open vs filled is a function of
-                # the user's pref, not the renderer's choice.
-                try:
-                    faces = coll.get_facecolors()
-                    cur_colour = faces[0] if len(faces) else None
-                except Exception:
-                    cur_colour = None
-                if cur_colour is None:
-                    try:
-                        edges = coll.get_edgecolors()
-                        cur_colour = edges[0] if len(edges) else None
-                    except Exception:
-                        cur_colour = None
-                if cur_colour is not None:
-                    if marker_open:
-                        try:
-                            coll.set_facecolor("none")
-                            coll.set_edgecolor(cur_colour)
-                        except Exception:
-                            swallowed()  # was: pass (silent except)
-                    else:
-                        try:
-                            coll.set_facecolor(cur_colour)
-                            coll.set_edgecolor(cur_colour)
-                        except Exception:
-                            swallowed()  # was: pass (silent except)
-                # Marker shape: swap the path in the PathCollection
-                # to the requested marker's path. Each point in the
-                # collection draws the same path, scaled by size.
-                if marker_style.lower() != "none":
-                    try:
-                        from matplotlib.markers import MarkerStyle
-                        ms = MarkerStyle(marker_style)
-                        new_path = ms.get_path().transformed(
-                            ms.get_transform()
-                        )
-                        coll.set_paths([new_path])
-                    except Exception:
-                        swallowed()  # was: pass (silent except)
-
-        # **Off means off.** ``ax.grid(False, alpha=…, linestyle=…)`` does not
-        # hide the grid: matplotlib reads line properties beside a false first
-        # argument as "style the grid", turns it back **on**, and says so in a
-        # ``UserWarning`` — so Properties → Grid → Show grid did nothing on any
-        # plot in the app, whichever way it was moved. The styling kwargs only
-        # go in when the grid is actually being drawn.
-        if bool(prefs.get("grid_show", True)):
-            ax.grid(True,
-                    alpha=float(prefs.get("grid_alpha", 0.25)),
-                    linestyle=str(prefs.get("grid_style", "--")))
-        else:
-            ax.grid(False)
-
-        # Axis limits are applied per-panel (each axis reads its own bucketed
-        # limit), not just to the targeted axis — so a limit set on any panel of a
-        # multi-panel figure sticks and renders on every redraw. (Log scaling
-        # below stays scoped to the targeted axis.)
-        xlo = _axis_limit(idx, "x_lim_min")
-        xhi = _axis_limit(idx, "x_lim_max")
-        ylo = _axis_limit(idx, "y_lim_min")
-        yhi = _axis_limit(idx, "y_lim_max")
-        # Whatever the rest of this pass does to the axes, a limit the user
-        # typed is the last word — so it is re-asserted at the end and the
-        # discrepancy is reported. See :func:`_hold_typed_limits`.
-        _typed_limits = (xlo, xhi, ylo, yhi)
-
-        if target_idx is None or idx == target_idx:
-            # ``_aw_force_xlog``/``_aw_force_ylog`` let an axis pin its own log
-            # state (the scatter plot defaults to log/log via a scatter-specific
-            # pref) so the shared x_log/y_log — which other plot types reset —
-            # can't clobber it on a later restyle.
-            #
-            # The *base* is the user's either way. An axis that pins whether it
-            # is logarithmic has not thereby chosen what it is logarithmic in,
-            # and the Response tab — the one figure that pins — reads the same
-            # pref when it draws, so the two agree.
-            if not getattr(ax, "_categorical_xaxis", False):
-                _fx = getattr(ax, "_aw_force_xlog", None)
-                _xlog = bool(prefs.get("x_log", False)) if _fx is None else bool(_fx)
-                apply_axis_log_scale(ax, "x", _xlog,
-                                     log_base_value(prefs.get("x_log_base", "10")))
-            if not getattr(ax, "_categorical_yaxis", False):
-                _fy = getattr(ax, "_aw_force_ylog", None)
-                _ylog = bool(prefs.get("y_log", False)) if _fy is None else bool(_fy)
-                apply_axis_log_scale(ax, "y", _ylog,
-                                     log_base_value(prefs.get("y_log_base", "10")))
-            # ``set_xscale`` above resets the axis's locator and formatter, so a
-            # time axis that asked to have its ticks rescaled has to say so
-            # again. The renderer stamped the whole correction; re-install from
-            # it — re-installing a factor alone would drop the offset here and
-            # nowhere else, which is the worst place for the two to disagree.
-            _ts = getattr(ax, "_aw_time_rescale", None)
-            if _ts is not None:
-                apply_time_rescale(ax, _ts)
-
-        # **After the scale, never before.** A limit can only be validated
-        # against the scale the axis will actually be drawn in, and on every
-        # redraw ``ax.clear()`` has left this axis linear until the block above
-        # ran: applied first, a non-positive bound on a log axis is accepted in
-        # silence — matplotlib refuses one only when the axis is *already*
-        # logarithmic — and survives into an axis where it means ``-inf``. That
-        # is the whole of the "my y limits keep coming back wrong" report: a
-        # fraction axis typed as 0 to 1 drew every point in the top thousandth
-        # of the figure, and re-typing the same two numbers fixed it because
-        # that path met an axis that was already log and had the bound refused.
-        _apply_limits_for_scale(ax, "x", xlo, xhi)
-        _apply_limits_for_scale(ax, "y", ylo, yhi)
-
-        # ``minorticks_off`` installs a ``NullLocator`` on *both* axes, which on
-        # a log axis would take away the subdivisions that make it readable
-        # between its two labelled powers — those are a property of the scale,
-        # not a preference about tick density, so a log axis keeps them whatever
-        # this row says and the row goes on governing the linear axes beside it.
-        from matplotlib.ticker import NullLocator as _NullLocator
-
-        _tick_minor = bool(_axis_style(idx, "tick_minor", False))
-        _log_axes = [w for w in ("x", "y")
-                     if (ax.get_xscale() if w == "x" else ax.get_yscale()) == "log"]
-        if _tick_minor:
-            ax.minorticks_on()
-        elif not _log_axes:
-            ax.minorticks_off()
-        else:
-            for _w in ("x", "y"):
-                if _w not in _log_axes:
-                    (ax.xaxis if _w == "x" else ax.yaxis).set_minor_locator(
-                        _NullLocator())
-        for _w in _log_axes:
-            apply_log_minor_ticks(
-                ax, _w,
-                log_base_value(prefs.get(f"{_w}_log_base", "10")))
-        length = float(_axis_style(idx, "tick_length", 4.0))
-        direction = str(_axis_style(idx, "tick_direction", "out"))
-        if bool(_axis_style(idx, "tick_major", True)):
-            ax.tick_params(which="major", length=length, direction=direction)
-        else:
-            ax.tick_params(which="major", length=0)
-        if _tick_minor or _log_axes:
-            ax.tick_params(which="minor", length=max(1.0, length * 0.6), direction=direction)
-
-        # **Every legend on the axes, not only the one ``ax.legend()`` made.**
-        # A legend added with ``add_artist`` is not ``ax.legend_``, so
-        # ``get_legend()`` never returns it and this pass used to walk straight
-        # past it — the aggregate scatter's two keys are built that way on
-        # purpose, and they were the one place in the app where Properties →
-        # Legend → Font size did nothing at all.
-        legends = legends_on(ax)
-        show_leg = bool(prefs.get("legend_show", True))
-        for leg in legends:
-            leg.set_visible(show_leg)
-        # **Position is the primary legend's alone.** The standalone keys pin
-        # their own corners precisely so this pass cannot move them: relocating
-        # both to ``legend_loc`` would drop one on top of the other, which is
-        # the reason they are off ``ax.legend_`` in the first place.
-        primary = ax.get_legend()
-        if primary is not None and show_leg:
-            loc_name = str(prefs.get("legend_loc", "best"))
-            try:
-                primary.set_loc(loc_name)
-            except Exception:
-                try:
-                    from matplotlib.legend import Legend as _Legend
-                    primary._loc = _Legend.codes.get(loc_name, 0)
-                except Exception:
-                    swallowed()  # was: pass (silent except)
-        for leg in legends:
-            for txt in leg.get_texts():
-                txt.set_fontsize(float(prefs.get("legend_font_size", 9)))
-                txt.set_color(_title_fg)
-                txt.set_fontfamily(_plot_font_family())
-            # The title is legend text too. Left out, a key headed "Well /
-            # group" or "Timepoint" kept whatever size it was created at while
-            # its own entries resized underneath it, so raising the size made
-            # the heading the smaller of the two.
-            title = leg.get_title()
-            if title is not None and title.get_text():
-                title.set_fontsize(float(prefs.get("legend_font_size", 9)))
-                title.set_color(_title_fg)
-                title.set_fontfamily(_plot_font_family())
-        if primary is not None:
-            # Last, so the swatches copy the traces *after* this pass has
-            # finished restyling them. Run earlier and the legend would faithfully
-            # reproduce the widths the lines had a moment ago.
-            sync_legend_handles(ax)
+        _style_x_tick_angle(ax, int(axis_prefs.style(idx, "x_tick_angle", 0)))
+        _style_lines(ax, marks)
+        _style_marker_collections(ax, marks)
+        _apply_grid(ax, prefs)
+        typed_limits = _apply_scales_and_limits(ax, idx, axis_prefs)
+        _apply_tick_prefs(ax, idx, axis_prefs)
+        _apply_legend_prefs(ax, prefs, title_fg)
 
         fixed_pos = getattr(ax, "_fixed_axes_position", None)
         if fixed_pos is not None:
             ax.set_position(fixed_pos)
 
-        _hold_typed_limits(ax, *_typed_limits)
+        _hold_typed_limits(ax, *typed_limits)
 
+    _apply_layout_engine(fig, prefs)
+
+
+def _style_axis_typography(ax, idx: int, axis_prefs: _AxisPrefs) -> str:
+    """Sizes, colours and font family of the axis text; returns the title ink,
+    which the legend pass uses for its own text."""
+    tick_sz = axis_prefs.font_size(idx, "tick_label_size", 10)
+    label_sz = axis_prefs.font_size(idx, "axis_label_size", 12)
+    title_sz = axis_prefs.font_size(idx, "title_size", 14)
+    # Theme-aware chrome: this function used to hardcode "black" everywhere
+    # (publication-ink), which was correct on export but overrode the
+    # PlotCard's screen-theme styling whenever it was called from a redraw.
+    _bg, title_fg, muted_fg, _grid, _spine = tokens_for(ax)
+    ax.patch.set_alpha(1.0)
+    ax.xaxis.label.set_color(muted_fg)
+    ax.yaxis.label.set_color(muted_fg)
+    ax.xaxis.label.set_fontsize(label_sz)
+    ax.yaxis.label.set_fontsize(label_sz)
+    ax.tick_params(axis="x", labelsize=tick_sz, colors=muted_fg)
+    ax.tick_params(axis="y", labelsize=tick_sz, colors=muted_fg)
+    ax.title.set_fontsize(title_sz)
+    ax.title.set_color(title_fg)
+
+    fam = _plot_font_family()
+    for tick in [*ax.get_xticklabels(), *ax.get_yticklabels()]:
+        tick.set_color(muted_fg)
+        tick.set_fontfamily(fam)
+        tick.set_fontsize(tick_sz)
+
+    ax.xaxis.label.set_fontfamily(fam)
+    ax.yaxis.label.set_fontfamily(fam)
+    ax.title.set_fontfamily(fam)
+    return title_fg
+
+
+def _style_x_tick_angle(ax, angle: int) -> None:
+    # Keep horizontal alignment in step with the applied angle: a
+    # horizontal label (0°) reads centered under its bar/tick, while an
+    # angled label anchors its right edge at the tick (the conventional
+    # slanted look). Without this the bar renderer's ``ha="right"`` (drawn
+    # alongside its own 45° rotation) survives even after this pass flattens
+    # the rotation back to 0°, leaving labels right-aligned under their bar.
+    ha = "center" if angle == 0 else "right"
+    for tick in ax.get_xticklabels():
+        tick.set_rotation(angle)
+        tick.set_horizontalalignment(ha)
+
+
+def _error_bar_cap_ids(ax) -> set:
+    # Error-bar caps live in ``ax.lines`` too — overriding their marker /
+    # linestyle replaces the tick at the top / bottom of each bar with
+    # the user's data-marker pick, which looks like the error bar is
+    # broken. Collect their ids so the line pass skips them.
+    cap_ids: set = set()
+    for container in getattr(ax, "containers", []) or []:
+        cap_lines = getattr(container, "caplines", None)
+        if cap_lines is None:
+            children = getattr(container, "lines", None)
+            if isinstance(children, tuple) and len(children) >= 2:
+                cap_lines = children[1]
+        for cap in (cap_lines or ()):
+            cap_ids.add(id(cap))
+    return cap_ids
+
+
+def _style_lines(ax, marks: _MarkPrefs) -> None:
+    cap_ids = _error_bar_cap_ids(ax)
+    for ln in ax.lines:
+        if getattr(ln, "_aw_no_style_override", False):
+            # Decorative annotation lines (e.g. significance brackets) opt
+            # out entirely — stamping the data marker/linestyle on them turns
+            # a flat bracket into a row of circles.
+            continue
+        if id(ln) in cap_ids:
+            # Error-bar cap markers have their own intrinsic capsize-
+            # based sizing + a default "_" / "|" marker that signals
+            # the cap. Touching their markersize / markeredgewidth /
+            # marker / linestyle either makes the caps look like
+            # data points or stamps the user's data-marker onto the
+            # caps — both read as "error bars suddenly appeared".
+            continue
+        _style_one_line(ln, marks)
+
+
+def _style_one_line(ln, marks: _MarkPrefs) -> None:
+    ln.set_linewidth(marks.line_width)
+    ln.set_markersize(marks.marker_size)
+    ln.set_markeredgewidth(marks.marker_edge_width)
+    # ``"keep"`` lets a tab opt out of overriding the renderer's own
+    # marker / linestyle pick (e.g. distinct markers per replicate).
+    # Lines the renderer drew as markers-only (linestyle='None' +
+    # a marker — the scatter / aggregate pattern) keep their no-
+    # connecting-line behaviour; overriding it to "-" stamped
+    # diagonal lines that read as spurious error bars.
+    cur_ls = ln.get_linestyle()
+    cur_mk = ln.get_marker()
+    scatter_only = (
+        getattr(ln, "_scatter_only_artist", False)
+        or (
+            cur_ls in ("None", "none", "", " ") and
+            cur_mk not in ("None", "none", "", None)
+        )
+    )
+    # ``_aw_linestyle_is_data``: the Line tab's grey mode encodes a
+    # trace in its dash pattern, alongside the marker shape and face
+    # below. Stamping one pref pattern over every trace collapses that
+    # third cue on every redraw while the legend goes on showing four
+    # different dashes.
+    line_style = marks.line_style
+    if (line_style and line_style != "keep" and not scatter_only
+            and not getattr(ln, "_aw_linestyle_is_data", False)):
+        ln.set_linestyle(line_style if line_style != "none" else "None")
+    if not marks.restyles_markers:
+        return
+    # ``_aw_marker_is_data``: renderers that encode a variable in the
+    # marker *shape* opt out of the shape override while still
+    # honouring size / open-vs-filled. The aggregate scatter gives
+    # each well its own shape and draws a legend keyed on those
+    # shapes — stamping one pref shape over every point collapsed
+    # them all onto the first well's marker while the legend went on
+    # advertising five different ones.
+    if not getattr(ln, "_aw_marker_is_data", False):
+        marker_style = marks.marker_style
+        ln.set_marker(marker_style if marker_style != "none" else "None")
+    # Force both edge and face explicitly. Some renderers
+    # (e.g. scatter cells) construct the line with
+    # ``markeredgecolor='none'`` for a clean filled-only
+    # look — that meant "open circle" set face='none' but
+    # the existing edge was 'none' too, producing a fully
+    # invisible marker. Pin the edge to the line colour in
+    # both modes so the ring is always visible.
+    #
+    # ``_aw_marker_face_is_data`` is the face's twin of the shape
+    # opt-out above, and it is a separate flag because the two are
+    # separate claims: the aggregate scatter encodes a well in the
+    # *shape* and is happy for the user to make every point hollow,
+    # while the Line tab's grey mode encodes a trace in the shape
+    # **and** the fill — half its cycle is the same six shapes
+    # open. Re-pinning the face here turned every open marker
+    # filled on the next redraw, which is every redraw, so six of
+    # the twelve traces stopped being distinguishable while the
+    # legend went on advertising them.
+    if getattr(ln, "_aw_marker_face_is_data", False):
+        return
+    ln_colour = ln.get_color()
+    if marks.marker_open:
+        ln.set_markerfacecolor("none")
+        ln.set_markeredgecolor(ln_colour)
+    else:
+        ln.set_markerfacecolor(ln_colour)
+        ln.set_markeredgecolor(ln_colour)
+
+
+def _style_marker_collections(ax, marks: _MarkPrefs) -> None:
+    # ``ax.scatter`` produces a ``PathCollection`` rather than a ``Line2D``,
+    # so the line pass misses every scatter-based artist (notably the
+    # beeswarm dots). Renderers that want scatter artists controlled by the
+    # export-style panel tag their PathCollection with
+    # ``_aw_marker_collection = True``. Other PathCollections (contour,
+    # hexbin, errorbar caps, single-point placeholders) stay untouched.
+    for coll in ax.collections:
+        is_density = getattr(coll, "_aw_density_collection", False)
+        if not (getattr(coll, "_aw_marker_collection", False) or is_density):
+            continue
+        # PathCollection ``sizes`` are in points^2 (area), unlike
+        # Line2D ``markersize`` which is points (diameter). Square
+        # the diameter so the visual size matches between the
+        # line- and scatter-based artists on the same plot.
+        try:
+            coll.set_sizes([marks.marker_size * marks.marker_size])
+        except Exception:
+            swallowed()  # was: pass (silent except)
+        try:
+            coll.set_linewidths([marks.marker_edge_width])
+        except Exception:
+            swallowed()  # was: pass (silent except)
+        if not marks.restyles_markers:
+            continue
+        if is_density:
+            _style_density_collection(coll, marks)
+        else:
+            _style_point_collection(coll, marks)
+        if marks.marker_style.lower() != "none":
+            _set_collection_marker_shape(coll, marks.marker_style)
+
+
+def _style_density_collection(coll, marks: _MarkPrefs) -> None:
+    # Density collections carry a per-point colormap (the whole point of
+    # the mode). The single-colour override would collapse the gradient,
+    # so density gets its own handling: honour the open/filled
+    # (hollow-circle) choice while keeping the per-point colours —
+    # recomputed from the scalar array each time so repeated restyles never
+    # lose the gradient or get stuck "open".
+    try:
+        arr = coll.get_array()
+    except Exception:
+        arr = None
+    if arr is None:
+        return
+    try:
+        coll.norm.autoscale_None(arr)
+        rgba = coll.cmap(coll.norm(arr))
+        if marks.marker_open:
+            coll.set_facecolors("none")
+            coll.set_edgecolors(rgba)
+        else:
+            coll.set_facecolors(rgba)
+            coll.set_edgecolors("none")
+    except Exception:
+        swallowed()  # leave the gradient untouched on error
+
+
+def _style_point_collection(coll, marks: _MarkPrefs) -> None:
+    # Per-point face/edge: read the FIRST currently-set
+    # face colour so we preserve the renderer's per-well
+    # colour assignment. Open vs filled is a function of
+    # the user's pref, not the renderer's choice.
+    try:
+        faces = coll.get_facecolors()
+        cur_colour = faces[0] if len(faces) else None
+    except Exception:
+        cur_colour = None
+    if cur_colour is None:
+        try:
+            edges = coll.get_edgecolors()
+            cur_colour = edges[0] if len(edges) else None
+        except Exception:
+            cur_colour = None
+    if cur_colour is None:
+        return
+    try:
+        coll.set_facecolor("none" if marks.marker_open else cur_colour)
+        coll.set_edgecolor(cur_colour)
+    except Exception:
+        swallowed()  # was: pass (silent except)
+
+
+def _set_collection_marker_shape(coll, marker_style: str) -> None:
+    # Marker shape: swap the path in the PathCollection
+    # to the requested marker's path. Each point in the
+    # collection draws the same path, scaled by size.
+    try:
+        from matplotlib.markers import MarkerStyle
+        ms = MarkerStyle(marker_style)
+        coll.set_paths([ms.get_path().transformed(ms.get_transform())])
+    except Exception:
+        swallowed()  # was: pass (silent except)
+
+
+def _apply_grid(ax, prefs: dict) -> None:
+    # **Off means off.** ``ax.grid(False, alpha=…, linestyle=…)`` does not
+    # hide the grid: matplotlib reads line properties beside a false first
+    # argument as "style the grid", turns it back **on**, and says so in a
+    # ``UserWarning`` — so Properties → Grid → Show grid did nothing on any
+    # plot in the app, whichever way it was moved. The styling kwargs only
+    # go in when the grid is actually being drawn.
+    if bool(prefs.get("grid_show", True)):
+        ax.grid(True,
+                alpha=float(prefs.get("grid_alpha", 0.25)),
+                linestyle=str(prefs.get("grid_style", "--")))
+    else:
+        ax.grid(False)
+
+
+def _apply_scales_and_limits(ax, idx: int, axis_prefs: _AxisPrefs) -> tuple:
+    """Log scale (targeted axis only), then this panel's typed limits.
+
+    Returns the typed limits, which the coordinator re-asserts at the very end
+    of the pass (:func:`_hold_typed_limits`): whatever else the pass does to
+    the axes, a limit the user typed is the last word.
+    """
+    prefs = axis_prefs.prefs
+    # Axis limits are applied per-panel (each axis reads its own bucketed
+    # limit), not just to the targeted axis — so a limit set on any panel of a
+    # multi-panel figure sticks and renders on every redraw. (Log scaling
+    # below stays scoped to the targeted axis.)
+    xlo = axis_prefs.limit(idx, "x_lim_min")
+    xhi = axis_prefs.limit(idx, "x_lim_max")
+    ylo = axis_prefs.limit(idx, "y_lim_min")
+    yhi = axis_prefs.limit(idx, "y_lim_max")
+
+    if axis_prefs.targets(idx):
+        # ``_aw_force_xlog``/``_aw_force_ylog`` let an axis pin its own log
+        # state (the scatter plot defaults to log/log via a scatter-specific
+        # pref) so the shared x_log/y_log — which other plot types reset —
+        # can't clobber it on a later restyle.
+        #
+        # The *base* is the user's either way. An axis that pins whether it
+        # is logarithmic has not thereby chosen what it is logarithmic in,
+        # and the Response tab — the one figure that pins — reads the same
+        # pref when it draws, so the two agree.
+        if not getattr(ax, "_categorical_xaxis", False):
+            _fx = getattr(ax, "_aw_force_xlog", None)
+            _xlog = bool(prefs.get("x_log", False)) if _fx is None else bool(_fx)
+            apply_axis_log_scale(ax, "x", _xlog,
+                                 log_base_value(prefs.get("x_log_base", "10")))
+        if not getattr(ax, "_categorical_yaxis", False):
+            _fy = getattr(ax, "_aw_force_ylog", None)
+            _ylog = bool(prefs.get("y_log", False)) if _fy is None else bool(_fy)
+            apply_axis_log_scale(ax, "y", _ylog,
+                                 log_base_value(prefs.get("y_log_base", "10")))
+        # ``set_xscale`` above resets the axis's locator and formatter, so a
+        # time axis that asked to have its ticks rescaled has to say so
+        # again. The renderer stamped the whole correction; re-install from
+        # it — re-installing a factor alone would drop the offset here and
+        # nowhere else, which is the worst place for the two to disagree.
+        _ts = getattr(ax, "_aw_time_rescale", None)
+        if _ts is not None:
+            apply_time_rescale(ax, _ts)
+
+    # **After the scale, never before.** A limit can only be validated
+    # against the scale the axis will actually be drawn in, and on every
+    # redraw ``ax.clear()`` has left this axis linear until the block above
+    # ran: applied first, a non-positive bound on a log axis is accepted in
+    # silence — matplotlib refuses one only when the axis is *already*
+    # logarithmic — and survives into an axis where it means ``-inf``. That
+    # is the whole of the "my y limits keep coming back wrong" report: a
+    # fraction axis typed as 0 to 1 drew every point in the top thousandth
+    # of the figure, and re-typing the same two numbers fixed it because
+    # that path met an axis that was already log and had the bound refused.
+    _apply_limits_for_scale(ax, "x", xlo, xhi)
+    _apply_limits_for_scale(ax, "y", ylo, yhi)
+    return (xlo, xhi, ylo, yhi)
+
+
+def _apply_tick_prefs(ax, idx: int, axis_prefs: _AxisPrefs) -> None:
+    # ``minorticks_off`` installs a ``NullLocator`` on *both* axes, which on
+    # a log axis would take away the subdivisions that make it readable
+    # between its two labelled powers — those are a property of the scale,
+    # not a preference about tick density, so a log axis keeps them whatever
+    # this row says and the row goes on governing the linear axes beside it.
+    from matplotlib.ticker import NullLocator as _NullLocator
+
+    tick_minor = bool(axis_prefs.style(idx, "tick_minor", False))
+    log_axes = [w for w in ("x", "y")
+                if (ax.get_xscale() if w == "x" else ax.get_yscale()) == "log"]
+    if tick_minor:
+        ax.minorticks_on()
+    elif not log_axes:
+        ax.minorticks_off()
+    else:
+        for w in ("x", "y"):
+            if w not in log_axes:
+                (ax.xaxis if w == "x" else ax.yaxis).set_minor_locator(
+                    _NullLocator())
+    for w in log_axes:
+        apply_log_minor_ticks(
+            ax, w,
+            log_base_value(axis_prefs.prefs.get(f"{w}_log_base", "10")))
+    length = float(axis_prefs.style(idx, "tick_length", 4.0))
+    direction = str(axis_prefs.style(idx, "tick_direction", "out"))
+    if bool(axis_prefs.style(idx, "tick_major", True)):
+        ax.tick_params(which="major", length=length, direction=direction)
+    else:
+        ax.tick_params(which="major", length=0)
+    if tick_minor or log_axes:
+        ax.tick_params(which="minor", length=max(1.0, length * 0.6), direction=direction)
+
+
+def _apply_legend_prefs(ax, prefs: dict, title_fg: str) -> None:
+    # **Every legend on the axes, not only the one ``ax.legend()`` made.**
+    # A legend added with ``add_artist`` is not ``ax.legend_``, so
+    # ``get_legend()`` never returns it and this pass used to walk straight
+    # past it — the aggregate scatter's two keys are built that way on
+    # purpose, and they were the one place in the app where Properties →
+    # Legend → Font size did nothing at all.
+    legends = legends_on(ax)
+    show_leg = bool(prefs.get("legend_show", True))
+    for leg in legends:
+        leg.set_visible(show_leg)
+    # **Position is the primary legend's alone.** The standalone keys pin
+    # their own corners precisely so this pass cannot move them: relocating
+    # both to ``legend_loc`` would drop one on top of the other, which is
+    # the reason they are off ``ax.legend_`` in the first place.
+    primary = ax.get_legend()
+    if primary is not None and show_leg:
+        _place_legend(primary, str(prefs.get("legend_loc", "best")))
+    for leg in legends:
+        font_size = float(prefs.get("legend_font_size", 9))
+        for txt in leg.get_texts():
+            txt.set_fontsize(font_size)
+            txt.set_color(title_fg)
+            txt.set_fontfamily(_plot_font_family())
+        # The title is legend text too. Left out, a key headed "Well /
+        # group" or "Timepoint" kept whatever size it was created at while
+        # its own entries resized underneath it, so raising the size made
+        # the heading the smaller of the two.
+        title = leg.get_title()
+        if title is not None and title.get_text():
+            title.set_fontsize(font_size)
+            title.set_color(title_fg)
+            title.set_fontfamily(_plot_font_family())
+    if primary is not None:
+        # Last, so the swatches copy the traces *after* this pass has
+        # finished restyling them. Run earlier and the legend would faithfully
+        # reproduce the widths the lines had a moment ago.
+        sync_legend_handles(ax)
+
+
+def _place_legend(legend, loc_name: str) -> None:
+    try:
+        legend.set_loc(loc_name)
+    except Exception:
+        try:
+            from matplotlib.legend import Legend as _Legend
+            legend._loc = _Legend.codes.get(loc_name, 0)
+        except Exception:
+            swallowed()  # was: pass (silent except)
+
+
+def _apply_layout_engine(fig, prefs: dict) -> None:
     use_constrained = bool(prefs.get("layout_constrained", False))
     use_tight = bool(prefs.get("layout_tight", False))
     try:

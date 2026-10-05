@@ -49,17 +49,20 @@ import pytest
 
 from services import run_journal as J
 from services.remote_runner import (
-    UPLOAD_HEARTBEAT,
-    UPLOAD_SENTINEL,
-    DatasetCache,
     LocalInputMode,
     OutputFilter,
-    RemoteHost,
     RemoteRunner,
     ZippedInput,
-    pipeline_argv_digest,
-    source_fingerprint,
 )
+from services.remote_config import RemoteHost
+from services.remote_run_id import (
+    UPLOAD_HEARTBEAT,
+    UPLOAD_SENTINEL,
+    pipeline_argv_digest,
+)
+from services.remote_scratch import source_fingerprint
+from services.remote_upload import DatasetCache
+from services.remote_fetch import FetchedOutputVerifier
 
 #: A previous run's output directory, under a different ``run_id`` than the one
 #: this run will compute — which is what re-attaching means.
@@ -186,7 +189,7 @@ def _spawn_with(host, plate, monkeypatch, stop_fetchers, *,
                         lambda self, zipped, **kw: (_KEY, 0, 0.01))
     monkeypatch.setattr(RemoteRunner, "sync_required_files",
                         lambda self, **kw: None)
-    monkeypatch.setattr(RemoteRunner, "_list_remote_completed_wells",
+    monkeypatch.setattr(FetchedOutputVerifier, "_list_remote_completed_wells",
                         lambda self: set(completed_remote_wells))
     # Not what these tests are about, and it shells out for real.
     monkeypatch.setattr(RemoteRunner, "_sweep_orphaned_allocation",
@@ -201,7 +204,7 @@ def _spawn_with(host, plate, monkeypatch, stop_fetchers, *,
         m.pid = 1234
         return m
 
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
 
     in_dir = plate / "in"
     zipped = ZippedInput(
@@ -330,7 +333,8 @@ def test_spawn_records_the_address_under_the_digest_it_used(
     run of the *same* configuration finds its own record and a differently
     configured one does not.
     """
-    from services.remote_runner import pipeline_argv_digest, source_fingerprint
+    from services.remote_run_id import pipeline_argv_digest
+    from services.remote_scratch import source_fingerprint
 
     cpu_host = replace(host, cpu_only=True)
     # `PipelineRunner` opens the journal before `spawn` runs; `spawn` only

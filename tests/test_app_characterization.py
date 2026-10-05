@@ -15,7 +15,7 @@ import pytest
 from tests.fixtures.mini_dataset import (
     CELLS_PER_TP, TIMEPOINTS, WELLS, cell_gfp, cell_mcherry,
 )
-from review.features.barplot.controller import collect_bar_items
+from review.features.barplot.collect import collect_bar_items
 from review.core.channel_state_controller import set_active_channel
 from review.features.lineplot.controller import collect_line_series
 

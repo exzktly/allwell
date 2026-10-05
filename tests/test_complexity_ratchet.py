@@ -22,6 +22,14 @@ from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 THRESHOLD = 40
+# Sum of the allowlisted functions' scores at the C0 baseline. The existing
+# per-function guard prevents a new function crossing 40, but did not stop an
+# existing debt function growing from (say) 50 to 90. This aggregate ratchet
+# makes that growth visible and only moves down as debt is decomposed.
+# 1192 -> 1088: apply_export_style_prefs (104) left the allowlist (C1).
+# 1088 -> 985: ExportStyleSidebar._build_ui (103) left the allowlist (C2).
+# 985 -> 813: collect_bar_items (95) and its _items_for_tp (77) left it (C3).
+TOTAL_ALLOWLISTED_CC_BUDGET = 813
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
@@ -98,8 +106,10 @@ def _functions_over_threshold() -> dict[str, int]:
 # A5 (redraw_line_plots, run_stats) — are all DONE (see notes below). Remove an
 # entry when you take it under 40.
 ALLOWLIST = {
-    "review/features/barplot/collect.py::collect_bar_items",
-    "review/features/barplot/collect.py::collect_bar_items._items_for_tp",
+    # C3 DONE: collect_bar_items (was CC 95) and its nested _items_for_tp
+    # (was 77) split into a request snapshot, a per-redraw _BarCollector and
+    # typed intermediates (_Panels, _Denominators) with one shared fold-change
+    # step; collect_bar_items is CC 2, the largest stage 15. Both removed.
     # A4 DONE: find_well_images_and_masks (was CC 98) decomposed into
     # _merge_scan / _discover_from_layouts / _scan_raw_disk_files /
     # _raw_file_well_passes / _log_find_result — main orchestrator now CC 13,
@@ -108,9 +118,14 @@ ALLOWLIST = {
     # feature now owns its own view-state serialization via the ``view_state_io``
     # registry hook); CC unchanged, so it stays allowlisted at the new path.
     "review/features/image_browser/image_table/view_state_io.py::apply_image_table",
-    "review/core/plot_style.py::apply_export_style_prefs",
+    # C1 DONE: apply_export_style_prefs (was CC 104) split into one pass per
+    # preference family (typography, tick angle, lines, marker collections,
+    # grid, scale + limits, ticks, legends, layout); coordinator CC 6, every
+    # pass <= 13. Removed from the allowlist.
     "review/core/centre_view.py::build_centre",
-    "review/features/export/sidebar_view.py::ExportStyleSidebar._build_ui",
+    # C2 DONE: ExportStyleSidebar._build_ui (was CC 103) split into one builder
+    # per Properties section over a module-level _SectionGrid; coordinator
+    # CC 2, the largest builder (Statistics) 32. Removed from the allowlist.
     "review/persistence/view_state.py::restore",
     "process_microscopy.py::main",
     # A5 DONE: redraw_line_plots (was CC 69) decomposed — the per-series painter
@@ -118,7 +133,7 @@ ALLOWLIST = {
     # extracted; the function is now CC 28. Removed from the allowlist.
     "review/core/centre_view.py::build_centre._build_plotting",
     "review/features/barplot/collect.py::collect_bar_items_for_group",
-    "services/remote_runner.py::stage_local_zips",
+    "services/remote_staging.py::stage_local_zips",
     "review/features/heatmap/controller.py::redraw_heatmap",
     "review/features/image_browser/cell_browser/collect.py::collect_cells",
     # DONE: the pipeline's Otsu estimator (was CC 55) moved to
@@ -166,4 +181,35 @@ def test_complexity_allowlist_has_no_stale_entries():
         "These allowlisted functions are now under the threshold (or were "
         "renamed/removed) — delete them from ALLOWLIST so the ratchet stays "
         "tight:\n" + "\n".join(f"  {k}" for k in sorted(resolved))
+    )
+
+
+def _allowlisted_cc_total() -> int:
+    over = _functions_over_threshold()
+    # The stale-entry test gives the normal diagnostic. Keep this helper strict
+    # too so invoking either total-budget test alone cannot undercount a renamed
+    # or newly-resolved allowlist entry.
+    missing = ALLOWLIST - set(over)
+    assert not missing, (
+        "Allowlisted complexity entries are missing:\n  "
+        + "\n  ".join(sorted(missing))
+    )
+    return sum(over[name] for name in ALLOWLIST)
+
+
+def test_total_allowlisted_complexity_does_not_grow():
+    total = _allowlisted_cc_total()
+    assert total <= TOTAL_ALLOWLISTED_CC_BUDGET, (
+        "Allowlisted cyclomatic-complexity debt grew from "
+        f"{TOTAL_ALLOWLISTED_CC_BUDGET} to {total}. Decompose the function "
+        "rather than spending another debt function's improvement."
+    )
+
+
+def test_complexity_debt_budget_is_not_slack():
+    total = _allowlisted_cc_total()
+    assert total >= TOTAL_ALLOWLISTED_CC_BUDGET, (
+        f"Allowlisted complexity fell to {total}; lower "
+        f"TOTAL_ALLOWLISTED_CC_BUDGET from {TOTAL_ALLOWLISTED_CC_BUDGET} so "
+        "the improvement cannot be spent later."
     )

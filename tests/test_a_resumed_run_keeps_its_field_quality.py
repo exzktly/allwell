@@ -36,6 +36,7 @@ import process_microscopy as pm
 from pipeline.field_quality import (
     FIELD_QUALITY_BLOCK, merge_fetched_field_quality, read_field_quality_block,
 )
+import pipeline.suspend as _suspend
 
 SCHEMA = ["experiment", "channel", "well", "fov", "timepoint"]
 _REAL_GROUP = pm.process_image_group
@@ -103,8 +104,8 @@ def _run_main(monkeypatch, plate, *, incremental, failing=()):
 
     monkeypatch.setattr(pm, "process_image_group", _group)
     monkeypatch.setattr(pm, "process_well_zips", _serial)
-    monkeypatch.setattr(pm._suspend, "install_handlers", lambda **k: None)
-    monkeypatch.setattr(pm._suspend, "watch_parent", lambda *a, **k: None)
+    monkeypatch.setattr(_suspend, "install_handlers", lambda **k: None)
+    monkeypatch.setattr(_suspend, "watch_parent", lambda *a, **k: None)
     argv = ["process_microscopy.py", "--input_dir", str(plate / "in"),
             "--output_dir", str(plate / "out"), "--nuclear_token", "DAPI",
             "--fluor_tokens", "GFP", "--filename_schema", ":".join(SCHEMA),
@@ -233,9 +234,9 @@ def test_the_remote_fetch_tells_the_merge_the_run_was_incremental():
     """The flag is the whole fix on the remote side, so the call must pass it."""
     import inspect
 
-    from services import remote_runner
+    from services import remote_fetch
 
-    src = inspect.getsource(remote_runner)
+    src = inspect.getsource(remote_fetch)
     assert "merge_fetched_field_quality(info_path, prior_field_quality, " \
            "incremental=run.incremental)" in src
 
@@ -283,7 +284,7 @@ def test_a_well_cut_short_by_a_suspend_says_it_is_partial(
         return out
 
     monkeypatch.setattr(pm, "process_image_group", _group)
-    monkeypatch.setattr(pm._suspend, "is_suspended", lambda: bool(suspended))
+    monkeypatch.setattr(_suspend, "is_suspended", lambda: bool(suspended))
     (tmp_path / "staging").mkdir()
     with caplog.at_level(logging.INFO):
         records, failed, _reason, _skipped = pm._process_groups_in_worker(

@@ -159,7 +159,11 @@ def test_the_funnel_and_the_paths_agree_about_the_parent():
     They were derived independently before, which is exactly how the output
     directory came to be created and the pidfile's parent not.
     """
-    from services.remote_runner import RemoteHost, remote_run_dir, remote_run_paths
+    from services.remote_config import RemoteHost
+    from services.remote_run_id import (
+        remote_run_dir,
+        remote_run_paths,
+    )
 
     host = RemoteHost(
         name="t", ssh_alias="a", remote_project_dir="~/allwell",

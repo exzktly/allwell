@@ -7,8 +7,9 @@ lazily**, inside :func:`_cellpose_model`, so merely importing this module does
 always share a process. The default StarDist path never imports this code's
 dependencies; only a Cellpose run does.
 
-``process_microscopy`` re-exports these names, so ``pm._segment_cellpose(...)``
-and the segmentation dispatch are unchanged.
+``process_microscopy``'s segmentation dispatch imports :func:`_segment_cellpose`
+from here at call time, which is what lets this module be absent from a
+StarDist-only build.
 """
 
 from __future__ import annotations

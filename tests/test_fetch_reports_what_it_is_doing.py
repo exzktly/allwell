@@ -32,10 +32,16 @@ from unittest.mock import patch
 
 import pytest
 
-import services.remote_runner as rr
 from services.pipeline_runner import ProgressTracker
 from services.remote_config import RemoteHost
-from services.remote_runner import Fetcher, LocalInputMode, OutputFilter
+from services.remote_runner import (
+    LocalInputMode,
+    OutputFilter,
+)
+from services.remote_fetch import Fetcher
+from services import remote_run_state
+from services import remote_scratch
+from services import remote_fetch
 
 pytestmark = pytest.mark.usefixtures("offline_transport")
 
@@ -43,7 +49,7 @@ pytestmark = pytest.mark.usefixtures("offline_transport")
 def _run(tmp_path: Path):
     out = tmp_path / "out"
     out.mkdir()
-    return rr._RemoteRun(
+    return remote_run_state._RemoteRun(
         run_id="x", cache_key="k", remote_input_dir="/r/in",
         remote_output_dir="/r/out", remote_pidfile="/r/pid",
         local_output_dir=out, local_input_mode=LocalInputMode.ZIP,
@@ -68,14 +74,14 @@ def _bare_fetcher(dest: Path) -> Fetcher:
 def test_the_fetched_zip_is_renamed_into_place_not_copied(tmp_path, monkeypatch):
     dest = tmp_path / "out"
     dest.mkdir()
-    transit = rr._transit_dir(dest)
+    transit = remote_scratch._transit_dir(dest)
     src = transit / "allwell-x-A01_out.zip"
     _write_zip(src)
     inode = src.stat().st_ino
 
     def no_copy(*_a, **_k):
         raise AssertionError("the zip was copied, not renamed")
-    monkeypatch.setattr(rr.shutil, "copyfile", no_copy)
+    monkeypatch.setattr(remote_fetch.shutil, "copyfile", no_copy)
 
     assert _bare_fetcher(dest)._materialize("A01", src) is True
     final = dest / "A01_out.zip"
@@ -90,13 +96,13 @@ def test_a_cross_device_rename_falls_back_to_a_staged_copy(tmp_path, monkeypatch
     dest.mkdir()
     src = tmp_path / "scratch.zip"
     _write_zip(src)
-    real_replace = rr.os.replace
+    real_replace = remote_fetch.os.replace
 
     def replace(a, b):
         if Path(a) == src:
             raise OSError(errno.EXDEV, "Invalid cross-device link")
         return real_replace(a, b)
-    monkeypatch.setattr(rr.os, "replace", replace)
+    monkeypatch.setattr(remote_fetch.os, "replace", replace)
 
     assert _bare_fetcher(dest)._materialize("A01", src) is True
     assert zipfile.is_zipfile(dest / "A01_out.zip")

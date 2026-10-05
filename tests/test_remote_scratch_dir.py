@@ -22,11 +22,13 @@ import subprocess
 import pytest
 
 from services.remote_config import RemoteHost, _format_block, _parse_entry
-from services.remote_runner import (
-    _batch_driver_snippet,
-    _compose_driver_cmd,
+from services.remote_commands import (
     _compose_remote_cmd,
     _remote_scratch_export,
+)
+from services.remote_commands import (
+    _batch_driver_snippet,
+    _compose_driver_cmd,
 )
 
 _ARGV = ["python", "process_microscopy.py", "--input_dir", "/r/in"]
@@ -77,7 +79,7 @@ def test_single_quoting_it_would_have_been_wrong():
     whatever the job's working directory happened to be, and the run would look
     like it had honoured the setting.
     """
-    from services.remote_runner import _remote_quote
+    from services.remote_transport import _remote_quote
 
     env = {"TMPDIR": "/local/scratch/job7"}
     naive = f"export ALLWELL_SCRATCH_DIR={_remote_quote('$TMPDIR')}; "

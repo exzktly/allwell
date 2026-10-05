@@ -69,26 +69,19 @@ from skimage.filters import threshold_otsu
 from skimage.segmentation import watershed
 from util.channel_roles import phase_role_conflicts, quantified_channel_tokens
 from util.fov import sort_key as _fov_sort_key
-from pipeline.cli_args import (  # noqa: F401 — re-exported for callers/tests
+from pipeline.cli_args import (
     DEFAULT_SEGMENTATION_METHOD,
-    FLATFIELD_MODES,
     build_parser, qc_options_from_args,
 )
-from pipeline.input_layout import (  # noqa: F401 — re-exported for callers/tests
+from pipeline.input_layout import (
     find_well_folders,
     find_well_zips,
     refuse_images_only_in_ignored_folders,
 )
 from util.image_exts import GROUP_IMAGE_EXTS, is_run_input_member
 from util.timepoint import parse_hours as _tp_parse_hours, sort_key as _tp_sort_key
-from util.well_token import (  # noqa: F401 — _bg_well_key re-exported for tests
-    split_background_wells as _split_background_wells,
-    background_well_key as _bg_well_key,
-    canonical_well_label as _canonical_well_label,
-    parse_background_well_map,
-)
-from util.schema import (  # noqa: F401  (re-exported for call sites and tests)
-    SCHEMA_FIELDS,
+from util.well_token import canonical_well_label as _canonical_well_label
+from util.schema import (
     DEFAULT_SCHEMA,
     DEFAULT_SEP,
     parse_schema,
@@ -106,25 +99,15 @@ from util.zip_write import replace_folder_with_archive
 # ---------------------------------------------------------------------------
 
 # The Cellpose model cache + segmenters live in Qt-free ``pipeline.cellpose``
-# (Torch is imported lazily there). Their re-exports resolve via a PEP 562 module
-# ``__getattr__`` — a DEFERRED import — so ``pipeline/cellpose.py`` can be
-# physically absent in a StarDist-only build (Cellpose profiled out) without
-# breaking this module's import; ``pm._segment_cellpose`` etc. still resolve on
-# first access.
-_CELLPOSE_REEXPORTS = ("_CELLPOSE_MODELS", "_cellpose_model", "_segment_cellpose")
-
-
-def __getattr__(name: str):  # PEP 562: only fires for names not in globals()
-    if name in _CELLPOSE_REEXPORTS:
-        import pipeline.cellpose as _cp
-        return getattr(_cp, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+# (Torch is imported lazily there), imported inside the one function that uses
+# them, so ``pipeline/cellpose.py`` can be physically absent in a StarDist-only
+# build (Cellpose profiled out) without breaking this module's import.
 # The StarDist segmenters + their per-worker model/FOV state live in the Qt-free
 # ``pipeline.stardist`` module (TensorFlow is imported lazily there; the model
-# is injected by ``_worker_init`` via ``set_model``). Re-exported so the
-# segmentation dispatch resolves them under this module too.
+# is injected by ``_worker_init`` via ``set_model``); the segmentation dispatch
+# below calls them.
 import pipeline.field_quality as _field_quality
-from pipeline.field_quality import FOCUS_COLUMN  # noqa: F401 (re-exported)
+from pipeline.field_quality import FOCUS_COLUMN
 import pipeline.stardist as _stardist
 import pipeline.suspend as _suspend
 from pipeline.mixed_input import consolidate_mixed_to_zips
@@ -172,8 +155,7 @@ _LABELFREE_METHODS = ("cellpose_labelfree",)
 # ``pipeline.io`` module. Re-exported so the many call sites here (and the
 # remote worker) are unchanged. See that module for the implementations + the
 # tmp -> fsync -> rename rationale.
-from pipeline.io import (  # noqa: F401
-    _AtomicTextHandle, _fsync_path,
+from pipeline.io import (
     _commit_staging_dir,
     _compress_images_to_zip,
     compress_images_to_zip,
@@ -181,8 +163,6 @@ from pipeline.io import (  # noqa: F401
     _safe_atomic_text_write,
     _safe_imwrite,
     _safe_well,
-    _sweep_stale_scratch_dirs,
-    _verify_files_complete,
     _write_single_csv,
     incremental_done_fov_keys,
     OutputCapacityMonitor,
@@ -190,10 +170,8 @@ from pipeline.io import (  # noqa: F401
     merge_images_into_zip,
     merge_records_into_csv,
     remove_directory,
-    retry_write,
     save_overlay,
     scratch_base_for,
-    write_csvs_per_well,
 )
 from pipeline.fov_checkpoint import (
     _fov_stem,
@@ -659,49 +637,32 @@ def parse_filename(
 
 # The one image reader lives beside the writers in ``pipeline.io``, re-exported
 # so ``pm.load_2d_gray`` — the Playground's own frame reader — is unchanged.
-from pipeline.io import (  # noqa: F401,E402
+from pipeline.io import (  # noqa: E402
     load_2d_gray, load_2d_gray_with_ceiling,
 )
 
 # Empty-well (blank) sampling, the two model builders, the per-image lookup and
-# the guards live in the Qt-free ``pipeline.empty_well``. Re-exported here so
-# ``pm.<name>`` call sites, the remote worker and the tests are unchanged.
-from pipeline.empty_well import (  # noqa: F401,E402
+# the guards live in the Qt-free ``pipeline.empty_well``; this module imports
+# what it calls. Callers import them from there.
+from pipeline.empty_well import (  # noqa: E402
     GROUPED_BACKGROUND_KEY,
     GROUPED_FLATFIELD_KEY,
-    WELL_GROUP_KEY,
-    BlankGroups,
-    _POOLED_TP,
     _empty_well_field,
     _empty_well_tp_key,
-    _load_image_source,
-    _require_empty_well_models,
     build_background_models,
     build_flatfield_models,
-    build_grouped_models,
-    models_for_well,
     plan_blank_groups,
     prepare_models,
     refuse_uncovered_wells,
-    require_grouped_models,
-    sample_empty_well_images,
     shared_kwargs_for_well,
 )
 
-# Background-correction math moved to ``pipeline.background.py`` (a Qt-free
-# cohesive module). Re-exported here so ``pm.<name>`` call sites and the remote
-# worker are unchanged. See that module for the implementations.
-from pipeline.background import (  # noqa: F401
-    BACKGROUND_METHODS,
-    apply_tophat,
+# Background-correction math lives in ``pipeline.background`` (a Qt-free
+# cohesive module); this module imports what it calls. See that module for the
+# implementations.
+from pipeline.background import (
     combined_empty_well_correct,
-    estimate_background_field,
     subtract_background,
-    _floor_after_subtract,
-    _fft_butterworth_bandpass,
-    _isotropic_disk_tophat,
-    _match_background_scale,
-    _robust_grid_background,
 )
 def _subtract_background_step(img: np.ndarray, *, radius: int,
                               background_method: str, bg_field, fft_small: float = 0.0,
@@ -817,12 +778,8 @@ def compute_shape_features(
 # (the GUI recomputes them for the Segmentation tab's flat-field validation
 # view). Imported under the original names so the rest of this module is
 # unchanged.
-from pipeline.flatfield import (  # noqa: F401
-    _FLATFIELD_FLOOR,
-    _FLATFIELD_SIGMA,
-    _normalize_flatfield,
+from pipeline.flatfield import (
     apply_flatfield,
-    estimate_basic_flatfield,
     estimate_gaussian_flatfield,
 )
 
@@ -944,19 +901,10 @@ def _segment_classical(image: np.ndarray) -> np.ndarray:
 # ``pipeline.auto_threshold_pass``. Both depend only on ``numpy`` + stdlib so
 # the pipeline-only deployment story is preserved.
 
-from pipeline.auto_threshold import (
-    DEFAULT_CELLS_PER_IMAGE_CAP as _AUTO_THRESHOLD_CELLS_PER_IMAGE_CAP,  # noqa: F401
-    estimate_thresholds_from_outputs,  # noqa: F401
-    pick_endpoint_timepoints as _pick_endpoint_timepoints,  # noqa: F401
-    sample_cell_and_bg as _sample_cell_and_bg,  # noqa: F401
-)
-from pipeline.threshold_optimize import estimate_thresholds_from_controls  # noqa: F401
-from pipeline.auto_threshold_pass import (  # noqa: F401
-    _apply_thresholds_to_pipeline_info,
-    _segmentation_tokens,
+from pipeline.auto_threshold_pass import (
     run_auto_threshold_pass,
 )
-from util.aw_safe import swallowed  # noqa: F401
+from util.aw_safe import swallowed
 
 
 def build_processed_output_path(
@@ -1802,19 +1750,12 @@ def find_image_groups(
 # ---------------------------------------------------------------------------
 
 # The pretrained-weights cache, its cross-process download lock and the
-# pkg_resources shim now live in ``pipeline.stardist_cache`` — one job, and this
-# file is at its line budget. Re-exported rather than re-homed at the call sites
-# because both reach them through this module *by attribute at call time*:
-# ``services/frame_preview`` calls ``pm._load_stardist_pretrained(...)``, and the
-# tests patch ``pm._ensure_pkg_resources_shim`` expecting that call to see it.
-from pipeline.stardist_cache import (  # noqa: E402,F401 — re-exported
+# pkg_resources shim live in ``pipeline.stardist_cache`` — one job, and this
+# file is at its line budget. This module imports the two it calls; everything
+# else, ``services/frame_preview`` included, reaches them there.
+from pipeline.stardist_cache import (  # noqa: E402
     _ensure_pkg_resources_shim,
     _load_stardist_pretrained,
-    _purge_stardist_cache,
-    _pid_alive,
-    _stardist_cache_models_dir,
-    _stardist_download_lock,
-    _stardist_lock_is_dead,
 )
 
 

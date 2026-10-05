@@ -16,13 +16,9 @@ import threading
 import time
 from pathlib import Path
 
-import process_microscopy as pm
-# The cache, its lock and the pkg_resources shim live here now;
-# ``pm`` re-exports them, and a re-export is a *binding* — patching
-# ``sd_cache._STARDIST_LOCK_STALE`` would not be seen by the function that
-# reads it, which resolves the name in this module's globals
-# (ARCHITECTURE §6.4). The functions are still driven through ``pm``,
-# because that is how ``services/frame_preview`` reaches them.
+# The cache, its lock and the pkg_resources shim live here. The functions are
+# driven, and their globals patched, on this module: that is where they read
+# the names being patched, and where ``services/frame_preview`` reaches them.
 import pipeline.stardist_cache as sd_cache
 
 
@@ -49,7 +45,7 @@ def test_recovers_from_truncated_cache(tmp_path, monkeypatch):
                     "Unable to synchronously open file (truncated file: eof = 1024)")
             return f"MODEL[{name}]"
 
-    out = pm._load_stardist_pretrained(FakeSD, "2D_versatile_fluo")
+    out = sd_cache._load_stardist_pretrained(FakeSD, "2D_versatile_fluo")
     assert out == "MODEL[2D_versatile_fluo]"
     assert FakeSD.calls == 2                 # purged + retried exactly once
     assert not model_dir.exists()            # corrupt cache removed
@@ -69,7 +65,7 @@ def test_does_not_retry_on_network_error(tmp_path, monkeypatch):
 
     import pytest
     with pytest.raises(OSError, match="Network is unreachable"):
-        pm._load_stardist_pretrained(FakeNet, "2D_versatile_fluo")
+        sd_cache._load_stardist_pretrained(FakeNet, "2D_versatile_fluo")
     assert FakeNet.calls == 1                 # no purge, no retry
     assert model_dir.exists()                 # cache left untouched
 
@@ -82,7 +78,7 @@ def test_purge_targets_only_model_cache(tmp_path, monkeypatch):
     other.parent.mkdir(parents=True)
     other.write_text("keep me")
 
-    removed = pm._purge_stardist_cache()
+    removed = sd_cache._purge_stardist_cache()
     assert str(model_dir) in removed
     assert not model_dir.exists()
     assert other.exists()
@@ -110,7 +106,7 @@ def test_concurrent_loads_download_once(tmp_path, monkeypatch):
 
     results: list = []
     threads = [threading.Thread(
-        target=lambda: results.append(pm._load_stardist_pretrained(FakeSD)))
+        target=lambda: results.append(sd_cache._load_stardist_pretrained(FakeSD)))
         for _ in range(8)]
     for t in threads:
         t.start()
@@ -123,7 +119,7 @@ def test_concurrent_loads_download_once(tmp_path, monkeypatch):
 
 def test_lock_stale_is_reclaimed(tmp_path, monkeypatch):
     monkeypatch.setenv("KERAS_HOME", str(tmp_path))
-    lockdir = pm._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
+    lockdir = sd_cache._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
     lockdir.mkdir(parents=True)
     old = time.time() - sd_cache._STARDIST_LOCK_STALE - 10      # older than stale window
     os.utime(lockdir, (old, old))
@@ -134,7 +130,7 @@ def test_lock_stale_is_reclaimed(tmp_path, monkeypatch):
             return f"MODEL[{name}]"
 
     # A stale lock must be reclaimed, not block — the load returns promptly.
-    out = pm._load_stardist_pretrained(FakeSD)
+    out = sd_cache._load_stardist_pretrained(FakeSD)
     assert out == "MODEL[2D_versatile_fluo]"
     assert not lockdir.exists()                          # reclaimed + released
 
@@ -146,8 +142,12 @@ def test_lock_dead_holder_reclaimed_instantly(tmp_path, monkeypatch):
     monkeypatch.setenv("KERAS_HOME", str(tmp_path))
     monkeypatch.setattr(sd_cache, "_STARDIST_LOCK_STALE", 1e9)  # disable mtime fallback
     monkeypatch.setattr(sd_cache, "_STARDIST_LOCK_TIMEOUT", 30.0)  # would be slow if it waited
-    monkeypatch.setattr(pm, "_pid_alive", lambda pid: False)  # recorded holder is dead
-    lockdir = pm._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
+    # Patched on the module that reads it. Patched on ``process_microscopy``,
+    # which only re-exported the name, it changed nothing: the test passed
+    # because PID 999999 is really dead, and went on passing with the patch
+    # saying the holder was alive.
+    monkeypatch.setattr(sd_cache, "_pid_alive", lambda pid: False)  # recorded holder is dead
+    lockdir = sd_cache._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
     lockdir.mkdir(parents=True)
     (lockdir / "pid.999999").touch()
 
@@ -157,7 +157,7 @@ def test_lock_dead_holder_reclaimed_instantly(tmp_path, monkeypatch):
             return f"MODEL[{name}]"
 
     t0 = time.monotonic()
-    out = pm._load_stardist_pretrained(FakeSD)
+    out = sd_cache._load_stardist_pretrained(FakeSD)
     assert out == "MODEL[2D_versatile_fluo]"
     assert time.monotonic() - t0 < 1.0                     # instant, not after timeout
     assert not lockdir.exists()                            # reclaimed + released
@@ -167,7 +167,7 @@ def test_lock_timeout_degrades_to_unlocked(tmp_path, monkeypatch):
     monkeypatch.setenv("KERAS_HOME", str(tmp_path))
     monkeypatch.setattr(sd_cache, "_STARDIST_LOCK_TIMEOUT", 0.2)
     monkeypatch.setattr(sd_cache, "_STARDIST_LOCK_STALE", 1e9)   # never treat as stale
-    lockdir = pm._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
+    lockdir = sd_cache._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
     lockdir.mkdir(parents=True)                            # held by a (fake) live holder
 
     class FakeSD:
@@ -176,6 +176,6 @@ def test_lock_timeout_degrades_to_unlocked(tmp_path, monkeypatch):
             return f"MODEL[{name}]"
 
     # Held lock + timeout → proceed WITHOUT it rather than hang/raise.
-    out = pm._load_stardist_pretrained(FakeSD)
+    out = sd_cache._load_stardist_pretrained(FakeSD)
     assert out == "MODEL[2D_versatile_fluo]"
     assert lockdir.exists()                               # we didn't hold/remove it

@@ -31,6 +31,8 @@ from pipeline.field_quality import FIELD_QUALITY_BLOCK
 from pipeline.field_quality_record import finalize_field_quality
 from pipeline.run_report import finalize_run_report, write_well_report
 from pipeline.well_skip import scope_to_only_wells, select_only_wells
+from pipeline import well_skip
+import pipeline.suspend as _suspend
 
 SCHEMA = ["experiment", "channel", "well", "fov", "timepoint"]
 _REAL_GROUP = pm.process_image_group
@@ -86,21 +88,21 @@ def _run_main(monkeypatch, plate, *extra, failing=(), ran=None, check=True):
                 fluor_tokens, csv_prefix, schema, sep, incremental,
                 incremental_prior_dir, settings_key, force, force_wells=None,
                 **_ignored):
-        forced = pm._canonical_force_wells(force_wells)
+        forced = well_skip._canonical_force_wells(force_wells)
         for label, zip_path in well_zips:
             if ran is not None:
                 ran.append(label)
             pm.process_well_zip_task(
                 label, zip_path, output_dir, shared_kwargs_template,
                 nuclear_token, fluor_tokens, csv_prefix, schema, sep,
-                pm._incremental_for_well(incremental, label, forced),
+                well_skip.incremental_for_well(incremental, label, forced),
                 incremental_prior_dir, settings_key, force or label in forced)
         return []
 
     monkeypatch.setattr(pm, "process_image_group", _group)
     monkeypatch.setattr(pm, "process_well_zips", _serial)
-    monkeypatch.setattr(pm._suspend, "install_handlers", lambda **k: None)
-    monkeypatch.setattr(pm._suspend, "watch_parent", lambda *a, **k: None)
+    monkeypatch.setattr(_suspend, "install_handlers", lambda **k: None)
+    monkeypatch.setattr(_suspend, "watch_parent", lambda *a, **k: None)
     argv = ["process_microscopy.py", "--input_dir", str(plate / "in"),
             "--output_dir", str(plate / "out"), "--nuclear_token", "DAPI",
             "--fluor_tokens", "GFP", "--filename_schema", ":".join(SCHEMA),

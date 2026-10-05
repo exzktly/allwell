@@ -43,7 +43,7 @@ def build_reference_fields(ctx, well: str, chan_lower: str, *,
     which is where nearly all of the wall-clock goes. It is a plain callable, so
     this stays a pure compute function with no idea a progress bar exists.
     """
-    import process_microscopy as pm
+    from pipeline.background import estimate_background_field
     from pipeline.flatfield import estimate_basic_flatfield, normalize_flatfield
     from review.data.frame_load import load_well_channel
     from review.data.image_repository import ImageRepository
@@ -74,13 +74,13 @@ def build_reference_fields(ctx, well: str, chan_lower: str, *,
         return ff_field, bg_field
 
     if background_method == "empty_well":
-        bg_field = pm.estimate_background_field(frames)
+        bg_field = estimate_background_field(frames)
     if flatfield_mode == "basic":
         ff_field = estimate_basic_flatfield(frames)
     elif flatfield_mode == "empty_well":
         # Combined empty-well: the flat-field is B/mean(B).
         if bg_field is None:
-            bg_field = pm.estimate_background_field(frames)
+            bg_field = estimate_background_field(frames)
         ff_field = normalize_flatfield(bg_field)
     return ff_field, bg_field
 

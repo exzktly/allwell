@@ -39,7 +39,7 @@ _FLATFIELD_FLOOR = FLATFIELD_FLOOR
 #: ``background_well_map``, which says which of those wells measured which
 #: block of the plate.
 #:
-#: The mode roster itself is ``process_microscopy.FLATFIELD_MODES``;
+#: The mode roster itself is ``pipeline.cli_args.FLATFIELD_MODES``;
 #: ``tests/test_correction_parameter_roster.py`` holds the two in step.
 FLATFIELD_MODE_PARAMS: dict[str, tuple[str, ...]] = {
     "none": (),

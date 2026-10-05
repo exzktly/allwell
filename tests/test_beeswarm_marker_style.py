@@ -213,7 +213,7 @@ def test_apply_export_style_resizes_tagged_path_collection():
     """v5.2.31: a PathCollection tagged ``_aw_marker_collection`` must
     receive ``set_sizes([marker_size**2])`` so the beeswarm dot size
     actually responds to the user's Marker-size pref."""
-    from review.features.export.style import apply_export_style_prefs
+    from review.core.plot_style import apply_export_style_prefs
 
     coll = _FakeCollection(tagged=True)
     fig, _ax = _fake_fig([_FakeLine()], [coll])
@@ -226,7 +226,7 @@ def test_apply_export_style_resizes_tagged_path_collection():
 def test_apply_export_style_skips_untagged_path_collection():
     """Untagged collections (errorbar caps, contour lines, etc.) must
     NOT be modified by the marker-style pass."""
-    from review.features.export.style import apply_export_style_prefs
+    from review.core.plot_style import apply_export_style_prefs
 
     untagged = _FakeCollection(tagged=False)
     fig, _ax = _fake_fig([_FakeLine()], [untagged])
@@ -238,7 +238,7 @@ def test_apply_export_style_skips_untagged_path_collection():
 def test_apply_export_style_applies_open_marker_to_collection():
     """When the user picks an ``_open`` marker, tagged PathCollections
     get a transparent face + edge in the original colour."""
-    from review.features.export.style import apply_export_style_prefs
+    from review.core.plot_style import apply_export_style_prefs
 
     coll = _FakeCollection(tagged=True, face=(0.2, 0.4, 0.8, 1.0))
     fig, _ax = _fake_fig([_FakeLine()], [coll])
@@ -254,7 +254,7 @@ def test_apply_export_style_applies_open_marker_to_collection():
 def test_apply_export_style_swaps_marker_shape_on_collection():
     """A non-default marker_style swaps the PathCollection's path so
     the dots take the requested shape (square, triangle, etc.)."""
-    from review.features.export.style import apply_export_style_prefs
+    from review.core.plot_style import apply_export_style_prefs
 
     coll = _FakeCollection(tagged=True)
     fig, _ax = _fake_fig([_FakeLine()], [coll])
@@ -267,7 +267,7 @@ def test_apply_export_style_swaps_marker_shape_on_collection():
 
 def test_apply_export_style_sets_collection_linewidth():
     """``marker_edge_width`` should reach the PathCollection too."""
-    from review.features.export.style import apply_export_style_prefs
+    from review.core.plot_style import apply_export_style_prefs
 
     coll = _FakeCollection(tagged=True)
     fig, _ax = _fake_fig([_FakeLine()], [coll])

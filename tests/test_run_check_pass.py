@@ -19,6 +19,9 @@ import pytest
 
 import pipeline.completeness as pc
 import process_microscopy as pm
+from pipeline import cli_args
+from util import schema
+import pipeline.suspend as _suspend
 
 SCHEMA = "exp:channel:well:fov:timepoint"
 SEP = "_"
@@ -79,12 +82,12 @@ def _run(args, out_dir, containers, log=None, **kw):
     log = log or _Log()
     kw.setdefault("started_at", None)
     kw.setdefault("mode", "zip")
-    kw.setdefault("suspended", pm._suspend.is_suspended())
+    kw.setdefault("suspended", _suspend.is_suspended())
     block = pc.record_run_check(
         info_path=out_dir / pm.PIPELINE_INFO_FILENAME,
         output_dir=out_dir,
         in_containers=containers,
-        schema=pm.parse_schema(args.filename_schema),
+        schema=schema.parse_schema(args.filename_schema),
         sep=args.filename_sep,
         csv_prefix=args.csv_prefix,
         atomic_writer=pm._safe_atomic_text_write,
@@ -173,7 +176,7 @@ def test_a_suspended_run_is_recorded_as_suspended_and_not_shouted_at(tmp_path,
     end-of-well path, so most wells are genuinely partial. Shouting INCOMPLETE
     describes the user's own stop back at them as a fault."""
     containers, out_dir = _plate(tmp_path, ["A01", "A02"], cover=1)
-    monkeypatch.setattr(pm._suspend, "is_suspended", lambda: True)
+    monkeypatch.setattr(_suspend, "is_suspended", lambda: True)
 
     block, log = _run(_args(), out_dir, containers)
     assert block["suspended"] is True
@@ -183,7 +186,7 @@ def test_a_suspended_run_is_recorded_as_suspended_and_not_shouted_at(tmp_path,
 
 def test_an_unsuspended_partial_run_still_warns(tmp_path, monkeypatch):
     containers, out_dir = _plate(tmp_path, ["A01"], cover=1)
-    monkeypatch.setattr(pm._suspend, "is_suspended", lambda: False)
+    monkeypatch.setattr(_suspend, "is_suspended", lambda: False)
     _block, log = _run(_args(), out_dir, containers)
     assert any(w.startswith("INCOMPLETE:") for w in log.warnings)
 
@@ -247,7 +250,7 @@ def _boom(*a, **kw):
 # ── the flag is declared where the pipeline can see it ──────────────────────
 
 def test_the_parser_accepts_the_flag_and_defaults_it_off():
-    parser = pm.build_parser()
+    parser = cli_args.build_parser()
     args = parser.parse_args([
         "--input_dir", "in", "--output_dir", "out", "--nuclear_token", "DAPI"])
     assert args.no_run_check is False
@@ -260,7 +263,7 @@ def test_the_parser_accepts_the_flag_and_defaults_it_off():
 def test_the_flag_reaches_the_sidecars_execution_options():
     """``vars(args)`` becomes ``execution_options``, which is what lets the
     Analyze form restore the checkbox from a prior run."""
-    parser = pm.build_parser()
+    parser = cli_args.build_parser()
     args = parser.parse_args([
         "--input_dir", "in", "--output_dir", "out", "--nuclear_token", "DAPI",
         "--no_run_check"])

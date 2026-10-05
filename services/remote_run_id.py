@@ -28,7 +28,11 @@ from pipeline.well_skip import _canonical_force_wells
 from services.remote_config import RemoteHost
 
 #: The upload handshake files, named here because ``remote_run_paths`` is the
-#: only thing that builds their paths.
+#: only thing that builds their paths. The sentinel is written into the run
+#: directory once every byte of the plate has landed; the scheduled job waits
+#: for it before starting the pipeline, which is what lets the allocation be
+#: requested *while* the upload is still running: on a busy cluster the queue
+#: wait and the transfer then overlap instead of running end to end.
 UPLOAD_SENTINEL = ".aw_upload_complete"
 UPLOAD_HEARTBEAT = ".aw_upload_alive"
 #: Touched by the app to ask a running remote pipeline to suspend; the pipeline

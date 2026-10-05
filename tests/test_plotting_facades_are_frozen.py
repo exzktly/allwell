@@ -112,14 +112,18 @@ def undeclared_reaches(facade: Path, declared: Iterable[str],
 def _sources(module: str) -> tuple[Path, ...]:
     """The files that could reach *module* at all.
 
-    Every form the scan sees spells the module's last two components somewhere
-    in the file — a dotted import, ``from <parent> import <leaf>``, a string
-    target — so a file missing either cannot reach it. Scanning only those keeps
-    five facades from costing five walks of the whole tree.
+    Every form the scan sees spells the module's own name somewhere in the
+    file, and its package's name too unless the file sits inside that package
+    — a dotted import, ``from <parent> import <leaf>``, a string target, or a
+    relative ``from .<leaf> import`` from a sibling. A file that fails both
+    cannot reach it. Scanning only those keeps five facades from costing five
+    walks of the whole tree.
     """
     parent, leaf = module.split(".")[-2:]
+    package = (REPO_ROOT / Path(*module.split(".")[:-1])).resolve()
     return tuple(p for p in consumer_sources()
-                 if leaf in (text := p.read_text(encoding="utf-8")) and parent in text)
+                 if leaf in (text := p.read_text(encoding="utf-8"))
+                 and (parent in text or package in p.resolve().parents))
 
 
 @functools.cache

@@ -1071,8 +1071,11 @@ class _MarkPrefs:
     """The line and marker preferences.
 
     The numeric ones are read when an artist needs them rather than up front,
-    so a figure with nothing to restyle never parses them — as before the
-    passes were split, when they were read inside the artist loops.
+    so a figure with nothing to restyle never parses them. That is how the line
+    loop has always read them; the marker-collection pass used to parse
+    ``marker_size`` and ``marker_edge_width`` once per axis before its loop, so
+    an unparsable value there raised even on an axis with no collection to
+    restyle, and now it does not.
     """
 
     def __init__(self, prefs: dict) -> None:

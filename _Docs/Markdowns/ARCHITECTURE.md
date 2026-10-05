@@ -817,14 +817,20 @@ allwell.main()
     │       `fontlist-v<N>.json` or, with none (first launch, a fresh state dir,
     │       any matplotlib upgrade), from a full system scan — so a patch
     │       applied after it came too late on every cold cache, which is what
-    │       stalled launch. On a cold cache configure() therefore writes an
-    │       empty placeholder list under that name first (`<N>` read from the
-    │       module's code object, which a frozen build has where it has no
-    │       source), lets the import load it, then builds the bundled-only list
-    │       over it and rebinds `font_manager.findfont` / `get_font_names`, which
-    │       the import bound to whichever manager it loaded.
-    │       `tests/test_mpl_bootstrap.py` launches a cold-cache process and
-    │       counts matplotlib's system-wide `findSystemFonts` calls: zero.
+    │       stalled launch. On a cold cache — no list, or a truncated, empty or
+    │       other-version one — configure() points the import, and only the
+    │       import, at an empty placeholder list in a private temporary
+    │       directory (`<N>` read from the module's code object, which a frozen
+    │       build has where it has no source), then builds the bundled-only list
+    │       and writes it into the shared cache atomically, and rebinds
+    │       `font_manager.findfont` / `get_font_names`, which the import bound to
+    │       whichever manager it loaded. The placeholder never enters the shared
+    │       cache: any process importing matplotlib there without configure()
+    │       would take an empty list as valid and have no fonts.
+    │       `tests/test_mpl_bootstrap.py` launches cold-cache processes and
+    │       counts matplotlib's system-wide `findSystemFonts` calls (zero), and
+    │       kills one mid-build to check a plain matplotlib process can still
+    │       render text against what it left.
     │       Both `assets/fonts` and the cache resolve against the *repository*
     │       root (the bundle root when frozen), not against the module's own
     │       directory one level down in `startup/` — a font directory resolved
@@ -834,7 +840,11 @@ allwell.main()
     │       repository root; a frozen build uses startup.boot_diag.user_state_dir()
     │       instead, because PyInstaller unpacks the bundle into sys._MEIPASS, a
     │       fresh temp tree per launch, so a cache pinned there was thrown away
-    │       and rebuilt every single start.
+    │       and rebuilt every single start. A frozen build also overrides a
+    │       preset MPLCONFIGDIR: PyInstaller's matplotlib runtime hook
+    │       (`pyi_rth_mplconfig`) sets it to a new temporary directory on every
+    │       launch before any app code runs, so deferring to it made every
+    │       frozen launch a cold cache. From source a caller's value stands.
     ├── QApplication(sys.argv)
     ├── app_fonts.register_qt_fonts() → theme_v2.Typography.family/_mono
     │       ← register bundled Inter / JetBrains Mono (static instances),
@@ -8385,7 +8395,7 @@ way round.
 
 Batched remote runs suppress the per-batch pass (partial-plate data would write
 misleading defaults) and re-run it once locally over the full downloaded output
-— `services/remote_runner._run_local_auto_threshold`, which rebuilds an args
+— `services/remote_process._run_local_auto_threshold`, which rebuilds an args
 object from the pipeline argv and calls the same `run_auto_threshold_pass` so
 the two paths cannot drift. That rebuild forces `no_auto_threshold=False` on
 purpose: when the pass is wanted it must ignore the batcher's copy of the flag.
@@ -8884,7 +8894,7 @@ survive an unreliable output volume.
 channel filter or `--incremental` cannot use the user's archives directly — both
 paths rewrite the zip (dropping unused channels / already-done FOV-groups), and
 rewriting in place would corrupt the user's dataset. So it stages. The staging is
-**plan-then-materialise** (`remote_runner._plan_staging` / `_materialize_staging`):
+**plan-then-materialise** (`remote_staging._plan_staging` / `_materialize_staging`):
 the plan pass reads each archive's *member list* only — that comes from the zip's
 central directory, a small read at the end of the file, so planning a whole plate
 costs a handful of seeks even across a network mount — and the materialise pass
@@ -9482,7 +9492,7 @@ exactly the files that went into the archive and removes the directory only when
 nothing is left in it. A folder still holding something survives carrying just
 that remainder, and the caller's log line names what it kept rather than
 reporting the folder gone. Four paths route through it —
-`remote_runner._zip_well_folder`'s two callers (plus the post-success hook, which
+`remote_staging._zip_well_folder`'s two callers (plus the post-success hook, which
 skips any folder the pass preserved),
 `pipeline.mixed_input.consolidate_mixed_to_zips`, the Datasets pane's
 `_zip_well_folders`, and
@@ -9630,8 +9640,8 @@ shield covers each of those crossings:
 
 | Where | What it protects |
 |---|---|
-| `remote_runner._copy_into_staging` | Copying each `<WELL>.zip` off the input volume into the upload staging dir — a whole plate, back to back, and an unguarded fault here failed the run before a byte was uploaded. |
-| `remote_runner._zip_well_folder` | Packing a leftover well folder read off the input volume. |
+| `remote_staging._materialize_staging` | Rewriting each `<WELL>.zip` the upload plan trims, reading it off the input volume into the upload staging dir — possibly a whole plate, back to back, and an unguarded fault here failed the run before a byte was uploaded. An archive that needs no rewrite is uploaded from where it is and never copied. |
+| `remote_staging._zip_well_folder` | Packing a leftover well folder read off the input volume. |
 | `input_resolution_service` | The mixed-input consolidation and the loose-image append, both of which rewrite archives *on* the input volume. |
 | `Fetcher._materialize` | Publishing `<well>_out.zip` into the output dir — the remote run's equivalent of the pipeline's out-zip write. |
 | `refresh_pipeline_info_available_from_outputs` | The `pipeline_info.json` rewrite, so one blip can't cost Review its timepoint/FOV lists. |
@@ -10372,7 +10382,7 @@ current out-zip mtime (silently dropped on load regardless — see
 CSV or a well archive. It read-modify-writes the already-loaded sidecar dict
 (replacing only `available_timepoints`/`available_fovs` with what's actually
 on disk), prunes stale `cell_overrides.json` entries, and sweeps leftover
-`__aw_tmp_*` staging files. `services.remote_runner.refresh_pipeline_info_available_from_outputs`
+`__aw_tmp_*` staging files. `services.remote_fetch.refresh_pipeline_info_available_from_outputs`
 is deliberately not reused here — it only ever *unions* into the existing
 availability lists, so a stale entry can never be dropped, which is the
 opposite of what a repair needs to do. Resolves `schema_fields` through
@@ -10420,7 +10430,7 @@ must be something the user can see and clear.
 
 **A remote run needs telling twice.** The flag on the remote command line is not
 enough on its own, because the client decides what to upload before the remote
-sees anything. `remote_runner._plan_staging` computes its own done-set — the
+sees anything. `remote_staging._plan_staging` computes its own done-set — the
 local CSV's rows unioned with the local `<WELL>_out.zip`'s members — and drops a
 well whose input it considers covered, logging `✓ <well>: up to date (local) —
 not uploaded`. For the well this whole path exists to recover (images present,
@@ -14858,9 +14868,9 @@ The map (each rule links to the test that holds it):
 | `AppRuntime` is live-object-only — `persistence/` never imports `app_runtime` (§5.9) | `tests/test_app_runtime.py` |
 | `process_microscopy` / `image_table` controller line budgets | `tests/test_monolith_budgets.py` |
 | No function crosses cyclomatic complexity 40 unless it is on the allowlist, and the allowlisted functions' **total** cannot grow — the per-function check alone let an existing debt function grow without limit, and the total's not-slack twin banks every decomposition's saving so it cannot be spent later | `tests/test_complexity_ratchet.py` (`TOTAL_ALLOWLISTED_CC_BUDGET`), with bite cases in `tests/test_guards_bite.py` |
-| `services.remote_runner`'s import surface is its `__all__`: no file reaches any other name through it, by any of four access forms, and it re-exports nothing outside it (§6.4) | `tests/test_remote_runner_facade.py`, scan in `tests/_facade_scan.py`, bite cases in `tests/test_guards_bite.py` |
+| `services.remote_runner`'s import surface is its `__all__`: no file reaches any other name through it, by any of four access forms under any spelling of the import (relative and `importlib.import_module` included), and it re-exports nothing outside it (§6.4) | `tests/test_remote_runner_facade.py`, scan in `tests/_facade_scan.py`, bite cases in `tests/test_guards_bite.py` |
 | Every control the Properties panel binds to a pref key is in the measured roster for its figure, is bound once, shows the stored value when the panel is rebuilt, and writes its own key and no other when moved; the hand-wired Error bars control reaches `PlotState` | `tests/test_properties_control_contract.py` |
-| `process_microscopy` re-exports nothing; callers import a `pipeline.*` name from its owner, and tests patch the orchestrator's own binding only at a listed seam (§6.2) | `tests/test_process_microscopy_facade.py`, scan in `tests/_facade_scan.py` |
+| `process_microscopy` re-exports nothing; callers import a `pipeline.*` name from its owner, and tests patch the orchestrator's own binding only at a listed seam, never reading a seam name through it (§6.2) | `tests/test_process_microscopy_facade.py`, scan in `tests/_facade_scan.py` |
 | No test patches a name on a module that only re-exports it — the patch rebinds an alias nothing reads and the test measures nothing. A re-export application code looks up at call time (through a module alias, or a function-local `from … import`) is a live target and is not flagged | `tests/test_no_patch_misses_its_target.py`, with bite cases in `tests/test_guards_bite.py` |
 | A Python subclass of a Qt class is declared at module scope, never inside a function: declared inside a builder with methods closing over `ctx`, the Home notes box kept every closed `ReviewApp` alive (§10.4) | `tests/test_qt_subclasses_live_at_module_scope.py`, with bite cases in `tests/test_guards_bite.py` |
 | A closed `ReviewApp` is collected, leaves no top-level widget, PySide wrapper or app-class object behind, and a window closed mid-drain runs no deferred builder after it is gone (§10.4) — slow lane, run by hand | `tests/test_a_closed_review_app_is_freed.py` |
@@ -14877,7 +14887,7 @@ The map (each rule links to the test that holds it):
 | A removable feature's state slice is reached from outside that feature through `state.feature_slice(name)`, never by attribute. `AppState.__getattr__` **raises** for a slice whose feature is not in `FEATURES`, so a profile build without it fails at the access — and `getattr(ctx.state.stats, "pairwise", [])` does not help, because the default covers a missing *attribute* on an object that already exists and reaching the object is what raises. Removability is read from `profiles/full.toml`, so a slice whose feature is kept forever (`bar`, `preview`, `review_image`) is not the subject; `features/registry.py` is exempt because every access there sits inside that feature's own activation hook, and the guard fails if that exemption stops describing a real access | `tests/test_disabled_feature_slices.py`, with bite cases in `tests/test_guards_bite.py` |
 | `swallow` and `swallowed` are not swapped. They are near-identical names with opposite call shapes — a context manager and a call for inside an `except` block — and swapping them fails only when the line runs. `with swallowed():` raises **before** the body, so the work it was meant to guard never happens; `swallowed()` outside a handler logs a suppression with no exception in flight, which reads as a failure that did not occur | `tests/test_safe_helpers_used_right.py`, with bite cases in `tests/test_guards_bite.py` |
 | A text-mode subprocess names its codec. `text=True` alone decodes the pipe with `locale.getpreferredencoding(False)` — UTF-8 here, the ANSI codepage on a user's Windows box — so a stream that reads correctly for the developer mojibakes the remote's `✓` / `→` markers for them and raises `UnicodeDecodeError` out of a reader thread on the first byte the codepage has no character for, skipping the `proc.wait()` behind it | `tests/test_subprocess_text_decoding.py`, with bite cases in `tests/test_guards_bite.py` |
-| A context menu is opened through `widgets/menu_exec.exec_menu`, never `QMenu.exec` directly. `QMenu.exec` blocks in Qt's C++ event loop with nothing offscreen to close it, and unlike a dialog's `exec` it **cannot** be monkeypatched — Shiboken exposes it as a static/instance overload, so an entry in `_MODAL_CALLS` would write a class attribute that instance lookup ignores and measure nothing. The seam is ordinary Python, so the autouse fixture patches that instead; the guard also rejects `from widgets.menu_exec import exec_menu`, which binds the name past the patch's reach | `tests/test_menu_exec_seam.py`, with bite cases in `tests/test_guards_bite.py` |
+| A context menu is opened through `widgets/menu_exec.exec_menu`, never `QMenu.exec` directly. `QMenu.exec` blocks in Qt's C++ event loop with nothing offscreen to close it, and unlike a dialog's `exec` it **cannot** be monkeypatched — Shiboken exposes it as a static/instance overload, so an entry in `_MODAL_CALLS` would write a class attribute that instance lookup ignores and measure nothing. The seam is ordinary Python, so the autouse fixture patches that instead; the guard also rejects `from widgets.menu_exec import exec_menu`, which binds the name past the patch's reach, and sees a raw `.exec()` on any name bound to a `*Menu(...)` construction, not only one called something with "menu" in it. A menu built in the function that opens it goes through `exec_transient_menu`, which deletes it afterwards: parented to a long-lived widget, a per-opening menu otherwise lives as long as that widget, and five openings of a job-queue row's menu left ten alive (`tests/test_transient_menus_are_disposed.py`) | `tests/test_menu_exec_seam.py`, with bite cases in `tests/test_guards_bite.py` |
 | No `logging.Handler.emit` creates or arms a Qt timer — `emit` runs on the thread that logged the record, so a timer built there never fires and its teardown raises `killTimer` from another thread. Handlers marshal through `core.worker_bridge.GuiLogRelay` (§10.1) | `tests/test_log_handler_marshalling.py` (static) + `tests/test_log_handler_thread_safety.py` (behavioural), with bite cases in `tests/test_guards_bite.py` |
 | `pipeline/`, `util/`, `services/` and `domain/` import no Qt and no `widgets` at any nesting; `data/` too, but for one allowlisted module (§5, §13) | `tests/test_qt_free_layers.py` |
 | …and reach none *transitively* either: a Qt-free module may not import, at module scope, a module that imports Qt. Reading each file's own import list misses a one-hop detour through `core/`, which is how `domain/stats_compute` came to raise `ImportError: libQt6Core.so.6` while every docstring cited the direct check as its guarantee. The fix for such a hop is a function-local import, which is why only module-scope edges are followed (§5) | `tests/test_qt_free_layers.py::test_a_qt_free_layer_stays_importable_without_qt` |

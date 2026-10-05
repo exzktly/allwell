@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -141,10 +142,95 @@ def test_a_cold_cache_launch_never_scans_the_system_fonts(tmp_path):
     with open(first["cache"], encoding="utf-8") as fh:
         assert len(json.load(fh)["ttflist"]) == len(first["fonts"])
 
-    # And the next launch reads that list rather than building another.
+    # And the next launch reads that list rather than building another: the
+    # file is untouched, not merely rebuilt to the same contents.
+    before = os.stat(first["cache"]).st_mtime_ns, Path(first["cache"]).read_bytes()
     second = _launch_cold(tmp_path)
     assert second["system_scans"] == 0
     assert sorted(second["fonts"]) == sorted(first["fonts"])
+    assert (os.stat(first["cache"]).st_mtime_ns,
+            Path(first["cache"]).read_bytes()) == before
+
+
+@pytest.mark.parametrize("damage", ["truncated", "empty_list", "other_version"])
+def test_a_damaged_cached_list_is_a_cold_cache(tmp_path, damage):
+    """A list the import cannot use sends it to the full scan, unless it is
+    treated as cold. matplotlib writes its own lists in place, so a crash can
+    truncate one, and an empty one leaves the import with no fonts at all."""
+    pytest.importorskip("matplotlib")
+    cache = _launch_cold(tmp_path)["cache"]
+    good = json.loads(Path(cache).read_text(encoding="utf-8"))
+    bad = {"truncated": Path(cache).read_text(encoding="utf-8")[:200],
+           "empty_list": json.dumps(dict(good, ttflist=[])),
+           "other_version": json.dumps(dict(good, _version=-1))}[damage]
+    Path(cache).write_text(bad, encoding="utf-8")
+
+    relaunched = _launch_cold(tmp_path)
+    assert relaunched["system_scans"] == 0
+    assert json.loads(Path(cache).read_text(encoding="utf-8"))["ttflist"]
+
+
+# A launch killed after the font-manager import and before the restricted list
+# is written. If the empty placeholder the import read had been put in the
+# shared cache, it would be left there, and any process that imports matplotlib
+# against that directory without configure() — a child inheriting MPLCONFIGDIR,
+# a script run from source — accepts it as valid and cannot resolve a font.
+_KILLED_MID_LAUNCH = r"""
+import os, sys
+def _profile(frame, event, arg):
+    if (event == "call" and frame.f_code.co_name == "__init__"
+            and frame.f_code.co_filename.endswith("font_manager.py")
+            and type(frame.f_locals.get("self")).__name__ == "FontManager"):
+        os._exit(0)
+sys.setprofile(_profile)
+from startup import mpl_bootstrap
+mpl_bootstrap.configure()
+os._exit(3)  # never reached: configure() always builds the restricted list here
+"""
+
+_PLAIN_MATPLOTLIB = r"""
+import io, matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+fig = plt.figure()
+fig.text(0.5, 0.5, "label")
+fig.savefig(io.BytesIO(), format="png")
+"""
+
+
+def test_a_launch_killed_mid_build_leaves_no_fontless_cache(tmp_path):
+    pytest.importorskip("matplotlib")
+    env = dict(os.environ, MPLCONFIGDIR=str(tmp_path))
+    killed = subprocess.run([sys.executable, "-c", _KILLED_MID_LAUNCH],
+                            cwd=str(REPO_ROOT), env=env, capture_output=True,
+                            text=True, timeout=120)
+    assert killed.returncode == 0, killed.stderr  # stopped where it was meant to
+
+    plain = subprocess.run([sys.executable, "-c", _PLAIN_MATPLOTLIB],
+                           cwd=str(REPO_ROOT), env=env, capture_output=True,
+                           text=True, timeout=120)
+    assert plain.returncode == 0, (
+        "matplotlib without configure() could not render text against the cache "
+        "an interrupted launch left behind:\n" + plain.stderr[-600:])
+
+
+def test_a_frozen_build_keeps_its_cache_across_launches(monkeypatch, tmp_path):
+    """PyInstaller's runtime hook sets MPLCONFIGDIR to a new temporary directory
+    on every launch; deferring to it made every frozen launch a cold cache."""
+    from startup import mpl_bootstrap
+    persistent = tmp_path / "state" / "mplcache"
+    monkeypatch.setattr(mpl_bootstrap, "_cache_root", lambda: str(persistent))
+    monkeypatch.setenv("MPLCONFIGDIR", str(tmp_path / "_MEI_per_launch"))
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    mpl_bootstrap._set_cachedir()
+    assert os.environ["MPLCONFIGDIR"] == str(persistent)
+
+    # From source a caller's own choice still stands.
+    monkeypatch.delattr(sys, "frozen")
+    monkeypatch.setenv("MPLCONFIGDIR", str(tmp_path / "chosen"))
+    mpl_bootstrap._set_cachedir()
+    assert os.environ["MPLCONFIGDIR"] == str(tmp_path / "chosen")
 
 
 def test_font_lookups_answer_from_the_restricted_manager(tmp_path):

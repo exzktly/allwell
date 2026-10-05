@@ -717,7 +717,7 @@ def well_present_in_input(input_dir: Path, well: str, *,
     in *input_dir* in any layout the pipeline reads: a per-well ``<WELL>.zip``,
     a per-well folder, or loose TIFFs whose schema ``well`` field matches.
 
-    Mirrors the empty-well sampling in :func:`process_microscopy.sample_empty_well_images`
+    Mirrors the empty-well sampling in :func:`pipeline.empty_well.sample_empty_well_images`
     (non-recursive zip / folder lookup, recursive loose-TIFF parse) so the
     Analyze pre-run check agrees with what the pipeline will actually find. Used
     to block a run when ``--flatfield empty_well`` / ``--background empty_well``

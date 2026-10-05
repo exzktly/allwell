@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 import pipeline.completeness as pc
+import pipeline.io as pio
 import process_microscopy as pm
 from pipeline import cli_args
 from util import schema
@@ -90,7 +91,7 @@ def _run(args, out_dir, containers, log=None, **kw):
         schema=schema.parse_schema(args.filename_schema),
         sep=args.filename_sep,
         csv_prefix=args.csv_prefix,
-        atomic_writer=pm._safe_atomic_text_write,
+        atomic_writer=pio._safe_atomic_text_write,
         log=log,
         skip=bool(args.no_run_check),
         **kw)
@@ -237,7 +238,7 @@ def test_a_failure_in_the_check_is_a_warning_not_an_exception(tmp_path,
 
 def test_an_unwritable_sidecar_does_not_raise(tmp_path, monkeypatch):
     containers, out_dir = _plate(tmp_path, ["A01"])
-    monkeypatch.setattr(pm, "_safe_atomic_text_write", _boom)
+    monkeypatch.setattr(pio, "_safe_atomic_text_write", _boom)
     block, log = _run(_args(no_run_check=True), out_dir, containers)
     assert block["skipped"] is True
     assert any("skipped completeness check" in w for w in log.warnings)

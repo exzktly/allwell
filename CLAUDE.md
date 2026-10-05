@@ -672,7 +672,7 @@ proposing a cause:
    type, well, field, timepoint. Check it before reading any application code.
 2. **Verify which input the code actually reads.** For the in/out layout the
    pipeline segments from `in/<well>.zip`, never the sibling `in/<well>/` folder
-   (`process_microscopy._process_one_well_zip` → `find_image_groups_in_zip`).
+   (`process_microscopy.process_well_zip_task` → `find_image_groups_in_zip`).
    Reasoning about files the run never opened wastes a whole cycle.
 3. **Separate "not computed" from "computed as zero".** Most silent-wrong-number
    bugs here are that conflation: a spread with one replicate, a mask that could

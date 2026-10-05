@@ -1,8 +1,8 @@
 """The post-run auto-threshold pass: estimate, then persist.
 
-Extracted from ``process_microscopy`` (which re-exports every public name, so
-call sites are unchanged) because it is a self-contained cluster with one job
-and the module it came from is under a line budget that only moves down.
+Extracted from ``process_microscopy`` because it is a self-contained cluster
+with one job and the module it came from is under a line budget that only moves
+down. Callers import these names from here.
 
 The split against its two neighbours is by *layer*, not by subject.
 ``pipeline.auto_threshold`` samples pixels and runs Otsu, and

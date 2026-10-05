@@ -11,7 +11,7 @@ therefore name its four GUI-written preserved keys — ``cell_gating``,
 loaded dict and mutating only ``available_timepoints``/``available_fovs``
 preserves every other key, including one added later, for free.
 
-``services.remote_runner.refresh_pipeline_info_available_from_outputs`` is the
+``services.remote_fetch.refresh_pipeline_info_available_from_outputs`` is the
 wrong tool here — it only ever *unions* into the existing lists, so a stale
 entry (a timepoint whose images were since deleted) can never be dropped. This
 module's rebuild replaces the lists with what's actually on disk.

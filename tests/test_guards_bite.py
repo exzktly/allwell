@@ -4718,12 +4718,66 @@ FACADE_REACHES = {
 }
 
 
+# The review of #946 (finding 4) added the next three: inline import_module,
+# and relative imports from inside the facade's own package, which
+# `qc/`, `crop/` and `batch_export/` already use.
+FACADE_REACHES.update({
+    "inline_import_module": ("import importlib\n"
+                             "importlib.import_module('services.remote_runner')._target\n"),
+})
+
+#: Written inside the facade's own package, as `services/probe.py`.
+FACADE_RELATIVE_REACHES = {
+    "relative_from_import": "from .remote_runner import _target\n",
+    "relative_package_alias": ("from . import remote_runner as rr\n"
+                               "rr._target()\n"),
+}
+
+
 @pytest.mark.parametrize("shape", sorted(FACADE_REACHES))
 def test_facade_scan_sees_every_access_form(tmp_path, shape):
     from tests._facade_scan import consumers_of
     path = _write(tmp_path, "reach.py", FACADE_REACHES[shape])
     users = consumers_of("services.remote_runner", [path])
     assert "_target" in users, f"the {shape} reach was not seen: {users}"
+
+
+@pytest.mark.parametrize("shape", sorted(FACADE_RELATIVE_REACHES))
+def test_facade_scan_resolves_relative_imports(tmp_path, shape):
+    from tests._facade_scan import consumers_of
+    path = _write(tmp_path, "services/probe.py", FACADE_RELATIVE_REACHES[shape])
+    users = consumers_of("services.remote_runner", [path], root=tmp_path)
+    assert "_target" in users, f"the {shape} reach was not seen: {users}"
+
+
+def test_a_relative_import_of_another_module_is_not_a_reach(tmp_path):
+    from tests._facade_scan import consumers_of
+    path = _write(tmp_path, "pipeline/probe.py", "from .remote_runner import _target\n")
+    users = consumers_of("services.remote_runner", [path], root=tmp_path)
+    assert "_target" not in users
+
+
+def test_module_level_names_reads_conditional_imports(tmp_path):
+    from tests._facade_scan import module_level_names
+    path = _write(tmp_path, "facade.py",
+                  "try:\n    from owner import fast\nexcept ImportError:\n"
+                  "    from owner import slow as fast\n"
+                  "if True:\n    from owner import other\n")
+    assert module_level_names(path) == {"fast": "import", "other": "import"}
+
+
+def test_a_one_word_string_is_not_a_read_of_a_reexport(tmp_path):
+    """Any string that parsed as a bare name counted as the module reading it,
+    so a dead re-export that also appeared in a log message or a dict key was
+    never reported. String annotations and __all__ still count."""
+    from tests._facade_scan import reexports
+    path = _write(tmp_path, "facade.py",
+                  "from __future__ import annotations\n"
+                  "from owner import dead, annotated, listed\n"
+                  "__all__ = ['listed']\n"
+                  "LOG = 'dead'\n"
+                  "def f(x: 'annotated') -> None:\n    pass\n")
+    assert reexports(path) == {"dead"}
 
 
 FACADE_NON_REACHES = {
@@ -4935,6 +4989,30 @@ CONNECTED_ACTION_SHAPES = {
                 "    a.triggered.connect(lambda: None)\n"
                 "    a = other.addAction('y')\n"
                 "    a.toggled.connect(lambda: None)\n"),
+    # The shapes the first version walked past (review of #946, finding 5).
+    "attribute_across_methods": ("class W:\n"
+                                 "    def build(self, menu):\n"
+                                 "        self._act = menu.addAction('x')\n"
+                                 "    def wire(self):\n"
+                                 "        self._act.triggered.connect(lambda: None)\n"),
+    "indexed_signal": ("def f(menu):\n"
+                       "    a = menu.addAction('x')\n"
+                       "    a.triggered[bool].connect(lambda c: None)\n"),
+    "annotated": ("def f(menu):\n"
+                  "    a: object = menu.addAction('x')\n"
+                  "    a.triggered.connect(lambda: None)\n"),
+    "walrus": ("def f(menu):\n"
+               "    if (a := menu.addAction('x')):\n"
+               "        a.triggered.connect(lambda: None)\n"),
+    "handed_to_a_helper": ("def _wire(action):\n"
+                           "    action.triggered.connect(lambda: None)\n"
+                           "def f(menu):\n"
+                           "    _wire(menu.addAction('x'))\n"),
+    "bound_then_handed_to_a_helper": ("def _wire(action, cb):\n"
+                                      "    action.toggled.connect(cb)\n"
+                                      "def f(menu):\n"
+                                      "    a = menu.addAction('x')\n"
+                                      "    _wire(a, print)\n"),
 }
 
 CONNECTED_ACTION_CLEAN = {
@@ -4946,6 +5024,15 @@ CONNECTED_ACTION_CLEAN = {
     "compared_after_exec": ("def f(menu):\n"
                             "    a = menu.addAction('x')\n"
                             "    return menu.exec() is a\n"),
+    "handed_to_a_helper_that_does_not_connect": (
+        "def _keep(action, store):\n"
+        "    store.append(action)\n"
+        "def f(menu, store):\n"
+        "    _keep(menu.addAction('x'), store)\n"),
+    "attribute_never_connected": ("class W:\n"
+                                  "    def build(self, menu):\n"
+                                  "        self._act = menu.addAction('x')\n"
+                                  "        self._act.setEnabled(False)\n"),
 }
 
 
@@ -4982,6 +5069,8 @@ LAZY_TARGET_SHAPES = {
     "built_from_variables": ("m = 'review.core.lazy'\n_x = lazy(m, 'gone')\n", []),
     "registry_hook": ("h = lambda: _import_attr('review.core.lazy', 'gone')\n",
                       ["gone"]),
+    "registry_projector": ("p = _lazy_projector('review.core.lazy', 'gone', a=1)\n",
+                           ["gone"]),
 }
 
 
@@ -5042,3 +5131,36 @@ def test_the_frozen_facade_guard_finds_an_undeclared_reexport(tmp_path):
     from tests._facade_scan import reexports
     facade = _write(tmp_path, "facade.py", FROZEN_FACADE_SRC)
     assert reexports(facade) == {"helper"}
+
+
+# ── per-open menus are disposed of ───────────────────────────────────────────
+#
+# `tests/test_menu_exec_seam.py` requires a menu built in the function that
+# opens it to go through `exec_transient_menu`, and flags a raw `.exec()` on
+# any name bound to a `*Menu(...)` construction, whatever the name is.
+
+PER_OPEN_MENU_SHAPES = {
+    "built_then_exec_menu": ("def f(b):\n    menu = QMenu(b)\n"
+                             "    menu_exec.exec_menu(menu, pos)\n", [3]),
+    "built_by_a_helper": ("def f(self):\n    m = self.build_menu()\n"
+                          "    menu_exec.exec_menu(m, pos)\n", [3]),
+    "transient_is_clean": ("def f(b):\n    menu = QMenu(b)\n"
+                           "    menu_exec.exec_transient_menu(menu, pos)\n", []),
+    "persistent_menu_is_clean": ("def f(self):\n"
+                                 "    menu_exec.exec_menu(self._menu, pos)\n", []),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(PER_OPEN_MENU_SHAPES))
+def test_the_per_open_menu_guard_judges_each_shape(shape):
+    import ast as _ast
+    from tests.test_menu_exec_seam import per_open_menus_left_alive
+    src, lines = PER_OPEN_MENU_SHAPES[shape]
+    assert per_open_menus_left_alive(_ast.parse(src)) == lines
+
+
+def test_a_raw_exec_on_a_menu_not_named_menu_is_seen(tmp_path):
+    import ast as _ast
+    from tests.test_menu_exec_seam import _menus_built_in
+    tree = _ast.parse("def f(b):\n    m = QMenu(b)\n    m.exec(pos)\n")
+    assert _menus_built_in(tree) == {"m"}

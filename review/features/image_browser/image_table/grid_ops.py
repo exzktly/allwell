@@ -57,4 +57,4 @@ def image_table_cell_override_menu(ctx, r: int, c: int, global_pos) -> None:
             act.setCheckable(True)
             act.setChecked(val == cur)
             act.triggered.connect(lambda _c=False, k=cell_key, v=val: _set(k, v))
-    menu_exec.exec_menu(menu, global_pos)
+    menu_exec.exec_transient_menu(menu, global_pos)

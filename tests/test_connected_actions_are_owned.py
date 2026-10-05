@@ -11,8 +11,9 @@ measurement. ``owned_action(owner, text)`` is the shape that is released with
 its owner.
 
 Flagged: the result of an ``addAction(...)`` call whose signal is connected,
-either chained (``m.addAction("x").triggered.connect(...)``) or through a name
-bound to it in the same function. ``addAction(text, callable)`` is not flagged
+either chained (``m.addAction("x").triggered.connect(...)``), through a name or
+``self.`` attribute bound to it, through an indexed signal, or by handing it to
+a module function that connects that parameter. ``addAction(text, callable)`` is not flagged
 unless its result is connected too: that overload was measured and leaves
 nothing behind.
 """
@@ -30,38 +31,105 @@ def _is_add_action(node) -> bool:
 
 
 def _connected_signal_owner(call: ast.Call):
-    """For ``<x>.<signal>.connect(...)``, return ``<x>``; else ``None``."""
-    if (isinstance(call.func, ast.Attribute) and call.func.attr == "connect"
-            and isinstance(call.func.value, ast.Attribute)):
-        return call.func.value.value
+    """For ``<x>.<signal>.connect(...)`` or ``<x>.<signal>[T].connect(...)``,
+    return ``<x>``; else ``None``."""
+    if not (isinstance(call.func, ast.Attribute) and call.func.attr == "connect"):
+        return None
+    signal = call.func.value
+    if isinstance(signal, ast.Subscript):          # triggered[bool]
+        signal = signal.value
+    if isinstance(signal, ast.Attribute):
+        return signal.value
     return None
 
 
+def _key(node) -> str | None:
+    """A binding a later read can be matched against: ``a`` or ``self._a``."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return ast.unparse(node)
+    return None
+
+
+def _bindings(scope) -> dict[str, list[int]]:
+    """Every ``addAction(...)`` result bound to a key in *scope*: plain,
+    annotated and walrus assignment."""
+    bound: dict[str, list[int]] = {}
+    for node in ast.walk(scope):
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)):
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if value is not None and _is_add_action(value):
+            for target in targets:
+                key = _key(target)
+                if key:
+                    bound.setdefault(key, []).append(value.lineno)
+    return bound
+
+
+def _connecting_helpers(tree) -> dict[str, set[int]]:
+    """Module functions that connect a signal of one of their parameters:
+    ``name -> {positional index}``. Handing an action to one connects it."""
+    out: dict[str, set[int]] = {}
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        params = [a.arg for a in fn.args.args]
+        for call in ast.walk(fn):
+            if isinstance(call, ast.Call):
+                owner = _connected_signal_owner(call)
+                if isinstance(owner, ast.Name) and owner.id in params:
+                    idx = params.index(owner.id)
+                    if params[0] in ("self", "cls"):
+                        idx -= 1  # the caller passes everything after it
+                    if idx >= 0:  # a method connecting a signal of self
+                        out.setdefault(fn.name, set()).add(idx)
+    return out
+
+
 def connected_unowned_actions(tree: ast.AST) -> list[int]:
-    """Line numbers of ``addAction(...)`` results whose signals are connected."""
+    """Line numbers of ``addAction(...)`` results whose signals are connected.
+
+    Seen: a chained connect; a name or ``self.`` attribute bound to the result
+    (plain, annotated or walrus) and connected anywhere it is visible — a name
+    within its function, an attribute anywhere in the module, since an action
+    built in one method is routinely wired in another; an indexed signal
+    (``triggered[bool]``); and the result, or a name bound to it, handed to a
+    module function that connects that parameter.
+    """
     lines: list[int] = []
+    helpers = _connecting_helpers(tree)
+    module_attrs = {k: v for k, v in _bindings(tree).items() if "." in k}
     scopes = [tree, *(n for n in ast.walk(tree)
                       if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))]
     for scope in scopes:
         # Every binding, not the last one: a function that reuses ``act`` for
         # two menus' actions connects both, and keeping one line per name
         # reported them one at a time, fix by fix.
-        bound: dict[str, list[int]] = {}
-        for node in ast.walk(scope):
-            if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                    and isinstance(node.targets[0], ast.Name)
-                    and _is_add_action(node.value)):
-                bound.setdefault(node.targets[0].id, []).append(node.value.lineno)
+        bound = {k: v for k, v in _bindings(scope).items() if "." not in k}
+        bound.update(module_attrs)
         for node in ast.walk(scope):
             if not isinstance(node, ast.Call):
                 continue
             owner = _connected_signal_owner(node)
-            if owner is None:
+            if owner is not None:
+                if _is_add_action(owner):
+                    lines.append(owner.lineno)
+                elif _key(owner) in bound:
+                    lines.extend(bound[_key(owner)])
                 continue
-            if _is_add_action(owner):
-                lines.append(owner.lineno)
-            elif isinstance(owner, ast.Name) and owner.id in bound:
-                lines.extend(bound[owner.id])
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            for idx in helpers.get(name, ()):
+                if idx < len(node.args):
+                    arg = node.args[idx]
+                    if _is_add_action(arg):
+                        lines.append(arg.lineno)
+                    elif _key(arg) in bound:
+                        lines.extend(bound[_key(arg)])
     return sorted(set(lines))
 
 

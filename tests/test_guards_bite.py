@@ -4935,6 +4935,30 @@ CONNECTED_ACTION_SHAPES = {
                 "    a.triggered.connect(lambda: None)\n"
                 "    a = other.addAction('y')\n"
                 "    a.toggled.connect(lambda: None)\n"),
+    # The shapes the first version walked past (review of #946, finding 5).
+    "attribute_across_methods": ("class W:\n"
+                                 "    def build(self, menu):\n"
+                                 "        self._act = menu.addAction('x')\n"
+                                 "    def wire(self):\n"
+                                 "        self._act.triggered.connect(lambda: None)\n"),
+    "indexed_signal": ("def f(menu):\n"
+                       "    a = menu.addAction('x')\n"
+                       "    a.triggered[bool].connect(lambda c: None)\n"),
+    "annotated": ("def f(menu):\n"
+                  "    a: object = menu.addAction('x')\n"
+                  "    a.triggered.connect(lambda: None)\n"),
+    "walrus": ("def f(menu):\n"
+               "    if (a := menu.addAction('x')):\n"
+               "        a.triggered.connect(lambda: None)\n"),
+    "handed_to_a_helper": ("def _wire(action):\n"
+                           "    action.triggered.connect(lambda: None)\n"
+                           "def f(menu):\n"
+                           "    _wire(menu.addAction('x'))\n"),
+    "bound_then_handed_to_a_helper": ("def _wire(action, cb):\n"
+                                      "    action.toggled.connect(cb)\n"
+                                      "def f(menu):\n"
+                                      "    a = menu.addAction('x')\n"
+                                      "    _wire(a, print)\n"),
 }
 
 CONNECTED_ACTION_CLEAN = {
@@ -4946,6 +4970,15 @@ CONNECTED_ACTION_CLEAN = {
     "compared_after_exec": ("def f(menu):\n"
                             "    a = menu.addAction('x')\n"
                             "    return menu.exec() is a\n"),
+    "handed_to_a_helper_that_does_not_connect": (
+        "def _keep(action, store):\n"
+        "    store.append(action)\n"
+        "def f(menu, store):\n"
+        "    _keep(menu.addAction('x'), store)\n"),
+    "attribute_never_connected": ("class W:\n"
+                                  "    def build(self, menu):\n"
+                                  "        self._act = menu.addAction('x')\n"
+                                  "        self._act.setEnabled(False)\n"),
 }
 
 

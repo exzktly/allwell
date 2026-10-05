@@ -49,7 +49,7 @@ from services.remote_runner import (
     WELL_XFER_PREFIX,
     stage_local_zips,
 )
-from services import run_journal
+from services import run_journal, run_provenance
 from services.subprocess_kill import signal_subprocess
 from util.aw_safe import swallow, swallowed
 from pipeline.suspend import LOG_MARKER as _SUSPEND_LOG_MARKER
@@ -748,6 +748,11 @@ class PipelineRunner:
         #: gate can both be reached on a freshly built runner.
         self._journal_dir: Path | None = None
         self._journal_token: float | None = None
+        #: The run whose ``run_started`` provenance event was written, so
+        #: ``_close_journal`` can write the matching ``run_finished``. Separate
+        #: from ``_journal_dir`` because a run whose journal could not be
+        #: opened still belongs in the history.
+        self._provenance_run: run_provenance.RunMark | None = None
         # Remote-execution state. Set in start() when the user chose a
         # remote host; the runner threads it through _run_pipeline_thread
         # to swap spawn_pipeline for the SSH-staged remote run.
@@ -1391,6 +1396,11 @@ class PipelineRunner:
         Best-effort throughout: a run whose journal cannot be written still
         runs, because the artefacts remain the authoritative record of what was
         produced and this is the narrative beside them.
+
+        The run's ``run_started`` provenance event is written first, and
+        independently of the journal: the journal describes the latest run and
+        is replaced by the next, while the provenance log keeps every run in
+        order (``services/run_provenance.py``).
         """
         mode = "local"
         if self._remote is not None:
@@ -1402,6 +1412,8 @@ class PipelineRunner:
             except (ValueError, TypeError):
                 batched = False
             mode = "remote-batched" if batched else "remote"
+        self._provenance_run = run_provenance.begin_run(
+            output_dir, mode=mode, input_dir=input_dir, argv=argv, opts=opts)
         try:
             self._journal_token = run_journal.open_run(
                 output_dir,
@@ -1460,6 +1472,9 @@ class PipelineRunner:
         survives, which is why it sits in the worker thread's ``finally``
         rather than beside any one outcome.
         """
+        mark, self._provenance_run = self._provenance_run, None
+        if mark is not None:
+            run_provenance.finish_run(mark, outcome=self._journal_outcome())
         output_dir, self._journal_dir = self._journal_dir, None
         if output_dir is None:
             return

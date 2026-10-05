@@ -203,15 +203,20 @@ differ from the figure I exported in March" has no answer on disk.
   from a closed roster), `source` (`pipeline`, `remote`, `review`, `datasets`),
   `app_version` (read from `version.py`, never written as a literal), and an
   event-specific `detail` object.
-- **A torn last line is not a corrupt file.** A crash mid-append leaves a
-  partial final line. The reader skips it, counts it, and reports the count; it
-  never discards the lines before it, and the writer never "repairs" it.
+- **A damaged line is not a corrupt file.** A crash mid-append leaves a
+  partial final line, and two processes appending at once on a network volume
+  or on Windows can interleave mid-file. The reader skips every line it cannot
+  parse, counts it, and reports the count; it never discards the lines around
+  it, and the writer never "repairs" it.
 - **It is evidence, never authority** — the same rule `services/run_journal.py`
   states for itself. No decision in the app reads the log. If it goes missing,
   nothing about the dataset changes.
-- **One writer process at a time.** The pipeline's worker pool must not append
-  concurrently; the orchestrator writes run-level events only. Remote runs write
-  nothing on the host: the local client appends on fetch.
+- **Run events come from the Analyze runner, not the pipeline.**
+  `PipelineRunner` writes `run_started` and `run_finished` at the moments it
+  opens and closes the run journal, for local, remote and batched runs alike,
+  so the pipeline's worker pool never appends and nothing is written on a
+  remote host (where the fetch would never collect it). A pipeline launched
+  directly from a terminal writes no run events.
 - **Review-side events are recorded when a save is flushed, not per edit.**
   `schedule_save` debounces edits behind a 500 ms timer (ARCHITECTURE §5.7), so
   a dragged gate slider is one event, not two hundred. The event names the
@@ -224,11 +229,12 @@ differ from the figure I exported in March" has no answer on disk.
 
 | ID | Item | State | Where | Evidence |
 |---|---|---|---|---|
-| P1 | Verify the premises in P.0 against the tree: does a second run replace `.aw_journal/run.json`; does any existing file already accumulate across runs; is `pipeline_info.json` always in the output root for every layout (in/out, folder mode, remote materialise) | `todo` | `services/run_journal.py`, `pipeline/run_report.py`, `pipeline/completeness.py` | |
-| P2 | Event schema and roster: closed set of event types, required fields per type, `schema_version` | `todo` | new Qt-free module in `util/` (remote manifest entry in the same commit) | |
-| P3 | Writer: atomic single-line append with fsync; reader that tolerates and counts a torn last line and refuses a future `schema_version` without discarding earlier lines | `todo` | same module as P2 | |
-| P4 | Pipeline emits `run_started` (settings digest, `only_wells`, `force_wells`, `incremental`, `force`) and `run_finished` (outcome, `run_check` summary, error-file count since start) | `todo` | a one-line call from `process_microscopy.py` into a new module (§0.1: zero headroom) | |
-| P5 | Remote client appends the same two events locally on fetch, with the remote host and output directory | `todo` | new module called from `services/remote_*`; `remote_runner.py` has zero headroom | |
+| P1 | Verify the premises in P.0 against the tree: does a second run replace `.aw_journal/run.json`; does any existing file already accumulate across runs; is `pipeline_info.json` always in the output root for every layout (in/out, folder mode, remote materialise) | `done` | `services/run_journal.py`, `services/remote_fetch.py`, `review/domain/viewer_state.py` | Measured: `run_journal.open_run` replaces `run.json` and clears `wells/` (`services/run_journal.py:313`), so nothing accumulates across runs. The remote fetch pulls named files only (`pipeline_info.json`, per-well CSVs and archives, `.aw_settings/`), so a log written by the remote pipeline would never come home. Review's data dir is not always the sidecar's directory: `resolve_pipeline_info_path` (`review/domain/viewer_state.py`) falls back one level up for the Analyze layout, so Review resolves the log's directory through it. |
+| P2 | Event schema and roster: closed set of event types, required fields per type, `schema_version` | `done` | `util/provenance_log.py` (`EVENT_FIELDS`, `SOURCES`, `SCHEMA_VERSION`); manifest entry in `services/remote_manifest.py` | `tests/test_provenance_log.py::test_an_unknown_event_is_refused`, `::test_a_missing_detail_key_is_refused_by_name`, `::test_a_key_present_as_none_is_accepted` |
+| P3 | Writer: atomic single-line append with fsync; reader that tolerates and counts a torn last line and refuses a future `schema_version` without discarding earlier lines | `done` | `util/provenance_log.py` (`append_event`, `read_events`) | `tests/test_provenance_log.py::test_a_torn_last_line_is_counted_and_hides_nothing_before_it`, `::test_appending_never_disturbs_the_bytes_already_there`, `::test_a_newer_schema_line_is_foreign_not_unreadable`, `::test_no_log_is_missing_and_an_empty_log_is_not`. Widened from a torn *last* line to any unreadable line: concurrent appends on a network volume or on Windows can interleave mid-file. |
+| P4 | Run events. **Revised:** emitted by `PipelineRunner` at the journal's open and close, not by `process_microscopy.py` — one writer for local, remote and batched runs, and the pipeline file has zero headroom. Records `argv` and the scope options rather than a settings digest: the GUI's opts are not the pipeline's parsed args, so a digest computed client-side would not match `.aw_settings/`. Cost, stated in ARCHITECTURE: a pipeline invoked directly from a terminal writes no run events | `done` | `services/run_provenance.py`, `services/pipeline_runner.py` (`_open_journal`, `_close_journal`) | `tests/test_provenance_log.py::test_a_second_run_adds_to_the_history_while_the_journal_is_replaced` drives the real `PipelineRunner` twice; deleting the `finish_run` call fails it. |
+| P4a | `run_finished` quoted the previous run's `run_check` when two runs fell in the same second: the block's timestamps are second-resolution. Found by the runner test. Replaced the timestamp comparison with a fingerprint of the block taken at `begin_run` | `done` | `services/run_provenance.py` (`run_check_summary`) | `tests/test_provenance_log.py::test_a_run_check_this_run_wrote_is_quoted_even_in_the_same_second`, `::test_a_run_check_left_from_before_this_run_is_not_quoted`; removing the fingerprint check fails the latter and the runner test. |
+| P5 | Remote runs are written by the same two calls as local ones (P4), against the local output directory, after the fetch. Still owed: a test that drives a remote-mode run through the runner and reads the events | `wip` | `services/pipeline_runner.py` | Code path shared with P4; not yet driven in remote mode by any test. |
 | P6 | Review emits `analysis_changed` for every domain in `ANALYSIS_SCOPES` at flush time, plus `reset` when a reset scope is cleared | `todo` | `review/persistence/registry.py` flush path | |
 | P6a | Guard: every domain in `ANALYSIS_SCOPES` reaches the event emitter, stated against the roster so a new domain is covered by being declared (CLAUDE.md §3, "derive the list from the registry") | `todo` | new test | |
 | P7 | Datasets tools that write a new dataset (subset, merge plates, concatenate, the importers) emit `derived_from` into the new dataset's log, naming the source dataset(s) | `todo` | `datasets/*/apply.py` | |

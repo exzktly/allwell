@@ -2,7 +2,8 @@
 
 ``tests/test_a_closed_review_app_is_freed.py`` holds the full app to this, and
 builds a ``ReviewApp`` to do it, so it runs in the manually dispatched slow
-lane. Row Q4 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` asks for
+lane. Row Q4 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) asks for
 the half that can be asserted without one to run on every push. The roots Q1
 found were all of one kind — a widget with no parent, or a callable the Qt side
 keeps, holding a closure over the context — and a feature built into the

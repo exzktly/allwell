@@ -3,7 +3,8 @@ what it imports.
 
 The pipeline orchestrator used to re-export most of what moved out of it into
 ``pipeline/`` so that tests and a few GUI call sites did not have to change.
-Row A0 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` measured 45
+Row A0 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) measured 45
 pure re-exports with ``tests/_facade_scan.py`` — which sees every access form:
 ``from … import``, attribute reads and writes under any alias, named
 setattr/patch calls and string patch targets — and removed the 26 nothing

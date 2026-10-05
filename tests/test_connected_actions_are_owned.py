@@ -3,7 +3,8 @@
 ``owner.addAction(text)`` creates the action in C++; once a Python callable is
 connected to one of its signals, PySide keeps the wrapper alive after the menu
 and the action are deleted — one wrapper per action, every time the menu is
-rebuilt. Row Q4 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` found
+rebuilt. Row Q4 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) found
 it as the last thing a closed window left behind (seven wrappers per window,
 all from the dataset menu), and ``widgets/owned_action.py`` has the
 measurement. ``owned_action(owner, text)`` is the shape that is released with

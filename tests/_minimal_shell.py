@@ -22,7 +22,8 @@ which belong to the shell this leaves out. A test whose subject *is* one of
 those (loading, persistence, navigation, the sidebar, the band) keeps using the
 real app.
 
-Row Q3 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md``.
+Row Q3 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it).
 """
 
 from __future__ import annotations

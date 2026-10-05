@@ -1,6 +1,7 @@
 """Two promises of the export-style pass that nothing pinned.
 
-Row C1 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` splits
+Row C1 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) splits
 ``apply_export_style_prefs`` into one pass per preference family. Mutating the
 split passes against every test file that reaches ``plot_style`` (and the topic
 files for each) left these two green:

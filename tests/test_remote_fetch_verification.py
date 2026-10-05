@@ -1,6 +1,7 @@
 """What a remote run's fetched output must prove before the remote copy goes.
 
-Row R1 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` moves fetched-
+Row R1 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) moves fetched-
 output verification and materialisation out of ``services/remote_runner.py``.
 Before the move, each behaviour the plan names was attacked by mutation against
 every test file that reaches the runner; four survived, and these tests are the

@@ -1,6 +1,7 @@
 """The Properties panel's frame: the buttons around the sections, and the grid.
 
-Row C2 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` splits
+Row C2 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) splits
 ``ExportStyleSidebar._build_ui`` into one builder per section. Mutating the
 split against every test that builds the panel left five changes green, all
 outside the sections the other Properties tests read:

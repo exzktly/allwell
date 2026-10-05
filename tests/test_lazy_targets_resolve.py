@@ -6,7 +6,8 @@ at module load. The cost is that the target is a pair of strings: nothing
 resolves it until the call, so a name that has moved away fails only when a user
 reaches the code path, as an ``AttributeError`` from inside the proxy.
 
-Row A3 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` removed the
+Row A3 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) removed the
 re-exports ``barplot/controller`` carried for other modules. The four-form
 facade scan saw every import, attribute reach and patch of them — and not four
 names ``runtime_app`` resolved through ``_lazy_names`` strings, which would have

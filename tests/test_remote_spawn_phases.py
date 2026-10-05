@@ -1,6 +1,7 @@
 """What ``RemoteRunner.spawn`` leaves behind for the rest of the run.
 
-Row R4 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` splits
+Row R4 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) splits
 ``spawn`` into phases. Characterised by mutation first, against every test that
 drives the remote client, and two of spawn's own outputs had no test at all —
 each of these survived with the whole set green:

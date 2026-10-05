@@ -2,7 +2,8 @@
 
 Every closed window used to stay in memory — about 31 MB each with the mini
 dataset loaded, measured by ``tests/perf/bench_app_retention.py`` (rows Q0–Q2 of
-``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md``). Three roots held it,
+the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it)). Three roots held it,
 and each test below pins one:
 
 * **The Home notes box** was a Qt subclass declared inside its builder with

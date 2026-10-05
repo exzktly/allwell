@@ -1,6 +1,7 @@
 """Two promises of the bar collector that nothing pinned.
 
-Row C3 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` splits
+Row C3 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) splits
 ``collect_bar_items`` into stages. Mutating the split against every test that
 reaches the bar collector or fold-change left two changes green — and each
 changed hundreds of configurations in a 3,840-configuration differential of

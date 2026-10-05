@@ -7,7 +7,8 @@ staging, process, upload and jobs), the runner kept re-exporting the moved
 names so its tests did not have to change. That made a smaller file without
 making a smaller API, because every test still reached the old module and the
 module graph behind it was invisible to callers. Workstream R of
-``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` drew the boundary
+the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) drew the boundary
 (row R0), inventoried 85 other names reached through the runner, and moved
 every consumer to the module that owns what it reaches (rows R1–R5). The
 inventory is now empty, so this guard states the end state directly:

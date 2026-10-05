@@ -7,7 +7,8 @@ patch changes nothing. The test then passes for whatever reason it would have
 passed anyway, and says it proved something.
 
 Found while classifying ``process_microscopy``'s re-exports (row A0 of
-``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md``):
+the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it)):
 ``tests/test_model_recovery.py`` patched ``process_microscopy._pid_alive`` to say
 a lock holder was dead. The lock code reads ``pipeline.stardist_cache._pid_alive``;
 the test passed only because PID 999999 really is dead, and went on passing with

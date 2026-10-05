@@ -1,7 +1,8 @@
 """A Python subclass of a Qt class is declared at module scope, not inside a function.
 
 Measured with ``tests/perf/bench_app_retention.py`` (row Q1 of
-``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md``): the Home notes box was a
+the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it)): the Home notes box was a
 ``QPlainTextEdit`` subclass declared inside its builder, its ``focusOutEvent``
 closing over ``ctx``. After the window was closed and deleted, that widget's
 Python wrapper survived its C++ object, held by a reference the garbage

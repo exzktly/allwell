@@ -4,7 +4,8 @@
 Run directly; this is a script a human reads, not a test, and it asserts
 nothing. Nothing it prints is evidence that a change works — behaviour is pinned
 by tests — but it is the measurement the retained-ownership work
-(`_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`, workstream Q) is judged
+(the remediation plan, deleted when its last row closed; `git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md` recovers it, workstream Q) is judged
 against, so it reports enough about its environment for two runs to be
 compared and says so when a metric is missing rather than printing zero.
 

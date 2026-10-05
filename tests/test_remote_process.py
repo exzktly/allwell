@@ -1,6 +1,7 @@
 """The single-launch remote process keeps its promises to the Fetcher.
 
-Row R3 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` moves the
+Row R3 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) moves the
 remote process wrappers out of ``services/remote_runner.py``. Characterised by
 mutation first, against every test that reaches the remote client, and the
 single-launch wrapper turned out to have no test at all: each of these survived

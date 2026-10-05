@@ -1,6 +1,7 @@
 """The log drawer's handler lets go of the logger when its widget is destroyed.
 
-Row Q4 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` measured what a
+Row Q4 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) measured what a
 closed window still leaves behind. With no dataset loaded, each window left a
 ``_GUILogHandler`` on the ``review`` logger, holding its relay and the dead log
 widget's wrapper: the handler detached only when the *next* record failed to

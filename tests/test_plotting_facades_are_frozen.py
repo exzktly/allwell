@@ -1,6 +1,7 @@
 """The plotting and remote facades re-export nothing beyond what they declare.
 
-Row A3 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` froze the
+Row A3 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) froze the
 surfaces the earlier rows left behind. ``barplot/controller.py`` and
 ``export/style.py`` had grown into pass-through modules: names moved out to
 ``barplot/collect.py``, ``review/core/plot_style.py`` and

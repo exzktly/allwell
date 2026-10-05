@@ -1,6 +1,7 @@
 """Local input staging cleans up after itself, on success and on failure.
 
-Row R2 of ``_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` moves staging
+Row R2 of the remediation plan (deleted when its last row closed; ``git log --
+_Docs/Markdowns/IMPLEMENTATION_REMEDIATION_PLAN.md`` recovers it) moves staging
 out of ``services/remote_runner.py``. Its cleanup was characterised by mutation
 first, against every test that reaches the remote client, and four mutations
 survived:

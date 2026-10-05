@@ -16,8 +16,8 @@
 plan, so one version bump: 9.10.14 → 9.10.15). Row commits are found with
 `git log --grep '^<ROW>:'`.
 
-**Next action:** R1 — extract fetched-output verification into
-`services/remote_fetch.py`
+**Next action:** R1 — move `Fetcher` and verification into
+`services/remote_fetch.py` (characterization committed)
 
 ## 1. Objective and scope
 
@@ -653,7 +653,7 @@ commit still owns one row.
 | Q0 | `done` | — | Reproducible `bench_app_retention.py` + JSON output | `git log --grep '^Q0:'`. Two clean-process 5-iteration runs: integer metrics identical, RSS growth 31.4 vs 30.8 MB/iteration (2.1% apart). Stated tolerance: counts exact, RSS ±5%. Baseline recorded in section 3.1. No product code changed |
 | A0 | `done` | R0 | Classified re-export inventory for `remote_runner` and `process_microscopy` | `git log --grep '^A0:'`. `remote_runner`: classified by R0. `process_microscopy`: 45 pure re-exports measured; 25 had no consumer under any access form or file type — 24 removed, `tifffile` kept as a side-effect import; `_pid_alive`'s only consumer was an inert patch (below), so it went too. 20 remain in `tests/test_process_microscopy_facade.py`: 1 side-effect, 3 first-party (Playground: `BACKGROUND_METHODS`, `FLATFIELD_MODES`, `estimate_background_field`), 16 test-only. Ran: ruff; both facade guards; all 88 test files reaching `process_microscopy` (1,964 passed, 3 skipped) |
 | A0.1 | `done` | A0 | Discovered: tests patching an alias nothing reads | `git log --grep '^A0:'`. `tests/test_model_recovery.py` patched `pm._pid_alive`; flipping that patch to "alive" left the test green, while the same patch on `pipeline.stardist_cache` made it wait out the lock timeout and fail. Now patched on the owner. `tests/test_no_patch_misses_its_target.py` rules the shape out repo-wide (patch forms: setattr, `patch.object`, string target, attribute store; a re-export looked up at call time is exempt, which cleared two false positives in `test_playground.py` and `test_plot_card_actions_a8.py`). Proven on `main` by `scripts/prove_guard.sh`: 1 site, the one fixed. 6 bite cases |
-| R1 | `todo` | R0, A0 | Fetched-output owner and verification characterization | Candidate: `services/remote_fetch.py` |
+| R1 | `wip` | R0, A0 | Fetched-output owner and verification characterization | `git log --grep '^R1:'`. **Characterization done:** 10 mutations against all runner-reaching tests (F1 manifest ignored, F2a empty zip accepted, F2b unreplaced zip accepted, F3 retry removed, F4 retry exhaustion ignored, F5/F6 cleanup after failed verify / non-zero exit, F7a/F7b incremental zip / CSV overwritten, F8 sidecar never installed, F9 partial zip accepted): 6 caught, 4 survived (F2a, F3, F7a, F7b) — each now fails a test in `tests/test_remote_fetch_verification.py`. **Stopped at:** the move itself. Layout decided: `services/remote_wire.py` (stdout/stderr vocabulary), `services/remote_run_state.py` (`_RemoteRun`, `OutputFilter` — shared by staging, process and fetch, so in none of them), `services/remote_fetch.py` (`Fetcher`, verification) |
 | R2 | `todo` | R0, A0 | Typed local-staging owner; `stage_local_zips` allowlist key moved | Candidate: `services/remote_staging.py` |
 | R3 | `todo` | R0, A0 | Remote process state-machine owner | Candidate: `services/remote_process.py` |
 | R4 | `todo` | R1, R2, R3 | Thin `RemoteRunner.spawn` orchestrator | Target <120 executable lines; validate target |

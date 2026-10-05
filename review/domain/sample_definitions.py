@@ -36,7 +36,7 @@ from collections.abc import Iterable
 
 from domain import selections_format as _sel_model
 from review.domain.viewer_state import resolve_pipeline_info_path
-from review.persistence._io import defer_io, update_json_atomic
+from review.persistence._io import defer_io, refuse_if_suspended, update_json_atomic
 
 
 _logger = logging.getLogger("review.domain.sample_definitions")
@@ -80,6 +80,11 @@ def _backup_pre_v2(info_path: Path) -> None:
     so two threads / processes racing through migration can't both think
     they're writing the "first" backup and overwrite each other's.
     """
+    # A backup taken for a write that is then refused would be the one change
+    # that lands — under the headless report's suspension, one more file in the
+    # dataset per run. Refused here, before the copy, and the caller abandons
+    # the update exactly as it does for a backup that could not be written.
+    refuse_if_suspended(info_path)
     primary = info_path.with_name(info_path.name + PRE_V2_BACKUP_SUFFIX)
     if not primary.exists():
         shutil.copy2(info_path, primary)

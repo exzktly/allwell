@@ -257,3 +257,49 @@ def test_the_checklist_disables_what_cannot_be_copied(qtbot, tmp_path):
     assert not dialog._boxes["export_groups"].isEnabled()
     dialog._boxes["saved_plots"].setChecked(False)
     assert "saved_plots" not in dialog.selected_keys()
+
+
+# ── found by review ────────────────────────────────────────────────────────
+
+def test_copied_plots_are_in_the_gallery_after_the_reload(tmp_path):
+    """The store was keyed on the folder alone, so the reload after a copy —
+    same folder — kept the pre-copy records, and the next save erased the
+    copies from disk."""
+    from review.features.saved_plots.state import SavedPlotsStore
+    ctx, data, _calls = _target(tmp_path)
+    store = SavedPlotsStore()
+    store.ensure_loaded(ctx)
+    assert [r.id for r in store.records] == ["own"]
+    rp.apply_recipe(ctx, rp.read_dataset_blocks(_source(tmp_path)), ["saved_plots"])
+    ctx.state.dataset.begin_load(data)            # what the reload does
+    store.ensure_loaded(ctx)
+    assert len(store.records) == 2 and store.records[1].copied_from == "plateA"
+    store.persist(ctx)
+    plots = json.loads((data / "persistence.json").read_text())["saved_plots"]
+    assert len(plots) == 2
+
+
+def test_a_write_that_did_not_land_is_failed_not_applied(tmp_path, monkeypatch):
+    from review.persistence import _doc
+
+    def _full_disk(*a, **k):
+        raise OSError(28, "No space left on device")
+
+    ctx, data, _calls = _target(tmp_path)
+    monkeypatch.setattr(_doc, "atomic_write_json", _full_disk)
+    result = rp.apply_recipe(ctx, rp.read_dataset_blocks(_source(tmp_path)), ["ratios"])
+    assert result.applied == [] and "could not be written" in result.failed["ratios"]
+    applied = [e for e in P.read_events(data).events if e["event"] == "recipe_applied"]
+    assert applied[0]["detail"]["scopes"] == []
+
+
+def test_a_scope_that_fails_on_its_second_block_says_what_landed(tmp_path, monkeypatch):
+    from review.persistence import _doc
+
+    def _full_disk(*a, **k):
+        raise OSError(28, "No space left on device")
+
+    ctx, data, _calls = _target(tmp_path)
+    monkeypatch.setattr(_doc, "atomic_write_json", _full_disk)
+    result = rp.apply_recipe(ctx, rp.read_dataset_blocks(_source(tmp_path)), ["gating"])
+    assert "already copied: cell_gating" in result.failed["gating"]

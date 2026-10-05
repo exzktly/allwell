@@ -148,8 +148,11 @@ def _copied_plots(records, existing_ids, label: str) -> list[dict]:
     return out
 
 
-def _apply_scope(ctx, scope, source: DatasetBlocks) -> int:
-    """Write one scope's present blocks. Returns plots added. Raises on refusal."""
+def _apply_scope(ctx, scope, source: DatasetBlocks, written: list[str]) -> int:
+    """Write one scope's present blocks. Returns plots added. Raises on refusal.
+
+    Each block that lands is appended to *written* as it does.
+    """
     from review.domain.viewer_state import resolve_pipeline_info_path
     from review.persistence import _doc
     from review.persistence._io import update_json_atomic
@@ -179,15 +182,29 @@ def _apply_scope(ctx, scope, source: DatasetBlocks) -> int:
 
             if not update_json_atomic(info_path, _set):
                 raise OSError(f"{info_path.name} is missing or could not be updated")
+            written.append(key)
+            continue
         elif key == "saved_plots":
             current = _doc.get_section(ctx, key) or []
             copies = _copied_plots(value, [r.get("id") for r in current
                                            if isinstance(r, dict)], source.label)
-            _doc.set_section(ctx, key, list(current) + copies)
+            _landed(_doc.set_section(ctx, key, list(current) + copies), key)
             added += len(copies)
         else:
-            _doc.set_section(ctx, key, value)
+            _landed(_doc.set_section(ctx, key, value), key)
+        written.append(key)
     return added
+
+
+def _landed(ok: bool, key: str) -> None:
+    """Raise when a ``persistence.json`` write did not land.
+
+    ``_doc.write`` logs a failed write and carries on — right for an autosave,
+    wrong here: a copy whose write failed must not be reported as copied, in
+    the status line or in the provenance log.
+    """
+    if not ok:
+        raise OSError(f"persistence.json could not be written ({key}); see the log")
 
 
 def apply_recipe(ctx, source: DatasetBlocks, keys) -> ApplyResult:
@@ -205,11 +222,15 @@ def apply_recipe(ctx, source: DatasetBlocks, keys) -> ApplyResult:
         if scope is None:
             result.failed[key] = "not a recipe scope"
             continue
+        written: list[str] = []
         try:
-            result.plots_added += _apply_scope(ctx, scope, source)
+            result.plots_added += _apply_scope(ctx, scope, source, written)
         except (OSError, ValueError, TypeError) as exc:
             _logger.warning("recipe: copying %s failed: %s", key, exc)
-            result.failed[key] = str(exc)
+            # A scope of two blocks can fail on its second: say which landed,
+            # rather than let "failed" imply this dataset was left untouched.
+            result.failed[key] = (f"{exc} (already copied: {', '.join(written)})"
+                                  if written else str(exc))
             continue
         result.applied.append(key)
     if result.applied or result.failed:

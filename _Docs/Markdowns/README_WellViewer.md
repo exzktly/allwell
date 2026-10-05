@@ -2196,14 +2196,16 @@ many findings there are and how many are still open.
 
 It reports the dataset's existing records and measures nothing new: the
 completeness record the run writes at its end (wells with missing or failed
-field groups, missing measurements, wells never processed, folder-level
-findings), the traceback files the *last* run left in `errors/` (older files
+field groups, missing measurements, measurements with no output archive, wells
+never processed, wells the check could not read, folder-level findings), the traceback files the *last* run left in `errors/` (older files
 are not listed, because that folder is never emptied), and the run's
 field-quality flags. When one of those cannot answer — no completeness record,
 a check that was turned off, a plate too partly measured to score — that is a
 row too, so an empty table really does mean nothing is known to be wrong. The
 completeness record names only the first few missing field groups per well; the
-rest appear as one row saying how many more there are.
+rest appear as one row saying how many more there are. A field you excluded
+keeps its row even after the run stops flagging it — the exclusion still
+removes its cells, so it stays where you can see it and **Reopen** it.
 
 What you can do depends on the row:
 

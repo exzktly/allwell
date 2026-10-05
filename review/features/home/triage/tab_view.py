@@ -145,6 +145,10 @@ def build_triage_subtab(ctx, parent: QWidget) -> None:
         if wells:
             ctx.notify.set_status(
                 f"Analyze is set up to re-run {', '.join(wells)} — press Run there.")
+        else:
+            ctx.notify.set_status(
+                "Could not open Analyze for a rerun: this build has no Analyze "
+                "pane, or this folder is not a dataset Analyze can open.")
 
     def _on_open() -> None:
         sel = _selected()

@@ -61,6 +61,26 @@ KIND_MISSING = "missing_group"
 KIND_MISSING_MORE = "missing_unlisted"
 KIND_ERROR_FILE = "error_file"
 KIND_FIELD_QUALITY = "field_quality"
+KIND_NO_ARCHIVE = "no_output_archive"
+KIND_PARTIAL = "partial_well"
+KIND_UNREADABLE = "unreadable_wells"
+KIND_EXCLUDED = "excluded_field"
+
+#: The row a well in each needs-attention state gets beyond its per-group rows,
+#: keyed by ``pipeline.completeness.HEALTH_STATES``. ``tests/test_qc_triage.py``
+#: holds every state in ``NEEDS_ATTENTION`` to a row, so a state added to the
+#: completeness record cannot pass through this table unreported. ``partial``
+#: is handled by the per-group rows below it (and by ``KIND_PARTIAL`` when the
+#: record lists none).
+WELL_STATE_ROWS: dict[str, tuple[str, str]] = {
+    "missing": (KIND_NO_CSV,
+                "Output images exist with no readable measurements CSV; an "
+                "ordinary re-run skips this well, a forced one rebuilds it."),
+    "csv_only": (KIND_NO_ARCHIVE,
+                 "The measurements CSV is here but the output archive is not, "
+                 "so its images cannot be reviewed; a forced re-run rebuilds "
+                 "both."),
+}
 
 #: Decision states, in the order a row's state is resolved.
 STATE_EXCLUDED = "excluded"
@@ -137,13 +157,12 @@ def _well_rows(ctx) -> list[TriageRow]:
         if not isinstance(rec, dict):
             continue
         health = str(rec.get("health") or "")
-        if health == "missing":
+        if health in WELL_STATE_ROWS:
+            kind, detail = WELL_STATE_ROWS[health]
             rows.append(TriageRow(
-                key=_key(KIND_NO_CSV, well), kind=KIND_NO_CSV,
-                stage=STAGE_PROCESSING, severity="warn", well=well, fov="",
-                timepoint="", can_rerun=True,
-                detail="Output images exist with no readable measurements CSV; "
-                       "an ordinary re-run skips this well, a forced one rebuilds it."))
+                key=_key(kind, well), kind=kind, stage=STAGE_PROCESSING,
+                severity="warn", well=well, fov="", timepoint="",
+                can_rerun=True, detail=detail))
         elif health == "partial" and not int(rec.get("covered_any") or 0):
             rows.append(TriageRow(
                 key=_key(KIND_UNSTARTED, well), kind=KIND_UNSTARTED,
@@ -167,6 +186,14 @@ def _well_rows(ctx) -> list[TriageRow]:
                 timepoint=str(tp), can_rerun=True,
                 detail="In the input, absent from the measurements CSV."))
         unlisted = int(rec.get("missing_count") or 0) - len(listed)
+        if health == "partial" and not listed and unlisted <= 0 and not rec.get("failed"):
+            # Partial with nothing itemised: still a row, never an absence.
+            rows.append(TriageRow(
+                key=_key(KIND_PARTIAL, well), kind=KIND_PARTIAL,
+                stage=STAGE_PROCESSING, severity="warn", well=well, fov="",
+                timepoint="", can_rerun=True,
+                detail="The completeness record calls this well partial without "
+                       "naming the missing field groups."))
         if unlisted > 0:
             # The record keeps only the first few missing groups per well. The
             # rest are counted, and a table that showed only the listed ones
@@ -177,6 +204,16 @@ def _well_rows(ctx) -> list[TriageRow]:
                 timepoint="", can_rerun=True,
                 detail=f"{unlisted} more missing field group(s) not listed — the "
                        f"completeness record names the first {len(listed)}."))
+    totals = _record(ctx).get("totals") or {}
+    unreadable = int(totals.get("unreadable") or 0) if isinstance(totals, dict) else 0
+    if unreadable:
+        rows.append(TriageRow(
+            key=_key(KIND_UNREADABLE), kind=KIND_UNREADABLE,
+            stage=STAGE_PROCESSING, severity="warn", well="", fov="",
+            timepoint="",
+            detail=f"{unreadable} well(s) could not be read by the completeness "
+                   f"check, so nothing is known about them — Validate & Repair "
+                   f"can look again."))
     return rows
 
 
@@ -269,18 +306,49 @@ def _field_quality_rows(ctx) -> list[TriageRow]:
     return rows
 
 
+def _exclusion_rows(ctx, flagged_rows) -> list[TriageRow]:
+    """One row for every exclusion no flagged-field row already shows.
+
+    An exclusion outlives the finding that prompted it — a rerun unflags the
+    field, a sidecar arrives without its field-quality block, the scorer
+    declines — and the layer goes on removing that field's cells. Without a row
+    of its own it would remove them with nothing on screen saying so, and with
+    no Reopen to put them back.
+    """
+    from review.data.field_quality_cache import untrusted_wells
+
+    shown = {field_key(r.well, r.fov, r.timepoint) for r in flagged_rows}
+    untrusted = set(untrusted_wells(ctx))
+    rows = []
+    for (well, fov, tp), meta in sorted(excluded_fields(ctx).items()):
+        if (well, fov, tp) in shown:
+            continue
+        reason = str((meta or {}).get("reason") or "")
+        refusal = ("This well's FOV labels do not identify its fields, so this "
+                   "exclusion is not applied." if well in untrusted else "")
+        rows.append(TriageRow(
+            key=_key(KIND_EXCLUDED, well, fov, tp), kind=KIND_EXCLUDED,
+            stage=STAGE_ACQUISITION, severity="info", well=well, fov=fov,
+            timepoint=tp, can_exclude=not refusal, exclude_refusal=refusal,
+            detail=(f"Excluded by hand{f' ({reason})' if reason else ''}; the "
+                    f"run's records no longer flag this field.")))
+    return rows
+
+
 def triage_rows(ctx) -> list[TriageRow]:
     """Every row, dataset-wide ones first, then by well."""
     if not hc.has_dataset(ctx):
         return []
+    flagged = _field_quality_rows(ctx)
     rows = (_record_rows(ctx) + _finding_rows(ctx) + _well_rows(ctx)
-            + _error_rows(ctx) + _field_quality_rows(ctx))
+            + _error_rows(ctx) + flagged + _exclusion_rows(ctx, flagged))
     return sorted(rows, key=lambda r: (bool(r.well), r.well, r.fov, r.timepoint, r.kind))
 
 
 def row_state(ctx, row: TriageRow) -> str:
     """The row's decision: excluded (from the exclusion itself), accepted, or open."""
-    if row.can_exclude and field_key(row.well, row.fov, row.timepoint) in excluded_fields(ctx):
+    if (row.kind in (KIND_FIELD_QUALITY, KIND_EXCLUDED)
+            and field_key(row.well, row.fov, row.timepoint) in excluded_fields(ctx)):
         return STATE_EXCLUDED
     decisions = getattr(ctx.state.dataset, "triage_decisions", None) or {}
     if (decisions.get(row.key) or {}).get("state") == STATE_ACCEPTED:
@@ -304,5 +372,7 @@ def summary(ctx, rows) -> str:
     for r in open_rows:
         by_stage[r.stage] = by_stage.get(r.stage, 0) + 1
     parts = ", ".join(f"{n} {stage}" for stage, n in sorted(by_stage.items()))
+    excluded = len(excluded_fields(ctx))
     return (f"{len(rows)} finding(s), {len(open_rows)} open"
-            + (f" ({parts})." if parts else "."))
+            + (f" ({parts})." if parts else ".")
+            + (f" {excluded} field(s) excluded by hand." if excluded else ""))

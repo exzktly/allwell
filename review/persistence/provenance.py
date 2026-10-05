@@ -135,8 +135,13 @@ def before_write(path: Path) -> dict[str, object] | None:
         return None
 
 
-def after_write(path: Path, before: dict[str, object] | None, text: str) -> int:
-    """Record every watched block that *text* changed. Returns how many."""
+def after_write(path: Path, before: dict[str, object] | None, text: str, *,
+                durable: bool = True) -> int:
+    """Record every watched block that *text* changed. Returns how many.
+
+    *durable* is the write's own: a non-durable autosave records its history
+    line without an fsync too (:func:`util.provenance_log.append_event`).
+    """
     if before is None:
         return 0
     path = Path(path)
@@ -150,9 +155,9 @@ def after_write(path: Path, before: dict[str, object] | None, text: str) -> int:
             new = block_digest(after[domain])
             if old == new:
                 continue
-            append_event(directory, "analysis_changed", source="review", detail={
-                "domain": domain, "file": path.name, "before": old, "after": new,
-            })
+            append_event(directory, "analysis_changed", source="review", durable=durable,
+                         detail={"domain": domain, "file": path.name,
+                                 "before": old, "after": new})
             recorded += 1
     return recorded
 

@@ -115,7 +115,10 @@ def rerun_wells(ctx, rows) -> list[str]:
     if not wells:
         return []
     from ..controller import open_in_analyze
-    open_in_analyze(ctx, force_wells=wells, only_wells=wells)
+    if not open_in_analyze(ctx, force_wells=wells, only_wells=wells):
+        # No Analyze pane in this build, or a folder Analyze cannot open: the
+        # caller must not say a rerun is set up when nothing was.
+        return []
     return wells
 
 

@@ -97,6 +97,11 @@ class DatasetState:
     # (``persistence/triage_decisions.py``). Per dataset, so cleared on a swap.
     field_exclusions: dict = field(default_factory=dict)
     triage_decisions: dict = field(default_factory=dict)
+    # Bumped by every :meth:`begin_load`, including a reload of the folder
+    # already open. A cache keyed on ``data_dir`` alone cannot tell a reload
+    # from no change, and a reload is exactly when files on disk changed under
+    # it — a copy of analysis, a reset (``SavedPlotsStore.ensure_loaded``).
+    load_generation: int = 0
 
     # Monotonic tick over the *contents* of ``cache``. Every path that changes
     # what a cached measurement frame holds — a projected verdict column, a
@@ -145,6 +150,7 @@ class DatasetState:
         still holding a reference sees the empty collections.
         """
         self.data_dir = data_dir
+        self.load_generation += 1
         self.persistence_doc = None
         self.well_paths.clear()
         self.cache.clear()

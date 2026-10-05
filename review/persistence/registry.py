@@ -147,10 +147,10 @@ class PersistenceRegistry:
     # reach these without importing the pane's internals; the registry is the
     # object the app already hands out for the dataset's files.
 
-    def writes_suspended(self, root):
-        """``_io.writes_suspended`` — no dataset JSON written under *root*."""
+    def writes_suspended(self, *roots):
+        """``_io.writes_suspended`` — nothing written at or under *roots*."""
         from review.persistence._io import writes_suspended
-        return writes_suspended(root)
+        return writes_suspended(*roots)
 
     def suppressed_writes(self) -> int:
         """How many writes a suspension has dropped in this process."""

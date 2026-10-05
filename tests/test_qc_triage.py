@@ -242,7 +242,7 @@ def test_rerun_hands_off_exactly_the_selected_wells(tmp_path, monkeypatch):
     from review.features.home import controller as hc
     seen = {}
     monkeypatch.setattr(hc, "open_in_analyze",
-                        lambda ctx, **kw: seen.update(kw))
+                        lambda ctx, **kw: seen.update(kw) or True)
     wells = {"A01": {"health": "missing", "covered_any": 3, "missing": [],
                      "missing_count": 0, "failed": []},
              "B03": {"health": "missing", "covered_any": 3, "missing": [],
@@ -251,3 +251,55 @@ def test_rerun_hands_off_exactly_the_selected_wells(tmp_path, monkeypatch):
     rows = tc.triage_rows(ctx)
     assert tcc.rerun_wells(ctx, rows[1:]) == ["B03"]
     assert seen == {"force_wells": ["B03"], "only_wells": ["B03"]}
+
+
+def test_a_rerun_that_could_not_open_analyze_reports_nothing_queued(tmp_path, monkeypatch):
+    """A build with no Analyze pane: the hand-off answers False, and the
+    status line must not claim a rerun is set up."""
+    from review.features.home import controller as hc
+    monkeypatch.setattr(hc, "open_in_analyze", lambda ctx, **kw: False)
+    wells = {"A01": {"health": "missing", "covered_any": 3, "missing": [],
+                     "missing_count": 0, "failed": []}}
+    ctx = _ctx(tmp_path, {"run_check": _run_check(wells)})
+    assert tcc.rerun_wells(ctx, tc.triage_rows(ctx)) == []
+
+
+def test_every_needs_attention_state_yields_a_row(tmp_path):
+    """A state the completeness record calls unfinished must not pass through
+    the table unreported — ``csv_only`` once did."""
+    from pipeline.completeness import NEEDS_ATTENTION
+    for state in NEEDS_ATTENTION:
+        wells = {"A01": {"health": state, "covered_any": 1, "missing": [],
+                         "missing_count": 0, "failed": []}}
+        (tmp_path / state).mkdir()
+        rows = tc.triage_rows(_ctx(tmp_path / state, {"run_check": _run_check(wells)}))
+        assert [r.well for r in rows] == ["A01"], (state, rows)
+        assert rows[0].can_rerun, state
+
+
+def test_unreadable_wells_are_a_row(tmp_path):
+    rows = tc.triage_rows(_ctx(tmp_path, {"run_check": _run_check(
+        totals={"wells": 6, "unreadable": 2})}))
+    assert [(r.kind, r.detail[:30]) for r in rows] == [
+        (tc.KIND_UNREADABLE, "2 well(s) could not be read by")]
+
+
+def test_an_exclusion_whose_finding_is_gone_stays_on_screen(tmp_path):
+    """Measured by the review: an exclusion on a field no longer flagged had no
+    row, no Reopen, and the summary said every record was clean while the layer
+    went on removing the field's cells."""
+    ctx = _ctx(tmp_path, {"run_check": _run_check()})     # no field-quality block
+    ctx.state.dataset.field_exclusions[("A01", "2", "0")] = {"reason": "blurred", "at": ""}
+    (row,) = tc.triage_rows(ctx)
+    assert (row.kind, row.well, row.fov, row.timepoint) == (tc.KIND_EXCLUDED, "A01", "2", "0")
+    assert "blurred" in row.detail
+    assert tc.row_state(ctx, row) == tc.STATE_EXCLUDED
+    assert tc.summary(ctx, [row]).endswith("1 field(s) excluded by hand.")
+    assert tcc.reopen(ctx, [row]) == 1
+    assert ctx.state.dataset.field_exclusions == {}
+
+
+def test_a_flagged_and_excluded_field_is_one_row_not_two(tmp_path):
+    ctx = _ctx(tmp_path, {"run_check": _run_check(), FIELD_QUALITY_BLOCK: _fq_block()})
+    ctx.state.dataset.field_exclusions[("B02", "2", "0")] = {"reason": "x", "at": ""}
+    assert [r.kind for r in tc.triage_rows(ctx)] == [tc.KIND_FIELD_QUALITY]

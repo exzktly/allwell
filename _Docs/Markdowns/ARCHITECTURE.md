@@ -2430,7 +2430,10 @@ plate. **It measures nothing.** `collect.triage_rows` reads three records other
 parts of the app already wrote: the completeness record (`run_check` — wells
 whose CSV is missing, wells staged and never processed, the field groups the
 run recorded as failed, the groups found missing, and dataset-wide findings),
-the traceback files in `errors/` written since the recorded run began
+every needs-attention well state — a guard holds each state in
+`pipeline.completeness.NEEDS_ATTENTION` to a row, via `WELL_STATE_ROWS` — and
+the count of wells the check could not read), the traceback files in `errors/`
+written since the recorded run began
 (`pipeline.completeness.error_files_since`, the listing `errors_since` counts,
 so the two cannot disagree about which files belong to the run), and the run's
 field-quality verdicts scored by `domain/field_quality_scores`. A source that
@@ -2438,14 +2441,20 @@ cannot speak is a row saying so — no record, a check switched off or stopped, 
 plate too partly measured to score — so an empty table means nothing is known to
 be wrong and can mean nothing else. The completeness record keeps only the first
 few missing groups per well; the rest are one row naming how many were not
-listed, rather than a table that silently understates the well.
+listed, rather than a table that silently understates the well. **Every
+exclusion has a row**, whether or not its field is still flagged: an exclusion
+outlives its finding (a rerun unflags the field, the block goes missing, the
+scorer declines) and goes on removing the field's cells, so one with no flagged
+row gets a row of its own, with Reopen.
 
 **What a row offers follows from where the problem arose.** A *processing* row
 (missing, failed, no CSV, never processed, a traceback) offers **Re-run wells**,
 which goes through Home's one Review-side door into Analyze
 (`home.controller.open_in_analyze`, also what *Finish this run* uses) with the
 selected wells both forced and the only wells run, so nothing else on the plate
-is touched; Analyze opens configured and the user presses Run. An *acquisition*
+is touched; Analyze opens configured and the user presses Run. The hand-off
+answers whether it happened, and a build with no Analyze pane is told so rather
+than told a rerun is set up. An *acquisition*
 row (a field the run measured as unlike the plate) offers **Exclude field…**,
 which asks for a reason. Neither offers the other: a missing field has no rows
 to exclude, and re-segmenting blurred pictures produces the same blurred
@@ -2518,18 +2527,29 @@ partial (3) and nothing to report (4); the manifest carries the same status as a
 word, and is written on every path, including invalid input.
 
 **It does not change the dataset.** The run sits inside
-`persistence/_io.writes_suspended(dataset)` — reached as
-`ctx.persistence.writes_suspended`, with `suppressed_writes` and `record_event`
-beside it on the registry, so the report imports nothing from the pane except
-`ReviewApp` — which drops every JSON write under
-the dataset folder at `_replace_with_text` — the one function that lands them —
-and counts it; pending debounced saves are flushed inside the block so none
-fires afterwards, and the count is in the manifest. Measured, replays that
-re-adopt a plot's groups or move its gating schedule no save at all, so this is
-defence in depth rather than a path the end-to-end test exercises: that test
-pins the outcome (the dataset is byte-identical afterwards) and
-`tests/test_headless_report.py` pins the suspension itself. The one write to
-the dataset is a `report_generated` line in its provenance log (§5.7).
+`persistence/_io.writes_suspended` — reached as `ctx.persistence.writes_suspended`,
+with `suppressed_writes` and `record_event` beside it on the registry, so the
+report imports nothing from the pane except `ReviewApp` — over the dataset
+folder and, when `--dataset` is the results folder and the sidecar sits one
+level up, that sidecar file too (`allwell_report.suspended_roots`). A suspended
+write **raises** `WritesSuspended`, an `OSError`, at `_replace_with_text` and
+`atomic_write_text`, and is counted. Raising rather than returning is the
+point: a caller told its write landed goes on to do what depends on it — the
+legacy-sidecar migration deletes the files it absorbed, the QC migration deletes
+`qc_params.json` — and a silently dropped write would have let it delete the
+only copy. The two destructive steps that come *before* a write check first
+(`_io.is_suspended`): `_doc.write` declines rather than rename an unreadable
+`persistence.json` aside, and the v1→v2 sample-definitions backup is refused
+before it is copied. Pending debounced saves are flushed inside the suspension,
+in a `finally`, so none fires after it lifts. Measured, replays that re-adopt a
+plot's groups or move its gating schedule no save at all, so the suspension is
+defence in depth that the end-to-end test does not exercise: that test pins the
+outcome (the dataset is byte-identical afterwards) and
+`tests/test_headless_report.py` pins the suspension, including a legacy sidecar
+loaded under it. Each run first removes the figures, PDF and manifest an earlier
+run left in `--output` (`clear_previous_output`), so a run that draws fewer
+plots cannot leave an old report beside a new manifest. The one write to the
+dataset is a `report_generated` line in its provenance log (§5.7).
 
 Batch Export groups are not drawn by the report yet: their orchestration lives
 in the panels. Nor does the report apply a recipe first — that would change the

@@ -127,7 +127,8 @@ class SavedPlotsStore:
 
     def __init__(self) -> None:
         self.records: list[SavedPlot] = []
-        self._loaded_dir: Path | None = None
+        #: ``(data_dir, load_generation)`` the records were read for.
+        self._loaded_dir: tuple | None = None
         #: Captures rendered this session that could not be written to disk,
         #: keyed by record id. Never persisted — see ``hold_vector``.
         self._held: dict[str, bytes] = {}
@@ -181,10 +182,20 @@ class SavedPlotsStore:
         return idir / rec.frames_filename
 
     # ── load / persist ────────────────────────────────────────────────────
+    @staticmethod
+    def _load_key(ctx):
+        """Which load of which folder the records belong to. The generation is
+        what makes a reload of the same folder count: copying analysis in, or a
+        reset, rewrites the gallery's section and then reloads the dataset, and
+        a store keyed on the folder alone kept the records from before — whose
+        next persist then erased what the copy had added."""
+        return (SavedPlotsStore._data_dir(ctx),
+                getattr(ctx.state.dataset, "load_generation", 0))
+
     def load(self, ctx) -> None:
         """(Re)load records for the current dataset from persistence.json."""
         self.records = []
-        self._loaded_dir = self._data_dir(ctx)
+        self._loaded_dir = self._load_key(ctx)
         # ``persistence._doc`` reads/writes ``persistence.json`` off the dataset
         # state (ctx-native; it unwraps the app internally).
         section = _doc.get_section(ctx, _SECTION)
@@ -194,8 +205,8 @@ class SavedPlotsStore:
                     self.records.append(SavedPlot.from_dict(entry))
 
     def ensure_loaded(self, ctx) -> None:
-        """Load lazily, and reload when the dataset directory changed."""
-        if self._loaded_dir != self._data_dir(ctx):
+        """Load lazily, and reload when the dataset was (re)loaded since."""
+        if self._loaded_dir != self._load_key(ctx):
             self.load(ctx)
 
     def _persist(self, ctx) -> None:

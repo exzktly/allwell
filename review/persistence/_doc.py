@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from review.persistence._io import atomic_write_json
+from review.persistence._io import atomic_write_json, is_suspended
 
 _logger = logging.getLogger("review")
 
@@ -136,16 +136,28 @@ def _set_aside_unreadable(p) -> bool:
     return False
 
 
-def write(state, doc: dict) -> None:
-    """Atomically replace the on-disk doc and refresh the cache."""
+def write(state, doc: dict) -> bool:
+    """Atomically replace the on-disk doc and refresh the cache.
+
+    Returns whether the write was made — or, inside a debounced autosave,
+    accepted for the background writer, which reports its own failures. Every
+    refusal answers ``False`` and logs why, so a caller that must not report a
+    change it did not make (copying analysis in, absorbing a legacy file) can
+    tell.
+    """
     p = path_for(state)
     if p is None:
-        return
+        return False
     if getattr(state.dataset, "persistence_doc_foreign", False):
         _logger.warning(
             "Not writing %s: it was written by a different schema version and "
             "this build would overwrite state it cannot read.", p)
-        return
+        return False
+    if is_suspended(p):
+        # Before the degraded branch below renames the file aside: under a
+        # suspension that rename would be the one change that lands.
+        _logger.info("Not writing %s: writes are suspended under it.", p)
+        return False
     if getattr(state.dataset, "persistence_doc_degraded", False):
         # The doc in memory is empty because the read failed, not because the
         # dataset has nothing saved. Writing it back would erase every section
@@ -157,7 +169,7 @@ def write(state, doc: dict) -> None:
             # to avoid, so the write is abandoned instead.
             _logger.warning("Not writing %s: its unreadable predecessor could "
                             "not be preserved.", p)
-            return
+            return False
         state.dataset.persistence_doc_degraded = False
     doc.setdefault("schema_version", SCHEMA_VERSION)
     try:
@@ -171,7 +183,7 @@ def write(state, doc: dict) -> None:
         atomic_write_json(p, doc, deferrable=True)
     except OSError as exc:
         _logger.warning("Failed to write %s: %s", p, exc)
-        return
+        return False
     # A deferred write has not landed yet, so this is the optimistic half: the
     # cache takes the doc the user's edit produced, and a write that later
     # fails is reported by the writer rather than by rolling the cache back.
@@ -179,20 +191,22 @@ def write(state, doc: dict) -> None:
     # to the next ``set_section``, so one unwritable moment would erase the
     # edit from every subsequent write too.
     state.dataset.persistence_doc = doc
+    return True
 
 
 def get_section(ctx, key: str) -> Any:
     return read(ctx.state).get(key)
 
 
-def set_section(ctx, key: str, value: Any) -> None:
-    """Mutate one section and flush the whole doc to disk."""
+def set_section(ctx, key: str, value: Any) -> bool:
+    """Mutate one section and flush the whole doc to disk. ``True`` when the
+    write was made (or accepted by the background writer); see :func:`write`."""
     doc = read(ctx.state)
     if value is None:
         doc.pop(key, None)
     else:
         doc[key] = value
-    write(ctx.state, doc)
+    return write(ctx.state, doc)
 
 
 def _migrate_from_legacy(persistence_path: Path) -> dict:

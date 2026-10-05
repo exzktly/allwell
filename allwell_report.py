@@ -27,14 +27,18 @@ exit code and a sentence rather than an ``ImportError``.
 absence, so a reader of the output folder can tell a gallery of three from a
 gallery of five with two failures.
 
-**The dataset is not changed.** The whole run sits inside
-``review.persistence._io.writes_suspended(dataset)``, which drops every JSON
-write under the dataset folder at the one function that lands them; pending
-debounced saves are flushed inside it so none fires after. Measured, replays
-that re-adopt a plot's groups or move its gating schedule no save at all, so
-this is defence in depth; the count is in the manifest. The one write to the
-dataset is a ``report_generated`` line in its provenance log — history, not
-state.
+**The dataset is not changed.** The whole run sits inside a write suspension
+(``review.persistence._io.writes_suspended``, reached through
+``ctx.persistence``) over the dataset folder and, when the sidecar sits one
+level above it, that file (:func:`suspended_roots`). A suspended write raises
+``WritesSuspended`` — an ``OSError`` — so a caller that would otherwise go on
+to delete what it thinks it has just rewritten (the legacy-sidecar migration)
+treats it as the failure it is. Pending debounced saves are flushed inside the
+suspension, whatever happens. Measured, replays that re-adopt a plot's groups
+or move its gating schedule schedule no save at all, so this is defence in
+depth; the count is in the manifest. The one write to the dataset is a
+``report_generated`` line in its provenance log — history, not state. Each run
+first clears what an earlier run of this command left in ``--output``.
 """
 
 from __future__ import annotations
@@ -136,6 +140,46 @@ def _app_version() -> str | None:
     return str(__version__)
 
 
+def suspended_roots(dataset: Path) -> list[Path]:
+    """Everything a report must not write: the dataset folder, and its sidecar
+    when that sits one level above the folder given.
+
+    ``--dataset`` may be the results folder itself, and for the Analyze layout
+    ``pipeline_info.json`` then sits in its parent, outside the folder — where
+    every definitions, gating and variables write lands. The file alone is
+    suspended there, not the parent folder, which may hold other datasets.
+    The rule is the loader's (``review.domain.viewer_state.resolve_pipeline_info_path``,
+    applied to ``out/`` when the folder has one), restated here because this
+    entry point may not import the pane's internals.
+    """
+    dataset = Path(dataset)
+    data_dir = dataset / "out" if (dataset / "out").is_dir() else dataset
+    roots = [dataset]
+    sidecar = data_dir.parent / "pipeline_info.json"
+    if not (data_dir / "pipeline_info.json").exists() and sidecar.exists() \
+            and data_dir.parent.resolve() != dataset.resolve():
+        roots.append(sidecar)
+    return roots
+
+
+def clear_previous_output(out_dir: Path) -> None:
+    """Remove what an earlier run of this command left in *out_dir*.
+
+    Only the files this command writes — ``figures/NN_*.png`` / ``.svg``,
+    ``report.pdf``, ``manifest.json`` — and never anything else in the folder.
+    Without it, a run that draws fewer plots, or none, leaves the previous
+    run's figures and PDF beside a manifest that does not list them: an old
+    report reading as a current one.
+    """
+    figures = out_dir / "figures"
+    if figures.is_dir():
+        for path in figures.iterdir():
+            if path.suffix in (".png", ".svg") and re.match(r"\d{2,}_", path.name):
+                path.unlink()
+    for name in ("report.pdf", MANIFEST_FILENAME):
+        (out_dir / name).unlink(missing_ok=True)
+
+
 def _write(manifest: Manifest, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest.finish()
@@ -190,6 +234,7 @@ def run_report(dataset: Path | str, out_dir: Path | str, *, pdf: bool = True) ->
     manifest = Manifest(dataset=str(dataset), output=str(out_dir),
                         generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
                         app_version=_app_version())
+    clear_previous_output(out_dir)
     if not dataset.is_dir():
         manifest.exit_code = EXIT_INVALID_INPUT
         manifest.message = f"{dataset} is not a folder"
@@ -206,19 +251,24 @@ def run_report(dataset: Path | str, out_dir: Path | str, *, pdf: bool = True) ->
         ctx = app._ctx
         pers = ctx.persistence
         before = pers.suppressed_writes()
-        with pers.writes_suspended(dataset):
-            app._load_path(dataset)
-            if not ctx.state.dataset.well_paths:
-                manifest.exit_code = EXIT_INVALID_INPUT
-                manifest.message = f"no wells could be loaded from {dataset}"
-            elif ctx.features.get("Saved Plots") is None:
-                manifest.exit_code = EXIT_INVALID_INPUT
-                manifest.message = "Saved Plots is not part of this build"
-            else:
-                drawn = _draw_all(ctx, manifest, out_dir)
-                if pdf:
-                    _write_pdf(ctx, drawn, manifest, out_dir)
-            pers.flush_all()
+        with pers.writes_suspended(*suspended_roots(dataset)):
+            try:
+                app._load_path(dataset)
+                if not ctx.state.dataset.well_paths:
+                    manifest.exit_code = EXIT_INVALID_INPUT
+                    manifest.message = f"no wells could be loaded from {dataset}"
+                elif ctx.features.get("Saved Plots") is None:
+                    manifest.exit_code = EXIT_INVALID_INPUT
+                    manifest.message = "Saved Plots is not part of this build"
+                else:
+                    drawn = _draw_all(ctx, manifest, out_dir)
+                    if pdf:
+                        _write_pdf(ctx, drawn, manifest, out_dir)
+            finally:
+                # Inside the suspension whatever happened above: a save still
+                # queued on the background writer must meet the suspension,
+                # not run after it lifts.
+                pers.flush_all()
         manifest.writes_suppressed = pers.suppressed_writes() - before
     except Exception as exc:
         _logger.exception("headless report failed")

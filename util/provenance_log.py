@@ -170,13 +170,19 @@ def format_line(event: str, *, source: str, detail: dict,
 
 
 def append_event(directory: Path | str | None, event: str, *, source: str,
-                 detail: dict, now: float | None = None) -> bool:
+                 detail: dict, now: float | None = None,
+                 durable: bool = True) -> bool:
     """Append one event to *directory*'s log. ``True`` when it reached disk.
 
     *directory* of ``None`` is a caller with no dataset open, and answers
     ``False`` without writing. Raises ``ValueError`` for an event the roster
     does not know or a detail missing a required key; every I/O failure is
     logged at WARNING and answered ``False``.
+
+    *durable* ``False`` skips the fsync. The caller recording a debounced
+    autosave passes it: that write skipped its own fsync because one on a
+    network share is a visible pause on the GUI thread, and the history line
+    beside it is no more precious than the state it describes.
     """
     line = format_line(event, source=source, detail=detail, now=now)
     if directory is None:
@@ -196,7 +202,8 @@ def append_event(directory: Path | str | None, event: str, *, source: str,
         while view:
             written = os.write(fd, view)
             view = view[written:]
-        os.fsync(fd)
+        if durable:
+            os.fsync(fd)
     except OSError as exc:
         _LOG.warning("could not append to the provenance log %s (%s); the %s "
                      "event may be missing or partial", path, exc, event)

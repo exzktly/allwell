@@ -1318,7 +1318,7 @@ def _register_cache_projectors() -> None:
     the list without naming anything, so this stays the one place that knows
     what the list contains.
 
-    **These four registrations are unconditional.** An earlier version of this
+    **Every registration here is unconditional.** An earlier version of this
     paragraph said "a profile that strips a feature strips its projector with
     it", which is not true of the code beneath it: nothing here consults the
     feature registry or the active profile, and each `_lazy_projector` resolves
@@ -1326,7 +1326,9 @@ def _register_cache_projectors() -> None:
     — every one of these four is an *inclusion* layer, and a build that drops a
     tab must not thereby change which cells count. It is said plainly because
     the sentence it replaces would send a reader looking for a gate that has
-    never existed.
+    never existed. The field-exclusion projector QC triage writes for is one
+    more inclusion layer of the same kind, and is unconditional for the same
+    reason: a build that strips the tab must still honour exclusions on disk.
 
     **The curation projector is bound with ``note_change=False``.** It is
     writing onto a frame ``load_and_project`` created a moment ago, which

@@ -18,9 +18,9 @@ coupling inventory that sees every access form
 
 ## 1. Objective and scope
 
-The plan originates from an implementation evaluation of the baseline commit
-(kept on the `evaluate-codebase-architecture-for-efficiency` branch, not on
-`main`). That evaluation made five suggestions:
+The plan originates from `IMPLEMENTATION_EVALUATION.md`, an evaluation of the
+baseline commit that sits beside this file. That evaluation is a snapshot and
+is not updated as rows close; this file is. It made five suggestions:
 
 1. automate a small full-application integration signal;
 2. extract cohesive state owners from `services/remote_runner.py`;

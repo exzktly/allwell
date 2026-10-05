@@ -16,9 +16,8 @@
 plan, so one version bump: 9.10.14 → 9.10.15). Row commits are found with
 `git log --grep '^<ROW>:'`.
 
-**Next action:** batch-10 fast lane (A3), then the terminal steps of section 10
-— bounded full-app files, the reconciliation pass, and the pull request that
-deletes this file
+**Next action:** the commit that deletes this file, then on that commit the full
+fast lane and the bounded full-app files, recorded in the pull request body
 
 ## 1. Objective and scope
 
@@ -809,18 +808,18 @@ Suggestions 2–5 are complete only when all of the following are true:
    board), and the pull request that closes the last row deletes this file and
    says so in its body.
 
-Terminal evidence belongs below and is filled only when the work closes:
+Terminal evidence, filled as the work closed (reconciled against the tree at `d5d5cb3c`: every row's named artifact exists, and the measured values below were re-taken there):
 
 | Evidence | Result |
 |---|---|
-| Terminal commit | pending |
-| `remote_runner.py` lines | pending |
-| Private `remote_runner` compatibility aliases | pending |
-| Target function CCs | pending |
-| Qt retention before / after | pending |
-| Guard family | pending |
-| Full fast lane | pending |
-| Bounded full-app files | pending |
+| Terminal commit | The commit that deletes this file; named in the pull request body |
+| `remote_runner.py` lines | 6,809 → 1,183 (budget 1,183) |
+| Private `remote_runner` compatibility aliases | 85 inventoried → 0 under all four access forms; 10 names reached, exactly `__all__`, each its owner's object |
+| Target function CCs | `apply_export_style_prefs` 104 → 6; `ExportStyleSidebar._build_ui` 103 → 2; `collect_bar_items` 95 → 2; `_items_for_tp` 77 → gone (`_BarCollector.items_for_tp`, CC 6). Allowlisted total 1,192 → 813; functions over CC 40 18 → 14 |
+| Qt retention before / after | Per closed window, loaded: app survives 5 of 5, +746 wrappers, +40 widgets → 0 survive, 0 wrappers, 0 widgets; empty: +277 wrappers, +20 widgets → 0 and 0 (section 3.1.1) |
+| Guard family | Green at `6dc4b15a` with the facade, import, deferred-import and feature-removal guards (623 tests) |
+| Full fast lane | Batch 10 at `6dc4b15a`: 10,619 passed, 0 failed. The run on the terminal commit is in the pull request body |
+| Bounded full-app files | Run on the terminal commit, one process per file; in the pull request body |
 
 ## 11. Fast-lane log
 
@@ -848,3 +847,4 @@ down; the clone is simply what removes the shared state.
 | 7 | C1, C2 | `454a8bc1`, independent clone | 10,560 passed, 10 skipped, 0 failed (7 min 55 s); exit 139 expected |
 | 8 | C3, C4 | `df417486`, independent clone | 10,562 passed, 10 skipped, 0 failed (8 min 8 s); exit 139 expected |
 | 9 | A1, A2, Q3, Q4 (+Q4.1) | `c4af9e24`, independent clone | 10,599 passed, 10 skipped, 0 failed (8 min 31 s); exit 139 expected. Q3 moved the Playground tests into the fast lane |
+| 10 | A3 | `6dc4b15a`, independent clone | 10,619 passed, 10 skipped, 0 failed (8 min 51 s); exit 139 expected |

@@ -155,6 +155,29 @@ def test_a_linear_axis_still_obeys_the_minor_tick_row():
     assert _minor(ax), "the Minor ticks row stopped putting ticks on a linear axis"
 
 
+def test_turning_the_minor_tick_row_on_keeps_the_log_subdivisions():
+    """``minorticks_on`` swaps every axis's minor locator for matplotlib's own,
+    which on a base-2 log axis draws nothing between the powers. The restyle
+    re-installs this module's subdivisions after it, so the row being *on* must
+    leave a log axis exactly as the row being off does.
+
+    Base 2 because it is the base where the two differ: matplotlib's default
+    base-10 subdivision happens to coincide with this module's, so a base-10
+    fixture passes with the re-install deleted (measured: C0 of the
+    implementation remediation plan).
+    """
+    fig, ax = _fig()
+    ax.plot([1, 16], [1, 2])
+    prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    prefs["x_log"] = True
+    prefs["x_log_base"] = "2"
+    prefs["tick_minor"] = True
+    apply_export_style_prefs(fig, prefs)
+    ticks = [t for t in _minor(ax) if 1.0 < t < 16.0]
+    root2 = math.sqrt(2.0)
+    assert ticks == pytest.approx([root2 * 2 ** k for k in range(4)], rel=1e-4)
+
+
 def test_the_y_axis_is_governed_independently_of_the_x():
     """A figure with a log y and a linear x must not get x subdivisions from
     the y's scale — ``minorticks_on``/``off`` act on the whole axes, so the two

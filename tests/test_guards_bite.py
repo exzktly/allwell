@@ -4738,3 +4738,38 @@ def test_facade_scan_clears_what_is_not_a_reach(tmp_path, shape):
     path = _write(tmp_path, "not_reach.py", FACADE_NON_REACHES[shape])
     users = consumers_of("services.remote_runner", [path])
     assert "_target" not in users, f"the {shape} case was wrongly counted"
+
+
+# ── total allowlisted complexity ────────────────────────────────────────────
+#
+# The per-function ratchet stops a new function crossing CC 40 but let an
+# allowlisted one grow without limit. The total-debt ceiling is what notices
+# an existing debt function gaining a branch, and its not-slack twin is what
+# stops a decomposition's saving being spent later.
+
+def _scores_shifted(module, delta: int):
+    real = module._functions_over_threshold()
+    victim = sorted(module.ALLOWLIST)[0]
+    shifted = dict(real)
+    shifted[victim] = real[victim] + delta
+    return lambda: shifted
+
+
+def test_total_cc_guard_catches_an_allowlisted_function_growing(monkeypatch):
+    module = importlib.import_module("tests.test_complexity_ratchet")
+    monkeypatch.setattr(module, "_functions_over_threshold", _scores_shifted(module, +1))
+    with pytest.raises(AssertionError, match="grew from"):
+        module.test_total_allowlisted_complexity_does_not_grow()
+
+
+def test_total_cc_guard_catches_an_unbanked_saving(monkeypatch):
+    module = importlib.import_module("tests.test_complexity_ratchet")
+    monkeypatch.setattr(module, "_functions_over_threshold", _scores_shifted(module, -1))
+    with pytest.raises(AssertionError, match="lower"):
+        module.test_complexity_debt_budget_is_not_slack()
+
+
+def test_total_cc_guard_clears_the_real_tree():
+    module = importlib.import_module("tests.test_complexity_ratchet")
+    module.test_total_allowlisted_complexity_does_not_grow()
+    module.test_complexity_debt_budget_is_not_slack()

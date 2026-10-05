@@ -11,13 +11,13 @@
 
 **Planning baseline:** `main` at `1127c41` (All-Well 9.10.14)
 
-**Current state:** R0 done; the rest `todo`. Workstream branch:
+**Current state:** R0 and C0 done; the rest `todo`. Workstream branch:
 `implementation-remediation-plan` (one pull request at the end of the whole
 plan, so one version bump: 9.10.14 → 9.10.15). Row commits are found with
 `git log --grep '^<ROW>:'`.
 
-**Next action:** C0 — total allowlisted-CC ratchet, then mutation-verified
-characterization of the three complexity seams
+**Next action:** batch-1 fast lane (R0 + C0), then Q0 — the retention
+benchmark
 
 ## 1. Objective and scope
 
@@ -360,6 +360,38 @@ failed and with what `AssertionError`. A class where no test fails gets a new
 focused test before C1–C3 may touch that seam. A file's name and docstring are
 not evidence that it measures the behavior; only a mutation it catches is.
 
+**C0 results.** Each mutation below was applied to the product code alone,
+the seam's test files were run, and the code was restored. "Survived" means the
+whole seam suite stayed green; each survivor got the test named beside it, and
+that test was then shown failing under the same mutation.
+
+| # | Seam | Mutation | Before C0 | Caught by |
+|---|---|---|---|---|
+| S1a | Style | flat axis limit applied to every panel, not only the targeted one | survived (25 passed) | `test_export_axis_prefs_per_figure.py::test_a_flat_limit_reaches_only_the_targeted_panel` (new) |
+| S1b | Style | typed limits not re-asserted at the end of the pass | caught | `test_typed_axis_limits_are_the_last_word.py::test_a_lost_limit_is_reported_rather_than_silently_fixed` |
+| S2 | Style | log-axis subdivisions not re-installed after *Minor ticks* on | survived (39 passed) | `test_log_minor_ticks.py::test_turning_the_minor_tick_row_on_keeps_the_log_subdivisions` (new; base 2, because base 10 coincides with matplotlib's default) |
+| S3a | Style | *Show grid* ignored | caught | `test_the_grid_stays_off_through_a_theme_flip.py::test_a_theme_flip_does_not_bring_the_grid_back` |
+| S3b | Style | colour-bar exemption removed | caught | `test_heatmap_value_format.py::test_tagged_colorbar_keeps_its_log_scale` |
+| S4a | Style | open-marker preference not applied to lines | caught | `test_scatter_gating_and_markers.py::test_style_pass_applies_open_markers_to_a_data_carrying_shape` |
+| S4b | Style | scatter `PathCollection`s skipped | caught | `test_scatter_density_gating.py::test_density_respects_open_circle_marker` |
+| S4c | Style | data-encoded marker fill overwritten | survived (103 passed) | `test_scatter_gating_and_markers.py::test_style_pass_leaves_a_data_carrying_fill_alone` (new, real `Line2D`) |
+| SB1a | Sidebar | Legend section built where the figure has no legend | caught | `test_properties_hides_what_it_cannot_do.py::test_a_section_the_heat_map_cannot_use_is_not_built` |
+| SB1b | Sidebar | a control drawn but its key no longer bound (Show grid) | survived (54 passed) | `test_properties_control_contract.py::test_each_panel_binds_its_measured_roster` (new) |
+| SB2a | Sidebar | Show grid seeded with a constant, not its stored pref | survived (111 passed) | `test_properties_control_contract.py::test_a_rebuilt_panel_shows_every_stored_value` (new) |
+| SB2b | Sidebar | Grid opacity bound under `grid_style` | survived (111 passed) | `test_properties_control_contract.py::test_no_pref_key_is_bound_to_two_controls` (new) |
+| SB3 | Sidebar | Legend location not restored from the store | survived (111 passed) | `test_properties_control_contract.py::test_a_rebuilt_panel_shows_every_stored_value` (new) |
+| SB4/5 | Sidebar | Error bars control disconnected, or its kind not stored | survived (303 passed across all 27 sidebar-touching files) | `test_properties_control_contract.py::test_choosing_an_error_bar_kind_reaches_the_plot_state` (new) |
+| B1 | Bars | pool-replicates toggle ignored | caught | `test_barplot_collect.py::test_collect_bar_items_pool_replicates_off_expands_to_wells` |
+| B2 | Bars | well-major emission order replaced by timepoint-major | caught | `test_barplot_collect.py::test_collect_bar_items_multi_tp_well_major_order` |
+| B3a | Bars | t0 denominator dropped | caught | `test_barplot_collect.py::test_collect_bar_items_baseline_t0_uses_member_stat` |
+| B3b | Bars | control denominator dropped | caught | `test_barplot_collect.py::test_collect_bar_items_fold_change_self_control_yields_one` |
+| B4 | Bars | a NaN mean drawn as a bar (`has_mean=True`) | survived (56 passed) | `test_barplot_collect.py::test_a_well_with_no_value_at_the_timepoint_is_drawn_as_missing` (new) |
+| B5 | Bars | replicate set ignores FOV mode | survived (56 passed) | `test_barplot_collect.py::test_a_replicate_set_s_spread_follows_the_replicate_unit` (new; helpers stubbed to differ, since the conftest mock computes both from the same numbers) |
+| B6 | Bars | single well's Events ignore FOV mode | survived (59 passed) | `test_barplot_collect.py::test_a_single_well_s_events_follow_the_replicate_unit` (new) |
+| B7 | Bars | a solo well given a cross-well total | survived (59 passed) | `test_barplot_collect.py::test_a_well_with_no_value_at_the_timepoint_is_drawn_as_missing` (extended) |
+| B8 | Bars | replicate set's per-FOV Events spread dropped | survived (59 passed) | `test_barplot_collect.py::test_a_replicate_set_s_spread_follows_the_replicate_unit` (extended) |
+| B9 | Bars | the batch collector's copy of B6 | survived (1,276 bar, batch-export and fold-change tests) | `test_barplot_collect.py::test_a_solo_well_draws_the_same_bar_on_the_tab_and_in_a_batch` (new) |
+
 **Definition of Done:** the total-debt ratchet exists with its bite case;
 every behavior class in the table has a recorded mutation that a named test
 catches, or a new test that does; and no product code changes.
@@ -617,7 +649,7 @@ commit still owns one row.
 | ID | Status | Depends on | Deliverable / proof | Evidence |
 |---|---|---|---|---|
 | R0 | `done` | — | Facade inventory, four-form liveness guard with bite cases, seeded ratchets | `git log --grep '^R0:'`. `__all__` = the 10 supported names; `tests/test_remote_runner_facade.py` inventories the 85 other names reached through the runner (13 alias, 41 binding, 31 owned) under all four access forms via `tests/_facade_scan.py`. Of the 11 candidates, 10 confirmed dead and removed; `_transit_refused` is live (`tests/test_remote_transit_volume.py:120`) and kept. Bite cases: 8 reach shapes + 3 non-reaches; mutating out the attribute, named-setattr and string-target branches failed 4, 2 and 1 of them respectively. Runner 6,810 lines after adding `__all__` (budget 6,810, unchanged). Ran: ruff; guard family + `test_guards_bite` + facade guard (554 passed); remote group + all 55 runner-reaching test files (1,418 passed). Fast lane: see the batch-1 entry in section 11 |
-| C0 | `todo` | — | Total allowlisted-CC ratchet + mutation-verified characterization per behavior class | Not started. Baseline total 1,192 |
+| C0 | `done` | — | Total allowlisted-CC ratchet + mutation-verified characterization per behavior class | `git log --grep '^C0:'`. `TOTAL_ALLOWLISTED_CC_BUDGET = 1192` with growth and not-slack tests and three bite cases. 24 mutation rows across the three seams (section 5, *C0 results*; SB4/5 is two mutations): 10 caught by existing tests, 14 survived; every survivor now fails a named test (11 new tests, 2 extended). Product code unchanged. Ran: ruff; the seam files; guard family. Fast lane: batch 1 in section 11 |
 | Q0 | `todo` | — | Reproducible `bench_app_retention.py` + JSON output | Not started. Requires PySide6 (installed by the cloud session-start hook) |
 | A0 | `todo` | R0 | Classified re-export inventory for `remote_runner` and `process_microscopy` | Not started |
 | R1 | `todo` | R0, A0 | Fetched-output owner and verification characterization | Candidate: `services/remote_fetch.py` |
@@ -764,6 +796,14 @@ The full fast lane (`scripts/test.sh`) is run locally after each batch of work,
 against a tree with no edits in flight, and recorded here with the commit it ran
 against. A run that straddled an edit is not recorded.
 
+**Run it in an independent clone, not a `git worktree`.** A baseline run in a
+worktree of `main`, while the primary checkout was being edited, reported nine
+failures in remote-runner tests whose `inspect.getsource` returned a different
+method from the one asked for — the source it read did not match the code it
+had imported. All nine passed in isolation on both trees, and the same commit
+in a `git clone --no-hardlinks` copy ran clean. The mechanism was not pinned
+down; the clone is simply what removes the shared state.
+
 | Batch | Rows | Commit | Result |
 |---|---|---|---|
-| 0 (baseline) | — | `main` at `1127c41`, in a separate worktree | running |
+| 0 (baseline) | — | `main` at `1127c41`, in an independent clone | 10,462 passed, 10 skipped, 0 failed (7 min 50 s); exit 139 is the expected PySide6 teardown SIGSEGV after a green run |

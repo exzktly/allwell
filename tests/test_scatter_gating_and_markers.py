@@ -226,6 +226,32 @@ def test_style_pass_applies_open_markers_to_a_data_carrying_shape():
     assert square.markeredgecolor == "blue"
 
 
+
+def test_style_pass_leaves_a_data_carrying_fill_alone():
+    """The Line tab's grey mode encodes a trace in the fill as well as the
+    shape, and tags such lines ``_aw_marker_face_is_data``. A filled marker
+    preference must not re-fill them, or half the traces become identical.
+
+    A real ``Line2D`` rather than the recording stub, so the assertion reads the
+    face colour matplotlib will draw. Measured: deleting the opt-out left this
+    file green before this test (C0 of the implementation remediation plan).
+    """
+    from matplotlib.colors import to_rgba
+    from matplotlib.figure import Figure
+
+    from review.core.plot_style import apply_export_style_prefs
+
+    fig = Figure()
+    ax = fig.add_subplot(1, 1, 1)
+    (hollow,) = ax.plot([0, 1], [0, 1], marker="o", color="tab:blue",
+                        markerfacecolor="none")
+    hollow._aw_marker_face_is_data = True
+
+    apply_export_style_prefs(fig, {"marker_style": "o", "marker_size": 8.0})
+
+    assert hollow.get_markerfacecolor() == "none"
+    assert to_rgba(hollow.get_markeredgecolor()) == to_rgba("tab:blue")
+
 # ── 2. the Cell Gating fluor gate reaches callers using display labels ──────
 
 def _gating_ctx(*, fluor_gates=None, thresh_frac_on=None):

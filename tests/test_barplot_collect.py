@@ -660,3 +660,111 @@ def test_bar_idx_at_x_uses_real_cluster_positions():
     # Endpoints still resolve.
     assert bar_idx_at_x(-1.0, 4, xs) == 0
     assert bar_idx_at_x(9.0, 4, xs) == 3
+
+
+def test_a_well_with_no_value_at_the_timepoint_is_drawn_as_missing():
+    """Undefined is not zero and not a bar: a well whose aggregate at this
+    timepoint is NaN must come back ``has_mean=False``.
+
+    Measured (C0 of the implementation remediation plan): with the per-well
+    branch's ``has_mean`` forced to ``True`` the bar-collection suite stayed
+    green, because every fixture well had a value at every timepoint.
+    """
+    from tests.conftest import MockApp
+
+    pts = {
+        "A01": [make_agg(0.0, 100.0), make_agg(1.0, float("nan"))],
+        "A02": [make_agg(0.0, 100.0), make_agg(1.0, 150.0)],
+    }
+    app = MockApp(per_well_pts=pts,
+                  selections=[{"name": "CTRL", "wells": ["A01", "A02"], "hidden": False}])
+    with _with_plot_overrides(app, bar_group_mode="well", bar_pool_replicates=False):
+        _, items, _ = collect_bar_items(app._ctx, 1.0, fc_state=FC_STATE_OFF)
+    by_key = {it.key: it for it in items}
+    assert by_key["A01"].has_mean is False
+    assert by_key["A02"].has_mean is True
+    assert by_key["A02"].mean == 150.0
+    # One well is not an aggregation of anything, so it carries no cross-well
+    # total (the CSV would otherwise print a replicate unit for a solo well).
+    assert by_key["A02"].n_above_total is None
+
+
+@pytest.mark.parametrize("fov_mode,expected_spread,expected_events", [
+    (True, 7.0, (3.0, 0.3)),
+    (False, 1.0, (4.0, 0.4)),
+])
+def test_a_replicate_set_s_spread_follows_the_replicate_unit(
+        mock_app, monkeypatch, fov_mode, expected_spread, expected_events):
+    """With FOV mode on, a replicate set's bar takes the per-FOV statistic;
+    off, the per-well one — the same rule the Statistics test uses.
+
+    The two helpers are stubbed to return *different* spreads, because the
+    conftest mock computes both from the same numbers: there, swapping them is
+    invisible, and a mutation that ignored FOV mode left the suite green (C0
+    of the implementation remediation plan).
+    """
+    import review.features.barplot.collect as C
+
+    monkeypatch.setattr(C, "compute_rep_stats",
+                        lambda *a, **k: (100.0, 1.0, 0.5, 0.01))
+    monkeypatch.setattr(C, "compute_rep_per_fov_stats",
+                        lambda *a, **k: (100.0, 7.0, 0.5, 0.07, 3.0, 0.3))
+    monkeypatch.setattr(C, "compute_rep_n_above_stats",
+                        lambda *a, **k: (4.0, 0.4))
+    mock_app._use_fov_replicates = fov_mode
+    _, items, _ = collect_bar_items(mock_app._ctx, 1.0, fc_state=FC_STATE_OFF)
+    by_key = {it.key: it for it in items}
+    assert by_key["CTRL"].spread == expected_spread
+    # The Events panel follows the same unit, spread included.
+    assert (by_key["CTRL"].n_above, by_key["CTRL"].n_above_spread) == expected_events
+
+
+@pytest.mark.parametrize("fov_mode,expected", [(True, (2.5, 0.5)), (False, (5.0, 0.0))])
+def test_a_single_well_s_events_follow_the_replicate_unit(fov_mode, expected):
+    """A well's Events bar is the per-FOV mean ± spread with FOV mode on, and
+    the well's own count with it off. The aggregate carries both, with
+    different values, so reading the wrong one shows.
+
+    Measured: with the per-well branch's FOV-mode check forced off, the
+    bar-collection, events-CSV and spread-CSV files all stayed green (C0 of
+    the implementation remediation plan).
+    """
+    from tests.conftest import MockApp
+
+    pts = {"A01": [make_agg(1.0, 100.0, n_above=5,
+                            n_above_pf_mean=2.5, n_above_pf_spread=0.5)]}
+    app = MockApp(per_well_pts=pts,
+                  selections=[{"name": "S", "wells": ["A01"], "hidden": False}])
+    app._use_fov_replicates = fov_mode
+    with _with_plot_overrides(app, bar_group_mode="well", bar_pool_replicates=False):
+        _, items, _ = collect_bar_items(app._ctx, 1.0, fc_state=FC_STATE_OFF)
+    (item,) = items
+    assert (item.n_above, item.n_above_spread) == expected
+
+
+@pytest.mark.parametrize("fov_mode", [True, False])
+def test_a_solo_well_draws_the_same_bar_on_the_tab_and_in_a_batch(fov_mode):
+    """Tab/batch parity for one well: every value the bar draws agrees.
+
+    The batch collector carries its own copy of the per-well branch. Measured:
+    forcing its FOV-mode check off left 1,276 bar, batch-export and
+    fold-change tests green (C0 of the implementation remediation plan), so
+    the two copies were free to disagree.
+    """
+    from tests.conftest import MockApp
+
+    pts = {"A01": [make_agg(1.0, 100.0, spread=4.0, frac=0.4, frac_spread=0.05,
+                            n_above=5, n_above_pf_mean=2.5,
+                            n_above_pf_spread=0.5)]}
+    app = MockApp(per_well_pts=pts,
+                  selections=[{"name": "S", "wells": ["A01"], "hidden": False}])
+    app._use_fov_replicates = fov_mode
+    with _with_plot_overrides(app, bar_group_mode="well", bar_pool_replicates=False):
+        _, (tab,), _ = collect_bar_items(app._ctx, 1.0, fc_state=FC_STATE_OFF)
+    (batch,) = collect_bar_items_for_group(
+        app._ctx, BarGroup("G", members=[], solo_wells=["A01"]), 1.0,
+        val_col="gfp_mean_intensity", threshold=50.0, use_sem=True,
+        per_fov_spread=fov_mode, fc_state=FC_STATE_OFF)
+
+    fields = ("mean", "spread", "frac", "frac_spread", "n_above", "n_above_spread")
+    assert {f: getattr(batch, f) for f in fields} == {f: getattr(tab, f) for f in fields}

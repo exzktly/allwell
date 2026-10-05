@@ -11,13 +11,12 @@
 
 **Planning baseline:** `main` at `1127c41` (All-Well 9.10.14)
 
-**Current state:** R0, C0, Q0, Q1, Q2, A0, R1, R2, R3 (+R3.1), R4, R5, C1, C2, C3, C4, A1 done; the rest `todo`. Workstream branch:
+**Current state:** R0, C0, Q0, Q1, Q2, A0, R1, R2, R3 (+R3.1), R4, R5, C1, C2, C3, C4, A1 done; A2 declined; the rest `todo`. Workstream branch:
 `implementation-remediation-plan` (one pull request at the end of the whole
 plan, so one version bump: 9.10.14 → 9.10.15). Row commits are found with
 `git log --grep '^<ROW>:'`.
 
-**Next action:** A2 — decide (likely `declined`: no row touched an
-Analyze mixin), then Q3 — minimal-shell fixtures for single-feature slow tests
+**Next action:** Q3 — minimal-shell fixtures for single-feature slow tests
 
 ## 1. Objective and scope
 
@@ -692,7 +691,7 @@ commit still owns one row.
 | Q3 | `todo` | Q0 | Minimal-shell fixture and safe test migrations | Mutation-tested assertions |
 | Q4 | `todo` | Q2, Q3 | Before/after result and stable regression budget | Fresh-process benchmark runs |
 | A1 | `done` | R1, R2, R3 | First-party imports point to owners | `git log --grep '^A1:'`. `remote_runner`: done by R5 (0 names reached outside `__all__`). `process_microscopy`: measured with the four-form scan, two sets — the 19 pure aliases A0 left, and every name the orchestrator *imports* that something reached through it (29). Application code: the Playground's three aliases (`BACKGROUND_METHODS`, `FLATFIELD_MODES`, `estimate_background_field`) and four bindings it read through `pm` — `services/frame_preview` (`_ensure_pkg_resources_shim`, `_load_stardist_pretrained`, now on `pipeline.stardist_cache`, where its tests now patch them), `scripts/allwell_remote` (`build_parser`), the Playground controller (`load_2d_gray`), `services/remote_process` (`run_auto_threshold_pass`) — all import from the owner, lazy where they were lazy. Tests: 31 files moved to owners, by AST script plus hand edits for renamed aliases (`_bg_well_key`, `_split_background_wells`, `_incremental_for_well`), module objects (`pm._suspend`, `pm._stardist`, `pm.os`; rewritten by AST position so code inside subprocess source strings was left alone) and the Cellpose names. Removed: all 19 aliases, the PEP 562 `__getattr__` that re-exported three Cellpose names for two tests, and eight `# noqa: F401 — re-exported` suppressions that had become false (ruff confirms every remaining import is used). Kept, and listed with reasons: five **binding seams** — names the orchestrator calls that tests patch on it, because patching the owner would not reach that call (`ProcessPoolExecutor`, `as_completed`, `_safe_atomic_text_write`, `preflight_scratch_for_run`, `prepare_models`). `tests/test_process_microscopy_facade.py` rewritten to the end state (only unused import is `tifffile`; no application reach to an imported name; tests only at a listed seam), each of its three tests proven to fail under a matching edit. Stale "re-exports" claims corrected in five `pipeline/` docstrings and ARCHITECTURE §6.2. `PROCESS_MICROSCOPY_BUDGET` 3,766 → 3,733. Not in scope and left: `pipeline.flatfield`'s own back-compat names (`_FLATFIELD_SIGMA`, `_FLATFIELD_FLOOR`, `_normalize_flatfield`), still read by tests — an owner's alias, not a facade. Ran: ruff; guard family + every test file reaching `process_microscopy` or a module it moved (121 files, 2,474 passed, 3 skipped) |
-| A2 | `todo` | R4, C4, Q2 | Touched Analyze seams explicit, or declined as not encountered | Scope-controlled |
+| A2 | `declined` | R4, C4, Q2 | Touched Analyze seams explicit, or declined as not encountered | Not encountered: `git diff --stat origin/main...HEAD -- analyze/` is empty at the A1 commit — no row edited an Analyze mixin, so there is no newly encountered sibling-mixin reach to replace, and the row's own Definition of Done says not to manufacture one. The two Analyze modules that import the remote client (`analyze/preflight.py`, `analyze/remote_dialog.py`) reach only its supported `__all__` names and were not modified |
 | A3 | `todo` | R5, C4, Q4, A1, A2 | Stable surfaces frozen and documented | Terminal API guard |
 
 ## 9. Verification matrix

@@ -188,7 +188,7 @@ def open_series_selector(ctx) -> None:
         action = QAction(NO_SERIES_LABEL, menu)
         action.triggered.connect(lambda _=False: _clear())
         menu.addAction(action)
-    menu_exec.exec_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
+    menu_exec.exec_transient_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
 
 
 #: The Property label that is not a column, re-exported from the shared metric
@@ -546,7 +546,7 @@ def open_timepoint_selector(ctx) -> None:
             action = QAction(label, menu)
             action.triggered.connect(lambda _=False, v=value: _set_all(v))
             menu.addAction(action)
-    menu_exec.exec_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
+    menu_exec.exec_transient_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
 
 
 def update_timepoint_button(ctx) -> None:

@@ -16,6 +16,11 @@ parented to *owner*, and added to it, so it goes when *owner* goes, whatever is
 connected to it. ``tests/test_connected_actions_are_owned.py`` fails on a
 connected action built the first way.
 
+That only helps once the owner itself goes. A menu built on every opening and
+parented to a long-lived widget stays alive, with its actions, until that widget
+does; opening it through ``widgets.menu_exec.exec_transient_menu`` is what
+deletes it after each use.
+
 Qt only, no application knowledge.
 """
 

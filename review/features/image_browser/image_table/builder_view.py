@@ -1585,4 +1585,4 @@ def _open_root_filter(ctx, dim: str, anchor: QWidget) -> None:
         return
     menu = _root_filter_menu(ctx, dim, anchor)
     if menu is not None:
-        menu_exec.exec_menu(menu, anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        menu_exec.exec_transient_menu(menu, anchor.mapToGlobal(anchor.rect().bottomLeft()))

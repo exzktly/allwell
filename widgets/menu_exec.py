@@ -33,3 +33,21 @@ from __future__ import annotations
 def exec_menu(menu, global_pos):
     """Open *menu* at *global_pos* and return the chosen ``QAction``, or None."""
     return menu.exec(global_pos)
+
+
+def exec_transient_menu(menu, global_pos):
+    """Open a menu built for this one opening, then delete it.
+
+    A menu built on every click and parented to a long-lived widget is never
+    freed by Qt: it stays a child of that widget, with its actions, until the
+    widget goes. Measured on a job-queue row, five openings left ten menus
+    alive (each with its chain submenu). The menu is deleted with
+    ``deleteLater`` so the chosen action is still valid for the caller; it is
+    skipped when choosing an action already deleted the menu's parent.
+    """
+    try:
+        return exec_menu(menu, global_pos)
+    finally:
+        import shiboken6
+        if shiboken6.isValid(menu):
+            menu.deleteLater()

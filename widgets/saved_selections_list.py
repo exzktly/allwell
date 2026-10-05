@@ -60,6 +60,7 @@ from ui import theme
 from util.well_token import canonical_well_label
 from util.aw_safe import swallowed
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
+from widgets import menu_exec
 from widgets.owned_action import owned_action
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -438,7 +439,7 @@ class _SelectionRow(QFrame):
             m = QMenu(b)
             owned_action(m, "✕ Remove").triggered.connect(
                 lambda _=False, t=token: self._remove_well(t))
-            m.exec(b.mapToGlobal(QPoint(0, b.height())))
+            menu_exec.exec_transient_menu(m, b.mapToGlobal(QPoint(0, b.height())))
         b.clicked.connect(_menu)
         return b
 
@@ -967,7 +968,8 @@ class SavedSelectionsList(QWidget):
         m.addSeparator()
         a_export = m.addAction("Export…")
         a_delete = m.addAction("Delete")
-        chosen = m.exec(anchor.mapToGlobal(QPoint(0, anchor.height())))
+        chosen = menu_exec.exec_transient_menu(
+            m, anchor.mapToGlobal(QPoint(0, anchor.height())))
         if chosen is None:
             return
         if chosen is a_rename:

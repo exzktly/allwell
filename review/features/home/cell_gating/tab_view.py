@@ -560,4 +560,4 @@ def _open_gate_filter_menu(ctx, mode: str) -> None:
         none_a.triggered.connect(
             lambda _=False: _cell_gating_set_gate_choices(ctx, mode, set()))
         menu.addAction(none_a)
-    menu_exec.exec_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
+    menu_exec.exec_transient_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))

@@ -5044,3 +5044,36 @@ def test_the_frozen_facade_guard_finds_an_undeclared_reexport(tmp_path):
     from tests._facade_scan import reexports
     facade = _write(tmp_path, "facade.py", FROZEN_FACADE_SRC)
     assert reexports(facade) == {"helper"}
+
+
+# ── per-open menus are disposed of ───────────────────────────────────────────
+#
+# `tests/test_menu_exec_seam.py` requires a menu built in the function that
+# opens it to go through `exec_transient_menu`, and flags a raw `.exec()` on
+# any name bound to a `*Menu(...)` construction, whatever the name is.
+
+PER_OPEN_MENU_SHAPES = {
+    "built_then_exec_menu": ("def f(b):\n    menu = QMenu(b)\n"
+                             "    menu_exec.exec_menu(menu, pos)\n", [3]),
+    "built_by_a_helper": ("def f(self):\n    m = self.build_menu()\n"
+                          "    menu_exec.exec_menu(m, pos)\n", [3]),
+    "transient_is_clean": ("def f(b):\n    menu = QMenu(b)\n"
+                           "    menu_exec.exec_transient_menu(menu, pos)\n", []),
+    "persistent_menu_is_clean": ("def f(self):\n"
+                                 "    menu_exec.exec_menu(self._menu, pos)\n", []),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(PER_OPEN_MENU_SHAPES))
+def test_the_per_open_menu_guard_judges_each_shape(shape):
+    import ast as _ast
+    from tests.test_menu_exec_seam import per_open_menus_left_alive
+    src, lines = PER_OPEN_MENU_SHAPES[shape]
+    assert per_open_menus_left_alive(_ast.parse(src)) == lines
+
+
+def test_a_raw_exec_on_a_menu_not_named_menu_is_seen(tmp_path):
+    import ast as _ast
+    from tests.test_menu_exec_seam import _menus_built_in
+    tree = _ast.parse("def f(b):\n    m = QMenu(b)\n    m.exec(pos)\n")
+    assert _menus_built_in(tree) == {"m"}

@@ -4982,6 +4982,8 @@ LAZY_TARGET_SHAPES = {
     "built_from_variables": ("m = 'review.core.lazy'\n_x = lazy(m, 'gone')\n", []),
     "registry_hook": ("h = lambda: _import_attr('review.core.lazy', 'gone')\n",
                       ["gone"]),
+    "registry_projector": ("p = _lazy_projector('review.core.lazy', 'gone', a=1)\n",
+                           ["gone"]),
 }
 
 

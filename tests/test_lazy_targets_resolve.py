@@ -25,8 +25,10 @@ import importlib
 from tests._repo_scan import parse_source, python_sources, rel
 
 #: ``lazy`` / ``lazy_names`` from ``review/core/lazy.py``, and the feature
-#: registry's ``_import_attr``, which resolves its hooks the same way.
-_LAZY_CALLS = {"lazy", "_lazy", "lazy_names", "_lazy_names", "_import_attr"}
+#: registry's ``_import_attr`` and ``_lazy_projector``, which resolve their
+#: hooks and cache projectors the same way.
+_LAZY_CALLS = {"lazy", "_lazy", "lazy_names", "_lazy_names", "_import_attr",
+               "_lazy_projector"}
 
 
 def lazy_targets(tree: ast.AST) -> list[tuple[int, str, str]]:

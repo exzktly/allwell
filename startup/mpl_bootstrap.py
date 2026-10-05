@@ -13,19 +13,34 @@ happens. Call it **once, before matplotlib is first imported** (from
 ``allwell.main``). It is defensive: any failure leaves matplotlib's default
 behaviour untouched rather than breaking startup.
 
-Note: on a *cold* cache the very first ``import matplotlib.font_manager`` still
-builds once; after that the limited cache persists (in the repo's ``.mplcache``
-when running from source, in the per-user state directory in a frozen build —
-``sys._MEIPASS`` is a fresh temp tree per launch and cannot hold a cache)
-and every launch skips the scan. To remove even the first-build cost, pre-warm
-the cache during environment provisioning by launching the app once.
+**The restriction has to be in place before ``matplotlib.font_manager`` is
+imported, and a patch cannot be.** The module builds its global ``FontManager``
+as the last statement of its own import: it loads ``fontlist-v<N>.json`` from the
+cache directory and, when there is none, constructs one — which is the full
+system-font scan. A ``findSystemFonts`` replaced after the import therefore came
+too late on every cold cache: the first launch, a fresh per-user state
+directory, and every matplotlib upgrade (``<N>`` changes with the version, so
+the old file no longer counts). So on a cold cache ``configure()`` first writes a
+placeholder font list under that exact name — an empty ``FontManager`` that the
+import loads instead of scanning — then patches discovery and builds the real,
+bundled-only list, which replaces the placeholder on disk. ``<N>`` is read from
+the module's code object, not its source, because a frozen build carries no
+``.py`` files; if it cannot be read, nothing is written and the import scans as
+matplotlib would on its own.
+
+The cache lives in the repo's ``.mplcache`` when running from source, and in the
+per-user state directory in a frozen build — ``sys._MEIPASS`` is a fresh temp
+tree per launch and cannot hold a cache.
 """
 
 from __future__ import annotations
 
+import dis
 import glob
+import json
 import os
 import sys as _sys
+import types
 
 # Both paths below are resolved against the *repository root* (the bundle root
 # in a frozen build), not against this file's own directory: `assets/fonts` and
@@ -76,6 +91,61 @@ def _set_cachedir() -> None:
         pass  # fall back to matplotlib's default cachedir
 
 
+def _font_list_version() -> int | None:
+    """``FontManager.__version__``, without importing ``matplotlib.font_manager``.
+
+    Importing the module is the scan this module exists to avoid, so the number is
+    read from the module's compiled code: the class body of ``FontManager`` stores
+    an integer constant under ``__version__``. ``get_code`` works for a source
+    install and for PyInstaller's frozen importer alike, and executes nothing.
+    ``None`` when it cannot be read; the caller then leaves the import alone.
+    """
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("matplotlib.font_manager")
+        code = spec.loader.get_code(spec.name)
+    except (ImportError, AttributeError, OSError, SyntaxError, ValueError):
+        return None
+    if code is None:
+        return None
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType) and const.co_name == "FontManager":
+            ins = list(dis.get_instructions(const))
+            for load, store in zip(ins, ins[1:]):
+                if (store.opname == "STORE_NAME" and store.argval == "__version__"
+                        and load.opname == "LOAD_CONST"
+                        and isinstance(load.argval, int)):
+                    return load.argval
+    return None
+
+
+def _seed_placeholder_font_list(cachedir: str) -> bool:
+    """Write an empty font list where the import will look, if none is there.
+
+    ``matplotlib.font_manager`` accepts any cached list whose ``_version``
+    matches, so an empty one makes its import load instantly instead of
+    scanning. ``configure()`` replaces it with the real list straight after.
+    Returns whether a placeholder was written.
+    """
+    version = _font_list_version()
+    if version is None:
+        return False
+    path = os.path.join(cachedir, f"fontlist-v{version}.json")
+    if os.path.exists(path):
+        return False
+    placeholder = {"_version": version, "ttflist": [], "afmlist": [],
+                   "defaultFamily": {"ttf": "DejaVu Sans", "afm": "Helvetica"},
+                   "default_size": None, "__class__": "FontManager"}
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(placeholder, fh)
+        os.replace(tmp, path)
+    except OSError:
+        return False  # unwritable cache: the import scans, as it would anyway
+    return True
+
+
 def _under(path: str, roots: list[str]) -> bool:
     if not path:
         return False
@@ -92,6 +162,14 @@ def configure() -> None:
         return  # nothing bundled → leave matplotlib alone
     try:
         import matplotlib
+    except ImportError:
+        return
+    if "matplotlib.font_manager" not in _sys.modules:
+        try:
+            _seed_placeholder_font_list(matplotlib.get_cachedir())
+        except OSError:
+            pass  # no cache directory: the import scans, as it would anyway
+    try:
         import matplotlib.font_manager as fm
     except Exception:
         return
@@ -109,6 +187,7 @@ def configure() -> None:
             return list(bundled)                          # system-wide → bundled only
 
         _limited_find._allwell_limited = True
+        _limited_find._allwell_original = _orig_find
         fm.findSystemFonts = _limited_find
 
     try:
@@ -124,4 +203,14 @@ def configure() -> None:
                               f"fontlist-v{fm.FontManager.__version__}.json")
             fm.json_dump(fm.fontManager, cache_file)
     except Exception:
-        pass  # a functioning (if unlimited) font manager beats a crash
+        # A functioning (if unlimited) font manager beats a crash — and beats the
+        # empty placeholder, which would leave text with no font to resolve.
+        if not list(getattr(getattr(fm, "fontManager", None), "ttflist", []) or []):
+            fm.findSystemFonts = getattr(fm.findSystemFonts, "_allwell_original",
+                                         fm.findSystemFonts)
+            fm.fontManager = fm._load_fontmanager(try_read_cache=False)
+    # The import bound these two module functions to whichever manager it
+    # loaded, so replacing ``fontManager`` alone leaves ``findfont`` answering
+    # from the old one — the placeholder, or the unrestricted cold-cache build.
+    fm.findfont = fm.fontManager.findfont
+    fm.get_font_names = fm.fontManager.get_font_names

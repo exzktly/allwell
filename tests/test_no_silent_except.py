@@ -178,11 +178,6 @@ SILENT_EXCEPT_ALLOWLIST = {
     # remaining channel to report on, which is the one honest case for a bare
     # pass. Everything else in this module now goes through `_quietly`.
     ("services/remote_bootstrap.py", "_quietly"),
-    # Rebuilding matplotlib's font cache. The handler's own comment states the
-    # trade: "a functioning (if unlimited) font manager beats a crash", and the
-    # fallback is a working app with the system font list rather than the
-    # bundled one.
-    ("startup/mpl_bootstrap.py", "configure"),
 }
 
 

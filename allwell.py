@@ -1769,9 +1769,10 @@ def main() -> None:
     # Restrict matplotlib to the bundled fonts BEFORE anything imports it (the
     # first plot pulls matplotlib.figure -> font_manager). Skips matplotlib's
     # full system-font enumeration, which can cost minutes on first launch on a
-    # Windows 365 Cloud PC. Defensive: never blocks startup. (This is the #1
-    # suspect for a silent "hangs on launch" — the boot log brackets it so a
-    # stall here is visible as the last-reached milestone.)
+    # Windows 365 Cloud PC. On a cold cache it seeds a placeholder font list so
+    # that importing font_manager does not scan before the restriction exists
+    # (see startup/mpl_bootstrap.py). Defensive: never blocks startup. The boot
+    # log brackets it, so a stall here is visible as the last-reached milestone.
     _boot_diag.boot("mpl_bootstrap.configure() — limiting matplotlib font scan …")
     try:
         from startup import mpl_bootstrap

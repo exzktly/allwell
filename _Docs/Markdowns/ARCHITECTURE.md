@@ -801,6 +801,19 @@ allwell.main()
     │       restricts font_manager.findSystemFonts to the bundled fonts (+ DejaVu)
     │       and pins MPLCONFIGDIR, so the system-font scan (minutes on a Windows 365
     │       Cloud PC) never runs. Defensive — failure leaves matplotlib untouched.
+    │       The restriction must exist before `import matplotlib.font_manager`,
+    │       because that import builds the global FontManager from the cached
+    │       `fontlist-v<N>.json` or, with none (first launch, a fresh state dir,
+    │       any matplotlib upgrade), from a full system scan — so a patch
+    │       applied after it came too late on every cold cache, which is what
+    │       stalled launch. On a cold cache configure() therefore writes an
+    │       empty placeholder list under that name first (`<N>` read from the
+    │       module's code object, which a frozen build has where it has no
+    │       source), lets the import load it, then builds the bundled-only list
+    │       over it and rebinds `font_manager.findfont` / `get_font_names`, which
+    │       the import bound to whichever manager it loaded.
+    │       `tests/test_mpl_bootstrap.py` launches a cold-cache process and
+    │       counts matplotlib's system-wide `findSystemFonts` calls: zero.
     │       Both `assets/fonts` and the cache resolve against the *repository*
     │       root (the bundle root when frozen), not against the module's own
     │       directory one level down in `startup/` — a font directory resolved

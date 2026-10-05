@@ -2045,6 +2045,9 @@ def test_required_files_list_is_what_we_promised():
         # decides from the same question which members survive a rewrite.
         "util/image_exts.py",
         "util/zip_write.py",
+        # The dataset's append-only provenance log. Written client-side only;
+        # listed because the manifest mirrors every ``util/`` file.
+        "util/provenance_log.py",
         # The Qt-free ``pipeline`` package (analysis-domain modules +
         # segmenters/writers), re-imported at module top level.
         "pipeline/__init__.py",

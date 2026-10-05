@@ -4718,12 +4718,66 @@ FACADE_REACHES = {
 }
 
 
+# The review of #946 (finding 4) added the next three: inline import_module,
+# and relative imports from inside the facade's own package, which
+# `qc/`, `crop/` and `batch_export/` already use.
+FACADE_REACHES.update({
+    "inline_import_module": ("import importlib\n"
+                             "importlib.import_module('services.remote_runner')._target\n"),
+})
+
+#: Written inside the facade's own package, as `services/probe.py`.
+FACADE_RELATIVE_REACHES = {
+    "relative_from_import": "from .remote_runner import _target\n",
+    "relative_package_alias": ("from . import remote_runner as rr\n"
+                               "rr._target()\n"),
+}
+
+
 @pytest.mark.parametrize("shape", sorted(FACADE_REACHES))
 def test_facade_scan_sees_every_access_form(tmp_path, shape):
     from tests._facade_scan import consumers_of
     path = _write(tmp_path, "reach.py", FACADE_REACHES[shape])
     users = consumers_of("services.remote_runner", [path])
     assert "_target" in users, f"the {shape} reach was not seen: {users}"
+
+
+@pytest.mark.parametrize("shape", sorted(FACADE_RELATIVE_REACHES))
+def test_facade_scan_resolves_relative_imports(tmp_path, shape):
+    from tests._facade_scan import consumers_of
+    path = _write(tmp_path, "services/probe.py", FACADE_RELATIVE_REACHES[shape])
+    users = consumers_of("services.remote_runner", [path], root=tmp_path)
+    assert "_target" in users, f"the {shape} reach was not seen: {users}"
+
+
+def test_a_relative_import_of_another_module_is_not_a_reach(tmp_path):
+    from tests._facade_scan import consumers_of
+    path = _write(tmp_path, "pipeline/probe.py", "from .remote_runner import _target\n")
+    users = consumers_of("services.remote_runner", [path], root=tmp_path)
+    assert "_target" not in users
+
+
+def test_module_level_names_reads_conditional_imports(tmp_path):
+    from tests._facade_scan import module_level_names
+    path = _write(tmp_path, "facade.py",
+                  "try:\n    from owner import fast\nexcept ImportError:\n"
+                  "    from owner import slow as fast\n"
+                  "if True:\n    from owner import other\n")
+    assert module_level_names(path) == {"fast": "import", "other": "import"}
+
+
+def test_a_one_word_string_is_not_a_read_of_a_reexport(tmp_path):
+    """Any string that parsed as a bare name counted as the module reading it,
+    so a dead re-export that also appeared in a log message or a dict key was
+    never reported. String annotations and __all__ still count."""
+    from tests._facade_scan import reexports
+    path = _write(tmp_path, "facade.py",
+                  "from __future__ import annotations\n"
+                  "from owner import dead, annotated, listed\n"
+                  "__all__ = ['listed']\n"
+                  "LOG = 'dead'\n"
+                  "def f(x: 'annotated') -> None:\n    pass\n")
+    assert reexports(path) == {"dead"}
 
 
 FACADE_NON_REACHES = {

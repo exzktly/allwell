@@ -35,7 +35,13 @@ import pytest
 import services.remote_runner as rr
 from services.pipeline_runner import ProgressTracker
 from services.remote_config import RemoteHost
-from services.remote_runner import Fetcher, LocalInputMode, OutputFilter
+from services.remote_runner import (
+    LocalInputMode,
+    OutputFilter,
+)
+from services.remote_fetch import Fetcher
+from services import remote_run_state
+from services import remote_scratch
 
 pytestmark = pytest.mark.usefixtures("offline_transport")
 
@@ -43,7 +49,7 @@ pytestmark = pytest.mark.usefixtures("offline_transport")
 def _run(tmp_path: Path):
     out = tmp_path / "out"
     out.mkdir()
-    return rr._RemoteRun(
+    return remote_run_state._RemoteRun(
         run_id="x", cache_key="k", remote_input_dir="/r/in",
         remote_output_dir="/r/out", remote_pidfile="/r/pid",
         local_output_dir=out, local_input_mode=LocalInputMode.ZIP,
@@ -68,7 +74,7 @@ def _bare_fetcher(dest: Path) -> Fetcher:
 def test_the_fetched_zip_is_renamed_into_place_not_copied(tmp_path, monkeypatch):
     dest = tmp_path / "out"
     dest.mkdir()
-    transit = rr._transit_dir(dest)
+    transit = remote_scratch._transit_dir(dest)
     src = transit / "allwell-x-A01_out.zip"
     _write_zip(src)
     inode = src.stat().st_ino

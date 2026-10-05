@@ -25,6 +25,7 @@ import pytest
 
 from services import run_journal as J
 from tests._fake_remote import FakeRemote
+from services.remote_fetch import FetchedOutputVerifier
 
 
 @pytest.fixture
@@ -106,7 +107,7 @@ def spawn(stop_fetchers):
                             lambda self, z, **k: (_KEY, 0, 0.01))
         monkeypatch.setattr(RemoteRunner, "sync_required_files",
                             lambda self, **k: None)
-        monkeypatch.setattr(RemoteRunner, "_list_remote_completed_wells",
+        monkeypatch.setattr(FetchedOutputVerifier, "_list_remote_completed_wells",
                             lambda self: set(completed))
 
         in_dir = plate / "in"
@@ -171,11 +172,11 @@ def test_cleanup_removes_the_run_dir_and_leaves_the_dataset_cache(
     own = str(Path(run.remote_pidfile).parent)
     assert remote.exists(own)
 
-    monkeypatch.setattr(type(runner), "_verify_local_manifest",
+    monkeypatch.setattr(FetchedOutputVerifier, "_verify_local_manifest",
                         lambda self, *, log: [])
-    monkeypatch.setattr(type(runner), "_reconcile_fetch",
+    monkeypatch.setattr(FetchedOutputVerifier, "_reconcile_fetch",
                         lambda self, *, log: "")
-    monkeypatch.setattr(type(runner), "_rsync_optional",
+    monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
                         lambda self, *a, **k: None)
     runner.verify_and_cleanup(True, cleanup_mode="run", log_fn=lambda _m: None)
 
@@ -189,11 +190,11 @@ def test_a_dry_run_cleanup_removes_nothing(host, plate, remote, monkeypatch, spa
                           completed=("A01", "B02"))
     own = str(Path(runner._run.remote_pidfile).parent)
 
-    monkeypatch.setattr(type(runner), "_verify_local_manifest",
+    monkeypatch.setattr(FetchedOutputVerifier, "_verify_local_manifest",
                         lambda self, *, log: [])
-    monkeypatch.setattr(type(runner), "_reconcile_fetch",
+    monkeypatch.setattr(FetchedOutputVerifier, "_reconcile_fetch",
                         lambda self, *, log: "")
-    monkeypatch.setattr(type(runner), "_rsync_optional",
+    monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
                         lambda self, *a, **k: None)
     runner.verify_and_cleanup(True, cleanup_mode="run", dry_run=True,
                               log_fn=lambda _m: None)
@@ -278,11 +279,11 @@ def test_a_re_attached_run_leaves_the_borrowed_directory_alone(
     assert "re-attaching" in log
     own = str(Path(runner._run.remote_pidfile).parent)
 
-    monkeypatch.setattr(type(runner), "_verify_local_manifest",
+    monkeypatch.setattr(FetchedOutputVerifier, "_verify_local_manifest",
                         lambda self, *, log: [])
-    monkeypatch.setattr(type(runner), "_reconcile_fetch",
+    monkeypatch.setattr(FetchedOutputVerifier, "_reconcile_fetch",
                         lambda self, *, log: "")
-    monkeypatch.setattr(type(runner), "_rsync_optional",
+    monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
                         lambda self, *a, **k: None)
     runner.verify_and_cleanup(True, cleanup_mode="run", log_fn=lambda _m: None)
 

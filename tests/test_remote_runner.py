@@ -19,7 +19,6 @@ import pytest
 from services.remote_config import RemoteHost
 from services.remote_runner import (
     DatasetCache,
-    Fetcher,
     LocalInputMode,
     OutputFilter,
     RemoteRunner,
@@ -36,7 +35,10 @@ from services.remote_runner import (
     repo_root,
     stage_local_zips,
 )
+from services.remote_fetch import Fetcher
 from tests._repo_scan import parse_source
+from services.remote_fetch import FetchedOutputVerifier
+from services import remote_fetch
 
 # Every test here drives real `RemoteRunner` / `Fetcher` code against a host
 # that does not exist. Answer the ssh and rsync primitives directly rather than
@@ -833,7 +835,7 @@ def _make_spawn_test_runner(
     # Stub out the remote-completed-wells lister: the test parametrizes
     # how many wells "exist" on the remote.
     monkeypatch.setattr(
-        RemoteRunner, "_list_remote_completed_wells",
+        FetchedOutputVerifier, "_list_remote_completed_wells",
         lambda self: set(completed_remote_wells),
     )
     # Capture the ssh argv we'd launch so the test can inspect it.
@@ -1021,7 +1023,7 @@ def test_list_remote_completed_wells_parses_out_zip_listing(runner_with_run, mon
             returncode=0,
         ),
     )
-    wells = runner_with_run._list_remote_completed_wells()
+    wells = runner_with_run._output_verifier()._list_remote_completed_wells()
     assert wells == {"A01", "B02", "H12"}
 
 
@@ -1031,7 +1033,7 @@ def test_list_remote_completed_wells_handles_empty_dir(runner_with_run, monkeypa
         DatasetCache, "_ssh_script",
         lambda self, script, *, check: MagicMock(stdout="", returncode=0),
     )
-    assert runner_with_run._list_remote_completed_wells() == set()
+    assert runner_with_run._output_verifier()._list_remote_completed_wells() == set()
 
 
 def test_list_remote_completed_wells_degrades_on_ssh_error(runner_with_run, monkeypatch):
@@ -1041,7 +1043,7 @@ def test_list_remote_completed_wells_degrades_on_ssh_error(runner_with_run, monk
     def fail(self, script, *, check):
         raise OSError("ssh: no such file")
     monkeypatch.setattr(DatasetCache, "_ssh_script", fail)
-    assert runner_with_run._list_remote_completed_wells() == set()
+    assert runner_with_run._output_verifier()._list_remote_completed_wells() == set()
 
 
 def test_verify_manifest_uses_remote_listing_as_backstop(runner_with_run, monkeypatch, tmp_path):
@@ -1063,7 +1065,7 @@ def test_verify_manifest_uses_remote_listing_as_backstop(runner_with_run, monkey
         ),
     )
     log_lines: list[str] = []
-    missing = runner_with_run._verify_local_manifest(
+    missing = runner_with_run._output_verifier()._verify_local_manifest(
         log=log_lines.append,
     )
     # A01 has its CSV (pre-created in the fixture). B02 doesn't —
@@ -1440,7 +1442,7 @@ def test_well_zip_sizes_skips_an_archive_that_vanished(tmp_path):
 
 
 def test_fetcher_observes_well_done_marker(host, tmp_path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     run = _RemoteRun(
         run_id="x",
@@ -1464,7 +1466,7 @@ def test_fetcher_observes_well_done_marker(host, tmp_path):
 
 
 def _make_run(tmp_path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
     return _RemoteRun(
         run_id="x", cache_key="k", remote_input_dir="/r/in",
         remote_output_dir="/r/out", remote_pidfile="/r/pid",
@@ -1551,7 +1553,7 @@ def test_a_missing_remote_file_yields_no_size(host, tmp_path):
 
 def test_zip_is_complete(tmp_path):
     import zipfile
-    from services.remote_runner import _zip_is_complete
+    from services.remote_scratch import _zip_is_complete
     good = tmp_path / "good.zip"
     with zipfile.ZipFile(good, "w") as z:
         z.writestr("a.tif", b"data")
@@ -1576,7 +1578,7 @@ def test_fetch_one_keeps_complete_zip_despite_rsync_error(host, tmp_path):
     # the run's own output, not the home scratch volume. A remote run has no
     # reason to touch home, and writing a whole well's output there and then
     # copying it across is what used to fill it.
-    from services.remote_runner import _transit_dir
+    from services.remote_scratch import _transit_dir
     tmp_zip = (_transit_dir(run.local_output_dir)
                / f"allwell-{run.run_id}-{well}_out.zip")
     with zipfile.ZipFile(tmp_zip, "w") as z:            # a COMPLETE zip on disk
@@ -1643,7 +1645,7 @@ def test_fetcher_observes_well_done_with_logging_prefix(host, tmp_path):
 
     The fix uses .search() against an ``(?:Well\\s+)?`` substring
     pattern so the actual production log lines parse correctly."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     run = _RemoteRun(
         run_id="x",
@@ -1672,7 +1674,7 @@ def test_fetcher_triggers_on_mangled_em_dash(host, tmp_path):
     the em-dash mojibake'd ("Well A01 â€" done."). The Fetcher must still fire
     per-well — otherwise no download progress shows and the out dir only fills
     from the end-of-run backstop."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     run = _RemoteRun(
         run_id="x", cache_key="k", remote_input_dir="/r/in",
@@ -1688,7 +1690,7 @@ def test_fetcher_triggers_on_mangled_em_dash(host, tmp_path):
 
 
 def test_fetcher_ignores_unrelated_lines(host, tmp_path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     run = _RemoteRun(
         run_id="x",
@@ -1714,7 +1716,7 @@ def test_fetcher_fetch_one_logs_size_and_timing(host, tmp_path, monkeypatch):
     materialised confirmation. Pre-v5.2.18 the Fetcher was completely
     silent during downloads; the user couldn't tell whether the GUI
     had hung or was making progress."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     run = _RemoteRun(
         run_id="r",
@@ -1773,7 +1775,7 @@ def test_fetcher_fetch_one_logs_size_and_timing(host, tmp_path, monkeypatch):
 def test_fetcher_fetch_one_warns_when_zip_missing(host, tmp_path, monkeypatch):
     """If the remote well_out.zip can't be pulled, the warn line must
     include the remote output dir so the user can investigate."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     run = _RemoteRun(
         run_id="r",
@@ -1809,7 +1811,7 @@ def test_verify_passes_when_all_csvs_and_zips_present(host, tmp_path):
     """v5.2.29: verify now demands both the CSV AND the per-well
     out_zip when output_filter=FULL (the default). Pre-create both
     to confirm the happy path stays green."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -1830,7 +1832,7 @@ def test_verify_passes_when_all_csvs_and_zips_present(host, tmp_path):
     (tmp_path / "B02_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)
+    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing == []
     assert any("all 2 wells" in m for m in logs)
 
@@ -1842,7 +1844,7 @@ def test_verify_flags_missing_out_zip_even_when_csv_is_present(host, tmp_path):
     out_zip must also be present (under FULL filter + ZIP mode) for
     a well to count as complete, so the existing retry path re-pulls
     the missing zip."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -1864,7 +1866,7 @@ def test_verify_flags_missing_out_zip_even_when_csv_is_present(host, tmp_path):
     (tmp_path / "A01_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)
+    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert any("B02_out.zip" in m for m in missing)
     assert not any("A01" in m for m in missing)
 
@@ -1872,7 +1874,7 @@ def test_verify_flags_missing_out_zip_even_when_csv_is_present(host, tmp_path):
 def test_verify_skips_zip_check_when_csv_only_filter(host, tmp_path):
     """In CSV_ONLY mode the user has explicitly opted out of the
     per-well zip — verify must NOT flag the absent zip as missing."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -1892,7 +1894,7 @@ def test_verify_skips_zip_check_when_csv_only_filter(host, tmp_path):
     # No A01_out.zip — but CSV_ONLY user doesn't want it.
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)
+    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing == []
 
 
@@ -1902,7 +1904,7 @@ def test_verify_expects_out_zip_even_in_folder_mode(host, tmp_path):
     must expect the zip even when the local input was per-well folders. (The
     old behaviour expected an extracted <well>/ dir, which no longer exists —
     that mismatch failed verify and skipped the post-run local-folder cleanup.)"""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -1923,13 +1925,13 @@ def test_verify_expects_out_zip_even_in_folder_mode(host, tmp_path):
     (tmp_path / "A01_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)
+    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert any("B02" in m and "_out.zip" in m for m in missing)
     assert not any("A01" in m for m in missing)
 
 
 def test_verify_reports_missing_csv(host, tmp_path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -1948,13 +1950,13 @@ def test_verify_reports_missing_csv(host, tmp_path):
     # B02 missing on purpose.
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)
+    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing
     assert any("B02" in m for m in missing)
 
 
 def test_verify_reports_empty_csv(host, tmp_path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -1971,7 +1973,7 @@ def test_verify_reports_empty_csv(host, tmp_path):
 
     (tmp_path / "measurements_A01.csv").write_text("")  # empty
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)
+    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing == ["empty CSV for A01"]
 
 
@@ -2351,7 +2353,7 @@ def test_sync_required_files_uses_bare_relative_sources_with_cwd(host, monkeypat
 
 @pytest.fixture
 def runner_with_run(host, tmp_path):
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -2384,7 +2386,7 @@ def test_verify_and_cleanup_run_mode_removes_run_dir_only(runner_with_run, monke
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     ok = runner.verify_and_cleanup(ok=True, cleanup_mode="run", log_fn=lambda _m: None)
@@ -2405,7 +2407,7 @@ def test_verify_and_cleanup_all_mode_removes_both(runner_with_run, monkeypatch):
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     runner.verify_and_cleanup(ok=True, cleanup_mode="all", log_fn=lambda _m: None)
@@ -2425,7 +2427,7 @@ def test_verify_and_cleanup_none_mode_removes_nothing(runner_with_run, monkeypat
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     runner.verify_and_cleanup(ok=True, cleanup_mode="none", log_fn=lambda _m: None)
@@ -2453,7 +2455,7 @@ def test_verify_and_cleanup_dry_run_does_not_rm(runner_with_run, monkeypatch):
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(DatasetCache, "_ssh_script", fake_ssh_script)
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     log_lines: list[str] = []
@@ -2499,7 +2501,7 @@ def test_verify_and_cleanup_dry_run_handles_missing_remote_path(runner_with_run,
         lambda self, script, *, check: MagicMock(stdout="MISSING\n", returncode=0),
     )
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     log_lines: list[str] = []
@@ -2531,7 +2533,7 @@ def test_verify_and_cleanup_dry_run_with_none_mode_is_a_noop(runner_with_run, mo
         ),
     )
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     log_lines: list[str] = []
@@ -2557,7 +2559,7 @@ def test_verify_and_cleanup_skips_when_failure(runner_with_run, monkeypatch):
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     ok = runner.verify_and_cleanup(ok=False, cleanup_mode="all", log_fn=lambda _m: None)
@@ -2580,7 +2582,7 @@ def test_verify_and_cleanup_skips_when_local_missing(runner_with_run, monkeypatc
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     # `_retry_missing_wells` runs against a host that does not exist: it lists
@@ -2592,7 +2594,7 @@ def test_verify_and_cleanup_skips_when_local_missing(runner_with_run, monkeypatc
         lambda *a, **kw: MagicMock(returncode=255, stdout=b"", stderr=b""),
     )
     monkeypatch.setattr(
-        "services.remote_runner._rsync_with_retry",
+        "services.remote_fetch._rsync_with_retry",
         lambda cmd, **kw: MagicMock(returncode=255, stdout="", stderr=""),
     )
     logs: list[str] = []
@@ -3148,7 +3150,7 @@ def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
     """v5.2.11: default cleanup_mode is 'none' (no auto-delete).
     User opts in explicitly via the GUI checkbox or
     --cleanup-remote=run / =all on the CLI."""
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
     runner = RemoteRunner(host)
     run = _RemoteRun(
         run_id="x", cache_key="k",
@@ -3168,7 +3170,7 @@ def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
         ) or MagicMock(stdout="", returncode=0),
     )
     monkeypatch.setattr(
-        RemoteRunner, "_rsync_optional",
+        FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
     )
     # `_retry_missing_wells` runs against a host that does not exist: it lists
@@ -3180,7 +3182,7 @@ def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
         lambda *a, **kw: MagicMock(returncode=255, stdout=b"", stderr=b""),
     )
     monkeypatch.setattr(
-        "services.remote_runner._rsync_with_retry",
+        "services.remote_fetch._rsync_with_retry",
         lambda cmd, **kw: MagicMock(returncode=255, stdout="", stderr=""),
     )
 
@@ -3230,10 +3232,10 @@ def _retry_runner(host, tmp_path, monkeypatch):
                        "timeout": timeout, "stop_event": stop_event})
         return MagicMock(returncode=0)
 
-    monkeypatch.setattr(rr, "_rsync_with_retry", _fake_rsync)
-    monkeypatch.setattr(rr, "resolve_rsync_binary", lambda: "rsync")
-    monkeypatch.setattr(rr, "_rsync_ssh_transport", lambda h: [])
-    monkeypatch.setattr(rr, "to_rsync_path", lambda p: str(p))
+    monkeypatch.setattr(remote_fetch, "_rsync_with_retry", _fake_rsync)
+    monkeypatch.setattr(remote_fetch, "resolve_rsync_binary", lambda: "rsync")
+    monkeypatch.setattr(remote_fetch, "_rsync_ssh_transport", lambda h: [])
+    monkeypatch.setattr(remote_fetch, "to_rsync_path", lambda p: str(p))
     return runner, pulled, rr
 
 
@@ -3243,7 +3245,7 @@ def test_retry_skips_artifacts_already_present(host, tmp_path, monkeypatch):
     runner, pulled, _ = _retry_runner(host, tmp_path, monkeypatch)
     (tmp_path / "data_A01.csv").write_text("x")
     (tmp_path / "A01_out.zip").write_text("zip")
-    runner._retry_missing_wells(["missing CSV for A01"], log=lambda _m: None)
+    runner._output_verifier()._retry_missing_wells(["missing CSV for A01"], log=lambda _m: None)
     assert pulled == []
 
 
@@ -3255,7 +3257,7 @@ def test_retry_csv_miss_does_not_drag_the_zip(host, tmp_path, monkeypatch):
     monkeypatch.setattr(
         rr.subprocess, "run",
         lambda *a, **k: MagicMock(stdout=b"/r/out/data_A01.csv\n", returncode=0))
-    runner._retry_missing_wells(["missing CSV for A01"], log=lambda _m: None)
+    runner._output_verifier()._retry_missing_wells(["missing CSV for A01"], log=lambda _m: None)
     assert any("data_A01.csv" in p["argv"] for p in pulled)
     assert not any("A01_out.zip" in p["argv"] for p in pulled)
 
@@ -3267,7 +3269,7 @@ def test_retry_zip_repull_has_no_walltimeout_and_is_stop_aware(host, tmp_path, m
     hang."""
     runner, pulled, _ = _retry_runner(host, tmp_path, monkeypatch)
     (tmp_path / "data_A01.csv").write_text("x")  # CSV present; zip absent
-    runner._retry_missing_wells(["missing A01_out.zip locally"], log=lambda _m: None)
+    runner._output_verifier()._retry_missing_wells(["missing A01_out.zip locally"], log=lambda _m: None)
     assert len(pulled) == 1
     assert "A01_out.zip" in pulled[0]["argv"]
     assert pulled[0]["timeout"] is None
@@ -3431,7 +3433,7 @@ def _runner_with_run(compute_launcher: str):
     """A RemoteRunner with a minimal _run set, no real ssh."""
     h = RemoteHost(name="c", ssh_alias="lobby", compute_launcher=compute_launcher)
     r = RemoteRunner(h)
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
     r._run = _RemoteRun(
         run_id="run-x",
         cache_key="k",
@@ -3522,13 +3524,13 @@ def test_retry_repulls_out_zip_for_folder_mode(host, tmp_path, monkeypatch):
         pulled.append(" ".join(map(str, argv)))
         return MagicMock(returncode=0)
 
-    monkeypatch.setattr(rr, "_rsync_with_retry", _fake_rsync)
-    monkeypatch.setattr(rr, "resolve_rsync_binary", lambda: "rsync")
-    monkeypatch.setattr(rr, "_rsync_ssh_transport", lambda h: [])
-    monkeypatch.setattr(rr, "to_rsync_path", lambda p: str(p))
+    monkeypatch.setattr(remote_fetch, "_rsync_with_retry", _fake_rsync)
+    monkeypatch.setattr(remote_fetch, "resolve_rsync_binary", lambda: "rsync")
+    monkeypatch.setattr(remote_fetch, "_rsync_ssh_transport", lambda h: [])
+    monkeypatch.setattr(remote_fetch, "to_rsync_path", lambda p: str(p))
 
     (tmp_path / "data_A01.csv").write_text("x")   # CSV present; out-zip absent
-    runner._retry_missing_wells(["missing A01_out.zip locally"], log=lambda _m: None)
+    runner._output_verifier()._retry_missing_wells(["missing A01_out.zip locally"], log=lambda _m: None)
 
     assert any("A01_out.zip" in p for p in pulled), \
         "FOLDER-mode out-zip must be re-pulled (was silently skipped)"

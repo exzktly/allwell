@@ -14,10 +14,11 @@ import zipfile
 from pathlib import Path
 
 import services.remote_runner as rr
+from services import remote_fetch
 
 
 def _bare_fetcher(dest, output_filter, incremental=False):
-    f = object.__new__(rr.Fetcher)
+    f = object.__new__(remote_fetch.Fetcher)
     f.output_filter = output_filter
     f.run = types.SimpleNamespace(local_output_dir=dest, incremental=incremental)
     f._log = lambda _m: None

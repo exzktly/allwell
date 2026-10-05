@@ -19,10 +19,8 @@ from pathlib import Path
 
 import json
 
-from services.remote_runner import (
-    _filter_new_fovs_in_staging,
-    refresh_pipeline_info_available_from_outputs,
-)
+from services.remote_runner import _filter_new_fovs_in_staging
+from services.remote_fetch import refresh_pipeline_info_available_from_outputs
 
 SCHEMA = "experiment:channel:well:fov:timepoint"
 SEP = "_"
@@ -248,7 +246,8 @@ def test_fetch_skips_a_well_this_run_did_not_produce(tmp_path):
     probe plus two retry-wrapped ``rsync --timeout=120`` transfers, which is
     the shape behind a fetch sitting on one well for minutes while the file it
     is pulling is already on disk."""
-    from services.remote_runner import Fetcher, OutputFilter
+    from services.remote_runner import OutputFilter
+    from services.remote_fetch import Fetcher
 
     out = tmp_path / "out"
     out.mkdir()
@@ -278,7 +277,8 @@ def test_fetch_skips_a_well_this_run_did_not_produce(tmp_path):
 def test_fetch_does_not_skip_an_incomplete_local_well(tmp_path):
     """The skip is narrow on purpose — a missing CSV, or a zip that is not a
     complete archive, still fetches."""
-    from services.remote_runner import Fetcher, OutputFilter
+    from services.remote_runner import OutputFilter
+    from services.remote_fetch import Fetcher
 
     out = tmp_path / "out"
     out.mkdir()
@@ -430,9 +430,9 @@ def test_the_fetch_captures_the_field_quality_block_before_it_is_overwritten():
     would look exactly like this one working.
     """
     import inspect
-    from services import remote_runner as rr
+    from services.remote_fetch import FetchedOutputVerifier
 
-    src = inspect.getsource(rr.RemoteRunner.verify_and_cleanup)
+    src = inspect.getsource(FetchedOutputVerifier.verify)
     read_at = src.index("read_field_quality_block")
     rsync_at = src.index("_rsync_optional")
     merge_at = src.index("merge_fetched_field_quality")

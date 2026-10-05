@@ -11,9 +11,9 @@ import queue
 import threading
 from pathlib import Path
 
-import services.remote_runner as rr
 from services.pipeline_runner import PipelineRunner
 from review.features.home.cell_gating.controller import GatingWorker
+from services import remote_fetch
 
 
 # ── E6 ────────────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ def test_gating_worker_emits_failed_on_crash(qapp, monkeypatch):
 
 # ── E12 ───────────────────────────────────────────────────────────────────
 def test_fetcher_loop_survives_one_bad_well():
-    f = object.__new__(rr.Fetcher)
+    f = object.__new__(remote_fetch.Fetcher)
     f._stop = threading.Event()
     f._pending = queue.Queue()
     logs: list[str] = []

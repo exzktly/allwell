@@ -34,13 +34,14 @@ def test_every_rostered_owner_still_exists_and_answers_the_roster():
     The roster matches on `type(owner).__name__`, so a rename does not raise —
     it simply stops matching, and the sweep goes quiet about that thread.
     """
-    from services import remote_runner
+    import importlib
 
+    modules = [importlib.import_module(f"services.{m}") for m in _REMOTE_CLIENT_MODULES]
     for name, (asked_to_stop, stop) in _RUN_THREAD_OWNERS.items():
-        cls = getattr(remote_runner, name, None)
+        cls = next((getattr(m, name) for m in modules if hasattr(m, name)), None)
         assert cls is not None, (
-            f"_RUN_THREAD_OWNERS names {name!r}, which no longer exists in "
-            "services.remote_runner. The entry now matches nothing and the "
+            f"_RUN_THREAD_OWNERS names {name!r}, which no longer exists in any "
+            f"of {_REMOTE_CLIENT_MODULES}. The entry now matches nothing and the "
             "sweep is silent about that thread.")
         # The stop callable is named on the class; the predicate reads private
         # state, so it is checked against a real instance below where cheap.
@@ -72,11 +73,17 @@ def test_the_heartbeat_is_swept_and_a_stopped_one_is_not_a_leak():
     assert not [o for _t, o, _s in _live_run_threads() if o is hb]
 
 
+#: The remote client's modules: the orchestrator and the owners extracted from
+#: it. A thread-starting class moved into a new one is found only if it is here.
+_REMOTE_CLIENT_MODULES = ("remote_runner", "remote_fetch")
+
+
 def _threaded_worker_classes() -> set[str]:
-    """Classes in `remote_runner` that start a named daemon thread of their own."""
-    tree = parse_source(REPO_ROOT / "services" / "remote_runner.py")
+    """Classes in the remote client that start a named daemon thread of their own."""
     owners: set[str] = set()
-    for cls in ast.walk(tree):
+    classes = [cls for m in _REMOTE_CLIENT_MODULES
+               for cls in ast.walk(parse_source(REPO_ROOT / "services" / f"{m}.py"))]
+    for cls in classes:
         if not isinstance(cls, ast.ClassDef):
             continue
         for node in ast.walk(cls):
@@ -114,7 +121,7 @@ def test_no_run_owned_thread_is_missing_from_the_roster():
     missing = sorted(_threaded_worker_classes()
                      - set(_RUN_THREAD_OWNERS) - set(excused))
     assert not missing, (
-        "these classes in services/remote_runner.py start a thread running "
+        "these classes in the remote client start a thread running "
         "one of their own methods, but conftest's _RUN_THREAD_OWNERS does not "
         "know how to stop one. A test that leaks it is neither stopped nor "
         f"failed: {', '.join(missing)}")

@@ -26,12 +26,13 @@ import pytest
 from services.remote_config import RemoteHost
 from services.remote_runner import (
     DatasetCache,
-    Fetcher,
     LocalInputMode,
     OutputFilter,
     RemoteRunner,
-    _RemoteRun,
 )
+from services.remote_fetch import Fetcher
+from services.remote_run_state import _RemoteRun
+from services.remote_fetch import FetchedOutputVerifier
 
 
 @pytest.fixture
@@ -70,8 +71,8 @@ def test_an_empty_local_out_zip_fails_verification(host, tmp_path):
     (tmp_path / "plate_A01.csv").write_text("a,b\n1,2\n")
     (tmp_path / "A01_out.zip").write_bytes(b"")
 
-    with patch.object(RemoteRunner, "_list_remote_completed_wells", lambda self: []):
-        missing = runner._verify_local_manifest(log=lambda _m: None)
+    with patch.object(FetchedOutputVerifier, "_list_remote_completed_wells", lambda self: []):
+        missing = runner._output_verifier()._verify_local_manifest(log=lambda _m: None)
 
     assert missing == ["missing A01_out.zip locally"]
 
@@ -89,9 +90,9 @@ def test_verification_retries_a_missing_well_and_passes_once_it_lands(
         DatasetCache, "_ssh_run",
         lambda self, argv, *, check: (rm_calls.append(list(argv)),
                                       MagicMock(stdout="", returncode=0))[1])
-    monkeypatch.setattr(RemoteRunner, "_rsync_optional",
+    monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
                         lambda self, src, dest, log_fn, **kw: None)
-    monkeypatch.setattr(RemoteRunner, "_list_remote_completed_wells", lambda self: [])
+    monkeypatch.setattr(FetchedOutputVerifier, "_list_remote_completed_wells", lambda self: [])
 
     retried: list[list[str]] = []
 
@@ -101,7 +102,7 @@ def test_verification_retries_a_missing_well_and_passes_once_it_lands(
         _zip(tmp_path / "A01_out.zip", {"A01_f1.tif": b"x"})
         return {"A01"}
 
-    monkeypatch.setattr(RemoteRunner, "_retry_missing_wells", fake_retry)
+    monkeypatch.setattr(FetchedOutputVerifier, "_retry_missing_wells", fake_retry)
 
     ok = runner.verify_and_cleanup(ok=True, cleanup_mode="run", log_fn=lambda _m: None)
 

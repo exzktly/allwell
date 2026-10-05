@@ -31,6 +31,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests._fake_remote import FakeRemote
+from services.remote_fetch import FetchedOutputVerifier
 
 _REPO = Path(__file__).resolve().parent.parent
 
@@ -180,7 +181,7 @@ def spawned(host, plate, tmp_path, monkeypatch, stop_fetchers):
     monkeypatch.setattr(DatasetCache, "ensure_uploaded",
                         lambda self, z, **k: (key, 0, 0.01))
     monkeypatch.setattr(RemoteRunner, "sync_required_files", lambda self, **k: None)
-    monkeypatch.setattr(RemoteRunner, "_list_remote_completed_wells",
+    monkeypatch.setattr(FetchedOutputVerifier, "_list_remote_completed_wells",
                         lambda self: set())
 
     def _spawn():

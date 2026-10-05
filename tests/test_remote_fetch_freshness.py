@@ -30,6 +30,9 @@ from pathlib import Path
 import pytest
 
 import services.remote_runner as rr
+from services import remote_fetch
+from services import remote_run_state
+from services import remote_wire
 
 
 def _stale_well(out_dir: Path, well: str, *, days_old: int = 1) -> Path:
@@ -49,7 +52,7 @@ def _stale_well(out_dir: Path, well: str, *, days_old: int = 1) -> Path:
 
 
 
-def _run(out_dir: Path, **kw) -> rr._RemoteRun:
+def _run(out_dir: Path, **kw) -> remote_run_state._RemoteRun:
     params = dict(
         run_id="run-x", cache_key="k", remote_input_dir="/r/in",
         remote_output_dir="/r/out", remote_pidfile="/r/pid",
@@ -57,7 +60,7 @@ def _run(out_dir: Path, **kw) -> rr._RemoteRun:
         output_filter=rr.OutputFilter.FULL,
     )
     params.update(kw)
-    return rr._RemoteRun(**params)
+    return remote_run_state._RemoteRun(**params)
 
 
 # ── the cause ────────────────────────────────────────────────────────────────
@@ -111,7 +114,7 @@ def test_a_forced_well_is_always_fetched(tmp_path):
     skipping a well the user asked to have replaced — that file is the thing
     being replaced."""
     _stale_well(tmp_path, "C08")
-    f = rr.Fetcher.__new__(rr.Fetcher)
+    f = remote_fetch.Fetcher.__new__(remote_fetch.Fetcher)
 
     f.run = _run(tmp_path)
     assert f._already_local("C08") is not None          # unforced: skipped
@@ -126,7 +129,7 @@ def test_an_unforced_complete_well_is_still_skipped(tmp_path):
     """Deliberate: re-pulling a well this run produced nothing for costs a full
     per-well transfer to replace a file with itself."""
     _stale_well(tmp_path, "A01")
-    f = rr.Fetcher.__new__(rr.Fetcher)
+    f = remote_fetch.Fetcher.__new__(remote_fetch.Fetcher)
     f.run = _run(tmp_path, force_wells=frozenset({"C08"}))
     assert f._already_local("A01") == (
         "already complete locally and untouched by this run")
@@ -134,7 +137,7 @@ def test_an_unforced_complete_well_is_still_skipped(tmp_path):
 
 def test_a_well_this_run_produced_output_for_is_always_fetched(tmp_path):
     _stale_well(tmp_path, "A01")
-    f = rr.Fetcher.__new__(rr.Fetcher)
+    f = remote_fetch.Fetcher.__new__(remote_fetch.Fetcher)
     f.run = _run(tmp_path)
     f.run.expected_wells.add("A01")
     assert f._already_local("A01") is None
@@ -155,7 +158,7 @@ class _Verifier:
 
 def _verify(run, remote_wells):
     lines: list[str] = []
-    missing = rr.RemoteRunner._verify_local_manifest(
+    missing = remote_fetch.FetchedOutputVerifier._verify_local_manifest(
         _Verifier(run, remote_wells), log=lines.append)
     return missing, lines
 
@@ -166,7 +169,7 @@ def test_a_forced_run_that_replaced_nothing_fails_verify(tmp_path):
     hours of discarded compute."""
     zip_path = _stale_well(tmp_path, "C08")
     run = _run(tmp_path, force=True,
-               pre_run_artifacts=rr._snapshot_local_artifacts(tmp_path))
+               pre_run_artifacts=remote_fetch._snapshot_local_artifacts(tmp_path))
     # The remote holds output for the well; the local file was never replaced.
     missing, _lines = _verify(run, {"C08"})
     assert missing == [
@@ -179,7 +182,7 @@ def test_a_forced_run_that_did_replace_the_output_passes(tmp_path):
     """A real forced run must not be failed by the new check."""
     _stale_well(tmp_path, "C08")
     run = _run(tmp_path, force=True,
-               pre_run_artifacts=rr._snapshot_local_artifacts(tmp_path))
+               pre_run_artifacts=remote_fetch._snapshot_local_artifacts(tmp_path))
     # The fetch lands new bytes.
     with zipfile.ZipFile(tmp_path / "C08_out.zip", "w") as zf:
         zf.writestr("C08_f0_t0.tif", b"today's very different bytes")
@@ -191,7 +194,7 @@ def test_a_forced_run_that_did_replace_the_output_passes(tmp_path):
 def test_an_unforced_run_does_not_fail_on_a_well_it_left_alone(tmp_path):
     """A well nothing was promised for keeps its old artefact legitimately."""
     _stale_well(tmp_path, "A01")
-    run = _run(tmp_path, pre_run_artifacts=rr._snapshot_local_artifacts(tmp_path))
+    run = _run(tmp_path, pre_run_artifacts=remote_fetch._snapshot_local_artifacts(tmp_path))
     missing, _ = _verify(run, {"A01"})
     assert missing == []
 
@@ -200,7 +203,7 @@ def test_a_missing_artifact_still_reports_as_missing(tmp_path):
     """The pre-existing check is unchanged: absent beats not-replaced."""
     (tmp_path / "measurements_A01.csv").write_text("well\nA01\n")
     run = _run(tmp_path, force=True,
-               pre_run_artifacts=rr._snapshot_local_artifacts(tmp_path))
+               pre_run_artifacts=remote_fetch._snapshot_local_artifacts(tmp_path))
     missing, _ = _verify(run, {"A01"})
     assert missing == ["missing A01_out.zip locally"]
 
@@ -222,18 +225,18 @@ def _retry_pulls(monkeypatch, tmp_path, run, well="C08") -> list[str]:
 
     def _fake_rsync(argv, **kw):
         pulled.append(argv[-2])          # the remote source
-    monkeypatch.setattr(rr, "_rsync_with_retry", _fake_rsync)
+    # Patched where the retry reads it: the verifier lives in remote_fetch.
+    monkeypatch.setattr(remote_fetch, "_rsync_with_retry", _fake_rsync)
 
-    runner = rr.RemoteRunner.__new__(rr.RemoteRunner)
-    runner._run = run
-    runner.host = rr.RemoteHost(
+    host = rr.RemoteHost(
         name="t", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
         cpu_only=False, extra_args=(), cache_budget_gb=10,
         measured_bandwidth_mbps=100.0,
     )
-    runner._cancelled = __import__("threading").Event()
-    runner._retry_missing_wells(
+    verifier = remote_fetch.FetchedOutputVerifier(
+        host, run, None, __import__("threading").Event())
+    verifier._retry_missing_wells(
         [f"{well}_out.zip was not replaced (same size and timestamp as "
          f"before the run)"],
         log=lambda _m: None)
@@ -248,7 +251,7 @@ def test_a_forced_well_that_was_not_replaced_is_re_pulled(monkeypatch, tmp_path)
     present is the symptom."""
     _stale_well(tmp_path, "C08")
     run = _run(tmp_path, force=True,
-               pre_run_artifacts=rr._snapshot_local_artifacts(tmp_path))
+               pre_run_artifacts=remote_fetch._snapshot_local_artifacts(tmp_path))
     pulled = _retry_pulls(monkeypatch, tmp_path, run)
     assert pulled == ["test-host:/r/out/C08_out.zip"]
 
@@ -256,7 +259,7 @@ def test_a_forced_well_that_was_not_replaced_is_re_pulled(monkeypatch, tmp_path)
 def test_an_unforced_present_zip_is_still_left_alone(monkeypatch, tmp_path):
     """The cost guard the branch exists for must survive."""
     _stale_well(tmp_path, "C08")
-    run = _run(tmp_path, pre_run_artifacts=rr._snapshot_local_artifacts(tmp_path))
+    run = _run(tmp_path, pre_run_artifacts=remote_fetch._snapshot_local_artifacts(tmp_path))
     assert _retry_pulls(monkeypatch, tmp_path, run) == []
 
 
@@ -278,7 +281,7 @@ def test_every_well_is_classified_in_a_file_beside_the_outputs(tmp_path):
     run = _run(tmp_path, force=True)
     run.expected_wells.add("A01")
     run.skipped_wells["A02"] = "already complete locally and untouched by this run"
-    summary = rr.RemoteRunner._reconcile_fetch(
+    summary = remote_fetch.FetchedOutputVerifier._reconcile_fetch(
         _Reconciler(run, {"A01", "A02", "A03"}), log=lambda _m: None)
 
     assert "1 fetched" in summary
@@ -320,7 +323,7 @@ def test_the_summary_accounts_for_every_well_the_report_lists(
     J.record_well(tmp_path, "A02", "quarantined", reason="held back")
     J.record_well(tmp_path, "A03", "quarantined", reason="held back")
 
-    summary = rr.RemoteRunner._reconcile_fetch(
+    summary = remote_fetch.FetchedOutputVerifier._reconcile_fetch(
         _Reconciler(run, {"A01", "A02", "A03"}), log=lambda _m: None)
 
     report = (tmp_path / "remote_fetch_report.txt").read_text()
@@ -340,7 +343,7 @@ def test_the_report_survives_an_unwritable_output_dir(tmp_path):
     """A diagnostic must never be the thing that fails the run."""
     run = _run(tmp_path / "gone")          # never created
     lines: list[str] = []
-    rr.RemoteRunner._reconcile_fetch(
+    remote_fetch.FetchedOutputVerifier._reconcile_fetch(
         _Reconciler(run, {"A01"}), log=lines.append)
     assert any("could not write" in ln for ln in lines)
 
@@ -355,7 +358,7 @@ def test_a_completion_marker_is_parsed_and_canonicalised(label, canonical):
     two-digit-only pattern never matched it, so that well never entered
     ``expected_wells`` and was never fetched."""
     line = f"2026-08-02 10:00:00  INFO      Well {label} — done."
-    m = rr._RE_WELL_DONE.search(line)
+    m = remote_wire._RE_WELL_DONE.search(line)
     assert m is not None, line
     from util.well_token import canonical_well_label
     assert canonical_well_label(m.group("well")) == canonical
@@ -383,7 +386,7 @@ def test_the_summary_accounts_for_every_well_it_names(tmp_path, monkeypatch):
     J.record_well(out, "A02", "failed", reason="materialize failed")
     J.record_well(out, "A03", "not-fetched", reason="the pull failed")
 
-    summary = rr.RemoteRunner._reconcile_fetch(
+    summary = remote_fetch.FetchedOutputVerifier._reconcile_fetch(
         _Reconciler(run, {"A01", "A02", "A03"}), log=lambda _m: None)
 
     assert "1 failed" in summary, f"a failed well vanished from: {summary}"

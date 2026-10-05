@@ -344,7 +344,7 @@ def test_the_heartbeat_counts_a_second_phase_on_the_same_gauge(tmp_path):
     counter and the base are pure arithmetic over files on disk, so they are
     testable without an ssh host (which nothing here has).
     """
-    from services.remote_runner import Fetcher
+    from services.remote_fetch import Fetcher
 
     dest = tmp_path / "out"
     dest.mkdir()

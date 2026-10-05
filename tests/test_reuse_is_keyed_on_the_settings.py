@@ -356,7 +356,7 @@ def test_a_remote_run_brings_the_settings_marker_back_with_the_well():
     """
     import inspect
 
-    from services.remote_runner import Fetcher
+    from services.remote_fetch import Fetcher
 
     src = inspect.getsource(Fetcher._fetch_one)
     assert "_pull_settings_marker" in src, (

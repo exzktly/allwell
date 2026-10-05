@@ -106,7 +106,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # FOV-group's quality record moved beside the metrics it composes, as
 # `pipeline.field_quality.group_record`. Every name is re-exported, so no call
 # site moved with either.
-PROCESS_MICROSCOPY_BUDGET = 3804
+# 3804 -> 3766: twenty-five re-exports nothing reached any more were deleted
+# (`tests/test_process_microscopy_facade.py` classifies the rest).
+PROCESS_MICROSCOPY_BUDGET = 3766
 
 # `services/remote_runner.py` is the largest module in the repo — nearly twice
 # `process_microscopy.py` — and until now the only large one with nothing
@@ -159,7 +161,14 @@ PROCESS_MICROSCOPY_BUDGET = 3804
 # and the full-cache-hit predicate that decides it moved to
 # `services/remote_run_id.py`, whose subject is exactly whether an earlier
 # run's work may be reused.
-REMOTE_RUNNER_BUDGET = 6810
+# 6810 -> 4760: the Fetcher and end-of-run output verification moved to
+# `services/remote_fetch.py`, the run record to `services/remote_run_state.py`
+# and the line vocabulary to `services/remote_wire.py`; ten re-exports nothing
+# reached were deleted and `__all__` states the supported facade. Tests import
+# what moved from its owner (`tests/test_remote_runner_facade.py`).
+REMOTE_RUNNER_BUDGET = 4760
+# Set at extraction: the Fetcher and its verifier, moved out of the runner.
+REMOTE_FETCH_BUDGET = 2052
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis
@@ -295,6 +304,16 @@ def test_remote_runner_line_budget():
         f"{REMOTE_RUNNER_BUDGET} budget. Extract a cohesive Qt-free module — "
         "staging, rsync/ssh transport and argv/run-id derivation are each a "
         "self-contained cluster — instead of appending. The ratchet only "
+        "moves down."
+    )
+
+
+def test_remote_fetch_line_budget():
+    n = _line_count("services/remote_fetch.py")
+    assert n <= REMOTE_FETCH_BUDGET, (
+        f"services/remote_fetch.py is {n} lines, over the {REMOTE_FETCH_BUDGET} "
+        "budget. It owns bringing a run's output home and proving it arrived; "
+        "anything else belongs beside the stage that does it. The ratchet only "
         "moves down."
     )
 

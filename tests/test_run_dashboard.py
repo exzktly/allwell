@@ -212,7 +212,7 @@ def test_tracker_emits_per_well_fov_progress():
 
 def test_tracker_emits_per_well_transfer_progress():
     """Upload and download report a fraction per well, not just plate-wide."""
-    from services.remote_runner import _well_xfer_line
+    from services.remote_wire import _well_xfer_line
 
     t = ProgressTracker()
     assert t.parse(_well_xfer_line("C02", "down", 0.418)) == [

@@ -112,7 +112,7 @@ def test_the_heartbeat_emits_both_cadences():
     """A fast live sample and a slow durable breadcrumb, from one loop."""
     import inspect
 
-    from services.remote_runner import Fetcher
+    from services.remote_fetch import Fetcher
 
     src = inspect.getsource(Fetcher._transfer_heartbeat)
     assert "TRANSIENT_PREFIX" in src, "the live sample must be marked transient"
@@ -131,6 +131,6 @@ def test_rsync_progress_no_longer_goes_to_the_log():
 
 
 def test_the_breadcrumb_is_a_minute_not_seconds():
-    from services.remote_runner import _BREADCRUMB_INTERVAL_S
+    from services.remote_wire import _BREADCRUMB_INTERVAL_S
 
     assert _BREADCRUMB_INTERVAL_S >= 60.0

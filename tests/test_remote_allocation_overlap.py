@@ -35,6 +35,7 @@ from services.remote_runner import (
     ZippedInput,
     _compose_remote_cmd,
 )
+from services.remote_fetch import FetchedOutputVerifier
 
 _PIDFILE = "/scratch/runs/run-abc/run.pid"
 _ARGV = ["python", "process_microscopy.py", "--input_dir", "/scratch/in"]
@@ -153,7 +154,7 @@ def _spawn_recording_order(monkeypatch, tmp_path, stop_fetchers, launcher, *,
     monkeypatch.setattr(DatasetCache, "gc", lambda self, budget, **kw: None)
     monkeypatch.setattr(RemoteRunner, "sync_required_files",
                         lambda self, **kw: None)
-    monkeypatch.setattr(RemoteRunner, "_list_remote_completed_wells",
+    monkeypatch.setattr(FetchedOutputVerifier, "_list_remote_completed_wells",
                         lambda self: set())
     cancelled: list[str] = []
     monkeypatch.setattr(RemoteRunner, "cancel",
@@ -334,7 +335,7 @@ def test_neither_cancel_path_will_touch_another_user_s_job(monkeypatch):
     monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
     runner._sweep_orphaned_allocation("/r/run.pid", "/r/.aw_upload_alive")
 
-    from services.remote_runner import _RemoteRun
+    from services.remote_run_state import _RemoteRun
 
     runner._run = _RemoteRun(
         run_id="run-x", cache_key="k", remote_input_dir="/r/in",

@@ -120,7 +120,7 @@ def test_the_client_check_drops_whatever_the_fetch_brought_back(tmp_path):
     turned the check off — and on a run whose client-side check then failed,
     that is the only thing they would be told.
     """
-    from services.remote_runner import run_client_side_completeness_check
+    from services.remote_fetch import run_client_side_completeness_check
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()
@@ -144,7 +144,7 @@ def test_a_sidecar_with_no_schema_leaves_no_misleading_record(tmp_path):
     """Nothing to compare against means no record — which reads as "not
     checked", the honest answer — rather than a record claiming everything is
     fine because nothing could be measured."""
-    from services.remote_runner import run_client_side_completeness_check
+    from services.remote_fetch import run_client_side_completeness_check
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()

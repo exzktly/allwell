@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 
 import pytest
 from review.domain.stats_compute import compute_rep_stats
+from services import remote_fetch
 
 
 # ── AggPoint helpers ────────────────────────────────────────────────────────
@@ -691,18 +692,18 @@ def offline_transport(monkeypatch):
     # `DatasetCache`, so patching the one above does not cover it. A `None`
     # total is the documented "the size is unknown, so draw no dial" answer —
     # the same thing a failed listing produces.
-    monkeypatch.setattr(remote_runner.Fetcher, "_list_remote_glob",
+    monkeypatch.setattr(remote_fetch.Fetcher, "_list_remote_glob",
                         lambda self, src_glob: (src_glob.split(":", 1)[0], [], None))
 
     # `pull_small_file` answers False for every failure by design — that is
     # already the documented shape of "the file did not come back".
     monkeypatch.setattr(remote_transport, "pull_small_file",
                         lambda *a, **k: False)
-    # `remote_runner` imports the name, so it holds its own reference and the
+    # `remote_fetch` imports the name, so it holds its own reference and the
     # patch above does not reach the Fetcher's call. Both are set: the one the
     # caller under test actually reads, and the definition, so a module that
     # starts importing it later is covered too.
-    monkeypatch.setattr(remote_runner, "pull_small_file",
+    monkeypatch.setattr(remote_fetch, "pull_small_file",
                         lambda *a, **k: False)
 
 

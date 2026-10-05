@@ -233,9 +233,9 @@ def test_the_remote_fetch_tells_the_merge_the_run_was_incremental():
     """The flag is the whole fix on the remote side, so the call must pass it."""
     import inspect
 
-    from services import remote_runner
+    from services import remote_fetch
 
-    src = inspect.getsource(remote_runner)
+    src = inspect.getsource(remote_fetch)
     assert "merge_fetched_field_quality(info_path, prior_field_quality, " \
            "incremental=run.incremental)" in src
 

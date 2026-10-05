@@ -27,12 +27,15 @@ import pytest
 import util.retry_io as rio
 from services.remote_runner import (
     _RSYNC_RETRY_CODES,
-    Fetcher,
     OutputFilter,
     _materialize_staging,
     _StagePlan,
+)
+from services.remote_fetch import (
+    Fetcher,
     refresh_pipeline_info_available_from_outputs,
 )
+from services import remote_fetch
 
 
 @pytest.fixture(autouse=True)
@@ -249,8 +252,8 @@ def test_materialize_failure_names_the_output_volume(monkeypatch, tmp_path):
 def _rsync_glob_stub(monkeypatch, *, listed: list[str], pull_ok: bool):
     import services.remote_runner as rr
 
-    monkeypatch.setattr(rr, "resolve_rsync_binary", lambda: "rsync")
-    monkeypatch.setattr(rr, "_rsync_ssh_transport", lambda _host: [])
+    monkeypatch.setattr(remote_fetch, "resolve_rsync_binary", lambda: "rsync")
+    monkeypatch.setattr(remote_fetch, "_rsync_ssh_transport", lambda _host: [])
     monkeypatch.setattr(
         rr.subprocess, "run",
         lambda *a, **k: types.SimpleNamespace(
@@ -264,7 +267,7 @@ def _rsync_glob_stub(monkeypatch, *, listed: list[str], pull_ok: bool):
     # ``_rsync_glob`` is now a two-line composition of the listing and the pull,
     # split so the CSV half of a well's fetch can learn its byte total before it
     # starts. Bind the real halves onto the stub so this still exercises them.
-    from services.remote_runner import Fetcher
+    from services.remote_fetch import Fetcher
     stub._list_remote_glob = lambda src: Fetcher._list_remote_glob(stub, src)
     stub._pull_listed = lambda h, f, d: Fetcher._pull_listed(stub, h, f, d)
     return stub

@@ -244,3 +244,30 @@ def test_a_second_run_adds_to_the_history_while_the_journal_is_replaced(tmp_path
     assert second_end["detail"]["run_check"] is None
     # And the journal describes the second run only.
     assert run_journal.read_journal(out_dir).outcome == "error"
+
+
+@pytest.mark.parametrize("batch, mode", [(0, "remote"), (4, "remote-batched")])
+def test_a_remote_run_is_recorded_locally_with_the_fetched_run_check(
+        tmp_path, monkeypatch, batch, mode):
+    """A remote run's events are the client's: ``_open_journal`` before the
+    upload, the fetched sidecar arriving in the local output directory, then
+    ``_close_journal`` — the order ``_run_pipeline_thread`` runs them in."""
+    from services import pipeline_runner as PR
+
+    monkeypatch.setattr(run_journal, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "out"
+    out.mkdir()
+    runner = PR.PipelineRunner()
+    runner._journal_spec = {"opts": {}}
+    runner._remote = object()          # only its presence decides the mode
+    runner._open_journal(tmp_path / "in", out, ["--x"],
+                         {"remote_batch_size": batch, "incremental": True})
+    _write_sidecar(out, "2020-01-01T00:00:00+00:00", {"complete": 8})   # the fetch
+    runner._close_journal()
+
+    started, finished = P.read_events(out).events
+    assert started["detail"]["mode"] == mode
+    assert started["detail"]["scope"]["incremental"] is True
+    assert finished["detail"]["mode"] == mode
+    assert finished["detail"]["outcome"] == "ok"
+    assert finished["detail"]["run_check"]["totals"] == {"complete": 8}

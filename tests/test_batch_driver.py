@@ -82,10 +82,8 @@ def test_one_batch_may_not_outlive_the_budget_meant_for_one_batch():
 
 
 def test_the_driver_gives_the_node_back_when_the_app_goes_away():
-    from services.remote_runner import (
-        UPLOAD_HEARTBEAT_STALE_S,
-        UPLOAD_WAIT_TIMEOUT_S,
-    )
+    from services.remote_runner import UPLOAD_WAIT_TIMEOUT_S
+    from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
 
     script = _batch_driver_snippet("/r/run-x", 2, _ARGV, "/r/run-x/.hb")
     assert "stopped responding" in script

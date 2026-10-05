@@ -107,7 +107,6 @@ COMPAT_INVENTORY: dict[str, str] = {
     "_rsync_with_retry": BINDING,
     "source_fingerprint": BINDING,
     "subprocess": BINDING,
-    "UPLOAD_HEARTBEAT_STALE_S": BINDING,
 }
 
 

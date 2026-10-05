@@ -173,7 +173,11 @@ PROCESS_MICROSCOPY_BUDGET = 3766
 # run heartbeat and their helpers moved to `services/remote_process.py`, and
 # the upload cache with its rsync streaming to `services/remote_upload.py`.
 # What is left is the orchestrator and the facade.
-REMOTE_RUNNER_BUDGET = 1356
+# 1356 -> 1243: `spawn` split into its phases, and the scheduler-job
+# teardown and orphan sweep moved to `services/remote_jobs.py`.
+REMOTE_RUNNER_BUDGET = 1243
+# Set at extraction: closing a run's scheduler job and sweeping a crashed one's.
+REMOTE_JOBS_BUDGET = 215
 # Set at extraction: the process wrappers and the batch driver's loop.
 REMOTE_PROCESS_BUDGET = 1400
 # Set at extraction: the upload cache and its rsync streaming.
@@ -318,6 +322,15 @@ def test_remote_runner_line_budget():
         "staging, rsync/ssh transport and argv/run-id derivation are each a "
         "self-contained cluster — instead of appending. The ratchet only "
         "moves down."
+    )
+
+
+def test_remote_jobs_line_budget():
+    n = _line_count("services/remote_jobs.py")
+    assert n <= REMOTE_JOBS_BUDGET, (
+        f"services/remote_jobs.py is {n} lines, over the {REMOTE_JOBS_BUDGET} "
+        "budget. It owns the scheduler jobs a run holds and making sure none "
+        "outlives it. The ratchet only moves down."
     )
 
 

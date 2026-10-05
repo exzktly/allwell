@@ -12,7 +12,8 @@ this one orchestrates — ``services.remote_staging`` turns the user's input int
 the archives a run uploads, ``services.remote_upload`` gets them onto the host
 once, ``services.remote_process`` presents the run as a process the GUI reads
 and stops, ``services.remote_fetch`` owns bringing output home and proving it
-arrived, ``services.remote_run_state`` the record a run carries, and
+arrived, ``services.remote_run_state`` the record a run carries,
+``services.remote_jobs`` the scheduler jobs a run holds, and
 ``services.remote_wire`` the lines the stages print and parse:
 
 * **Per-well zip granularity** — ``remote_staging.stage_local_zips`` runs the existing
@@ -104,6 +105,7 @@ from services.remote_process import (
     _record_remote_in_journal,
     _scheduler_handoff_lines,
 )
+from services.remote_jobs import close_remote_job, sweep_orphaned_allocation
 from services.remote_fetch import (
     FetchedOutputVerifier,
     Fetcher,
@@ -123,7 +125,6 @@ from services.remote_fetch import (
 # that time it. Re-exported so every call site and test here is unchanged --
 # see services/remote_wait_snippets.py.
 from services.remote_wait_snippets import (  # noqa: F401
-    UPLOAD_HEARTBEAT_STALE_S,
     UPLOAD_WAIT_TIMEOUT_S,
 )
 from services.remote_transport import (  # noqa: F401
@@ -148,6 +149,7 @@ from services.remote_commands import (  # noqa: F401 — re-exported
 # module because it is pure, which is what lets the reuse predicate be tested
 # directly rather than through a harness. Re-exported so existing imports work.
 from services.remote_run_id import (  # noqa: F401
+    RemoteRunPaths,
     _pipeline_launch_is_pointless,
     UPLOAD_HEARTBEAT,
     UPLOAD_SENTINEL,
@@ -223,27 +225,21 @@ class RunEstimate:
 # ────────────────────────────────────────────────────────────────────────────
 
 
-def _only_my_job(jid_var: str, marker: str) -> str:
-    """Shell that refuses to cancel a job belonging to somebody else.
+@dataclass(frozen=True)
+class _PreparedRun:
+    """Where one run lives, decided before anything moves.
 
-    Two locks rather than one. The id is read from a file this app wrote, so in
-    the ordinary case it is our own job — but ``remote_staging_dir`` can point
-    at shared scratch, and ``run_id`` is deterministic in (input, arguments),
-    so two people processing the same plate share a run directory and therefore
-    a sidecar. Slurm would refuse a non-owner's ``scancel`` anyway; that is the
-    scheduler's policy, not this app's promise, and a cluster where operators
-    run the GUI would not have it.
-
-    So: ask the scheduler whose job it is and stop if the answer is not us, and
-    pass ``-u`` to ``scancel`` as well, so even a job that changed hands between
-    the question and the answer cannot be cancelled by us.
+    ``remote_output`` is this run's own output directory, or an earlier run's
+    it re-attached to; everything in ``paths`` (pidfile, sentinel, heartbeat,
+    suspend request) is always this run's own, because the orphan sweep finds a
+    crashed session's job by recomputing exactly that address.
     """
-    return (
-        f'_aw_me=$(id -un 2>/dev/null || echo "$USER"); '
-        f'_aw_owner=$(squeue -h -j "${jid_var}" -o %u 2>/dev/null | head -n1); '
-        f'if [ -n "$_aw_owner" ] && [ "$_aw_owner" != "$_aw_me" ]; then '
-        f'echo "{marker} ${jid_var} $_aw_owner"; exit 0; fi; '
-    )
+
+    key: str
+    run_id: str
+    remote_input: str
+    remote_output: str
+    paths: RemoteRunPaths
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -457,11 +453,96 @@ class RemoteRunner:
                 stop_event=stop_event,
             )
 
-        # Single-shot path (the v5.4.5 and earlier behavior, byte-
-        # identical apart from the moved sync_required_files() call).
-        # Cache budget enforcement before each run.
+        # Single-shot path. Cache budget enforcement before each run.
         self._cache.gc(self.host.cache_budget_gb * (1024**3), log_fn=log)
 
+        # Address the run and record where it goes, then decide whether the
+        # pipeline needs to run at all, compose what the remote is sent, and
+        # launch — in that order, each its own step below.
+        prep = self._prepare_run(zipped, local_output_dir, pipeline_argv,
+                                 output_filter, log)
+        cache_hit = self._preflight_cache_hit(
+            zipped, pipeline_argv, prep.remote_output, log)
+        overlap, ssh_argv = self._compose_launch(
+            prep, zipped, pipeline_argv, output_filter, cache_hit, log)
+        remote_pidfile = prep.paths.pidfile
+        remote_sentinel = prep.paths.sentinel
+        remote_heartbeat = prep.paths.heartbeat
+
+        def upload() -> tuple[int, float]:
+            return self._upload_input(zipped, prep.key, local_output_dir, log,
+                                      progress_fn, stop_event)
+
+        heartbeat: _UploadHeartbeat | None = None
+        if overlap:
+            # Before adding an allocation of our own, hand back one a crashed
+            # run of this same dataset may have left holding a node.
+            self._sweep_orphaned_allocation(
+                remote_pidfile, remote_heartbeat, log_fn=log)
+            heartbeat = _UploadHeartbeat(self._cache, remote_heartbeat)
+            # One beat before the job can look, so the first thing it sees is a
+            # heartbeat that exists rather than one that is missing.
+            heartbeat.beat()
+            popen = self._start_ssh(ssh_argv)
+            try:
+                heartbeat.start()
+                upload()
+            except BaseException:
+                # An allocation is already in flight and nothing will ever
+                # write its sentinel. The stopped heartbeat would free it
+                # within the minute anyway; this is the direct route.
+                heartbeat.stop()
+                log("[remote] upload failed — releasing the allocation\n")
+                try:
+                    self.cancel(popen)
+                except Exception:
+                    swallowed("releasing the allocation after a failed upload")
+                raise
+            # Inside the guard, not after it: this is a ``check=True`` call, so
+            # a failure here raises with an allocation already granted, a
+            # heartbeat thread still beating and the whole plate uploaded. It
+            # is the last step of the upload, so it fails for the same reasons
+            # the upload does and wants the same cleanup.
+            try:
+                # The job is watching for exactly this file.
+                self._cache._ssh_run(["touch", remote_sentinel], check=True)
+            except BaseException:
+                heartbeat.stop()
+                log("[remote] could not signal upload completion — "
+                    "releasing the allocation\n")
+                try:
+                    self.cancel(popen)
+                except Exception:
+                    swallowed("releasing the allocation after a failed sentinel")
+                raise
+        else:
+            upload()
+            popen = self._start_ssh(ssh_argv)
+
+        fetcher = Fetcher(
+            self.host,
+            self._run,
+            output_filter=output_filter,
+            log_fn=log,
+            progress_fn=progress_fn,
+            poll_sidecar=True,
+        )
+        # Keep a handle so cancel() can stop an in-flight per-well download.
+        self._fetcher = fetcher
+        self._cancelled.clear()
+        # Suspendable only from here: the pipeline is launched and its input is
+        # all on the host. Earlier, a request would wait out the rest of the
+        # upload and a node for a run that then does nothing, so a suspend
+        # during the upload stops it instead (`PipelineRunner.suspend`).
+        if not cache_hit:
+            self._run.suspend_request = prep.paths.suspend_request
+        return _RemoteProcess(popen, self._run, fetcher, heartbeat=heartbeat)
+
+    def _prepare_run(self, zipped: ZippedInput, local_output_dir: Path,
+                     pipeline_argv: list[str], output_filter: OutputFilter,
+                     log: Callable[[str], None]) -> _PreparedRun:
+        """Address this run, create its remote directories and write down
+        where it went — before a byte of the plate moves."""
         # ``sync_required_files`` ran above (covers both single-shot
         # and batched paths). Cheap — ~300 KB of source plus rsync's
         # delta-skip when nothing changed.
@@ -489,7 +570,6 @@ class RemoteRunner:
         remote_output = own.out
         remote_pidfile = own.pidfile
         remote_sentinel = own.sentinel
-        remote_heartbeat = own.heartbeat
 
         # Only the *output* directory can be re-attached, and only it is. The
         # input dir keys on this run's own staged archives, and the pidfile /
@@ -573,7 +653,14 @@ class RemoteRunner:
             local_output_dir, run=self._run, host_alias=self.host.ssh_alias,
             argv_digest=argv_digest, source_key=source_key,
         )
+        return _PreparedRun(key=key, run_id=run_id, remote_input=remote_input,
+                            remote_output=remote_output, paths=own)
 
+    def _preflight_cache_hit(self, zipped: ZippedInput, pipeline_argv: list[str],
+                             remote_output: str,
+                             log: Callable[[str], None]) -> bool:
+        """Whether every well's output is already on the remote, so the
+        pipeline need not be launched at all."""
         # v5.2.27: pre-flight cache-hit check. Before launching the
         # pipeline, ssh in and count the ``*_out.zip`` files already
         # present in the remote output dir. If every well in the
@@ -630,7 +717,20 @@ class RemoteRunner:
                     "run was asked to reprocess — launching the pipeline "
                     "anyway (it will overwrite).\n"
                 )
+        return cache_hit
 
+    def _compose_launch(self, prep: _PreparedRun, zipped: ZippedInput,
+                        pipeline_argv: list[str], output_filter: OutputFilter,
+                        cache_hit: bool,
+                        log: Callable[[str], None]) -> tuple[bool, list[str]]:
+        """What the remote is sent, and whether to ask for the node before
+        the upload. Returns ``(overlap, ssh_argv)``."""
+        run_id, key = prep.run_id, prep.key
+        remote_input, remote_output = prep.remote_input, prep.remote_output
+        own = prep.paths
+        remote_pidfile = own.pidfile
+        remote_sentinel = own.sentinel
+        remote_heartbeat = own.heartbeat
         if cache_hit:
             # Replace the pipeline with a no-op. The shell still runs
             # ``echo $$ > pidfile`` (so cancel() can find the PID if
@@ -701,114 +801,54 @@ class RemoteRunner:
             # A cache hit short-circuits to a ``true`` no-op and consumes no
             # allocation, so it is not waiting for one.
             log(_scheduler_handoff_lines(self.host.compute_launcher))
+        return overlap, ssh_argv
 
-        def _start_ssh() -> subprocess.Popen:
-            return subprocess.Popen(
-                ssh_argv,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                # Decode the remote (Linux, UTF-8) pipeline output as UTF-8 so
-                # the em-dash in per-well markers ("Well X — done.") isn't
-                # mojibake'd on a cp1252 Windows client — otherwise the
-                # dashboard's Process stage stays stuck at 0/N while ASCII-only
-                # markers (threshold) reach N/N.
-                **TEXT_UTF8,
-                bufsize=1,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
-                start_new_session=(os.name == "posix"),
-            )
-
-        def _upload() -> tuple[int, float]:
-            up_key, sent, elapsed = self._cache.ensure_uploaded(
-                zipped, log_fn=log, progress_fn=progress_fn,
-                stop_event=stop_event,
-            )
-            if up_key != key:
-                # The key decides the remote input directory, and the job was
-                # sent to wait in the one derived above. Two answers here means
-                # the bytes went somewhere the pipeline will not look.
-                raise RuntimeError(
-                    f"upload landed under cache key {up_key[:8]} but the run "
-                    f"was prepared for {key[:8]}")
-            log(f"[remote] uploaded {sent / (1024**2):.1f} MB in "
-                f"{_fmt_secs(elapsed)}\n")
-            # Their input is on the remote now. Recorded because it is the one
-            # thing that distinguishes "this run never got to that well" from
-            # "its images were sent and the run died before computing them" —
-            # and on a run that dies mid-plate, that is the difference between
-            # re-uploading a plate and not.
-            for wz in zipped.well_zips:
-                label = _canonical_well_from_path(Path(wz).stem)
-                if label:
-                    with swallow(f"journalling {label} as uploaded"):
-                        run_journal.record_well(
-                            local_output_dir, label, "uploaded")
-            return sent, elapsed
-
-        heartbeat: _UploadHeartbeat | None = None
-        if overlap:
-            # Before adding an allocation of our own, hand back one a crashed
-            # run of this same dataset may have left holding a node.
-            self._sweep_orphaned_allocation(
-                remote_pidfile, remote_heartbeat, log_fn=log)
-            heartbeat = _UploadHeartbeat(self._cache, remote_heartbeat)
-            # One beat before the job can look, so the first thing it sees is a
-            # heartbeat that exists rather than one that is missing.
-            heartbeat.beat()
-            popen = _start_ssh()
-            try:
-                heartbeat.start()
-                _upload()
-            except BaseException:
-                # An allocation is already in flight and nothing will ever
-                # write its sentinel. The stopped heartbeat would free it
-                # within the minute anyway; this is the direct route.
-                heartbeat.stop()
-                log("[remote] upload failed — releasing the allocation\n")
-                try:
-                    self.cancel(popen)
-                except Exception:
-                    swallowed("releasing the allocation after a failed upload")
-                raise
-            # Inside the guard, not after it: this is a ``check=True`` call, so
-            # a failure here raises with an allocation already granted, a
-            # heartbeat thread still beating and the whole plate uploaded. It
-            # is the last step of the upload, so it fails for the same reasons
-            # the upload does and wants the same cleanup.
-            try:
-                # The job is watching for exactly this file.
-                self._cache._ssh_run(["touch", remote_sentinel], check=True)
-            except BaseException:
-                heartbeat.stop()
-                log("[remote] could not signal upload completion — "
-                    "releasing the allocation\n")
-                try:
-                    self.cancel(popen)
-                except Exception:
-                    swallowed("releasing the allocation after a failed sentinel")
-                raise
-        else:
-            _upload()
-            popen = _start_ssh()
-
-        fetcher = Fetcher(
-            self.host,
-            self._run,
-            output_filter=output_filter,
-            log_fn=log,
-            progress_fn=progress_fn,
-            poll_sidecar=True,
+    def _start_ssh(self, ssh_argv: list[str]) -> subprocess.Popen:
+        return subprocess.Popen(
+            ssh_argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            # Decode the remote (Linux, UTF-8) pipeline output as UTF-8 so
+            # the em-dash in per-well markers ("Well X — done.") isn't
+            # mojibake'd on a cp1252 Windows client — otherwise the
+            # dashboard's Process stage stays stuck at 0/N while ASCII-only
+            # markers (threshold) reach N/N.
+            **TEXT_UTF8,
+            bufsize=1,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            start_new_session=(os.name == "posix"),
         )
-        # Keep a handle so cancel() can stop an in-flight per-well download.
-        self._fetcher = fetcher
-        self._cancelled.clear()
-        # Suspendable only from here: the pipeline is launched and its input is
-        # all on the host. Earlier, a request would wait out the rest of the
-        # upload and a node for a run that then does nothing, so a suspend
-        # during the upload stops it instead (`PipelineRunner.suspend`).
-        if not cache_hit:
-            self._run.suspend_request = own.suspend_request
-        return _RemoteProcess(popen, self._run, fetcher, heartbeat=heartbeat)
+
+    def _upload_input(self, zipped: ZippedInput, key: str, local_output_dir: Path,
+                      log: Callable[[str], None], progress_fn,
+                      stop_event) -> tuple[int, float]:
+        """Send the staged archives, check they landed under the key the run
+        was addressed by, and journal each well as uploaded."""
+        up_key, sent, elapsed = self._cache.ensure_uploaded(
+            zipped, log_fn=log, progress_fn=progress_fn,
+            stop_event=stop_event,
+        )
+        if up_key != key:
+            # The key decides the remote input directory, and the job was
+            # sent to wait in the one derived above. Two answers here means
+            # the bytes went somewhere the pipeline will not look.
+            raise RuntimeError(
+                f"upload landed under cache key {up_key[:8]} but the run "
+                f"was prepared for {key[:8]}")
+        log(f"[remote] uploaded {sent / (1024**2):.1f} MB in "
+            f"{_fmt_secs(elapsed)}\n")
+        # Their input is on the remote now. Recorded because it is the one
+        # thing that distinguishes "this run never got to that well" from
+        # "its images were sent and the run died before computing them" —
+        # and on a run that dies mid-plate, that is the difference between
+        # re-uploading a plate and not.
+        for wz in zipped.well_zips:
+            label = _canonical_well_from_path(Path(wz).stem)
+            if label:
+                with swallow(f"journalling {label} as uploaded"):
+                    run_journal.record_well(
+                        local_output_dir, label, "uploaded")
+        return sent, elapsed
 
     # ── Verify + cleanup ────────────────────────────────────────────────
 
@@ -1007,171 +1047,18 @@ class RemoteRunner:
     def close_remote_job(
         self, *, log_fn: Callable[[str], None] | None = None
     ) -> None:
-        """Guaranteed-teardown backstop: ensure the scheduler job this run
-        launched is closed.
-
-        Idempotent and best-effort — a no-op on direct-execution hosts (no
-        ``compute_launcher``), when no run has started, or when the job has
-        already exited (``scancel`` on a finished id is harmless). Reads the
-        ``$SLURM_JOB_ID`` the run wrote to ``<pidfile>.slurm`` on the shared
-        filesystem and ``scancel``s it via a fresh ssh.
-
-        ``srun`` already exits when the pipeline finishes *or* fails, so in
-        the common case the job is gone before we get here and this does
-        nothing. Its job is to make sure an *orphaned* allocation — ssh /
-        srun client died, connection dropped, AllWell crashed mid-run —
-        never lingers in the queue waiting on the user. Called from the
-        PipelineRunner's ``finally`` (covers complete / fail / exception)
-        and from :meth:`cancel` (covers user Stop)."""
-        if not self.host.compute_launcher.strip():
-            return
-        run = self._run
-        if run is None:
-            return
-        log = log_fn or (lambda _m: None)
-        slurm_sidecar_q = _remote_quote(f"{run.remote_pidfile}.slurm")
-        cmd = (
-            f"_jid=$(cat {slurm_sidecar_q} 2>/dev/null); "
-            '[ -z "$_jid" ] && exit 0; '
-            + _only_my_job("_jid", "AW_NOTMINE") +
-            'command -v scancel >/dev/null 2>&1 '
-            '&& scancel -u "$_aw_me" "$_jid" 2>/dev/null '
-            '&& echo "AW_SCANCELLED $_jid" || true'
-        )
-        try:
-            result = subprocess.run(
-                self.host.ssh_argv(allocate_tty=False) + [cmd],
-                capture_output=True, timeout=10, **TEXT_UTF8,
-            )
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            # A failed teardown ssh must not be silent — an orphaned SLURM
-            # allocation could keep running (and billing) unnoticed (audit E13).
-            log(f"[remote] WARN scheduler: could not confirm scancel of the "
-                f"remote job ({exc}); a SLURM allocation may still be running.\n")
-            return
-        out = (result.stdout or "")
-        if "AW_SCANCELLED" in out:
-            jid = out.split("AW_SCANCELLED", 1)[1].strip().split()[0:1]
-            log(
-                f"[remote] scheduler: cancelled lingering job "
-                f"{jid[0] if jid else ''}.\n"
-            )
-        elif "AW_NOTMINE" in out:
-            # Not "already finished": it is running, and it is somebody else's.
-            # Reporting it as a clean teardown would say the opposite of what
-            # happened, and this is the log a user reads when a node is still
-            # busy after they stopped.
-            rest = out.split("AW_NOTMINE", 1)[1].strip().split()
-            log(f"[remote] scheduler: job {rest[0] if rest else '?'} belongs to "
-                f"{rest[1] if len(rest) > 1 else 'another user'} — left "
-                f"running.\n")
-        else:
-            # The common case: ``srun`` already exited with the pipeline, so
-            # there was no allocation left to cancel. Confirm the clean
-            # teardown so the log has a definite end-of-job marker rather
-            # than silence.
-            log("[remote] scheduler: job already finished — nothing to cancel.\n")
+        """Close the scheduler job this run launched (see
+        :func:`services.remote_jobs.close_remote_job`)."""
+        close_remote_job(self.host, self._run, log_fn=log_fn)
 
     def _sweep_orphaned_allocation(
         self, remote_pidfile: str, heartbeat: str,
         *, log_fn: Callable[[str], None] | None = None,
     ) -> str:
-        """Cancel an allocation a *previous* run of this app left behind.
-
-        The scancel backstop covers every exit the app survives: a clean quit,
-        a finished run, a Stop click. It cannot cover the ones where no Python
-        of ours runs at all — SIGKILL, a segfault, a force-quit, the power
-        going — because it needs the job id held in memory. The id is on the
-        shared filesystem the whole time (`<pidfile>.slurm`), and ``run_id`` is
-        deterministic in the input and the arguments, so the next run of the
-        same plate can find exactly the job the crashed one left.
-
-        **Guarded, because that determinism cuts both ways.** Two instances
-        running the same plate compute the same ``run_id``, so an unconditional
-        sweep would have each cancel the other's live job. A run that is still
-        owned is beating its heartbeat, and one that started moments ago has a
-        fresh sidecar; either is left alone. What gets cancelled is a job whose
-        owner has been silent for longer than a stalled upload would be.
-
-        Every step that cannot answer refuses to cancel rather than guessing.
-        A job that is somebody else's, or one whose age this host's ``stat``
-        cannot report, is left running: the cost of not sweeping is an idle
-        node until its walltime, and the cost of sweeping wrongly is somebody's
-        half-finished plate.
-
-        Returns which of those it found — ``"swept"``, ``"owned"``,
-        ``"notmine"``, ``"unknown"`` or ``"none"`` — because the batched path
-        also has to know whether the run directory it is about to empty
-        currently belongs to somebody.
-        """
-        if not self.host.compute_launcher.strip():
-            return "none"
-        log = log_fn or (lambda _m: None)
-        sidecar_q = _remote_quote(f"{remote_pidfile}.slurm")
-        hb_q = _remote_quote(heartbeat)
-        stale = UPLOAD_HEARTBEAT_STALE_S
-        # One round trip: read the id, and the two ages that decide whether it
-        # is anyone's. Ages are computed remotely so no clock is compared
-        # against another machine's, and both spellings of ``stat`` are tried
-        # — GNU's ``-c %Y`` and BSD's ``-f %m`` — because a host with only the
-        # second used to report every age as zero, which reads as "long dead"
-        # and would cancel a job that had started seconds earlier.
-        script = (
-            f'_jid=$(cat {sidecar_q} 2>/dev/null); '
-            f'[ -z "$_jid" ] && exit 0; '
-            f'_now=$(date +%s); '
-            f'_sc=$(stat -c %Y {sidecar_q} 2>/dev/null || '
-            f'stat -f %m {sidecar_q} 2>/dev/null || echo ""); '
-            f'if [ -z "$_sc" ]; then echo "AW_UNKNOWN $_jid"; exit 0; fi; '
-            f'_hb=0; if [ -e {hb_q} ]; then '
-            f'_hb=$(stat -c %Y {hb_q} 2>/dev/null || '
-            f'stat -f %m {hb_q} 2>/dev/null || echo 0); fi; '
-            f'if [ "$_hb" -ne 0 ] && '
-            f'[ "$((_now - $_hb))" -le {stale} ]; then '
-            f'echo "AW_OWNED $_jid"; exit 0; fi; '
-            f'if [ "$((_now - $_sc))" -le {stale} ]; then '
-            f'echo "AW_OWNED $_jid"; exit 0; fi; '
-            + _only_my_job("_jid", "AW_NOTMINE") +
-            'command -v scancel >/dev/null 2>&1 '
-            '&& scancel -u "$_aw_me" "$_jid" '
-            '2>/dev/null && echo "AW_SWEPT $_jid" || true'
-        )
-        try:
-            result = subprocess.run(
-                self.host.ssh_argv(allocate_tty=False) + [script],
-                capture_output=True, timeout=15, **TEXT_UTF8,
-            )
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            log(f"[remote] WARN scheduler: could not check for a leftover "
-                f"allocation ({exc}).\n")
-            return "unknown"
-        out = result.stdout or ""
-        if "AW_SWEPT" in out:
-            jid = out.split("AW_SWEPT", 1)[1].strip().split()[:1]
-            log(f"[remote] scheduler: cancelled a job left over from an "
-                f"earlier run of this dataset ({jid[0] if jid else '?'}) — "
-                f"the app it belonged to is gone.\n")
-            return "swept"
-        if "AW_NOTMINE" in out:
-            rest = out.split("AW_NOTMINE", 1)[1].strip().split()
-            log(f"[remote] scheduler: the job in this dataset's run directory "
-                f"({rest[0] if rest else '?'}) belongs to "
-                f"{rest[1] if len(rest) > 1 else 'another user'} — not touching "
-                f"it.\n")
-            return "notmine"
-        if "AW_OWNED" in out:
-            jid = out.split("AW_OWNED", 1)[1].strip().split()[:1]
-            log(f"[remote] scheduler: another session is running this same "
-                f"dataset (job {jid[0] if jid else '?'}); leaving it alone.\n")
-            return "owned"
-        if "AW_UNKNOWN" in out:
-            jid = out.split("AW_UNKNOWN", 1)[1].strip().split()[:1]
-            log(f"[remote] WARN scheduler: this host cannot report a file's "
-                f"modification time, so there is no way to tell whether job "
-                f"{jid[0] if jid else '?'} in this dataset's run directory is "
-                f"still in use. Leaving it running.\n")
-            return "unknown"
-        return "none"
+        """Cancel an allocation a crashed earlier run left behind (see
+        :func:`services.remote_jobs.sweep_orphaned_allocation`)."""
+        return sweep_orphaned_allocation(self.host, remote_pidfile, heartbeat,
+                                         log_fn=log_fn)
 
     @property
     def can_request_suspend(self) -> bool:

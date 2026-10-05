@@ -242,7 +242,7 @@ def test_the_job_gives_up_on_a_dead_uploader_not_just_a_slow_one():
     power gone — and waiting out two hours of idle, billed node for that is the
     wrong behaviour. A heartbeat that stops advancing frees the node in about a
     minute however long the upload legitimately needed."""
-    from services.remote_runner import UPLOAD_HEARTBEAT_STALE_S
+    from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
 
     cmd = _compose_remote_cmd(
         "srun -N1", _PIDFILE, _ARGV, cache_hit=False,

@@ -4626,6 +4626,67 @@ Measured growth: an `analysis_changed` line is about 240 bytes and a
 `run_started` about 870; a heavy year of 20,000 lines is about 5 MB and reads in
 0.12 s, so the file is not rotated.
 
+**Copying analysis from another dataset — a recipe.** The title bar's copy
+button (`allwell._on_copy_analysis_clicked` → `review/core/recipe_view.prompt_copy_analysis`)
+copies chosen analysis decisions from another dataset folder into the one open
+in Review. Three modules, split by layer:
+
+- `review/domain/recipe_compute.py` — the roster and the fit, pure.
+  `RECIPE_SCOPES` names what can be copied, keyed like `ANALYSIS_SCOPES`
+  (`sample_variables`, `sample_definitions`, `gating`, `ratios`,
+  `export_groups`) plus `saved_plots`, each with the `(file, key)` blocks it
+  owns. `DECLINED` names the two analysis scopes it will not copy and why:
+  *curation* (overrides keyed by the source's nucleus ids, a crop by its pixel
+  geometry, an exclusion by a field the source run measured — none identifies
+  anything on another plate) and *smFISH* (a threshold is the one the target's
+  spot counts would have had to be baked with). `tests/test_recipes.py` holds
+  every `ANALYSIS_SCOPES` key to exactly one of the two. `check_fit` reports,
+  per scope, the wells and channels the source block names that the target
+  lacks, whether it would replace a different value the target already holds
+  (the pipeline's own auto-threshold, typically), and whether the source has
+  anything to copy at all. It finds names by walking each block's strings and
+  keys — a canonical well label is a well; a source channel token, alone or as
+  the prefix of a `<channel>_…` column name, is a channel — because a reader
+  per block shape would be a second definition of six formats. It reports and
+  never rewrites: a gate on a channel the target lacks is inert there, and a
+  definition naming a missing well attaches to nothing.
+- `review/persistence/recipe.py` — the I/O, Qt-free. `read_dataset_blocks`
+  reads a folder as a user picks it (`out/` when present) without loading it,
+  and **refuses** a file that exists and cannot be read, or a `persistence.json`
+  of a schema this build does not know, by name — an unreadable source block is
+  "could not be read", never "nothing". `apply_recipe` writes into the open
+  dataset: it **flushes every pending debounced save first** (a timer armed
+  just before the copy would otherwise land after it and write the old value
+  back), then writes `pipeline_info.json` blocks through
+  `_io.update_json_atomic` (never creating a sidecar the pipeline did not write)
+  and `persistence.json` sections through `_doc.set_section`, after reading the
+  document so a foreign one is reported rather than silently declined. A source
+  block that is absent is not copied, so it cannot erase the target's own. Each
+  scope is isolated; a failure is reported and the rest run. Every block
+  written is an `analysis_changed` in the provenance log by the usual route,
+  and the copy as a whole is one `recipe_applied` line naming the source, the
+  scopes, what failed, and how many plots were added.
+- `review/core/recipe_view.py` — the dialog: pick a folder, flush, show one
+  checkbox per scope with `ScopeFit.describe()` beneath it (a scope with
+  nothing to copy, or unreadable, is shown disabled with its reason rather than
+  omitted), copy what is ticked, reload through the same
+  `allwell._reload_current_dataset` the reset uses, and report on the status
+  line — naming anything that failed rather than calling a partial copy a whole
+  one.
+
+**Copied saved plots arrive undrawn.** A saved plot is its parameters *and* a
+picture of the source plate's data; copying the picture would put another
+plate's figure in this gallery under this dataset's name. So a copied record is
+added beside the target's own under a fresh id, with no PNG, SVG or frame plan,
+and with `SavedPlot.copied_from` naming its source. `SavedPlotsStore.image_path`
+answers `None` for a record with no PNG, and every surface that shows a saved
+plot — the gallery card, Home's strip, the PDF report, the PowerPoint deck —
+shows `saved_plots.state.undrawn_note` in its place, so a copied plot cannot
+pass for a missing file or for a figure of this dataset. Restoring it replays
+its parameters against this dataset's data, which is the only way it acquires a
+picture here; what that draws when the parameters name wells or channels this
+dataset lacks has not yet been checked in the running app (tracker R6a).
+
 **Resetting saved state — the scope model.** `persistence/reset_scopes.py` is
 the one map from what a user names to the state that name owns. State is
 modelled in two tiers and both title-bar reset buttons are expressed in them:
@@ -14206,7 +14267,7 @@ binary as a pipeline launch.
 ---
 
 
-## 11. Recipes
+## 11. How-to guides
 
 ### 11.1 Add a new plotting tab
 

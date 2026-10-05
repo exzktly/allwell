@@ -661,7 +661,10 @@ def build_saved_plot_tile(ctx, parent: QWidget, entry: dict) -> QWidget:
         # a missing file distinguishable from a plot that drew nothing, which is
         # the whole point of the record carrying a filename at all.
         picture.setObjectName("Muted")
-        picture.setText("(image unavailable)")
+        # A plot copied from another dataset has no picture by design, which
+        # is a different fact from a file that went missing.
+        picture.setText("(not drawn here yet)" if entry.get("copied_from")
+                        else "(image unavailable)")
     else:
         picture.setPixmap(pixmap)
     column.addWidget(picture)

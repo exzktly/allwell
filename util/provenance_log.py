@@ -90,6 +90,10 @@ EVENT_FIELDS: dict[str, tuple[str, ...]] = {
     "derived_from": ("tool", "sources"),
     # Validate & Repair changed this dataset's metadata.
     "repaired": ("actions",),
+    # Analysis was copied into this dataset from another one. Each block it
+    # wrote is also an ``analysis_changed``; this line says where they came
+    # from and what did not copy.
+    "recipe_applied": ("source", "scopes", "failed"),
 }
 
 

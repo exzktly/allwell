@@ -727,8 +727,10 @@ def build_saved_plots_deck(
             _note(slide, reason, figure_w=figure_w)
             continue
         result.missing += 1
-        _note(slide, "The saved image for this plot could not be read, so the "
-                     "figure is missing from this slide.", figure_w=figure_w)
+        from .state import undrawn_note
+        _note(slide, undrawn_note(rec) or (
+            "The saved image for this plot could not be read, so the figure is "
+            "missing from this slide."), figure_w=figure_w)
 
     if on_progress is not None:
         on_progress(len(recs), total, "")

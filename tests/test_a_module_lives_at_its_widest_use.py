@@ -67,6 +67,12 @@ ALLOWED: dict[str, str] = {
         "`prompt_reset_analysis`) live here because the scopes they reset are "
         "Review's, and the prompt is about Review's state. Reached from the "
         "shell rather than from another pane.",
+    "review/core/recipe_view.py":
+        "The title bar's copy-analysis action (`prompt_copy_analysis`) lives "
+        "here for the reason the reset actions beside it do: what it copies is "
+        "Review's analysis state, read and written through Review's persistence "
+        "layer, and the dialog is about that state. Reached from the shell "
+        "rather than from another pane.",
     "review/core/plot_card_actions.py":
         "The title bar reads `PLOT_CARD_ATTRS` to decide which menu entries to "
         "enable. Plotting is Review's subject outright, and the module reaches "

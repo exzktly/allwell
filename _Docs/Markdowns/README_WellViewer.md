@@ -48,6 +48,7 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
    - [Saved Plots](#saved-plots) · [Batch export](#batch-export)
    - [Starting over](#starting-over)
+   - [Copying analysis from another dataset](#copying-analysis-from-another-dataset)
 6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
    - [Convert OME-TIFF](#convert-ome-tiff) · [Convert CZI](#convert-czi) ·
      [Convert ND2](#convert-nd2) ·
@@ -5004,6 +5005,45 @@ others still run and the status line names the one that did not.
 Smaller resets stay next to the thing they affect: **Clear all groups** on
 Home → Sample Map → Replicates, and **Reset crop + curation** in the Segmentation
 tab's Edit menu, which is the same action as the Curation checkbox above.
+
+### Copying analysis from another dataset
+
+The **copy** button beside the trash can copies what you decided about one
+plate onto the plate that is open — useful when the next plate in a series has
+the same layout and the same gates. Pick the other dataset's folder; before
+anything is written, a checklist shows each item and how well it fits this
+plate:
+
+| Item | What is copied |
+|---|---|
+| **Sample variables** | The plate's variables and every well's values. |
+| **Sample definitions** | Well labels, groups, notes, saved selections. |
+| **Gating** | FluorGating floors, ThreshFracOn cutoffs, scatter gates, and the QC debris gate. |
+| **Ratio metrics** | Every ratio channel. |
+| **Batch Export groups** | The export groups on each Batch Export panel. |
+| **Saved plots** | Added beside this dataset's own plots, never in place of them. |
+
+Under each item a sentence says whether it **copies cleanly**, or copies but
+names wells this plate does not have, uses channels this plate was not imaged
+with, or replaces values this plate already has (the run's own automatic
+thresholds, usually). An item the other dataset has nothing for, or whose file
+could not be read, is shown greyed out with the reason. Nothing is changed until
+you press **Copy**; then the dataset reloads, and the status line names
+anything that did not copy.
+
+Two things are never copied: **curation** (the crop, per-cell includes and
+excludes, and fields excluded in QC Triage all point at particular cells and
+fields of the other plate) and **smFISH thresholds** (each one belongs to the
+spot counts already written into that plate's CSVs).
+
+**Copied saved plots are not drawn yet.** Their picture would show the other
+plate's data, so they arrive without one, marked *Copied from … and not yet
+drawn on this dataset* on the gallery card, in the Home strip, and in the PDF
+and PowerPoint exports. **Restore** replays a copied plot's settings on this
+plate's data; if it names wells or channels this plate does not have, check
+what it draws before saving it again.
+
+Every copy is recorded in the dataset's history (`provenance.jsonl`).
 
 ---
 

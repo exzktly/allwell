@@ -79,6 +79,12 @@ class SavedPlot:
     panel_only: bool | None = None
     thresholds: dict = field(default_factory=dict)
     summary: str = ""          # human-readable parameter summary
+    #: The dataset this record was copied from by a recipe, or "" for a plot
+    #: saved here. A copied record carries no image: its picture would be the
+    #: source plate's data under this dataset's name. Every surface that shows a
+    #: saved plot says so instead (:func:`undrawn_note`), until it is restored
+    #: and drawn from this dataset's own data.
+    copied_from: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -97,7 +103,22 @@ class SavedPlot:
             params=dict(d.get("params", {}) or {}),
             thresholds=dict(d.get("thresholds", {}) or {}),
             summary=str(d.get("summary", "")),
+            copied_from=str(d.get("copied_from", "") or ""),
         )
+
+
+def undrawn_note(rec) -> str:
+    """What to show in place of a copied record's missing picture, or ``""``.
+
+    One sentence, used by the gallery card, the Home strip, the PDF report and
+    the PowerPoint deck alike, so a copied plot reads the same everywhere and
+    cannot pass for a missing file — or, worse, for a figure of this dataset.
+    """
+    source = str(getattr(rec, "copied_from", "") or "")
+    if not source:
+        return ""
+    return (f"Copied from {source} and not yet drawn on this dataset. "
+            f"Restore it to draw it from this dataset's data.")
 
 
 class SavedPlotsStore:
@@ -123,8 +144,16 @@ class SavedPlotsStore:
         return (d / _IMAGES_DIRNAME) if d is not None else None
 
     def image_path(self, ctx, rec: SavedPlot) -> Path | None:
+        """Where this record's raster lives, or ``None`` if it has none.
+
+        ``None`` for a record with no ``png_filename`` — a plot copied from
+        another dataset, which has not been drawn here — rather than the images
+        directory itself, which every reader would then try to open as a file.
+        """
         idir = self.images_dir(ctx)
-        return (idir / rec.png_filename) if idir is not None else None
+        if idir is None or not rec.png_filename:
+            return None
+        return idir / rec.png_filename
 
     def vector_path(self, ctx, rec: SavedPlot) -> Path | None:
         """Where this record's vector capture lives, or ``None`` if it has none.

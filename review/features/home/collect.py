@@ -814,6 +814,7 @@ def saved_plots_strip(ctx) -> dict:
             "tab": rec.tab,
             "created_at": rec.created_at,
             "image": store.image_path(ctx, rec),
+            "copied_from": rec.copied_from,
         }
         for rec in records[:SAVED_PLOT_STRIP_LIMIT]
     ]

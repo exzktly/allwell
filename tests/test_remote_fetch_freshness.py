@@ -33,6 +33,8 @@ import services.remote_runner as rr
 from services import remote_fetch
 from services import remote_run_state
 from services import remote_wire
+from services import remote_config
+from services import remote_run_id
 
 
 def _stale_well(out_dir: Path, well: str, *, days_old: int = 1) -> Path:
@@ -71,13 +73,13 @@ def test_a_forced_run_still_launches_the_pipeline():
     can never reprocess anything on a remote that has run before."""
     argv = ["--input_dir", "/in", "--output_dir", "/out", "--force"]
     complete = {f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)}
-    assert rr._pipeline_launch_is_pointless(argv, 96, complete) is False
+    assert remote_run_id._pipeline_launch_is_pointless(argv, 96, complete) is False
 
 
 def test_a_per_well_forced_run_still_launches_the_pipeline():
     argv = ["--input_dir", "/in", "--force_wells", "C08", "D08"]
     complete = {f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)}
-    assert rr._pipeline_launch_is_pointless(argv, 96, complete) is False
+    assert remote_run_id._pipeline_launch_is_pointless(argv, 96, complete) is False
 
 
 def test_an_unforced_rerun_still_skips_the_pipeline():
@@ -86,13 +88,13 @@ def test_an_unforced_rerun_still_skips_the_pipeline():
     (the case where a previous run's *fetch* was interrupted)."""
     argv = ["--input_dir", "/in", "--output_dir", "/out"]
     complete = {f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)}
-    assert rr._pipeline_launch_is_pointless(argv, 96, complete) is True
+    assert remote_run_id._pipeline_launch_is_pointless(argv, 96, complete) is True
 
 
 def test_an_incomplete_remote_always_launches():
     argv = ["--input_dir", "/in"]
-    assert rr._pipeline_launch_is_pointless(argv, 96, {"A01", "A02"}) is False
-    assert rr._pipeline_launch_is_pointless(argv, 0, set()) is False
+    assert remote_run_id._pipeline_launch_is_pointless(argv, 96, {"A01", "A02"}) is False
+    assert remote_run_id._pipeline_launch_is_pointless(argv, 0, set()) is False
 
 
 @pytest.mark.parametrize("argv,force,wells", [
@@ -104,7 +106,7 @@ def test_an_incomplete_remote_always_launches():
 def test_the_run_intent_is_read_off_the_argv(argv, force, wells):
     """``--force_wells`` is ``nargs="*"``, so its values run until the next
     flag; and ``c8`` and ``C08`` name the same well."""
-    assert rr._forced_from_argv(argv) == (force, wells)
+    assert remote_run_id._forced_from_argv(argv) == (force, wells)
 
 
 # ── the fetch decision ───────────────────────────────────────────────────────
@@ -228,7 +230,7 @@ def _retry_pulls(monkeypatch, tmp_path, run, well="C08") -> list[str]:
     # Patched where the retry reads it: the verifier lives in remote_fetch.
     monkeypatch.setattr(remote_fetch, "_rsync_with_retry", _fake_rsync)
 
-    host = rr.RemoteHost(
+    host = remote_config.RemoteHost(
         name="t", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
         cpu_only=False, extra_args=(), cache_budget_gb=10,

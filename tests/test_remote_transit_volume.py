@@ -32,10 +32,11 @@ from services.remote_config import RemoteHost
 from services.remote_runner import (
     LocalInputMode,
     OutputFilter,
-    _scratch_dir,
 )
+from services.remote_scratch import _scratch_dir
 from services.remote_scratch import sweep_stale_scratch
 from services.remote_fetch import Fetcher
+from services import remote_scratch
 from services import remote_scratch
 
 # Every test here drives real `RemoteRunner` / `Fetcher` code against a host
@@ -97,7 +98,7 @@ def test_the_transit_directory_is_hidden_from_every_dataset_scan(host, tmp_path)
     """It lives inside the user's output folder, which Review reads back. Every
     scan in the app drops a name starting with a dot (`image_discovery`,
     `auto_threshold`, `zip_members`), so the name has to keep its dot."""
-    from services.remote_runner import TRANSIT_SUBDIR
+    from services.remote_scratch import TRANSIT_SUBDIR
     from services.remote_scratch import _transit_dir
     assert TRANSIT_SUBDIR.startswith(".")
     run = _run(tmp_path)
@@ -118,8 +119,7 @@ def test_a_volume_that_refuses_falls_back_and_says_which(tmp_path):
     the same `OSError` a read-only or quota'd output folder does, and unlike a
     chmod it behaves the same for a root-owned CI container.
     """
-    import services.remote_runner as rr
-    rr._transit_refused.clear()
+    remote_scratch._transit_refused.clear()
 
     blocked = tmp_path / "not-a-directory"
     blocked.write_text("")

@@ -31,7 +31,7 @@ from tests._fake_remote import FakeRemote
 
 @pytest.fixture
 def host():
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     return RemoteHost(
         name="test", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",

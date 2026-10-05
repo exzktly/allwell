@@ -50,34 +50,10 @@ from services.remote_config import (
     RemoteHost,
     resolve_rsync_binary,
 )
-# Stdlib-only (fov, tp) done-key helpers — shared with pipeline.io (audit A2).
-# This module import must stay imaging-stack-free; incremental_keys is csv/
-# zipfile/pathlib only, so it never drags numpy/tifffile into the remote client.
-# The conda-environment resolution cluster, re-exported so every call site in
-# this module (and the tests that reach for it) is unchanged by the move.
-from services.remote_conda import (  # noqa: F401
-    _CONDA_ACTIVATE_SNIPPET,
-    _conda_env_guard,
-    _conda_env_selector,
-    _conda_run_prefix,
-    _conda_run_prefix_for,
-)
-# The record half of field quality, which is stdlib-only. Importing
-# ``pipeline.field_quality`` here would pull numpy and scipy into the remote
-# client — a guard walks this module's import graph and says so, because the
-# client is sent to hosts where the pipeline's dependencies are not installed.
+from services.remote_conda import _conda_env_selector, _conda_run_prefix_for
 from services import run_journal
 from util.aw_safe import swallow, swallowed
-# The shared "retry an OSError with a backoff, then fail with an actionable
-# message" shield. A remote run does as much I/O on the user's own volumes as a
-# local one — it reads the whole plate off the input volume to stage the upload
-# and writes every fetched well back onto the output volume — so it needs the
-# same protection the pipeline's result writes have. ``pipeline.io`` owns the
-# pipeline-side wrapper; this module cannot import it (that would drag numpy /
-# tifffile into the remote client), which is why the loop lives in ``util``.
-# The run record and the line vocabulary every stage of a remote run shares, and
-# the owner of bringing its output home. Each lives in a module of its own; the
-# runner orchestrates them.
+# The run record and the line vocabulary every stage of a remote run shares.
 from services.remote_run_state import (
     LocalInputMode,
     OutputFilter,
@@ -95,8 +71,9 @@ from services.remote_staging import (  # noqa: F401 — facade re-exports
     input_well_containers,
     stage_local_zips,
 )
-# Getting the input onto the host, and the run as a process the GUI can read,
-# wait on and stop.
+# The stages this module orchestrates: getting the input onto the host, the run
+# as a process the GUI can read, wait on and stop, the scheduler jobs it holds,
+# and bringing its output home.
 from services.remote_upload import DatasetCache
 from services.remote_process import (
     _BatchedRemoteProcess,
@@ -111,48 +88,21 @@ from services.remote_fetch import (
     Fetcher,
     _snapshot_local_artifacts,
 )
-
-
-# The scratch / transit / fingerprint leaves live in their own module now — nine
-# functions whose only tie to this one was ``TRANSIT_SUBDIR``. Re-exported here
-# rather than left for callers to find, so every existing import of them from
-# ``services.remote_runner`` keeps working and the move is a move rather than a
-# rename of the whole call graph.
-# The transport layer — rsync capability probes, remote-path quoting, the retry
-# funnel every transfer passes through, and the progress-line reader — lives in
-# its own module. Re-exported so every existing import keeps working.
-# The shell a granted node runs while it waits for its input, and the clocks
-# that time it. Re-exported so every call site and test here is unchanged --
-# see services/remote_wait_snippets.py.
-from services.remote_wait_snippets import (  # noqa: F401
-    UPLOAD_WAIT_TIMEOUT_S,
-)
-from services.remote_transport import (  # noqa: F401
+from services.remote_transport import (
     _fmt_secs,
     _remote_join,
     _remote_quote,
-    _rsync_run_cancellable,
     _rsync_ssh_transport,
     _rsync_supports_info_flag,
-    _rsync_version,
     _rsync_with_retry,
 )
-
 from services.remote_suspend import request_suspend as _request_suspend
-from services.remote_commands import (  # noqa: F401 — re-exported
-    BATCH_DONE_MARKER,
-    _compose_remote_cmd,
-    _remote_scratch_export,
-)
+from services.remote_commands import _compose_remote_cmd
 # Where a run lives, and whether an earlier one's output may be reused — the
-# addresses, the keys they are derived from, and the re-attach decision. Its own
-# module because it is pure, which is what lets the reuse predicate be tested
-# directly rather than through a harness. Re-exported so existing imports work.
-from services.remote_run_id import (  # noqa: F401
+# addresses, the keys they are derived from, and the re-attach decision.
+from services.remote_run_id import (
     RemoteRunPaths,
     _pipeline_launch_is_pointless,
-    UPLOAD_HEARTBEAT,
-    UPLOAD_SENTINEL,
     _choose_remote_output_dir,
     _compute_run_id,
     _forced_from_argv,
@@ -161,27 +111,17 @@ from services.remote_run_id import (  # noqa: F401
     remote_run_dir,
     remote_run_paths,
 )
-
-from services.remote_scratch import (  # noqa: F401
-    TRANSIT_SUBDIR,
-    # The same set object, not a copy: it is mutated, never rebound, so a
-    # caller clearing it through either module clears the one the code reads.
-    _transit_refused,
-    _scratch_dir,
-    source_fingerprint,
-)
-
-
+from services.remote_scratch import source_fingerprint
 # The remote upload manifest lives in ``services/remote_manifest`` — a data
 # declaration with no behaviour, moved out so a newly-required entry cannot
 # collide with this module's line budget. Re-exported because a dozen call
 # sites, the PyInstaller spec and several docstrings name it by this path.
 from services.remote_manifest import _REQUIRED_REMOTE_FILES, repo_root  # noqa: E402
 
-# The supported import surface for application and command-line callers.
-# Every other name reached through this module is migration debt, classified
-# in ``tests/test_remote_runner_facade.py::COMPAT_INVENTORY`` and only allowed
-# to shrink. The private manifest name is deliberate: the bootstrap and the
+# The supported import surface for application and command-line callers, and
+# the only names any file may reach through this module
+# (``tests/test_remote_runner_facade.py``). Everything else is imported from
+# the module that owns it. The private manifest name is deliberate: the bootstrap and the
 # PyInstaller spec read it by this path as their packaging contract.
 __all__ = (
     "LocalInputMode", "OutputFilter", "RemoteRunner", "TRANSIENT_PREFIX",

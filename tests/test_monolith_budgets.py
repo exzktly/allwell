@@ -175,7 +175,9 @@ PROCESS_MICROSCOPY_BUDGET = 3766
 # What is left is the orchestrator and the facade.
 # 1356 -> 1243: `spawn` split into its phases, and the scheduler-job
 # teardown and orphan sweep moved to `services/remote_jobs.py`.
-REMOTE_RUNNER_BUDGET = 1243
+# 1243 -> 1183: the last thirteen compatibility re-exports deleted once every
+# consumer imported from the owning module.
+REMOTE_RUNNER_BUDGET = 1183
 # Set at extraction: closing a run's scheduler job and sweeping a crashed one's.
 REMOTE_JOBS_BUDGET = 215
 # Set at extraction: the process wrappers and the batch driver's loop.

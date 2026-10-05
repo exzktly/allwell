@@ -1,9 +1,8 @@
 """How a command is built to run inside the remote's conda environment.
 
-Extracted from ``services/remote_runner.py``, which re-exports every name so
-no call site moved, because it is a self-contained cluster with one job and
-the module it came from is the largest in the repository, under a line budget
-that only moves down.
+Extracted from ``services/remote_runner.py`` because it is a self-contained
+cluster with one job, and the module it came from is under a line budget that
+only moves down. Callers import from here.
 
 The job is one question asked in four places — the single-run launch, the
 batched driver, the scheduler handoff and the pre-flight probe — and the

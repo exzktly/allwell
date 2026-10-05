@@ -33,6 +33,7 @@ from pipeline.run_report import (
     write_well_report,
 )
 from services import remote_staging
+from services import remote_scratch
 
 
 # ── The completeness record ─────────────────────────────────────────────────
@@ -311,7 +312,7 @@ def test_staging_writes_only_the_members_that_will_be_uploaded(tmp_path, monkeyp
     # Beside the input, and nowhere near the home volume — a remote run has no
     # reason to touch it.
     assert src in staging.parents, staging
-    assert rr._scratch_dir() not in staging.parents, staging
+    assert remote_scratch._scratch_dir() not in staging.parents, staging
 
     text = "".join(lines)
     assert "scanning input" in text, "the first slow step must announce itself"

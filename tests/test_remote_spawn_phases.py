@@ -57,9 +57,9 @@ def _spawn(monkeypatch, tmp_path, stop_fetchers, *, already_done: set[str]):
         m.returncode = 0
         return m
 
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
     monkeypatch.setattr(
-        "services.remote_runner.subprocess.run",
+        "subprocess.run",
         lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "", ""))
 
     zip_path = tmp_path / "A01.zip"

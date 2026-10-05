@@ -23,6 +23,7 @@ actual frames, so a fabricated member list would exercise none of it.
 from __future__ import annotations
 
 import re
+import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
@@ -127,7 +128,6 @@ def test_the_blank_is_held_out_of_the_batches_and_uploaded_once(tmp_path):
     uncompressed frames, so a design that puts it in every batch multiplies the
     largest object in the run — the whole reason it gets a directory of its own
     rather than being copied N times."""
-    import services.remote_runner as rr
 
     uploads: list[tuple[str, tuple[str, ...]]] = []
 
@@ -142,7 +142,7 @@ def test_the_blank_is_held_out_of_the_batches_and_uploaded_once(tmp_path):
     p._pipeline_argv = ["--background", "empty_well", "--background_well", "H12"]
 
     import unittest.mock as mock
-    with mock.patch.object(rr.subprocess, "Popen", lambda argv, **kw: proc):
+    with mock.patch.object(subprocess, "Popen", lambda argv, **kw: proc):
         import threading
         worker = threading.Thread(target=p._run_batches, daemon=True)
         worker.start()
@@ -180,7 +180,6 @@ def test_a_re_run_still_uploads_the_blank_it_no_longer_needs_to_process(tmp_path
     the filter's verdict must not reach it. It is still not re-processed: it is
     uploaded as a reference and left out of the final batch's link.
     """
-    import services.remote_runner as rr
 
     uploads: list[tuple[str, tuple[str, ...]]] = []
 
@@ -203,7 +202,7 @@ def test_a_re_run_still_uploads_the_blank_it_no_longer_needs_to_process(tmp_path
 
     drivers: list[str] = []
     import unittest.mock as mock
-    with mock.patch.object(rr.subprocess, "Popen",
+    with mock.patch.object(subprocess, "Popen",
                            lambda argv, **kw: drivers.append(argv[-1]) or proc):
         import threading
         worker = threading.Thread(target=p._run_batches, daemon=True)
@@ -508,7 +507,6 @@ def test_a_stop_during_the_reference_upload_is_not_a_fault(tmp_path):
     """`upload_subset` watches the stop event, so a Stop returns a non-zero
     rsync code. Reporting the user's own Stop as a failure — with rsync's number
     rather than 130 — is what the batch-upload path already avoids."""
-    import services.remote_runner as rr
     import unittest.mock as mock
 
     proc = _FakeProc()
@@ -521,7 +519,7 @@ def test_a_stop_during_the_reference_upload_is_not_a_fault(tmp_path):
     _stub_runner(p, proc, stopping_upload)
     p._pipeline_argv = ["--background", "empty_well", "--background_well", "H12"]
 
-    with mock.patch.object(rr.subprocess, "Popen", lambda a, **k: proc):
+    with mock.patch.object(subprocess, "Popen", lambda a, **k: proc):
         p._run_batches()
 
     assert p._returncode == 130, p._logged
@@ -552,7 +550,6 @@ def test_the_blank_list_is_parsed_the_way_the_pipeline_parses_it(tmp_path):
 def _drive(tmp_path, wells, *, complete=(), argv=None, batch_size=1):
     """Run `_run_batches` with the remote stubbed; return uploads, driver cmds,
     the object, and whatever reached the stdout queue."""
-    import services.remote_runner as rr
     import unittest.mock as mock
 
     uploads: list[tuple[str, tuple[str, ...]]] = []
@@ -574,7 +571,7 @@ def _drive(tmp_path, wells, *, complete=(), argv=None, batch_size=1):
     for well in complete:
         (out / f"measurements_{well}.csv").write_text(f"well\n{well}\n")
 
-    with mock.patch.object(rr.subprocess, "Popen",
+    with mock.patch.object(subprocess, "Popen",
                            lambda a, **k: drivers.append(a[-1]) or proc):
         import threading
         worker = threading.Thread(target=p._run_batches, daemon=True)

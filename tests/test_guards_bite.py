@@ -4710,6 +4710,11 @@ FACADE_REACHES = {
     "import_module": ("import importlib\n"
                       "m = importlib.import_module('services.remote_runner')\n"
                       "m._target\n"),
+    # Reaches `_target` and walks on: how forty patches of
+    # `"services.remote_runner.subprocess.run"` went unseen by the scan.
+    "deep_string_target": ("def test(monkeypatch):\n"
+                           "    monkeypatch.setattr("
+                           "'services.remote_runner._target.run', None)\n"),
 }
 
 

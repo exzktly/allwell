@@ -49,16 +49,18 @@ import pytest
 
 from services import run_journal as J
 from services.remote_runner import (
-    UPLOAD_HEARTBEAT,
-    UPLOAD_SENTINEL,
     LocalInputMode,
     OutputFilter,
-    RemoteHost,
     RemoteRunner,
     ZippedInput,
-    pipeline_argv_digest,
-    source_fingerprint,
 )
+from services.remote_config import RemoteHost
+from services.remote_run_id import (
+    UPLOAD_HEARTBEAT,
+    UPLOAD_SENTINEL,
+    pipeline_argv_digest,
+)
+from services.remote_scratch import source_fingerprint
 from services.remote_upload import DatasetCache
 from services.remote_fetch import FetchedOutputVerifier
 
@@ -202,7 +204,7 @@ def _spawn_with(host, plate, monkeypatch, stop_fetchers, *,
         m.pid = 1234
         return m
 
-    monkeypatch.setattr("services.remote_runner.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
 
     in_dir = plate / "in"
     zipped = ZippedInput(
@@ -331,7 +333,8 @@ def test_spawn_records_the_address_under_the_digest_it_used(
     run of the *same* configuration finds its own record and a differently
     configured one does not.
     """
-    from services.remote_runner import pipeline_argv_digest, source_fingerprint
+    from services.remote_run_id import pipeline_argv_digest
+    from services.remote_scratch import source_fingerprint
 
     cpu_host = replace(host, cpu_only=True)
     # `PipelineRunner` opens the journal before `spawn` runs; `spawn` only

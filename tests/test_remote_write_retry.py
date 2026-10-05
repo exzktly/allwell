@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import errno
 import json
+import os
+import subprocess
 import types
 import zipfile
 from pathlib import Path
@@ -207,7 +209,6 @@ def _fetcher_stub(out_dir: Path, *, incremental: bool = False, log=None):
 
 
 def test_materialize_survives_a_transient_fault(monkeypatch, tmp_path):
-    import services.remote_runner as rr
 
     out_dir = tmp_path / "results"
     out_dir.mkdir()
@@ -215,8 +216,8 @@ def test_materialize_survives_a_transient_fault(monkeypatch, tmp_path):
     with zipfile.ZipFile(src_zip, "w") as zf:
         zf.writestr("a_labels.tif", b"x")
 
-    flaky = _flaky(1, rr.os.replace)
-    monkeypatch.setattr(rr.os, "replace", flaky)
+    flaky = _flaky(1, os.replace)
+    monkeypatch.setattr(os, "replace", flaky)
 
     assert Fetcher._materialize(_fetcher_stub(out_dir), "A01", src_zip) is True
     assert (out_dir / "A01_out.zip").is_file()
@@ -226,14 +227,13 @@ def test_materialize_survives_a_transient_fault(monkeypatch, tmp_path):
 
 
 def test_materialize_failure_names_the_output_volume(monkeypatch, tmp_path):
-    import services.remote_runner as rr
 
     out_dir = tmp_path / "results"
     out_dir.mkdir()
     src_zip = tmp_path / "transit.zip"
     src_zip.write_bytes(b"x")
     monkeypatch.setattr(
-        rr.os, "replace", lambda *a, **k: (_ for _ in ()).throw(_ebadf()))
+        os, "replace", lambda *a, **k: (_ for _ in ()).throw(_ebadf()))
 
     lines: list[str] = []
     stub = _fetcher_stub(out_dir, log=lines.append)
@@ -249,12 +249,11 @@ def test_materialize_failure_names_the_output_volume(monkeypatch, tmp_path):
 # ── telling a local write fault apart from an empty remote ──────────────────
 
 def _rsync_glob_stub(monkeypatch, *, listed: list[str], pull_ok: bool):
-    import services.remote_runner as rr
 
     monkeypatch.setattr(remote_fetch, "resolve_rsync_binary", lambda: "rsync")
     monkeypatch.setattr(remote_fetch, "_rsync_ssh_transport", lambda _host: [])
     monkeypatch.setattr(
-        rr.subprocess, "run",
+        subprocess, "run",
         lambda *a, **k: types.SimpleNamespace(
             returncode=0, stdout="\n".join(listed).encode(), stderr=b"",
         ),
@@ -297,7 +296,6 @@ def test_rsync_retries_a_local_file_io_error():
 # ── the sidecar rewrite ─────────────────────────────────────────────────────
 
 def test_pipeline_info_refresh_survives_a_transient_fault(monkeypatch, tmp_path):
-    import services.remote_runner as rr
 
     out = tmp_path / "results"
     out.mkdir()
@@ -308,8 +306,8 @@ def test_pipeline_info_refresh_survives_a_transient_fault(monkeypatch, tmp_path)
     with zipfile.ZipFile(out / "A01_out.zip", "w") as zf:
         zf.writestr("A01_1_0_GFP_tophat.tif", b"x")
 
-    flaky = _flaky(1, rr.os.replace)
-    monkeypatch.setattr(rr.os, "replace", flaky)
+    flaky = _flaky(1, os.replace)
+    monkeypatch.setattr(os, "replace", flaky)
 
     assert refresh_pipeline_info_available_from_outputs(out) is True
     assert flaky.calls["n"] == 2

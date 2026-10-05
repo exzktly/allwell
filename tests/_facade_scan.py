@@ -115,7 +115,11 @@ def consumers_of(module: str, sources: Iterable[Path] | None = None,
     *exclude* removes files from the scan (normally the module itself).
     """
     skip = {Path(p).resolve() for p in exclude}
-    pattern = re.compile(rf"^{re.escape(module)}\.([A-Za-z_][A-Za-z0-9_]*)$")
+    # A deeper target (``"m.subprocess.run"``) reaches ``subprocess`` through
+    # *module* just as ``"m.subprocess"`` does: the patch resolves the first
+    # attribute on *module* and then walks on from there.
+    pattern = re.compile(
+        rf"^{re.escape(module)}\.([A-Za-z_][A-Za-z0-9_]*)(?:\.[A-Za-z0-9_.]*)?$")
     users: dict[str, set[tuple[str, str]]] = {}
 
     def add(name: str, path: Path, form: str) -> None:

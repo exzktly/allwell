@@ -21,6 +21,7 @@ import pytest
 from analyze.domain.job_edit import _opts_as_pinfo_keys
 from analyze.log_pane import _completeness_line
 from services.pipeline_service import build_pipeline_args
+from services import remote_run_id
 
 
 def _args(**opts):
@@ -160,12 +161,11 @@ def test_the_remote_argv_always_suppresses_the_check():
     """Every remote launch, single or batched. A record written on the far side
     would inventory the uploaded split rather than the plate, and would be
     overwritten by the fetch in any case."""
-    import services.remote_runner as rr
 
     argv = ["python", "process_microscopy.py",
             "--input_dir", "/local/in", "--output_dir", "/local/out",
             "--nuclear_token", "DAPI"]
-    assert rr._local_input_dir_from_argv(argv).name == "in"
-    assert rr._local_input_dir_from_argv(
+    assert remote_run_id._local_input_dir_from_argv(argv).name == "in"
+    assert remote_run_id._local_input_dir_from_argv(
         ["python", "x.py", "--input_dir=/local/plate"]).name == "plate"
-    assert rr._local_input_dir_from_argv(["python", "x.py"]) is None
+    assert remote_run_id._local_input_dir_from_argv(["python", "x.py"]) is None

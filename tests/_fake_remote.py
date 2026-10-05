@@ -92,7 +92,7 @@ class FakeRemote:
     # ── the boundary ─────────────────────────────────────────────────────
     #: Captured at import, before anything is patched. ``subprocess.run``
     #: looks ``Popen`` up in its own module globals, so a fake that patches
-    #: ``services.remote_runner.subprocess.Popen`` — the *shared* module —
+    #: ``subprocess.Popen`` — the *shared* module —
     #: would have its own shell calls answered by the mock it installed.
     _REAL_POPEN = staticmethod(subprocess.Popen)
 
@@ -144,7 +144,6 @@ class FakeRemote:
         *shared* ``subprocess`` module and would answer the fake's own shell
         calls with the test's mock.
         """
-        import services.remote_runner as rr
         from services import remote_fetch
         from services import remote_transport
 
@@ -254,21 +253,21 @@ class FakeRemote:
                 "the run launched a pipeline and the test supplied no "
                 "on_launch to answer it")
 
-        monkeypatch.setattr(rr.subprocess, "run", _run)
-        monkeypatch.setattr(rr.subprocess, "Popen", _popen)
-        # `_rsync_with_retry` is patched on every module that holds one of its
-        # callers: the runner's file sync, the Fetcher and the end-of-run
-        # verifier in `remote_fetch`. The same holds
-        # for the transport's other names (`_rsync_ssh_transport`,
+        monkeypatch.setattr(subprocess, "run", _run)
+        monkeypatch.setattr(subprocess, "Popen", _popen)
+        # `_rsync_with_retry` is patched on the module that holds its callers,
+        # the Fetcher and the end-of-run verifier in `remote_fetch`. The same
+        # holds for the transport's other names (`_rsync_ssh_transport`,
         # `resolve_rsync_binary`, `resolve_ssh_for_rsync`): patch the module
         # that holds the *caller*, not the module that holds the definition.
-        monkeypatch.setattr(rr, "_rsync_with_retry", _rsync)
+        # The runner's own file sync is not patched here: it runs the real
+        # retry funnel, which reaches this host through the
+        # `_rsync_run_cancellable` patch below.
         monkeypatch.setattr(remote_fetch, "_rsync_with_retry", _rsync)
         # ``_rsync_run_cancellable`` is called from inside
         # ``remote_transport._rsync_with_retry``, so it has to be patched on
-        # the module that holds that caller.  ``remote_runner`` only re-exports
-        # the name, and patching a re-exported binding never reaches a caller
-        # living in the module the name came from.
+        # the module that holds that caller: patching another module's binding
+        # of the name never reaches a caller living in the module it came from.
         monkeypatch.setattr(remote_transport, "_rsync_run_cancellable",
                             lambda cmd, **kw: _rsync(cmd, **kw))
 

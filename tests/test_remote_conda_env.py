@@ -31,11 +31,13 @@ from services.remote_config import (
     RemoteHost,
 )
 from services.remote_runner import (
-    _CONDA_ACTIVATE_SNIPPET,
     LocalInputMode,
     OutputFilter,
     RemoteRunner,
-    _compose_remote_cmd,
+)
+from services.remote_commands import _compose_remote_cmd
+from services.remote_conda import (
+    _CONDA_ACTIVATE_SNIPPET,
     _conda_env_guard,
     _conda_env_selector,
     _conda_run_prefix_for,

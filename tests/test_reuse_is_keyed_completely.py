@@ -410,7 +410,7 @@ def test_an_unrecorded_well_is_grandfathered_deliberately(tmp_path):
 # ── the completeness of one key, rather than the roster of keys ─────────────
 
 def _host(**kw):
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     base = dict(
         name="test", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
@@ -450,7 +450,12 @@ def test_the_digest_covers_what_the_host_adds_to_the_argv(covered):
     threshold found the previous run's outputs complete and fetched them back.
     """
     from services.remote_runner import (
-        OutputFilter, RemoteRunner, _compute_run_id, pipeline_argv_digest,
+        OutputFilter,
+        RemoteRunner,
+    )
+    from services.remote_run_id import (
+        _compute_run_id,
+        pipeline_argv_digest,
     )
 
     plain = RemoteRunner(_host())
@@ -675,7 +680,7 @@ def test_a_forced_run_never_re_attaches():
     forced re-run — the one outcome a user pressing Force is explicitly trying
     to rule out.
     """
-    from services.remote_runner import _choose_remote_output_dir
+    from services.remote_run_id import _choose_remote_output_dir
 
     fresh, stored = "/stg/runs/run-new/out", "/stg/runs/run-old/out"
     chosen, _reason = _choose_remote_output_dir(
@@ -687,7 +692,7 @@ def test_a_forced_run_never_re_attaches():
 
 def test_an_unforced_run_re_attaches_to_the_same_directory():
     """The other half, so the test above cannot pass by never re-attaching."""
-    from services.remote_runner import _choose_remote_output_dir
+    from services.remote_run_id import _choose_remote_output_dir
 
     fresh, stored = "/stg/runs/run-new/out", "/stg/runs/run-old/out"
     chosen, reason = _choose_remote_output_dir(
@@ -697,7 +702,7 @@ def test_an_unforced_run_re_attaches_to_the_same_directory():
 
 def test_an_empty_recorded_directory_is_not_re_attached_to():
     """A recorded address says where work was *sent*, not that it is there."""
-    from services.remote_runner import _choose_remote_output_dir
+    from services.remote_run_id import _choose_remote_output_dir
 
     fresh, stored = "/stg/runs/run-new/out", "/stg/runs/run-old/out"
     chosen, _reason = _choose_remote_output_dir(
@@ -733,7 +738,10 @@ def test_the_keys_are_the_same_on_every_launch():
     A digest that changed on every call would satisfy every test above and make
     re-attach dead — which is how the feature shipped unreachable once already.
     """
-    from services.remote_runner import _compute_run_id, pipeline_argv_digest
+    from services.remote_run_id import (
+        _compute_run_id,
+        pipeline_argv_digest,
+    )
 
     argv, key = _local_argv(), "k" * 32
     assert pipeline_argv_digest(argv, extras=["--cpu_only"]) == _PINNED_DIGEST
@@ -757,7 +765,7 @@ def test_the_launcher_does_not_reach_the_digest():
     `sys.executable` is itself machine-specific: it passed on the machine that
     wrote it and failed in CI. This test compares the shapes directly.
     """
-    from services.remote_runner import pipeline_argv_digest
+    from services.remote_run_id import pipeline_argv_digest
 
     flags = ["--input_dir", "/in", "--nuclear_token", "DAPI",
              "--segmentation_method", "stardist_nuclei"]

@@ -1,17 +1,18 @@
 """Scratch, transit and fingerprint helpers for a remote run.
 
-The leaves of ``services/remote_runner.py``'s staging work: where transient
-bytes are put while a transfer is in flight, how a stale one is swept, whether
-an archive arrived whole, and what the user's own input archives hash to.
+The leaves of a remote run's staging and fetching work: where transient bytes
+are put while a transfer is in flight, how a stale one is swept, whether an
+archive arrived whole, and what the user's own input archives hash to.
 
-They are here rather than there because they are genuinely separable — nine
-functions whose only tie to the rest of that module was one constant — and
-because that module is 8,000 lines with a line budget, whose whole point is
-that a cohesive cluster leaves rather than the file growing again.
+They are a module of their own because they are genuinely separable — nine
+functions whose only tie to the runner they came from was one constant — and
+because the stages that use them (staging, upload, fetch) each have a line
+budget, whose whole point is that a cohesive cluster leaves rather than a file
+growing again.
 
 Stdlib and ``util`` only, deliberately: nothing here knows about ssh, rsync, a
-host, or a run. ``remote_runner`` re-exports every name, so call sites and
-tests keep importing them from where they always did.
+host, or a run. Callers import these names from here, never through
+``remote_runner``.
 """
 
 from __future__ import annotations

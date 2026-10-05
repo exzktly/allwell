@@ -2,9 +2,9 @@
 
 Pure string composition — no ssh, no I/O — so every quoting decision here can be
 tested by reading the string, and the batch driver by running it in ``bash``.
-Split out of ``services/remote_runner.py``, which re-exports every name, so the
-runner keeps its one import surface and this module stays below it: it imports
-the transport's quoting and the conda / wait snippets, never the runner.
+Split out of ``services/remote_runner.py``. Callers import from here; this
+module stays below the runner: it imports the transport's quoting and the
+conda / wait snippets, never the runner.
 """
 
 from __future__ import annotations

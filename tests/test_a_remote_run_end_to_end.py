@@ -30,7 +30,7 @@ from services.remote_fetch import FetchedOutputVerifier
 
 @pytest.fixture
 def host():
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     return RemoteHost(
         name="test", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
@@ -229,7 +229,8 @@ STORED_OUT = "~/.allwell-staging/runs/run-previous/out"
 def _record_a_previous_run(plate, remote):
     """A journal naming an address under a *different* run id, and a host that
     really holds output there — so the re-attach both fires and is verified."""
-    from services.remote_runner import pipeline_argv_digest, source_fingerprint
+    from services.remote_run_id import pipeline_argv_digest
+    from services.remote_scratch import source_fingerprint
 
     remote.path(STORED_OUT).mkdir(parents=True, exist_ok=True)
     for well in ("A01", "B02"):
@@ -365,9 +366,9 @@ def test_the_transfer_model_honours_the_argv_shapes_the_runner_builds(
     Each rule below is one the runner actually depends on, and each was wrong
     in the first version of this file.
     """
-    import services.remote_runner as rr
+    from services import remote_fetch
 
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     host = RemoteHost(
         name="t", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
@@ -378,7 +379,7 @@ def test_the_transfer_model_honours_the_argv_shapes_the_runner_builds(
     # leaves ``Popen`` replaced for every later test in the session — which is
     # what it did, breaking the local-run harness three files away.
     remote.install(monkeypatch, host)
-    rsync = rr._rsync_with_retry
+    rsync = remote_fetch._rsync_with_retry
 
     # 1. `-aR`, as `sync_required_files` uses: the source path is
     #    reproduced under the destination.
@@ -444,7 +445,7 @@ def test_the_fake_refuses_a_host_it_cannot_contain(tmp_path, remote):
 
     Refusing is the honest answer while nothing rewrites paths inside `_bash`.
     """
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     host = RemoteHost(
         name="t", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="/scratch/someone/staging",
@@ -467,7 +468,7 @@ def test_an_unrelated_subprocess_is_not_mistaken_for_a_pipeline_launch(
     end-to-end tests above assert on. Nothing in the suite reaches it today
     only because those call sites happen to be stubbed.
     """
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     host = RemoteHost(
         name="t", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",

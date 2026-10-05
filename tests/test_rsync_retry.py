@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from services.remote_runner import _rsync_with_retry
+from services.remote_transport import _rsync_with_retry
 from services.remote_transport import (
     _RSYNC_RETRY_CODES,
     _RSYNC_RETRY_DELAYS,
@@ -36,7 +36,7 @@ def _fail(code: int, stderr: str = "") -> subprocess.CompletedProcess:
 def test_first_try_success_returns_immediately(monkeypatch):
     fake_run = MagicMock(return_value=_ok())
     fake_sleep = MagicMock()
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setattr("services.remote_transport.time.sleep", fake_sleep)
 
     result = _rsync_with_retry(["rsync", "-a", "x", "y"])
@@ -50,7 +50,7 @@ def test_non_transient_exit_code_does_not_retry(monkeypatch):
     is just noise. Must return immediately."""
     fake_run = MagicMock(return_value=_fail(23, "permission denied"))
     fake_sleep = MagicMock()
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setattr("services.remote_transport.time.sleep", fake_sleep)
 
     result = _rsync_with_retry(["rsync", "-a", "x", "y"])
@@ -80,7 +80,7 @@ def _record_timeline(monkeypatch, result):
         timeline.append(_RUN)
         return result
 
-    monkeypatch.setattr("services.remote_runner.subprocess.run", _run)
+    monkeypatch.setattr("subprocess.run", _run)
     monkeypatch.setattr(
         "services.remote_transport.time.sleep", lambda s: timeline.append(float(s)),
     )
@@ -108,7 +108,7 @@ def test_transient_exit_code_triggers_retries(code, monkeypatch):
     """Every retry-eligible code keeps trying up to the budget."""
     fake_run = MagicMock(return_value=_fail(code))
     sleeps: list[float] = []
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setattr(
         "services.remote_transport.time.sleep", lambda s: sleeps.append(float(s)),
     )
@@ -127,7 +127,7 @@ def test_retry_then_succeed(monkeypatch):
     or two retries without exhausting the budget."""
     fake_run = MagicMock(side_effect=[_fail(10), _fail(10), _ok()])
     sleeps: list[float] = []
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setattr(
         "services.remote_transport.time.sleep", lambda s: sleeps.append(float(s)),
     )
@@ -153,7 +153,7 @@ def test_oserror_in_subprocess_keeps_retrying(monkeypatch):
     CompletedProcess so the caller sees a uniform return type."""
     fake_run = MagicMock(side_effect=OSError("connection reset"))
     fake_sleep = MagicMock()
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setattr("services.remote_transport.time.sleep", fake_sleep)
 
     result = _rsync_with_retry(["rsync", "-a", "x", "y"])
@@ -169,7 +169,7 @@ def test_timeout_in_subprocess_keeps_retrying(monkeypatch):
         side_effect=subprocess.TimeoutExpired(cmd="rsync", timeout=60),
     )
     fake_sleep = MagicMock()
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setattr("services.remote_transport.time.sleep", fake_sleep)
 
     result = _rsync_with_retry(["rsync"], timeout=60)
@@ -181,7 +181,7 @@ def test_log_fn_receives_retry_notices(monkeypatch):
     """The caller's log_fn should see one notice per retry so the GUI
     can show 'retrying rsync 2/3 in 4s' messages."""
     fake_run = MagicMock(return_value=_fail(30))
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setattr("services.remote_transport.time.sleep", lambda s: None)
 
     logs: list[str] = []
@@ -199,7 +199,7 @@ def test_cancellable_run_timeout_none_never_walltimeouts():
     fetch relies on rsync's own --timeout for stalls instead."""
     import sys
     import threading
-    from services.remote_runner import _rsync_run_cancellable
+    from services.remote_transport import _rsync_run_cancellable
     ev = threading.Event()  # never set
     r = _rsync_run_cancellable(
         [sys.executable, "-c", "import time; time.sleep(0.5)"],
@@ -211,7 +211,7 @@ def test_cancellable_run_timeout_none_never_walltimeouts():
 def test_cancellable_run_walltimeout_still_fires_when_set():
     import sys
     import threading
-    from services.remote_runner import _rsync_run_cancellable
+    from services.remote_transport import _rsync_run_cancellable
     ev = threading.Event()
     with pytest.raises(subprocess.TimeoutExpired):
         _rsync_run_cancellable(

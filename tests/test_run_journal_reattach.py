@@ -32,11 +32,11 @@ import zipfile
 import pytest
 
 from services import run_journal as J
-from services.remote_runner import (
+from services.remote_runner import stage_local_zips
+from services.remote_run_id import (
     _choose_remote_output_dir,
     _compute_run_id,
     pipeline_argv_digest,
-    stage_local_zips,
 )
 from services.remote_upload import DatasetCache
 from services import remote_run_state
@@ -44,7 +44,7 @@ from services import remote_fetch
 from services import remote_upload
 
 def _make_host():
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     return RemoteHost(
         name="test", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
@@ -413,7 +413,7 @@ def test_an_ordinary_run_still_removes_its_run_dir(tmp_path, monkeypatch):
 # ── the discrimination the whole re-attach rests on ─────────────────────────
 
 def _record_run_one(out_dir, in_dir):
-    from services.remote_runner import source_fingerprint
+    from services.remote_scratch import source_fingerprint
     J.open_run(out_dir, spec={}, mode="remote", input_dir=in_dir, argv=[])
     J.record_remote(
         out_dir, run_id="run-OLD", cache_key="keyOLD", host_alias="hpc",
@@ -423,7 +423,7 @@ def _record_run_one(out_dir, in_dir):
 
 
 def _run_two_chooses(out_dir, in_dir):
-    from services.remote_runner import source_fingerprint
+    from services.remote_scratch import source_fingerprint
     J.open_run(out_dir, spec={}, mode="remote", input_dir=in_dir, argv=[])
     stored = J.stored_remote_address(
         out_dir, argv_digest="d1", source_key=source_fingerprint(in_dir),
@@ -486,7 +486,7 @@ def test_the_stored_address_survives_the_app_s_real_call_order(tmp_path, monkeyp
     something a unit test of either end can see.
     """
     from services import pipeline_runner as PR
-    from services.remote_runner import source_fingerprint
+    from services.remote_scratch import source_fingerprint
 
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
     out = tmp_path / "out"

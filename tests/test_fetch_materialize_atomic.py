@@ -15,6 +15,7 @@ from pathlib import Path
 
 import services.remote_runner as rr
 from services import remote_fetch
+from services import remote_scratch
 
 
 def _bare_fetcher(dest, output_filter, incremental=False):
@@ -69,13 +70,13 @@ def test_bad_scratch_override_warns_and_falls_back(tmp_path, monkeypatch, caplog
     home = tmp_path / "home"; home.mkdir()
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(bad))
-    # The logger is `services.remote_scratch`, where `_scratch_dir` lives —
-    # `remote_runner` only re-exports the function. Naming the wrong logger
+    # The logger is `services.remote_scratch`, where `_scratch_dir` lives.
+    # Naming the wrong logger
     # here is inert rather than wrong today, because caplog's handler sits on
     # root and WARNING propagates to it; it would start dropping the records
     # the moment that module set `propagate = False` or a filter keyed on the
     # name appeared, and the test would then pass while asserting nothing.
     with caplog.at_level(logging.WARNING, logger="services.remote_scratch"):
-        p = rr._scratch_dir()
+        p = remote_scratch._scratch_dir()
     assert p == home / ".allwell" / "scratch"
     assert any("unusable" in r.getMessage() for r in caplog.records)

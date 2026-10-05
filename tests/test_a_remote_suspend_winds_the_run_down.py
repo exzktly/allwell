@@ -140,7 +140,7 @@ def test_without_a_request_the_driver_waits_for_the_next_batch(tmp_path):
 
 @pytest.fixture
 def host():
-    from services.remote_runner import RemoteHost
+    from services.remote_config import RemoteHost
     return RemoteHost(
         name="test", ssh_alias="test-host", remote_project_dir="~/allwell",
         remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
@@ -397,7 +397,7 @@ def _driver_output(*lines: str):
 
 def test_a_driver_that_stops_for_a_suspend_is_not_a_lost_node():
     """Read as a lost node, the early exit would cancel the last batch's downloads."""
-    from services.remote_runner import BATCH_DONE_MARKER
+    from services.remote_commands import BATCH_DONE_MARKER
 
     b = _batched(3)
     b.note_suspend_requested()
@@ -411,7 +411,7 @@ def test_a_driver_that_stops_for_a_suspend_is_not_a_lost_node():
 
 def test_a_driver_that_stops_without_a_suspend_is_still_a_lost_node():
     """The control: the lost-node rule itself is unchanged."""
-    from services.remote_runner import BATCH_DONE_MARKER
+    from services.remote_commands import BATCH_DONE_MARKER
 
     b = _batched(3)
     b._read_driver(_driver_output(BATCH_DONE_MARKER.format(i=1, rc=0) + "\n"))

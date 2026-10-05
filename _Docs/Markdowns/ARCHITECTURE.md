@@ -13616,14 +13616,21 @@ exercise a dialog path patches that specific call itself; its `monkeypatch` is
 applied later and wins.
 
 **Why the full-app tests are dangerous in bulk.** Constructing the app builds
-~1,800 QObjects wired together with signal→bound-method connections
+about 1,260 QObjects under the window, and about 3,850 once the mini dataset is
+loaded and the centre tabs drain, wired together with signal→bound-method connections
 (`signal.connect(app._method)`), closures that capture `app`, and child widgets
 that keep an `_app` back-reference (coordinators, `LabelGrid`,
 `RatioMetricsPanel`, the `WidgetRegistry` / `ViewerContext` / `PersistenceRegistry`).
 That web of Qt-C++ ↔ Python references **is not reclaimed within the process**:
-`close()` + `deleteLater()` + `gc.collect()` do **not** free it — measured, the
-`ReviewApp` instance and its widgets survive teardown, so `app.allWidgets()`
-climbs ~1,800 per test and RSS grows ~40 MB per test, monotonically. Nor can it
+`close()` + `deleteLater()` + `gc.collect()` do **not** free it. Measured by
+`tests/perf/bench_app_retention.py` in one plain process (no pytest), every
+closed `ReviewApp` instance survives, and each construction with the mini
+dataset loaded leaves about 31 MB of RSS, 40 live `QWidget`s (8 of them
+top-level), roughly 750 PySide wrappers and 455 objects of the app's own
+classes behind it; an unloaded construction leaves about 5 MB and 20 widgets.
+Two clean-process runs agree exactly on the counts and within 2% on RSS. Under
+pytest the per-test cost is higher still, because `qtbot` holds every app it
+was handed. Either way the growth is monotonic. Nor can it
 be forced: deleting the app's top-level widgets from a teardown fixture
 segfaults the interpreter *after* the tests themselves have passed, which is
 why `conftest.py`'s widget reaper (below) exempts anything marked `slow`.

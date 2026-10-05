@@ -11,13 +11,13 @@
 
 **Planning baseline:** `main` at `1127c41` (All-Well 9.10.14)
 
-**Current state:** R0 and C0 done; the rest `todo`. Workstream branch:
+**Current state:** R0, C0 and Q0 done; the rest `todo`. Workstream branch:
 `implementation-remediation-plan` (one pull request at the end of the whole
 plan, so one version bump: 9.10.14 → 9.10.15). Row commits are found with
 `git log --grep '^<ROW>:'`.
 
-**Next action:** batch-1 fast lane (R0 + C0), then Q0 — the retention
-benchmark
+**Next action:** Q1 — attribute what keeps a closed `ReviewApp` alive
+(batch-1 fast lane running against R0 + C0)
 
 ## 1. Objective and scope
 
@@ -134,7 +134,7 @@ All figures are measured on `main` at `1127c41`.
 | … of which import the module and use attributes (`rr.X`) | 28 files | `import services.remote_runner [as …]` source count |
 | `monkeypatch.setattr(<runner module>, "name", …)` sites | 24 | source count |
 | `"services.remote_runner.<name>"` string patch targets | 5 distinct | source count |
-| Full `ReviewApp` construction | about 1,800 QObjects and about 40 MB retained per test | historical estimate in `ARCHITECTURE.md` §10.4; Q0 must remeasure |
+| Full `ReviewApp` construction (Q0 baseline) | mini dataset loaded: 3,855 QObject children open; per construction after close, the `ReviewApp` survives (5 of 5) with +31.1 MB RSS (31.4 / 30.8 in two runs), +40 `QWidget`s (+8 top-level), +746 PySide wrappers, +455 app-class objects. Unloaded: 1,257 QObjects; +4.9 MB, +20 widgets (+4 top-level), +277 wrappers, +197 app objects | `python tests/perf/bench_app_retention.py --iterations 5 [--fixture empty]`; Linux, Python 3.11.15, PySide6/Qt 6.7.3, offscreen, RSS from `/proc/self/statm`. The historical "~1,800 QObjects, ~40 MB per test" was a pytest-context figure |
 
 The import counts measure coupling, not defects. They are recorded so moving a
 definition cannot be mistaken for reducing the facade while all consumers keep
@@ -650,7 +650,7 @@ commit still owns one row.
 |---|---|---|---|---|
 | R0 | `done` | — | Facade inventory, four-form liveness guard with bite cases, seeded ratchets | `git log --grep '^R0:'`. `__all__` = the 10 supported names; `tests/test_remote_runner_facade.py` inventories the 85 other names reached through the runner (13 alias, 41 binding, 31 owned) under all four access forms via `tests/_facade_scan.py`. Of the 11 candidates, 10 confirmed dead and removed; `_transit_refused` is live (`tests/test_remote_transit_volume.py:120`) and kept. Bite cases: 8 reach shapes + 3 non-reaches; mutating out the attribute, named-setattr and string-target branches failed 4, 2 and 1 of them respectively. Runner 6,810 lines after adding `__all__` (budget 6,810, unchanged). Ran: ruff; guard family + `test_guards_bite` + facade guard (554 passed); remote group + all 55 runner-reaching test files (1,418 passed). Fast lane: see the batch-1 entry in section 11 |
 | C0 | `done` | — | Total allowlisted-CC ratchet + mutation-verified characterization per behavior class | `git log --grep '^C0:'`. `TOTAL_ALLOWLISTED_CC_BUDGET = 1192` with growth and not-slack tests and three bite cases. 24 mutation rows across the three seams (section 5, *C0 results*; SB4/5 is two mutations): 10 caught by existing tests, 14 survived; every survivor now fails a named test (11 new tests, 2 extended). Product code unchanged. Ran: ruff; the seam files; guard family. Fast lane: batch 1 in section 11 |
-| Q0 | `todo` | — | Reproducible `bench_app_retention.py` + JSON output | Not started. Requires PySide6 (installed by the cloud session-start hook) |
+| Q0 | `done` | — | Reproducible `bench_app_retention.py` + JSON output | `git log --grep '^Q0:'`. Two clean-process 5-iteration runs: integer metrics identical, RSS growth 31.4 vs 30.8 MB/iteration (2.1% apart). Stated tolerance: counts exact, RSS ±5%. Baseline recorded in section 3.1. No product code changed |
 | A0 | `todo` | R0 | Classified re-export inventory for `remote_runner` and `process_microscopy` | Not started |
 | R1 | `todo` | R0, A0 | Fetched-output owner and verification characterization | Candidate: `services/remote_fetch.py` |
 | R2 | `todo` | R0, A0 | Typed local-staging owner; `stage_local_zips` allowlist key moved | Candidate: `services/remote_staging.py` |

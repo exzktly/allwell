@@ -65,6 +65,7 @@ from review.features.image_browser.image_table.export import (
     set_gallery_quality,
 )
 from ui import theme
+from widgets.owned_action import owned_action
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -371,9 +372,9 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     table_btn = _menu_button(action_row, "Table",
                              tooltip="Reset the layout, or clear the images")
     tmenu = table_btn.menu()
-    tmenu.addAction("Reset table layout").triggered.connect(
+    owned_action(tmenu, "Reset table layout").triggered.connect(
         lambda _=False: image_table_reset_layout(ctx))
-    tmenu.addAction("Clear rendered images").triggered.connect(
+    owned_action(tmenu, "Clear rendered images").triggered.connect(
         lambda _=False: image_table_clear_render(ctx))
     tr.addWidget(table_btn)
 
@@ -391,7 +392,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     crop_act.toggled.connect(lambda _c=False: _crop.toggle_mode())
     cmenu.addAction(crop_act)
     reg.register("_image_table_crop_act", crop_act)
-    reset_crop_act = cmenu.addAction("Show the full field again")
+    reset_crop_act = owned_action(cmenu, "Show the full field again")
     reset_crop_act.triggered.connect(lambda _=False: _crop.clear())
 
     def _sync_crop_menu() -> None:
@@ -466,17 +467,17 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         action_row, "Save", tooltip="Save, copy, or export this table.",
     )
     emenu = export_btn.menu()
-    emenu.addAction("Export to File…").triggered.connect(
+    owned_action(emenu, "Export to File…").triggered.connect(
         lambda _=False: image_table_export(ctx))
-    emenu.addAction("Export to PowerPoint…").triggered.connect(
+    owned_action(emenu, "Export to PowerPoint…").triggered.connect(
         lambda _=False: image_table_export_pptx(ctx))
     emenu.addSeparator()
-    emenu.addAction("Copy PNG").triggered.connect(
+    owned_action(emenu, "Copy PNG").triggered.connect(
         lambda _=False: image_table_copy_png(ctx))
-    emenu.addAction("Copy SVG").triggered.connect(
+    owned_action(emenu, "Copy SVG").triggered.connect(
         lambda _=False: image_table_copy_svg(ctx))
     emenu.addSeparator()
-    emenu.addAction("Save to Saved Plots").triggered.connect(
+    owned_action(emenu, "Save to Saved Plots").triggered.connect(
         lambda _=False: image_table_save_to_gallery(ctx))
 
     # Quick-pick resolution/speed preset for "Save to Saved Plots" — the same
@@ -488,7 +489,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     quality_actions: dict[str, QAction] = {}
     for _qkey in GALLERY_QUALITY_PRESETS:
         _gallery_px = GALLERY_QUALITY_PRESETS[_qkey][1]
-        _qact = quality_menu.addAction(f"{GALLERY_QUALITY_LABELS[_qkey]} — {_gallery_px}px")
+        _qact = owned_action(quality_menu, f"{GALLERY_QUALITY_LABELS[_qkey]} — {_gallery_px}px")
         _qact.setCheckable(True)
         quality_group.addAction(_qact)
         _qact.triggered.connect(partial(set_gallery_quality, ctx, _qkey))
@@ -501,7 +502,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     quality_menu.aboutToShow.connect(_sync_quality_check)
 
     emenu.addSeparator()
-    emenu.addAction("Export settings…").triggered.connect(
+    owned_action(emenu, "Export settings…").triggered.connect(
         lambda _=False: image_table_open_export_settings(ctx))
     tr.addWidget(export_btn)
 

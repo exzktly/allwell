@@ -106,3 +106,48 @@ def test_a_window_closed_mid_drain_builds_nothing_after_it_is_gone(qapp, caplog)
               if "Deferred build" in r.getMessage()]
     assert failed == []
     assert ref() is None
+
+
+def _survivor_counts():
+    """PySide wrappers and repository-class objects alive, by type name."""
+    from collections import Counter
+
+    roots = ("review.", "widgets.", "ui.", "core.", "analyze.", "datasets.")
+    pyside: Counter = Counter()
+    ours: Counter = Counter()
+    for obj in gc.get_objects():
+        mod = getattr(type(obj), "__module__", "")
+        if not isinstance(mod, str):
+            continue
+        if mod.startswith("PySide6"):
+            pyside[type(obj).__name__] += 1
+        elif mod.startswith(roots) and not isinstance(obj, type):
+            ours[f"{mod}.{type(obj).__name__}"] += 1
+    return pyside, ours
+
+
+def test_a_closed_window_leaves_no_wrapper_and_no_app_object_behind(qapp, mini_dataset):
+    """Q4 of the remediation plan measured the last of it: seven ``QAction``
+    wrappers per window from the dataset menu, and a log handler holding a
+    dead text widget. Both are gone, so the budget is zero: the second and
+    third windows (the first warms import-time caches) leave exactly what the
+    second left — compared by type, so a leak names itself."""
+    from review.runtime_app import ReviewApp
+
+    def one_window():
+        app = ReviewApp()
+        app._load_path(mini_dataset)
+        qapp.processEvents()
+        _close(qapp, app)
+        del app
+        _flush(qapp)
+        gc.collect()
+        _flush(qapp)
+        gc.collect()
+        return _survivor_counts()
+
+    one_window()
+    pyside_2, ours_2 = one_window()
+    pyside_3, ours_3 = one_window()
+    assert dict(pyside_3 - pyside_2) == {}
+    assert dict(ours_3 - ours_2) == {}

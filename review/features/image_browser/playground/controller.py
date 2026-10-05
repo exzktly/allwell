@@ -9,7 +9,7 @@ renderer. Reference-well methods (empty_well / basic) build their per-channel
 field on a worker thread.
 
 Widget reads are all guarded (``getattr``) so the controller can be driven purely
-through ``app._app_state.playground`` in headless tests.
+through ``ctx.state.playground`` in headless tests.
 """
 
 from __future__ import annotations
@@ -948,7 +948,7 @@ def _render(ctx, arr) -> None:
         above_ids=above_ids, threshold=thr,
         label_colors=bool(st.binary_label_colors))
     _set_count(ctx.window, _count_text(st.display_facts))
-    render_playground_display(ctx.window)
+    render_playground_display(ctx)
 
 
 def _build_reference_then_render(ctx, chan_lower: str, *, ff_mode: str,
@@ -1501,7 +1501,7 @@ def playground_pan_move(ctx, event) -> None:
     sx, sy, ox, oy = drag
     st.pan_x = ox + (mx - sx)
     st.pan_y = oy + (my - sy)
-    render_playground_display(ctx.window)
+    render_playground_display(ctx)
 
 
 def playground_hover(ctx, event) -> None:

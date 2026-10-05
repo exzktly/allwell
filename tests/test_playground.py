@@ -17,9 +17,9 @@ import process_microscopy as pm
 from pipeline import background
 from pipeline import flatfield
 
-# Heavy: builds the Qt Playground worker/UI; ~4 min. Excluded from the fast CI
-# lane (`-m "not slow"`); run explicitly in the local/manual full pass.
-pytestmark = pytest.mark.slow
+# The tests that build a ``ReviewApp`` (``loaded_app`` / ``viewer_app``) are
+# marked slow by the conftest; the rest — the pure correction tests and the
+# Playground tests on the minimal shell — run in the fast lane.
 
 
 # ── shared correction (pure, no Qt) ──────────────────────────────────────────
@@ -128,17 +128,30 @@ def test_build_reference_fields_empty_returns_none(monkeypatch):
 # ── controller orchestration (offscreen app) ─────────────────────────────────
 
 @pytest.fixture
-def playground_app(loaded_app):
-    """A loaded app with the Playground sub-tab built."""
+def playground_app(shell_ctx):
+    """The Playground sub-tab built against the mini dataset, in a minimal shell.
+
+    Every test using this drives the Playground and nothing else, so it needs
+    the feature's ``ViewerContext`` rather than all of ``ReviewApp``
+    (``tests/_minimal_shell.py``). The shell's window stands in for the app:
+    the tab stamps its widget handles onto it, and ``_ctx`` / ``_app_state`` /
+    ``_features`` are set on it so a test reads the context it drove. The tests
+    that are about the shell — activation through the notebook, the plotting
+    context bar's threshold box — use ``loaded_app`` and stay in the slow lane.
+    """
     from review.features.image_browser.playground.tab_view import build_playground_tab
     from PySide6.QtWidgets import QWidget, QHBoxLayout
+    ctx, host = shell_ctx
+    host._ctx = ctx
+    host._app_state = ctx.state
+    host._features = ctx.features
     frame = QWidget()
     QHBoxLayout(frame)
-    build_playground_tab(loaded_app._ctx, frame)
+    build_playground_tab(ctx, frame)
     # Keep the frame (and its child widgets) alive for the test's lifetime —
-    # otherwise Qt garbage-collects the combos referenced via app._playground_*.
-    loaded_app._test_playground_frame = frame
-    return loaded_app
+    # otherwise Qt garbage-collects the combos referenced via host._playground_*.
+    host._test_playground_frame = frame
+    return host
 
 
 def test_tab_builds_and_populates_selectors(playground_app):

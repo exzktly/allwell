@@ -511,6 +511,24 @@ def loaded_app(viewer_app, mini_dataset):
 
 
 @pytest.fixture
+def shell_ctx(qtbot, mini_dataset):
+    """``(ctx, window)`` — the mini dataset loaded into a minimal shell.
+
+    A production ``ViewerContext`` around a bare ``QMainWindow``, with no
+    ``ReviewApp``: about 300 QObjects against the full app's 4,300, and no
+    ``slow`` mark, because nothing here is retained the way a ``ReviewApp`` is.
+    For a test whose subject is one feature — build its tab into a frame
+    against ``ctx`` and drive it. A test whose subject is the shell (loading,
+    persistence, navigation, the sidebar) keeps ``loaded_app``.
+    See ``tests/_minimal_shell.py``.
+    """
+    from tests._minimal_shell import load_dataset, minimal_shell
+    ctx, window = minimal_shell(qtbot)
+    load_dataset(ctx, mini_dataset)
+    return ctx, window
+
+
+@pytest.fixture
 def image_table_app(loaded_app):
     """``loaded_app`` with the Image Table sub-tab actually built.
 

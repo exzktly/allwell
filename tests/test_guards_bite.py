@@ -4915,3 +4915,52 @@ def test_inert_patch_guard_clears_a_re_export_read_at_call_time(tmp_path, monkey
                    "    from pkg.facade import is_alive\n"
                    "    return is_alive(pid)\n"))
     assert _run_inert_patch_guard(monkeypatch, tmp_path, app, tests) is None
+
+
+# ── connected actions are created on the Python side ─────────────────────────
+#
+# `tests/test_connected_actions_are_owned.py`: an `addAction(text)` result whose
+# signal is connected leaks its wrapper after the menu is gone. The rebound
+# shape is the one that slipped past the first version, which kept only the last
+# binding of each name.
+
+CONNECTED_ACTION_SHAPES = {
+    "chained": ("def f(menu):\n"
+                "    menu.addAction('x').triggered.connect(lambda: None)\n"),
+    "bound": ("def f(menu):\n"
+              "    a = menu.addAction('x')\n"
+              "    a.triggered.connect(lambda: None)\n"),
+    "rebound": ("def f(menu, other):\n"
+                "    a = menu.addAction('x')\n"
+                "    a.triggered.connect(lambda: None)\n"
+                "    a = other.addAction('y')\n"
+                "    a.toggled.connect(lambda: None)\n"),
+}
+
+CONNECTED_ACTION_CLEAN = {
+    "owned": ("from widgets.owned_action import owned_action\n"
+              "def f(menu):\n"
+              "    owned_action(menu, 'x').triggered.connect(lambda: None)\n"),
+    "slot_overload": ("def f(menu):\n"
+                      "    menu.addAction('x', lambda: None)\n"),
+    "compared_after_exec": ("def f(menu):\n"
+                            "    a = menu.addAction('x')\n"
+                            "    return menu.exec() is a\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(CONNECTED_ACTION_SHAPES))
+def test_the_connected_action_guard_fires(shape):
+    import ast as _ast
+    from tests.test_connected_actions_are_owned import connected_unowned_actions
+    src = CONNECTED_ACTION_SHAPES[shape]
+    found = connected_unowned_actions(_ast.parse(src))
+    expected = [i for i, line in enumerate(src.splitlines(), 1) if "addAction" in line]
+    assert found == expected, f"the {shape} shape reported {found}, not {expected}"
+
+
+@pytest.mark.parametrize("shape", sorted(CONNECTED_ACTION_CLEAN))
+def test_the_connected_action_guard_clears_safe_shapes(shape):
+    import ast as _ast
+    from tests.test_connected_actions_are_owned import connected_unowned_actions
+    assert connected_unowned_actions(_ast.parse(CONNECTED_ACTION_CLEAN[shape])) == []

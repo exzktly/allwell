@@ -23,6 +23,7 @@ from review.core.sidebar_view import build_sidebar
 from review.core.status_view import build_bottom
 from widgets.separator import build_hline_separator
 from review.domain.dataset_name import dataset_display_name
+from widgets.owned_action import owned_action
 
 
 #: The left panel's width, shared by all three modes — Review's own rail,
@@ -117,7 +118,7 @@ def _fill_dataset_menu(win, menu) -> None:
     # its full path and when it was last opened — the two facts that tell
     # ``plate3_run2`` from ``plate3_run2`` on another drive.
     menu.setToolTipsVisible(True)
-    menu.addAction("Open…").triggered.connect(lambda _=False: win._browse())
+    owned_action(menu, "Open…").triggered.connect(lambda _=False: win._browse())
 
     ctx = getattr(win, "_ctx", None)
     if ctx is None:
@@ -132,7 +133,7 @@ def _fill_dataset_menu(win, menu) -> None:
     heading = menu.addAction("Recent")
     heading.setEnabled(False)
     for label, sublabel, on_click, enabled, tooltip, _on_remove in rows:
-        action = menu.addAction(label)
+        action = owned_action(menu, label)
         action.setToolTip(tooltip)
         action.setEnabled(bool(enabled))
         if callable(on_click):

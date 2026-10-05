@@ -37,9 +37,14 @@ class _GUILogHandler(logging.Handler):
     GuiLogRelay`, whose queued signal is the app's one way across that boundary.
 
     Detaches itself the moment its widget is gone. A handler outlives the window
-    it writes into — nothing removes it on teardown, and in a process that builds
-    more than one window (the test suite does) the dead ones stay subscribed to
-    the same logger. Left attached they are not merely inert: see :meth:`_append`.
+    it writes into — nothing else removes it on teardown, and in a process that
+    builds more than one window (the test suite does) the dead ones stay
+    subscribed to the same logger. Left attached they are not merely inert: see
+    :meth:`_append`. Two routes, because either can be first: the widget's
+    ``destroyed`` signal, so a window closed with nothing logged after it lets
+    its handler go — that one used to stay attached, holding its relay and the
+    dead widget's wrapper, until some later record happened to arrive — and
+    :meth:`_append`'s ``RuntimeError``, for a record already in flight.
     """
 
     def __init__(self, widget: QTextEdit) -> None:
@@ -48,6 +53,7 @@ class _GUILogHandler(logging.Handler):
         # Built here, so its thread affinity is whichever thread constructs the
         # handler — the GUI thread, since ``build_bottom`` runs there.
         self._relay = GuiLogRelay(self._append)
+        widget.destroyed.connect(lambda _obj=None: self._detach())
 
     def emit(self, record: logging.LogRecord) -> None:
         try:

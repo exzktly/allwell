@@ -78,4 +78,4 @@ def open_timepoint_selector(
     none_action.triggered.connect(lambda _=False: _set_all(False))
     menu.addAction(none_action)
 
-    menu_exec.exec_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
+    menu_exec.exec_transient_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))

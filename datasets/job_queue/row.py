@@ -314,7 +314,7 @@ class JobRow(QWidget):
 
     def _open_menu(self) -> None:
         menu = self.build_menu()
-        menu_exec.exec_menu(
+        menu_exec.exec_transient_menu(
             menu, self._menu_btn.mapToGlobal(self._menu_btn.rect().bottomLeft()))
 
     # ── drag-handle reorder ──────────────────────────────────────────────

@@ -286,7 +286,7 @@ def build_pairing_window(ctx, scope: str) -> QDialog | None:
             if ref is None:
                 continue
             menu.addAction(text).setData(ref)
-        chosen = menu_exec.exec_menu(
+        chosen = menu_exec.exec_transient_menu(
             menu, set_all_btn.mapToGlobal(set_all_btn.rect().bottomLeft()))
         if chosen is None:
             return
@@ -302,7 +302,7 @@ def build_pairing_window(ctx, scope: str) -> QDialog | None:
                 act = menu.addAction(
                     f"Every {size} samples — {word} is the control")
                 act.setData((size, position))
-        chosen = menu_exec.exec_menu(
+        chosen = menu_exec.exec_transient_menu(
             menu, auto_btn.mapToGlobal(auto_btn.rect().bottomLeft()))
         if chosen is None:
             return

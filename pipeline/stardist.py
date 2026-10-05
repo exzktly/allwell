@@ -19,8 +19,8 @@ parameters as arguments and reads no module state, so an interactive caller can
 run the pipeline's exact segmentation on one frame.
 ``_segment_stardist_nuclei`` is the worker-global wrapper over it.
 
-``process_microscopy`` re-exports the two ``_segment_stardist_*`` functions, so
-the segmentation dispatch is unchanged.
+``process_microscopy`` imports the two ``_segment_stardist_*`` functions for its
+segmentation dispatch.
 """
 
 from __future__ import annotations

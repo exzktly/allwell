@@ -476,7 +476,7 @@ def open_bar_timepoint_selector(ctx) -> None:
     menu.addAction(none_action)
 
     btn = ctx.runtime.barplot.tp_button
-    menu_exec.exec_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
+    menu_exec.exec_transient_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
 
 
 def refresh_bar_layout_btn_state(ctx) -> None:

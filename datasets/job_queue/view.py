@@ -213,7 +213,7 @@ class JobQueuePage(QWidget):
 
     def _open_add_menu(self) -> None:
         menu = self.build_add_menu()
-        menu_exec.exec_menu(
+        menu_exec.exec_transient_menu(
             menu, self._add_btn.mapToGlobal(self._add_btn.rect().bottomLeft()))
 
     def build_add_menu(self) -> QMenu:

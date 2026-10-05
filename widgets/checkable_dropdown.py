@@ -156,4 +156,4 @@ class CheckableDropdown(QWidget):
         none_action.triggered.connect(lambda _=False: self._set_all(False))
         menu.addAction(none_action)
         btn = self._button
-        menu_exec.exec_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
+        menu_exec.exec_transient_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))

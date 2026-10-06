@@ -13,6 +13,7 @@ positives on handlers that log, re-raise, or do real recovery work.
 """
 
 import ast
+from functools import lru_cache
 from pathlib import Path
 from tests._repo_scan import parse_source
 
@@ -197,23 +198,29 @@ def _silent_sites():
             tree = parse_source(path)
         except SyntaxError:  # pragma: no cover - the tree parses
             continue
-        stack: list[str] = []
-
-        def visit(node, stack=stack, where=rel(path)):
-            is_fn = isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            if is_fn:
-                stack.append(node.name)
-            if isinstance(node, ast.ExceptHandler) and _is_broad(node) \
-                    and _silent_body(node):
-                found.append((where, stack[-1] if stack else "<module>",
-                              node.body[0].lineno))
-            for child in ast.iter_child_nodes(node):
-                visit(child)
-            if is_fn:
-                stack.pop()
-
-        visit(tree)
+        found.extend(_silent_sites_in_tree(tree, rel(path)))
     return found
+
+
+@lru_cache(maxsize=1024)
+def _silent_sites_in_tree(tree, where):
+    # The shared parser supplies a different tree whenever source text changes.
+    found = []
+    stack = []
+
+    def visit(node):
+        is_fn = isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        if is_fn:
+            stack.append(node.name)
+        if isinstance(node, ast.ExceptHandler) and _is_broad(node) and _silent_body(node):
+            found.append((where, stack[-1] if stack else "<module>", node.body[0].lineno))
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+        if is_fn:
+            stack.pop()
+
+    visit(tree)
+    return tuple(found)
 
 
 def test_no_silent_broad_except_anywhere():

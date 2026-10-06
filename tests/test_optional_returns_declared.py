@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import ast
 
-from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source, python_sources, rel
 
 
 def _own_returns(fn: ast.AST) -> list[ast.Return]:
@@ -52,6 +52,10 @@ def offenders_in(source: str, path: str) -> list[str]:
         tree = ast.parse(source)
     except SyntaxError:  # pragma: no cover - the tree parses
         return []
+    return _offenders_in_tree(tree, path)
+
+
+def _offenders_in_tree(tree, path):
     out = []
     for fn in ast.walk(tree):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -70,7 +74,7 @@ def offenders_in(source: str, path: str) -> list[str]:
 def offenders() -> list[str]:
     out: list[str] = []
     for path in python_sources():
-        out += offenders_in(path.read_text(encoding="utf-8"), rel(path))
+        out += _offenders_in_tree(parse_source(path), rel(path))
     return out
 
 

@@ -195,9 +195,9 @@ def _bad_ctx_calls(tree: ast.AST, unambiguous: set, *, only_real_app: bool):
                 scopes.append((node, _uses_real_app_fixture(node)))
 
     for scope, is_real in scopes:
+        if only_real_app and not is_real:
+            continue
         for node in ast.walk(scope):
-            if only_real_app and not is_real:
-                continue
             if not isinstance(node, ast.Call) or not node.args:
                 continue
             name = _called_free_func(node, unambiguous, aliases)

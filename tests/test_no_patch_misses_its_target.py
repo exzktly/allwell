@@ -68,17 +68,18 @@ def _read_at_call_time() -> frozenset[tuple[str, str]]:
     for path in python_sources():
         tree = parse_source(path)
         names, dotted = _bindings(tree)
-        for node in ast.walk(tree):
+        pending = [(tree, False)]
+        while pending:
+            node, in_function = pending.pop()
             if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
                 mod = _module_of(node.value, names, dotted)
                 if mod:
                     pairs.add((mod, node.attr))
-        for fn in ast.walk(tree):
-            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                for node in ast.walk(fn):
-                    if isinstance(node, ast.ImportFrom) and node.module in mods:
-                        for alias in node.names:
-                            pairs.add((node.module, alias.name))
+            in_function = in_function or isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            if in_function and isinstance(node, ast.ImportFrom) and node.module in mods:
+                for alias in node.names:
+                    pairs.add((node.module, alias.name))
+            pending.extend((child, in_function) for child in ast.iter_child_nodes(node))
     return frozenset(pairs)
 
 

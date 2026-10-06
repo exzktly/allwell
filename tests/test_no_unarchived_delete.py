@@ -44,6 +44,7 @@ moved to the package it belongs in.
 from __future__ import annotations
 
 import ast
+from functools import lru_cache
 
 from tests._repo_scan import parse_source, python_sources, rel
 
@@ -132,6 +133,21 @@ def _imported_names(tree: ast.AST) -> set[str]:
 
 
 def repo_archive_writers() -> frozenset[str]:
+    return _repo_archive_writers(_source_snapshot())
+
+
+def _source_snapshot():
+    sources = []
+    for path in python_sources():
+        try:
+            sources.append((path, parse_source(path)))
+        except SyntaxError:  # match offenders_in's handling of synthetic sources
+            continue
+    return tuple(sources)
+
+
+@lru_cache(maxsize=2)
+def _repo_archive_writers(sources) -> frozenset[str]:
     """Every function name in the tree that reaches ``atomic_zip``.
 
     The closure is computed over ``(module, function)`` pairs and follows each
@@ -148,16 +164,7 @@ def repo_archive_writers() -> frozenset[str]:
     """
     defs: dict[tuple[str, str], set[str]] = {}
     imports: dict[str, dict[str, tuple[str, str]]] = {}
-    for path in python_sources():
-        # ``parse_source``, never ``ast.parse(path.read_text())``: the tree is
-        # 479 files and parsing it is 2.8 s, which roughly sixty guards in this
-        # lane each want in full. ``test_the_fast_lane_stays_fast`` is what
-        # noticed this function doing its own — and it only noticed in the
-        # whole lane, not in this file's own run.
-        try:
-            tree = parse_source(path)
-        except (OSError, SyntaxError):  # pragma: no cover - the tree parses
-            continue
+    for path, tree in sources:
         mod = rel(path)[:-3].replace("/", ".")
         for name, callees in _definitions(tree).items():
             defs[(mod, name)] = callees
@@ -217,8 +224,14 @@ def offenders_in(source: str, path: str,
     except SyntaxError:  # pragma: no cover - the tree parses
         return []
 
+    return _offenders_in_tree(tree, path, extra_writers)
+
+
+def _offenders_in_tree(tree, path, extra_writers):
     calls = {(fn.lineno, fn.name): _called_names(fn) for fn in _functions(tree)}
-    local = _definitions(tree)
+    local = {}
+    for (_lineno, name), callees in calls.items():
+        local.setdefault(name, set()).update(callees)
     bound = set(local) | _imported_names(tree)
 
     writers = set(_ARCHIVE_WRITERS) | (set(extra_writers) & bound)
@@ -242,15 +255,21 @@ def offenders_in(source: str, path: str,
 
 def _pairings() -> list[tuple[str, int, str]]:
     """Every archive-write-then-remove-directory pairing, allowlist included."""
+    return list(_pairings_for_sources(_source_snapshot()))
+
+
+@lru_cache(maxsize=2)
+def _pairings_for_sources(sources):
+    # AST identity comes from the text-keyed parser: edits and file membership
+    # changes produce a new snapshot, including same-size/same-mtime rewrites.
     found: list[tuple[str, int, str]] = []
-    writers = repo_archive_writers()
-    for path in python_sources():
-        for entry in offenders_in(path.read_text(encoding="utf-8"), rel(path),
-                                  writers):
+    writers = _repo_archive_writers(sources)
+    for path, tree in sources:
+        for entry in _offenders_in_tree(tree, rel(path), writers):
             location, _, name = entry.partition(" ")
             file_part, _, lineno = location.rpartition(":")
             found.append((file_part, int(lineno), name.rstrip("()")))
-    return found
+    return tuple(found)
 
 
 def offenders() -> list[str]:

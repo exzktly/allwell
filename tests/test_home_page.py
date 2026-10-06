@@ -398,10 +398,12 @@ def _goto_subtab(app, qtbot, name: str) -> None:
 
 def test_the_page_opens_on_overview(loaded_app):
     """Overview leads because Home is the landing page and it reports rather
-    than asks. The definition editors follow it."""
+    than asks. The definition editors follow it, and QC Triage — a report on
+    the run rather than a definition — closes the row."""
     sub = _subtabs(loaded_app)
     assert [sub.tabText(i) for i in range(sub.count())] == [
         "Overview", "Cell Gating", "Sample Map", "Ratios", "Pipeline Info",
+        "QC Triage",
     ]
     assert sub.tabText(sub.currentIndex()) == "Overview"
 
@@ -419,7 +421,7 @@ def test_every_definition_tab_is_built_after_a_load(loaded_app):
     ctx = loaded_app._ctx
     assert ctx.runtime.home.built == {
         "Cell Gating": True, "Sample Map": True, "Ratios": True,
-        "Pipeline Info": True,
+        "Pipeline Info": True, "QC Triage": True,
     }
     for key in ("_rep_list", "_lbl_grid", "_ratio_panel"):
         assert ctx.widgets.get_or_none(key) is not None, key

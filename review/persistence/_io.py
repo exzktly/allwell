@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from core.safe import swallowed
+from review.persistence import provenance as _provenance
 
 _logger = logging.getLogger("review")
 
@@ -123,13 +124,99 @@ def _retry_on_permission_error(op_name: str, op):
     raise last_exc
 
 
+# --------------------------------------------------------------------------
+# Suspending writes under a directory
+# --------------------------------------------------------------------------
+#
+# The headless report (``allwell_report.py``) loads a dataset into the real app
+# and replays each saved plot, which moves gating, groups and view state the
+# way a user restoring a plot would. A report must change nothing about the
+# dataset it reports on, so while it runs every write under that dataset's
+# folder — and its sidecar, which may sit one level up — **raises**
+# :class:`WritesSuspended` here, at the functions that land them, and is
+# counted. Raising rather than returning is the point: a caller that thinks its
+# write landed goes on to do what depends on it — the legacy-sidecar migration
+# deletes the files it absorbed, the QC migration deletes ``qc_params.json`` —
+# and a suppressed write that reported success would have deleted the user's
+# only copy. ``WritesSuspended`` is an ``OSError``, so every caller that already
+# survives a failed write survives this one by the same path. Process-wide
+# rather than thread-local, because the background writer is another thread.
+_suspended_roots: list[Path] = []
+_suspended_count = 0
+_suspend_lock = threading.Lock()
+
+
+class WritesSuspended(OSError):
+    """A write refused because writes are suspended under its path."""
+
+
+@contextmanager
+def writes_suspended(*roots: Path) -> Iterator[None]:
+    """Within this block, nothing at or under any of *roots* is written.
+
+    A root may be a directory (everything under it) or a single file. Each
+    refused write is counted (:func:`suppressed_writes`) and logged at INFO.
+    """
+    resolved = [Path(r).resolve() for r in roots]
+    with _suspend_lock:
+        _suspended_roots.extend(resolved)
+    try:
+        yield
+    finally:
+        with _suspend_lock:
+            for r in resolved:
+                _suspended_roots.remove(r)
+
+
+def suppressed_writes() -> int:
+    """How many writes :func:`writes_suspended` has refused in this process."""
+    return _suspended_count
+
+
+def is_suspended(path: Path) -> bool:
+    """Whether a write to *path* would be refused. Counts nothing.
+
+    For a caller about to do something destructive *before* its write — rename
+    a file aside, copy a backup — so it can decline the whole operation rather
+    than discover the refusal half-way through.
+    """
+    with _suspend_lock:
+        if not _suspended_roots:
+            return False
+        roots = list(_suspended_roots)
+    try:
+        target = Path(path).resolve()
+    except OSError:
+        return False
+    return any(target == r or r in target.parents for r in roots)
+
+
+def refuse_if_suspended(path: Path) -> None:
+    """Raise :class:`WritesSuspended` (and count it) when *path* is suspended."""
+    global _suspended_count
+    if not is_suspended(path):
+        return
+    with _suspend_lock:
+        _suspended_count += 1
+    _logger.info("write to %s refused: writes are suspended under its dataset "
+                 "(a headless report is running)", path)
+    raise WritesSuspended(f"writes are suspended under {path}")
+
+
 def _replace_with_text(path: Path, text: str, *, durable: bool) -> None:
     """Land *text* at *path* through a uniquified tmp file + ``os.replace``.
 
     The half of :func:`atomic_write_json` that touches the filesystem, split out
     so the serialisation can stay on the calling thread while this runs on the
     background writer. Raises ``OSError`` exactly as before.
+
+    It is also where the dataset's provenance log learns what changed
+    (:mod:`review.persistence.provenance`): the file is read just before the
+    replace and compared with *text* just after it, on this same thread, so a
+    write that fails records nothing.
     """
+    refuse_if_suspended(path)
+    before = _provenance.before_write(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _unique_tmp_path(path)
 
@@ -159,6 +246,7 @@ def _replace_with_text(path: Path, text: str, *, durable: bool) -> None:
                 _retry_on_permission_error("unlink", tmp.unlink)
         except OSError:
             swallowed("atomic_write_json: tmp cleanup unlink failed")
+    _provenance.after_write(path, before, text, durable=durable)
 
 
 def atomic_write_json(path: Path, data: Any, *, indent: int = 2,
@@ -215,6 +303,7 @@ def atomic_write_text(path: Path, text: str) -> None:
     ``[WinError 5] Access is denied`` mid Apply-Global-Threshold.
     """
     path = Path(path)
+    refuse_if_suspended(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _unique_tmp_path(path)
 

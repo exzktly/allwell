@@ -207,11 +207,13 @@ months later.
 ```
 allwell/
 │
-│  ── entry points: the three commands a person runs ──
+│  ── entry points: the four commands a person runs ──
 ├── allwell.py                   ← `python allwell.py` — the GUI, plus the title-bar shell and help drawer
 ├── process_microscopy.py        ← the analysis pipeline orchestrator + its CLI (decomposed; see §6.2)
+├── allwell_report.py            ← `python allwell_report.py` — draw a dataset's saved plots without a
+│                                  window (Saved Plots → *The headless report*)
 ├── all_well_launcher.py         ← the module PyInstaller boots + the --run-pipeline / --run-zipper
-│                                  / --run-bootstrap dispatch. A helper the *app* spawns is not an entry
+│                                  / --run-bootstrap / --run-report dispatch. A helper the *app* spawns is not an entry
 │                                  point in this sense and does not belong here — it lives in the package
 │                                  whose work it does (see pipeline/well_plate_zipper.py below)
 │
@@ -400,6 +402,10 @@ allwell/
 │   ├── frozen_io.py            ← reading bundled data from a PyInstaller bundle
 │   ├── json_write.py           ← write_json_atomic(): the one way to replace a
 │   │                              JSON file the app or pipeline will read again
+│   ├── provenance_log.py       ← the dataset's append-only history,
+│   │                              provenance.jsonl beside pipeline_info.json:
+│   │                              the event roster, the writer, the tolerant
+│   │                              reader (§5.7)
 │   └── zip_write.py            ← atomic_zip(): the one verified writer for the
 │                                  per-well archives (pipeline, services, remote),
 │                                  and replace_folder_with_archive(): the one way
@@ -651,11 +657,16 @@ review/
 │   │   ├── sample_map/   tab_view.py, controller.py  ← the layered tab the
 │   │   │                                 three editors above are pages of
 │   │   ├── ratios/       tab_view.py   ← the ratio-metric editor [removable]
-│   │   └── pipeline_info/ tab_view.py  ← read-only run parameters [removable]
+│   │   ├── pipeline_info/ tab_view.py  ← read-only run parameters [removable]
+│   │   └── triage/       collect.py, controller.py, tab_view.py ← QC triage:
+│   │                                 every problem the plate's records report,
+│   │                                 one row each, with the action each admits
+│   │                                 [removable]
 │   ├── spatial/      controller.py, collect.py, renderer.py, state.py, tab_view.py
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
 │   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
-│   │                 + _svg_shapes.py (the PowerPoint export)
+│   │                 + _svg_shapes.py (the PowerPoint export),
+│   │                 _render.py (draw one record for the headless report)
 │   ├── crop/         controller.py, region.py        ← support lib (always present)
 │   ├── qc/           controller.py, params.py, tab_view.py   ← support lib
 │   ├── export/       service.py, style.py, sidebar_view.py
@@ -2419,6 +2430,144 @@ gated on `view_state.owns_tab_block`, which separates "this tab keeps no block"
 (true of most tabs, and not worth a warning) from "this record has none of the
 block this tab keeps" (worth one — the fix is to re-save the plot, and a user
 who is told nothing re-clicks Restore instead).
+
+#### QC Triage (`features/home/triage/`)
+
+The last Home sub-tab is one table of every problem the dataset's own records
+report, so a user does not have to read Validate, the Cell Gating panel, the
+Segmentation overlay and `errors/` separately to learn what is wrong with a
+plate. **It measures nothing.** `collect.triage_rows` reads three records other
+parts of the app already wrote: the completeness record (`run_check` — wells
+whose CSV is missing, wells staged and never processed, the field groups the
+run recorded as failed, the groups found missing, and dataset-wide findings),
+every needs-attention well state — a guard holds each state in
+`pipeline.completeness.NEEDS_ATTENTION` to a row, via `WELL_STATE_ROWS` — and
+the count of wells the check could not read), the traceback files in `errors/`
+written since the recorded run began
+(`pipeline.completeness.error_files_since`, the listing `errors_since` counts,
+so the two cannot disagree about which files belong to the run), and the run's
+field-quality verdicts scored by `domain/field_quality_scores`. A source that
+cannot speak is a row saying so — no record, a check switched off or stopped, a
+plate too partly measured to score — so an empty table means nothing is known to
+be wrong and can mean nothing else. The completeness record keeps only the first
+few missing groups per well; the rest are one row naming how many were not
+listed, rather than a table that silently understates the well. **Every
+exclusion has a row**, whether or not its field is still flagged: an exclusion
+outlives its finding (a rerun unflags the field, the block goes missing, the
+scorer declines) and goes on removing the field's cells, so one with no flagged
+row gets a row of its own, with Reopen.
+
+**What a row offers follows from where the problem arose.** A *processing* row
+(missing, failed, no CSV, never processed, a traceback) offers **Re-run wells**,
+which goes through Home's one Review-side door into Analyze
+(`home.controller.open_in_analyze`, also what *Finish this run* uses) with the
+selected wells both forced and the only wells run, so nothing else on the plate
+is touched; Analyze opens configured and the user presses Run. The hand-off
+answers whether it happened, and a build with no Analyze pane is told so rather
+than told a rerun is set up. An *acquisition*
+row (a field the run measured as unlike the plate) offers **Exclude field…**,
+which asks for a reason. Neither offers the other: a missing field has no rows
+to exclude, and re-segmenting blurred pictures produces the same blurred
+numbers. **Accept** marks a finding seen; **Reopen** undoes Accept and puts an
+excluded field back. Every button is enabled only when a selected row supports
+it. **Open in Segmentation** calls the `image_browser.show_field` service, the
+same jump the Cell Browser's click uses (`review_image/_navigate.py`), placed
+beside Segmentation because that sub-tab is the one no profile removes.
+
+**The exclusion is an inclusion layer, not a triage feature.**
+`review/data/field_exclusions.py` projects `Excluded_Field_Pass` from
+`DatasetState.field_exclusions` (`(well, fov, timepoint)` → reason and time) and
+is registered with the other cache projectors unconditionally, so a build that
+strips the triage tab still honours exclusions a previous session wrote. It
+refuses the wells `Field_Pass` refuses — those whose FOV labels do not identify
+their fields — because a per-field key on such a well matches the wrong rows or
+none; the triage row says so in its Decision column instead of offering the
+button. A well with nothing excluded carries no column. Excluding saves
+immediately (`persistence.save`, not the debounce, because a decision to remove
+data must not wait on a timer the user can quit through), re-projects every
+layer through `qc.recompute_all`, and redraws through `redraw_app`. The
+exclusions and the accepted findings are two persistence domains,
+`field_exclusions` and `triage_decisions`, both cleared by the *Curation* reset
+scope and both recorded in the provenance log (§5.7). A decision is keyed by the
+finding's identity (kind, well, field, timepoint, file name) and never by its
+sentence, so a count that changes as a rerun recovers groups does not orphan the
+decision; decisions for findings no longer reported are kept rather than pruned,
+because a finding also disappears when its evidence is briefly unavailable.
+
+Field-level rerun is not offered, by decision. `pipeline.io.merge_records_into_csv`
+keeps existing rows and drops new ones with the same key, so re-processing an
+already-processed field through the incremental path would leave the old numbers
+and report success. Doing it properly means replacing the field's CSV rows,
+archive members and field-quality record, carrying that replacement through the
+remote upload split and fetch, and invalidating per-cell overrides keyed by the
+old nucleus ids — a body of work out of proportion to the case it serves. A
+field whose pictures are suspect is excluded instead, and a well that needs
+processing again is re-run whole.
+
+#### The headless report (`allwell_report.py`)
+
+`python allwell_report.py --dataset <folder> --output <folder>` draws every
+saved plot of a dataset from its current data without showing a window, and
+writes `figures/NN_<title>.png` + `.svg`, `report.pdf`, and `manifest.json`.
+
+**It is an entry point, beside `allwell.py`.** It constructs the Review pane,
+which only the shell may do — a module inside `review/` may not import
+`ReviewApp` (`test_nothing_imports_reviewapp_at_runtime`) — so it is a root
+module with its reason in `tests/test_root_holds_only_entry_points.py`, and the
+frozen app reaches it through the launcher's `--run-report` dispatch.
+
+**It is the real app, offscreen.** `allwell_report.run_report` constructs `ReviewApp`
+under the offscreen platform, loads the dataset, and replays each record through
+the `saved_plots.render` service (`features/saved_plots/_render.py`): restore the
+record onto its tab, finish the gating pass on this thread, capture the figure
+in publication mode — the replay the PowerPoint export's vector repair already
+performs. Measured before choosing this route: construction and load of the mini
+dataset take about 7 s and 400 MB, no window is shown and no modal is raised.
+The alternative — a widget-free context driving collectors and renderers —
+would need Batch Export's orchestration lifted out of its panels first and
+would be a second definition of how every plot is drawn. The PDF is the
+gallery's own builder (`saved_plots.report_pdf`); the report names no
+feature and reaches all three through services, so a profile without Saved
+Plots gets an exit code and a sentence rather than an `ImportError`.
+
+**A plot that is not drawn is a manifest entry with the reason**, and a plot
+drawn from fewer wells than it names carries a `note` saying which; neither is
+ever an absence: an Image Table grid (no chart to redraw), a record saved as one panel
+of a multi-panel figure (a redraw would draw every panel), a replay that raised.
+Copied plots (`copied_from`) are drawn from this dataset's data like any other,
+and the entry keeps their origin. Exit codes distinguish complete (0), failed
+(1), invalid input (2 — no folder, no wells, or no Saved Plots in this build),
+partial (3) and nothing to report (4); the manifest carries the same status as a
+word, and is written on every path, including invalid input.
+
+**It does not change the dataset.** The run sits inside
+`persistence/_io.writes_suspended` — reached as `ctx.persistence.writes_suspended`,
+with `suppressed_writes` and `record_event` beside it on the registry, so the
+report imports nothing from the pane except `ReviewApp` — over the dataset
+folder and, when `--dataset` is the results folder and the sidecar sits one
+level up, that sidecar file too (`allwell_report.suspended_roots`). A suspended
+write **raises** `WritesSuspended`, an `OSError`, at `_replace_with_text` and
+`atomic_write_text`, and is counted. Raising rather than returning is the
+point: a caller told its write landed goes on to do what depends on it — the
+legacy-sidecar migration deletes the files it absorbed, the QC migration deletes
+`qc_params.json` — and a silently dropped write would have let it delete the
+only copy. The two destructive steps that come *before* a write check first
+(`_io.is_suspended`): `_doc.write` declines rather than rename an unreadable
+`persistence.json` aside, and the v1→v2 sample-definitions backup is refused
+before it is copied. Pending debounced saves are flushed inside the suspension,
+in a `finally`, so none fires after it lifts. Measured, replays that re-adopt a
+plot's groups or move its gating schedule no save at all, so the suspension is
+defence in depth that the end-to-end test does not exercise: that test pins the
+outcome (the dataset is byte-identical afterwards) and
+`tests/test_headless_report.py` pins the suspension, including a legacy sidecar
+loaded under it. Each run first removes the figures, PDF and manifest an earlier
+run left in `--output` (`clear_previous_output`), so a run that draws fewer
+plots cannot leave an old report beside a new manifest. The one write to the
+dataset is a `report_generated` line in its provenance log (§5.7).
+
+Batch Export groups are not drawn by the report yet: their orchestration lives
+in the panels. Nor does the report apply a recipe first — that would change the
+dataset; copy the analysis in the app, then report.
 
 #### Exporting the gallery (`features/saved_plots/_report.py`, `_deck.py`)
 
@@ -4342,6 +4491,8 @@ Every "save state into the dataset folder" path lives under
 | `persistence.json::view_state` | `view_state.py` | Active tab, selected wells, channel/metric, fold-change scopes, per-tab combos, export-style prefs. Saved on dataset switch + app close. **The two "absent" stashes are per-plate and are cleared before the section is read.** `restore` remembers the wells a saved view names that the plate in front of it does not hold, so `snapshot` can union them back and a subset load does not prune them — but those sets describe one particular `persistence.json`, and they are the only piece of view state written by `restore` and read by `snapshot` without either being keyed to a data directory. `restore` reassigns both, and it only runs when the new plate *has* a `view_state` section; when it has none the assignment never happens and the previous plate's wells were unioned into this plate's saved selection. `forget_absent_wells(ctx)` empties them, called at the top of `load_from_data_dir` before the section is read and therefore ahead of every path that returns without reaching `restore` — no saved block, a section that is not a dict, a document that cannot be migrated. |
 | `persistence.json::qc_params` | `qc_params.py` | QC debris-gating thresholds edited on the Home → Cell Gating tab (the fundamental always-applied inclusion layer); seeded from `pipeline_info.json` `qc_options` when unset. |
 | `cell_overrides.json` | `cell_overrides.py` | Per-cell `Included` overrides set on the Segmentation tab (kept separate — large + write-heavy). |
+| `persistence.json::field_exclusions` | `field_exclusions.py` | Fields excluded by hand from QC triage, as a list of `{well, fov, timepoint, reason, at}` records, read into `DatasetState.field_exclusions`. Feeds the `Excluded_Field_Pass` layer (`data/field_exclusions.py`). A record that cannot be read is dropped and logged rather than guessed at, because a half-read exclusion could remove the wrong field. Written sorted, so an unchanged set writes identical bytes. |
+| `persistence.json::triage_decisions` | `triage_decisions.py` | QC triage findings the user accepted, keyed by the finding's stable key → `{state, note, at}`. Only `accepted` is stored: an excluded field's state is read from the exclusion itself, so the two cannot disagree. |
 | `bar_groups.json` | `bar_groups.py` | User-picked file for Batch Export's `BarGroup` state (no auto-save). |
 
 `persistence.json` is a single consolidated viewer-state document managed by
@@ -4504,6 +4655,150 @@ with an empty `seg_fp` (the well's zip was missing or unreadable when the
 override was saved), and gating that warning on `version < 2` meant exactly the
 file that could hold both shapes warned about neither. The version is reported
 inside the message instead of deciding whether to emit it.
+
+**The provenance log — what was done to a dataset, in order.** Every other
+record describes current state: `pipeline_info.json` is rewritten by every run,
+`run_report` / `run_check` describe the last run, the run journal is replaced
+when the next run opens, and `persistence.json` holds the gates and groups as
+they stand. `util/provenance_log.py` keeps the sequence: `provenance.jsonl`, in
+the directory holding `pipeline_info.json`, one JSON object per line, each
+carrying `schema_version`, a UTC `ts`, the `event`, its `source` (`analyze`,
+`review`, `datasets`, `report`), the `app_version` read from `version.py`, and
+an event-specific `detail`.
+
+- **Append-only, and never authority.** A line is added with one `O_APPEND`
+  write and fsync; nothing rewrites, truncates or repairs the file, and no
+  decision anywhere reads it. That is what makes several unlocked writers
+  acceptable: the worst a lost or torn line can do is make the history
+  incomplete, and the reader says so.
+- **A closed roster.** `EVENT_FIELDS` names every event type and the detail keys
+  it must carry; `append_event` raises `ValueError` for an unknown type, an
+  unknown source or a missing key (a programming error, found by the test that
+  drives the emitting path), and answers `False` with a WARNING for any I/O
+  failure, because a save, a run or a repair must never fail because its
+  history could not be written. A key may be present as `None` — unknown is a
+  value; absent is a missing key.
+- **The reader counts what it cannot use.** `read_events` returns a
+  `ProvenanceRead`: the events this build understands, plus `unreadable` (a torn
+  last line after a crash, or an interleaved append from two processes on a
+  network volume or Windows — anywhere in the file, not only at the end),
+  `foreign` (a `schema_version` newer than this build) and `missing`. `complete`
+  is true only when all three are clear, so an incomplete history never reads as
+  a complete one, and one bad line never hides the rest.
+- **Review records at the write, from what was written.**
+  `review/persistence/provenance.py` is called by `_io._replace_with_text` — the
+  one function that replaces a dataset JSON file — immediately before and after
+  the replace, on whichever thread performs it. `before_write` reads the file as
+  it stands; `after_write` parses the text that replaced it and appends one
+  `analysis_changed` per analysis block whose digest differs (`block_digest`, a
+  short hash; the history says *that* a block changed, the files say what it is
+  now). `STORED_AT` maps each `(file, key)` to its `ANALYSIS_SCOPES` domain, and
+  `RECORDED_UNDER` names the one domain with no block of its own (`notes`, which
+  lives inside `sample_definitions`). Hooking the write rather than the
+  registry's flush is what covers the inline writers — the gating block, the
+  smFISH thresholds, a reset's `_save` — that never pass the registry; reading
+  "before" at the write rather than remembering it from the load is what keeps a
+  block the pipeline changed in between from being attributed to Review; and
+  recording after the replace is what makes a failed write record nothing. A
+  debounced autosave records once, on the background writer, after it lands.
+  Recording failures are logged at WARNING and never fail the write.
+  `clear_analysis` appends `reset` naming the scopes that completed, after their
+  own writes have recorded what they changed. The log's directory comes from
+  `resolve_pipeline_info_path`, so a dataset whose sidecar sits one level above
+  its data directory (the Analyze layout) keeps one log, beside the sidecar.
+  `tests/test_review_provenance.py::test_every_analysis_domain_reaches_the_log`
+  holds every `ANALYSIS_SCOPES` domain to a row of `STORED_AT` or
+  `RECORDED_UNDER`, so a new analysis domain cannot be silently left out.
+- **The other writers.** Analyze runs are recorded by the runner
+  (`services/run_provenance.py`, §6.4); Datasets derivations and repairs by
+  `datasets/core/provenance.py` and `datasets/validate/apply.py` (§6b).
+
+Measured growth: an `analysis_changed` line is about 240 bytes and a
+`run_started` about 870; a heavy year of 20,000 lines is about 5 MB and reads in
+0.12 s, so the file is not rotated.
+
+**Copying analysis from another dataset — a recipe.** The title bar's copy
+button (`allwell._on_copy_analysis_clicked`) pops a menu
+(`review/core/recipe_view.copy_analysis_menu`, shown with `popup`, never `exec`)
+with three actions: copy from another dataset folder, copy from a **recipe
+file**, and save the open dataset's analysis as a recipe file. Copying
+(`prompt_copy_analysis`) brings chosen analysis decisions into the dataset open
+in Review. Three modules, split by layer:
+
+- `review/domain/recipe_compute.py` — the roster and the fit, pure.
+  `RECIPE_SCOPES` names what can be copied, keyed like `ANALYSIS_SCOPES`
+  (`sample_variables`, `sample_definitions`, `gating`, `ratios`,
+  `export_groups`) plus `saved_plots`, each with the `(file, key)` blocks it
+  owns. `DECLINED` names the two analysis scopes it will not copy and why:
+  *curation* (overrides keyed by the source's nucleus ids, a crop by its pixel
+  geometry, an exclusion by a field the source run measured — none identifies
+  anything on another plate) and *smFISH* (a threshold is the one the target's
+  spot counts would have had to be baked with). `tests/test_recipes.py` holds
+  every `ANALYSIS_SCOPES` key to exactly one of the two. `check_fit` reports,
+  per scope, the wells and channels the source block names that the target
+  lacks, whether it would replace a different value the target already holds
+  (the pipeline's own auto-threshold, typically), and whether the source has
+  anything to copy at all. It finds names by walking each block's strings and
+  keys — a canonical well label is a well; a source channel token, alone or as
+  the prefix of a `<channel>_…` column name, is a channel — because a reader
+  per block shape would be a second definition of six formats. It reports and
+  never rewrites: a gate on a channel the target lacks is inert there, and a
+  definition naming a missing well attaches to nothing. A recipe file is one
+  JSON document (`recipe_document`: `kind` `allwell-recipe`, `schema_version`,
+  the source label and channels, and each block the source holds as
+  `{file, key, value}`); `blocks_from_document` reads it back into the same
+  `DatasetBlocks` a folder gives, so the fit check and the copy cannot tell the
+  two sources apart. It refuses, by name, a document of another kind, a newer
+  schema, and a block no recipe scope owns — applying one would write somewhere
+  no reset, fit check or provenance domain knows about.
+- `review/persistence/recipe.py` — the I/O, Qt-free. `read_dataset_blocks`
+  reads a folder as a user picks it (`out/` when present) without loading it,
+  and **refuses** a file that exists and cannot be read, or a `persistence.json`
+  of a schema this build does not know, by name — an unreadable source block is
+  "could not be read", never "nothing". `apply_recipe` writes into the open
+  dataset: it **flushes every pending debounced save first** (a timer armed
+  just before the copy would otherwise land after it and write the old value
+  back), then writes `pipeline_info.json` blocks through
+  `_io.update_json_atomic` (never creating a sidecar the pipeline did not write)
+  and `persistence.json` sections through `_doc.set_section`, after reading the
+  document so a foreign one is reported rather than silently declined. A source
+  block that is absent is not copied, so it cannot erase the target's own. Each
+  scope is isolated; a failure is reported and the rest run. Every block
+  written is an `analysis_changed` in the provenance log by the usual route,
+  and the copy as a whole is one `recipe_applied` line naming the source, the
+  scopes, what failed, and how many plots were added. `write_recipe_file`
+  writes a recipe file atomically and refuses a source with an unreadable file
+  (it would read back as a dataset with nothing for those scopes);
+  `read_recipe_file` reads one.
+- `review/core/recipe_view.py` — the menu and the dialog: pick a folder or a
+  recipe file, flush, show one
+  checkbox per scope with `ScopeFit.describe()` beneath it (a scope with
+  nothing to copy, or unreadable, is shown disabled with its reason rather than
+  omitted), copy what is ticked, reload through the same
+  `allwell._reload_current_dataset` the reset uses, and report on the status
+  line — naming anything that failed rather than calling a partial copy a whole
+  one.
+
+**Copied saved plots arrive undrawn.** A saved plot is its parameters *and* a
+picture of the source plate's data; copying the picture would put another
+plate's figure in this gallery under this dataset's name. So a copied record is
+added beside the target's own under a fresh id, with no PNG, SVG or frame plan,
+and with `SavedPlot.copied_from` naming its source. `SavedPlotsStore.image_path`
+answers `None` for a record with no PNG, and every surface that shows a saved
+plot — the gallery card, Home's strip, the PDF report, the PowerPoint deck —
+shows `saved_plots.state.undrawn_note` in its place, so a copied plot cannot
+pass for a missing file or for a figure of this dataset. Restoring it replays
+its parameters against this dataset's data, which is the only way it acquires a
+picture here. **A restore names the wells it cannot draw.** A record that names
+wells this dataset lacks — a copied plot, typically, or one saved before a
+well's files were removed — is drawn from the wells that are here, and the rest
+used to drop out with nothing said (measured: a record naming `H12` restored
+on a plate without it, drew from `A01` alone, and the status line read only
+"1 replicate set(s) · 1 well(s)"). `saved_plots.controller.absent_wells` reads
+the record's selected wells, soloed wells and replicate sets against the loaded
+wells, and `restore_saved_plot` puts the sentence on the status line — with the
+group-drift sentence when there is one, since two calls would leave only the
+second — and the headless report puts it in that plot's manifest `note`.
 
 **Resetting saved state — the scope model.** `persistence/reset_scopes.py` is
 the one map from what a user names to the state that name owns. State is
@@ -8536,8 +8831,11 @@ PyInstaller entry point. Two responsibilities:
    when running inside a frozen `.app` bundle — there's no Python
    interpreter on `sys.executable`, so re-exec'ing the launcher with the
    sentinel argv routes the same Python process into the pipeline.
-   `--run-zipper` and `--run-bootstrap` are the same trick for
-   `well_plate_zipper.main()` and `services/remote_bootstrap.main()`.
+   `--run-zipper`, `--run-bootstrap` and `--run-report` are the same trick
+   for `well_plate_zipper.main()`, `services/remote_bootstrap.main()` and the
+   headless report's `allwell_report.main()` (which from source is
+   `python allwell_report.py`; the spec lists it as a hidden import, since the
+   launcher reaches it through a function-level import).
 
 A frozen **windowed** (`console=False`) build leaves `sys.stdout` /
 `sys.stderr` — and `sys.__stdout__` / `sys.__stderr__` — set to None even
@@ -8582,6 +8880,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | *(pipeline)* `settings_record.py` + `util/settings_digest.py` | Which configuration produced each well's output, recorded beside it as `<out>/.aw_settings/<WELL>.json`. `KEYED_ON` is the roster of what invalidates a prior result — the segmenter and every one of its thresholds, the channels quantified, the QC gate, both top-hat radii and FFT bands, the mesh background parameters, the flat-field and blank, the auto-threshold controls and their control wells, and the filename schema — with the reason each entry is in it; `settings_digest` hashes whatever of them a run states. **The keys are `process_microscopy.build_parser()` destinations**, because the one caller digests that parser's namespace: a key spelled any other way contributes nothing, silently, which is how the first version of the roster came to name six options that do not exist and leave fifteen real ones unkeyed. `NOT_KEYED_ON` is its complement, carrying the reason each remaining option is outside the key, so the two partition the parser exactly and a newly added option fails the suite until someone classifies it. Both of the pipeline's reuse predicates consult the record: the plain re-run skip (`well_skip.output_exists_for_well`) and the incremental done-set. Without it, re-running a plate with a different segmenter was answered "up to date" while `write_pipeline_info` rewrote the sidecar to advertise the new configuration, so the plate described a setup that had produced none of the numbers in it. The marker is written by the worker, after both the CSV and the archive are on disk and past every short circuit — a well that logged "up to date (no new FOVs)" computed nothing and must not be credited with this run's settings. A remote run's marker is written on the worker host, so `Fetcher._pull_settings_marker` brings each well's back with its output rather than the client recomputing a second copy of the digest. **A well with no recorded digest is accepted**, so introducing the check forces nobody to reprocess anything; the cost is that a plate written before the record existed keeps the old behaviour until its next forced run. The digest is deliberately blind to the paths, to `--force`/`--incremental` and to anything about the machine, so a plate computed locally and on a worker host produces the same key. Registered in `tests/test_reuse_is_keyed_completely.py`, which drives every key through `well_settings_allow_reuse` itself rather than only through the digest. |
 | `run_detect.py` | Run-time detection of an Analyze run's filename schema, separator and channel roles from its input (`resolve_detection`, for a `RunSpec` with `auto_detect`), preferring a chained converter's recorded `upstream_layout`, and the checks that the detected channels fit every option naming a channel (`channel_option_errors`). Detection that cannot decide raises `DetectionError`; it never falls back to the job's frozen values. `scan_pipeline_info` is the confidence rule the form's **Detect from filenames** shares. |
 | `run_journal.py` | The record of what a run intended, where it sent the work, and what became of each well — opened before the first well is processed, amended as the run goes, closed with an outcome, so a record still open at the next start-up is a run the app was killed during (§6.5). Stdlib-only. Writes `<output_dir>/.aw_journal/`: `run.json` for the run and one `wells/<WELL>.json` per well, `pipeline/run_report.py`'s one-atomic-file-per-unit shape so the orchestrator, the worker pool and the Fetcher thread all record without a lock. **Evidence, never authority** — `pipeline.completeness` stays the answer to "is this well complete" and the artefacts stay the done-set, so a journal that goes missing costs answers rather than making a good dataset look empty. It drives exactly one decision, the remote re-attach above. A well record can name the run it belongs to: `open_run` returns a token, and a writer that hands it back cannot file its progress under a previous run's surviving record — which is what a run whose own `open_run` failed would otherwise do. The local path passes it (`analyze.progress._journal_well`); the remote writers — `_record_remote_in_journal` and the Fetcher's three `record_well` calls — do not, so they are trusted writes and that protection does not extend to them. The consequence is worth stating rather than leaving implied: on a *remote* run whose own `open_run` failed, those four still write into whatever record survives in that directory, which in that exact scenario is the previous run's, still open because the index is holding it for resume. Measured: run 2's remote address and its uploaded wells land inside run 1's record. Re-attach is keyed on the cache key and would therefore decline, so no wrong numbers follow — but run 1's tally and per-well detail are corrupted, and its resume offer describes a run that did not produce them — while a run's *own* completion lines, which are parsed on the GUI thread and therefore arrive after the worker thread closed the record, are still accepted. Asking the cheaper question instead, "is a run open here", refused the tail of every plate: a 24-well run recorded four wells and the pre-run readout said so. `tests/test_a_run_end_to_end_records_every_well.py` drives a real run through a real drain and is the only test on either side of this record that does. `WELL_STATES` is the single roster of what a run can have done to a well, guarded by `tests/test_no_second_journal_vocabulary.py` — which walks dict keys as well as tuples, lists and sets, because a states-to-words table is presentation only for as long as the module holding it also consults the canonical roster; one that does not is holding its only copy, and anything iterating it drops every state it fails to spell. |
+| `run_provenance.py` | An Analyze run's two lines in the dataset's provenance log (§5.7). `PipelineRunner._open_journal` calls `begin_run`, which appends `run_started` (mode, input folder, the exact pipeline argv, and the run-scope options `force` / `force_wells` / `incremental` / `only_wells`) and fingerprints the sidecar's current `run_check` block; `_close_journal` calls `finish_run`, which appends `run_finished` with the journal's outcome and this run's `run_check` totals. Emitted by the runner rather than the pipeline because the runner is the one process that sees the start and end of every run — a remote pipeline's own writes would stay on the worker host, since the fetch pulls named files only — and because `process_microscopy.py` is at its line budget. The cost is stated: a pipeline launched from a terminal writes no run events. **The `run_check` is quoted only if it changed during the run.** A run that died before its end-of-run check leaves the previous run's block in the sidecar; its timestamps are second-resolution, so two runs of a small plate can share one, and comparing them let a failed run quote the previous run's healthy totals. Comparing a digest taken at `begin_run` instead has no resolution limit; a run that rewrote a byte-identical block is reported as having none, which errs toward unknown. `argv` is recorded rather than a settings digest because the client's opts are not the pipeline's parsed namespace, so a client-side digest would not match `.aw_settings/`. Pinned by `tests/test_provenance_log.py`, which drives the real runner twice (the history grows while the journal is replaced) and the remote open/fetch/close order. |
 
 These modules deliberately have no Qt imports beyond what the Analyze tab
 itself uses — keeping them potentially reusable for a CLI driver.
@@ -9510,6 +9809,7 @@ deletable:
 | Module | What it holds |
 |---|---|
 | `datasets/core/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `out_folders`, `dataset_wells`), the folder's own answer to how many files claim one well (`well_spelling_collisions`, `describe_well_collisions`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. That scan is two halves: `collect_input_image_stems(in_dir, known_zip_members=…)` walks the input folder (loose TIFs, one level of well subfolders, well zips' TIF members), taking already-listed member names for any zip the caller has read itself rather than opening it again; `schema_values_from_stems` extracts one field's distinct values out of stems already in hand. `collect_available_schema_values` is the two composed, and remains the entry point for a caller asking about a single field from a cold start (Apply repairs). A caller asking about two fields, or one that has just read every archive for its own reasons (Validate does both), goes through the halves and walks once. `out_folders` is `out_zips`'s folder-mode twin (`out/<WELL>/`, written when `compressed_output=False`) — a dataset is written either zipped or folder-mode, never both, but a caller checking for "done" image evidence regardless of which mode produced it (Validate) should check both maps rather than assuming one. `dataset_wells` unions all four well-enumeration maps, including `out_folders`, matching its own docstring ("every 96-well position present in a dataset's `in` or `out`") — every current caller (Concatenate, Merge Plates, Subset) already refuses folder-mode input before calling it, so this only matters for a future caller that doesn't. `preview_wells(root)` is a best-effort, exception-safe `dataset_wells` a page calls on every keystroke while the user is still typing a path — it returns `[]` for anything that isn't (yet) a real dataset folder instead of raising `DatasetPathsError` the way `resolve_dataset` would, since "not a valid path yet" is the normal, expected state through most of a field edit, not an error to report. `shorten_headline(text, *full_paths)` replaces every occurrence of each of *full_paths* inside *text* with its own basename — a run's success summary is built by formatting a full destination (or source) path into a sentence, right for the log line but unreadable as a dashboard headline; the caller keeps the original *text* for the log and passes it again as the headline's own tooltip, so the full path is never actually lost, only the on-screen headline is shortened. It skips any path that is empty (Import Loose's in-place mode, whose `dest_root` is `""`) — `"".replace` would otherwise insert the basename between every character of *text*. **The four well maps hold one path per canonical well, so they cannot represent two spellings of one position** — `in/A1.zip` beside `in/A01.zip`, the state a plate exported by a scope that does not zero-pad and later topped up by a run that does is left in. Nothing about the surviving map says the other archive exists, and every copy tool reads the map rather than the folder, so the loser's images were absent from the copy while the run reported success with a well count that never mentioned them. Two things answer it, and neither is inside the maps. The survivor is deterministic — a sorted glob, and the spelling that already equals the canonical label wins — rather than whatever the filesystem yielded first. And `well_spelling_collisions(paths)` asks the folder directly, returning `{well: [every path claiming it]}`; `describe_well_collisions` renders the refusal sentence, one line per well naming every file, so the user can see which two spellings to reconcile without going to look. Only genuine same-role duplicates count: two raw-input zips, two raw-input folders, two `<WELL>_out.zip` archives, two `out/<WELL>/` folders, or two measurements CSVs for one well **under the same `--csv_prefix`**. A zip beside a same-well folder is not a collision — `process_microscopy` ignores well folders whenever any zip is present, a settled precedence `in_containers` follows — and two CSVs under *different* prefixes is the mixed-prefix state `out_csvs`' own docstring documents and Validate reports with a cause of its own; refusing either here would reject a layout the pipeline reads correctly. |
+| `datasets/core/provenance.py` | `record_derivation(dest, tool=…, sources=…, **detail)` — the `derived_from` line Subset, Merge Plates and Concatenate append to the dataset they wrote (§5.7), naming the source dataset roots plus what the tool's summary states (`wells` kept, the `well_map`, the `offset_hours`). Called after verification and after the destination's `pipeline_info.json` is written, so a derivation that raised part-way records nothing. The importers are deliberately not covered — they write raw input with no sidecar, so no directory holds the dataset's history until its first Analyze run, which the runner records. Validate & Repair appends `repaired` from `datasets/validate/apply.apply_repairs` when it changed something, and nothing for its idempotent no-op. |
 | `datasets/core/containers.py` | `copy_container_members` — the one path every Datasets tool moves image bytes through — plus `container_dest` (where a container belongs in a destination directory: `<WELL>.zip` for a zipped well, `<WELL>/` for a folder-mode one, always named for the **well token** rather than for the source file, because a source plate written with unpadded tokens otherwise produced `in/A1.zip` beside an `out/A01_out.zip` from the same run and nothing downstream matched the two up), `read_members` / `write_zip` (collision-safe, first-write-wins), `clear_destination`, `restamp_overrides` / `unstamped_note` (below), and the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. **It moves bytes rather than reconstructing them.** No Datasets tool alters image data: Subset filters, Concatenate offsets a name's timepoint field, Merge plates rewrites a name's well token, and in every case the member's compressed payload is identical on both sides — a name lives in a member's headers, not in its data. So the helper publishes one destination archive from one or more source containers, taking a `rename(container, member_name)` callback that returns the destination name or `None` to leave the member out, in three tiers. **Whole-file copy:** a single zip source with every member kept under its own name is copied byte-for-byte and never opened for reading — staged beside the destination and renamed into place, like the other two tiers, so an interrupted copy leaves no partial `<WELL>.zip` behind. That is a wells-only Subset, and it is the case a user would otherwise do by hand in Finder, so it has to cost what Finder costs. **Raw member passthrough:** otherwise each kept member's already-compressed bytes are streamed across by `datasets/core/zip_passthrough.py` — no inflate, no deflate, no CRC recomputation — and a dropped member is never read at all, so a filter that keeps a quarter of an archive costs about a quarter of it. **Fallback:** a folder source, or a member the passthrough declines (a directory entry, an encrypted member), goes through `read_members`/`write_zip`'s ordinary decompress-and-recompress, one member at a time. The tier is chosen from member *lists* only — for a zip that is the central directory, a footer, so planning costs a couple of seeks however large the archive is and however slow the volume holding it — and peak memory is one chunk or one member rather than a whole uncompressed archive per thread. **Tiers 2 and 3 publish through `util/zip_write.atomic_zip`**, the same staged-then-verified-then-renamed writer the pipeline's own archives use (with `durable=False`, and therefore without the CRC read-back, because the source dataset is still on disk beside the destination): a plain `with ZipFile(dest, "w")` writes a central directory for whatever landed before an exception, so a member failing part-way through a well left a structurally valid archive holding fewer images than it was asked for with nothing on it saying so. The tools do write an in-progress marker and clear the destination on the next attempt, but nothing stops a user opening that half-written folder in Review first. **Two consequences of moving bytes rather than rebuilding them are worth knowing.** A whole-file copy reproduces the source exactly, so it keeps directory entries that a re-pack drops — inert either way, since `find_image_groups_in_zip`, `data/zip_members.py`, Validate and `incremental_keys` all filter by basename/extension or on a trailing slash. And a copied member keeps its source's compression method, so a subset or merge of a dataset whose `in/` archives were written `ZIP_STORED` (what `pipeline/ome_explode.py` writes) stays stored rather than being deflated on the way out; the destination can be larger on disk than the old re-packing path produced, which is the cost of not spending CPU to reproduce bytes that already exist. Returns `(written, dropped)`: *written* is what actually landed, so a caller can verify a CSV row's `filename` is really there; *dropped* is only the names lost to a **collision**, which is real data loss, never a member the `rename` callback declined. Nothing is created when nothing is kept — a zero-member zip is structurally valid but macOS Archive Utility refuses to expand it and All-Well reads it as a well whose images have vanished, the same rule `util/zip_write.atomic_zip` enforces for the pipeline's own archives. `read_members` / `write_zip` remain the tier-3 primitives and the shape a caller reaches for when it genuinely needs a member's decoded bytes in hand; both take an optional `progress(done, total)` keyword, called once per member against a total they know up front. `WellFraction` fuses per-pass counts into one dial: copying a well is several passes (the source container, then the QC `<WELL>_out.zip`), so the passes are declared up front as equal-weight *slices*, each pass reports into the slice `slice_progress()` hands it, and a pass with no work closes its slice with `skip()`. `copy_container_members` consumes exactly one slice whichever tier serves it, reporting a whole-file copy or an empty filter as a single closing step. Feeding each pass's own `(done, total)` straight to a dashboard instead would fill the same well's dial from empty once per pass, which reads as the well restarting; leaving a no-work slice unclaimed would strand a finished well short of full. `finish()` closes out whatever remains once the well's non-container work (its CSV) is done. The scale is a fixed 100 steps, deduplicated to whole steps, so a well holding thousands of files emits a bounded number of updates rather than one queued signal and one plate repaint per file. **`restamp_overrides` is the one carry-over rule for `cell_overrides.json`.** Every tool that copies that file has to re-fingerprint it — a repack changes the destination archive's mtime although the segmentation is untouched, and the fingerprint exists to catch a real re-segmentation — so it stamps each entry's `seg_fp` from the destination `<WELL>_out.zip`'s mtime and **returns how many it could not stamp**. A fingerprint that could not be computed is not a fingerprint, so the key is removed rather than left holding the source dataset's value: an entry with no `seg_fp` is the legacy unfingerprinted shape both readers already understand and keep (`review/persistence/cell_overrides.py`, `datasets/validate/apply._prune_stale_overrides`), whereas the source's stamp compared against the destination archive differs, and Validate then pruned the entry — the user's manual cell exclusions vanishing with every step reporting success. The count is returned rather than logged inside the helper so each tool states it in its own cell-override log line through `unstamped_note`: an override carried without a fingerprint survives, but it will no longer be dropped when that well really is re-segmented, and that is a fact about the artifact the run just produced. Subset, Merge Plates and Concatenate all call it, which is what stops the three copies drifting apart again. |
 | `datasets/core/zip_passthrough.py` | `copy_member_raw` / `member_is_raw_copyable` / `RawCopyUnsupported` — copying one member's already-compressed bytes from one archive into another. The destination member keeps the source's compression method, CRC and both sizes, so it decompresses to exactly the same data; only its name and its position in the file change. **This depends on four `zipfile` implementation details** — `ZipFile.fp`, `.filelist`, `.NameToInfo`, `.start_dir` (plus the `_didModify` flag) — because the standard library exposes no public API for adding a member whose bytes are already compressed. Two things keep that contained: `member_is_raw_copyable` gates every member first, so a directory entry or an encrypted member is routed to the ordinary path as an expected case rather than an error; and `RawCopyUnsupported` is raised, with the destination truncated back to its exact pre-member state, when an archive's local headers disagree with its central directory. That last case is raised on rather than worked around — the ordinary path would fail on the same member for the same reason, and an archive that quietly holds fewer images than it was asked for is the one outcome this code must never produce. Any ZIP64 record in the source's extra field is stripped before the header is rebuilt (`ZipInfo.FileHeader` appends a freshly-computed one, and the source's describes the member at its old offsets); the data-descriptor flag comes off for the same class of reason, since the copied header carries the CRC and sizes inline where the source kept them in a trailer. **A member that is being renamed also loses Info-ZIP's Unicode Path and Unicode Comment records** (`0x7075` / `0x6375`). Each embeds its own copy of the member's name alongside a CRC of the name it was derived from, so across a rename it is a second, stale name for the same member: a reader that honours it and skips the name-CRC restores the file under its *pre-rename* name, silently undoing the well remap or timepoint offset the copy existed to perform. A member keeping its own name keeps those records, which still describe it correctly. |
 | `datasets/core/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate — plus `is_os_junk_member`, the shared answer to "is this member operating-system debris rather than data?" (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `__MACOSX/`, AppleDouble `._` sidecars, the Spotlight and Trash directories). It is deliberately a *named set*, not "anything that isn't an image": a `notes.txt` a user put in an archive on purpose is real content, and a caller that refuses to reconcile two conflicting copies of a real file should keep refusing. Concatenate is its only caller — see §6b's Verification note for what carrying that debris through a merge used to do. |
@@ -11541,8 +11841,8 @@ checks) — and a refusal leaves the session open on the form.
 
 ### 6.6b Why a cell is gone: the Segmentation overlay
 
-Inclusion is the AND of six verdict layers (`Included`, `QC_Pass`, `Crop_Pass`,
-`Gate_Pass`, `Field_Pass`, `Focus_Pass`), and the picture that shows a user
+Inclusion is the AND of seven verdict layers (`Included`, `QC_Pass`, `Crop_Pass`,
+`Gate_Pass`, `Field_Pass`, `Focus_Pass`, `Excluded_Field_Pass`), and the picture that shows a user
 their cells is the one place that AND is invisible by construction: an excluded
 cell simply has no outline. The **Why removed** toggle
 (`renderer.toggle_review_image_exclusion_layers`) outlines each excluded cell in
@@ -11558,7 +11858,7 @@ quietly wrong.
   precedence: the composition is an AND, so a cell failing three layers is out
   for all three and none of them is "the" cause. Manual comes first because it
   is the one a click undoes.
-* **Six answers need six colours.** `_layer_inks` maps each label to a design
+* **Each answer needs its own colour.** `_layer_inks` maps each label to a design
   token, chosen by measurement: every pairwise CIE76 ΔE is at least 31 and every
   relative luminance at least 0.28, which is what a one-pixel stroke needs on
   this plot surface. Two layers once shared `text_muted` — ΔE of exactly 0, and
@@ -11727,7 +12027,10 @@ drives `main` twice through the real well task.
 as a `Field_Pass` column — the fourth in the same family as `Included`,
 `QC_Pass` and `Crop_Pass`, ANDed at the same chokepoint, registered as a cache
 projector like the other three. `review/data/focus_gate.py` is the fifth,
-`Focus_Pass`, and the two are **not alternatives**: the field verdict removes a
+`Focus_Pass`, and `review/data/field_exclusions.py` the sixth,
+`Excluded_Field_Pass` — a field the user excluded by hand from QC triage, which
+refuses the same untrusted wells this layer does. The first two are **not
+alternatives**: the field verdict removes a
 whole field or none of it, while the per-cell cut removes the soft *part* of a
 field — a focus gradient, a coverslip tilt — which is not a whole-field fact
 and is not a rectangle either, so it is a column rather than a crop. A field
@@ -14080,7 +14383,7 @@ binary as a pipeline launch.
 ---
 
 
-## 11. Recipes
+## 11. How-to guides
 
 ### 11.1 Add a new plotting tab
 
@@ -14547,6 +14850,7 @@ The map (each rule links to the test that holds it):
 | Feature-module naming scheme (§3) | `test_architecture_contracts.py::test_feature_module_naming` |
 | One definition of "is this well complete" — no module outside `pipeline/completeness.py` spells out the dataset-health states as its own roster, so the states a plate legend paints cannot diverge from the states the classifier returns (§6.2, §6b) | `tests/test_no_second_completeness_predicate.py`, with its bite cases in `tests/test_guards_bite.py` |
 | One definition of what a run did to a well — no module outside `services/run_journal.py` spells out the run-journal well states as its own roster, so a state the runner records cannot be one a reader has never heard of and silently reports as something else (§6.5) | `tests/test_no_second_journal_vocabulary.py`, with its bite cases in `tests/test_guards_bite.py` |
+| Every analysis domain reaches the provenance log — each `ANALYSIS_SCOPES` storage domain has a stored location in `review/persistence/provenance.STORED_AT` or a written reason in `RECORDED_UNDER`, and neither names a domain that is not analysis state (§5.7) | `tests/test_review_provenance.py::test_every_analysis_domain_reaches_the_log`, with `::test_the_roster_guard_bites` |
 | One definition of where a remote run lives — no module builds `{remote_staging_dir}/runs/{run_id}` from a literal outside `remote_run_dir` / `remote_run_paths`. It was spelled nine times across three classes while the dataset address beside it had one definition, and the half-sweeps that produced left a re-attaching run's own directory uncreated. | `tests/test_one_definition_of_the_run_dir.py`, with its bite cases in `tests/test_guards_bite.py`. Matched on the literal's static text, so the spelling of the run-id expression cannot dodge it, and on the *position* of a bare `"runs"` segment for the two builders that never write a separator — `posixpath.join(staging, "runs", run_id)` and `PurePosixPath(staging) / "runs" / run_id`. Reading only f-strings left `%`, `.format` and `+` concatenation as ways around the rule. Scanned through `tests/_repo_scan.py` — the first version read one hardcoded file and went vacuous the moment an extraction moved code out of it — and it fails when it cannot find the funnel at all, rather than passing with nothing to compare against. |
 | `domain/` & `data/` never import `features/` (the layering) | `tests/test_layering.py` |
 | No silent broad-except anywhere (§15) — the four area tests, plus one over the whole `_repo_scan` surface (root modules and `scripts/` included) with a per-site, file-and-function allowlist and a liveness test | `tests/test_no_silent_except.py` |

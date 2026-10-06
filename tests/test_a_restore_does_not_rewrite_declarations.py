@@ -374,3 +374,50 @@ def test_the_gating_block_is_still_re_applied(tmp_path, monkeypatch):
     # …and the file is still the user's.
     assert _on_disk(tmp_path)["sample_definitions"]["well_labels"] == {
         "A01": "shCtrl", "A02": "shA"}
+
+
+# ── wells the record names that this dataset does not have ─────────────────
+
+def test_wells_the_dataset_lacks_are_named_with_the_drift(tmp_path):
+    """A plot copied from another plate (or saved before a well's files were
+    removed) names wells this one does not have. The restore draws from the
+    wells that are here and drops the rest; measured in the real app, the
+    status line used to say only "1 replicate set(s) · 1 well(s)"."""
+    from review.features.saved_plots.controller import (
+        _report_group_drift, absent_wells, absent_wells_sentence,
+    )
+
+    ctx, statuses, _calls = _ctx(tmp_path)
+    loaded = set(ctx.state.dataset.well_paths)
+    rec = SimpleNamespace(title="Fig 1", params={
+        "selected_wells": ["A01", "H12"], "active_solo_wells": ["G11"],
+        "selections": [make_selection(name="Mine", wells=["A01", "A02", "H12"])]})
+    assert absent_wells(ctx, rec) == sorted({"G11", "H12"} - loaded) == ["G11", "H12"]
+    _report_group_drift(ctx, rec, also=absent_wells_sentence(ctx, rec))
+    (said,) = statuses
+    assert "different wells" in said            # the drift, still said
+    assert said.endswith(" It names 2 well(s) this dataset does not have "
+                         "(“G11”, “H12”), so the figure shows only the wells "
+                         "that are here."), said
+
+
+def test_absent_wells_alone_are_still_said(tmp_path):
+    from review.features.saved_plots.controller import (
+        _report_group_drift, absent_wells_sentence,
+    )
+
+    ctx, statuses, _calls = _ctx(tmp_path)
+    rec = SimpleNamespace(title="Fig 1", params={
+        "selected_wells": ["H12"],
+        "selections": [make_selection(name="Mine", wells=["A01", "A02"])]})
+    _report_group_drift(ctx, rec, also=absent_wells_sentence(ctx, rec))
+    (said,) = statuses
+    assert said.startswith("Restored “Fig 1”.") and "H12" in said, said
+
+
+def test_nothing_is_said_when_every_named_well_is_here(tmp_path):
+    from review.features.saved_plots.controller import absent_wells_sentence
+
+    ctx, _statuses, _calls = _ctx(tmp_path)
+    rec = SimpleNamespace(title="Fig 1", params={"selected_wells": ["A01"]})
+    assert absent_wells_sentence(ctx, rec) == ""

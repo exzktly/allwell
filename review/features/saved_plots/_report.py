@@ -73,7 +73,9 @@ def _plot_page(pdf, rec, *, image_path: Path | None, summary: str) -> None:
         except Exception:
             drawn = False
     if not drawn:
-        ax.text(0.5, 0.5, "(image unavailable)", ha="center", va="center",
+        from .state import undrawn_note
+        ax.text(0.5, 0.5, undrawn_note(rec) or "(image unavailable)",
+                ha="center", va="center", wrap=True,
                 fontsize=11, color=theme.CPub.text_faint, transform=ax.transAxes)
 
     if summary:

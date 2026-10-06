@@ -23,6 +23,7 @@ from pathlib import Path
 from util.aw_safe import swallow
 from domain.image_identity import normalize_fov, normalize_tp
 from datasets.core.concurrency import pick_workers
+from datasets.core.provenance import record_derivation
 from datasets.core.containers import (
     FILENAME_COLUMN,
     OVERRIDES_FILENAME,
@@ -333,5 +334,7 @@ def execute_plan(
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)
     emit("Wrote subset pipeline_info.json.")
+    record_derivation(plan.dest, tool="subset", sources=(plan.src,),
+                      wells=sorted(plan.wells_kept))
 
     return f"Subset written to {plan.dest.root} ({len(plan.wells_kept)} well(s))."

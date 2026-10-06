@@ -141,6 +141,27 @@ class PersistenceRegistry:
                 "persistence: debounced autosave for %r failed; the edit was "
                 "not written to disk", name)
 
+    # -- for a caller outside the pane ------------------------------------
+    #
+    # The headless report (``allwell_report.py``) builds the pane and must
+    # reach these without importing the pane's internals; the registry is the
+    # object the app already hands out for the dataset's files.
+
+    def writes_suspended(self, *roots):
+        """``_io.writes_suspended`` — nothing written at or under *roots*."""
+        from review.persistence._io import writes_suspended
+        return writes_suspended(*roots)
+
+    def suppressed_writes(self) -> int:
+        """How many writes a suspension has dropped in this process."""
+        from review.persistence._io import suppressed_writes
+        return suppressed_writes()
+
+    def record_event(self, event: str, *, source: str, detail: dict) -> bool:
+        """Append *event* to the open dataset's provenance log."""
+        from review.persistence.provenance import record_event
+        return record_event(self._ctx, event, source=source, detail=detail)
+
     # -- the background writer -------------------------------------------
 
     def _enqueue(self, name: str, job) -> None:
@@ -189,9 +210,9 @@ class PersistenceRegistry:
 def build_persistence_registry(ctx) -> PersistenceRegistry:
     """Create the registry and register every data-dir persistence domain."""
     from review.persistence import (
-        cell_overrides, crop_region, heatmap_layouts, line_order,
-        qc_params, plot_groups, ratios, sample_definitions,
-        sample_variables, view_state,
+        cell_overrides, crop_region, field_exclusions, heatmap_layouts,
+        line_order, qc_params, plot_groups, ratios, sample_definitions,
+        sample_variables, triage_decisions, view_state,
     )
 
     registry = PersistenceRegistry(ctx)
@@ -225,6 +246,12 @@ def build_persistence_registry(ctx) -> PersistenceRegistry:
     registry.register("crop_region",
                       save=crop_region.save_to_data_dir,
                       load=crop_region.load_from_data_dir)
+    registry.register("field_exclusions",
+                      save=field_exclusions.save_to_data_dir,
+                      load=field_exclusions.load_from_data_dir)
+    registry.register("triage_decisions",
+                      save=triage_decisions.save_to_data_dir,
+                      load=triage_decisions.load_from_data_dir)
 
     # Feature-owned removable domains. Their modules (persistence/export_groups.py
     # → Batch Export, persistence/multivariate.py → Multivariate) are physically

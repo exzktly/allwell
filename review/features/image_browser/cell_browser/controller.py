@@ -7,8 +7,6 @@ this module owns the page bookkeeping and turns worker results into grid tiles.
 
 from __future__ import annotations
 
-from review.features.image_browser.review_image.collect import review_row_keys
-from review.core.ui_helpers import norm_timepoint
 
 import logging
 
@@ -25,11 +23,7 @@ from review.features.image_browser.cell_browser.collect import (
     collect_cells,
 )
 from review.features.image_browser.cell_browser.state import MAX_TOTAL, THUMB_PX
-from review.features.image_browser.review_image.renderer import (
-    refresh_review_image_ctx,
-    update_preview_ctx,
-    zoom_review_image_to_selected_nucleus_ctx,
-)
+from review.features.image_browser.review_image._navigate import show_in_segmentation
 
 _logger = logging.getLogger("review")
 
@@ -299,44 +293,8 @@ def on_cell_clicked(ctx, desc) -> None:
     """Highlight the clicked cell in the Segmentation view (mirrors the
     Review-CSV jump-to-image navigation)."""
     try:
-        if getattr(ctx.window, "_notebook", None) is not None:
-            from review.features.image_browser.controller import (
-                show_image_browser_subtab,
-            )
-            show_image_browser_subtab(ctx, "Segmentation")
-        # Target nucleus before any refresh so intermediate renders already
-        # draw the highlight (mirrors review_image.controller's jump-to-cell).
-        if desc.nucleus_id:
-            try:
-                ctx.state.review_image.selected_nucleus = int(float(desc.nucleus_id))
-            except (TypeError, ValueError):
-                ctx.state.review_image.selected_nucleus = None
-        # Switch wells *through* update_preview so the target well's image maps
-        # are decoded and the FOV menu is repopulated — otherwise jumping to a
-        # cell in a different well leaves the FOV combo (and image) stale.
-        ctx.state.preview.selected_well = desc.well
-        update_preview_ctx(ctx, desc.well)
-        # The FOV / timepoint combos hold *normalized* tokens — FOV as
-        # ``float:g`` (renderer ``_norm_fov``) and timepoint as parsed hours
-        # ``:g`` (``_norm_timepoint``). The descriptor carries the raw CSV
-        # tokens, so passing them straight to setCurrentText silently no-ops
-        # (no matching item) and the view stays on the previous FOV/timepoint.
-        # Normalize the same way the working Review-CSV jump does so they match.
-        fov_norm = review_row_keys(ctx,
-            {"fov": desc.fov, "timepoint": desc.tp_token,
-             "nucleus_id": desc.nucleus_id})[0]
-        tp_norm = norm_timepoint(ctx, desc.tp_token)
-        fov_cb = getattr(ctx.window, "_preview_fov_cb", None)
-        if fov_cb is not None and fov_norm:
-            fov_cb.setCurrentText(fov_norm)
-        refresh_review_image_ctx(ctx)
-        # The TP menu now holds the target FOV's timepoints; setting it fires
-        # currentIndexChanged → refresh, rendering the correct frame.
-        tp_cb = ctx.runtime.review_image.tp_cb
-        if tp_cb is not None and tp_norm:
-            tp_cb.setCurrentText(tp_norm)
-        # Centre + zoom on the highlighted cell so it's actually visible.
-        zoom_review_image_to_selected_nucleus_ctx(ctx)
+        show_in_segmentation(ctx, desc.well, desc.fov, desc.tp_token,
+                             desc.nucleus_id)
     except Exception as exc:
         _logger.exception("cell_browser: navigate-to-segmentation failed")
         _set_status(ctx, f"Could not open cell in Segmentation: {exc}")

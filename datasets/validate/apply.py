@@ -32,6 +32,7 @@ from datasets.core.dataset_paths import (
 )
 from datasets.validate.validate_compute import DatasetReport, _OVERRIDES_FILENAME
 from util.json_write import write_json_atomic
+from util.provenance_log import append_event
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,15 @@ def apply_repairs(root: Path | str, report: DatasetReport) -> RepairResult:
     if swept:
         parts.append(f"swept {swept} leftover staging file(s)")
     summary = "; ".join(parts) if parts else "nothing to repair"
+    if parts:
+        # Only a repair that changed something is history; the idempotent
+        # re-run that found nothing to do leaves the log as it was.
+        append_event(paths.out_dir, "repaired", source="datasets", detail={
+            "actions": parts,
+            "pruned_overrides": pruned,
+            "swept_staging_files": swept,
+            "rebuilt_availability": rebuilt,
+        })
 
     return RepairResult(
         rebuilt_availability=rebuilt,

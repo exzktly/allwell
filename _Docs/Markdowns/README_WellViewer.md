@@ -40,7 +40,7 @@ to add features, how to debug, and build / environment troubleshooting), see
 3. [Quick start](#quick-start)
 4. [Analyze mode — running the pipeline](#analyze-mode--running-the-pipeline)
 5. [Review mode — exploring results](#review-mode--exploring-results)
-   - [Home](#home) (Overview · Cell Gating · Sample Map — Replicates · Variables · Well Labels — · Ratios · Pipeline Info)
+   - [Home](#home) (Overview · Cell Gating · Sample Map — Replicates · Variables · Well Labels — · Ratios · Pipeline Info · QC Triage)
    - [The Review window at a glance](#the-review-window-at-a-glance)
    - [Controls shared by every tab](#controls-shared-by-every-tab)
    - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Response Curves](#response-curves) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
@@ -48,6 +48,7 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
    - [Saved Plots](#saved-plots) · [Batch export](#batch-export)
    - [Starting over](#starting-over)
+   - [Copying analysis from another dataset](#copying-analysis-from-another-dataset)
 6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
    - [Convert OME-TIFF](#convert-ome-tiff) · [Convert CZI](#convert-czi) ·
      [Convert ND2](#convert-nd2) ·
@@ -1262,8 +1263,27 @@ and by `remote_fetch_report.txt` in the output folder.
 │                              gating thresholds + saved selections +
 │                              the completeness record, etc.
 ├── errors/                 ← one traceback per failed field, when any fail
+├── provenance.jsonl        ← the dataset's history (see below)
 └── (transient tmp_<well>/  ← deleted on success)
 ```
+
+**The dataset's history.** `provenance.jsonl`, beside `pipeline_info.json`,
+grows by one line each time something meaningful is done to the dataset: an
+Analyze run starts or finishes (with what it was told to do — including *Only
+these wells* / *Force these wells* — and how it ended), a piece of your analysis
+reaches disk with a different value (gating, sample definitions, variables,
+ratios, the QC gate, the crop, cell curation, smFISH thresholds, Batch Export
+groups), a reset clears something, a Datasets tool builds this dataset from
+others, or Validate & Repair fixes it. Each line is plain JSON with a UTC
+timestamp and the All-Well version that wrote it. Lines are only ever added,
+never rewritten.
+
+It records *that* something changed and when, not the values themselves — the
+other files hold the current values. Nothing in All-Well reads it to make a
+decision, so deleting it loses the history and nothing else. A run launched by
+typing `python process_microscopy.py …` in a terminal, rather than from the
+Analyze pane, is not recorded; neither is a folder produced by one of the
+importers until its first Analyze run.
 
 **The completeness record.** `pipeline_info.json` gains a `run_check` block at
 the end of every run, holding one entry per well: how many
@@ -2163,6 +2183,49 @@ dataset.
 
 Read the schema + channel tokens + FOVs + timepoints the dataset was built with.
 It is read-only — it reports what the run recorded, not something you set here.
+
+#### QC Triage
+
+Every problem the dataset's own records know about, one row each, so you do
+not have to read Validate & Repair, the Cell Gating panel, the Segmentation
+overlay and the `errors/` folder separately. The columns are **Stage**
+(*processing* — something went wrong running the pipeline — or *acquisition* —
+the run measured a field as unlike the rest of the plate), **Well**, **Field**,
+**Time**, **Problem**, and **Decision**. The line above the table counts how
+many findings there are and how many are still open.
+
+It reports the dataset's existing records and measures nothing new: the
+completeness record the run writes at its end (wells with missing or failed
+field groups, missing measurements, measurements with no output archive, wells
+never processed, wells the check could not read, folder-level findings), the traceback files the *last* run left in `errors/` (older files
+are not listed, because that folder is never emptied), and the run's
+field-quality flags. When one of those cannot answer — no completeness record,
+a check that was turned off, a plate too partly measured to score — that is a
+row too, so an empty table really does mean nothing is known to be wrong. The
+completeness record names only the first few missing field groups per well; the
+rest appear as one row saying how many more there are. A field you excluded
+keeps its row even after the run stops flagging it — the exclusion still
+removes its cells, so it stays where you can see it and **Reopen** it.
+
+What you can do depends on the row:
+
+- **Re-run wells…** (processing rows) opens Analyze set up to re-segment just
+  the selected wells from scratch — *Only these wells* and *Force these wells*
+  both filled in — and leaves every other well alone. Nothing runs until you
+  press **Run** there. Re-running replaces those wells' results; it cannot be
+  undone.
+- **Exclude field…** (acquisition rows) asks why, then leaves that field out of
+  every plot, statistic and export. The reason is shown in the Decision column,
+  the Segmentation overlay outlines the field's cells in white, and **Reopen**
+  puts the field back. A field in a well whose filenames do not identify its
+  fields cannot be excluded; the Decision column says so.
+- **Accept** marks a finding as seen and acceptable; **Reopen** undoes it.
+- **Open in Segmentation** shows the row's field in Image Browser.
+
+Exclusions and accepted findings are saved with the dataset, are cleared by
+**Reset analysis → Curation**, and are recorded in the dataset's history
+(`provenance.jsonl`). Re-running a single field rather than a whole well is not
+offered yet.
 
 ### The Review window at a glance
 
@@ -4034,13 +4097,14 @@ reviewing and curating individual cells.
   channel (the same per-cell readout the Image Table shows).
 - **Why removed** — a toggle on the control row that outlines every *excluded*
   cell in the colour of the layer that removed it: you deleted it, the debris
-  gate, the crop, the scatter gates, the run's field verdict, or the focus cut.
+  gate, the crop, the scatter gates, the run's field verdict, the focus cut, or
+  a field you excluded in **Home → QC Triage** (white).
   A colour key appears under the picture, listing only the layers this field
   actually has cells for, and if the toggle is on and nothing here is excluded
   the line says that rather than leaving you with an unchanged picture and no
   way to tell whether the control worked.
 
-  Being *included* is the AND of all six layers, so a cell can fail more than
+  Being *included* is the AND of all seven layers, so a cell can fail more than
   one and an outline can only be one colour — it shows the first, and hovering
   the cell names every layer that dropped it. That is also why clicking a cell
   back in cannot restore one a verdict column removed: raise that threshold, or
@@ -4678,6 +4742,32 @@ rather than a single panel.
   one PDF to hand off alongside your analysis, or as a PowerPoint deck when the
   figures still need restyling for a talk or a thesis.
 
+#### Drawing the gallery without opening the app
+
+```bash
+python allwell_report.py --dataset /data/plate-01 --output /reports/plate-01
+```
+
+draws every saved plot of a dataset from its **current** data — the same as
+pressing Restore on each — without opening a window, and writes:
+
+```
+/reports/plate-01/
+├── figures/01_<title>.png  (+ .svg)   ← one per plot that could be drawn
+├── report.pdf                         ← the drawn plots, one per page
+└── manifest.json                      ← every saved plot, drawn or not, and why
+```
+
+A plot that cannot be redrawn — an Image Table grid, or one panel of a
+multi-panel figure — is listed in `manifest.json` with the reason rather than
+left out, and one drawn from fewer wells than it names (a plot copied from
+another plate, say) carries a note naming them. The command's exit code says how it went: `0` everything drawn, `3`
+some drawn (the manifest names the rest), `1` nothing drawn, `2` the folder is
+not a dataset (or this build has no Saved Plots), `4` the dataset has no saved
+plots. The dataset itself is not changed; the run is noted in its history
+(`provenance.jsonl`). In the packaged app, run the app's executable with
+`--run-report` as its first argument, followed by the same flags.
+
 ### Batch export
 
 Define one or more groups (replicate sets + solo wells), pick a set of
@@ -4929,7 +5019,7 @@ leave ticked, then reloads the dataset:
 |---|---|
 | **Sample definitions** | Well labels, groups, notes, saved selections. |
 | **Gating** | FluorGating floors, ThreshFracOn cutoffs, drawn scatter gates, and the QC debris gate — the last returning to the settings the pipeline run itself used, not to no gate at all. |
-| **Curation** | The crop region and every manual include/exclude on individual cells. |
+| **Curation** | The crop region, every manual include/exclude on individual cells, and every field excluded or finding accepted in QC Triage. |
 | **Ratio metrics** | Every ratio channel you defined. |
 | **smFISH thresholds** | The saved per-channel thresholds. |
 | **Batch Export groups** | The export groups on each Batch Export panel. |
@@ -4943,6 +5033,57 @@ others still run and the status line names the one that did not.
 Smaller resets stay next to the thing they affect: **Clear all groups** on
 Home → Sample Map → Replicates, and **Reset crop + curation** in the Segmentation
 tab's Edit menu, which is the same action as the Curation checkbox above.
+
+### Copying analysis from another dataset
+
+The **copy** button beside the trash can copies what you decided about one
+plate onto the plate that is open — useful when the next plate in a series has
+the same layout and the same gates. It opens a menu:
+
+- **Copy analysis from another dataset…** — pick the other dataset's folder.
+- **Copy analysis from a recipe file…** — pick a recipe file saved earlier.
+- **Save this dataset's analysis as a recipe file…** — write the open
+  dataset's analysis to one file (`<name>.allwell-recipe.json`) you can keep,
+  share, and apply to other plates without the dataset it came from.
+
+Whichever source you pick, before anything is written a checklist shows each
+item and how well it fits this plate:
+
+| Item | What is copied |
+|---|---|
+| **Sample variables** | The plate's variables and every well's values. |
+| **Sample definitions** | Well labels, groups, notes, saved selections. |
+| **Gating** | FluorGating floors, ThreshFracOn cutoffs, scatter gates, and the QC debris gate. |
+| **Ratio metrics** | Every ratio channel. |
+| **Batch Export groups** | The export groups on each Batch Export panel. |
+| **Saved plots** | Added beside this dataset's own plots, never in place of them. |
+
+Under each item a sentence says whether it **copies cleanly**, or copies but
+names wells this plate does not have, uses channels this plate was not imaged
+with, or replaces values this plate already has (the run's own automatic
+thresholds, usually). An item the other dataset has nothing for, or whose file
+could not be read, is shown greyed out with the reason. Nothing is changed until
+you press **Copy**; then the dataset reloads, and the status line names
+anything that did not copy.
+
+Two things are never copied: **curation** (the crop, per-cell includes and
+excludes, and fields excluded in QC Triage all point at particular cells and
+fields of the other plate) and **smFISH thresholds** (each one belongs to the
+spot counts already written into that plate's CSVs).
+
+**Copied saved plots are not drawn yet.** Their picture would show the other
+plate's data, so they arrive without one, marked *Copied from … and not yet
+drawn on this dataset* on the gallery card, in the Home strip, and in the PDF
+and PowerPoint exports. **Restore** replays a copied plot's settings on this
+plate's data; if they name wells this plate does not have, the plot is drawn
+from the wells that are here and the status line names the ones left out.
+
+A recipe file holds the same items a dataset does and is checked the same way.
+A file that is not an All-Well recipe, or was saved by a newer version, is
+refused with the reason; a dataset whose files cannot be read is not saved as a
+recipe, because the file would claim it had nothing to copy.
+
+Every copy is recorded in the dataset's history (`provenance.jsonl`).
 
 ---
 

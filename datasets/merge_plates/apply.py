@@ -23,6 +23,7 @@ from pathlib import Path
 from util.aw_safe import swallow
 from util.well_token import canonical_well_label
 from datasets.core.concurrency import pick_workers
+from datasets.core.provenance import record_derivation
 from datasets.core.dataset_paths import split_stem_well
 from datasets.core.containers import (
     FILENAME_COLUMN,
@@ -490,6 +491,8 @@ def execute_plan(
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)
     emit("Wrote merged pipeline_info.json.")
+    record_derivation(plan.dest, tool="merge_plates", sources=(plan.ds1, plan.ds2),
+                      well_map=dict(plan.well_map))
 
     total_wells = len(plan.wells_ds1) + len(plan.wells_ds2)
     summary = f"Merged {total_wells} well(s) into {plan.dest.root}."

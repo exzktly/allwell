@@ -122,7 +122,12 @@ def _absorb_legacy_sidecar(app) -> dict | None:
         return None
     if not isinstance(inner, dict):
         return None
-    _doc.set_section(app._ctx, _SECTION, inner)      # absorb into persistence.json
+    if not _doc.set_section(app._ctx, _SECTION, inner):   # absorb into persistence.json
+        # The section did not land (a refused or failed write), so the legacy
+        # file is still the only copy and stays for the next attempt.
+        _logger.warning("Kept legacy %s: its contents could not be written into "
+                        "persistence.json", legacy.name)
+        return inner
     try:
         legacy.unlink()
     except OSError as exc:

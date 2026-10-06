@@ -26,6 +26,7 @@ from review.core.ui_helpers import (
 )
 from core.safe import swallow, swallowed
 from review.data.curation import apply_curation_to_cache
+from review.data.field_exclusions import apply_field_exclusions_to_cache
 from review.domain.dataset_name import dataset_display_name
 
 
@@ -585,6 +586,12 @@ def load_directory(ctx, d: Path, label=None) -> None:
     try:
         app._persistence.load("cell_overrides")
         apply_curation_to_cache(ctx)
+        # Fields excluded by hand from QC triage are curation too, and are
+        # hydrated with it for the same reason: before any controller reads a
+        # row. The projector re-runs on every frame ``get_rows`` loads later.
+        app._persistence.load("field_exclusions")
+        apply_field_exclusions_to_cache(ctx)
+        app._persistence.load("triage_decisions")
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate QC-layer thresholds (qc_params.json, else seed from pipeline_info)

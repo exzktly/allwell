@@ -99,7 +99,7 @@ class AppRuntime:
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
                  "review_image", "review", "stats", "plot_groups", "export",
                  "centre", "view_state", "tab", "groups", "pipeline_info",
-                 "playground", "qc", "home")
+                 "playground", "qc", "home", "triage")
 
     def __init__(self, app=None, store: dict | None = None) -> None:
         if store is None:
@@ -246,6 +246,10 @@ class AppRuntime:
         # in core when the tab is profiled out, the way every removable feature's
         # does; nothing then writes it and the one reader is callable-guarded.
         object.__setattr__(self, "pipeline_info", _FeatureRuntime(s, "_pipeline_info_"))
+        # Home's QC TRIAGE tab (prefix ``_triage_``): the table's refresh
+        # closure (``ctx.runtime.triage.refresh``), stamped on build and called
+        # by Home on entering the tab. ``None`` in a build without the tab.
+        object.__setattr__(self, "triage", _FeatureRuntime(s, "_triage_"))
         # Playground testbed transient scratch (prefix ``_playground_``): the
         # current frame identity key (``ctx.runtime.playground.frame_key`` <->
         # ``app._playground_frame_key``), the reference-field worker bridge

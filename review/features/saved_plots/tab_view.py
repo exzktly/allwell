@@ -566,9 +566,11 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
     if preview is not None:
         v.addWidget(preview)
     else:
-        missing = QLabel("(image unavailable)", card)
+        from .state import undrawn_note
+        missing = QLabel(undrawn_note(rec) or "(image unavailable)", card)
         missing.setObjectName("Muted")
         missing.setAlignment(Qt.AlignCenter)
+        missing.setWordWrap(True)
         v.addWidget(missing)
 
     ts = QLabel(rec.created_at.replace("T", "  "), card)

@@ -88,6 +88,7 @@ SECTION_BY_PAGE: dict[str, str] = {
     "Well Labels": "Well Labels",
     "Ratios": "Ratios",
     "Pipeline Info": "Pipeline Info",
+    "QC Triage": "QC Triage",
     "Saved Plots": "Saved Plots",
     "Batch Export": "Batch export",
 }

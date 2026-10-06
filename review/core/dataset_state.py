@@ -90,6 +90,18 @@ class DatasetState:
     # renamed aside; this build simply refuses to write over state it cannot
     # read.
     persistence_doc_foreign: bool = False
+    # Fields the user excluded by hand from QC triage, keyed ``(well, fov,
+    # timepoint)`` -> ``{"reason", "at"}`` (``data/field_exclusions.py``,
+    # persisted by ``persistence/field_exclusions.py``), and the triage
+    # findings they accepted, keyed by finding -> ``{"state", "note", "at"}``
+    # (``persistence/triage_decisions.py``). Per dataset, so cleared on a swap.
+    field_exclusions: dict = field(default_factory=dict)
+    triage_decisions: dict = field(default_factory=dict)
+    # Bumped by every :meth:`begin_load`, including a reload of the folder
+    # already open. A cache keyed on ``data_dir`` alone cannot tell a reload
+    # from no change, and a reload is exactly when files on disk changed under
+    # it — a copy of analysis, a reset (``SavedPlotsStore.ensure_loaded``).
+    load_generation: int = 0
 
     # Monotonic tick over the *contents* of ``cache``. Every path that changes
     # what a cached measurement frame holds — a projected verdict column, a
@@ -138,12 +150,15 @@ class DatasetState:
         still holding a reference sees the empty collections.
         """
         self.data_dir = data_dir
+        self.load_generation += 1
         self.persistence_doc = None
         self.well_paths.clear()
         self.cache.clear()
         self.fov_integrity.clear()
         self.persistence_doc_degraded = False
         self.persistence_doc_foreign = False
+        self.field_exclusions.clear()
+        self.triage_decisions.clear()
         # Well labels are per-dataset (persisted in the new dataset's
         # pipeline_info sample_definitions block). The loader merges them in
         # additively and early-returns when the new dataset has no block, so

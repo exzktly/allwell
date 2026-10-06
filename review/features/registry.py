@@ -123,6 +123,8 @@ _response_redraw = _lazy_hook("review.features.response.controller",
                               "redraw_response")
 _build_pipeline_info = _lazy_build("review.features.home.pipeline_info.tab_view",
                                    "build_pipeline_info_subtab")
+_build_triage = _lazy_build("review.features.home.triage.tab_view",
+                            "build_triage_subtab")
 
 
 def _build_cell_gating(ctx, frame) -> None:
@@ -433,6 +435,26 @@ def _svc_heatmap_well_dropped():
     return _on_drop_event
 
 
+
+
+def _svc_saved_plots_gallery():
+    from review.features.saved_plots._render import gallery
+    return gallery
+
+
+def _svc_saved_plots_report_pdf():
+    from review.features.saved_plots._report import build_saved_plots_report
+    return build_saved_plots_report
+
+
+def _svc_saved_plots_render():
+    from review.features.saved_plots._render import render_saved_plot
+    return render_saved_plot
+
+
+def _svc_image_browser_show_field():
+    from review.features.image_browser.review_image._navigate import show_field
+    return show_field
 
 
 def _svc_preview_build_picker():
@@ -1001,7 +1023,11 @@ def _features() -> list[FeatureDescriptor]:
             # The preview picker is a sidebar the image tabs share, built with
             # the shell rather than with a tab body, so the shell reaches it by
             # name instead of importing it.
-            services={"preview.build_picker": _svc_preview_build_picker},
+            services={"preview.build_picker": _svc_preview_build_picker,
+                      # QC triage's *Open in Segmentation*: Segmentation is the
+                      # sub-tab no profile removes, so the service survives
+                      # every build that ships Image Browser at all.
+                      "image_browser.show_field": _svc_image_browser_show_field},
         ),
         FeatureDescriptor(
             name="smFISH", group="Images", build=_build_smfish, lazy_only=True,
@@ -1023,6 +1049,11 @@ def _features() -> list[FeatureDescriptor]:
             lazy_only=True,
             on_activate=_activate_saved_plots,
             plot_card_decorator=_saved_plots_card_decorator,
+            # The headless report reads the gallery and draws each plot
+            # through these, so the report names no feature.
+            services={"saved_plots.gallery": _svc_saved_plots_gallery,
+                      "saved_plots.render": _svc_saved_plots_render,
+                      "saved_plots.report_pdf": _svc_saved_plots_report_pdf},
         ),
         FeatureDescriptor(
             name="Batch Export", group="Data", build=_build_batch_export,
@@ -1160,6 +1191,12 @@ def _features() -> list[FeatureDescriptor]:
         FeatureDescriptor(name="Ratios", parent="Home", build=_build_ratios),
         FeatureDescriptor(name="Pipeline Info", parent="Home",
                           build=_build_pipeline_info),
+        # Every problem the plate's own records report, one row each, with the
+        # action each kind of problem admits. Removable: the field exclusions
+        # it writes are an inclusion layer registered below unconditionally,
+        # so a build without this tab still honours the ones on disk.
+        FeatureDescriptor(name="QC Triage", parent="Home",
+                          build=_build_triage),
     ]
 
 
@@ -1261,7 +1298,8 @@ def _lazy_projector(module: str, name: str, **fixed):
 
 
 def _register_cache_projectors() -> None:
-    """Register the curation, QC, crop and field-quality row-cache projectors.
+    """Register the row-cache projectors: curation, QC, crop, field quality,
+    the focus cut, and field exclusions.
 
     The projection of the inclusion-verdict columns onto a freshly loaded frame
     is wired here, with the rest of the feature wiring, because this module is
@@ -1280,7 +1318,7 @@ def _register_cache_projectors() -> None:
     the list without naming anything, so this stays the one place that knows
     what the list contains.
 
-    **These four registrations are unconditional.** An earlier version of this
+    **Every registration here is unconditional.** An earlier version of this
     paragraph said "a profile that strips a feature strips its projector with
     it", which is not true of the code beneath it: nothing here consults the
     feature registry or the active profile, and each `_lazy_projector` resolves
@@ -1288,7 +1326,9 @@ def _register_cache_projectors() -> None:
     — every one of these four is an *inclusion* layer, and a build that drops a
     tab must not thereby change which cells count. It is said plainly because
     the sentence it replaces would send a reader looking for a gate that has
-    never existed.
+    never existed. The field-exclusion projector QC triage writes for is one
+    more inclusion layer of the same kind, and is unconditional for the same
+    reason: a build that strips the tab must still honour exclusions on disk.
 
     **The curation projector is bound with ``note_change=False``.** It is
     writing onto a frame ``load_and_project`` created a moment ago, which
@@ -1326,6 +1366,12 @@ def _register_cache_projectors() -> None:
     # a whole field or none of it, this one removes the soft part of a field.
     register_cache_projector(_lazy_projector(
         "review.data.focus_gate", "apply_focus_gate_to_cache"))
+    # Fields excluded by hand from QC triage. Unconditional like the rest:
+    # a build that strips the triage tab must still honour exclusions a
+    # previous session wrote, or the same plate would count different cells
+    # in two builds.
+    register_cache_projector(_lazy_projector(
+        "review.data.field_exclusions", "apply_field_exclusions_to_cache"))
 
 
 def attach_feature_state(state, registry: FeatureRegistry | None = None) -> None:

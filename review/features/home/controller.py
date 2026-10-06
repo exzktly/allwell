@@ -247,6 +247,10 @@ def on_home_subtab_changed(ctx, idx: int) -> None:
         cb = ctx.runtime.pipeline_info.refresh
         if callable(cb):
             cb()            # re-read in case the dataset changed
+    elif name == "QC Triage":
+        cb = ctx.runtime.triage.refresh
+        if callable(cb):
+            cb()            # the records may have changed since the last visit
     elif name == "Sample Map":
         # The three annotation editors are layers of this tab, so the entry
         # rules are the layer's rather than the sub-tab's. This branch used to
@@ -384,6 +388,11 @@ def refresh_home(ctx) -> None:
     _paint_saved_plots(ctx)
     _paint_recents(ctx)
     paint_recents_placeholder(ctx)
+    # The triage table reads the same record, so it is repainted with the rest
+    # of the page — after a load, a resync of ``run_check`` or a reset.
+    triage_refresh = ctx.runtime.triage.refresh
+    if callable(triage_refresh):
+        triage_refresh()
     slice_ = ctx.state.feature_slice("home")
     if slice_ is not None:
         slice_.last_rendered_for = str(
@@ -940,20 +949,35 @@ def _complete_run_in_analyze(ctx) -> None:
     guarded, the same shape as the Datasets handoff above, because a build that
     mounts no Analyze pane must do nothing rather than raise.
     """
+    open_in_analyze(ctx, force_wells=hc.wells_needing_force(ctx),
+                    only_wells=hc.wells_needing_work(ctx))
+
+
+def open_in_analyze(ctx, *, force_wells, only_wells) -> bool:
+    """Open Analyze on this dataset, incremental, scoped to the named wells.
+
+    The one Review-side door into Analyze. Home's *Finish this run* goes
+    through it with the record's own answer to which wells need work; QC
+    triage's *Re-run wells* goes through it with the wells the user picked,
+    both forced and limited, so nothing else on the plate is touched. Returns
+    whether the hand-off happened — ``False`` in a build that mounts no
+    Analyze pane, or for a folder that is not a dataset Analyze can open.
+    """
     shell = ctx.window.window()
     handoff = getattr(shell, "_open_dataset_in_analyze", None)
     if not callable(handoff):
-        return
+        return False
     root = dataset_root(ctx)
     if not root:
-        return
+        return False
     handoff(
         Path(root),
         dict(getattr(ctx.state.dataset, "pipeline_info", None) or {}),
         incremental=True,
-        force_wells=hc.wells_needing_force(ctx),
-        only_wells=hc.wells_needing_work(ctx),
+        force_wells=list(force_wells),
+        only_wells=list(only_wells),
     )
+    return True
 
 
 def dataset_root(ctx) -> str:

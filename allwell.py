@@ -344,6 +344,20 @@ class AllWellApp(QMainWindow):
         self._reset_saves_btn.clicked.connect(self._on_reset_saves_clicked)
         ra.addWidget(self._reset_saves_btn)
 
+        # Copy analysis decisions — sample variables and definitions, gating,
+        # ratios, Batch Export groups, saved plots — from another dataset into
+        # this one, after a preview of how each fits. The roster and the fit
+        # check live in review/domain/recipe_compute.py.
+        self._copy_analysis_btn = IconButton("copy")
+        self._copy_analysis_btn.setToolTip(
+            "Copy analysis from another dataset or a recipe file — sample "
+            "definitions, gating, ratio metrics, Batch Export groups and saved "
+            "plots, with a preview of what fits before anything is written — "
+            "or save this dataset's analysis as a recipe file."
+        )
+        self._copy_analysis_btn.clicked.connect(self._on_copy_analysis_clicked)
+        ra.addWidget(self._copy_analysis_btn)
+
         self._open_btn = IconButton("home")
         self._open_btn.setToolTip(
             "Reveal the current dataset's folder in your file manager "
@@ -1254,13 +1268,36 @@ class AllWellApp(QMainWindow):
                 self, "No dataset", "Load a dataset before resetting.")
             return
 
-        def _reload() -> None:
-            root = self._current_dataset_root() or cur
-            if hasattr(review, "_load_path"):
-                review._load_path(Path(root))
-
         from review.core.reset_scopes_view import prompt_reset_analysis
-        prompt_reset_analysis(review._ctx, reload_after=_reload)
+        prompt_reset_analysis(review._ctx, reload_after=self._reload_current_dataset)
+
+    def _reload_current_dataset(self) -> None:
+        """Reopen the dataset Review has loaded, so live state is re-read from
+        disk — what a reset and a copy of analysis both need afterwards."""
+        review = self._review
+        cur = self._current_data_dir()
+        if review is None or not cur:
+            return
+        root = self._current_dataset_root() or cur
+        if hasattr(review, "_load_path"):
+            review._load_path(Path(root))
+
+    def _on_copy_analysis_clicked(self) -> None:
+        """Offer copying analysis in (from a dataset or a recipe file) or saving it out.
+
+        The menu, the dialogs, the fit check and the writes live in
+        ``review/core/recipe_view.py``; this handler only supplies the reload
+        and where the menu appears.
+        """
+        review = self._review
+        if review is None:
+            return
+        from review.core.recipe_view import copy_analysis_menu
+        btn = self._copy_analysis_btn
+        menu = copy_analysis_menu(review._ctx, self,
+                                  reload_after=self._reload_current_dataset)
+        # ``popup``, not ``exec``: the menu must not block the event loop.
+        menu.popup(btn.mapToGlobal(btn.rect().bottomLeft()))
 
     def _toggle_log_drawer(self) -> None:
         if self._log_drawer is None:

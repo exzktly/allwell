@@ -141,11 +141,14 @@ class _ImportBlocker:
     ("stats", "Statistics"),
     ("scatter", "Scatter Plot"),
     ("barplot", "Bar Plots"),
-    # Home's two removable sub-tabs. The container package stays; only the
+    # Home's removable sub-tabs. The container package stays; only the
     # sub-package goes, so these also prove Home reaches its tab bodies through
-    # the registry rather than by importing them.
+    # the registry rather than by importing them. QC Triage's exclusions are an
+    # inclusion layer registered outside its package, so this also proves a
+    # build without the tab still loads a dataset that carries them.
     ("home.ratios", "Ratios"),
     ("home.pipeline_info", "Pipeline Info"),
+    ("home.triage", "QC Triage"),
 ])
 def test_app_tolerates_feature_deletion(qtbot, monkeypatch, mini_dataset, pkg, descriptor):
     # Purge any already-imported submodules, then block re-import — so the test

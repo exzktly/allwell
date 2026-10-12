@@ -243,10 +243,33 @@ def test_progress_is_reported_per_well_and_for_the_run(tmp_path):
                 well_progress_fn=lambda w, d, t: per_well.append((w, d, t)))
 
     assert run[0] == (0, 8) and run[-1] == (8, 8)
-    # Each well accounts for FOVs × timepoints × channels = 4 planes, and its
-    # last tick says so — a denominator taken from the run total would read 8.
-    assert ("C07", 4, 4) in per_well
-    assert ("A02", 4, 4) in per_well
+    # Each well accounts for FOVs × timepoints × channels = 4 planes plus one
+    # step for publishing its archive — a denominator taken from the run total
+    # would read 8. The last plane is 4 of 5; only the publish reads full.
+    assert [d for w, d, t in per_well if w == "C07"] == [1, 2, 3, 4, 5]
+    assert {t for _w, _d, t in per_well} == {5}
+    assert ("A02", 5, 5) in per_well
+
+
+def test_a_well_reads_full_only_once_its_archive_is_published(tmp_path):
+    """The converter pages draw a green ✓ on the full step, so it must not
+    arrive while the well's archive is still under its staging name — the last
+    plane used to report ``planes / planes`` from inside ``atomic_zip``, before
+    the archive was closed, verified and renamed onto ``<WELL>.zip``."""
+    path = _named_plate(tmp_path, wells=2, fovs=1, timepoints=2, channels=2)
+    out = tmp_path / "dest" / "in"
+    at_full: dict[str, bool] = {}
+    early: list[tuple[str, int, int]] = []
+
+    def _record(w, d, t):
+        if d >= t:
+            at_full[w] = (out / f"{w}.zip").is_file()
+        elif (out / f"{w}.zip").is_file():
+            early.append((w, d, t))
+
+    explode_czi(path, out, experiment="E", workers=1, well_progress_fn=_record)
+    assert at_full == {"A02": True, "C07": True}
+    assert early == []
 
 
 def test_a_resumed_run_keeps_the_wells_it_already_finished(tmp_path):

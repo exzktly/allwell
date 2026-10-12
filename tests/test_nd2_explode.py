@@ -132,6 +132,27 @@ def test_progress_is_reported_against_what_the_run_writes(tmp_path):
     assert seen[-1] == (24, 24)
 
 
+def test_a_well_reads_full_only_once_its_archive_is_published(tmp_path):
+    """The converter pages draw a green ✓ on the full step, so it must not
+    arrive while the well's archive is still under its staging name — the last
+    plane used to report ``planes / planes`` from inside ``atomic_zip``, before
+    the archive was closed, verified and renamed onto ``<WELL>.zip``."""
+    out = tmp_path / "out"
+    at_full: dict[str, bool] = {}
+    early: list[tuple[str, int, int]] = []
+
+    def _record(w, d, t):
+        if d >= t:
+            at_full[w] = (out / f"{w}.zip").is_file()
+        elif (out / f"{w}.zip").is_file():
+            early.append((w, d, t))
+
+    explode_nd2(_plate(tmp_path), out, experiment="Exp", workers=1,
+                well_progress_fn=_record)
+    assert at_full and all(at_full.values()), at_full
+    assert early == []
+
+
 def test_resuming_leaves_its_own_finished_wells_alone(tmp_path):
     out = tmp_path / "out"
     src = _plate(tmp_path)

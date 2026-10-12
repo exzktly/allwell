@@ -56,6 +56,7 @@ from pipeline.explode_common import (
     expected_members,
     hours_token,
     pick_workers,
+    publishing_total,
     resolve_positions,
     stride_note,
     subset_note,
@@ -1484,6 +1485,10 @@ def explode_ome_tiff(
     # writes the same number, so this is the denominator of each well's share.
     planes_per_well = max(1, fovs * n_kept_t * layout.size_c)
 
+    # Each plane is reported out of one more than the well holds; the last
+    # step is the archive's publish, reported after ``atomic_zip`` exits.
+    well_total = publishing_total(planes_per_well)
+
     def _bump(well: "str | None" = None, well_done: int = 0) -> None:
         nonlocal done
         with lock:
@@ -1495,7 +1500,7 @@ def explode_ome_tiff(
         # harmless, and taking the lock per plane would serialise the parallel
         # per-well conversion this reports on.
         if well_progress_fn and well is not None:
-            well_progress_fn(well, well_done, planes_per_well)
+            well_progress_fn(well, well_done, well_total)
 
     if progress_fn:
         progress_fn(0, total)
@@ -1557,6 +1562,10 @@ def explode_ome_tiff(
                                 written += 1
                                 well_written += 1
                                 _bump(label, well_written)
+                # Only now is the archive on disk under its own name — see
+                # ``publishing_total`` for why the last plane is not the end.
+                if well_progress_fn:
+                    well_progress_fn(label, well_total, well_total)
                 wells.append(label)
         return written, wells, read_s, write_s, resumed
 

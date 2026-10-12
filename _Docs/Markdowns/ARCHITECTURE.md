@@ -9979,10 +9979,18 @@ a copy of this one. It is locked (`setEnabled(False)`) for the run's duration �
 a click would edit the very order being converted — and each well fills as a
 dial. `explode_ome_tiff` takes a `well_progress_fn(well, done, total)` beside
 its run-wide `progress_fn`, ticking once per plane written with that well's own
-share (its FOVs × timepoints × channels); `datasets.ome_import.apply.convert`
-quantises those ticks through `core.containers.WellFraction` before they
-cross the Qt signal boundary, so a well of thousands of planes emits at most 101
-updates rather than one per plane. The quantising lives on the `datasets` side
+share. The denominator is `explode_common.publishing_total` — the well's FOVs ×
+timepoints × channels **plus one**, and that last step is reported only after
+the well's `atomic_zip` block exits, i.e. once the archive has been closed,
+verified and renamed onto `<WELL>.zip`. All three converters (OME-TIFF, CZI,
+ND2) do this, because their pages draw a well as finished — green, and a ✓ on
+`ConverterDashboard` — from the full step alone; reporting the last plane as
+full put the ✓ on a well whose archive still sat under its staging name.
+`datasets.ome_import.apply.convert` quantises those ticks through
+`core.containers.WellFraction` before they cross the Qt signal boundary, so a
+well of thousands of planes emits at most 101 updates rather than one per
+plane. `WellFraction` rounds **down**, so only a well that is exactly full
+reaches the last step — 999 of 1,000 planes reads 99, never 100. The quantising lives on the `datasets` side
 deliberately: what counts as "often enough to be worth a repaint" is a UI
 question, and `pipeline/` may not import `datasets/`. The run-wide
 `QProgressBar` beneath it is hidden until a conversion starts — an idle bar

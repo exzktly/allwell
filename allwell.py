@@ -25,6 +25,7 @@ from pathlib import Path
 from startup import boot_diag as _boot_diag
 _boot_diag.arm_faulthandler()
 _boot_diag.install_excepthook()
+_boot_diag.arm_stall_watchdog()
 _boot_diag.boot(f"start pid={__import__('os').getpid()} python={sys.version.split()[0]} platform={sys.platform}")
 
 _boot_diag.boot("importing PySide6 (Qt DLLs) …")
@@ -1861,6 +1862,7 @@ def main() -> None:
     app = QApplication.instance() or QApplication(sys.argv)
     _boot_diag.boot("QApplication created OK")
     _boot_diag.install_qt_cross_thread_trace()
+    _boot_diag.start_stall_heartbeat(app)
     _install_combobox_popup_widener()
     # Collapse both font-family tokens to single resolvable names so Qt's
     # QSS parser doesn't walk alias tables and warn at startup

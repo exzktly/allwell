@@ -174,6 +174,15 @@ SILENT_EXCEPT_ALLOWLIST = {
     # would re-enter the logging and Qt machinery the handler is reporting on.
     ("startup/boot_diag.py", "_handler"),
     ("startup/boot_diag.py", "install_qt_cross_thread_trace"),
+    # The stall watchdog. `_watch` writes its report straight to the boot-log
+    # handle (going through `boot` would count as a heartbeat), so a failed
+    # write has no channel left to report on; arming the thread and starting
+    # the heartbeat timer run before and during start-up, where a diagnostic
+    # that raised would take the launch down with it — the same reasoning as
+    # `arm_faulthandler` above.
+    ("startup/boot_diag.py", "_watch"),
+    ("startup/boot_diag.py", "arm_stall_watchdog"),
+    ("startup/boot_diag.py", "start_stall_heartbeat"),
     # The bootstrap's own last-resort note. `_quietly` reports a failed log
     # write to the real stderr; when *that* write fails too there is no
     # remaining channel to report on, which is the one honest case for a bare

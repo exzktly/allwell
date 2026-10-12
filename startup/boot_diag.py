@@ -17,13 +17,21 @@ useless, so this module leaves a trail on disk instead:
   (best-effort) a GUI message box, so a headless/pythonw launch still surfaces
   the error.
 
-**A log that recorded a crash is kept.** The boot log is truncated per launch so
+* :func:`arm_stall_watchdog` records where the GUI thread *is* when it stops
+  answering for :data:`STALL_THRESHOLD_S` seconds, and again at each doubling
+  of that, so a launch that took minutes leaves the line it was stuck on rather
+  than only the milestone before it. :func:`boot` is its heartbeat until the
+  ``QApplication`` exists; :func:`start_stall_heartbeat` takes over from there.
+
+**A log that recorded a crash or a stall is kept.** The boot log is truncated per launch so
 it always describes the *current* attempt — which is right for a hang, and was
 wrong for a crash: the thing a user does after a crash is restart the app, and
 that restart erased the traceback the dialog had just told them to go and read.
 A log carrying a crash marker is therefore moved aside first
 (:func:`crash_log_paths`), and only logs from launches that ended quietly are
-overwritten. The dialog also carries the traceback itself now, so the common
+overwritten. A stall report is kept the same way, for the same reason: what a
+user does after a launch that took fifteen minutes is quit and try again, and
+that relaunch would otherwise erase the only record of where the time went. The dialog also carries the traceback itself now, so the common
 case needs no file at all.
 
 Stdlib-only and fully defensive: importing or calling anything here never blocks
@@ -35,6 +43,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -95,6 +104,15 @@ _CRASH_MARKERS = (
 _SCAN_BYTES = 1 << 20
 
 
+#: What :func:`arm_stall_watchdog` writes at the head of every stall report.
+#: Plain text, not ``faulthandler``'s format, so a stall is never reported as a
+#: crash — but it is in :data:`_KEEP_MARKERS`, so its log survives a relaunch.
+_STALL_MARKER = "STALL: the GUI thread has not answered"
+
+#: Everything that makes a log worth keeping past the next launch.
+_KEEP_MARKERS = _CRASH_MARKERS + (_STALL_MARKER,)
+
+
 def crash_log_paths() -> list[Path]:
     """The kept logs from previous launches that ended in a crash, newest first.
 
@@ -106,11 +124,12 @@ def crash_log_paths() -> list[Path]:
     return [p for p in kept if p.exists()]
 
 
-def _looks_like_a_crash(path: Path) -> bool:
+def _looks_like_a_crash(path: Path, markers=_CRASH_MARKERS) -> bool:
     """Whether *path* holds a traceback or a native dump. False on any error.
 
     False is the safe direction: it means the log is treated as an ordinary
     launch record and overwritten, which is what every version before this did.
+    *markers* widens the question; rotation passes :data:`_KEEP_MARKERS`.
     """
     try:
         size = path.stat().st_size
@@ -125,7 +144,7 @@ def _looks_like_a_crash(path: Path) -> bool:
                 text = fh.read()
     except OSError:
         return False
-    return any(marker in text for marker in _CRASH_MARKERS)
+    return any(marker in text for marker in markers)
 
 
 def _rotate_if_it_recorded_a_crash() -> None:
@@ -137,7 +156,7 @@ def _rotate_if_it_recorded_a_crash() -> None:
     """
     base = log_path()
     try:
-        if not base.exists() or not _looks_like_a_crash(base):
+        if not base.exists() or not _looks_like_a_crash(base, _KEEP_MARKERS):
             return
         for i in range(CRASH_LOG_KEEP, 1, -1):
             older = base.with_name(f"{base.name}.{i}")
@@ -169,7 +188,14 @@ def boot(msg: str) -> None:
     """Record a startup milestone to stderr and the boot log, flushed.
 
     A hang leaves its last-reached milestone as the final log line; a crash
-    leaves the milestone just before the faulthandler dump. Never raises."""
+    leaves the milestone just before the faulthandler dump. Never raises.
+
+    A milestone from the main thread is also a heartbeat for
+    :func:`arm_stall_watchdog`. One from any other thread — the Qt message
+    handler, the watchdog's own "answered again" — is not, or a worker logging
+    while the GUI thread is stuck would hide the stall it is stuck in."""
+    if threading.current_thread() is threading.main_thread():
+        beat()
     line = f"{time.strftime('%H:%M:%S')} [boot] {msg}\n"
     try:
         if sys.stderr is not None:
@@ -324,5 +350,116 @@ def install_excepthook() -> None:
 
     try:
         sys.excepthook = _hook
+    except Exception:
+        pass
+
+
+#: How long the GUI thread may go without a heartbeat before it is recorded as
+#: stalled. A healthy launch builds its window in well under this (five to ten
+#: seconds from a source checkout), so a report means something real, and the
+#: launches it exists for — minutes long — cross it many times over.
+STALL_THRESHOLD_S = 15.0
+
+#: How many stall reports one process writes. Each report doubles the wait
+#: before the next one for the same stall (15 s, 30 s, 60 s, …), so a single
+#: fifteen-minute stall takes six; the cap only bounds a session that stalls
+#: over and over.
+_STALL_DUMPS = 12
+
+#: ``time.monotonic()`` of the GUI thread's last sign of life. Monotonic, so a
+#: laptop that slept is not reported as a stall: neither macOS's nor Linux's
+#: monotonic clock advances during suspend.
+_LAST_BEAT = time.monotonic()
+_WATCHDOG_ARMED = False
+
+
+def beat() -> None:
+    """The GUI thread is alive. Called by :func:`boot` and by the heartbeat timer."""
+    global _LAST_BEAT
+    _LAST_BEAT = time.monotonic()
+
+
+def _main_thread_stack() -> str:
+    """The main thread's Python stack, formatted by hand (see :func:`_all_thread_stacks`)."""
+    import traceback
+
+    frame = sys._current_frames().get(threading.main_thread().ident)
+    if frame is None:
+        return "  (the main thread has no Python frame)\n"
+    return "".join("    " + line for line in
+                   "".join(traceback.format_stack(frame)).splitlines(True))
+
+
+def _watch(threshold_s: float, poll_s: float, stop=None) -> None:
+    """The watchdog loop. Runs on its own daemon thread for the process's life.
+
+    *stop* is a ``threading.Event`` that ends it; the app passes none. A test
+    that runs this loop must, or the thread outlives it and goes on writing
+    stall reports into later tests' logs.
+    """
+    dumps = 0
+    next_report = threshold_s
+    stalled_at = None
+    while dumps < _STALL_DUMPS and not (stop is not None and stop.is_set()):
+        time.sleep(poll_s)
+        last = _LAST_BEAT
+        gap = time.monotonic() - last
+        if stalled_at is not None and last != stalled_at:
+            boot(f"GUI thread answered again after "
+                 f"{time.monotonic() - stalled_at:.0f}s")
+            stalled_at, next_report = None, threshold_s
+            continue
+        if gap < next_report:
+            continue
+        stalled_at = last
+        dumps += 1
+        next_report *= 2
+        # ``boot`` would count as a heartbeat, so this writes the log directly.
+        h = _handle()
+        if h is None:
+            continue
+        try:
+            h.write(f"{time.strftime('%H:%M:%S')} [boot] {_STALL_MARKER} for "
+                    f"{gap:.0f}s. It is here:\n{_main_thread_stack()}")
+            h.flush()
+        except Exception:
+            pass
+
+
+def arm_stall_watchdog(threshold_s: float = STALL_THRESHOLD_S,
+                       poll_s: float = 1.0) -> None:
+    """Record where the GUI thread is whenever it stops answering. Never raises.
+
+    The milestones :func:`boot` writes say which *step* a slow launch was in;
+    when one step took fifteen minutes, that is not enough to say why. This
+    samples the main thread's stack from a daemon thread once the heartbeat has
+    been silent for *threshold_s*, then again at each doubling, so the log
+    shows both where it was stuck and whether it stayed in one place. Idempotent.
+    """
+    global _WATCHDOG_ARMED
+    if _WATCHDOG_ARMED:
+        return
+    try:
+        threading.Thread(target=_watch, args=(threshold_s, poll_s),
+                         name="allwell-stall-watchdog", daemon=True).start()
+        _WATCHDOG_ARMED = True
+    except Exception:
+        pass
+
+
+def start_stall_heartbeat(app) -> None:
+    """Beat once a second from *app*'s event loop. Never raises.
+
+    Call once the ``QApplication`` exists. A timer and not a call in each
+    handler: a timer fires only when the event loop is free to run it, which is
+    exactly the property being watched. Modal dialogs run a nested loop, so the
+    timer keeps beating behind them and an open dialog is not a stall.
+    """
+    try:
+        from PySide6.QtCore import QTimer
+        timer = QTimer(app)
+        timer.setObjectName("allwell-stall-heartbeat")
+        timer.timeout.connect(beat)
+        timer.start(1000)
     except Exception:
         pass

@@ -461,7 +461,7 @@ allwell/
 │                                  uses) and page_stack.py (NamedPageStack, the
 │                                  name-keyed QStackedWidget all three panes build on)
 ├── startup/                     ← what runs before the application exists (§4)
-│   ├── boot_diag.py            ← the per-launch boot log + faulthandler, so a native crash or a
+│   ├── boot_diag.py            ← the per-launch boot log + faulthandler + stall watchdog, so a native crash or a
 │   │                              hang names the step that never returned
 │   ├── mpl_bootstrap.py        ← restrict matplotlib to the bundled fonts (called first in main)
 │   └── app_fonts.py            ← register the bundled Inter / JetBrains Mono faces with Qt
@@ -807,6 +807,14 @@ In one diagram, end-to-end:
 all_well_launcher.main()                       (PyInstaller bundle only)
     │
     ▼ regular Python run jumps in here:
+allwell (module import)
+    ├── startup.boot_diag.arm_faulthandler() / install_excepthook()
+    └── startup.boot_diag.arm_stall_watchdog()  ← a daemon thread that writes the
+            GUI thread's Python stack to the boot log whenever it has gone
+            STALL_THRESHOLD_S (15 s) without a heartbeat, and again at each
+            doubling. Every boot() milestone is a heartbeat until the
+            QApplication exists; start_stall_heartbeat(app) beats once a second
+            from the event loop after that (§12.8).
 allwell.main()
     ├── startup.mpl_bootstrap.configure()  ← FIRST, before anything imports matplotlib:
     │       restricts font_manager.findSystemFonts to the bundled fonts (+ DejaVu)
@@ -846,6 +854,7 @@ allwell.main()
     │       launch before any app code runs, so deferring to it made every
     │       frozen launch a cold cache. From source a caller's value stands.
     ├── QApplication(sys.argv)
+    ├── boot_diag.install_qt_cross_thread_trace() / start_stall_heartbeat(app)
     ├── app_fonts.register_qt_fonts() → theme_v2.Typography.family/_mono
     │       ← register bundled Inter / JetBrains Mono (static instances),
     │         falling back to app.font().family() if unavailable
@@ -884,6 +893,15 @@ Two important details:
 2. **Optional `--data_dir` argument** is queued with `QTimer.singleShot(150,
    …)` so the first paint completes before the dataset starts loading. This
    keeps the UI responsive while a few hundred CSVs stream in.
+3. **Nothing on the construction path may wait on a user folder.** The recent-
+   datasets rows are built three times before the window is shown (the rail
+   head's dataset menu, Home's card, Home's placeholder) and each asks whether
+   its folders still exist. A `stat` under a network share whose server has
+   gone away blocks for tens of seconds on macOS, so that question is answered
+   off the GUI thread with a bounded wait (`review/core/folder_reachability.py`,
+   §5.2, *Recent datasets*). Measured with a fake share whose every `stat`
+   blocks 3 s and a full history: 63.8 s to the event loop asking inline,
+   7.0 s through the probe.
 
 ---
 
@@ -3001,7 +3019,8 @@ logged and dropped: the dataset is already loaded and on screen by then.
 
 It appears in three places, fed by one function — `core/recent_view.entry_rows`
 — so they cannot disagree about which folders are reachable or what a row is
-called. On Home's no-dataset placeholder it shows `RECENTS_ON_PLACEHOLDER` rows
+called. Two of the three are built while the window is being constructed, before
+anything is on screen. On Home's no-dataset placeholder it shows `RECENTS_ON_PLACEHOLDER` rows
 — fewer than the store holds, because a launch screen offering ten folders is a
 file manager. On Home's Overview it is a card of `RECENTS_ON_CARD` rows, hidden
 entirely when there is no history, and with the dataset currently open filtered
@@ -3017,10 +3036,42 @@ so `core/recent_view` holds reading it through the shell's settings handle,
 deciding what each row says and whether it can be opened, and performing the open
 and the forget; Home reads it from there like the other two. With the rules
 inside `features/home`, the shell could only have reached them through a feature
-service seam or an import the layering forbids. Nothing is cached: the list is at
-most `MAX_RECENTS` long, the menu builds its rows when it is about to be shown,
-and a cache would need invalidating by a load, by a forget and by the other
-surface's forget — three writers for ten rows.
+service seam or an import the layering forbids. The list itself is not cached:
+it is at most `MAX_RECENTS` long, the menu builds its rows when it is about to be
+shown, and a cache would need invalidating by a load, by a forget and by the
+other surface's forget — three writers for ten rows.
+
+**Whether a folder is reachable is asked off the GUI thread.** The only way to
+know is a `stat`, and under a network share whose server has stopped answering
+— a laptop off the lab network, a dropped VPN, a restarted NAS — macOS keeps the
+mount and blocks that `stat` until the SMB client gives up, tens of seconds per
+call. Asked inline, a full history on such a share cost nineteen blocked calls
+during construction, before the window appeared. `core/folder_reachability.py`
+holds the rule, Qt-free: `ReachabilityProbe.check(paths)` starts one daemon
+thread per folder and waits for them at most `WAIT_BUDGET_S` (0.2 s) **in
+total**, so a local folder is decided at once, exactly as it was inline, and a
+folder that has not answered comes back `None`. A folder whose check is still
+running is never checked again until it returns (one blocked thread per folder,
+never one per repaint), and one whose last answer came after the budget keeps
+that answer for `SLOW_RECHECK_S` (60 s) — otherwise the repaint its late answer
+triggers would re-check it, draw it as being checked, and repaint again for as
+long as the share is down. A folder that answered promptly is re-checked on
+every build, so a drive plugged back in brings its row back. A check still
+running reads as `None` even with an older answer cached: a share that answered
+an hour ago and is not answering now is exactly the folder a click must not be
+offered on, since the load would block on the same `stat`.
+
+`entry_rows` draws `None` as a disabled row whose tooltip carries
+`CHECKING_NOTE` — distinct from `UNREACHABLE_NOTE`, because a slow share is not
+a missing folder, and Home's card counts only `row_is_unreachable` rows into its
+"cannot be reached" sentence. The probe's listener fires on the worker thread
+when a late answer differs from what was drawn; `recent_view` routes it through
+a queued signal (`_ReachabilityRelay`) to the `on_changed` repaint the last
+caller passed, on the GUI thread. Home passes its two-surface repaint; the rail
+head's menu passes none because it is rebuilt every time it opens.
+`tests/test_folder_reachability.py` blocks `os.stat` itself for a fake share,
+below both `Path.is_dir` and `os.path.isdir`, so the menu test fails on its
+clock against the inline version.
 
 **Forgetting a row.** `recent_datasets.forget` / `record_forget` are the pure
 and the stored halves, matched on the resolved path — the same key `remember`
@@ -14588,14 +14639,36 @@ C/Python stack there even from a windowed build with no console, and a *hang*
 leaves its last-reached milestone as the log's final line. `install_excepthook`
 writes any uncaught Python exception to the same file.
 
-**A log that recorded a crash is kept.** The boot log is truncated per launch so
+**A launch that stalls names the line it was stuck on.** The milestones say
+which *step* a slow launch was in, and "building main window (AllWellApp) …"
+followed by nothing for fifteen minutes names a step thousands of lines long.
+`arm_stall_watchdog`, armed at import beside `arm_faulthandler`, runs a daemon
+thread that reads the GUI thread's heartbeat once a second; when it has been
+silent for `STALL_THRESHOLD_S` (15 s) it writes `STALL: the GUI thread has not
+answered for Ns` and the main thread's Python stack (formatted by hand, like the
+cross-thread trace below, so it is never read as a crash), then again at each
+doubling — 15 s, 30 s, 60 s … up to `_STALL_DUMPS` reports — so a long stall
+shows whether it stayed in one place, and `GUI thread answered again after Ns`
+when it ends. Every `boot()` milestone from the main thread is a heartbeat until
+the `QApplication` exists, and `start_stall_heartbeat(app)` beats from a
+one-second `QTimer` on the event loop after that; a modal dialog runs a nested
+loop, so it keeps beating. A milestone logged from any other thread is not a
+heartbeat, or a worker logging while the GUI thread is stuck would hide the
+stall. The clock is `time.monotonic()`, which does not advance while a laptop
+sleeps. A stall the process cannot see — macOS assessing an unsigned bundle
+before the interpreter starts — shows instead as the gap between launching the
+app and the log's first timestamp.
+
+**A log that recorded a crash or a stall is kept.** The boot log is truncated per launch so
 it describes the current attempt, which is what makes it useful after a hang.
 That erased the evidence in the one case it mattered most: the thing a user does
 after a crash is relaunch, and the relaunch deleted the traceback the crash
 dialog had just told them to read. `_rotate_if_it_recorded_a_crash` therefore
 moves a log carrying a crash marker (`FATAL uncaught exception`, or one of
 `faulthandler`'s) aside to `allwell-boot.log.1` … `.CRASH_LOG_KEEP` first;
-`crash_log_paths()` lists the survivors, newest first. Logs from launches that
+`crash_log_paths()` lists the survivors, newest first. A log holding a stall
+report is kept the same way (`_KEEP_MARKERS`), because what a user does after a
+fifteen-minute launch is quit and try again. Logs from launches that
 ended quietly are still overwritten, so a dozen ordinary restarts cannot push
 the one crash out of the ring. The crash dialog also carries the traceback in
 its "Show Details" section, so the usual case needs no file at all — and it no

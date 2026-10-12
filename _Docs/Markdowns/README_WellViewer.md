@@ -1391,7 +1391,11 @@ getting back to yesterday's plate does not mean navigating to it again. Clicking
 one opens it exactly as the folder picker would. A dataset whose folder is not
 reachable right now — an external drive that is not plugged in is the usual
 reason — is still listed, greyed out, with the reason if you hover it; it comes
-back by itself when the drive does. The list is kept per user on this machine,
+back by itself when the drive does. A dataset on a network share that is slow to
+answer is greyed out too, with *"is being checked"* on hover, and becomes
+clickable as soon as the share replies; a share that has stopped answering
+altogether — off the lab network, VPN disconnected — no longer holds up the
+app's start while it waits. The list is kept per user on this machine,
 not in any dataset folder, so copying a dataset to a colleague does not hand
 them your history of other plates. A folder that opened but turned out to hold
 no wells is not added.
@@ -3206,6 +3210,15 @@ still exported (see below).
   If a message like *"Timers cannot be stopped from another thread"* appears,
   the same log also records which part of the app caused it — send that file
   with the report, even if the app did not close.
+- **If the app takes a long time to start, or freezes, the same log says
+  where.** Whenever the window stops responding for 15 seconds or more, the log
+  gets a `STALL:` entry naming the exact line the app was stuck on, repeated as
+  the wait goes on, and a copy of a log with a stall in it is kept on the next
+  launch the same way a crash's is. Send `allwell-boot.log` (and `.1` if you
+  have restarted since). If the log's *first* line is already minutes after you
+  double-clicked the app, the time went before the app itself started — on a
+  Mac that is usually macOS checking a newly copied, unsigned app bundle, and
+  it happens once per copy.
 - **You can look at the finished wells while the rest are still running** —
   Analyze and Review are two panes of one window, and the run is a separate
   process (or on the cluster), so switching to Review does not touch it. Open

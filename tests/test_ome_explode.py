@@ -378,7 +378,8 @@ def test_per_well_progress_splits_the_run_by_well(tmp_path):
     """The run-wide plane counter cannot say which well is being written, so a
     page with a plate above its progress bar had nothing to paint onto it. Each
     well's own share is reported alongside the total: four planes per well here
-    (1 FOV x 2 channels x 2 timepoints), counted from 1 to 4 for each."""
+    (1 FOV x 2 channels x 2 timepoints), counted from 1 to 4 for each, out of 5
+    — the fifth step is the archive's publish (``publishing_total``)."""
     p = _write_ome(tmp_path / "s.ome.tif", positions=4, size_t=2, size_c=2, size_z=1)
     seen: list[tuple[str, int, int]] = []
     explode_ome_tiff(
@@ -387,10 +388,36 @@ def test_per_well_progress_splits_the_run_by_well(tmp_path):
         well_progress_fn=lambda w, d, t: seen.append((w, d, t)),
     )
     assert {w for w, _d, _t in seen} == {"A01", "A02", "B01", "B02"}
-    assert {t for _w, _d, t in seen} == {4}          # planes per well
+    assert {t for _w, _d, t in seen} == {5}          # planes per well + publish
     for well in ("A01", "A02", "B01", "B02"):
         ticks = [d for w, d, _t in seen if w == well]
-        assert ticks == [1, 2, 3, 4], (well, ticks)
+        assert ticks == [1, 2, 3, 4, 5], (well, ticks)
+
+
+def test_a_well_reads_full_only_once_its_archive_is_published(tmp_path):
+    """The converter pages draw a green ✓ on the full step, so it must not
+    arrive while the well's archive is still under its staging name. Before the
+    publish step existed, the last plane reported ``planes / planes`` from
+    inside ``atomic_zip`` — the ✓ appeared, and only then was the archive
+    closed, verified and renamed onto ``<WELL>.zip``."""
+    p = _write_ome(tmp_path / "s.ome.tif", positions=2, size_t=2, size_c=2, size_z=1)
+    out = tmp_path / "in"
+    at_full: dict[str, bool] = {}
+    early: list[tuple[str, int, int]] = []
+
+    def _record(w, d, t):
+        if d >= t:
+            at_full[w] = (out / f"{w}.zip").is_file()
+        elif (out / f"{w}.zip").is_file():
+            early.append((w, d, t))
+
+    explode_ome_tiff(
+        p, out, grid_rows=1, grid_cols=2, origin_well="A01",
+        direction="row", experiment="exp", workers=1,
+        well_progress_fn=_record,
+    )
+    assert at_full == {"A01": True, "A02": True}
+    assert early == []
 
 
 def test_per_well_progress_is_optional(tmp_path):
@@ -423,11 +450,11 @@ def test_per_well_progress_across_several_workers(tmp_path):
     )
     per_well: dict[str, list[int]] = {}
     for well, done, total in seen:
-        assert total == 2                       # 1 FOV x 2 channels x 1 timepoint
+        assert total == 3          # 1 FOV x 2 channels x 1 timepoint, + publish
         per_well.setdefault(well, []).append(done)
     assert len(per_well) == 8
     for well, ticks in per_well.items():
-        assert ticks == [1, 2], (well, ticks)
+        assert ticks == [1, 2, 3], (well, ticks)
 
 
 def test_per_well_progress_counts_fovs_and_timepoints_into_the_denominator(tmp_path):
@@ -440,8 +467,8 @@ def test_per_well_progress_counts_fovs_and_timepoints_into_the_denominator(tmp_p
         direction="row", experiment="exp", workers=1, fovs_per_well=2,
         well_progress_fn=lambda w, d, t: seen.append((w, d, t)),
     )
-    assert {t for _w, _d, t in seen} == {12}    # 2 FOV x 3 tp x 2 ch
-    assert [d for w, d, _t in seen if w == "A01"] == list(range(1, 13))
+    assert {t for _w, _d, t in seen} == {13}    # 2 FOV x 3 tp x 2 ch, + publish
+    assert [d for w, d, _t in seen if w == "A01"] == list(range(1, 14))
 
 
 def test_convert_quantises_per_well_ticks_before_the_ui_sees_them(tmp_path):

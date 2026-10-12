@@ -41,6 +41,23 @@ from pipeline.timepoints import (  # noqa: F401
 from util.well_token import canonical_well_label
 
 
+def publishing_total(planes_per_well: int) -> int:
+    """The denominator a well's progress is reported against: its planes + 1.
+
+    The extra step is the archive being *published* — closed, fsynced,
+    re-read and verified, and renamed from its staging name onto
+    ``<WELL>.zip`` by :func:`util.zip_write.atomic_zip`. That happens after the
+    last plane is written, and on a large well it is seconds of work. Reporting
+    the last plane as ``planes / planes`` told the page the well was finished
+    while its archive still sat under a staging name, so the plate drew a
+    green ✓ on a well that did not yet exist on disk — and that a cancel or a
+    failed verify at that moment would then leave missing. Every plane is
+    therefore reported out of ``planes + 1``, and only the exit of the
+    ``atomic_zip`` block reports the final step.
+    """
+    return max(1, int(planes_per_well)) + 1
+
+
 class ExplodeCancelled(Exception):
     """Raised when a ``should_abort`` callback stops an explode mid-run."""
 

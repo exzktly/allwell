@@ -110,9 +110,18 @@ class WellFraction:
 
     def _emit(self, index: int, within: float) -> None:
         """Report slice *index* as *within* (0..1) full, deduplicated to whole
-        steps so a large container doesn't flood the UI thread."""
+        steps so a large container doesn't flood the UI thread.
+
+        Rounded *down*, never to nearest. A dashboard reads the full step as
+        "this well is finished" — the converters draw their ✓ from it — so a
+        well 999 planes into 1,000 must not round up to 100 while its last
+        plane, or its archive's publish, is still outstanding. Only a fill of
+        exactly 1.0 reaches the last step, and every way of finishing a well
+        (``(n, n)`` on the last slice, :meth:`skip`, :meth:`finish`) produces
+        exactly that.
+        """
         filled = (min(index, self._slices) + max(0.0, min(1.0, within))) / self._slices
-        step = int(round(min(1.0, filled) * _FRACTION_STEPS))
+        step = int(min(1.0, filled) * _FRACTION_STEPS)
         if step <= self._last_step:
             return
         self._last_step = step

@@ -71,6 +71,7 @@ from services.remote_run_id import (
     remote_run_dir,
     remote_run_paths,
 )
+from services.remote_batch_staging import prune_staged
 from services.remote_scratch import (
     source_fingerprint,
 )
@@ -728,14 +729,9 @@ class _BatchedRemoteProcess:
                for t in (BATCH_READY, BATCH_DONE)],
             check=False,
         )
-        # …and any batch a previous, aborted run of this same dataset staged.
-        # `run_id` is deterministic, so those directories are still sitting
-        # there and the driver would swap one in as though it were ours.
-        self._runner._cache._ssh_run(
-            ["rm", "-rf", f"{run_dir}/in", f"{run_dir}/bg"]
-            + [self._batch_staging_dir(i) for i in range(1, n_batches + 1)],
-            check=False,
-        )
+        # An aborted run's half-processed `in/` is cleared; its staged batches
+        # and `bg/` are kept for the retry (`remote_batch_staging`).
+        self._runner._cache._ssh_run(["rm", "-rf", f"{run_dir}/in"], check=False)
 
         # The empty-well blank(s), uploaded once for the whole run. They sit
         # outside the batch staging so the driver's `rm -rf in && mv b<i> in`
@@ -746,6 +742,8 @@ class _BatchedRemoteProcess:
         blanks = [z for z in self._zipped.well_zips
                   if z.stem in getattr(self, "_blank_stems", ())]
         if blanks:
+            prune_staged(self._runner._cache, f"{run_dir}/bg", blanks,
+                         "empty-well reference", self._log)
             sent, _elapsed, rc = self._runner._cache.upload_subset(
                 blanks, f"{run_dir}/bg", log_fn=self._log,
                 # A blank is a full well, and it is the first large transfer of
@@ -1190,6 +1188,8 @@ class _BatchedRemoteProcess:
                     inner_progress: Callable[[float], None] | None = _scaled_progress
                 else:
                     inner_progress = None
+                prune_staged(self._runner._cache, self._batch_staging_dir(
+                    batch_idx + 1), batch_zips, f"batch {batch_idx + 1}", self._log)
                 sent_bytes, _elapsed, rc = self._runner._cache.upload_subset(
                     batch_zips,
                     self._batch_staging_dir(batch_idx + 1),

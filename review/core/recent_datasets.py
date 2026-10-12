@@ -19,16 +19,16 @@ top of the reachability check the view already makes. Recording it once, at the
 moment the dataset actually opened, halves that and is the more truthful answer
 besides: it says what the folder was called *then*.
 
-Note what this does **not** buy, because the first version of this paragraph
-claimed it did: the paint still stats once per row, so an unmounted network
-mount can still block it. Halving the stats is not removing them, and if that
-blocking ever becomes real the fix is to move the check off the paint, not to
-store more.
+Note what this does **not** buy: halving the stats is not removing them. The
+blocking it could not prevent did become real — a network share whose server
+is not answering holds a ``stat`` for tens of seconds on macOS, and the rows are
+built three times during launch — and the fix was the one this paragraph named:
+the check moved off the GUI thread (``review.core.folder_reachability``).
 
-**Nothing here checks whether a path still exists.** Reachability is asked at
-the moment the rows are drawn, by ``home.controller._recent_entry_rows``, and
-the entry is shown either way — a folder that is not there is drawn disabled
-with the reason, never hidden.
+**Nothing here checks whether a path still exists.** Reachability is asked when
+the rows are built, by ``core.recent_view.entry_rows``, and the entry is shown
+either way — a folder that is not there is drawn disabled with the reason, and
+one that has not answered yet is drawn disabled as being checked, never hidden.
 """
 
 from __future__ import annotations

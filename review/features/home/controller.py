@@ -625,7 +625,9 @@ def _paint_recents(ctx) -> None:
     card.setVisible(bool(rows))
     if not rows:
         return
-    unreachable = sum(1 for row in rows if not row[3])
+    from review.core.recent_view import row_is_unreachable
+
+    unreachable = sum(1 for row in rows if row_is_unreachable(row))
     note.setText(
         "Click one to open it."
         + (f" {unreachable} of these cannot be reached right now — hover for "
@@ -851,7 +853,8 @@ def recent_rows(ctx, limit: int, *, exclude=None) -> list:
     The rules — which folders are reachable, what each row is called, what its
     tooltip says — are ``core.recent_view.entry_rows``, shared with the rail
     head's dataset menu so the three surfaces cannot drift. What Home adds is
-    the callback a removal runs afterwards: **both** of its surfaces, because
+    the callback a removal — or a folder's late reachability answer — runs
+    afterwards: **both** of its surfaces, because
     the card and the placeholder are the same list in the two states of one
     page, and a row forgotten on one while the other still holds it is a list
     that disagrees with itself the moment a dataset is opened or closed.
@@ -859,7 +862,8 @@ def recent_rows(ctx, limit: int, *, exclude=None) -> list:
     from review.core.recent_view import entry_rows
 
     return entry_rows(ctx, limit, exclude=exclude,
-                      on_removed=lambda: _repaint_recents(ctx))
+                      on_removed=lambda: _repaint_recents(ctx),
+                      on_changed=lambda: _repaint_recents(ctx))
 
 
 def _repaint_recents(ctx) -> None:

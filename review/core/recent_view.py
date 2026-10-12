@@ -14,11 +14,18 @@ already writes the list. With the display rules living inside
 seam or an import it is not allowed to make — so the rules moved to the layer
 that already owns both ends, and Home reads them from here like anyone else.
 
-**Nothing is cached.** Every call re-reads ``QSettings`` and re-stats the
-folders. The list is at most :data:`~review.core.recent_datasets.MAX_RECENTS`
-long, the menu builds its rows when it is about to be shown, and a cache would
-have to be invalidated by a load, by a forget and by the other surface's forget
-— three writers for ten rows.
+**The list is not cached; reachability is asked off the GUI thread.** Every
+call re-reads ``QSettings`` — the list is at most
+:data:`~review.core.recent_datasets.MAX_RECENTS` long, and a cache would have to
+be invalidated by a load, by a forget and by the other surface's forget. Whether
+each folder still exists is asked through
+:data:`review.core.folder_reachability.PROBE`, which runs the ``stat`` on a
+daemon thread and waits for it only briefly: a folder on a network share whose
+server is not answering blocks a ``stat`` for tens of seconds on macOS, and
+these rows are built three times while the window is being constructed. A row
+whose folder has not answered yet is drawn disabled and says it is being
+checked; when the answer arrives, the surface that passed *on_changed* to
+:func:`entry_rows` is repainted on the GUI thread.
 """
 
 from __future__ import annotations
@@ -27,9 +34,10 @@ import logging
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
 from core.safe import swallow
+from review.core.folder_reachability import PROBE
 
 _logger = logging.getLogger("review")
 
@@ -43,11 +51,9 @@ def recent_datasets(ctx) -> list:
     ``core.recent_datasets.decode`` — so this never raises into a page build.
 
     **Nothing here touches the filesystem.** Whether a remembered folder still
-    exists is asked at the moment the rows are built, by :func:`entry_rows`,
-    because the commonest reason one has vanished is an external drive that is
-    not mounted and a stat against an absent network mount can block for
-    seconds. A page build that walked five of those would hang the launch it is
-    meant to speed up.
+    exists is asked by :func:`entry_rows`, and asked off the GUI thread, because
+    a ``stat`` under a network share that is not answering blocks for tens of
+    seconds — and the rows are built three times during launch.
     """
     from core.app_settings import app_settings
     from review.core.recent_datasets import load
@@ -110,8 +116,60 @@ UNREACHABLE_NOTE = (
     "is not reachable right now — the folder has moved or its drive is not "
     "mounted. Removing it from the list is the × on the row.")
 
+#: What a row says while its folder has not answered yet. Distinct from
+#: :data:`UNREACHABLE_NOTE` on purpose: a share that is slow to answer is not a
+#: folder that is gone, and the row is redrawn either way once it does answer.
+CHECKING_NOTE = (
+    "is being checked — its drive has not answered yet. The row becomes "
+    "clickable as soon as it does.")
 
-def entry_rows(ctx, limit: int, *, exclude=None, on_removed=None) -> list:
+
+def row_is_unreachable(row) -> bool:
+    """Whether *row* (from :func:`entry_rows`) is a folder known to be gone.
+
+    Not ``not row[3]``: a row whose folder is still being checked is disabled
+    too, and counting it as unreachable would tell the user a drive is missing
+    when it has merely not answered yet.
+    """
+    return not row[3] and UNREACHABLE_NOTE in str(row[4])
+
+
+class _ReachabilityRelay(QObject):
+    """Carries the probe's late answers from its worker thread to the GUI."""
+
+    changed = Signal()
+
+
+#: Created on first use, which is on the GUI thread (``entry_rows`` is only ever
+#: called while building or repainting a widget), so the queued connection
+#: delivers there. Held at module level because a collected ``QObject`` never
+#: delivers.
+_RELAY: _ReachabilityRelay | None = None
+
+#: The repaint to run when a late answer changes what a row should say. One
+#: slot, last writer wins: Home is the only surface that passes one, and its
+#: callback repaints both of Home's surfaces. The rail head's menu passes none
+#: because it is rebuilt every time it is shown.
+_ON_CHANGED: list = [None]
+
+
+def _deliver_change() -> None:
+    callback = _ON_CHANGED[0]
+    if callable(callback):
+        with swallow("repaint the recent-datasets rows after a late answer"):
+            callback()
+
+
+def _relay() -> _ReachabilityRelay:
+    global _RELAY
+    if _RELAY is None:
+        _RELAY = _ReachabilityRelay()
+        _RELAY.changed.connect(_deliver_change, Qt.QueuedConnection)
+    return _RELAY
+
+
+def entry_rows(ctx, limit: int, *, exclude=None, on_removed=None,
+               on_changed=None) -> list:
     """``(label, sublabel, on_click, enabled, tooltip, on_remove)`` per row.
 
     One function for every surface that draws this list, so the card, the
@@ -122,6 +180,13 @@ def entry_rows(ctx, limit: int, *, exclude=None, on_removed=None) -> list:
     it would tell the user their history had been lost, when what actually
     happened is that a drive is unplugged — and the row coming back by itself
     when the drive returns is the behaviour that makes the list trustworthy.
+
+    **A folder that has not answered yet is shown, disabled, as being checked.**
+    The ``stat`` runs off the GUI thread (see the module docstring); *on_changed*
+    is what to run, on the GUI thread, when a late answer changes a row —
+    repainting whatever drew it. Without one the rows stay as drawn until the
+    caller next builds them, which is right for the rail head's menu: it is
+    rebuilt every time it opens.
 
     *exclude* drops the dataset already open, for the card that sits inside it.
 
@@ -136,20 +201,32 @@ def entry_rows(ctx, limit: int, *, exclude=None, on_removed=None) -> list:
     """
     rows = []
     entries = [e for e in recent_datasets(ctx)
-               if not is_the_open_dataset(e.path, exclude)]
-    for entry in entries[:limit]:
+               if not is_the_open_dataset(e.path, exclude)][:limit]
+    if not entries:
+        return rows
+    PROBE.set_listener(_relay().changed.emit)
+    if on_changed is not None:
+        _ON_CHANGED[0] = on_changed
+    answers = [None] * len(entries)
+    with swallow("check whether the recent datasets are still reachable"):
+        answers = PROBE.check([str(Path(e.path)) for e in entries])
+    for entry, answer in zip(entries, answers):
         path = Path(entry.path)
-        exists = False
-        with swallow(f"check whether {path} is still reachable"):
-            exists = path.is_dir()
+        exists = answer is True
         parent = str(path.parent) if path.parent != path else ""
         when = opened_ago(entry.opened_at)
+        if exists:
+            tooltip = f"{path}{when}"
+        elif answer is None:
+            tooltip = f"{path} {CHECKING_NOTE}"
+        else:
+            tooltip = f"{path} {UNREACHABLE_NOTE}"
         rows.append((
             entry.name or path.name or entry.path,
             parent,
             (lambda _p=path: open_recent(ctx, _p)) if exists else None,
             exists,
-            f"{path}{when}" if exists else f"{path} {UNREACHABLE_NOTE}",
+            tooltip,
             (lambda _p=path: forget_recent(ctx, _p, then=on_removed))
             if callable(on_removed) else None,
         ))

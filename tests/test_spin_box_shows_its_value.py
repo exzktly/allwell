@@ -1,8 +1,11 @@
 """A spin box has to have room for the number in it.
 
 Qt sizes a ``QSpinBox``'s text area to the widest value its range can hold plus
-a fixed **6 px** — the same 6 px whether the range is 1–9 or 0–65535. That is
-under half a digit, so any platform whose text renders a little wider than the
+a margin that does not grow with the range — the same few pixels for 1–9 as
+for 0–65535. At the UI size that is **5 or 6 px**: 6 for every range in DejaVu
+Sans, 6 for 1–999 and 5 for 0–65535 in Inter, so the exact figure depends on how
+the font's digit widths round to whole pixels. Either way it is under half a
+digit, so any platform whose text renders a little wider than the
 metric predicted (a different font fallback, a hinting difference, a
 fractional-DPI scale) clips the value, and on a two-digit box there is nothing
 left to read. Groups' *Replicates per group* (range 1–12) is the one that was
@@ -25,6 +28,7 @@ width there means there is nothing left to decide.
 from __future__ import annotations
 
 import pytest
+from PySide6.QtGui import QFontMetricsF
 from PySide6.QtWidgets import QHBoxLayout, QSpinBox, QWidget
 
 from ui import theme
@@ -33,20 +37,20 @@ pytestmark = pytest.mark.qt
 
 #: The narrow ranges a spin box in this app really carries — a one-digit count,
 #: the plate's twelve columns, its ninety-six wells. This is the vulnerable
-#: class: a value of one or two digits is short enough that Qt's fixed 6 px is
-#: the difference between reading it and not.
+#: class: a value of one or two digits is short enough that Qt's few pixels of
+#: margin are the difference between reading it and not.
 _NARROW = ((1, 9), (1, 12), (1, 96))
 
 #: Ranges wide enough that the floor cannot reach them. Kept here deliberately:
 #: ``min-width`` is a floor and cannot scale with content, so these keep Qt's
-#: own 6 px and this file says so rather than leaving a reader to assume the
-#: guarantee is universal. Six pixels beside a five-digit value is a different
-#: proposition from six beside two — the error that clips text scales with the
-#: text, and so does the room Qt gives it.
+#: own margin and this file says so rather than leaving a reader to assume the
+#: guarantee is universal. A few pixels beside a five-digit value is a different
+#: proposition from the same beside two — the error that clips text scales with
+#: the text, and so does the room Qt gives it.
 _WIDE = ((1, 999), (0, 65535))
 
 #: How much clear space a value needs beyond its own width. Qt's own margin is
-#: 6 px and 6 px is what was not enough; half a digit at the UI size is about 4,
+#: 5–6 px depending on the font, and that is what was not enough; half a digit at the UI size is about 4,
 #: so this asks for roughly one whole digit of headroom.
 _MIN_SLACK = 9
 
@@ -72,7 +76,7 @@ def test_a_short_range_has_room_for_its_widest_value(qtbot, qapp, low, high):
     assert width - needed >= _MIN_SLACK, (
         f"a {low}–{high} spin box gives its value {width}px for {needed}px of "
         f"text — {width - needed}px of slack, under the {_MIN_SLACK}px floor. "
-        f"Qt's own margin is 6px whatever the range, so this is the state a "
+        f"Qt's own margin is 5–6px whatever the range, so this is the state a "
         f"slightly wider font clips.")
 
 
@@ -127,19 +131,64 @@ def test_the_reported_control_is_covered_by_that(qtbot, qapp):
         f"{needed}px of text")
 
 
+#: ``QLineEditPrivate::horizontalMargin``: the gap a ``QLineEdit`` keeps between
+#: its contents rect and the text on each side. Private to Qt and fixed at 2 px
+#: since Qt 4, so it is restated here rather than read.
+_LINE_EDIT_SIDE_MARGIN = 2
+
+
 @pytest.mark.parametrize(("low", "high"), _WIDE)
 def test_a_wide_range_at_least_never_loses_room(qtbot, qapp, low, high):
     """The floor does not reach these, and they must not go backwards either.
 
     Stated as the limit it is: a box whose own range asks for more than the
-    floor keeps Qt's 6 px, so this asserts that baseline rather than the
+    floor keeps Qt's own sizing, so this asserts that baseline rather than the
     stronger one above. A change that bought the narrow boxes their headroom by
     taking it from the wide ones fails here.
+
+    **Two halves, both independent of the font.** This used to assert 6 px of
+    slack, which is Qt's margin in DejaVu Sans; in Inter at the same size Qt
+    gives a 0–65535 box 5 px, and the assertion failed on every machine whose
+    ``sans-serif`` is Inter while nothing was clipped. So instead:
+
+    * **the box gets the whole width Qt asked for** (its size hint). This is
+      the half that bites. Measured against ``ui/theme.py`` with a rule
+      appended to the spin-box block: ``max-width: 60px`` takes 1 px from a
+      0–65535 box in DejaVu and fails here while the value still fits (in Inter
+      the box needs no more than 60 px of content and loses nothing, so it
+      correctly passes), and ``max-width: 40px`` fails both ranges in both
+      fonts;
+    * **the widest value, at its exact (fractional) advance, fits in the part
+      of the field the line edit draws into.** This is the user-visible claim,
+      kept as the statement of it, and recorded as not having been seen to fail
+      on its own: a 40 px stepper and a 12 px ``margin-left`` on the inner
+      ``QLineEdit`` both leave this file green, because under the app
+      stylesheet Qt grows the box rather than squeezing the field, and every
+      change that did take room was caught by the size-hint half first.
     """
-    width, needed = _slack(qtbot, qapp, low, high)
-    assert width >= needed + 6, (
-        f"a {low}–{high} spin box gives its value {width}px for {needed}px of "
-        f"text, below even Qt's own margin")
+    qapp.setStyleSheet(theme.qss())
+    host = QWidget()
+    qtbot.addWidget(host)
+    QHBoxLayout(host)
+    box = QSpinBox(host)
+    box.setRange(low, high)
+    box.setValue(high)
+    host.layout().addWidget(box)
+    host.show()
+
+    assert box.width() >= box.sizeHint().width(), (
+        f"a {low}–{high} spin box is {box.width()}px wide against the "
+        f"{box.sizeHint().width()}px Qt sized it for — something is taking the "
+        f"room Qt gives its widest value")
+
+    edit = box.lineEdit()
+    margins = edit.textMargins()
+    drawable = (edit.contentsRect().width() - margins.left() - margins.right()
+                - 2 * _LINE_EDIT_SIDE_MARGIN)
+    needed = QFontMetricsF(edit.font()).horizontalAdvance(str(high))
+    assert drawable >= needed, (
+        f"a {low}–{high} spin box draws its value in {drawable}px, and "
+        f"{high} needs {needed:.2f}px — the number is cut off")
 
 
 @pytest.mark.parametrize("style", ["Fusion", "Windows"])

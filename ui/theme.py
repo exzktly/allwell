@@ -359,8 +359,10 @@ class Metrics:
     # for the number in it.
     #
     # Measured rather than chosen: Qt sizes a QSpinBox's text area to the widest
-    # value the range can hold plus a fixed **6 px**, and that 6 px is the same
-    # whether the range is 1–9 or 0–65535. Six pixels is under half a digit, so
+    # value the range can hold plus a margin that does not grow with the range:
+    # **5 or 6 px** at the UI size, the exact figure depending on how the font's
+    # digit widths round to whole pixels (6 throughout in DejaVu Sans; 5 for a
+    # 0–65535 box in Inter). Either figure is under half a digit, so
     # any platform whose text renders slightly wider than the metric predicted —
     # a different font fallback, a hinting difference, a fractional-DPI scale —
     # clips the value, and on a two-digit box there is nothing left to read.
@@ -372,7 +374,7 @@ class Metrics:
     # was. ``min-width`` applies to the contents rect and is the only lever that
     # grows the part the number is drawn in.
     #
-    # 28 px takes a one- or two-digit box from 6 px of slack to 20 / 15, and
+    # 28 px takes a one- or two-digit box from 5–6 px of slack to 20 / 15, and
     # costs at most 14 px of width. Boxes whose own range already asks for more
     # than this are untouched.
     spin_min_w   = 28
@@ -1267,8 +1269,8 @@ QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
     background-color: {c.panel};
 }}
 /* See ``Metrics.spin_min_w``: Qt gives a spin box's text area the width of its
-   widest value plus a fixed 6 px, whichever the range, and 6 px is under half a
-   digit. */
+   widest value plus 5–6 px (the figure depends on the font), however wide the
+   range, and that is under half a digit. */
 QSpinBox, QDoubleSpinBox {{
     min-width: {m.spin_min_w}px;
     padding-right: {m.spin_buttons_w}px;

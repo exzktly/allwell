@@ -200,6 +200,19 @@ def test_well_fraction_deduplicates_to_whole_steps():
     assert seen[-1] == 100
 
 
+def test_well_fraction_never_rounds_an_unfinished_well_up_to_full():
+    """The full step is what a converter page draws its ✓ from, so a well one
+    step short of done must not round up to it. 999 of 1,000 is 99.9% and used
+    to round to 100 — a ✓ on a well still writing its last plane."""
+    seen: list[int] = []
+    frac = ct.WellFraction(lambda _w, done, _t: seen.append(done), "D04", 1)
+    on_write = frac.slice_progress()
+    on_write(999, 1000)
+    assert seen[-1] == 99
+    on_write(1000, 1000)
+    assert seen[-1] == 100
+
+
 def test_clear_destination_removes_in_and_out(tmp_path):
     dest_root = tmp_path / "dest"
     (dest_root / "in").mkdir(parents=True)

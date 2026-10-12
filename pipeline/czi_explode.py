@@ -48,6 +48,7 @@ from pipeline.explode_common import (
     encode_tiff,
     expected_members,
     pick_workers,
+    publishing_total,
     resolve_positions,
     shortfall_summary,
     stride_note,
@@ -481,6 +482,7 @@ def explode_czi(
                         _bump()
                     continue
                 well_written = 0
+                well_total = publishing_total(planes_per_well)
                 with atomic_zip(out_in_dir / f"{label}.zip",
                                 compression=zipfile.ZIP_STORED) as archive:
                     for fov, position in enumerate(well_map.positions[index]):
@@ -511,8 +513,7 @@ def explode_czi(
                                         f"{layout.channel_names[channel]} — "
                                         f"skipped")
                                     well_written += 1
-                                    _bump(label, well_written,
-                                          planes_per_well)
+                                    _bump(label, well_written, well_total)
                                     continue
                                 read_s += time.perf_counter() - started
                                 started = time.perf_counter()
@@ -523,7 +524,11 @@ def explode_czi(
                                 write_s += time.perf_counter() - started
                                 written += 1
                                 well_written += 1
-                                _bump(label, well_written, planes_per_well)
+                                _bump(label, well_written, well_total)
+                # Only now is the archive on disk under its own name — see
+                # ``publishing_total`` for why the last plane is not the end.
+                if well_progress_fn:
+                    well_progress_fn(label, well_total, well_total)
                 converted.append(label)
         return written, converted, read_s, write_s, resumed, missing
 

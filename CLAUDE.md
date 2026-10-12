@@ -48,8 +48,11 @@ ALLWELL_PROFILE=<name> scripts/build_executable.sh   # feature-subset binary
 
 On Claude Code on the web, `.claude/hooks/session-start.sh` has already installed
 the test deps and the Qt system libraries (`libegl1` and friends — Qt needs
-GL/EGL even under the offscreen QPA), so `ruff check .` and `scripts/test.sh`
-work from the first turn. It does **not** install TF/StarDist/Torch/Cellpose; the
+GL/EGL even under the offscreen QPA), into a Python 3.11 (or 3.12) venv at
+`~/.allwell-test-venv` that it puts first on the session's PATH, so `ruff check .`
+and `scripts/test.sh` work from the first turn. If they do not — `No module named
+pytest` — the hook failed: read its error in `/tmp/claude-code.log`
+(`SessionStart`), since a failing hook does not stop the session. It does **not** install TF/StarDist/Torch/Cellpose; the
 `slow` segmentation tests still need those by hand. See ARCHITECTURE.md §10.6.
 
 Test deps: `pip install -r tests/requirements-dev.txt` — pinned to the app's

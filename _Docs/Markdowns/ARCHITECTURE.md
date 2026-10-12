@@ -14299,6 +14299,20 @@ so a remote session and CI resolve the same pinned versions from the same file.
 Both steps are guarded by a presence check, so a cached container re-runs the
 hook in well under a second.
 
+**The test stack lives in a virtualenv built from a pinned-compatible
+interpreter**, `$HOME/.allwell-test-venv` (overridable with
+`ALLWELL_TEST_VENV`), made with `python3.11` — what CI runs — or `python3.12`,
+the newest `PySide6==6.7.3` publishes wheels for. The hook never installs into
+bare `python3`: that is whatever the image's default happens to be, and when it
+became 3.13 pip could resolve no PySide6, the hook exited 1, and the session
+started with no test stack at all, because a failing `SessionStart` hook does
+not stop the session. The hook then appends `VIRTUAL_ENV` and a `PATH` with the
+venv's `bin/` first to `$CLAUDE_ENV_FILE`, which is how a `SessionStart` hook
+sets environment for every later command — so `scripts/test.sh`'s plain
+`python` and a bare `ruff` both resolve to the venv. With neither interpreter
+installed it exits 1 with a one-line message naming the `python3` it found,
+rather than pip's list of every PySide6 version it could not use.
+
 Without it a fresh remote container has no test stack at all, and every test
 collection dies at `import PySide6` with `libEGL.so.1: cannot open shared object
 file` — Qt needs GL/EGL even under the offscreen QPA platform.

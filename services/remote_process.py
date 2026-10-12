@@ -27,6 +27,7 @@ from functools import lru_cache
 import threading
 from pathlib import Path
 from collections.abc import Callable
+from services.subprocess_kill import own_process_group_kwargs
 from services.subprocess_text import TEXT_UTF8
 from services.remote_config import (
     launcher_time_seconds,
@@ -832,7 +833,7 @@ class _BatchedRemoteProcess:
             **TEXT_UTF8,
             bufsize=1,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
-            start_new_session=(os.name == "posix"),
+            **own_process_group_kwargs(),
         )
         with self._current_proc_lock:
             self._current_proc = proc

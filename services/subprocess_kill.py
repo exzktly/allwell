@@ -9,6 +9,17 @@ copy instead of forking the implementation.
 POSIX: ``os.killpg`` against the captured pgid.
 Windows: ``CTRL_BREAK_EVENT`` to the process group.
 
+**A process this module signals must be started in a group of its own**, which
+is what :func:`own_process_group_kwargs` gives ``Popen``. On Windows the
+``CTRL_BREAK_EVENT`` goes to a console *process group*, and a child that was not
+created with ``CREATE_NEW_PROCESS_GROUP`` leads no group: the event then reaches
+every process attached to the console, the app included. The app has no
+handler for it, so Windows ends it on the spot with ``STATUS_CONTROL_C_EXIT`` —
+no traceback, nothing in the boot log. That is how Stop on a remote run closed
+the app on Windows when launched from a terminal: both ``ssh`` spawns passed
+``start_new_session`` for POSIX and nothing for Windows.
+``tests/test_spawned_processes_lead_their_own_group.py`` holds the rule.
+
 The pgid is captured **up front** before SIGTERM is sent — without that,
 a 5-second escalation window could SIGKILL an unrelated process whose
 PID got recycled. (Real bug we saw in v5.0.0 testing on a busy host.)
@@ -22,6 +33,19 @@ import subprocess
 import threading
 
 from util.aw_safe import swallowed
+
+
+def own_process_group_kwargs() -> dict:
+    """``Popen`` keyword arguments that start the child in a group of its own.
+
+    A new session on POSIX, so :func:`signal_subprocess` can ``killpg`` the
+    whole tree without reaching the GUI's group; ``CREATE_NEW_PROCESS_GROUP``
+    on Windows, so its ``CTRL_BREAK_EVENT`` reaches this child and not every
+    process on the console (see the module docstring).
+    """
+    if os.name == "posix":
+        return {"start_new_session": True}
+    return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
 
 
 def signal_subprocess(proc: subprocess.Popen | None, *,

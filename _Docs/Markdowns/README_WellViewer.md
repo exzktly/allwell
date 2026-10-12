@@ -1223,6 +1223,8 @@ and by `remote_fetch_report.txt` in the output folder.
   On a remote run, Stop answers at once at any stage: pressed during the
   upload it ends the upload and nothing is launched on the host; pressed later,
   the host-side kill runs in the background rather than holding up the window.
+  On Windows this includes an All-Well started from a terminal: Stop ends the
+  connection to the host and leaves the app open.
 - Either way the wells already finished keep their results, so nothing you have
   waited for is thrown away — Suspend just also keeps the fields in progress and
   saves you re-entering the form.

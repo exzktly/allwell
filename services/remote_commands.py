@@ -18,6 +18,7 @@ from services.remote_conda import (
     EnvSelector,
     _conda_env_guard,
 )
+from services.remote_srun_retry import is_srun, wrap_srun_launch
 from services.remote_transport import _remote_join, _remote_quote
 from services.remote_wait_snippets import (
     _UPLOAD_WAIT_EXIT,
@@ -255,14 +256,7 @@ def _compose_driver_cmd(
         f'(partition ${{SLURM_JOB_PARTITION:-?}}) — held for every batch"; '
         f"{driver_script}"
     )
-    return (
-        f"echo $$ > {pidfile_q}; "
-        # `shlex.join`, not `' '.join`: the split alone drops the quoting, so a
-        # token carrying a shell metacharacter (`--constraint=a|b`) reaches the
-        # login shell as a pipe and the launch dies with "b: command not found".
-        # `_compose_remote_cmd` has always done this; this one had not.
-        f"exec {shlex.join(shlex.split(launcher))} bash -lc {shlex.quote(inner)}"
-    )
+    return _launch(launcher, inner, remote_pidfile)
 
 
 def _compose_remote_cmd(
@@ -350,12 +344,26 @@ def _compose_remote_cmd(
         f"{wait_snippet}"
         f"exec {_remote_join(remote_argv)}"
     )
-    # shlex.split→join normalises whitespace AND re-quotes any token with
-    # shell metacharacters (e.g. ``--constraint=a|b``) so the outer remote
-    # login shell passes them to the scheduler literally instead of, say,
-    # treating ``|`` as a pipe.
-    launcher_str = shlex.join(shlex.split(launcher))
+    return _launch(launcher, inner, remote_pidfile)
+
+
+def _launch(launcher: str, inner: str, remote_pidfile: str) -> str:
+    """``<launcher> bash -lc <inner>`` for the login shell, PID recorded.
+
+    An ``srun`` launcher goes through :func:`services.remote_srun_retry.
+    wrap_srun_launch`, which prefers nodes that are powered on and retries a
+    node that fails to boot; that wrapper records ``srun``'s own PID. Any other
+    launcher is exec'd as it always was, the login shell's PID recorded first.
+
+    ``shlex.split`` → ``join`` normalises whitespace and re-quotes any token
+    carrying a shell metacharacter (``--constraint=a|b``), so the login shell
+    passes it to the scheduler literally instead of reading ``|`` as a pipe.
+    """
+    if is_srun(launcher):
+        return wrap_srun_launch(
+            launcher, shlex.quote(inner), _remote_quote(remote_pidfile),
+            _remote_quote(f"{remote_pidfile}.srun-err"))
     return (
-        f"echo $$ > {pidfile_q}; "
-        f"exec {launcher_str} bash -lc {shlex.quote(inner)}"
+        f"echo $$ > {_remote_quote(remote_pidfile)}; "
+        f"exec {shlex.join(shlex.split(launcher))} bash -lc {shlex.quote(inner)}"
     )

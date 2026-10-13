@@ -111,6 +111,7 @@ from pipeline.field_quality import FOCUS_COLUMN
 import pipeline.stardist as _stardist
 import pipeline.suspend as _suspend
 from pipeline.mixed_input import consolidate_mixed_to_zips
+from pipeline.parallelism import plan_parallelism
 from pipeline.stardist import (
     _segment_stardist_nuclei,
     _segment_stardist_seeded_watershed_cell,
@@ -3342,69 +3343,9 @@ def main() -> None:
     except Exception as exc:  # log but don't abort the run
         log.warning("Could not write %s: %s", PIPELINE_INFO_FILENAME, exc)
 
-    # ── Parallelism auto-configuration ────────────────────────────────────────
-    # On GPU: TF manages its own scheduling — don't pin threads.
-    # On CPU: StarDist inference sweet spot is ~4 threads per inference on
-    #   modern x86 (L3 bandwidth saturates past that for typical microscopy
-    #   image sizes).  Workers = floor(cpu_count / tf_threads) so every core
-    #   is owned by exactly one worker with no contention.
-    #   This scales automatically: 8 cores → 2 workers, 16 → 4, 30 → 7, 64 → 16.
-    try:
-        cpu_count = len(os.sched_getaffinity(0))
-    except AttributeError:
-        cpu_count = mp.cpu_count()
-    # Reserve one core for the main process (orchestration, CSV writing, pool
-    # management).  Without this, workers saturate all cores and the OS
-    # time-slices the main process in, adding scheduling latency.
-    available = max(1, cpu_count - 1)
-
-    # Thread pinning applies whenever workers share CPU cores — regardless of
-    # whether --cpu_only is set.  Without pinning, every TF worker tries to use
-    # all available cores, causing contention even if no GPU is present.
-    if args.tf_threads > 0:
-        tf_threads = min(args.tf_threads, available)
-    else:
-        # Default sweet spot for StarDist is 4 threads, but clamp to the
-        # available core budget so a 2-core host doesn't spawn 4 TF
-        # threads on 1 reserved core (worse than going single-threaded).
-        tf_threads = min(4, available)
-    workers            = max(1, available // tf_threads)
-    threads_per_worker = tf_threads
-
-    import sys as _sys
-    _on_mac = _sys.platform == "darwin"
-
-    if args.cpu_only:
-        # Explicit override: CPU regardless of platform
-        pass
-    elif _on_mac:
-        # macOS/Metal: inference runs on the GPU, so scale the worker COUNT with
-        # cores on a small per-worker CPU budget (8→3, 12→5, 16→7; was a flat 2).
-        mac_threads = min(args.tf_threads, available) if args.tf_threads > 0 else 2
-        tf_threads = threads_per_worker = mac_threads
-        workers = max(2, available // mac_threads)
-    # else: non-Mac CPU-only default already set above (workers = available //
-    # tf_threads), so no branch needed.
-
-    workers_override = False
-    if args.workers > 0:
-        workers_override = True
-        workers = max(1, min(args.workers, available))
-        if workers != args.workers:
-            log.warning(
-                "Requested --workers=%d exceeds available CPU budget (%d); using %d.",
-                args.workers,
-                available,
-                workers,
-            )
-
-    # Effective device for logging
-    if args.cpu_only:
-        _device_str = "CPU only (--cpu_only)"
-    elif _on_mac:
-        _device_str = "Metal GPU (macOS) if tensorflow-metal installed, else CPU"
-    else:
-        _device_str = "CPU only (non-macOS)"
+    # ── Parallelism auto-configuration (pipeline.parallelism) ─────────────────
+    plan = plan_parallelism(args, log)
+    workers, threads_per_worker = plan.workers, plan.threads_per_worker
 
     log.info("Input    : %s", input_dir)
     log.info("Output   : %s", output_dir)
@@ -3415,11 +3356,13 @@ def main() -> None:
     log.info("Scratch  : %s%s", _scratch_base,
              "  (= output dir)" if _scratch_base == output_dir else "")
     log.info("CPUs     : %d total, %d available (1 reserved for main process)",
-             cpu_count, available)
-    log.info("Device   : %s", _device_str)
+             plan.cpu_count, plan.available)
+    log.info("Device   : %s", plan.device_str)
+    if plan.cellpose_note:
+        log.info("Cellpose : %s", plan.cellpose_note)
     log.info("TF threads/worker : %d  (workers: %d x %d = %d cores)",
-             tf_threads, workers, tf_threads, workers * tf_threads)
-    if workers_override:
+             plan.tf_threads, workers, plan.tf_threads, workers * plan.tf_threads)
+    if plan.workers_override:
         log.info("Workers override : --workers=%d", args.workers)
 
     fluor_tokens_for_quant = quantified_channel_tokens(

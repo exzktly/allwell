@@ -22,7 +22,7 @@ from util.channel_roles import phase_role_conflicts
 # in ``process_microscopy`` just to name two strings.
 _STARDIST_METHODS = ("stardist_nuclei", "stardist_seeded_watershed_cell")
 # Both take the cell diameter: general Cellpose and the label-free preset run the
-# same model, and an estimated diameter costs each the same extra network pass.
+# same model, and the diameter sets the scale each segments at.
 _CELLPOSE_DIAMETER_METHODS = ("cellpose", "cellpose_labelfree")
 
 #: What the Nucleus probability field starts with on a fresh form.
@@ -155,15 +155,23 @@ class AnalyzeSegParamsMixin:
         """The cell diameter, shared by both Cellpose methods.
 
         It lives outside the stack, like the StarDist thresholds, because the
-        label-free preset needs it as much as general Cellpose does: left at 0,
-        Cellpose estimates the diameter on every field with a separate network
-        pass before segmenting, which roughly doubles the time per field. The
+        label-free preset needs it as much as general Cellpose does, and the
         label-free page had no way to set it at all.
+
+        What it does is Cellpose's (``CellposeModel.eval``, 3.1): a diameter *d*
+        resizes every image by ``diam_mean / d`` before segmenting, where
+        ``diam_mean`` is the cell size the model was trained at (30 px for the
+        cyto models, which is the ``model diam_mean`` line Cellpose logs). The
+        time per field therefore scales with ``(30 / d)²`` — 15 px is about four
+        times slower, 60 px about four times faster. At 0 nothing is resized and
+        nothing is estimated: this path builds ``CellposeModel``, which has no
+        size model, so the image is segmented as if its cells were 30 px.
         """
-        tip = ("Typical cell diameter in pixels. 0 lets Cellpose estimate it on "
-               "every field, which roughly doubles the time per field; a measured "
-               "value is faster and steadier across the plate.")
-        d_cell = self._row(sec, "Cell diameter (px, 0=auto)", tooltip=tip)
+        tip = ("Typical cell diameter in pixels. Cellpose resizes each image so "
+               "cells this size become the 30 px its model was trained on, so "
+               "smaller values are slower (15 px: about 4x) and larger ones "
+               "faster. 0 skips the resize and segments as if cells were 30 px.")
+        d_cell = self._row(sec, "Cell diameter (px, 0=model's 30)", tooltip=tip)
         self._cellpose_diameter_edit = self._entry(d_cell, "0", width=70)
         self._cellpose_diameter_edit.setToolTip(tip)
         d_cell.layout().addStretch(1)
@@ -334,7 +342,7 @@ class AnalyzeSegParamsMixin:
             "stardist_nuclei": "Best default for a nuclear stain (DAPI/Hoechst/NIR): StarDist segments the 'Segmentation channel' above into nuclei.",
             "stardist_seeded_watershed_cell": "Use for whole-cell (cytoplasm) measurements: StarDist seeds + a cytoplasm mask; also quantifies the cytoplasm channel.",
             "cellpose": "Use for non-nuclear or tricky morphologies: Cellpose on the 'Segmentation channel' above (fluorescent or brightfield).",
-            "cellpose_labelfree": "Use when there's no stain at all: Cellpose (cyto3) on the channel marked 'Phase' — label-free. Set the cell diameter to skip the per-field size estimate.",
+            "cellpose_labelfree": "Use when there's no stain at all: Cellpose (cyto3) on the channel marked 'Phase' — label-free. Set the cell diameter when your cells are far from 30 px.",
             "classical_threshold": "Fast model-free fallback for clean, separated objects: Otsu threshold + watershed on the 'Segmentation channel' above.",
         }.get(method, "")
         self._segmentation_hint_lbl.setText(hint)

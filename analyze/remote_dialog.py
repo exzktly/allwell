@@ -274,7 +274,13 @@ class RemoteFormDialog(QDialog):
         main_form.setLabelAlignment(Qt.AlignRight)
         main_form.setSpacing(8)
 
-        self._cpu_only_cb = QCheckBox("CPU only (disable GPU on remote)", self)
+        # StarDist's switch only: Cellpose uses a GPU whenever the node it runs
+        # on has one (pipeline.parallelism says why), and bootstrap ticks this
+        # whenever the *login* node has no GPU, which is most clusters.
+        self._cpu_only_cb = QCheckBox("StarDist on CPU only", self)
+        self._cpu_only_cb.setToolTip(
+            "Hide the GPU from StarDist (TensorFlow). Cellpose is not affected: "
+            "it uses a GPU whenever the node it runs on has one.")
         self._cpu_only_cb.setChecked(host.cpu_only)
         main_form.addRow("", self._cpu_only_cb)
 

@@ -8168,7 +8168,16 @@ holds all three: no unused import beyond the `tifffile` side-effect import, no
 application code reaching an imported name through `pm`, and no test doing so
 except at a listed seam. The packages:
 `pipeline.background` (background/illumination math), `pipeline.cellpose`
-(Cellpose segmenters; Torch lazy), `pipeline.stardist` (StarDist segmenters +
+(Cellpose segmenters; Torch lazy; each worker's model goes on a CUDA device
+whenever Torch can see one, via `_cellpose_device`, which logs the device it
+chose and, on CPU, what Torch reported), `pipeline.parallelism` (the run's
+worker count and threads per worker, and the Cellpose GPU plan: GPUs are
+counted in the main process from `CUDA_VISIBLE_DEVICES` or `nvidia-smi -L`
+without importing Torch, and Cellpose runs are capped at
+`CELLPOSE_WORKERS_PER_GPU` workers per GPU unless `--workers` is given;
+`--cpu_only` stays StarDist's switch because a remote host's `cpu_only` is
+written from the login node's TensorFlow, which is false on most clusters;
+`tests/test_cellpose_uses_the_gpu.py`), `pipeline.stardist` (StarDist segmenters +
 per-worker model state behind `set_model`/`set_fov_label`; TensorFlow lazy), and
 `pipeline.io` (atomic image/CSV/overlay writers). The two ML runtimes stay
 behind lazy imports, so importing `process_microscopy` pulls in **neither TF nor
@@ -8612,10 +8621,13 @@ noted:
   parameter is the **cell diameter**: `build_pipeline_args` sends
   `--cellpose_diameter` for both Cellpose methods when it is above 0, and
   `analyze.domain.fields._CELLPOSE_FIELD_METHODS` validates it for both, so a
-  typo blocks the run instead of falling back to auto. Left at 0, Cellpose
-  estimates the diameter on every field with an extra network pass, roughly
-  doubling the time per field. Model and thresholds stay general Cellpose's
-  alone. `tests/test_labelfree_takes_a_cell_diameter.py` drives the real Analyze
+  typo blocks the run instead of being read as 0. What the value does is
+  Cellpose's own (`CellposeModel.eval`, 3.1): a diameter *d* resizes every
+  image by `diam_mean / d` (30 px for the cyto models) before segmenting, so the
+  time per field scales with `(30 / d)²`; at 0 nothing is resized and nothing
+  is estimated, because `pipeline.cellpose` builds `CellposeModel`, which has no
+  size model (that belongs to the `models.Cellpose` wrapper). Model and
+  thresholds stay general Cellpose's alone. `tests/test_labelfree_takes_a_cell_diameter.py` drives the real Analyze
   tab from the combo to the argv.
 
 **Phase-channel correction passthrough.** A channel designated **Phase**

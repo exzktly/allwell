@@ -14,7 +14,13 @@ StarDist-only build.
 
 from __future__ import annotations
 
+import logging
+import multiprocessing as mp
+import os
+
 import numpy as np
+
+log = logging.getLogger("process_microscopy")
 
 # Per-worker Cellpose models, keyed by model type (cyto3/cyto2/cyto/nuclei), so a
 # run can choose a model without silently reusing another type's cache. Lazy.
@@ -36,9 +42,41 @@ def _cellpose_model(model_type: str = "cyto3"):
                 "Cellpose segmentation requires the 'cellpose' package. Install "
                 f"it (see requirements) — import failed: {exc}"
             ) from exc
-        model = _cp_models.CellposeModel(model_type=key)
+        device, where = _cellpose_device()
+        model = _cp_models.CellposeModel(
+            model_type=key, gpu=device.type == "cuda", device=device)
+        # Said once per worker and model, because it is the only place the run
+        # states where segmentation actually happened: the main process can
+        # count GPUs, but only Torch in the worker knows whether it can use one.
+        log.info("Cellpose %s on %s (worker %d).", key, where, os.getpid())
         _CELLPOSE_MODELS[key] = model
     return model
+
+
+def _cellpose_device():
+    """``(torch.device, description)`` for this worker's Cellpose model.
+
+    A CUDA device whenever Torch can see one — ``--cpu_only`` is StarDist's
+    switch and does not apply (``pipeline.parallelism`` says why). With several GPUs the
+    workers are spread across them by their pool ordinal. Apple's MPS is not
+    used: Cellpose there stays on CPU as before. When no GPU is usable the
+    description names what Torch reported, so a node that has a GPU the
+    install cannot reach (a CPU-only Torch build, a driver too old for its
+    CUDA) says so in the log instead of quietly running on CPU.
+    """
+    import torch
+
+    if torch.cuda.is_available():
+        n = max(1, torch.cuda.device_count())
+        ordinal = getattr(mp.current_process(), "_identity", ()) or (1,)
+        index = (ordinal[-1] - 1) % n
+        return (torch.device(f"cuda:{index}"),
+                f"GPU cuda:{index} ({torch.cuda.get_device_name(index)})")
+    built_for = getattr(torch.version, "cuda", None) or "none (CPU-only build)"
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "<unset>")
+    return torch.device("cpu"), (
+        f"CPU — Torch {torch.__version__} sees no CUDA device "
+        f"(built for CUDA {built_for}; CUDA_VISIBLE_DEVICES={visible})")
 
 
 def _segment_cellpose(
@@ -51,7 +89,10 @@ def _segment_cellpose(
     nucleus_image: np.ndarray | None = None,
 ) -> np.ndarray:
     """Segment *image* with Cellpose. Works on any channel (fluorescent or
-    brightfield) — the caller chooses the input. ``diameter=0`` auto-estimates.
+    brightfield) — the caller chooses the input. ``diameter=0`` passes none, so
+    Cellpose segments at its model's own scale (30 px for cyto3) without
+    resizing; a diameter *d* resizes the image by ``30 / d`` first, which is
+    what makes a small *d* slow. Nothing estimates the size on this path.
 
     When *nucleus_image* is given, the two channels are stacked and Cellpose runs
     in cyto+nucleus mode (``channels=[1, 2]``); otherwise grayscale

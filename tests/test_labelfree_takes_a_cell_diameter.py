@@ -3,8 +3,9 @@
 The diameter field lived on the general-Cellpose page only, and
 ``build_pipeline_args`` sent ``--cellpose_diameter`` only for
 ``segmentation_method == "cellpose"``. The label-free preset therefore always
-ran with diameter 0, which makes Cellpose estimate the size on every field with
-an extra network pass — a user saw 40 s per field and found nowhere to set it.
+ran with diameter 0 — segmenting every image as if its cells were the 30 px the
+cyto3 model was trained on — and a user whose cells are not that size found
+nowhere in the app to say so.
 
 The field is now a row shared by both Cellpose methods. These tests drive the
 real Analyze tab: pick the method in its combo, type into the field the user
@@ -71,7 +72,7 @@ def test_a_diameter_typed_for_label_free_reaches_the_pipeline(tab):
     assert "--cellpose_flow_threshold" not in argv
 
 
-def test_label_free_left_at_zero_still_estimates(tab):
+def test_label_free_left_at_zero_sends_no_diameter(tab):
     _pick(tab, "cellpose_labelfree")
     tab._cellpose_diameter_edit.setText("0")
     assert "--cellpose_diameter" not in _argv(tab._collect_run_options())

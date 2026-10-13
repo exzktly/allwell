@@ -21,6 +21,9 @@ from util.channel_roles import phase_role_conflicts
 # this is a GUI-side view of the method vocabulary, and the module must not pull
 # in ``process_microscopy`` just to name two strings.
 _STARDIST_METHODS = ("stardist_nuclei", "stardist_seeded_watershed_cell")
+# Both take the cell diameter: general Cellpose and the label-free preset run the
+# same model, and an estimated diameter costs each the same extra network pass.
+_CELLPOSE_DIAMETER_METHODS = ("cellpose", "cellpose_labelfree")
 
 #: What the Nucleus probability field starts with on a fresh form.
 #:
@@ -83,6 +86,8 @@ class AnalyzeSegParamsMixin:
         # needing a second hook in _refresh_segmentation_hints.
         self._seg_param_stack.currentChanged.connect(
             lambda _=None: self._sync_stardist_param_rows())
+        self._seg_param_stack.currentChanged.connect(
+            lambda _=None: self._sync_cellpose_diameter_row())
         sec.layout().addWidget(self._seg_param_stack)
 
         def _page() -> QWidget:
@@ -119,9 +124,6 @@ class AnalyzeSegParamsMixin:
         self._cellpose_model_cb.addItems(["cyto3", "cyto2", "cyto", "nuclei"])
         m_cell.layout().addWidget(self._cellpose_model_cb)
         m_cell.layout().addStretch(1)
-        d_cell = self._row(cp, "Diameter (px, 0=auto)")
-        self._cellpose_diameter_edit = self._entry(d_cell, "0", width=70)
-        d_cell.layout().addStretch(1)
         f_cell = self._row(cp, "Flow threshold")
         self._cellpose_flow_thr_edit = self._entry(f_cell, "0.4", width=70)
         f_cell.layout().addStretch(1)
@@ -133,10 +135,11 @@ class AnalyzeSegParamsMixin:
         n_cell.layout().addStretch(1)
         self._seg_param_stack.addPage("cellpose", cp)
 
-        # Label-free (Cellpose preset on the Phase channel) — no exposed params.
+        # Label-free (Cellpose preset on the Phase channel). Its one exposed
+        # parameter, the diameter, is the shared row below the stack.
         lf = _page()
         lf_lbl = QLabel("Segments the channel marked 'Phase' above, using a Cellpose "
-                        "brightfield preset (cyto3, auto diameter).", lf)
+                        "brightfield preset (cyto3).", lf)
         lf_lbl.setObjectName("Muted")
         lf_lbl.setWordWrap(True)
         lf.layout().addWidget(lf_lbl)
@@ -145,7 +148,35 @@ class AnalyzeSegParamsMixin:
         # Classical (Otsu + watershed): no extra parameters.
         self._seg_param_stack.addPage("classical_threshold", _page())
 
+        self._build_cellpose_diameter_row(sec)
         self._build_stardist_threshold_rows(sec)
+
+    def _build_cellpose_diameter_row(self, sec: QWidget) -> None:
+        """The cell diameter, shared by both Cellpose methods.
+
+        It lives outside the stack, like the StarDist thresholds, because the
+        label-free preset needs it as much as general Cellpose does: left at 0,
+        Cellpose estimates the diameter on every field with a separate network
+        pass before segmenting, which roughly doubles the time per field. The
+        label-free page had no way to set it at all.
+        """
+        tip = ("Typical cell diameter in pixels. 0 lets Cellpose estimate it on "
+               "every field, which roughly doubles the time per field; a measured "
+               "value is faster and steadier across the plate.")
+        d_cell = self._row(sec, "Cell diameter (px, 0=auto)", tooltip=tip)
+        self._cellpose_diameter_edit = self._entry(d_cell, "0", width=70)
+        self._cellpose_diameter_edit.setToolTip(tip)
+        d_cell.layout().addStretch(1)
+        # _row() returns the right-hand cell; the label is in its parent, so the
+        # parent row is what gets hidden.
+        self._cellpose_diameter_row = d_cell.parentWidget()
+        self._sync_cellpose_diameter_row()
+
+    def _sync_cellpose_diameter_row(self) -> None:
+        """Show the diameter only for the methods that run Cellpose."""
+        row = getattr(self, "_cellpose_diameter_row", None)
+        if row is not None:
+            row.setVisible(self._seg_method() in _CELLPOSE_DIAMETER_METHODS)
 
     def _build_stardist_threshold_rows(self, sec: QWidget) -> None:
         """The two StarDist detection thresholds, shared by both StarDist pages.
@@ -303,7 +334,7 @@ class AnalyzeSegParamsMixin:
             "stardist_nuclei": "Best default for a nuclear stain (DAPI/Hoechst/NIR): StarDist segments the 'Segmentation channel' above into nuclei.",
             "stardist_seeded_watershed_cell": "Use for whole-cell (cytoplasm) measurements: StarDist seeds + a cytoplasm mask; also quantifies the cytoplasm channel.",
             "cellpose": "Use for non-nuclear or tricky morphologies: Cellpose on the 'Segmentation channel' above (fluorescent or brightfield).",
-            "cellpose_labelfree": "Use when there's no stain at all: Cellpose (cyto3) on the channel marked 'Phase' — label-free.",
+            "cellpose_labelfree": "Use when there's no stain at all: Cellpose (cyto3) on the channel marked 'Phase' — label-free. Set the cell diameter to skip the per-field size estimate.",
             "classical_threshold": "Fast model-free fallback for clean, separated objects: Otsu threshold + watershed on the 'Segmentation channel' above.",
         }.get(method, "")
         self._segmentation_hint_lbl.setText(hint)

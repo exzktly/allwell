@@ -99,12 +99,19 @@ _FLOAT_FIELDS = {
     "cellpose_cellprob_threshold": ("Cellpose cell-probability threshold", None, None, None),
 }
 
-#: The Cellpose parameters above are only read when the general-Cellpose
-#: routine is selected; ``segmentation_method`` is not a boolean, so it gets
+#: The Cellpose parameters above are only read when a routine that runs
+#: Cellpose is selected; ``segmentation_method`` is not a boolean, so it gets
 #: its own gate rather than being forced into the table's ``gate`` column.
 _CELLPOSE_FIELDS = frozenset(
     k for k in _FLOAT_FIELDS if k.startswith("cellpose_")
 )
+
+#: Which routines read each Cellpose parameter. The thresholds are general
+#: Cellpose's alone; the diameter is read by the label-free preset too, so a
+#: typo there must block that run rather than fall back to auto unannounced.
+_CELLPOSE_FIELD_METHODS = {
+    "cellpose_diameter": ("cellpose", "cellpose_labelfree"),
+}
 
 #: The two StarDist detection thresholds. Blank or ``auto`` means "use the
 #: threshold the pretrained model ships with"; anything else must read as a
@@ -205,9 +212,10 @@ def _float_field_errors(opts: dict) -> list[str]:
     cannot block a run it has no effect on.
     """
     errors: list[str] = []
-    cellpose_on = str(opts.get("segmentation_method", "") or "") == "cellpose"
+    method = str(opts.get("segmentation_method", "") or "")
     for key, (label, low, high, gate) in _FLOAT_FIELDS.items():
-        if key in _CELLPOSE_FIELDS and not cellpose_on:
+        if (key in _CELLPOSE_FIELDS
+                and method not in _CELLPOSE_FIELD_METHODS.get(key, ("cellpose",))):
             continue
         if gate is not None and not opts.get(gate):
             continue

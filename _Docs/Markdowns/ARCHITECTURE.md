@@ -5814,9 +5814,11 @@ a plate that was never produced.
 The per-method segmentation parameters are their own mixin,
 `analyze.seg_params.AnalyzeSegParamsMixin`: the `NamedPageStack` of
 per-routine pages (StarDist / watershed / Cellpose / label-free / classical) plus
-the StarDist detection thresholds, which sit *below* the stack because both
-StarDist routines share them and ride the stack's own `currentChanged` for
-visibility (so no second hook in `_refresh_segmentation_hints` is needed). The
+two rows that sit *below* the stack because more than one routine reads them:
+the Cellpose cell diameter (both Cellpose routines) and the StarDist detection
+thresholds (both StarDist routines). Each rides the stack's own
+`currentChanged` for visibility, so no second hook in
+`_refresh_segmentation_hints` is needed. The
 hints and per-method validation (`_refresh_segmentation_hints` /
 `_segmentation_validation_errors` / `_collapse_seg_param_stack`) live here too,
 beside the panel they drive. Every widget still lands on the `AnalyzeTab`
@@ -8595,7 +8597,8 @@ noted:
   detected. `n_tiles` is logged per FOV. The tile-size math is pure integer logic
   covered by `tests/test_stardist_tiling.py`.
 - `cellpose` — **general** Cellpose, not phase-locked. Exposes model
-  (cyto3/cyto2/cyto/nuclei), diameter, `flow_threshold`, `cellprob_threshold`,
+  (cyto3/cyto2/cyto/nuclei), diameter (the row shared with the label-free
+  preset), `flow_threshold`, `cellprob_threshold`,
   and an optional second **nucleus channel** (`channels=[seg, nuc]`). Models are
   cached per type in `_CELLPOSE_MODELS`; `_worker_init` skips the StarDist/TF load.
 - `classical_threshold` — Otsu + distance-transform watershed (no model), general.
@@ -8605,7 +8608,15 @@ noted:
   mutually exclusive, not also smFISH) → `--phase_token`; `main()` remaps the
   phase token onto the nuclear slot (only for this method) so all per-FOV grouping
   is reused. Phase is a first-class role (`image_identity.Role.PHASE`, suffix
-  `_phase`) recorded as `phase_token` in `pipeline_info.json`.
+  `_phase`) recorded as `phase_token` in `pipeline_info.json`. Its one exposed
+  parameter is the **cell diameter**: `build_pipeline_args` sends
+  `--cellpose_diameter` for both Cellpose methods when it is above 0, and
+  `analyze.domain.fields._CELLPOSE_FIELD_METHODS` validates it for both, so a
+  typo blocks the run instead of falling back to auto. Left at 0, Cellpose
+  estimates the diameter on every field with an extra network pass, roughly
+  doubling the time per field. Model and thresholds stay general Cellpose's
+  alone. `tests/test_labelfree_takes_a_cell_diameter.py` drives the real Analyze
+  tab from the combo to the argv.
 
 **Phase-channel correction passthrough.** A channel designated **Phase**
 skips *all* background correction (flat-field + subtraction) for every
@@ -9783,6 +9794,26 @@ them against a stub conda and a scratch `HOME` — the create-or-stop decision i
 the part that strands users when it is wrong, and an ssh call hides it. The stub
 refuses `conda create` over an existing prefix the way conda does; without that,
 tests of this behaviour pass against the broken script too.
+
+**"The env is complete" means every pipeline package, not TensorFlow.** The
+probe reports which of `remote_bootstrap.REQUIRED_IMPORTS` — one import name per
+distribution `requirements-remote.txt` installs on Linux — the env cannot find,
+via `importlib.util.find_spec`, which locates a module without importing it, so
+the probe neither pays for loading Torch and TensorFlow nor risks the two
+refusing to share a process. A dotted name (`google.protobuf`) is looked up only
+once its top level is found, because `find_spec` imports the parent and raises
+when it is absent. `install_pip_deps` skips the `pip install -r` only when
+TensorFlow is present and nothing is missing; an env whose python cannot answer
+reports `?` and is installed into. The skip used to be TensorFlow alone, so an
+env built before Cellpose joined the requirements, or one whose Torch half
+failed, reported ready on every re-bootstrap and the run died on the compute node
+at `from cellpose import models`. `NOT_PROBED` names the requirement lines the
+probe deliberately skips (the macOS-only TensorFlow builds, `tomli` below Python
+3.11), each with its reason, and `tests/test_bootstrap_probes_every_requirement.py`
+holds the two rosters against the requirements file and runs the probe's own
+shell line under bash with a real interpreter. Version drift — a package present
+at the wrong pin — is not detected; pip resolves that only when the install
+runs for another reason.
 
 ---
 

@@ -3400,16 +3400,22 @@ def test_compose_remote_cmd_direct_is_legacy_shape():
 
 
 def test_compose_remote_cmd_scheduled_wraps_in_srun():
-    """A launcher → the login shell records its PID then execs srun, and the
+    """A launcher → srun is started with its own PID recorded, and the
     conda activation + pipeline run INSIDE the srun step (bash -lc) so they
-    land on the scheduled compute node, not the login node."""
+    land on the scheduled compute node, not the login node.
+
+    srun goes through ``services.remote_srun_retry`` (awake-node preference,
+    boot-failure retry), whose loop cannot ``exec`` srun; the PID the cancel
+    channel reads is srun's own, written by the ``sh -c`` that execs it.
+    ``tests/test_srun_boot_retry.py`` runs that wrapper."""
     launcher = "srun --partition=gpu --gres=gpu:1 --time=4:00:00"
     cmd = _compose_remote_cmd(launcher, _PIDFILE, _ARGV, cache_hit=False)
-    # PID still recorded on the login side, before srun.
-    assert cmd.startswith('echo $$ > "$HOME"')
-    assert cmd.index("echo $$") < cmd.index("srun")
-    # The launcher tokens are present and followed by bash -lc.
-    assert "srun --partition=gpu --gres=gpu:1 --time=4:00:00 bash -lc" in cmd
+    # srun's PID is recorded before it starts, into the run's pidfile.
+    assert "sh -c 'echo $$ > \"$0\"; exec \"$@\"' \"$_aw_pid\"" in cmd
+    assert cmd.index("_aw_pid=") < cmd.index("srun --partition")
+    # The launcher tokens are present, then the exclusion slot, then bash -lc.
+    assert ("srun --partition=gpu --gres=gpu:1 --time=4:00:00 "
+            '${_aw_ex:+--exclude="$_aw_ex"} bash -lc') in cmd
     # conda + the pipeline are inside the wrapped (quoted) inner script.
     assert _CONDA_ACTIVATE_SNIPPET in cmd
     assert "process_microscopy.py" in cmd

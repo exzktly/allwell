@@ -109,8 +109,11 @@ def test_the_pipeline_is_always_the_last_thing_the_job_does(sentinel):
     allocation belongs to the pipeline rather than to a shell babysitting it."""
     cmd = _compose_remote_cmd("srun -N1", _PIDFILE, _ARGV, cache_hit=False,
                               upload_sentinel=sentinel)
-    assert cmd.rstrip().endswith("/scratch/in'")
-    assert "exec python process_microscopy.py" in cmd
+    # The srun wrapper (services.remote_srun_retry) surrounds the launch with
+    # its retry loop, so the job's script is the argument to `bash -lc`.
+    inner = cmd.split(" bash -lc ", 1)[1].rsplit(' 2>&1; echo $? > "$_aw_rcf"', 1)[0]
+    assert inner.rstrip().endswith("/scratch/in'")
+    assert "exec python process_microscopy.py" in inner
 
 
 # ── the order the two waits are actually spent in ────────────────────────────

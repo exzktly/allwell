@@ -519,6 +519,11 @@ else, or once a run has written there again.
 - **Top-hat radii.** Nuclear and per-fluor radii in pixels. `0` or
   `--no_tophat_*` flags disable per-channel.
 - **Min nucleus area** in pixels (rejects garbage detections).
+- **Cell diameter (px, 0=auto)** — shown for both Cellpose methods, general and
+  label-free. At `0` Cellpose estimates the size on every field with an extra
+  pass before segmenting, which roughly doubles the time per field; measure a
+  typical cell in the image viewer and enter its width in pixels to skip that.
+  A value that is not a number stops the run before it starts.
 - **Nucleus probability** and **Overlap (NMS)** — the two StarDist detection
   thresholds, shown for both StarDist methods. A field left **blank** means the
   run uses the threshold built into the pretrained model.
@@ -1035,7 +1040,11 @@ it.
 
 **Manage…** opens the remote-host dialog: add, edit, delete, test, or bootstrap
 a host (bootstrap installs the pipeline and its Python environment on a machine
-that has never run All-Well). A malformed `remotes.toml` never blocks the app —
+that has never run All-Well). Running bootstrap again on a host that is already
+set up checks for every package a run needs — TensorFlow, StarDist, Torch,
+Cellpose and the rest — and installs whatever is missing, so a host set up
+before Cellpose was part of the install picks it up on the next bootstrap. The
+log names the packages it found missing. A malformed `remotes.toml` never blocks the app —
 the run log carries a warning and the dropdown stays on `Local`. Inside the
 dialog, a file that cannot be read or parsed is reported in a message naming the
 error rather than leaving Edit…, Test and the list silently doing nothing.

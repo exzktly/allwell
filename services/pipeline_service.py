@@ -209,12 +209,21 @@ def build_pipeline_args(
     phase_token = (opts.get("phase_token") or "").strip()
     if phase_token:
         args += ["--phase_token", phase_token]
-    # General Cellpose: expose model + diameter + thresholds + optional nucleus
+    # The cell diameter belongs to both Cellpose methods: the label-free preset
+    # runs the same model, and 0 (auto) makes either estimate it on every field
+    # with an extra network pass. Only a measured value is sent.
+    if segmentation_method in ("cellpose", "cellpose_labelfree"):
+        try:
+            diameter = float(opts.get("cellpose_diameter", 0.0))
+        except (TypeError, ValueError):
+            diameter = 0.0
+        if diameter > 0:
+            args += ["--cellpose_diameter", str(diameter)]
+    # General Cellpose also exposes model + thresholds + optional nucleus
     # channel (works on a fluorescent or brightfield channel; no phase remap).
     if segmentation_method == "cellpose":
         args += ["--cellpose_model", str(opts.get("cellpose_model", "cyto3") or "cyto3")]
         for flag, key, default in (
-            ("--cellpose_diameter", "cellpose_diameter", 0.0),
             ("--cellpose_flow_threshold", "cellpose_flow_threshold", 0.4),
             ("--cellpose_cellprob_threshold", "cellpose_cellprob_threshold", 0.0),
         ):
@@ -222,9 +231,6 @@ def build_pipeline_args(
                 val = float(opts.get(key, default))
             except (TypeError, ValueError):
                 val = default
-            # diameter is only meaningful when > 0; thresholds always emitted
-            if key == "cellpose_diameter" and val <= 0:
-                continue
             args += [flag, str(val)]
         nuc = (opts.get("cellpose_nuclei_channel") or "").strip()
         if nuc:

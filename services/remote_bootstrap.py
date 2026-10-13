@@ -247,6 +247,9 @@ class HostProbe:
     invocation is still running on the remote. Drives the v5.1.1
     'resume tailing instead of restart' behavior in
     :func:`install_pip_deps`."""
+    missing_modules: tuple[str, ...] = ()
+    """Modules of :data:`REQUIRED_IMPORTS` the env cannot find. ``("?",)``
+    when the env's python could not be run to answer."""
 
 
 # ── argv ───────────────────────────────────────────────────────────────────
@@ -477,6 +480,54 @@ source "$_AW_CONDA_SH"
 """
 
 
+#: Every distribution ``requirements-remote.txt`` installs on a Linux remote,
+#: mapped to the module a run imports it as. The probe reports which of these
+#: the env cannot find, and :func:`install_pip_deps` installs whenever any is
+#: missing. It used to skip the whole install as soon as ``tensorflow``
+#: imported, so an env built before Cellpose joined the requirements — or one
+#: whose Torch half failed to install — reported ready on every later bootstrap
+#: and the run then died on ``from cellpose import models`` on the compute node.
+#: ``tests/test_bootstrap_probes_every_requirement.py`` holds this roster
+#: against the requirements file, so a package added there without a row here
+#: fails the suite instead of going unprobed.
+REQUIRED_IMPORTS: dict[str, str] = {
+    "tensorflow": "tensorflow",
+    "keras": "keras",
+    "protobuf": "google.protobuf",
+    "csbdeep": "csbdeep",
+    "stardist": "stardist",
+    "numba": "numba",
+    "llvmlite": "llvmlite",
+    "tifffile": "tifffile",
+    "imagecodecs": "imagecodecs",
+    "pandas": "pandas",
+    "typing-extensions": "typing_extensions",
+    "torch": "torch",
+    "torchvision": "torchvision",
+    "cellpose": "cellpose",
+    "exceptiongroup": "exceptiongroup",
+}
+
+#: Requirement lines the probe deliberately does not look for, each with why.
+NOT_PROBED: dict[str, str] = {
+    "tensorflow-macos": "installed only on macOS arm64; a remote host is Linux",
+    "tensorflow-metal": "installed only on macOS arm64; a remote host is Linux",
+    "tomli": "installed only on Python < 3.11, where tomllib is missing",
+}
+
+#: Prints the comma-joined modules among its arguments that the interpreter
+#: cannot find. ``find_spec`` locates a module without importing it, so the
+#: probe neither pays for importing Torch and TensorFlow nor risks the two
+#: refusing to share a process. A dotted name (``google.protobuf``) is looked
+#: up only once its top level is found, because ``find_spec`` imports the
+#: parent and raises when the parent is absent. No single quotes: it is
+#: embedded in one.
+_MISSING_MODULES_PY = (
+    "import importlib.util as u, sys; "
+    'print(",".join(m for m in sys.argv[1:] '
+    'if u.find_spec(m.split(".")[0]) is None or u.find_spec(m) is None))'
+)
+
 _PROBE_SCRIPT = r"""
 set -u
 MINIFORGE_DIR="$HOME/miniforge3"
@@ -498,6 +549,7 @@ TF_VERSION=
 STARDIST_OK=false
 GPU_VISIBLE=false
 PY_VERSION=
+MISSING_MODULES=
 
 if has_conda; then
     # v5.2.4: same discovery as the install scripts — prefer miniforge
@@ -528,6 +580,8 @@ if has_conda; then
         if python -c 'import stardist' 2>/dev/null; then
             STARDIST_OK=true
         fi
+        # "?" when the env's python cannot run at all: unknown reads as missing.
+        MISSING_MODULES=$(python -c '__MISSING_MODULES_PY__' __REQUIRED_MODULES__ 2>/dev/null || echo "?")
     fi
 fi
 
@@ -536,6 +590,7 @@ echo "tensorflow_version=$TF_VERSION"
 echo "stardist_ok=$STARDIST_OK"
 echo "gpu_visible=$GPU_VISIBLE"
 echo "python_version=$PY_VERSION"
+echo "missing_modules=$MISSING_MODULES"
 
 # v5.1.1: detect a still-running detached pip install from a prior
 # bootstrap. The marker is written by install_pip_deps; we only
@@ -550,6 +605,9 @@ if [ -f "$PIP_RUNNING_MARKER" ]; then
 fi
 echo "pip_in_progress=$PIP_IN_PROGRESS"
 """
+_PROBE_SCRIPT = (_PROBE_SCRIPT
+                 .replace("__MISSING_MODULES_PY__", _MISSING_MODULES_PY)
+                 .replace("__REQUIRED_MODULES__", " ".join(REQUIRED_IMPORTS.values())))
 
 
 def probe_host(alias: str, *, ssh_key_path: str = "") -> HostProbe:
@@ -578,6 +636,8 @@ def probe_host(alias: str, *, ssh_key_path: str = "") -> HostProbe:
         gpu_visible=_bool("gpu_visible"),
         python_version=fields.get("python_version", ""),
         pip_in_progress=_bool("pip_in_progress"),
+        missing_modules=tuple(
+            m for m in fields.get("missing_modules", "").split(",") if m),
     )
 
 
@@ -782,9 +842,11 @@ def install_pip_deps(
 ) -> None:
     """Pip-install ``requirements.txt`` in the conda env.
 
-    Skipped when the probe found a usable tensorflow already — that's
-    the most expensive part of bootstrap and re-doing it on every
-    invocation would make ``--force``-less re-runs unbearably slow.
+    Skipped when the probe found tensorflow *and* every other module in
+    :data:`REQUIRED_IMPORTS` — the install is the most expensive part of
+    bootstrap, and re-doing it on every invocation would make
+    ``--force``-less re-runs unbearably slow. Anything missing runs it:
+    pip leaves the packages already at their pins alone and adds the rest.
 
     v5.1.1: the pip install is wrapped in ``nohup`` and redirected to a
     log file, with a ``.pip_running`` marker on the remote. If the SSH
@@ -795,12 +857,19 @@ def install_pip_deps(
     to exit so the synchronous code path stays as it was on a stable
     connection.
     """
-    if probe.tensorflow_version:
+    if probe.tensorflow_version and not probe.missing_modules:
         say(
-            f"Remote already has tensorflow {probe.tensorflow_version} — "
-            "skipping pip install."
+            f"Remote already has tensorflow {probe.tensorflow_version} and "
+            "every other pipeline package — skipping pip install."
         )
         return
+    if probe.tensorflow_version:
+        say(
+            f"Remote has tensorflow {probe.tensorflow_version} but is missing "
+            f"{', '.join(probe.missing_modules)} — installing "
+            "requirements-remote.txt (packages already at their pinned "
+            "versions are left as they are)."
+        )
     if probe.pip_in_progress:
         say(
             "A previous bootstrap left pip running detached on the remote. "
@@ -1232,7 +1301,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nERROR: {exc}\n", file=sys.stderr)
         return 3
 
-    # 6. Install pip deps (skipped if TF already importable).
+    # 6. Install pip deps (skipped only if nothing in REQUIRED_IMPORTS is missing).
     install_pip_deps(ssh_target, probe, ssh_key_path=key_path)
 
     # 7. Bandwidth probe. Also rsync-bound; same FileNotFoundError

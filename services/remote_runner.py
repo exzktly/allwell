@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Callable
 
+from services.subprocess_kill import own_process_group_kwargs
 from services.subprocess_text import TEXT_UTF8
 from services.remote_config import (
     RemoteHost,
@@ -745,9 +746,7 @@ class RemoteRunner:
 
     def _start_ssh(self, ssh_argv: list[str]) -> subprocess.Popen:
         return subprocess.Popen(
-            ssh_argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            ssh_argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             # Decode the remote (Linux, UTF-8) pipeline output as UTF-8 so
             # the em-dash in per-well markers ("Well X — done.") isn't
             # mojibake'd on a cp1252 Windows client — otherwise the
@@ -756,7 +755,7 @@ class RemoteRunner:
             **TEXT_UTF8,
             bufsize=1,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
-            start_new_session=(os.name == "posix"),
+            **own_process_group_kwargs(),
         )
 
     def _upload_input(self, zipped: ZippedInput, key: str, local_output_dir: Path,

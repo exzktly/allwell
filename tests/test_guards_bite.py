@@ -5164,3 +5164,45 @@ def test_a_raw_exec_on_a_menu_not_named_menu_is_seen(tmp_path):
     from tests.test_menu_exec_seam import _menus_built_in
     tree = _ast.parse("def f(b):\n    m = QMenu(b)\n    m.exec(pos)\n")
     assert _menus_built_in(tree) == {"m"}
+
+
+# ── a child in a POSIX session leads a Windows process group too ────────────
+
+SPAWN_VIOLATIONS = {
+    # The shape that shipped in both ssh spawns: Stop's CTRL_BREAK_EVENT then
+    # reached the whole console on Windows and ended the app.
+    "posix_only_keyword": (
+        "import os, subprocess\n\n\ndef spawn(argv):\n"
+        "    return subprocess.Popen(argv, start_new_session=(os.name == 'posix'))\n"),
+    "posix_only_kwargs_dict": (
+        "import os, subprocess\n\n\ndef spawn(argv):\n    kw = {}\n"
+        "    if os.name == 'posix':\n        kw['start_new_session'] = True\n"
+        "    return subprocess.Popen(argv, **kw)\n"),
+}
+
+SPAWN_SANCTIONED = {
+    "helper": (
+        "import subprocess\nfrom services.subprocess_kill import own_process_group_kwargs\n\n\n"
+        "def spawn(argv):\n    return subprocess.Popen(argv, **own_process_group_kwargs())\n"),
+    "both_halves": (
+        "import os, subprocess\n\n\ndef spawn(argv):\n    kw = {}\n"
+        "    if os.name == 'posix':\n        kw['start_new_session'] = True\n    else:\n"
+        "        kw['creationflags'] = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)\n"
+        "    return subprocess.Popen(argv, **kw)\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(SPAWN_VIOLATIONS))
+def test_spawn_group_guard_catches_a_posix_only_session(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_spawn.py", SPAWN_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_spawned_processes_lead_their_own_group",
+                    "test_a_new_session_comes_with_a_new_windows_group", [bad])
+    assert exc is not None, f"the {shape} spawn went uncaught"
+    assert "bad_spawn.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", sorted(SPAWN_SANCTIONED))
+def test_spawn_group_guard_clears_a_spawn_with_both_groups(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_spawn.py", SPAWN_SANCTIONED[shape])
+    assert _run_scan(monkeypatch, "tests.test_spawned_processes_lead_their_own_group",
+                     "test_a_new_session_comes_with_a_new_windows_group", [good]) is None

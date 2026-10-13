@@ -1223,6 +1223,8 @@ and by `remote_fetch_report.txt` in the output folder.
   On a remote run, Stop answers at once at any stage: pressed during the
   upload it ends the upload and nothing is launched on the host; pressed later,
   the host-side kill runs in the background rather than holding up the window.
+  On Windows this includes an All-Well started from a terminal: Stop ends the
+  connection to the host and leaves the app open.
 - Either way the wells already finished keep their results, so nothing you have
   waited for is thrown away — Suspend just also keeps the fields in progress and
   saves you re-entering the form.
@@ -5361,7 +5363,7 @@ records the unit of its coordinates the converter recovers from that by itself;
 when it does not, enter the grid and FOVs per well and the plate map follows what
 you typed.
 
-**A batched remote run queues once, not once per batch.** With **Remote batch size** set, the plate is uploaded and processed in slices so the cluster never holds all of it at once. The compute node is now requested a single time and held for the whole run, so on a busy cluster you wait in the queue once instead of once per batch. Two consequences worth knowing: the `--time` in your host's launcher is scaled up automatically (it sized one batch and now covers the plate, plus one batch's worth again for the transfers that happen while the node is held, capped at 24 hours — the log says what it asked for), and a batch that fails no longer ends the run. The remaining batches still process, and the summary names which ones failed so you can re-run just those.
+**A batched remote run queues once, not once per batch.** With **Remote batch size** set, the plate is uploaded and processed in slices so the cluster never holds all of it at once. The compute node is now requested a single time and held for the whole run, so on a busy cluster you wait in the queue once instead of once per batch. Two consequences worth knowing: the `--time` in your host's launcher is scaled up automatically (it sized one batch and now covers the plate, plus one batch's worth again for the transfers that happen while the node is held, capped at 24 hours — the log says what it asked for), and a batch that fails no longer ends the run. The remaining batches still process, and the summary names which ones failed so you can re-run just those. If a run ends before its node ever starts — a cluster node that fails to boot reports `srun: error: Nodes … are still not ready` and then `Something is wrong with the boot of the nodes` — the wells it had already uploaded stay on the cluster, and retrying the same plate with the same settings does not send them again; the log says how many of each batch's wells were already there. Adding `--exclude=<node>` to the host's launcher keeps the retry off the node that failed.
 
 If you start the same plate with the same settings from a second window while the first is still running, the second one stops and says so rather than starting: both would use the same folder on the cluster, and the second would clear the first's input out from under it. Wait for the first to finish, or change something about the run.
 

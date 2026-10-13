@@ -42,26 +42,60 @@ else
 fi
 
 # ── Python test stack ────────────────────────────────────────────────────────
-# Pinned to the versions the app ships against (tests/requirements-dev.txt).
-if python3 -c "import pytest, PySide6" >/dev/null 2>&1; then
-  log "test stack present"
+# The stack lives in its own virtualenv, built from an interpreter the pins
+# support, and that venv is put first on PATH for the session.
+#
+# Bare `python3` is whatever the image's default happens to be, and that moved
+# to 3.13 underneath this hook: tests/requirements-dev.txt pins
+# PySide6==6.7.3, which publishes no wheel for 3.13 (Requires-Python <3.13),
+# so pip found no match, the hook exited 1, and the session started with no
+# pytest, no PySide6 and no ruff — silently, since a failing SessionStart hook
+# does not stop the session. CI runs 3.11 (.github/workflows/ci.yml), so that
+# is the first choice; 3.12 is the newest the pins still support.
+VENV="${ALLWELL_TEST_VENV:-$HOME/.allwell-test-venv}"
+PY=""
+for candidate in python3.11 python3.12; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    PY="$candidate"
+    break
+  fi
+done
+if [ -z "$PY" ]; then
+  log "ERROR: neither python3.11 nor python3.12 is installed (python3 is" \
+      "$(python3 --version 2>&1)). PySide6==6.7.3 needs Python <3.13, so the" \
+      "test stack cannot be installed; add one of them to the environment."
+  exit 1
+fi
+
+if [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c "import pytest, PySide6" >/dev/null 2>&1; then
+  log "test stack present ($("$VENV/bin/python" --version 2>&1), $VENV)"
 else
-  log "installing tests/requirements-dev.txt"
-  # The upgrade is a convenience, never a precondition: a container whose pip
-  # came from the distro has no RECORD file, so pip refuses to uninstall itself
-  # and exits non-zero — and under `set -e` that aborted the hook before the
-  # test stack was installed at all, leaving a session where every test
-  # collection dies at `import PySide6`. Failing here costs nothing; failing
-  # the line below is what matters.
-  python3 -m pip install --quiet --upgrade pip || log "pip upgrade skipped"
-  python3 -m pip install --quiet -r tests/requirements-dev.txt
+  log "building $VENV with $PY and installing tests/requirements-dev.txt"
+  rm -rf "$VENV"
+  "$PY" -m venv "$VENV"
+  # A venv's own pip upgrades cleanly, but the upgrade is still a convenience,
+  # never a precondition: failing the line below is what matters.
+  "$VENV/bin/python" -m pip install --quiet --upgrade pip || log "pip upgrade skipped"
+  "$VENV/bin/python" -m pip install --quiet -r tests/requirements-dev.txt
 fi
 
 # ── Linter ───────────────────────────────────────────────────────────────────
 # Same pin CI enforces; a version drift here would report different findings.
-if ! command -v ruff >/dev/null 2>&1; then
+if [ ! -x "$VENV/bin/ruff" ]; then
   log "installing ruff"
-  python3 -m pip install --quiet "ruff==0.15.8"
+  "$VENV/bin/python" -m pip install --quiet "ruff==0.15.8"
+fi
+
+# ── Session PATH ─────────────────────────────────────────────────────────────
+# `scripts/test.sh` runs plain `python`, and `ruff` is called by name, so the
+# venv has to come first on PATH for every later command in the session. A
+# SessionStart hook persists environment for the session by appending exports
+# to $CLAUDE_ENV_FILE.
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  echo "export VIRTUAL_ENV=\"$VENV\"" >> "$CLAUDE_ENV_FILE"
+  echo "export PATH=\"$VENV/bin:\$PATH\"" >> "$CLAUDE_ENV_FILE"
+else
+  log "CLAUDE_ENV_FILE is not set; run: export PATH=\"$VENV/bin:\$PATH\""
 fi
 
 log "ready"

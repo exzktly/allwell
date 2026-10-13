@@ -751,3 +751,32 @@ def test_the_bootstrap_path_spawn_builds_is_a_file_that_exists(qtbot, monkeypatc
         "The repository root must come from services.remote_runner.repo_root, "
         "not from this module's own __file__, which moves with the file.")
     assert bootstrap.name == "remote_bootstrap.py"
+
+
+def test_a_launcher_with_a_loose_word_is_refused_and_named(qtbot, boxes, monkeypatch):
+    """The reported launcher: the instance type stood on its own after
+    ``--mem=60G``, so srun took it for the program and the run failed only once
+    a node had started, with ``execve(): g4dn.12xlarge: No such file``."""
+    import analyze.remote_dialog as ard
+
+    written: list = []
+    monkeypatch.setattr(ard, "write_remote", lambda host: written.append(host))
+    dlg = ard.RemoteFormDialog(None, host=None)
+    qtbot.addWidget(dlg)
+    dlg._name_edit.setText("aws")
+    dlg._ssh_alias_edit.setText("aws.example")
+    dlg._compute_loc_combo.setCurrentIndex(1)
+    dlg._compute_launcher_edit.setText(
+        "srun --partition=gpu-small-queue --cpus-per-task=16 --mem=60G g4dn.12xlarge")
+    dlg._on_ok()
+
+    assert not written, "a launcher srun would misread was saved"
+    texts = [t for kind, _title, t in boxes if kind == "critical"]
+    assert texts and "“g4dn.12xlarge”" in texts[-1], texts
+    assert "--constraint=g4dn.12xlarge" in texts[-1]
+
+    dlg._compute_launcher_edit.setText(
+        "srun --partition=gpu-small-queue --cpus-per-task=16 --mem=60G "
+        "--constraint=g4dn.12xlarge")
+    dlg._on_ok()
+    assert written, "the corrected launcher was refused too"

@@ -18,7 +18,11 @@ from services.remote_conda import (
     EnvSelector,
     _conda_env_guard,
 )
-from services.remote_srun_retry import is_srun, wrap_srun_launch
+from services.remote_srun_retry import (
+    is_srun,
+    stray_words_message,
+    wrap_srun_launch,
+)
 from services.remote_transport import _remote_join, _remote_quote
 from services.remote_wait_snippets import (
     _UPLOAD_WAIT_EXIT,
@@ -360,6 +364,12 @@ def _launch(launcher: str, inner: str, remote_pidfile: str) -> str:
     passes it to the scheduler literally instead of reading ``|`` as a pipe.
     """
     if is_srun(launcher):
+        stray = stray_words_message(launcher)
+        if stray:
+            # Refused here rather than sent: the job would queue, wait for a
+            # node, and only then fail with srun's bare "execve(): …: No such
+            # file or directory". A saved host is not re-checked by the dialog.
+            raise ValueError(stray)
         return wrap_srun_launch(
             launcher, shlex.quote(inner), _remote_quote(remote_pidfile),
             _remote_quote(f"{remote_pidfile}.srun-err"))

@@ -36,9 +36,14 @@ Exclusions the user wrote into the launcher (``--exclude`` / ``-x``) are kept:
 Slurm takes the *last* ``--exclude`` it is given, so the wrapper removes the
 user's from the launcher and merges them into the one it passes.
 
-``srun``'s stderr is copied to a file beside the pidfile so the shell can read
-what went wrong; only its own ``srun:`` lines are kept, because the pipeline's
-log flows through the same stream and can run to megabytes. Each attempt still
+The launch's output is copied to a file beside the pidfile with ``tee``, so the
+shell can read what went wrong, and only lines that begin ``srun:`` are searched.
+It is ``tee`` and not a filter such as ``awk '/^srun: /'``: ``mawk``, the
+default ``awk`` on Debian and Ubuntu login nodes, fills its whole input buffer
+before handling a line, so a filter there held the job's first lines back until
+more output arrived, and a run that had just been allocated a node sat silent.
+``tee`` passes each line on as it arrives. The copy is truncated before each
+attempt and removed when the loop ends. Each attempt still
 writes ``srun``'s own PID to the pidfile (a ``sh -c … exec``), so the
 ``kill -TERM $(cat <pidfile>)`` cancel channel keeps reaching ``srun``.
 
@@ -70,6 +75,52 @@ def is_srun(launcher: str) -> bool:
     except ValueError:
         return False
     return bool(tokens) and tokens[0].rsplit("/", 1)[-1] == "srun"
+
+
+def stray_launcher_words(launcher: str) -> list[str]:
+    """Words in an ``srun`` launcher that ``srun`` would run as the program.
+
+    The app appends ``bash -lc <job>`` to the launcher, and ``srun`` stops
+    reading options at the first word that is not one, so any such word ends up
+    as the program instead of the job: a launcher ending ``--mem=60G
+    g4dn.12xlarge`` had ``slurmstepd`` try to ``execve("g4dn.12xlarge")`` and
+    fail with exit code 2 once a node finally started — after the run had
+    waited out the whole queue.
+
+    Decidable without srun's option table: a word that follows an option
+    written with ``=``, or follows another such word, cannot be that option's
+    value. A word after a bare option (``-p gpu``, ``--partition gpu``) may be
+    its value and is left alone, so a flag followed by a stray word is not
+    caught; the common shape — the stray word last, after ``--opt=value`` — is.
+    Returns ``[]`` for anything that is not an ``srun`` launcher.
+    """
+    if not is_srun(launcher):
+        return []
+    tokens = shlex.split(launcher)[1:]
+    stray: list[str] = []
+    prev_takes_value = False
+    for tok in tokens:
+        if tok.startswith("-"):
+            prev_takes_value = "=" not in tok and tok != "--"
+            continue
+        if not prev_takes_value:
+            stray.append(tok)
+        prev_takes_value = False
+    return stray
+
+
+def stray_words_message(launcher: str) -> str | None:
+    """The sentence to show for :func:`stray_launcher_words`, or ``None``."""
+    stray = stray_launcher_words(launcher)
+    if not stray:
+        return None
+    words = ", ".join(f"“{w}”" for w in stray)
+    return (
+        f"The scheduler command has {words} on its own, not attached to an "
+        f"option, so srun would try to run it as the program instead of the "
+        f"job and the run would fail once a node starts. Attach it to the option "
+        f"it belongs to — an instance or node type is usually a constraint, "
+        f"e.g. --constraint={stray[0]} — or remove it.")
 
 
 def _split_launcher(tokens: list[str]) -> tuple[list[str], list[str], str]:
@@ -134,23 +185,23 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         f'else echo "[remote] scheduler: no powered-on node in {where} — Slurm will boot one"; fi; ',
         "fi; ",
         f"_aw_ex=$(printf '%s,%s' \"$_aw_x\" \"$_aw_asleep\" | {merge}); ",
-        # 2. The launch. srun's PID goes to the pidfile; its own lines to the file.
+        # 2. The launch. srun's PID goes to the pidfile; its output is copied (tee).
         ': > "$_aw_err"; rm -f "$_aw_rcf"; ',
         "{ sh -c 'echo $$ > \"$0\"; exec \"$@\"' \"$_aw_pid\" ",
         f"{launcher_str} ${{_aw_ex:+--exclude=\"$_aw_ex\"}} bash -lc {inner_quoted} 2>&1; ",
         'echo $? > "$_aw_rcf"; } ',
-        "| awk -v f=\"$_aw_err\" '{ print; fflush() } /^srun: / { print >> f; fflush(f) }'; ",
+        '| tee -a "$_aw_err"; ',
         '_aw_rc=$(cat "$_aw_rcf" 2>/dev/null || echo 1); ',
         # 3a. Awake nodes cannot satisfy the request: once, try without that.
         'if [ "$_aw_rc" != 0 ] && [ -n "$_aw_asleep" ] '
-        "&& grep -q 'Requested node configuration is not available' \"$_aw_err\"; then ",
+        "&& grep -q '^srun: .*Requested node configuration is not available' \"$_aw_err\"; then ",
         "_aw_awake=0; ",
         'echo "[remote] scheduler: no powered-on node can take this request — letting Slurm boot one"; ',
         "continue; fi; ",
         # 3b. The node did not boot: exclude it and ask again.
-        f"if [ \"$_aw_rc\" != 0 ] && grep -qE '{_BOOT_FAILURE_RE}' \"$_aw_err\"; then ",
-        "_aw_bad=$(sed -nE 's/.*Nodes ([^ ]+) are still not ready.*/\\1/p; "
-        f"s/.*Node failure on ([^ ]+).*/\\1/p' \"$_aw_err\" | {merge}); ",
+        f"if [ \"$_aw_rc\" != 0 ] && grep -qE '^srun: .*({_BOOT_FAILURE_RE})' \"$_aw_err\"; then ",
+        "_aw_bad=$(sed -nE 's/^srun: .*Nodes ([^ ]+) are still not ready.*/\\1/p; "
+        f"s/^srun: .*Node failure on ([^ ]+).*/\\1/p' \"$_aw_err\" | {merge}); ",
         f"_aw_x=$(printf '%s,%s' \"$_aw_x\" \"$_aw_bad\" | {merge}); ",
         f'if [ "$_aw_try" -le {SRUN_BOOT_RETRIES} ]; then ',
         'echo "[remote] scheduler: node(s) ${_aw_bad:-?} failed to boot — '

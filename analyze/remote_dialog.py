@@ -46,6 +46,7 @@ from services.remote_config import (
 from services import remote_config
 from services import ssh_key_setup
 from services.subprocess_kill import signal_subprocess
+from services.remote_srun_retry import stray_words_message
 from services.subprocess_text import TEXT_UTF8
 from ui import theme
 
@@ -585,6 +586,8 @@ class RemoteFormDialog(QDialog):
                 "Fill it in, or switch Run compute back to “On the remote "
                 "machine itself”."
             )
+        if self._compute_loc_combo.currentData() == "scheduled":
+            return stray_words_message(self._compute_launcher_edit.text())
         return None
 
     def result_host(self) -> RemoteHost:

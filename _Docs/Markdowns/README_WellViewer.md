@@ -1080,6 +1080,19 @@ login node is the one thing the setting exists to avoid, so the form refuses it
 and says so. Switch **Run compute** back to *On the remote machine itself* if
 that is what you meant.
 
+**Fetch** next to *Compute profile* reads the cluster's JupyterHub
+configuration and lists the compute options its web page offers; picking one
+fills in the scheduler command. The command is built the way JupyterHub builds
+its own job: from the cluster's job template, which decides what each of a
+profile's settings means. A profile that names an instance type, say
+`g4dn.12xlarge`, therefore becomes `--constraint=g4dn.12xlarge` when that is what
+the template does with it, rather than a word on its own that `srun` would try
+to run. Only the parts of the template that choose a node — partition, CPUs,
+memory, time, GPUs, constraint and the like — are carried over. When a setting
+cannot be placed, because it is attached to no option or needs a value the
+profile does not give, it is left out, and the line under the SSH controls says
+which profile lost what. Check the filled-in command before saving.
+
 **Remote scratch dir**, under *Advanced (remote paths)* in that dialog, is worth
 setting on a cluster. It is where the pipeline keeps its per-well working files
 *on the remote* — every extracted input image and roughly six uncompressed

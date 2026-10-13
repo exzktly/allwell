@@ -44,6 +44,11 @@ from pathlib import Path
 from typing import Any
 
 from services.subprocess_text import TEXT_UTF8
+from services.slurm_batch_script import (
+    ScriptLauncher,
+    directive_flags,
+    launcher_from_batch_script,
+)
 
 # tomllib is stdlib on 3.11+; tomli is the 3.10 backport. The project pins
 # 3.10.14, so tomli is the expected provider — but we accept either so the
@@ -944,6 +949,15 @@ for spawner in ("Spawner", "KubeSpawner", "SlurmSpawner", "BatchSpawnerBase",
                                     "options", "slurm", "default", "description")})
         profiles.append({"name": name, "slug": slug, "kwargs": _kwargs(merged)})
 
+# The spawner-wide settings a profile inherits: the job template (whose
+# #SBATCH lines decide what each req_* value means) and req_* defaults.
+spawner = {}
+for cls in ("Spawner", "BatchSpawnerBase", "SlurmSpawner"):
+    sp = _store(c).get(cls)
+    for k, v in (_store(sp).items() if sp is not None else ()):
+        if (k == "batch_script" or k.startswith("req_")) and isinstance(v, (str, int, float)):
+            spawner[k] = v
+
 # De-dup by (name, slug) preserving order.
 seen = set()
 uniq = []
@@ -953,7 +967,8 @@ for p in profiles:
         seen.add(sig)
         uniq.append(p)
 
-print(json.dumps({"ok": True, "source": used, "profiles": uniq}))
+print(json.dumps({"ok": True, "source": used, "profiles": uniq,
+                  "spawner": spawner}))
 '''
 
 
@@ -1124,23 +1139,32 @@ _REQ_FLAG_MAP: tuple[tuple[str, str], ...] = (
 )
 
 
-def profile_kwargs_to_launcher(kwargs: dict, *, program: str = "srun") -> str:
-    """Map a JupyterHub profile's spawner kwargs to an ``srun`` launcher.
+def profile_launcher(
+    kwargs: dict, *, batch_script: str = "", program: str = "srun",
+) -> ScriptLauncher:
+    """A JupyterHub profile's ``srun`` launcher, and what had to be left out.
 
-    Recognises batchspawner's ``req_*`` fields (``req_partition``,
-    ``req_ngpus`` → ``--gres=gpu:N``, ``req_runtime`` → ``--time``,
-    ``req_memory`` → ``--mem``, ``req_nprocs`` → ``--cpus-per-task``, plus raw
-    ``req_options``) and the same names without the ``req_`` prefix. An
-    explicit ``launcher`` / ``compute_launcher`` / ``cmd`` string on the
-    profile wins outright. Returns "" when nothing scheduler-shaped is found
-    (the caller skips such profiles). Pure — unit-tested without any ssh.
+    An explicit ``launcher`` / ``compute_launcher`` / ``cmd`` string on the
+    profile wins outright. Otherwise, when the cluster configures a job
+    template (*batch_script*), the template decides which option each value
+    becomes — see :mod:`services.slurm_batch_script`. Without one, batchspawner's
+    ``req_*`` fields map by name (``req_partition``, ``req_ngpus`` →
+    ``--gres=gpu:N``, ``req_runtime`` → ``--time``, ``req_memory`` → ``--mem``,
+    ``req_nprocs`` → ``--cpus-per-task``, the same names without the ``req_``
+    prefix) and the free-form ``req_options`` is read as the ``#SBATCH``
+    directive batchspawner's stock template writes it as: its resource options
+    are kept and a word attached to no option is dropped and reported, never
+    appended — ``srun`` would run it as the program. The launcher is "" when
+    nothing scheduler-shaped is found (the caller skips such profiles). Pure.
     """
     if not isinstance(kwargs, dict):
-        return ""
+        return ScriptLauncher("")
     for k in ("launcher", "compute_launcher", "cmd"):
         v = kwargs.get(k)
         if isinstance(v, str) and v.strip():
-            return v.strip()
+            return ScriptLauncher(v.strip())
+    if isinstance(batch_script, str) and batch_script.strip():
+        return launcher_from_batch_script(batch_script, kwargs, program=program)
 
     def _val(req_key: str) -> Any:
         # Accept both the batchspawner ``req_`` form and the bare key.
@@ -1150,6 +1174,7 @@ def profile_kwargs_to_launcher(kwargs: dict, *, program: str = "srun") -> str:
         return kwargs.get(bare)
 
     parts: list[str] = [program]
+    dropped: list[str] = []
     for key, flag in _REQ_FLAG_MAP:
         val = _val(key)
         if val is not None and str(val).strip() != "":
@@ -1159,16 +1184,29 @@ def profile_kwargs_to_launcher(kwargs: dict, *, program: str = "srun") -> str:
         parts.append(f"--gres=gpu:{str(ngpus).strip()}")
     extra = _val("req_options")
     if isinstance(extra, str) and extra.strip():
-        parts.extend(shlex.split(extra))
+        try:
+            flags, stray = directive_flags(shlex.split(extra))
+        except ValueError:
+            flags, stray = [], [extra.strip()]
+        parts.extend(flags)
+        dropped.extend(f"“{w}” (not attached to any option)" for w in stray)
     if len(parts) == 1:
-        return ""  # only the program token — nothing recognised
-    return shlex.join(parts)
+        return ScriptLauncher("", dropped)  # only the program token
+    return ScriptLauncher(shlex.join(parts), dropped)
+
+
+def profile_kwargs_to_launcher(kwargs: dict, *, program: str = "srun") -> str:
+    """:func:`profile_launcher`'s launcher for a profile with no job template."""
+    return profile_launcher(kwargs, program=program).launcher
 
 
 def parse_jupyterhub_profiles_json(
     stdout: str, *, stderr: str = "", returncode: int = 0
 ) -> tuple[bool, list[tuple[str, str]], str]:
     """Parse the discovery snippet's JSON into ``(ok, [(name, launcher)], detail)``.
+
+    On success *detail* names anything a profile's launcher had to leave out
+    (empty when nothing was), so the dialog can say so beside the list.
 
     Tolerant of leading noise (login banners / motd on the ssh channel): if the
     whole stream isn't valid JSON it retries on the last non-empty line, which
@@ -1192,15 +1230,23 @@ def parse_jupyterhub_profiles_json(
         return (False, [], ((stderr or text).strip() or "unparseable output")[:300])
     if not doc.get("ok"):
         return (False, [], str(doc.get("error") or "no profiles found")[:300])
+    spawner = doc.get("spawner") if isinstance(doc.get("spawner"), dict) else {}
+    defaults = {k: v for k, v in spawner.items() if k != "batch_script"}
     out: list[tuple[str, str]] = []
+    notes: list[str] = []
     skipped = 0
     for p in doc.get("profiles", []):
         if not isinstance(p, dict):
             continue
         name = str(p.get("name") or p.get("slug") or "profile").strip()
-        launcher = profile_kwargs_to_launcher(p.get("kwargs") or {})
-        if launcher:
-            out.append((name, launcher))
+        own = p.get("kwargs") if isinstance(p.get("kwargs"), dict) else {}
+        made = profile_launcher(
+            {**defaults, **own},
+            batch_script=str(own.get("batch_script") or spawner.get("batch_script") or ""))
+        if made.launcher:
+            out.append((name, made.launcher))
+            if made.dropped:
+                notes.append(f"“{name}” left out {'; '.join(made.dropped)}.")
         else:
             skipped += 1
     if not out:
@@ -1209,7 +1255,7 @@ def parse_jupyterhub_profiles_json(
             "JupyterHub config had no SLURM-shaped compute profiles"
             + (f" ({skipped} non-SLURM profile(s) skipped)." if skipped else "."),
         )
-    return (True, out, "")
+    return (True, out, " ".join(notes))
 
 
 def query_jupyterhub_profiles(

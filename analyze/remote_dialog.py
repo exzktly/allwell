@@ -46,6 +46,7 @@ from services.remote_config import (
 from services import remote_config
 from services import ssh_key_setup
 from services.subprocess_kill import signal_subprocess
+from services.remote_srun_retry import stray_words_message
 from services.subprocess_text import TEXT_UTF8
 from ui import theme
 
@@ -266,6 +267,7 @@ class RemoteFormDialog(QDialog):
 
         self._test_result_lbl = QLabel("", self)
         self._test_result_lbl.setObjectName("Muted")
+        self._test_result_lbl.setWordWrap(True)
         layout.addLayout(form)
         layout.addWidget(self._test_result_lbl)
 
@@ -585,6 +587,8 @@ class RemoteFormDialog(QDialog):
                 "Fill it in, or switch Run compute back to “On the remote "
                 "machine itself”."
             )
+        if self._compute_loc_combo.currentData() == "scheduled":
+            return stray_words_message(self._compute_launcher_edit.text())
         return None
 
     def result_host(self) -> RemoteHost:
@@ -786,8 +790,11 @@ class RemoteFormDialog(QDialog):
             self._populate_profile_combo(
                 profiles, select_launcher=self._compute_launcher_edit.text(),
             )
+            # On success *detail* names anything a profile's launcher had to
+            # leave out — a word attached to no option, a line it could not fill.
             self._test_result_lbl.setText(
                 f"✓ {len(profiles)} profile(s) from {alias}'s JupyterHub config."
+                + (f" {detail}" if detail else "")
             )
 
         poll_queue_on(self, result_q, _done)

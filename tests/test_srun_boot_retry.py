@@ -213,3 +213,79 @@ def test_the_job_script_reaches_srun_byte_for_byte(tmp_path):
     unwrapped = (tmp_path / "mysched.inner").read_text()
     assert wrapped == unwrapped
     assert "process_microscopy.py --input_dir '/scratch/a b/in'" in wrapped
+
+
+def test_the_job_s_first_line_arrives_before_the_job_ends(tmp_path):
+    """A run sat silent after "allocated resources": the output passed through
+    ``awk``, and mawk — the default awk on Debian and Ubuntu login nodes — fills
+    its input buffer before handling a line, so the job's first lines waited
+    for more output. Measured: a line, a pause, a second line, and the first
+    one is read here well before the second is written."""
+    import select
+    import time
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _write_exe(bindir / "srun", (
+        'echo "srun: job 7 has been allocated resources" >&2\n'
+        'echo "[remote] scheduler: allocation granted"\n'
+        'sleep 4\n'
+        'echo "batch 1 done"\n'))
+    pidfile = tmp_path / "run.pid"
+    cmd = wrap_srun_launch("srun -p cpu", shlex.quote("true"),
+                           shlex.quote(str(pidfile)),
+                           shlex.quote(str(pidfile) + ".srun-err"))
+    env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp_path)}
+    started = time.monotonic()
+    proc = subprocess.Popen(["sh", "-c", cmd], stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, env=env)
+    first_at = None
+    buf = b""
+    try:
+        while time.monotonic() - started < 15:
+            ready, _, _ = select.select([proc.stdout], [], [], 0.2)
+            if ready:
+                chunk = proc.stdout.read1(4096) if hasattr(proc.stdout, "read1") \
+                    else os.read(proc.stdout.fileno(), 4096)
+                if not chunk:
+                    break
+                buf += chunk
+                if first_at is None and b"allocation granted" in buf:
+                    first_at = time.monotonic() - started
+    finally:
+        proc.kill()
+        proc.wait()
+    assert first_at is not None, buf.decode(errors="replace")
+    assert first_at < 2.5, (
+        f"the job's first line arrived after {first_at:.1f}s, with the job "
+        f"pausing 4s before its next line: the output is being held back")
+
+
+@pytest.mark.parametrize("launcher, stray", [
+    # The reported one.
+    ("srun --partition=gpu-small-queue --cpus-per-task=16 --mem=60G g4dn.12xlarge",
+     ["g4dn.12xlarge"]),
+    ("srun --partition=gpu-small-queue --mem=60G --constraint=g4dn.12xlarge", []),
+    # A bare option's value is its value, not a program.
+    ("srun -p gpu -c 16 --time 4:00:00", []),
+    ("srun --mem=8G a b", ["a", "b"]),
+    ("srun g4dn.12xlarge -p gpu", ["g4dn.12xlarge"]),
+    ("qsub -I extra", []),
+    ("", []),
+])
+def test_a_word_srun_would_run_as_the_program_is_found(launcher, stray):
+    from services.remote_srun_retry import stray_launcher_words
+
+    assert stray_launcher_words(launcher) == stray
+
+
+def test_a_launch_with_a_loose_word_is_refused_before_it_queues():
+    """A saved host is not re-checked by the dialog, so the launch refuses it
+    too — before the job waits out the queue to fail on execve()."""
+    from services.remote_commands import _compose_driver_cmd, _compose_remote_cmd
+
+    bad = "srun --partition=gpu-small-queue --mem=60G g4dn.12xlarge"
+    with pytest.raises(ValueError, match="--constraint=g4dn.12xlarge"):
+        _compose_remote_cmd(bad, "~/x/run.pid", ["python", "pm.py"], cache_hit=False)
+    with pytest.raises(ValueError, match="g4dn.12xlarge"):
+        _compose_driver_cmd(bad, "~/x/run.pid", "true")

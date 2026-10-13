@@ -131,7 +131,7 @@ def test_segment_cellpose_honors_params(monkeypatch):
     calls: dict = {}
 
     class _FakeModel:
-        def __init__(self, model_type=None):
+        def __init__(self, model_type=None, **kw):
             calls["model_type"] = model_type
 
         def eval(self, x, **kw):
@@ -144,6 +144,10 @@ def test_segment_cellpose_honors_params(monkeypatch):
     monkeypatch.setitem(sys.modules, "cellpose", fake_cellpose)
     monkeypatch.setitem(sys.modules, "cellpose.models", fake_models)
     monkeypatch.setattr(mc, "_CELLPOSE_MODELS", {}, raising=False)
+    # The model is placed on a device chosen through Torch, which the test stack
+    # does not install; a CPU-only stand-in answers.
+    monkeypatch.setattr(mc, "_cellpose_device", lambda: (
+        types.SimpleNamespace(type="cpu"), "CPU (test)"))
 
     img = np.zeros((8, 8), np.float32)
     mc._segment_cellpose(img, model_type="cyto2", diameter=20.0,

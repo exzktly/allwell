@@ -117,7 +117,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--cellpose_diameter",
         type=float,
         default=0.0,
-        help="Cellpose cell diameter in px (0 = auto-estimate).",
+        help=("Cellpose cell diameter in px. Each image is resized by 30/diameter "
+              "before segmenting, so small values are slower. 0 = no resize "
+              "(the model's own 30 px); the size is not estimated."),
     )
     p.add_argument(
         "--cellpose_flow_threshold",
@@ -419,9 +421,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--cpu_only", action="store_true",
                    help=(
-                       "Force StarDist to run on CPU even if a GPU is available. "
-                       "Sets CUDA_VISIBLE_DEVICES='' in every worker process "
-                       "before TensorFlow is initialised, preventing GPU use. "
+                       "Force StarDist to run on CPU even if a GPU is available: "
+                       "TensorFlow's GPUs are hidden in every worker before it "
+                       "initialises. Cellpose is not affected; it uses a GPU "
+                       "whenever Torch can see one. "
                        "Useful for debugging, reproducibility, or when sharing "
                        "a GPU with other jobs."
                    ))

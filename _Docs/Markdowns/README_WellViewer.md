@@ -519,10 +519,15 @@ else, or once a run has written there again.
 - **Top-hat radii.** Nuclear and per-fluor radii in pixels. `0` or
   `--no_tophat_*` flags disable per-channel.
 - **Min nucleus area** in pixels (rejects garbage detections).
-- **Cell diameter (px, 0=auto)** — shown for both Cellpose methods, general and
-  label-free. At `0` Cellpose estimates the size on every field with an extra
-  pass before segmenting, which roughly doubles the time per field; measure a
-  typical cell in the image viewer and enter its width in pixels to skip that.
+- **Cell diameter (px, 0=model's 30)** — shown for both Cellpose methods, general
+  and label-free. Cellpose's models were trained on cells about 30 px across, and
+  Cellpose resizes each image so that cells of the diameter you enter become
+  30 px before segmenting. That makes the time per field scale with
+  (30 ÷ diameter)²: **15 px is about 4× slower**, 20 px about 2.25×, 60 px about
+  4× faster. At `0` nothing is resized and Cellpose segments as if your cells
+  were 30 px; it does not estimate the size. Enter a measured value when your
+  cells are far from 30 px and check the masks: segmentation is most reliable
+  when the diameter matches the cells, so a smaller value can be worth its time.
   A value that is not a number stops the run before it starts.
 - **Nucleus probability** and **Overlap (NMS)** — the two StarDist detection
   thresholds, shown for both StarDist methods. A field left **blank** means the
@@ -926,7 +931,22 @@ archives and outputs are always written as per-well `.zip` archives. See
   - On Apple Silicon Metal the default is 2 — Metal serialises GPU calls
     across processes, so more workers don't help GPU throughput.
   - CPU-only: defaults to `floor((cpu_count − 1) / tf_threads)`.
-- **CPU-only.** Forces TensorFlow to ignore the GPU.
+  - **Cellpose on a GPU node:** at most 2 workers per GPU, so they do not all
+    load a copy of the model onto one card; the cores this frees go to each
+    worker's thread count. A value you type here still wins.
+- **CPU-only.** Forces TensorFlow (StarDist) to ignore the GPU. It does not
+  affect Cellpose.
+- **Cellpose and the GPU.** Cellpose runs on a GPU whenever the machine it
+  runs on has one that its Torch install can use — on a cluster, the compute
+  node your launcher's `--gres=gpu…` granted. The run log says so twice: a
+  `Cellpose :` line near the top with what the run found (`GPU — 1 visible…` or
+  `CPU — no GPU visible on this node…`), and one line per worker naming the
+  device its model actually loaded on, such as
+  `Cellpose cyto3 on GPU cuda:0 (NVIDIA A100…)`. If that line says
+  `CPU — Torch … sees no CUDA device` on a node that has a GPU, the Torch
+  installed in the remote environment cannot use it (a CPU-only build, or a
+  driver older than its CUDA); the line names both. On a Mac, Cellpose stays on
+  the CPU.
 - **Start even if the disk looks too small.** Overrides the space check that
   refuses a run it estimates will not fit. Leave it off by default. Tick it when
   a refusal looks wrong — that estimate sizes from the largest image in the

@@ -210,8 +210,8 @@ def build_pipeline_args(
     if phase_token:
         args += ["--phase_token", phase_token]
     # The cell diameter belongs to both Cellpose methods: the label-free preset
-    # runs the same model, and 0 (auto) makes either estimate it on every field
-    # with an extra network pass. Only a measured value is sent.
+    # runs the same model, and the diameter sets the scale both segment at (0 =
+    # the model's own 30 px, no resize). Only a value above 0 is sent.
     if segmentation_method in ("cellpose", "cellpose_labelfree"):
         try:
             diameter = float(opts.get("cellpose_diameter", 0.0))

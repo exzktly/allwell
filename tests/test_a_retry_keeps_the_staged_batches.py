@@ -18,6 +18,7 @@ already match). The remote shell commands themselves run for real, under
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import threading
@@ -83,6 +84,12 @@ def _attempt(tmp_path, monkeypatch, remote_root, *, node_boots: bool):
     proc = _FakeProc()
     sent: list[str] = []
     p = _batched(tmp_path, ["A01", "A02", "A03"], batch_size=2)
+    # `_batched` writes the archives afresh on every call, which would give the
+    # second attempt new mtimes. A changed archive is a different plate — the
+    # run directory is keyed on the mtimes — so the test pins them: a retry of
+    # the same plate offers the same files, as it does in the app.
+    for z in p._zipped.well_zips:
+        os.utime(z, (1_700_000_000, 1_700_000_000))
     run_dir = _remote(p, proc, remote_root, sent)
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: proc)
 

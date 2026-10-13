@@ -124,6 +124,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # with ModuleNotFoundError before it reads a single image.
     "pipeline/cli_args.py",
     "pipeline/cellpose.py",
+    # Worker count, threads per worker and the Cellpose GPU plan. Imported by
+    # process_microscopy at module scope, so the remote needs it to start.
+    "pipeline/parallelism.py",
     # The one definition of "is this well complete", shared by the end-of-run
     # check and the Datasets Validate tool.
     "pipeline/completeness.py",

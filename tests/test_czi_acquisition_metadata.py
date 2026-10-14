@@ -12,7 +12,7 @@ import sys
 import numpy as np
 import pytest
 
-from pipeline.czi_read import CziReader, CziReadError, read_czi_layout
+from pipeline.czi_read import AcquisitionClock, CziReader, CziReadError, read_czi_layout
 from tests._czi_fixture import Tile, write_czi
 
 
@@ -117,3 +117,53 @@ def test_missing_plane_and_closed_reader_do_not_invent_metadata(tmp_path):
     with reader:
         with pytest.raises(CziReadError, match="holds no image"):
             reader.read_tile_metadata(0, 0, 5, 0, 0)
+
+
+def test_unzoned_tile_instant_stays_unzoned(tmp_path):
+    path = write_czi(tmp_path / "local-clock.czi", [Tile(
+        np.zeros((3, 4), "uint16"), acquired="2024-06-12T14:02:03.123456")])
+    with CziReader(path) as reader:
+        assert reader.read_tile_metadata(0, 0, 0, 0, 0).acquired_at == "2024-06-12T14:02:03.123456"
+
+
+def test_acquisition_start_is_earliest_across_tiles_and_channel_z_planes(tmp_path):
+    path = write_czi(tmp_path / "clocks.czi", [
+        Tile(np.zeros((3, 4), "uint16"), acquired="2024-06-12T12:00:00+02:00"),
+        Tile(np.zeros((3, 4), "uint16"), c=1, z=1, acquired="2024-06-12T09:30:00Z"),
+        Tile(np.zeros((3, 4), "uint16"), tile=1, acquired="2024-06-12T09:20:00Z"),
+        Tile(np.zeros((3, 4), "uint16"), tile=2),
+    ])
+    clock = AcquisitionClock()
+    with CziReader(path) as reader:
+        for tile in (0, 1, 2):
+            clock.add_tile(item.acquired_at for item in reader.position_metadata(0, tile, 0))
+    assert clock.summary() == {"started_at": "2024-06-12T09:20:00+00:00",
+                               "start_reason": None, "tiles_without_time": 1}
+
+
+def test_missing_times_are_counted_per_tile_and_unzoned_starts_stay_unzoned():
+    clock = AcquisitionClock()
+    clock.add_tile([None, None, "invalid"])
+    clock.add_tile(["2024-06-12T11:00:00", None])
+    clock.add_tile(["2024-06-12T10:00:00"])
+    assert clock.summary() == {"started_at": "2024-06-12T10:00:00",
+                               "start_reason": None, "tiles_without_time": 1}
+
+
+def test_mixed_clocks_are_refused_even_when_they_arrive_in_different_wells():
+    first, second = AcquisitionClock(), AcquisitionClock()
+    first.add_tile(["2024-06-12T11:00:00Z"])
+    second.add_tile(["2024-06-12T10:00:00"])
+    second.add_tile([None, None])
+    first.merge(second)
+    assert first.summary() == {
+        "started_at": None, "start_reason": "Tile acquisition times mix zoned and unzoned clocks",
+        "tiles_without_time": 1}
+
+
+def test_an_acquisition_with_no_readable_stamps_has_a_reason():
+    clock = AcquisitionClock()
+    clock.add_tile([])
+    assert clock.summary() == {"started_at": None,
+                               "start_reason": "No tiles carry a readable acquisition time",
+                               "tiles_without_time": 1}

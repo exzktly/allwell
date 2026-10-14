@@ -11,17 +11,21 @@ import zipfile
 
 import pytest
 
-from util.acquisition_record import (AcquisitionRecordError, new_record, read_record,
+from util.acquisition_record import (AcquisitionRecordError, new_record, new_timepoint, read_record,
                                      record_path, validate_against_archives,
                                      validate_record, write_record)
 
 
 def _record():
     record = new_record(source_files=["Plate.czi"])
-    record.update(pixel_size_um={"x": .65, "y": None}, tile_size_px={"x": 2048, "y": 1024},
-                  objective="10x", declared_overlap_percent={"x": 10, "y": 15},
-                  timepoints={"0h": {"started_at": "2026-10-14T10:00:00-04:00"},
-                              "24h": {"started_at": None}})
+    first = new_timepoint(started_at="2026-10-14T10:00:00-04:00")
+    first.update(pixel_size_um={"x": .65, "y": None}, tile_size_px={"x": 2048, "y": 1024},
+                 objective="10x", declared_overlap_percent={"x": 10, "y": 15})
+    later = new_timepoint()
+    later.update(pixel_size_um={"x": .32, "y": .33}, tile_size_px={"x": 512, "y": 768},
+                 objective="20x", declared_overlap_percent={"x": 5, "y": None},
+                 start_reason="No readable tile timestamps", tiles_without_time=4)
+    record["timepoints"] = {"0h": first, "24h": later}
     record["tiles"] = [dict(well=well, field=field, timepoint=token,
                             mosaic_xy_px=[0, -100] if field == "f0" else None,
                             stage_xy_um=[123.5, -200.5], source_file="Plate.czi")
@@ -55,11 +59,38 @@ def test_real_writer_reader_preserve_unknowns_zero_positions_and_provenance(tmp_
     assert record_path(tmp_path) == tmp_path / "in" / "acquisition.json"
     loaded = read_record(tmp_path)
     assert loaded == record
-    assert loaded["pixel_size_um"]["y"] is None
+    assert loaded["timepoints"]["0h"]["pixel_size_um"]["y"] is None
     assert loaded["timepoints"]["24h"]["started_at"] is None
     assert loaded["tiles"][0]["mosaic_xy_px"] == [0, -100]
     assert loaded["timepoints"]["0h"]["started_at"].endswith("-04:00")
     assert not list((tmp_path / "in").glob("__aw_tmp_*"))
+
+
+def test_each_timepoint_keeps_its_own_calibration_and_clock(tmp_path):
+    record = _record()
+    _archives(tmp_path, record)
+    write_record(tmp_path, record)
+    loaded = read_record(tmp_path)
+    assert loaded["timepoints"] == record["timepoints"]
+    assert loaded["timepoints"]["24h"]["pixel_size_um"] == {"x": .32, "y": .33}
+    assert loaded["timepoints"]["24h"]["tile_size_px"] == {"x": 512, "y": 768}
+    assert loaded["timepoints"]["24h"]["objective"] == "20x"
+    assert loaded["timepoints"]["24h"]["declared_overlap_percent"] == {"x": 5, "y": None}
+    assert loaded["timepoints"]["24h"]["tiles_without_time"] == 4
+    assert validate_against_archives(tmp_path, loaded).ok
+    loaded["timepoints"]["24h"]["pixel_size_um"]["x"] = 0
+    result = validate_record(loaded)
+    assert not result.ok and any("'24h'" in issue and "pixel_size_um.x" in issue
+                                 for issue in result.issues)
+
+
+def test_dataset_calibration_and_per_tile_clocks_are_refused():
+    record = _record()
+    record["pixel_size_um"] = {"x": .65, "y": .65}
+    record["tiles"][0]["acquired_at"] = "2026-10-14T10:00:00"
+    result = validate_record(record)
+    assert any("Calibration belongs to each timepoint" in issue for issue in result.issues)
+    assert any("shared acquisition time" in issue for issue in result.issues)
 
 
 def test_missing_corrupt_and_unsupported_records_are_three_distinct_states(tmp_path):
@@ -81,7 +112,7 @@ def test_invalid_metadata_does_not_replace_a_good_record(tmp_path):
     write_record(tmp_path, good)
     before = record_path(tmp_path).read_bytes()
     invalid = copy.deepcopy(good)
-    invalid["pixel_size_um"]["x"] = 0
+    invalid["timepoints"]["0h"]["pixel_size_um"]["x"] = 0
     with pytest.raises(AcquisitionRecordError, match="pixel_size_um.x"):
         write_record(tmp_path, invalid)
     assert record_path(tmp_path).read_bytes() == before
@@ -94,7 +125,7 @@ def test_atomic_replace_failure_preserves_old_content_and_cleans_staging(tmp_pat
     write_record(tmp_path, record)
     before = record_path(tmp_path).read_bytes()
     changed = copy.deepcopy(record)
-    changed["objective"] = "20x"
+    changed["timepoints"]["0h"]["objective"] = "20x"
 
     def cannot_publish(*args):
         raise OSError("simulated interrupted publish")
@@ -112,10 +143,10 @@ def test_atomic_replace_failure_preserves_old_content_and_cleans_staging(tmp_pat
 
 @pytest.mark.parametrize("change,fragment", [
     (lambda r: r.update(format_version=True), "format_version"),
-    (lambda r: r["pixel_size_um"].update(x=float("nan")), "pixel_size_um.x"),
-    (lambda r: r["pixel_size_um"].update(x=10 ** 400), "pixel_size_um.x"),
-    (lambda r: r["tile_size_px"].update(x=2.5), "tile_size_px.x"),
-    (lambda r: r["declared_overlap_percent"].update(x=101), "overlap_percent.x"),
+    (lambda r: r["timepoints"]["0h"]["pixel_size_um"].update(x=float("nan")), "pixel_size_um.x"),
+    (lambda r: r["timepoints"]["0h"]["pixel_size_um"].update(x=10 ** 400), "pixel_size_um.x"),
+    (lambda r: r["timepoints"]["0h"]["tile_size_px"].update(x=2.5), "tile_size_px.x"),
+    (lambda r: r["timepoints"]["0h"]["declared_overlap_percent"].update(x=101), "overlap_percent.x"),
     (lambda r: r["tiles"].append(copy.deepcopy(r["tiles"][0])), "Duplicate tile"),
     (lambda r: r["tiles"][0].update(timepoint="72h"), "undeclared timepoint"),
     (lambda r: r["tiles"][0].update(stage_xy_um=[True, 1]), "stage_xy_um"),
@@ -155,7 +186,7 @@ def test_record_extra_and_missing_wells_fields_and_times_are_all_named(tmp_path)
 
 def test_custom_filename_schema_is_used_without_numeric_token_normalisation(tmp_path):
     record = new_record()
-    record["timepoints"] = {"t0": {"started_at": None}}
+    record["timepoints"] = {"t0": new_timepoint()}
     record["tiles"] = [dict(well="A01", field="f01", timepoint="t0",
                             mosaic_xy_px=None, stage_xy_um=None)]
     path = tmp_path / "in" / "A01.zip"

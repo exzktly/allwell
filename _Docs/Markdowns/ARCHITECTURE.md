@@ -7140,9 +7140,11 @@ an absent record (`None`) from corrupt, unsupported or duplicate-key metadata
 `util.json_write.write_json_atomic`, so invalid metadata or a failed replacement
 preserves the preceding record. Extra provenance keys survive round trips.
 
-Format 1 contains `source_files`; nullable x/y `pixel_size_um`, `tile_size_px`,
-and `declared_overlap_percent`; nullable `objective`; `timepoints` keyed by exact
-filename tokens with nullable ISO 8601 `started_at`; and `tiles`, each containing
+Format 1 contains dataset-level `source_files`; `timepoints` keyed by exact
+filename tokens, each with nullable x/y `pixel_size_um`, `tile_size_px` and
+`declared_overlap_percent`, nullable `objective` and ISO 8601 `started_at`,
+nullable `start_reason`, and a nonnegative `tiles_without_time` count; and
+`tiles`, each containing
 canonical `well`, exact `field` and `timepoint`, nullable `mosaic_xy_px` and
 `stage_xy_um` coordinate pairs, and an optional declared `source_file`. Coordinate
 zeros are measured values. Missing metadata remains null, including individual
@@ -7180,9 +7182,16 @@ Metadata access is lazy: the initial header scan retains its one-position-per-
 timepoint seek budget. `TimeScan.instants_by_index` retains that representative
 position's absolute readings even when missing the first stamp or mixing zoned
 and unzoned stamps prevents calculating elapsed hours. Those instants do not
-claim the earliest start across all plate tiles. The dataset record's start-time
-aggregation remains unspecified in tracker R2b; no converter producer is wired
-until that distinction is resolved. Synthetic ZISRAW tests establish these
+claim the earliest start across all plate tiles. The dataset record uses one shared time per timepoint: the earliest recorded
+tile across published wells, with mixed zoned/unzoned readings refused and
+missing tile readings counted. No per-well or per-tile time is stored downstream.
+`CziReader.position_metadata` visits only the planes at a requested spatial tile
+using its existing channel/Z index. `AcquisitionClock` reduces those transient
+readings, counts a missing reading once per spatial tile, compares aware instants
+across offsets, preserves unzoned instants and refuses mixed offset presence.
+Disjoint well clocks merge into one acquisition clock; no raw readings survive
+in its summary. The initial header scan's sampled timing and seek budget remain
+unchanged. The converter integration is tracked in Section R. Synthetic ZISRAW tests establish these
 parser conventions; real ZEN tag population and coordinate comparability across
 acquisitions remain R8/Q7.
 

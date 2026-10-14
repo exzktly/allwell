@@ -1730,6 +1730,55 @@ class CziTileMetadata:
     acquired_at: str | None = None
 
 
+@dataclass
+class AcquisitionClock:
+    """Reduce transient plane readings to one shared acquisition start.
+
+    One add_tile call represents one (well, field, timepoint), even when that
+    tile has several channels or Z planes. Raw plane readings are not retained.
+    Different offsets remain comparable; mixing offset presence is refused.
+    """
+
+    earliest: datetime | None = None
+    clock_kinds: set[bool] = field(default_factory=set)
+    tiles_without_time: int = 0
+
+    def add_tile(self, instants) -> None:
+        stamps = []
+        for instant in instants:
+            if instant is None:
+                continue
+            try:
+                stamps.append(datetime.fromisoformat(instant.replace("Z", "+00:00")))
+            except ValueError:
+                continue
+        if not stamps:
+            self.tiles_without_time += 1
+        self.clock_kinds.update(stamp.tzinfo is not None for stamp in stamps)
+        if len(self.clock_kinds) > 1:
+            self.earliest = None
+        elif stamps:
+            self.earliest = min(stamps + ([self.earliest] if self.earliest else []))
+
+    def merge(self, other: AcquisitionClock) -> None:
+        """Combine disjoint published wells without assigning per-well times."""
+        self.tiles_without_time += other.tiles_without_time
+        self.clock_kinds.update(other.clock_kinds)
+        if len(self.clock_kinds) > 1:
+            self.earliest = None
+        elif other.earliest is not None:
+            self.earliest = min(self.earliest, other.earliest) if self.earliest else other.earliest
+
+    def summary(self) -> dict:
+        reason = None
+        if len(self.clock_kinds) > 1:
+            reason = "Tile acquisition times mix zoned and unzoned clocks"
+        elif self.earliest is None:
+            reason = "No tiles carry a readable acquisition time"
+        return {"started_at": self.earliest.isoformat() if self.earliest else None,
+                "start_reason": reason, "tiles_without_time": self.tiles_without_time}
+
+
 def _stage_xy_um(root: ET.Element) -> tuple[float, float] | None:
     """Read the two native stage tags, refusing absent or invalid axes."""
     axes: dict[str, list[float | None]] = {"StageXPosition": [],
@@ -1814,6 +1863,19 @@ class CziReader:
 
     def has_plane(self, scene: int, tile: int, t: int, c: int, z: int) -> bool:
         return (scene, tile, t, c, z) in self._index
+
+    def position_metadata(self, scene: int, tile: int, t: int) -> list[CziTileMetadata]:
+        """Transient readings for the planes at one spatial tile, no pixels.
+
+        Conversion uses every stored plane's reading so channel/Z ordering
+        cannot hide an earlier acquisition or an incompatible clock. Missing
+        channels are absent; a spatial tile with no planes returns an empty list.
+        """
+        if self._fh is None:
+            raise CziReadError("The CZI is not open; use CziReader as a context manager.")
+        return [self.read_tile_metadata(scene, tile, t, channel, z)
+                for channel in range(self._layout.size_c)
+                for z in self._z_planes.get((scene, tile, t, channel), ())]
 
     def read_tile_metadata(self, scene: int, tile: int, t: int, c: int,
                            z: int) -> CziTileMetadata:

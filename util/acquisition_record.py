@@ -47,12 +47,21 @@ def new_record(*, source_files=()) -> dict:
     return {
         "format_version": FORMAT_VERSION,
         "source_files": list(source_files),
+        "timepoints": {},
+        "tiles": [],
+    }
+
+
+def new_timepoint(*, started_at=None) -> dict:
+    """Calibration and one shared acquisition clock for a filename token."""
+    return {
+        "started_at": started_at,
+        "start_reason": None,
+        "tiles_without_time": 0,
         "pixel_size_um": {"x": None, "y": None},
         "tile_size_px": {"x": None, "y": None},
         "objective": None,
         "declared_overlap_percent": {"x": None, "y": None},
-        "timepoints": {},
-        "tiles": [],
     }
 
 
@@ -91,6 +100,18 @@ def _timepoints(payload, issues):
         if not _text(token) or not isinstance(metadata, dict) or "started_at" not in metadata:
             issues.append(f"Invalid timepoint {token!r}: expected started_at or null")
             continue
+        local_issues = []
+        _axes(metadata, "pixel_size_um", lambda v: _number(v) and v > 0, local_issues)
+        _axes(metadata, "tile_size_px", lambda v: type(v) is int and v > 0, local_issues)
+        _axes(metadata, "declared_overlap_percent", lambda v: _number(v) and 0 <= v <= 100, local_issues)
+        if "objective" not in metadata or (metadata["objective"] is not None and not _text(metadata["objective"])):
+            local_issues.append("objective must be a nonempty name or null")
+        if "start_reason" not in metadata or (metadata["start_reason"] is not None and not _text(metadata["start_reason"])):
+            local_issues.append("start_reason must be a nonempty reason or null")
+        missing = metadata.get("tiles_without_time")
+        if type(missing) is not int or missing < 0:
+            local_issues.append("tiles_without_time must be a nonnegative integer")
+        issues.extend(f"Timepoint {token!r}: {issue}" for issue in local_issues)
         start = metadata["started_at"]
         if start is None:
             continue
@@ -122,6 +143,8 @@ def _tiles(payload, sources, timepoints, issues):
         if canonical_well_label(well) != well:
             issues.append(f"Tile {index} well {well!r} must be a canonical plate label")
         key = well, field, token
+        if "acquired_at" in tile or "started_at" in tile:
+            issues.append(f"Tile {key!r} must use its timepoint's shared acquisition time")
         if key in seen:
             issues.append(f"Duplicate tile identity {key!r}")
         seen.add(key)
@@ -157,11 +180,8 @@ def validate_record(payload) -> AcquisitionValidation:
         sources = []
     elif len(set(sources)) != len(sources):
         issues.append("source_files contains duplicate names")
-    _axes(payload, "pixel_size_um", lambda v: _number(v) and v > 0, issues)
-    _axes(payload, "tile_size_px", lambda v: type(v) is int and v > 0, issues)
-    _axes(payload, "declared_overlap_percent", lambda v: _number(v) and 0 <= v <= 100, issues)
-    if "objective" not in payload or (payload["objective"] is not None and not _text(payload["objective"])):
-        issues.append("objective must be a nonempty name or null")
+    if any(key in payload for key in ("pixel_size_um", "tile_size_px", "objective", "declared_overlap_percent")):
+        issues.append("Calibration belongs to each timepoint, not the dataset")
     timepoints = _timepoints(payload, issues)
     _tiles(payload, sources, timepoints, issues)
     return AcquisitionValidation(tuple(issues))

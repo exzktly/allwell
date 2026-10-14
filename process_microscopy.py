@@ -3163,7 +3163,6 @@ def write_pipeline_info(
     """Serialize the run metadata sidecar to ``<output_dir>/pipeline_info.json``."""
     if segmentation_method != "stardist_seeded_watershed_cell":
         cytoplasm_token = ""
-    check_acquisition_inputs(input_dir, filename_schema, filename_sep)
     fields = [f.strip() for f in filename_schema.split(":")]
     info = {
         "schema_version": PIPELINE_INFO_SCHEMA_VERSION,
@@ -3287,6 +3286,7 @@ def main() -> None:
                 f"or use --segmentation_method=cellpose_labelfree."
             )
     log.info("Schema   : %s  (sep=%r)", args.filename_schema, sep)
+    check_acquisition_inputs(input_dir, args.filename_schema, sep)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 

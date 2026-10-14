@@ -65,3 +65,43 @@ def test_remote_entrypoint_checks_record_before_processing(tmp_path):
     except AcquisitionRecordError as caught:
         error = caught
     assert error is not None and 'missing tile' in str(error)
+
+
+@pytest.mark.parametrize("invalid", ["coverage", "corrupt", "pending"])
+def test_actual_cli_refuses_invalid_record_before_pixel_setup(tmp_path, monkeypatch, invalid):
+    import process_microscopy as pm
+    import sys
+    from util.acquisition_record import publication_marker
+    root = tmp_path / "dataset"
+    record = _dataset(root)
+    path = root / "in" / "acquisition.json"
+    if invalid == "coverage":
+        record["tiles"].pop()
+        write_record(root, record)
+    elif invalid == "corrupt":
+        path.write_text("{invalid")
+    else:
+        publication_marker(path).write_text("{}")
+    monkeypatch.setattr(sys, "argv", ["process_microscopy.py", "--input_dir", str(root / "in"),
+                                     "--output_dir", str(root / "out")])
+    monkeypatch.setattr(pm._suspend, "install_handlers", lambda **kw: None)
+    monkeypatch.setattr(pm._suspend, "watch_parent", lambda *a, **kw: None)
+    reached = []
+
+    class ReachedSetup(RuntimeError):
+        pass
+
+    def setup(*args):
+        reached.append(True)
+        raise ReachedSetup()
+
+    monkeypatch.setattr(pm, "plan_parallelism", setup)
+    error = None
+    try:
+        pm.main()
+    except AcquisitionRecordError as caught:
+        error = caught
+    except ReachedSetup:
+        pass
+    assert not reached, "invalid acquisition metadata reached pixel setup"
+    assert error is not None

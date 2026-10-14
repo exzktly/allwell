@@ -36,6 +36,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from services.remote_commands import unpack_login_shell_command
+
 
 class FakeRemote:
     """A temporary directory standing in for the worker host's ``$HOME``."""
@@ -47,7 +49,9 @@ class FakeRemote:
         self.commands: list[str] = []
         #: Every rsync, as ``(sources, destination)`` after alias translation.
         self.transfers: list[tuple[list[str], str]] = []
-        #: The argv of each pipeline launch.
+        #: The argv of each pipeline launch, its last element unpacked to the
+        #: script the login shell runs (``pack_for_login_shell``). Unpacking
+        #: raises on a launch that was not packed, so that is checked too.
         self.launched: list[list[str]] = []
 
     # ── what the host holds ──────────────────────────────────────────────
@@ -246,7 +250,8 @@ class FakeRemote:
             if not any(argv[:len(pre)] == list(pre)
                        for pre in (ssh_prefix, ssh_prefix_tty)):
                 return self._REAL_POPEN(argv, *a, **kw)
-            self.launched.append(argv)
+            self.launched.append(
+                argv[:-1] + [unpack_login_shell_command(argv[-1])])
             if on_launch is not None:
                 return on_launch(argv)
             raise AssertionError(

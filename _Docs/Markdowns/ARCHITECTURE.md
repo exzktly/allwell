@@ -8268,9 +8268,7 @@ per-axis noise in each acquisition and checks near and far predictions within
 planted-outlier tests require rejection. The uncertainty assumes independent
 isotropic residuals and treats the prediction input as fixed; it excludes new
 measurement noise in that input and stage-calibration uncertainty, and is not a
-guaranteed bound. The scientific self-review is recorded in
-`NANOWELL_GEOMETRY_REVIEW.md`; calibration against measured stage data remains
-absent.
+guaranteed bound. It has not been calibrated against measured stage data.
 
 Both geometry modules are in the remote manifest and currently have only test
 callers. They do not enable nanowell processing in Analyze or change outputs.

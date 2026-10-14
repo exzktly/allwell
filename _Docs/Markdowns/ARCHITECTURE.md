@@ -9312,6 +9312,12 @@ nothing said, while the record on disk still stated the plate was unfinished. A
 *new* run of the same directory clears the flag, because `_index_upsert` builds
 a fresh entry: the dismissal was about the run that had been offered.
 
+**A forced run is never made incremental.** `resume_aware_spec` returns a
+spec with `force` set unchanged: Force means recompute from scratch — the resume
+message itself tells the user to tick it for that — and on a remote run an
+incremental staging under it uploaded nothing for wells already complete
+locally, so Force did nothing on any input with an unfinished run behind it.
+
 **The resume message names the cause it found.** `resume_aware_spec` fires on
 every outcome in `UNFINISHED_OUTCOMES` plus a record left open, which is four
 different events — a suspend, a stop, a failure, and an app that was killed. One
@@ -10498,7 +10504,12 @@ downstream has nothing to act on. `_plan_staging` therefore takes the same force
 list, canonicalised through `pipeline.well_skip._canonical_force_wells`, and
 stages a forced well in full before the incremental diff is consulted at all;
 `services.pipeline_runner` passes it from `opts["force_wells"]`, the same key
-`build_pipeline_args` reads. Planning also logs what it concluded (`planned N
+`build_pipeline_args` reads. **Force on the whole plate turns the diff off.**
+`services.pipeline_runner` stages with `incremental` only when `force` is not
+set: a forced run uploads every well whole, because the pipeline's own
+`--force` cannot reprocess a well that was dropped before the upload, and
+`incremental` can arrive on a forced run from more than one place (the form, a
+loose-image append, a resume). Planning also logs what it concluded (`planned N
 well archive(s) to upload, M already up to date`) — it emits a line only for a
 well it drops or rewrites, so a plate whose remaining wells all stage unchanged
 went silent right after the two or three it did report, which reads as a stall

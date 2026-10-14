@@ -26,7 +26,7 @@ from services.remote_runner import (
     repo_root,
     stage_local_zips,
 )
-from services.remote_commands import _compose_remote_cmd
+from services.remote_commands import _compose_remote_cmd, unpack_login_shell_command
 from services.remote_conda import (
     _CONDA_ACTIVATE_SNIPPET,
     _conda_run_prefix,
@@ -894,7 +894,8 @@ def test_spawn_skips_pipeline_when_remote_has_all_wells(host, tmp_path, monkeypa
     # And the actual remote command should be ``true`` (skipping the
     # whole conda-run / process_microscopy launch).
     ssh_argv = captured["argv"]
-    remote_cmd = ssh_argv[-1]  # last element is the remote command
+    # The last element is the remote command, packed for the command line.
+    remote_cmd = unpack_login_shell_command(ssh_argv[-1])
     assert "exec true" in remote_cmd
     assert "process_microscopy" not in remote_cmd
 
@@ -927,7 +928,7 @@ def test_spawn_runs_pipeline_when_remote_is_partial(host, tmp_path, monkeypatch,
     # And the actual remote command should still be the pipeline,
     # not the no-op ``true``.
     ssh_argv = captured["argv"]
-    remote_cmd = ssh_argv[-1]
+    remote_cmd = unpack_login_shell_command(ssh_argv[-1])
     assert "process_microscopy" in remote_cmd
 
 
@@ -955,7 +956,7 @@ def test_spawn_runs_pipeline_when_remote_is_empty(host, tmp_path, monkeypatch, s
     assert "FULL CACHE HIT" not in blob
     assert "0/1 well" in blob
     ssh_argv = captured["argv"]
-    remote_cmd = ssh_argv[-1]
+    remote_cmd = unpack_login_shell_command(ssh_argv[-1])
     assert "process_microscopy" in remote_cmd
 
 

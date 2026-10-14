@@ -33,6 +33,7 @@ import pytest
 import tifffile
 
 from process_microscopy import correct_single_frame
+from services.remote_commands import unpack_login_shell_command
 from pipeline.empty_well import (
     build_background_models,
     _empty_well_field,
@@ -203,7 +204,8 @@ def test_a_re_run_still_uploads_the_blank_it_no_longer_needs_to_process(tmp_path
     drivers: list[str] = []
     import unittest.mock as mock
     with mock.patch.object(subprocess, "Popen",
-                           lambda argv, **kw: drivers.append(argv[-1]) or proc):
+                           lambda argv, **kw: drivers.append(
+                               unpack_login_shell_command(argv[-1])) or proc):
         import threading
         worker = threading.Thread(target=p._run_batches, daemon=True)
         worker.start()
@@ -572,7 +574,8 @@ def _drive(tmp_path, wells, *, complete=(), argv=None, batch_size=1):
         (out / f"measurements_{well}.csv").write_text(f"well\n{well}\n")
 
     with mock.patch.object(subprocess, "Popen",
-                           lambda a, **k: drivers.append(a[-1]) or proc):
+                           lambda a, **k: drivers.append(
+                               unpack_login_shell_command(a[-1])) or proc):
         import threading
         worker = threading.Thread(target=p._run_batches, daemon=True)
         worker.start()

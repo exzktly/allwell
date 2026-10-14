@@ -48,6 +48,8 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # process_microscopy at module top level, so the remote needs the package.
     "util/__init__.py",
     "util/aw_safe.py",
+    # Versioned acquisition metadata is stdlib-only and shared by input readers.
+    "util/acquisition_record.py",
     # Nanowell addressing and geometry are Qt-free; the manifest mirrors
     # these packages even while their only callers are synthetic tests.
     "util/nanowell_address.py",

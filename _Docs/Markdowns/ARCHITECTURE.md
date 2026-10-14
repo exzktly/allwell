@@ -7132,6 +7132,33 @@ a third copy of those three lines under a comment saying it mirrored the first.
 
 ### 6.2a The CZI converter
 
+
+**Acquisition-record primitive.** `util/acquisition_record.py` is stdlib-only and
+stores versioned JSON at `<dataset>/in/acquisition.json`. The reader distinguishes
+an absent record (`None`) from corrupt, unsupported or duplicate-key metadata
+(`AcquisitionRecordError`). The writer validates before calling
+`util.json_write.write_json_atomic`, so invalid metadata or a failed replacement
+preserves the preceding record. Extra provenance keys survive round trips.
+
+Format 1 contains `source_files`; nullable x/y `pixel_size_um`, `tile_size_px`,
+and `declared_overlap_percent`; nullable `objective`; `timepoints` keyed by exact
+filename tokens with nullable ISO 8601 `started_at`; and `tiles`, each containing
+canonical `well`, exact `field` and `timepoint`, nullable `mosaic_xy_px` and
+`stage_xy_um` coordinate pairs, and an optional declared `source_file`. Coordinate
+zeros are measured values. Missing metadata remains null, including individual
+scale axes; missing timezones are not invented. Producers must supply values in
+the explicit units and cannot treat unlabelled native overlap as percent.
+
+`validate_against_archives` uses ZIP member headers and the supplied filename
+schema/separator to compare complete well/field/timepoint coverage. Channel
+planes share a tile; opaque field/timepoint spellings are not numerically merged.
+The pipeline's input-image predicate excludes metadata, directories and macOS
+sidecars. Missing/extra wells or tiles, unreadable archives and bad image names
+are explicit issues. An unreadable well's field coverage is not fabricated as
+empty. This primitive is currently exercised only by tests; the converter does
+not yet write or carry the record automatically.
+
+
 A Zeiss plate scan arrives as one `.czi` holding every scene, mosaic tile,
 channel, Z-plane and timepoint of the run. *Convert CZI*
 (`datasets/czi_import/`, §6b) is the standalone converter for it, structured

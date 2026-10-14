@@ -2001,6 +2001,7 @@ def test_required_files_list_is_what_we_promised():
         # parsing, timepoint parsing, logged-swallow).
         "util/__init__.py",
         "util/aw_safe.py",
+        "util/acquisition_record.py",
         "util/nanowell_address.py",
         # One os.scandir in place of a stat per directory entry; client-side
         # only, listed because the manifest mirrors every util/ file.

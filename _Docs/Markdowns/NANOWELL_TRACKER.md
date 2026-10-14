@@ -566,19 +566,36 @@ square at `(0, 0)`:
  r=-1      ( 0,-1)   (+1,-1)
 ```
 
-- `q` counts along the lattice direction nearest image east; `r` along the
-  direction 60° counter-clockwise from it (as seen on screen). Position =
-  origin + q·a₁ + r·a₂.
+- **Points are image coordinates: x to the right, y down.** "Counter-clockwise"
+  always means counter-clockwise *as seen on screen*; with y down, rotating
+  `(x, y)` by φ counter-clockwise on screen is
+  `(x·cosφ + y·sinφ, −x·sinφ + y·cosφ)` — east `(1, 0)` turned 90° is
+  `(0, −1)`, which is up on screen.
+- **a₁** is the lattice vector whose direction is nearest image east; **a₂** is
+  a₁ turned 60° counter-clockwise on screen. Position = origin + q·a₁ + r·a₂.
 - **Ring** `k = (|q| + |r| + |q + r|) / 2` — the number of steps from the
   centre. Ring *k* holds 6*k* sites.
-- **Label** `k.i`, where *i* runs 0 … 6*k* − 1 counter-clockwise from east.
-  `(q, r)` is the join key everywhere; the label is for people. The pair is
-  stored, the label is derived, and `util/nanowell_address.py` holds both
-  directions as exact inverses.
+- **Within-ring index** *i*, 0 … 6*k* − 1, counter-clockwise from east. With
+  the six directions in counter-clockwise order
+  `D = [(1,0), (0,1), (−1,1), (−1,0), (0,−1), (1,−1)]`, the corners are
+  `C_j = k·D_j`, and the ring is walked from `C_0` in *k* straight steps along
+  `D_(j+2 mod 6)` from each corner `C_j`: `i = j·k + s`, position
+  `C_j + s·D_(j+2 mod 6)`, `s` in 0 … *k* − 1. Checked by script:
+  - ring 1: `(1,0)=1.0, (0,1)=1.1, (−1,1)=1.2, (−1,0)=1.3, (0,−1)=1.4, (1,−1)=1.5`;
+  - ring 2: `(2,0)=2.0, (1,1)=2.1, (0,2)=2.2, (−1,2)=2.3, (−2,2)=2.4,
+    (−2,1)=2.5, (−2,0)=2.6, (−1,−1)=2.7, (0,−2)=2.8, (1,−2)=2.9, (2,−2)=2.10,
+    (2,−1)=2.11`.
+- **Label** `k.i`; the square is `0.0`. `(q, r)` is the join key everywhere;
+  the label is for people. The pair is stored, the label is derived, and
+  `util/nanowell_address.py` holds both directions as exact inverses; a
+  malformed label raises `ValueError` naming it.
 - The scheme is the same for both plate formats; the 50 µm format simply has
   more rings.
-- A square lattice, if one is ever used, keeps the same integer coordinates;
-  only the ring rule changes (`max(|i|, |j|)`, 8*k* per ring).
+- A square lattice, if one is ever used, keeps the same integer coordinates,
+  with a₂ turned 90° from a₁. Ring `max(|i|, |j|)` holds 8*k* sites, indexed
+  counter-clockwise from `(k, 0)`: up the right edge to `(k, k)`, left along the
+  top to `(−k, k)`, down the left edge to `(−k, −k)`, right along the bottom to
+  `(k, −k)`, then up to `(k, −1)`.
 
 #### 3.4.2 Why orientation is unambiguous
 
@@ -612,9 +629,11 @@ and the method used is recorded on every (well, timepoint):
 4. **Otherwise the (well, timepoint) is `unaddressed`**, with the reason, and
    no address is written for it.
 
-When the fiducial and the array centre are both available they must agree; a
-disagreement is recorded (`origin_conflict`) and shown in the Array QC view
-rather than resolved silently.
+When the fiducial and the array centre are both available they must agree. On
+a disagreement the fiducial is used — it is direct evidence that has already
+beaten its runner-up by a margin — and the result carries
+`agreement = "conflict"`, which the Array QC view shows; it is never resolved
+silently or dropped.
 
 #### 3.4.4 The roster
 
@@ -835,9 +854,10 @@ These come from CLAUDE.md §6, where each was learned the hard way.
 2. **Check the base before merging, not after.** After a merge, verify the work
    reached `main` with `git cat-file -e origin/main:<a file the PR added>`; the
    merge notification says "merged" either way.
-3. **Open each PR when its section's rows are done**, not before — pushing to a
-   branch with no PR is free, and every push to an open PR bills a CI run.
-   While PR N is in review, work continues on PR N+1's branch.
+3. **Open each PR when its section's rows are done and the work has been
+   reviewed (§4.2)**, not before — pushing to a branch with no PR is free, and
+   every push to an open PR bills a CI run. While PR N is in review, work
+   continues on PR N+1's branch.
 4. **Review fixes to PR N reach the branches above it by merge**, never rebase,
    once anything above has been pushed: merge PR N's branch into N+1, then N+1
    into N+2, one push per branch per round.
@@ -853,6 +873,35 @@ These come from CLAUDE.md §6, where each was learned the hard way.
 8. **Docs move with the code.** Each PR's close-out row updates the
    `ARCHITECTURE.md` section it made true, and `README_WellViewer.md` when a
    user can see the change, then trims §3 here to a pointer.
+
+### 4.2 Working a section, and handing it back
+
+Any worker — a later session, or another assistant — works a section the same
+way:
+
+1. Read `CLAUDE.md`, then this file's opening rules and the §3 parts its rows
+   cite.
+2. Work on the section's branch from §4; commit and push as you go. Never
+   create another branch, rebase, amend or force-push a published branch.
+3. Touch nothing outside the section's rows. A finding outside them becomes a
+   row, not a change.
+4. Before handing back, run the checks `CLAUDE.md` §2 lists: the guard family
+   as a set, the section's test files, `ruff check .`, and the full fast lane
+   after the last commit.
+5. **Do not open the pull request.** A section's work is reviewed first; the PR
+   opens after review, per §4.1.
+6. Hand back a report with:
+   - the commits, SHA and subject, confirmed pushed (or `git format-patch
+     origin/main..HEAD` output if pushing was not possible);
+   - each row's final state with its evidence;
+   - each check run, its counts, and the commit it ran against;
+   - every point where this file was silent or ambiguous, and what was chosen
+     (also written into the row);
+   - anything done differently, anything doubted, and any guard that pushed
+     back;
+   - the row counts from the command at the top of this file.
+
+   A check that was not run is reported as not run.
 
 ---
 
@@ -879,19 +928,19 @@ Answers are written into the row. Rows that depend on an answer say so.
 
 | # | Item | Place | State | Evidence |
 |---|---|---|---|---|
-| G1 | Address type `(q, r)`, ring, label `k.i` and its parser as exact inverses; within-ring ordering counter-clockwise from east; square-lattice variant | `util/nanowell_address.py` | `todo` | |
-| G2 | Lattice fit from a point set: basis vectors from nearest-neighbour displacement clustering, robust to 30 % missing points and outliers; returns pitch, angle, RMS residual, inlier mask | `pipeline/nanowell_lattice.py` | `todo` | |
-| G3 | Index points to integer `(q, r)` with sub-pixel residual; points more than a quarter pitch from any site are outliers, not forced onto one | `pipeline/nanowell_lattice.py` | `todo` | |
-| G4 | Basis convention (a₁ nearest east, a₂ +60° on screen) under rotations −25°…+25° and a mirror flag | `pipeline/nanowell_lattice.py` | `todo` | |
-| G5 | Origin chain (fiducial → array centre → plate-rigid prediction → `unaddressed`), recording method and agreement; never guesses | `pipeline/nanowell_lattice.py` | `todo` | |
-| G6 | Array-boundary circle fit from a partial arc; roster = sites inside; roster identical for shifted observation windows of one array | `pipeline/nanowell_lattice.py` | `todo` | |
-| G7 | Ownership per axis: owner tile per site, and the set of sites no tile wholly contains (the fused set), from tile rectangles and the nanowell diameter | `pipeline/nanowell_lattice.py` | `todo` | |
-| G8 | Plate-rigid transform between two timepoints from the anchored wells' origins in stage coordinates (rotation + translation, robust to outlier wells); prediction for a well whose square is hidden | `pipeline/nanowell_lattice.py` | `todo` | |
-| G9 | Synthetic point-set generator: hex array in both formats, central square, circular boundary, bubble holes, rotation, translation, a plate moved between timepoints | `tests/_nanowell_synth.py` | `todo` | |
-| G10 | The discriminating fixture: two observations of one array, the second shifted 1.5 pitches and rotated 3°, window centre not on the square — every site keeps its address. Mutation: origin = "site nearest window centre" must fail it | `tests/test_nanowell_addressing.py` | `todo` | |
-| G11 | Plate-rigid fixture: a plate moved by more than a pitch between timepoints with one well's square hidden; G8 recovers its address. Mutation: carry the previous timepoint's origin unchanged — must fail | `tests/test_nanowell_addressing.py` | `todo` | |
-| G12 | Manifest entries for the new `util/` and `pipeline/` modules; confirm no guard rejects a module whose only importer is tests | `services/remote_manifest.py` | `todo` | |
-| G13 | Close-out: guard family, ruff, touched tests, scientific review, ARCHITECTURE section for the addressing, version, PR opened with stack note | — | `todo` | |
+| G1 | Address type `NanowellAddress(q, r)` (frozen), `ring`, `label` `k.i` and `parse_label` as exact inverses, per §3.4.1, for hex and square lattices; stdlib only. Round trip tested exhaustively to ring 45 (the 50 µm format reaches ~40) | `util/nanowell_address.py` | `todo` | |
+| G2 | `fit_lattice(points, *, expected_pitch=None, kind="hex"\|"square"\|"auto")` → frozen result: `ok`, `reason`, `a1`, `a2`, `pitch`, `angle_deg`, `kind`, `rms_residual`, `inlier_mask`, and the basis's departure from ideal (a₁–a₂ angle, length ratio). Seeded from nearest-neighbour displacement vectors (`scipy.spatial.cKDTree`, antipodes folded, clustered), refined as a general 2×2 basis plus origin by least squares on cleanly indexed points. Succeeds with 30 % of points missing plus 10 % random outliers; on failure `ok=False` with a reason, never a fabricated lattice. `auto` decides hex or square from nearest-neighbour angles and says which | `pipeline/nanowell_lattice.py` | `todo` | |
+| G3 | `index_points(points, fit, origin)` → integer `(q, r)`, residual, outlier flag (residual over a quarter pitch). Outliers are not forced onto a site; two points on one site keep the nearer and mark the other | `pipeline/nanowell_lattice.py` | `todo` | |
+| G4 | Basis convention per §3.4.1 under rotations −25°…+25° in 5° steps, with a `mirrored` flag (a mirroring camera) under which the counter-clockwise rule holds in the unmirrored frame; valid to ±30° (hex) / ±45° (square) | `pipeline/nanowell_lattice.py` | `todo` | |
+| G5 | `resolve_origin(...)`: optional inputs — fiducial candidate (site, score, runner-up score), array-centre estimate (G6), plate-rigid prediction with uncertainty (G8). Frozen result: `status` (`anchored` / `unaddressed`), `origin_site`, `method` (`fiducial` / `array_centre` / `plate_rigid` / none), `agreement` (`agree` / `conflict` / `single_source`), `reason`. Order and conflict rule per §3.4.3; the plate-rigid prediction is used only when its uncertainty is under half a pitch; never guesses | `pipeline/nanowell_lattice.py` | `todo` | |
+| G6 | `fit_array_boundary(site_xy)`: circle through the outermost site centres, robust to seeing as little as 120° of arc; returns centre, radius, arc coverage, status. The array-centre estimate is its centre snapped to the nearest site. `roster(fit, origin, radius)`: every `(q, r)` whose centre lies within radius + 0.25·pitch; identical for shifted observation windows of one array | `pipeline/nanowell_lattice.py` | `todo` | |
+| G7 | `assign_owners(site_xy, nanowell_diameter, tiles, margin)` over axis-aligned tile rectangles with ids: owner = a tile holding the whole disk plus margin, nearest tile centre on a tie; sites no tile wholly holds are returned as the fused set, never dropped. Tested: overlap ≥ diameter + 2·margin on both axes gives an empty fused set; a smaller overlap gives exactly the seam sites the test computes independently | `pipeline/nanowell_lattice.py` | `todo` | |
+| G8 | `fit_plate_rigid(origins_a, origins_b)` (well → origin in stage coordinates at two timepoints): rotation + translation, no scale (2-D Kabsch), robust to outlier wells; needs ≥ 3 wells, else `ok=False` with a reason; per-well residuals and RMS. `predict_origin(transform, origin_a)` → position plus an uncertainty derived from the residuals | `pipeline/nanowell_lattice.py` | `todo` | |
+| G9 | Seeded synthetic point-set generator: hex array of radius R in both formats (100 µm / ~172 µm pitch and 50 µm / ~86 µm), square flagged at `(0, 0)`, circular boundary, bubble holes (removed discs of sites), dropouts, outliers, rotation, translation, mirror, window clipping, and a plate of wells moved rigidly between two timepoints | `tests/_nanowell_synth.py` | `todo` | |
+| G10 | The discriminating fixture: two observations of one array, the second shifted 1.5 pitches and rotated 3°, window centre not on the square — every site keeps its address. Mutation: origin = "site nearest window centre" must fail with an `AssertionError` that says why | `tests/test_nanowell_addressing.py` | `todo` | |
+| G11 | Plate-rigid fixture: a plate moved by more than a pitch between timepoints with one well's square hidden; G8 recovers its addresses. Mutation: carry the previous timepoint's origin unchanged — must fail | `tests/test_nanowell_addressing.py` | `todo` | |
+| G12 | Both new modules in `_REQUIRED_REMOTE_FILES` (`services/remote_manifest.py`); confirm `tests/test_a_module_lives_at_its_widest_use.py` and `tests/test_first_party_imports_resolve.py` accept a module whose only importers are tests — if one does not, report it rather than work around it | `services/remote_manifest.py` | `todo` | |
+| G13 | Close-out per §4.2: checks; an ARCHITECTURE §6 section describing the addressing and `pipeline/nanowell_lattice.py` as they exist; one patch bump in `version.py` (after `git diff origin/main -- version.py`); §3.4 here trimmed to a pointer where ARCHITECTURE now holds it; report handed back. The PR opens after review | — | `todo` | |
 
 ### Section R — The acquisition record (PR 2)
 

@@ -85,9 +85,9 @@ These are the user's statements. They outrank anything inferred below.
 - Nanowells are usually **100 µm in diameter**; an alternative plate format has
   **50 µm** nanowells. Imaged at **10x**, about **1,100 nanowells per well** in
   the 100 µm format.
-- **Each well is imaged as a 5×5 grid of tiles with 10 % overlap**, as set in
-  the acquisition software. The tiles must be registered and assembled at the
-  start of each well's analysis.
+- **Each well is imaged as a grid of overlapping tiles** — 5×5 with 10 %
+  overlap in the current experiments, set in the acquisition software. The
+  tiles must be registered and assembled at the start of each well's analysis.
 - **The CZI file records each tile's position.** The converter may need
   changing to record it.
 - **In phase contrast, nanowells appear light and the lattice between them
@@ -100,8 +100,15 @@ These are the user's statements. They outrank anything inferred below.
 - Cells are **15–30 µm**. **Every timepoint has phase contrast; only some have
   fluorescence. Label-free analysis is critical.**
 - **The plate may be removed from the microscope between timepoints**, and the
-  software must support that. Separate acquisitions will probably be merged
-  across time with the Datasets tools.
+  software must support that. Separate acquisitions are merged across time with
+  the Datasets tools, **on the raw images, before analysis**, and the user wants
+  **a field to enter the time gap explicitly** when concatenating.
+- Both CZI layouts occur: **one CZI holding every well**, and **one CZI per
+  scene** (ZEN's Split Scenes export). The existing reader handles both
+  (`pipeline/czi_set.py`).
+- **The tile plan changes between experiments.** Nothing about the grid — its
+  size, its overlap, its positions — may be assumed; it is read from each
+  dataset.
 - The goal: an addressing scheme anchored on the central square that lets the
   same nanowell be compared across timepoints (cell count, brightness), per-
   nanowell metrics such as fold change over time, and comparison of those
@@ -111,10 +118,11 @@ These are the user's statements. They outrank anything inferred below.
 ### 1.2 Numbers derived from those facts (inferred, not measured)
 
 Arithmetic on the reported numbers, so later measurements have something to be
-checked against. Each line states what it assumes. None of these values is
-hard-coded anywhere: pixel size and tile positions are **read from the CZI**,
-and the pitch, radius and orientation are **measured from the images**; these
-are sanity bounds.
+checked against. Each line states what it assumes, and the tile figures use the
+current experiments' 5×5 grid at 10 % overlap — the plan changes between
+experiments. None of these values is hard-coded anywhere: pixel size, grid and
+tile positions are **read from the CZI**, and the pitch, radius and orientation
+are **measured from the images**; these are sanity bounds.
 
 - **Pixel scale.** For illustration, a 6.5 µm camera pixel with no extra
   magnification gives 0.65 µm/px at 10x. A 100 µm nanowell is then about
@@ -129,8 +137,8 @@ are sanity bounds.
   (~86 µm), the same array area holds about **4,400 sites**.
 - **Rings.** With the square at the centre, a circular array of 1,100 sites
   reaches about **17–20 rings**; 4,400 sites reach about **35–40**.
-- **Overlap is a per-axis length, and it decides the design.** With 10 %
-  overlap, the overlap along an axis is 0.1 × the tile's extent on that axis.
+- **Overlap is a per-axis length, and it decides the design.** With the
+  current 10 % overlap, the overlap along an axis is 0.1 × the tile's extent on that axis.
   For every nanowell to lie wholly inside at least one tile, that overlap must
   be at least the nanowell diameter plus a margin for position error — call it
   *d* + 20 µm. So the tile must be at least **1.2 mm** along *both* axes for the
@@ -233,8 +241,10 @@ The user's "never skipped" is honoured by the **roster**: every nanowell in the
 array has a row at every timepoint, whatever its state. Rows are never dropped;
 metrics inside a row are undefined when they cannot be measured.
 
-The same rule governs merging across time: a timepoint whose real acquisition
-time is unknown is never given an invented one (§3.0.3).
+The same rule governs merging across time: a merged timepoint's position in time
+comes from the gap the user entered or from recorded acquisition times, and the
+merge records which (§3.0.3). It is never silently derived from a cadence that
+does not exist.
 
 ### 2.5 Tests must be able to tell a right answer from a wrong one
 
@@ -259,8 +269,11 @@ Its findings become rows.
 ### 3.0 From the microscope to one dataset
 
 Because the plate leaves the microscope between timepoints, each timepoint is a
-separate acquisition and a separate CZI. Two things must happen before the
-nanowell analysis can run, and neither exists today.
+separate acquisition and a separate CZI — or a separate Split Scenes folder of
+CZIs. Reading either shape already works: `pipeline/czi_set.py` treats one file
+holding every scene and a folder of one-scene files as the same plate (it
+refuses only ZEN's numbered *file parts*, a third shape, by name). Two things
+must happen before the nanowell analysis can run, and neither exists today.
 
 #### 3.0.1 The converter records where and when each tile was taken
 
@@ -305,10 +318,12 @@ this use case it refuses at three separate points, all confirmed in code:
 2. **Dataset 1 must have at least two timepoints.** `concatenate_compute._interval_hours`
    (`:233-240`) refuses a single-timepoint dataset 1, and every acquisition here
    is one timepoint. The very first merge — t0 plus t1 — is refused.
-3. **The time offset is guessed, not read.** `compute_offset` (`:262-272`)
-   places dataset 2's first timepoint at dataset 1's last plus dataset 1's
-   median interval. For acquisitions taken whenever the plate was put back,
-   that invents the elapsed time.
+3. **The time gap is guessed, and the user cannot say otherwise.**
+   `compute_offset` (`:262-272`) places dataset 2's first timepoint at dataset
+   1's last plus dataset 1's median interval, and the page
+   (`datasets/concatenate/view.py`) has no field to override it. For
+   acquisitions taken whenever the plate was put back, that invents the elapsed
+   time.
 
 It also writes a fresh destination every time and leaves both sources
 untouched, so a timelapse built one timepoint at a time is copied in full at
@@ -316,31 +331,66 @@ every step (Q9).
 
 #### 3.0.3 What Concatenate will do
 
-- **Use recorded time when both datasets carry it.** Dataset 2 is offset by the
-  difference between the two acquisitions' recorded starts; its labels are named
-  by `pipeline.timepoints`' existing naming rules (which already refuse to round
-  a reading further than its jitter allows) and rendered in dataset 1's format.
-  An overlap is refused. The median-interval rule stays exactly as it is for
-  datasets without records, including its refusal of a single-timepoint
-  dataset 1 — there it is still the only information available.
-- **Accept unanalysed datasets** — `in/` plus an acquisition record, no `out/`.
-  Compatibility is then checked from the two records (filename schema, channels,
-  pixel size, tile size, grid), and raw + raw gives a raw destination.
-- **Accept analysed + unanalysed.** The destination keeps dataset 1's outputs,
-  and dataset 2's timepoints are left for an incremental Analyze run, which
-  processes exactly those (incremental runs already skip done units).
+**A time-gap field.** The page gains one field beside the dataset row: *dataset
+2's first timepoint comes __ after dataset 1's last*. It reads any duration
+`util.timepoint.parse_hours` already reads (`24`, `24h`, `1d`, `1d2h30m`), must
+be positive, and is the user's answer to the question the tool currently
+guesses at. Where it gets its starting value, in order:
+
+1. **Recorded acquisition times**, when both datasets carry an acquisition
+   record: the field is pre-filled with the difference between dataset 1's last
+   recorded start and dataset 2's first, rounded by `pipeline.timepoints`'
+   existing naming rules (which already refuse to round a reading further than
+   its jitter allows).
+2. **Dataset 1's median interval**, when dataset 1 has two or more timepoints:
+   the field is pre-filled with today's rule, so a user who does nothing gets
+   exactly today's behaviour.
+3. **Nothing** — a single-timepoint dataset 1 with no record. The field is then
+   required, and the page says why, instead of refusing the merge outright as
+   it does today.
+
+The user can overwrite the pre-filled value with any gap; a nominal schedule
+(`24h`, `48h`) rather than the stopwatch reading is a legitimate choice. When an
+entered gap disagrees with the recorded times by more than the naming
+tolerance, the page shows both numbers and proceeds with the entered one — it is
+a warning, not a refusal. The status preview lists dataset 2's resulting labels
+before anything is copied, and the merge records the gap and where it came from
+(`entered`, `recorded`, `interval`) in the destination's provenance line
+(`datasets/core/provenance.record_derivation`, which already carries
+`offset_hours`) and in the merged acquisition record. The existing check that
+dataset 2's timepoints land after dataset 1's with no overlap is unchanged.
+
+**Raw datasets, before analysis — the primary path.** Concatenate accepts a
+dataset that has `in/` and no `out/` — a converted plate nobody has analysed —
+and raw + raw gives a raw destination that Analyze then runs on once.
+Compatibility is checked from the two acquisition records when both exist
+(filename schema, channels, pixel size), and from the archives' own member
+names otherwise (`util/schema_infer.py`). **Differing tile plans are accepted**:
+the tile plan changes between experiments and may change between acquisitions,
+and each timepoint keeps its own positions. A differing pixel size is shown in
+the preview as a warning — the nanowell analysis works in µm, but intensities
+measured at two magnifications may not compare.
+
+**Also:**
+
+- **Analysed + unanalysed.** The destination keeps dataset 1's outputs, and
+  dataset 2's timepoints are left for an incremental Analyze run, which
+  processes exactly those (incremental runs already skip done units). Secondary
+  to the raw path; it is what a running experiment needs if re-copying the
+  accumulated raw dataset each day is too slow (Q9).
 - **Merge the acquisition record**, keeping each timepoint's own positions —
   after the plate was put back they differ.
-- **Optionally, merge several datasets in one run**, ordered by recorded start,
-  which is one copy instead of one per added timepoint (M7).
+- **Optionally, merge several datasets in one run**, each with its own gap
+  field, which is one copy instead of one per added timepoint (M13).
 
 #### 3.0.4 The workflows this gives
 
-- **All timepoints already acquired:** convert each CZI → Concatenate them in
-  order (or once, with M7) → run Analyze once.
-- **An experiment still running:** day 0, convert and analyse. Each later day,
-  convert the new CZI → Concatenate (analysed dataset + new raw acquisition) →
-  run Analyze incrementally; only the new timepoint is processed.
+- **All timepoints already acquired:** convert each CZI → Concatenate the raw
+  datasets in order, entering each gap (or once, with M13) → run Analyze once.
+- **An experiment still running:** convert each new CZI and Concatenate it onto
+  the accumulated raw dataset, then re-run Analyze incrementally; only the new
+  timepoint is processed. If the copy cost is too high at scale (Q9), the
+  analysed + unanalysed path avoids re-analysing anything, but not re-copying.
 
 ### 3.1 The pipeline's unit of work becomes (well, timepoint)
 
@@ -351,8 +401,8 @@ checkpoints and failure traces are all keyed on `(fov, timepoint)`.
 
 A nanowell analysis cannot work field by field: the address of a nanowell in
 field 7 depends on where the square is, which may be in field 13. So in
-nanowell mode the unit becomes **one well at one timepoint — all 25 tiles
-together**:
+nanowell mode the unit becomes **one well at one timepoint — every tile of its
+grid together** (25 in the current experiments):
 
 ```
 for each timepoint of the well:
@@ -378,9 +428,12 @@ headroom (§2.3).
 #### 3.2.1 Which tile is where
 
 For CZI data, from the acquisition record: each tile's recorded position, in
-µm via the recorded pixel size. The overlap is *measured* from those positions
-along each axis and compared with the declared 10 %; a large disagreement is
-reported, because one of the two is wrong about the acquisition.
+µm via the recorded pixel size. Because the tile plan changes between
+experiments (and possibly between acquisitions of one), the grid's size and
+overlap are read per (well, timepoint) and never carried from one to another.
+The overlap is *measured* from the positions along each axis and compared with
+the declared overlap when the file states one; a large disagreement is reported,
+because one of the two is wrong about the acquisition.
 
 For data with no record (loose TIFFs, until the OME and ND2 converters record
 positions too), the grid position comes from a **scan pattern** setting —
@@ -439,7 +492,7 @@ things:
   (`domain/image_identity.py`), the per-tile `_labels` images and every Image
   Browser surface keep working unchanged.
 
-With 10 % overlap this holds for the 50 µm format on any ordinary 10x camera,
+With the current 10 % overlap this holds for the 50 µm format on any ordinary 10x camera,
 and for the 100 µm format only when the tile images at least ~1.2 mm on both
 axes (§1.2). So the **fused-site path is planned, not hypothetical** (T9): a
 site that no single tile wholly contains is measured from a crop fused from the
@@ -739,7 +792,7 @@ are their tests; nothing nanowell-specific is user-visible until PR 7.
 |---|---|---|---|---|---|
 | 1 | `claude/nanowell-1-geometry` | `main` | G | this tracker; addressing; lattice fitting on point sets; origin chain; plate-rigid transform; roster; ownership | patch |
 | 2 | `claude/nanowell-2-acquisition` | PR 1 | R | the acquisition record; the CZI converter writes it; Subset, Merge Plates, Validate and remote carry it | patch |
-| 3 | `claude/nanowell-3-merge-time` | PR 2 | M | Concatenate: recorded-time offsets, single-timepoint and unanalysed datasets, record merging | patch |
+| 3 | `claude/nanowell-3-merge-time` | PR 2 | M | Concatenate: a time-gap field (pre-filled from recorded times or the interval), raw datasets before analysis, single-timepoint datasets, differing tile plans, record merging | patch |
 | 4 | `claude/nanowell-4-tiles` | PR 3 | T | recorded placement; three-source registration; periodicity guard; fused-site crops; montage preview | patch |
 | 5 | `claude/nanowell-5-sites` | PR 4 | N | phase-channel detection for both formats; fiducial; per-site refinement; occlusion; clipping; focus | patch |
 | 6 | `claude/nanowell-6-contents` | PR 5 | C | template; rim suppression; confluence; label-free count; fluorescence | patch |
@@ -795,7 +848,7 @@ Answers are written into the row. Rows that depend on an answer say so.
 | # | Question | Default until answered | State | Answer / evidence |
 |---|---|---|---|---|
 | Q1 | Pixel size at 10x and tile size in pixels | — | `done` | Read from the CZI's scaling metadata and subblock sizes (R2); no user input needed. Real values recorded in R8 |
-| Q2 | Tile overlap | — | `done` | 10 %, set in the acquisition software. Whether that clears a 100 µm nanowell depends on the tile's extent per axis (§1.2); measured per dataset (T2) |
+| Q2 | Tile overlap | — | `done` | 10 % in the current experiments, set in the acquisition software (the plan changes between experiments, Q10). Whether that clears a 100 µm nanowell depends on the tile's extent per axis (§1.2); measured per dataset (T2) |
 | Q3 | How the 25 tiles are numbered and where each sits | — | `done` | The CZI records each tile's position; the converter will record it (R2–R3). The scan-pattern setting remains only for data with no record |
 | Q4 | Is the square always at the centre of the array? | — | `done` | Yes, physically. Origin fallback 2 (§3.4.3) relies on it |
 | Q5 | Is the plate taken off the microscope between timepoints? | — | `done` | It can be, and must be supported. Every timepoint is anchored on its own; acquisitions are merged across time with Concatenate (§3.0) |
@@ -803,7 +856,7 @@ Answers are written into the row. Rows that depend on an answer say so.
 | Q7 | Sample data: CZIs of 2–3 wells at 2+ timepoints with the plate removed between them, including a bubble, a clipped edge, and if possible a hidden square; one plate of each format if available | blocks every real-data row | `todo` | |
 | Q8 | How do nanowells look in phase? | — | `done` | Light nanowells on a black lattice, at every timepoint (§3.3) |
 | Q9 | How many timepoints, channels and wells does a typical experiment have, and is a full copy of the dataset per added timepoint acceptable (~20 GB per channel per timepoint for 96 wells, §1.2)? | keep Concatenate's fresh-copy rule | `todo` | |
-| Q10 | Is each timepoint saved as one CZI holding every well, or as a Split Scenes folder of per-well CZIs? Is the same ZEN experiment (same tile plan) reused at every timepoint? | either is read; same plan assumed | `todo` | |
+| Q10 | Is each timepoint saved as one CZI holding every well, or as a Split Scenes folder of per-well CZIs? Is the tile plan reused? | — | `done` | Both layouts occur, and `pipeline/czi_set.py` already reads both. The tile plan changes between experiments, so grid size, overlap and positions are read per (well, timepoint) and never assumed (§3.2.1) |
 
 ### Section G — Geometry and addressing (PR 1)
 
@@ -841,15 +894,21 @@ Answers are written into the row. Rows that depend on an answer say so.
 
 | # | Item | Place | State | Evidence |
 |---|---|---|---|---|
-| M1 | Recorded-time offset when both datasets carry a record: dataset 2 offset by the difference of recorded starts, named by `pipeline.timepoints`' rules, rendered in dataset 1's format; overlap refused; the median-interval rule unchanged for datasets without records | `datasets/concatenate/concatenate_compute.py` | `todo` | |
-| M2 | Single-timepoint dataset 1 accepted when M1 applies; still refused otherwise | `datasets/concatenate/concatenate_compute.py` | `todo` | |
-| M3 | Unanalysed datasets (`in/` + record, no `out/`): compatibility from the records; raw + raw gives a raw destination; verification checks images rather than rows | `datasets/concatenate/`, `datasets/core/dataset_paths.py` | `todo` | |
-| M4 | Analysed + unanalysed: destination keeps dataset 1's outputs; a test runs an incremental Analyze on the result and checks that exactly dataset 2's timepoints are processed | `datasets/concatenate/` | `todo` | |
-| M5 | Record merge: dataset 2's timepoint keys shifted; each timepoint keeps its own positions and absolute start | `datasets/concatenate/apply.py` | `todo` | |
-| M6 | The discriminating fixture: dataset 1 at 0 h and 24 h, dataset 2 recorded 30 h after dataset 1's start — the old rule says 48 h, the new one 30 h. Mutation: revert to the interval rule — must fail | `tests/test_concatenate_compute.py` | `todo` | |
-| M7 | Several datasets in one run, ordered by recorded start (one copy instead of one per added timepoint) | `datasets/concatenate/` | `todo` | |
-| M8 | The copy cost at the user's scale, and whether an append that avoids a full copy is needed — a layout question, because a zip archive cannot be extended atomically without being rewritten | — | `blocked` | Q9 |
-| M9 | Close-out: README Concatenate section rewritten for the new rules (including the refusal it no longer makes), ARCHITECTURE §6b, version | — | `todo` | |
+| M1 | Gap rule: dataset 2's first timepoint = dataset 1's last + the gap; the gap is a parameter of the plan (`compute_offset` takes it), positive, read through `util.timepoint.parse_hours`; overlap still refused | `datasets/concatenate/concatenate_compute.py` | `todo` | |
+| M2 | Gap field on the page beside the dataset row, carried through the controller and worker into the plan; required (with the reason shown) when no default exists | `datasets/concatenate/view.py`, `controller.py`, `worker.py` | `todo` | |
+| M3 | Pre-fill order: recorded acquisition times (both records present) → dataset 1's median interval (two or more timepoints) → empty and required. Leaving the pre-filled interval untouched reproduces today's result exactly | `datasets/concatenate/concatenate_compute.py` | `todo` | |
+| M4 | An entered gap that disagrees with the recorded times beyond the naming tolerance shows both numbers as a warning and proceeds with the entered one | `datasets/concatenate/view.py` | `todo` | |
+| M5 | Status preview lists dataset 2's resulting timepoint labels before anything is copied, and updates as the gap is typed | `datasets/concatenate/view.py` | `todo` | |
+| M6 | Single-timepoint dataset 1 accepted whenever a gap exists (entered or recorded); the old refusal survives only as the "field is required" message | `datasets/concatenate/concatenate_compute.py` | `todo` | |
+| M7 | Raw datasets before analysis (`in/`, no `out/`) — the primary path: raw + raw gives a raw destination; compatibility from the acquisition records, else from member names via `util/schema_infer.py`; verification checks images rather than measurement rows | `datasets/concatenate/`, `datasets/core/dataset_paths.py` | `todo` | |
+| M8 | Differing tile plans accepted (each timepoint keeps its positions); a differing pixel size is a preview warning, not a refusal | `datasets/concatenate/concatenate_compute.py` | `todo` | |
+| M9 | Record merge and provenance: dataset 2's timepoint keys shifted; each timepoint keeps its own positions and absolute start; the gap and its source (`entered` / `recorded` / `interval`) written to the merged record and to `record_derivation` | `datasets/concatenate/apply.py`, `datasets/core/provenance.py` | `todo` | |
+| M10 | The discriminating fixture: dataset 1 at 0 h and 24 h, gap entered as 6 h — dataset 2 must start at 30 h, where the interval rule gives 48 h; a second case with recorded starts 30 h apart and no entry gives 30 h. Mutation: ignore the entered gap — must fail | `tests/test_concatenate_compute.py` | `todo` | |
+| M11 | A test that types into the real gap field and presses Concatenate, and asserts the plan the worker receives (CLAUDE.md §7.6) | `tests/` | `todo` | |
+| M12 | Analysed + unanalysed (secondary): destination keeps dataset 1's outputs; a test runs an incremental Analyze on the result and checks that exactly dataset 2's timepoints are processed | `datasets/concatenate/` | `todo` | |
+| M13 | Several datasets in one run, each with its own gap field (one copy instead of one per added timepoint) | `datasets/concatenate/` | `todo` | |
+| M14 | The copy cost at the user's scale, and whether an append that avoids a full copy is needed — a layout question, because a zip archive cannot be extended atomically without being rewritten | — | `blocked` | Q9 |
+| M15 | Close-out: README Concatenate section rewritten for the gap field and raw datasets (including the refusals it no longer makes), ARCHITECTURE §6b, version | — | `todo` | |
 
 ### Section T — Tiles and registration (PR 4)
 
@@ -862,7 +921,7 @@ Answers are written into the row. Rows that depend on an answer say so.
 | T5 | Weighted least-squares solve; per-tile source and residual; corner tiles with no array fall back to the recorded position without failing | `pipeline/tile_register.py` | `todo` | |
 | T6 | Scan-pattern auto-detection | — | `declined` | The CZI records positions (Q3), so CZI data never needs it; data without a record uses the explicit setting, and a guessed layout that scores well is still a guess |
 | T7 | Downsampled phase montage (long side ≤ 4,096 px), blended in overlaps, 8-bit with the stretch recorded | `pipeline/tile_register.py` | `todo` | |
-| T8 | Synthetic tile renderer: G9's array rendered into 5×5 tiles at 10 % overlap with stage jitter, camera rotation, vignetting, noise, cells, debris and a bubble; one tile geometry where 100 µm sites all have owners and one where they do not | `tests/_nanowell_synth.py` | `todo` | |
+| T8 | Synthetic tile renderer: G9's array rendered into overlapping tiles with stage jitter, camera rotation, vignetting, noise, cells, debris and a bubble — at 5×5 / 10 % and at a different plan (4×6 / 15 %), so nothing passes by assuming the current one; one tile geometry where 100 µm sites all have owners and one where they do not | `tests/_nanowell_synth.py` | `todo` | |
 | T9 | Fused-site crops: the covering tiles blended into one crop per seam site; cells attributed to the tile with most of the disk; row flagged `fused` | `pipeline/tile_register.py` | `todo` | |
 | T10 | Real-data check of registration residuals and measured overlap on Q7 data | — | `blocked` | Q7 |
 | T11 | Close-out (as G13) | — | `todo` | |
@@ -914,7 +973,7 @@ Answers are written into the row. Rows that depend on an answer say so.
 | P9 | Remote: manifest, tiles kept together on upload, `nanowells/` fetched; extractions to pay for `remote_runner.py` and `remote_fetch.py` | `services/` | `todo` | |
 | P10 | Datasets tools carry `nanowells/`: Subset filters, Merge Plates remaps wells, Concatenate shifts timepoints; Validate checks the tables against the archives | `datasets/` | `todo` | |
 | P11 | End-to-end CLI test on synthetic tiles with a deterministic stand-in segmenter (fast lane); real Cellpose in the slow segmentation lane | `tests/` | `todo` | |
-| P12 | End-to-end over a merge: two single-timepoint raw datasets (plate moved between them) → Concatenate → Analyze → every site joined across the two timepoints | `tests/` | `todo` | |
+| P12 | End-to-end over a merge: two single-timepoint raw datasets (plate moved between them, different tile plans) → Concatenate with an entered gap → Analyze → every site joined across the two timepoints at the entered time | `tests/` | `todo` | |
 | P13 | Real-data run: time and peak memory per (well, timepoint) recorded here | — | `blocked` | Q7 |
 | P14 | Close-out: ARCHITECTURE §6.2 section, README CLI flags, version | — | `todo` | |
 
@@ -982,10 +1041,11 @@ Each of these, if it turns out true, changes a section rather than a row.
   always at the array's centre, but with one fewer cross-check.
 - **The CZI does not record what §3.0.1 expects** (no scaling, no stage
   positions, no start time on some ZEN versions). The record then carries what
-  exists and says what is missing, Concatenate falls back to its interval rule
-  for those datasets, and the Analyze no-record settings become the main path
-  for them.
-- **The copy cost of one Concatenate per timepoint is unacceptable (Q9).** M7
+  exists and says what is missing, Concatenate's gap field has no recorded
+  value to pre-fill (the user's entry is then the only source, which the field
+  already supports), and the Analyze no-record settings become the main path
+  for those datasets.
+- **The copy cost of one Concatenate per timepoint is unacceptable (Q9).** M13
   helps only when all timepoints are already acquired. A running experiment
   then needs an input layout that can grow without rewriting — a decision about
   every reader of `in/`, not a Concatenate change.
@@ -1003,5 +1063,8 @@ Each of these, if it turns out true, changes a section rather than a row.
 - **Cellpose `cyto3` is poor on these cells in phase (C10).** The answer is not
   a new model (§2.2) without a row and a measurement; confluence remains the
   robust readout either way.
-- **Wells are not always 5×5.** The grid comes from the record, so this costs
-  nothing unless grids vary *within* a plate.
+- **The tile plan varies between wells of one acquisition.** Plans changing
+  between experiments, and between acquisitions, is handled — the grid is read
+  per (well, timepoint). Within one acquisition, wells with different grids are
+  still handled, but the Analyze preview and preflight summarise one plan per
+  dataset and would need to show several.

@@ -371,6 +371,23 @@ and each timepoint keeps its own positions. A differing pixel size is shown in
 the preview as a warning — the nanowell analysis works in µm, but intensities
 measured at two magnifications may not compare.
 
+**Which combinations merge.** The gap field applies to every one of them.
+
+| Dataset 1 + dataset 2 | Today | Planned | Row |
+|---|---|---|---|
+| analysed + analysed | supported | unchanged, plus the gap field; leaving its pre-filled value reproduces today's result exactly | M1, M3 |
+| raw + raw | refused (needs `out/` and `pipeline_info.json`) | **the primary path**: a raw destination, analysed once | M7 |
+| analysed + raw | refused | supported: dataset 1's outputs kept; the next incremental Analyze processes only dataset 2's timepoints | M12 |
+| raw + analysed | refused | still refused, with a message naming the order to use instead | M12a |
+
+For nanowell plates, merge raw and then analyse. Two fallbacks only work when
+one run sees every timepoint: re-anchoring a well whose square is hidden, from
+the rest of the plate (§3.4.3), and the earliest empty-nanowell template
+(§3.6). Concatenating two analysed nanowell datasets still joins sites
+correctly over time, but those fallbacks did not have the other timepoints.
+Until the `nanowells/` tables are carried (P10), Concatenate refuses analysed
+nanowell datasets rather than dropping them.
+
 **Also:**
 
 - **Analysed + unanalysed.** The destination keeps dataset 1's outputs, and
@@ -906,6 +923,7 @@ Answers are written into the row. Rows that depend on an answer say so.
 | M10 | The discriminating fixture: dataset 1 at 0 h and 24 h, gap entered as 6 h — dataset 2 must start at 30 h, where the interval rule gives 48 h; a second case with recorded starts 30 h apart and no entry gives 30 h. Mutation: ignore the entered gap — must fail | `tests/test_concatenate_compute.py` | `todo` | |
 | M11 | A test that types into the real gap field and presses Concatenate, and asserts the plan the worker receives (CLAUDE.md §7.6) | `tests/` | `todo` | |
 | M12 | Analysed + unanalysed (secondary): destination keeps dataset 1's outputs; a test runs an incremental Analyze on the result and checks that exactly dataset 2's timepoints are processed | `datasets/concatenate/` | `todo` | |
+| M12a | Raw dataset 1 + analysed dataset 2 | `datasets/concatenate/concatenate_compute.py` | `declined` | It would leave earlier timepoints unanalysed beneath analysed later ones, and the other three combinations cover every real case better. Refused with a message naming the order to use instead. Reopen if the user asks for it |
 | M13 | Several datasets in one run, each with its own gap field (one copy instead of one per added timepoint) | `datasets/concatenate/` | `todo` | |
 | M14 | The copy cost at the user's scale, and whether an append that avoids a full copy is needed — a layout question, because a zip archive cannot be extended atomically without being rewritten | — | `blocked` | Q9 |
 | M15 | Close-out: README Concatenate section rewritten for the gap field and raw datasets (including the refusals it no longer makes), ARCHITECTURE §6b, version | — | `todo` | |

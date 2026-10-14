@@ -23,8 +23,13 @@ Only resource options carry over (:data:`_SRUN_RESOURCE_OPTIONS`). The rest of
 a job template is about the batch job JupyterHub submits, not about a step the
 app runs: ``--output`` would send the run's stream to a file the app never
 reads, ``--export={{keepvars}}`` would strip the job's environment down to
-JupyterHub's variables, and ``--ntasks`` above one would run the pipeline that
-many times. Those are left out quietly, because every template has them.
+JupyterHub's variables. Those are left out quietly, because every template has
+them. A task count is the one batch option that is translated rather than kept
+or dropped: a template that asks for cores with ``#SBATCH -n {nprocs}`` gives a
+batch job that many CPUs, while ``-n`` on the app's ``srun`` would run the
+pipeline that many times, so :func:`single_task` turns it into
+``--cpus-per-task``. Dropping it instead left the step with one CPU, and the
+pipeline sizes its worker pool from the CPUs it is given.
 
 Two losses are *reported*, in :attr:`ScriptLauncher.dropped`, because they
 change which node the run gets: a word that is neither an option nor an
@@ -48,18 +53,22 @@ _SRUN_RESOURCE_OPTIONS: dict[str, bool] = {
     "gpus": True, "gpus-per-node": True, "gpus-per-task": True,
     "cpus-per-gpu": True, "nodelist": True, "exclude": True, "licenses": True,
     "clusters": True, "wckey": True, "exclusive": False,
+    # Kept only to be folded into --cpus-per-task by single_task().
+    "ntasks": True,
 }
 
 #: Short spellings of the options above (all of them take a value).
 _SHORT: dict[str, str] = {
     "p": "partition", "q": "qos", "A": "account", "C": "constraint",
     "c": "cpus-per-task", "t": "time", "G": "gpus", "w": "nodelist",
-    "x": "exclude", "L": "licenses", "M": "clusters",
+    "x": "exclude", "L": "licenses", "M": "clusters", "n": "ntasks",
 }
 
 _IF_BLOCK = re.compile(r"\{%-?\s*if\s+(\w+)\s*-?%\}(.*?)\{%-?\s*endif\s*-?%\}", re.S)
 _JINJA_VAR = re.compile(r"\{\{-?\s*(\w+)\s*-?\}\}")
 _FORMAT_VAR = re.compile(r"(?<!\{)\{(\w+)\}(?!\})")
+_WHOLE_VALUE_IS_A_VARIABLE = re.compile(
+    r"^#SBATCH\s+-{1,2}[\w-]+(?:=|\s+)(?:\{\{-?\s*\w+\s*-?\}\}|\{\w+\})\s*$")
 
 
 @dataclass
@@ -158,6 +167,35 @@ def directive_flags(tokens: list[str]) -> tuple[list[str], list[str]]:
     return kept, stray
 
 
+def single_task(flags: list[str]) -> list[str]:
+    """*flags* with ``--ntasks`` folded into ``--cpus-per-task``.
+
+    A job template asks for cores the batch way: ``#SBATCH -n 16`` gives the
+    job sixteen CPUs, and the one process JupyterHub starts in it uses them
+    all. The same flag on the ``srun`` the app launches would start the
+    pipeline sixteen times, each with one CPU. The app runs one process that
+    spreads its own workers across the CPUs it is given, so the step asks for
+    one task with *tasks × cpus-per-task* CPUs. A task count that is not a
+    whole number is dropped rather than guessed at.
+    """
+    def _value(name: str) -> str | None:
+        for f in flags:
+            if f.startswith(f"--{name}="):
+                return f.split("=", 1)[1]
+        return None
+
+    tasks = _value("ntasks")
+    if tasks is None:
+        return flags
+    out = [f for f in flags if not f.startswith(("--ntasks=", "--cpus-per-task="))]
+    per_task = _value("cpus-per-task") or "1"
+    if tasks.isdigit() and per_task.isdigit():
+        out.append(f"--cpus-per-task={int(tasks) * int(per_task)}")
+    elif _value("cpus-per-task") is not None:
+        out.append(f"--cpus-per-task={per_task}")
+    return out
+
+
 def launcher_from_batch_script(
     template: str, kwargs: dict[str, Any], *, program: str = "srun",
 ) -> ScriptLauncher:
@@ -181,15 +219,21 @@ def launcher_from_batch_script(
             dropped.append(body)
             continue
         if missing:
-            # A line that needs an unset variable cannot be rendered. Losing a
-            # resource line changes the node; losing --chdir={{homedir}} does not.
-            if tokens and _option_name(tokens[0]) in _SRUN_RESOURCE_OPTIONS:
+            # A line that needs an unset variable cannot be rendered. Losing
+            # --chdir={{homedir}} does not change the node, and neither does a
+            # resource option whose whole value is the unset variable: the
+            # profile simply does not ask for that resource (batchspawner
+            # renders it empty). A value with more around the variable —
+            # --gres=gpu:{{ngpus}} — was meant to ask for something.
+            if (tokens and _option_name(tokens[0]) in _SRUN_RESOURCE_OPTIONS
+                    and not _WHOLE_VALUE_IS_A_VARIABLE.match(written)):
                 dropped.append(f"{written} (the profile sets no "
                                f"{', '.join(sorted(missing))})")
             continue
         kept, stray = directive_flags(tokens)
         flags.extend(kept)
         dropped.extend(f"“{w}” (not attached to any option)" for w in stray)
+    flags = single_task(flags)
     if not flags:
         return ScriptLauncher("", dropped)
     return ScriptLauncher(shlex.join([program, *flags]), dropped)

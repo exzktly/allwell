@@ -48,6 +48,7 @@ from services.slurm_batch_script import (
     ScriptLauncher,
     directive_flags,
     launcher_from_batch_script,
+    single_task,
 )
 
 # tomllib is stdlib on 3.11+; tomli is the 3.10 backport. The project pins
@@ -1190,6 +1191,7 @@ def profile_launcher(
             flags, stray = [], [extra.strip()]
         parts.extend(flags)
         dropped.extend(f"“{w}” (not attached to any option)" for w in stray)
+    parts = [program, *single_task(parts[1:])]
     if len(parts) == 1:
         return ScriptLauncher("", dropped)  # only the program token
     return ScriptLauncher(shlex.join(parts), dropped)

@@ -20,11 +20,14 @@ retried: the app saw the stream end and reported the allocation lost.
    failing. ``alloc`` and ``comp`` count as awake: they are running and will
    free up, and excluding them would leave a job that cannot start at all
    whenever every awake node happens to be busy. If no node is awake it says so
-   and lets Slurm boot one, and if the awake nodes cannot satisfy the request
-   (``Requested node configuration is not available`` — say, the GPU nodes are
-   all asleep) it retries once without the state-based exclusion. A node's
-   state can change between the ``sinfo`` and the start of the job, which is
-   what the retry below is for.
+   and lets Slurm boot one. If the awake nodes cannot satisfy the request —
+   say, none of them is the instance type a ``--constraint`` names — it finds
+   out first with ``srun --test-only``, which queues nothing, says so in plain
+   words and drops the state-based exclusion, rather than letting the real
+   ``srun`` fail with ``Requested node configuration is not available``, which
+   reads as an error. A node's state can change between the check and the start
+   of the job, so a real launch that still fails that way is retried once
+   without the exclusion, and a boot failure is what the retry below is for.
 2. **Retries a boot failure** up to :data:`SRUN_BOOT_RETRIES` times, adding the
    node(s) ``srun`` named to ``--exclude`` each time so Slurm picks another.
    Each retry prints a line saying which node failed, and a ``requesting
@@ -179,12 +182,21 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         f"_aw_all=$(sinfo -h -N {part_words} -o '%N %t' 2>/dev/null); ",
         f"if printf '%s\\n' \"$_aw_all\" | awk '$2 ~ /^({awake})$/ {{f=1}} END {{exit !f}}'; then ",
         f"_aw_asleep=$(printf '%s\\n' \"$_aw_all\" | awk 'NF==2 && $2 !~ /^({awake})$/ {{print $1}}' | {merge}); ",
-        'if [ -n "$_aw_asleep" ]; then ',
-        "echo \"[remote] scheduler: avoiding $(printf '%s' \"$_aw_asleep\" | awk -F, '{print NF}') "
-        f"node(s) in {where} that are powered down, booting or out of service\"; fi; ",
         f'else echo "[remote] scheduler: no powered-on node in {where} — Slurm will boot one"; fi; ',
         "fi; ",
         f"_aw_ex=$(printf '%s,%s' \"$_aw_x\" \"$_aw_asleep\" | {merge}); ",
+        # 1b. Ask Slurm, without queuing anything, whether a powered-on node
+        # could ever take this request. If none can, say so in plain words
+        # rather than let srun fail with "Requested node configuration is not
+        # available" before the real attempt.
+        'if [ -n "$_aw_asleep" ] && ! '
+        f'{launcher_str} --test-only ${{_aw_ex:+--exclude="$_aw_ex"}} true >/dev/null 2>&1; then ',
+        f'_aw_asleep=""; _aw_awake=0; _aw_ex=$(printf \'%s\' "$_aw_x" | {merge}); ',
+        'echo "[remote] scheduler: no powered-on node matches this request — Slurm will '
+        'start one, which can take several minutes"; fi; ',
+        'if [ -n "$_aw_asleep" ]; then ',
+        "echo \"[remote] scheduler: avoiding $(printf '%s' \"$_aw_asleep\" | awk -F, '{print NF}') "
+        f"node(s) in {where} that are powered down, booting or out of service\"; fi; ",
         # 2. The launch. srun's PID goes to the pidfile; its output is copied (tee).
         ': > "$_aw_err"; rm -f "$_aw_rcf"; ',
         "{ sh -c 'echo $$ > \"$0\"; exec \"$@\"' \"$_aw_pid\" ",

@@ -8187,11 +8187,18 @@ reason and no fabricated basis or origin.
 Mirroring requires an explicit reflected coordinate, `mirror_axis="x"` or
 `"y"`, with `mirrored=True`. Basis selection occurs after unmirroring and the
 basis and phase are returned in the original input frame. Camera reflection is
-never inferred. The holder orientation convention is unambiguous strictly below
-30° for hexagonal lattices and 45° for square lattices; tests cover the specified
-−25°…+25° sequence. At exact symmetry endpoints two directions are equally near
-east, so the current implementation returns an ambiguous-orientation failure.
-The tracker's G4b records the unresolved specification for those endpoints.
+never inferred. A hexagonal lattice repeats every 60° and a square one every
+90°, so at 30° / 45° two axes are equally near east, and near those angles
+positional noise decides between them: unguarded, a true 29.99° hexagonal
+rotation fitted as −30.03° and was reported as a success, with every address
+turned by a sixth of a turn. `fit_lattice` therefore accepts a rotation only
+within ±25° (hexagonal) or ±40° (square) of east, `_ORIENTATION_LIMIT_DEG`, and
+refuses anything beyond with a reason naming the measured angle. The lattice
+alone cannot distinguish a rotation θ from θ ± 60° (hex) or ± 90° (square), so
+the limit guards only the band next to the ambiguity: a true rotation between
+35° and 85° (hex) or 50° and 130° (square) folds back inside the limit and is
+fitted on the wrong axis. A plate keyed in its holder sits within a few degrees,
+so that case needs a misaligned camera; nothing in this module can detect it.
 
 `index_points(points, fit, origin)` finds the nearest lattice site in the
 Cartesian metric, not by separately rounding the two oblique coordinates.
@@ -8208,8 +8215,8 @@ measured angular coverage. Radial tolerance is half a nearest-neighbour spacing;
 a 120° arc acceptance allows one spacing of endpoint angular resolution because
 the rim consists of discrete sites. The measured angle is reported without
 rounding it up. Tests include an actual hexagonal 120° cap, continuous arcs and
-insufficient or collinear evidence. This is synthetic point-set validation;
-real phase-image boundary validation remains dependent on tracker Q7.
+insufficient or collinear evidence. All of this is validated on synthetic
+point sets only, not on boundaries detected in real phase images.
 
 `resolve_origin(fit, *, fiducial=None, array_centre=None, plate_rigid=None,
 fiducial_margin)` independently anchors each acquisition. The required score
@@ -8229,10 +8236,9 @@ No previous acquisition's origin is silently carried over.
 `radius + 0.25·pitch`, including undetected sites and bubbles. Use one shared
 array-model radius across a well's acquisitions: independently noisy radius
 estimates can change which marginal sites lie inside the model. The function
-does not silently quantise those estimates. Shifted-window tests recover each
-origin independently and keep the same model roster. Later integration must
-check agreement of pitch (±0.5%), angle after removing measured plate rotation
-(±0.5°), and roster, and record violations as timepoint statuses.
+does not silently quantise those estimates, and it does not choose the shared
+radius itself. Shifted-window tests recover each origin independently and keep
+the same model roster.
 
 `TileRectangle` carries an id and finite axis-aligned bounds.
 `assign_owners` tests the entire nanowell disk plus the caller's margin against

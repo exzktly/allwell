@@ -213,3 +213,39 @@ def test_exact_nearest_east_ties_do_not_fabricate_an_orientation(kind, angle):
     fit = fit_lattice(coordinates @ (rotation @ native).T, kind=kind)
     assert not fit.ok and "ambiguous" in fit.reason
     assert fit.a1 is None and fit.phase_origin is None
+
+
+def _noisy_lattice(kind, angle, seed=3):
+    """A 21x21 patch rotated *angle* degrees on screen, with 2 units of noise."""
+    radians = math.radians(angle)
+    rotation = np.array([[math.cos(radians), math.sin(radians)],
+                         [-math.sin(radians), math.cos(radians)]])
+    native = np.array([[172, 86 if kind == "hex" else 0],
+                       [0, -math.sqrt(3) * 86 if kind == "hex" else -172]])
+    coordinates = np.array([(q, r) for q in range(-10, 11) for r in range(-10, 11)])
+    noise = np.random.default_rng(seed).normal(0, 2, (len(coordinates), 2))
+    return coordinates @ (rotation @ native).T + noise
+
+
+@pytest.mark.parametrize("kind,angle", [
+    ("hex", 25.5), ("hex", 29.99), ("hex", 31), ("hex", -25.5), ("hex", -29.99), ("hex", -31),
+    ("square", 40.5), ("square", 44.99), ("square", 46), ("square", -40.5), ("square", -44.99)])
+def test_orientations_near_the_ambiguity_are_refused_not_relabelled(kind, angle):
+    """Near 30° (hex) or 45° (square) noise flips which axis is nearest east.
+
+    Without the limit, 29.99° fitted as -30.03° and 31° as -29.02°, both
+    reported as successes with every address turned by a sixth of a turn.
+    """
+    fit = fit_lattice(_noisy_lattice(kind, angle), kind=kind)
+    assert not fit.ok, (
+        f"a {kind} lattice at {angle}° was accepted as {fit.angle_deg:.2f}°; "
+        f"near the ambiguity the axis choice is not trustworthy and must be refused")
+    assert "beyond" in fit.reason and fit.a1 is None and fit.phase_origin is None
+
+
+@pytest.mark.parametrize("kind,angle", [("hex", 24.9), ("hex", -24.9),
+                                        ("square", 39.9), ("square", -39.9)])
+def test_orientations_inside_the_limit_keep_their_true_axis(kind, angle):
+    fit = fit_lattice(_noisy_lattice(kind, angle), kind=kind)
+    assert fit.ok, fit.reason
+    assert abs(fit.angle_deg - angle) < 0.1

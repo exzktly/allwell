@@ -304,7 +304,7 @@ At the dataset level each tool merges it explicitly instead.
 Which of those fields the user's ZEN version actually populates is not known
 until real files are read (R8, blocked on Q7). In particular, whether mosaic
 positions are absolute stage-derived coordinates or are re-based per file
-decides whether they can be compared *across* acquisitions, which §3.4.3's third
+decides whether they can be compared *across* acquisitions, which §3.4.3's plate-rigid
 fallback needs.
 
 #### 3.0.2 Concatenate exists, and cannot merge these acquisitions yet
@@ -555,9 +555,58 @@ occluded nanowell is a black disk on the black lattice.
 
 ### 3.4 The addressing scheme
 
-Implemented geometry, address conventions, independent origin resolution and the
-model-defined roster are described in `ARCHITECTURE.md` §6.2e. G4b records the
-unresolved exact orientation endpoints; Q7 still gates real-data validation.
+What PR 1 built — the coordinates and labels, the lattice fit, the orientation
+limit, origin resolution, the roster primitive, ownership and the plate-rigid
+transform — is described in `ARCHITECTURE.md` §6.2e, which is now the
+reference for it. What remains below is the design later sections still have
+to build on top of those primitives.
+
+#### 3.4.1 Coordinates and labels
+
+Built; see `ARCHITECTURE.md` §6.2e.
+
+#### 3.4.2 Orientation
+
+Built, with a limit: a fit is accepted only within ±25° (hexagonal) or ±40°
+(square) of image east and refused beyond (G4b). The lattice alone cannot tell a
+rotation from one a sixth (hex) or a quarter (square) of a turn away, so a true
+rotation of 35°–85° (hex) or 50°–130° (square) would fold back inside the limit
+on the wrong axis. A plate keyed in its holder cannot get there; a misaligned
+camera could. The square nanowell is what can catch it: its edges repeat every
+90° and the hexagonal lattice every 60°, so together they repeat only every
+180°, which a keyed plate never reaches (N3a).
+
+#### 3.4.3 Where the origin comes from, at every timepoint
+
+`resolve_origin` (built) chooses between the evidence it is given. What later
+sections must supply, and in what order:
+
+- Because the plate is removed between timepoints, **every timepoint is
+  anchored on its own**; nothing is carried over from a previous timepoint on
+  the assumption that the plate stayed put.
+- The fiducial comes from the square-versus-circle score (N3); the array centre
+  from `fit_array_boundary` over the detected sites (N2); the plate-rigid
+  prediction from the wells anchored at both timepoints, in stage coordinates.
+- The plate-rigid fallback runs as an **end-of-run pass** after every well has
+  been processed, because it needs the other wells (P3). It needs stage
+  positions comparable across acquisitions, which R8 establishes from real
+  CZIs; without them the fallback is unavailable and a well whose square is
+  hidden and whose boundary is not visible stays `unaddressed`, with the
+  reason.
+
+#### 3.4.4 The roster
+
+`roster()` (built) enumerates the model disk for a given origin and radius,
+and keeps hidden sites. Two things are left to the sections that call it:
+
+- **One array-model radius per well**, shared by every timepoint. G6a measured
+  that each clipped observation's own radius estimate changed twelve marginal
+  sites, so the per-timepoint estimates must be combined into one value per
+  well before any roster is built (N8a).
+- **Cross-timepoint consistency.** Within one well, pitch (±0.5 %), angle (±0.5°
+  after removing the plate's measured rotation) and roster must agree across
+  timepoints; a violation is a named status on the timepoint, not an exception
+  (N8).
 
 ### 3.5 What state a site can be in, and which numbers it may carry
 
@@ -830,7 +879,7 @@ Answers are written into the row. Rows that depend on an answer say so.
 | Q1 | Pixel size at 10x and tile size in pixels | — | `done` | Read from the CZI's scaling metadata and subblock sizes (R2); no user input needed. Real values recorded in R8 |
 | Q2 | Tile overlap | — | `done` | 10 % in the current experiments, set in the acquisition software (the plan changes between experiments, Q10). Whether that clears a 100 µm nanowell depends on the tile's extent per axis (§1.2); measured per dataset (T2) |
 | Q3 | How the 25 tiles are numbered and where each sits | — | `done` | The CZI records each tile's position; the converter will record it (R2–R3). The scan-pattern setting remains only for data with no record |
-| Q4 | Is the square always at the centre of the array? | — | `done` | Yes, physically. Origin fallback 2 (§3.4.3) relies on it |
+| Q4 | Is the square always at the centre of the array? | — | `done` | Yes, physically. The array-centre fallback (§3.4.3) relies on it |
 | Q5 | Is the plate taken off the microscope between timepoints? | — | `done` | It can be, and must be supported. Every timepoint is anchored on its own; acquisitions are merged across time with Concatenate (§3.0) |
 | Q6 | What does "sometimes smaller" mean? | — | `done` | Nanowells are usually 100 µm; an alternative plate format has 50 µm nanowells. Plate format becomes a setting (§3.3, §3.9) |
 | Q7 | Sample data: CZIs of 2–3 wells at 2+ timepoints with the plate removed between them, including a bubble, a clipped edge, and if possible a hidden square; one plate of each format if available | blocks every real-data row | `todo` | |
@@ -851,7 +900,7 @@ Answers are written into the row. Rows that depend on an answer say so.
 | G3 | `index_points(points, fit, origin)` → integer `(q, r)`, residual, outlier flag (residual over a quarter pitch). Outliers are not forced onto a site; two points on one site keep the nearer and mark the other | `pipeline/nanowell_lattice.py` | `done` | index_points uses Cartesian nearest-site distances, refuses residuals above a quarter pitch and retains only the nearer duplicate; rejected points have no q/r address. Forcing all detections to have addresses fails the duplicate/residual regression with AssertionError. |
 | G4 | Basis convention per §3.4.1 under rotations −25°…+25° in 5° steps, with a `mirrored` flag (a mirroring camera) under which the counter-clockwise rule holds in the unmirrored frame; valid to ±30° (hex) / ±45° (square) | `pipeline/nanowell_lattice.py` | `done` | Hex and square nearest-east/counter-clockwise bases and actual recovered integer addresses pass rotations −25° through +25° in 5° steps. Both mirror axes pass in explicitly unmirrored frames. Ignoring unmirroring makes two parametrised cases fail with AssertionError. Exact endpoint ambiguity is separately recorded in G4b. |
 | G4a | Avoid guessing which coordinate a mirroring camera reflects | `pipeline/nanowell_lattice.py` | `done` | mirrored=True requires mirror_axis="x" or "y"; omission returns a failure reason rather than guessing a camera axis. Both explicit axes recover the independently known basis and addresses. Ignoring the unmirroring step produces two AssertionError failures. |
-| G4b | Resolve the contradictory exact orientation endpoints in G4 and §3.4.2 | `pipeline/nanowell_lattice.py` | `blocked` | G4 includes exact ±30° (hex) and ±45° (square), while the original §3.4.2 said strictly under 30°. Two lattice directions are equally near east at those endpoints. Asked the user whether to reject exact ties or require an orientation prior; the answer remains pending. The implementation currently returns an unsuccessful fit with an explicit ambiguous-orientation reason rather than assigning arbitrary addresses; four exact-tie cases pass |
+| G4b | Resolve the contradictory exact orientation endpoints in G4 and §3.4.2 | `pipeline/nanowell_lattice.py`, `tests/test_nanowell_lattice.py` | `done` | Answered by the user in review: accept within ±25° (hex) and ±40° (square) of east, refuse beyond. Review had measured that the exact-tie guard never fires on noisy data: with 2 µm noise a true 29.99° fitted as −30.03° and 31° as −29.02°, both reported as successes with every address turned. `_ORIENTATION_LIMIT_DEG` now refuses beyond the limit with the measured angle in the reason. `test_orientations_near_the_ambiguity_are_refused_not_relabelled` (11 cases at 25.5°, 29.99°, 31°, 40.5°, 44.99°, 46° and their negatives) fails all 11 against the previous code with AssertionErrors naming the accepted angle (29.99° → −30.00°, 31° → −28.99°, −31° → 29.00°, 46° → −43.99°); `test_orientations_inside_the_limit_keep_their_true_axis` holds ±24.9° / ±39.9°. Rotations further out fold back inside the limit; N3a covers them |
 | G5 | `resolve_origin(fit, *, fiducial=None, array_centre=None, plate_rigid=None, fiducial_margin)`: `fiducial` is the candidate site's `(x, y)` with its square-likeness score and the runner-up's score; `array_centre` is G6's `(x, y)`; `plate_rigid` is G8's predicted `(x, y)` with its one-sigma uncertainty; `fiducial_margin` is required, with no default. Frozen result: `status` (`anchored` / `unaddressed`), `origin_xy` (the chosen lattice site's position, snapped through `fit`), `method` (`fiducial` / `array_centre` / `plate_rigid` / none), `agreement` (`agree` / `conflict` / `single_source`), `reason`. Order and conflict rule per §3.4.3; the plate-rigid prediction is accepted only when 3 × its uncertainty is under half a pitch; never guesses. Addresses then come from `index_points(points, fit, origin_xy)` | `pipeline/nanowell_lattice.py` | `done` | resolve_origin requires fiducial_margin, snaps all accepted XY evidence through the lattice phase, applies fiducial/centre/rigid priority and reports conflicts. The plate gate uses strictly three sigma below half pitch. Mutations accepting an ambiguous fiducial, using one sigma, or reversing priority each fail the evidence-priority regression with AssertionError. No accepted source returns unaddressed with no origin. |
 | G6 | `fit_array_boundary(site_xy)`: circle through the outermost site centres, robust to seeing as little as 120° of arc; returns centre, radius, arc coverage, status. The array-centre estimate is its centre snapped to the nearest site. `roster(fit, origin, radius)`: every `(q, r)` whose centre lies within radius + 0.25·pitch; identical for shifted observation windows of one array | `pipeline/nanowell_lattice.py` | `done` | ArrayBoundary reports a robust convex-hull circle, centre, radius, measured coverage and failure reason. Continuous 120/180/360-degree arcs, an actual hexagonal 120-degree cap, and bubble-hidden central sites pass. Using a window centre fails G10; omitting a hidden model site fails the roster regression, both with AssertionError. Roster stability requires one shared caller-supplied array-model radius (G6a); angular discretisation is explicit (G6b). |
 | G6a | Clarify roster stability when each clipped observation estimates a slightly different radius | `pipeline/nanowell_lattice.py` | `done` | The first recovery run found twelve marginal roster sites changed when each clipped observation supplied its independently measured radius. The documented roster contract uses one shared physical array-model radius across observations; G10 independently recovers both origins and compares the resulting complete rosters using that same radius. No claim is made that independent noisy radius estimates always select identical edge sites; later integration must check model agreement. No silent radius quantisation was added. |
@@ -866,7 +915,7 @@ Answers are written into the row. Rows that depend on an answer say so.
 | G11 | Plate-rigid fixture: a plate moved by more than a pitch between timepoints with one well's square hidden; G8 recovers its addresses. Mutation: carry the previous timepoint's origin unchanged — must fail | `tests/test_nanowell_addressing.py` | `done` | Twelve synthetic wells move by more than one pitch and rotate 3 degrees. Eleven independently fiducial-anchored wells fit the plate transform; the remaining well has its square hidden and only an interior window. The actual lattice fit, plate prediction and resolver recover all its addresses. Replacing predict_origin position with the previous origin fails the new-origin assertion with an explanatory AssertionError. |
 | G12 | Both new modules in `_REQUIRED_REMOTE_FILES` (`services/remote_manifest.py`); confirm `tests/test_a_module_lives_at_its_widest_use.py` and `tests/test_first_party_imports_resolve.py` accept a module whose only importers are tests — if one does not, report it rather than work around it | `services/remote_manifest.py` | `done` | Both modules added to _REQUIRED_REMOTE_FILES. Initial targeted run: remote-manifest 6, widest-use 4, first-party-import 2 tests all pass with test-only callers. Omitting entries in the mutation worktree makes test_manifest_includes_all_pipeline_and_util_files fail with AssertionError naming both modules; no guard exemption or workaround |
 | G12a | Update the legacy exact-manifest contract test for the two new modules | `tests/test_remote_runner.py::test_required_files_list_is_what_we_promised` | `done` | Full lane on 5fee4745 first failed with AssertionError because this independent tuple omitted both modules. Added exactly those entries in manifest order, preserving exact equality and the headless requirements contract; the remote-runner/manifest follow-up has 151 passing tests |
-| G13 | Close-out per §4.2: checks; an ARCHITECTURE §6 section describing the addressing and `pipeline/nanowell_lattice.py` as they exist; one patch bump in `version.py` (after `git diff origin/main -- version.py`); §3.4 here trimmed to a pointer where ARCHITECTURE now holds it; report handed back. The PR opens after review | — | `blocked` | G4b exact-endpoint specification still needs the user's answer; no arbitrary orientation is assigned. Implemented close-out: ARCHITECTURE §6.2e describes all geometry and its numerical assumptions, §3.4 is replaced by a pointer, and the existing version change is exactly one patch increment over origin/main. Post-commit guard family, section tests, manifest/import contracts and runtime regressions pass: 312 tests on 1a621559; Ruff and whitespace checks pass. The full fast lane will run after this final tracker commit and its actual results are handed back in the §4.2 report. Independent scientific/real-data review is not claimed; no PR is opened before review |
+| G13 | Close-out per §4.2: checks; an ARCHITECTURE §6 section describing the addressing and `pipeline/nanowell_lattice.py` as they exist; one patch bump in `version.py` (after `git diff origin/main -- version.py`); §3.4 here trimmed to a pointer where ARCHITECTURE now holds it; report handed back. The PR opens after review | — | `todo` | G4b is answered and built. Prepared: ARCHITECTURE §6.2e describes all of PR 1's geometry; §3.4 here points to it and keeps only the design later sections build on; one patch increment over origin/main; review's full fast lane on 7a10e3a passed. Still to do: the scientific review of the diff, the §4.2 report on the final commit, and opening the PR once the user has approved it |
 | G13a | Diagnose scratch-path ancestry failures before attributing them to nanowell code | Cloud test runtime; `tests/test_remote_transit_volume.py`, `tests/test_run_completeness.py` | `done` | Both failures reproduce on unchanged base c7a0d158 with ALLWELL_SCRATCH_DIR unset: read-only home falls back to /tmp, which also contains pytest fixtures. The same two tests pass on that base with a fresh --basetemp outside /tmp under /workspace/.test-tmp. Existing PipelineRunner calls can clear the process scratch override. Final validation uses an owned, non-hidden workspace basetemp under /workspace/test-tmp; no outside-Section-G application/test code is changed or assertions relaxed |
 | G13b | Use a non-hidden pytest basetemp so image grouping can scan test images | Cloud test runtime; `tests/test_image_grouping_characterization.py` | `done` | Full lane on fcb31f65 passed the scratch tests but failed two image-grouping tests because the chosen parent /workspace/.test-tmp is hidden. The unchanged base c7a0d158 reproduces both failures under a hidden parent and passes both under /workspace/test-tmp. The scanner deliberately rejects paths with hidden components. Corrected the runtime path, not image-discovery code or assertions |
 
@@ -928,11 +977,13 @@ Answers are written into the row. Rows that depend on an answer say so.
 | N1 | Lattice pitch and angle from the montage's 2-D Fourier peaks; survives a bubble covering 10 % of the array | `pipeline/nanowell_detect.py` | `todo` | |
 | N2 | Matched filter for a light disk on a dark lattice at the plate format's radius (100 µm, 50 µm, custom) via the recorded pixel size; least-squares lattice refinement on candidates at sites (G2/G3) | `pipeline/nanowell_detect.py` | `todo` | |
 | N3 | Fiducial: square-versus-circle score per central site at the lattice angle; margin over runner-up; score recorded | `pipeline/nanowell_detect.py` | `todo` | |
+| N3a | Cross-check the lattice axis against the square's orientation. The square repeats every 90° and the hex lattice every 60°, so together they fix the axis up to 180°, which a keyed plate never reaches. A square whose edges disagree with the axis the fit chose means the rotation folded back across the ±25° / ±40° limit (§3.4.2): refuse that (well, timepoint) with the reason rather than address it on the wrong axis. Fixture: a hex array rotated 40°, which the lattice alone fits as −20° | `pipeline/nanowell_detect.py` | `todo` | |
 | N4 | Per-site centre and radius refinement; `fitted` versus `predicted`; no site dropped | `pipeline/nanowell_detect.py` | `todo` | |
 | N5 | Occlusion: bubble mask from the montage plus per-site contrast against the lattice (an occluded site is a black disk on black); `visible_fraction` | `pipeline/nanowell_detect.py` | `todo` | |
 | N6 | `imaged_fraction` and clipping at the coverage edge, the array edge and the well wall; a clipped edge never raises | `pipeline/nanowell_detect.py` | `todo` | |
 | N7 | Per-site rim focus through `pipeline.field_quality.edge_focus` | `pipeline/nanowell_detect.py` | `todo` | |
 | N8 | Cross-timepoint consistency (pitch, angle after the plate's rotation, roster) as a named status | `pipeline/nanowell_detect.py` | `todo` | |
+| N8a | One array-model radius per well, shared by every timepoint's roster: combine the per-timepoint `fit_array_boundary` radii (the median of those that fitted) and record each timepoint's deviation from it; a timepoint whose own radius disagrees by more than half a pitch gets a named status. Raised by G6a, which measured twelve marginal sites changing when each observation used its own estimate | `pipeline/nanowell_detect.py` | `todo` | |
 | N9 | Both formats in the synthetic tests: every N row passes at 100 µm and at 50 µm, and a 50 µm array analysed with the 100 µm setting is reported as a format mismatch rather than detected wrongly | `tests/` | `todo` | |
 | N10 | Real data: addresses checked by hand on 3 wells × 2 timepoints, including a bubble and a clipped edge; counts recorded here | — | `blocked` | Q7 |
 | N11 | Close-out (as G13) | — | `todo` | |

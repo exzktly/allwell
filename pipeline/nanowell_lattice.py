@@ -12,6 +12,20 @@ import math
 
 import numpy as np
 
+#: The largest rotation from image east, in degrees, at which the nearest-east
+#: axis is accepted. A hexagonal lattice looks the same every 60°, a square one
+#: every 90°, so two axes are equally near east at 30° / 45° and the choice
+#: between them is arbitrary there. It is unreliable well before that: with
+#: 2 µm of positional noise a true 29.99° hex rotation was fitted as -30.03°
+#: and reported as a success, which turns every address in the well by one
+#: sixth of a turn. The 5° margin keeps the choice stable under noise; a fit
+#: beyond it is refused rather than relabelled. The lattice alone cannot tell
+#: a rotation of θ from θ ± 60° (hex) or ± 90° (square), so this protects only
+#: the band next to the ambiguity; a true rotation further out is folded back
+#: inside the limit, and the square nanowell's own orientation is what can
+#: catch that (tracked as N3a).
+_ORIENTATION_LIMIT_DEG = {"hex": 25.0, "square": 40.0}
+
 
 @dataclass(frozen=True)
 class TileRectangle:
@@ -384,6 +398,13 @@ def fit_lattice(points, *, expected_pitch=None, kind="hex", mirrored=False,
         if abs(basis_angle - ideal_angle) > 15 or not 0.7 < lengths[1] / lengths[0] < 1.3:
             raise ValueError("Refined basis departs too far from the selected lattice")
         angle = math.degrees(math.atan2(-basis[1, 0], basis[0, 0]))
+        limit = _ORIENTATION_LIMIT_DEG[selected]
+        # The tolerance only absorbs floating-point error at exactly the limit.
+        if abs(angle) > limit + 1e-6:
+            raise ValueError(
+                f"The lattice is rotated {angle:.2f}° from image east, beyond the "
+                f"±{limit:g}° within which its nearest-east axis is unambiguous "
+                f"for a {selected} lattice; refusing rather than choosing an axis")
         actual = reflection @ basis
         return LatticeFit(True, "", tuple(actual[:, 0]), tuple(actual[:, 1]),
                           float(lengths.mean()), angle, selected, tuple(reflection @ origin), rms,

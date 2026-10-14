@@ -13,9 +13,10 @@ useless, so this module leaves a trail on disk instead:
 * :func:`arm_faulthandler` points ``faulthandler`` at that same log, so a native
   segfault/abort dumps a C+Python stack there even though the terminal shows
   nothing.
-* :func:`install_excepthook` routes any uncaught Python exception to the log and
-  (best-effort) a GUI message box, so a headless/pythonw launch still surfaces
-  the error.
+* :func:`install_excepthook` routes any uncaught Python exception — on the main
+  thread or a background one — to the log, to the application log, and
+  (best-effort, main thread only) a GUI message box, so a headless/pythonw
+  launch still surfaces the error.
 
 **A log that recorded a crash is kept.** The boot log is truncated per launch so
 it always describes the *current* attempt — which is right for a hang, and was
@@ -238,7 +239,9 @@ def _all_thread_stacks() -> str:
 def install_qt_cross_thread_trace() -> None:
     """Record who touched a Qt object from the wrong thread. Never raises.
 
-    Call once the ``QApplication`` exists. Installs a Qt message handler that,
+    Call once the ``QApplication`` exists. Qt's warnings, criticals and fatals
+    are also forwarded to the ``allwell.qt`` logger, so they appear in the
+    application log beside the app's own. Installs a Qt message handler that,
     for a cross-thread warning, writes the message, the thread that raised it
     and every thread's Python stack to the boot log — the evidence a report
     like "clicking Stop crashes with *timers cannot be stopped from another
@@ -247,13 +250,37 @@ def install_qt_cross_thread_trace() -> None:
     default handler would print it.
     """
     try:
-        from PySide6.QtCore import qInstallMessageHandler
+        from PySide6.QtCore import QtMsgType, qInstallMessageHandler
     except Exception:
         return
+    import logging
+    import threading
+
+    # Qt's own warnings reach the application log too, beside every other
+    # warning the app raises. Debug and info chatter stay on stderr only.
+    to_level = {
+        QtMsgType.QtWarningMsg: logging.WARNING,
+        QtMsgType.QtCriticalMsg: logging.ERROR,
+        QtMsgType.QtFatalMsg: logging.CRITICAL,
+    }
+    qt_log = logging.getLogger("allwell.qt")
+    # The log handler marshals through a queued Qt signal, and that can itself
+    # raise a Qt warning — at teardown, say — which would re-enter here.
+    forwarding = threading.local()
     dumps = [0]
     previous = None
 
     def _handler(mode, context, message):
+        try:
+            level = to_level.get(mode)
+            if level is not None and not getattr(forwarding, "active", False):
+                forwarding.active = True
+                try:
+                    qt_log.log(level, "%s", message)
+                finally:
+                    forwarding.active = False
+        except Exception:
+            pass
         try:
             if (dumps[0] < _CROSS_THREAD_DUMPS
                     and any(m in str(message) for m in _CROSS_THREAD_MARKERS)):
@@ -295,6 +322,14 @@ def install_excepthook() -> None:
             sys.__excepthook__(exc_type, exc, tb)
         except Exception:
             pass
+        # And to the application log, where every other error lands. After the
+        # two records above, which must not depend on logging working.
+        try:
+            import logging
+            logging.getLogger("allwell.uncaught").error(
+                "Uncaught exception:\n%s", text.rstrip())
+        except Exception:
+            pass
         # Best-effort GUI dialog — ONLY when a QApplication already exists. Never
         # create one here: if the failure IS Qt (missing platform plugin / DLL),
         # constructing QApplication would re-crash or hang, and a modal box with
@@ -326,3 +361,32 @@ def install_excepthook() -> None:
         sys.excepthook = _hook
     except Exception:
         pass
+    _install_thread_excepthook()
+
+
+def _install_thread_excepthook() -> None:
+    """Route an exception that kills a background thread to the app log.
+
+    ``sys.excepthook`` never sees these: Python hands them to
+    ``threading.excepthook``, whose default prints to stderr — which a
+    double-clicked app does not have. The default still runs afterwards.
+    """
+    import logging
+    import threading
+    import traceback
+
+    previous = threading.excepthook
+
+    def _thread_hook(args):
+        try:
+            if args.exc_type is not SystemExit:
+                text = "".join(traceback.format_exception(
+                    args.exc_type, args.exc_value, args.exc_traceback))
+                name = args.thread.name if args.thread is not None else "?"
+                boot(f"uncaught exception on thread {name!r}:\n{text}")
+                logging.getLogger("allwell.uncaught").error(
+                    "Uncaught exception on thread %r:\n%s", name, text.rstrip())
+        finally:
+            previous(args)
+
+    threading.excepthook = _thread_hook

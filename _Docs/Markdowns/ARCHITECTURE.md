@@ -7723,6 +7723,9 @@ Four things about it are load-bearing:
   `TimeScan`, including non-default scale and timestamp values. A real cold/
   warm scan verifies that both survive disk storage without opening the source
   again; stale-reader and stale-format fixtures independently require reparsing.
+  The reader signature guard covers the scaling and acquisition-time producers,
+  their numeric/timestamp parsers, representative-position selection and
+  `TimeScan`, so a helper-only change cannot retain an old reader signature.
 - **It never writes into the images' own folder.** A plate is routinely on a
   read-only archive, a share somebody else administers, or a cloud-sync root.
   The cache lives beside the boot log — `%LOCALAPPDATA%\allwell\czi-scans` or

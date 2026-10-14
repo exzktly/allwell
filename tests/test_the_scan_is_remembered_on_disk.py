@@ -532,10 +532,18 @@ def test_a_changed_reader_invalidates_every_cached_scan():
         inspect.getsource(czi_read.wells_from_scenes),
         inspect.getsource(czi_read.CziLayout),
         inspect.getsource(czi_read._PlateMetadata),
+        inspect.getsource(czi_read._pixel_size_um),
+        inspect.getsource(czi_read._finite_metadata_number),
+        inspect.getsource(czi_read.scan_timepoint_hours),
+        inspect.getsource(czi_read._representative_blocks),
+        inspect.getsource(czi_read.parse_acquisition_time),
+        inspect.getsource(czi_read._acquisition_time_from_root),
+        inspect.getsource(czi_read.normalise_instant),
+        inspect.getsource(czi_read.TimeScan),
     ])
     digest = hashlib.sha256(material.encode()).hexdigest()[:16]
 
-    assert (scan_cache.PARSER_VERSION, digest) == (2, "e3831b4a4b6d749f"), (
+    assert (scan_cache.PARSER_VERSION, digest) == (2, "d4441e0790a4f55d"), (
         "the CZI reader has changed. Every cached scan on every user's disk "
         "was produced by the old one and the file stamps do not know that. "
         f"Bump PARSER_VERSION, then put the new digest here: {digest}")

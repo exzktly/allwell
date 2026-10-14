@@ -788,7 +788,7 @@ are their tests; nothing nanowell-specific is user-visible until PR 7.
 
 | PR | Branch | Base | Section | Delivers | Version |
 |---|---|---|---|---|---|
-| 1 | `claude/nanowell-1-geometry` | `main` | G | this tracker; addressing; lattice fitting on point sets; origin chain; plate-rigid transform; roster; ownership | patch |
+| 1 (#960) | `claude/nanowell-1-geometry` | `main` | G | this tracker; addressing; lattice fitting on point sets; origin chain; plate-rigid transform; roster; ownership | patch |
 | 2 | `claude/nanowell-2-acquisition` | PR 1 | R | the acquisition record; the CZI converter writes it; Subset, Merge Plates, Validate and remote carry it | patch |
 | 3 | `claude/nanowell-3-merge-time` | PR 2 | M | Concatenate: a time-gap field (pre-filled from recorded times or the interval), raw datasets before analysis, single-timepoint datasets, differing tile plans, record merging | patch |
 | 4 | `claude/nanowell-4-tiles` | PR 3 | T | recorded placement; three-source registration; periodicity guard; fused-site crops; montage preview | patch |

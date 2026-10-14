@@ -36,6 +36,7 @@ from __future__ import annotations
 import logging
 import sys as _sys
 
+from core.log_mirror import mirror_line
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox, QLabel, QPushButton, QTextEdit, QWidget,
@@ -302,6 +303,11 @@ class AnalyzeLogPaneMixin:
         """
         if not batch:
             return
+        # Warnings and errors also go to the application log, so one place
+        # holds every pane's failures (core/log_mirror.py). The tag is the
+        # one this pane colours the line by, so the two cannot disagree.
+        for text, tag in batch:
+            mirror_line("analyze", text, tag)
         # Snapshot the user's scroll position before appending. Auto-
         # scroll-to-bottom only if they were already pinned there;
         # otherwise leave the viewport alone so a user scrolled up to

@@ -39,13 +39,41 @@ def test_nearest_centre_wins_and_exact_ties_do_not_depend_on_tile_order():
     expected = ("b", "a", "a", None)
     assert assign_owners(sites, 50, tiles, 10).owners == expected
     assert assign_owners(sites, 50, tiles[::-1], 10).owners == expected
-    assert assign_owners(sites, 50, tiles, 10).fused_indices == (3,)
+    assert assign_owners(sites, 50, tiles, 10).fused_indices == ()
+    assert assign_owners(sites, 50, tiles, 10).unimaged_indices == (3,)
 
 
 def test_disk_fits_without_margin_but_must_be_fused_with_margin():
     tiles = [TileRectangle("only", 0, 0, 100, 100)]
     assert assign_owners([[30, 50]], 50, tiles, 0).owners == ("only",)
     assert assign_owners([[30, 50]], 50, tiles, 10).owners == (None,)
+    assert assign_owners([[30, 50]], 50, tiles, 10).fused_indices == (0,)
+
+
+def test_outer_edges_are_unimaged_and_seams_are_fused_without_losing_sites():
+    tiles = [TileRectangle(f"{col},{row}", col * 100, row * 100,
+                           col * 100 + 100, row * 100 + 100)
+             for row in range(2) for col in range(2)]
+    result = assign_owners([[100, 100], [195, 50], [50, 50], [230, 230]], 40, tiles, 5)
+    assert result.owners == (None, None, "0,0", None)
+    assert result.fused_indices == (0,)
+    assert result.unimaged_indices == (1, 3)
+    assert sorted(result.fused_indices + result.unimaged_indices) == [0, 1, 3]
+
+
+def test_union_coverage_checks_interior_holes_and_the_disk_not_its_bounding_box():
+    # A narrow hole lies inside the disk despite every cardinal rim point
+    # being covered. Sampling the circumference alone would miss it.
+    tiles = [TileRectangle("left", -100, -100, -2, 100),
+             TileRectangle("right", 2, -100, 100, 100),
+             TileRectangle("top", -100, -100, 100, -2),
+             TileRectangle("bottom", -100, 2, 100, 100)]
+    assert assign_owners([[0, 0]], 40, tiles, 0).unimaged_indices == (0,)
+    # Bounding-box corner gaps outside a disk must not make it unimaged.
+    cross = [TileRectangle("horizontal", -25, -15, 25, 15),
+             TileRectangle("vertical", -15, -25, 15, 25)]
+    result = assign_owners([[0, 0]], 40, cross, 0)
+    assert result.fused_indices == (0,) and result.unimaged_indices == ()
 
 
 def test_invalid_geometry_is_refused_and_empty_sites_are_supported():

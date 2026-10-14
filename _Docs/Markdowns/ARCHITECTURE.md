@@ -8147,35 +8147,128 @@ actually given — rather than on the reporter calls behind it, because a scan
 that computes a perfect count and never writes it to the label leaves exactly
 the frozen page this fixes.
 
-### 6.2e Nanowell geometry primitives
+### 6.2e Nanowell geometry and addressing
 
-`util/nanowell_address.py` is stdlib-only: frozen integer axial addresses,
-hexagonal ring labels by default, explicit square-lattice labels, and exact
-parsing. Positive r advances counter-clockwise from east in the lattice frame;
-labels identify a site within its ring, while `(q, r)` is the join key. A label
-alone does not identify its lattice kind; square parsing must name that kind.
+`util/nanowell_address.py` is stdlib-only. `NanowellAddress(q, r)` is frozen,
+integer-valued, and hexagonal by default; square addressing requires an explicit
+keyword-only `kind`. Positions, origins, predictions, pitch, radius, diameter and
+margins throughout the geometry API use the caller's units without conversion.
+Image coordinates have x right and y down. Counter-clockwise on screen rotates
+`(x, y)` to `(x cosφ + y sinφ, -x sinφ + y cosφ)`. In the unmirrored frame, a₁ is
+the direction nearest image east and a₂ advances counter-clockwise by 60° for
+hexagonal lattices or 90° for square lattices. Position is `origin + q·a₁ + r·a₂`.
 
-`pipeline/nanowell_lattice.py` is Qt-free. `TileRectangle` carries an id and
-finite axis-aligned bounds in the same units as the site centres.
+Hexagonal ring `k = max(|q|, |r|, |q+r|)` contains 6k sites. Its corners follow
+`D = [(1,0), (0,1), (-1,1), (-1,0), (0,-1), (1,-1)]`. From corner `k·D[j]`,
+walk k steps along `D[(j+2) % 6]`; offset `j·k+s` identifies the site at step s.
+The first ring is `(1,0)=1.0, (0,1)=1.1, (-1,1)=1.2, (-1,0)=1.3,
+(0,-1)=1.4, (1,-1)=1.5`. Square ring `max(|q|, |r|)` contains 8k sites, walking
+from `(k,0)` up to `(k,k)`, left to `(-k,k)`, down to `(-k,-k)`, right to
+`(k,-k)`, then up to `(k,-1)`. The central site is `0.0`. `(q,r)` is the join
+key; the canonical label `k.i` is derived, and `parse_label` is its exact inverse.
+A label does not identify its lattice kind. Malformed labels raise `ValueError`
+naming the input. Round trips are exhaustive through ring 45 for both kinds;
+explicit labels separately pin each kind's first two rings and direction.
+
+`pipeline/nanowell_lattice.py` is Qt-free. `fit_lattice(points, *,
+expected_pitch=None, kind="hex", mirrored=False, mirror_axis=None)` seeds a
+basis from `cKDTree` nearest-neighbour displacements. Antipodes are folded;
+angular harmonics distinguish three hexagonal axes from two square axes for
+`kind="auto"`, and the direction clusters supply the initial vectors. Circular
+coordinate consensus supplies the phase even when the point nearest the window
+centroid is an outlier. Least squares refines a general 2×2 basis and origin on
+unique, cleanly indexed points, rather than forcing ideal lengths and angles.
+The frozen `LatticeFit` carries `ok`, `reason`, `a1`, `a2`, `pitch`, `angle_deg`,
+`kind`, `phase_origin`, RMS, the inlier mask, the a₁–a₂ angle and length ratio,
+and reflection metadata. `phase_origin` is the fitted lattice site nearest the
+inliers' centroid; it does not designate the central square. Failure carries a
+reason and no fabricated basis or origin.
+
+Mirroring requires an explicit reflected coordinate, `mirror_axis="x"` or
+`"y"`, with `mirrored=True`. Basis selection occurs after unmirroring and the
+basis and phase are returned in the original input frame. Camera reflection is
+never inferred. The holder orientation convention is unambiguous strictly below
+30° for hexagonal lattices and 45° for square lattices; tests cover the specified
+−25°…+25° sequence. At exact symmetry endpoints two directions are equally near
+east, so the current implementation returns an ambiguous-orientation failure.
+The tracker's G4b records the unresolved specification for those endpoints.
+
+`index_points(points, fit, origin)` finds the nearest lattice site in the
+Cartesian metric, not by separately rounding the two oblique coordinates.
+Residuals over a quarter pitch are outliers, with `q=None` and `r=None` rather
+than fabricated addresses. Among duplicate detections on one site only the
+nearer survives; equal residuals retain input order. Results are frozen
+`IndexedPoint` records containing q, r, residual, outlier flag and reason.
+
+`fit_array_boundary(site_xy)` expects lattice-filtered site positions. It fits
+a circle to convex-hull sites using seeded triplet hypotheses and robust radial
+refinement, separating the circular rim from clipping chords and interior sites.
+It reports a frozen `ArrayBoundary` with status, reason, centre, radius and
+measured angular coverage. Radial tolerance is half a nearest-neighbour spacing;
+a 120° arc acceptance allows one spacing of endpoint angular resolution because
+the rim consists of discrete sites. The measured angle is reported without
+rounding it up. Tests include an actual hexagonal 120° cap, continuous arcs and
+insufficient or collinear evidence. This is synthetic point-set validation;
+real phase-image boundary validation remains dependent on tracker Q7.
+
+`resolve_origin(fit, *, fiducial=None, array_centre=None, plate_rigid=None,
+fiducial_margin)` independently anchors each acquisition. The required score
+margin has no synthetic default or absolute-score calibration. A
+`FiducialCandidate(position, score, runner_up_score)` is accepted only when its
+score exceeds its runner-up by more than the supplied margin. Accepted evidence
+is snapped through the fitted phase in priority order: fiducial, array centre,
+then plate-rigid prediction. Three times the prediction's one-sigma uncertainty
+must be strictly below half a pitch. With no accepted source, the frozen
+`OriginResolution` is `unaddressed` with a reason and no origin. Accepted
+results carry `origin_xy`, the method, and `agreement` (`agree`, `conflict`, or
+`single_source`). Disagreeing sources remain an explicit conflict; the
+higher-priority source is retained, including fiducial over array centre.
+No previous acquisition's origin is silently carried over.
+
+`roster(fit, origin, radius)` enumerates every integer site within
+`radius + 0.25·pitch`, including undetected sites and bubbles. Use one shared
+array-model radius across a well's acquisitions: independently noisy radius
+estimates can change which marginal sites lie inside the model. The function
+does not silently quantise those estimates. Shifted-window tests recover each
+origin independently and keep the same model roster. Later integration must
+check agreement of pitch (±0.5%), angle after removing measured plate rotation
+(±0.5°), and roster, and record violations as timepoint statuses.
+
+`TileRectangle` carries an id and finite axis-aligned bounds.
 `assign_owners` tests the entire nanowell disk plus the caller's margin against
-each tile and chooses the containing tile nearest its centre. Equal distances
-are resolved by lexical tile-id order. Its frozen result retains every input
-site, with a tile id or `None`, and explicitly lists every unowned site's index.
-Those indices include both seams and sites outside coverage; ownership alone
-cannot decide whether a crop can be fused or is unmeasurable.
+each tile and chooses the containing tile nearest its centre; exact distance
+ties use lexical tile-id order. The frozen `OwnershipResult` retains every input
+site with a tile id or `None`. Unowned sites are partitioned into
+`fused_indices`, whose whole physical disks are covered by the tile union, and
+`unimaged_indices`, whose disks have a missing portion. Margin controls
+single-tile ownership; union coverage tests the physical disk. Exact vertical
+slab coverage of the rectangle union detects interior holes and accepts missing
+bounding-box corners outside the circular disk. Outside-coverage sites therefore
+cannot be sent to the seam-fusion path.
 
-`fit_plate_rigid` fits a proper 2-D rotation and translation (no scale) to
-common well origins. Pair hypotheses minimise median radial residual; a
-median-plus-three-scaled-MAD cutoff selects at least three consensus wells for
-Kabsch refinement. Frozen results carry per-well residuals, consensus ids, RMS,
-and failure reasons. `predict_origin` returns a position and a one-sigma radial
-prediction standard error derived from residual variance and rotational
-leverage. This assumes independent isotropic residuals; it is not a guaranteed
-error bound and does not account for calibration uncertainty. No caller yet
-uses this number to accept or reject a nanowell origin.
+`fit_plate_rigid` fits a proper 2-D rotation and translation without scale or
+reflection to at least three common well origins. Pair hypotheses minimise the
+median radial residual. Consensus is refitted and reselected, permitting genuine
+wells to rejoin, with a conservative six-sigma radial cutoff whose scale is the
+Rayleigh median divided by `sqrt(2 ln 2)`. This avoids the small-sample trimming
+bias from treating radial residuals as signed Gaussian deviations. Frozen
+`PlateRigidFit` results include per-well residuals, consensus ids, RMS and failure
+reasons. `predict_origin` returns an `OriginPrediction` with position and a
+one-sigma radial prediction standard error. Residual variance is SSE/(2n−3);
+translation and rotational leverage give variance times `(2/n + distance²/spread)`.
+The seeded 500-fit simulation measures prediction error independently with 5 µm
+per-axis noise in each acquisition and checks near and far predictions within
+10% of empirical RMS while retaining all wells in nearly every fit. Separate
+planted-outlier tests require rejection. The uncertainty assumes independent
+isotropic residuals and treats the prediction input as fixed; it excludes new
+measurement noise in that input and stage-calibration uncertainty, and is not a
+guaranteed bound. Scientific and real-data review must assess those assumptions.
 
-These modules are listed in the remote manifest and currently have only test
+Both geometry modules are in the remote manifest and currently have only test
 callers. They do not enable nanowell processing in Analyze or change outputs.
+The synthetic shifted/rotated-window and moved-plate fixtures recover actual
+addresses through these functions; replacing the boundary centre with the
+window centre or carrying an old origin makes the discriminating tests fail.
 
 ### 6.2 `process_microscopy.py`
 

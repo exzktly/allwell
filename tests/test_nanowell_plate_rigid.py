@@ -57,3 +57,36 @@ def test_insufficient_invalid_or_coincident_wells_do_not_make_a_transform():
         assert fit.rotation is None and fit.translation is None
         prediction = predict_origin(fit, (0, 0))
         assert not prediction.ok and prediction.position is None and prediction.uncertainty is None
+
+
+def test_uncertainty_matches_empirical_prediction_error_without_trimming_good_wells(request):
+    """Independent noisy measurements of both acquisitions, as in G8a review.
+
+    Predictions are evaluated at noiseless coordinates so this measures the
+    transform uncertainty, not new measurement noise at the prediction site.
+    """
+    rng = np.random.default_rng(1984)
+    coordinates = np.array([(9000 * col, 9000 * row) for row in range(3) for col in range(4)])
+    targets = np.array([_moved(xy) for xy in coordinates])
+    sites = [coordinates.mean(axis=0), np.array((100000., 100000.))]
+    predicted_variances, squared_errors = np.zeros(2), np.zeros(2)
+    complete = 0
+    count = 500
+    for _ in range(count):
+        source = coordinates + rng.normal(0, 5, coordinates.shape)
+        target = targets + rng.normal(0, 5, coordinates.shape)
+        fit = fit_plate_rigid(dict(enumerate(source)), dict(enumerate(target)))
+        assert fit.ok, fit.reason
+        complete += len(fit.inlier_wells) == 12
+        for index, site in enumerate(sites):
+            prediction = predict_origin(fit, site)
+            predicted_variances[index] += prediction.uncertainty ** 2
+            squared_errors[index] += np.sum((np.asarray(prediction.position) - _moved(site)) ** 2)
+    assert complete >= 495, f"Only {complete}/500 fits retained every genuine well"
+    predicted = np.sqrt(predicted_variances / count)
+    empirical = np.sqrt(squared_errors / count)
+    request.node.user_properties.append(("complete_fits", complete))
+    request.node.user_properties.append(("predicted_rms", predicted.tolist()))
+    request.node.user_properties.append(("empirical_rms", empirical.tolist()))
+    np.testing.assert_allclose(predicted / empirical, np.ones(2), rtol=.1,
+                               err_msg="Reported uncertainty must match empirical radial RMS, near and far")

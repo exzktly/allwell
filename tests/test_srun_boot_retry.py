@@ -47,18 +47,33 @@ def _write_exe(path: Path, body: str) -> None:
 
 
 def _fake_cluster(tmp_path: Path, outcomes: list[tuple[str, str]],
-                  sinfo: str | None) -> Path:
-    """A bin dir whose ``srun`` plays *outcomes* in order: (kind, node)."""
+                  sinfo: str | None, *, test_only_fits: bool = True) -> Path:
+    """A bin dir whose ``srun`` plays *outcomes* in order: (kind, node).
+
+    ``srun --test-only`` queues nothing and consumes no outcome; it answers
+    whether the request could run, per *test_only_fits*, and is logged to
+    ``state/test_only``.
+    """
     bindir = tmp_path / "bin"
     bindir.mkdir()
     state = tmp_path / "state"
     state.mkdir()
+    if not test_only_fits:
+        (state / "test_only_fails").write_text("")
     for i, (kind, node) in enumerate(outcomes, start=1):
         body = {"boot_fail": _BOOT_FAIL, "unavailable": _CONFIG_UNAVAILABLE,
                 "run": _RUN}[kind]
         _write_exe(state / f"outcome{i}", f"JOB={1000 + i}\nNODE={node}\n" + body)
     _write_exe(bindir / "srun", (
         f'S={shlex.quote(str(state))}\n'
+        'case " $* " in *" --test-only "*)\n'
+        '  printf "%s\\n" "$*" >> "$S/test_only"\n'
+        '  if [ -f "$S/test_only_fails" ]; then\n'
+        "    echo 'srun: error: Unable to allocate resources: "
+        "Requested node configuration is not available' >&2; exit 1\n"
+        '  fi\n'
+        '  echo "srun: Job 9 to start at 2026-01-01T00:00:00" >&2; exit 0;;\n'
+        'esac\n'
         'n=$(( $(cat "$S/count" 2>/dev/null || echo 0) + 1 ))\n'
         'echo "$n" > "$S/count"\n'
         'printf "%s\\n" "$*" > "$S/args$n"\n'
@@ -157,6 +172,36 @@ def test_awake_nodes_that_cannot_take_the_request_fall_back_once(tmp_path):
     assert _excluded(args[0]) == {"n02", "n04", "n06"}
     assert _excluded(args[1]) == set()
     assert "no powered-on node can take this request" in out.stdout
+
+
+def test_a_request_no_awake_node_can_take_is_found_before_srun_fails(tmp_path):
+    """The reported run: the awake nodes in the partition were the wrong
+    instance type for ``--constraint=g6.4xlarge``, so the first real srun
+    failed with "Requested node configuration is not available" — read by the
+    user as an error, though the fallback then booted the right node. Slurm is
+    asked first with ``--test-only``, which queues nothing, and the only real
+    launch is the one that can run."""
+    bindir = _fake_cluster(tmp_path, [("run", "n02")], _SINFO, test_only_fits=False)
+    out, args, _ = _run(tmp_path, bindir, "srun -p gpu --constraint=g6.4xlarge")
+
+    assert out.returncode == 0, out.stdout
+    test_only = (tmp_path / "state" / "test_only").read_text().splitlines()
+    assert len(test_only) == 1
+    assert _excluded(test_only[0]) == {"n02", "n04", "n06"}
+    assert "--constraint=g6.4xlarge" in test_only[0]
+    assert len(args) == 1 and _excluded(args[0]) == set()
+    assert "Requested node configuration is not available" not in out.stdout
+    assert ("[remote] scheduler: no powered-on node matches this request — Slurm "
+            "will start one, which can take several minutes") in out.stdout
+    assert "avoiding" not in out.stdout
+
+
+def test_a_request_an_awake_node_can_take_keeps_the_preference(tmp_path):
+    bindir = _fake_cluster(tmp_path, [("run", "n03")], _SINFO)
+    out, args, _ = _run(tmp_path, bindir, "srun -p cpu")
+    assert _excluded(args[0]) == {"n02", "n04", "n06"}
+    assert "avoiding 3 node(s) in cpu" in out.stdout
+    assert "no powered-on node matches" not in out.stdout
 
 
 def test_a_failure_that_is_not_a_boot_failure_is_not_retried(tmp_path):

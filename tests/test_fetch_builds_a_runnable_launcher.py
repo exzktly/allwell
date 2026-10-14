@@ -30,7 +30,11 @@ from services.remote_config import (
     profile_launcher,
 )
 from services.remote_srun_retry import stray_launcher_words
-from services.slurm_batch_script import directive_flags, launcher_from_batch_script
+from services.slurm_batch_script import (
+    directive_flags,
+    launcher_from_batch_script,
+    single_task,
+)
 
 # The shape of the reporting cluster's config: a site template that places
 # ``options`` after ``--constraint=``, with batchspawner's usual job-only lines.
@@ -86,6 +90,65 @@ def test_the_reported_profile_becomes_a_constraint(tmp_path):
     assert detail == "", "nothing was lost, so nothing may be reported"
 
 
+# The reporting cluster's own template and profile shapes, as its
+# jupyterhub_config.py has them: str.format placeholders, cores asked for with
+# ``-n {nprocs}``, profiles as 5-tuples naming the spawner class by string.
+_REAL_CONFIG = """
+c.SlurmSpawner.batch_script = '''#!/bin/bash
+#SBATCH -J "JH-notebook"
+#SBATCH -p {partition}
+#SBATCH -N 1
+#SBATCH -n {nprocs}
+#SBATCH --mem={memory}
+#SBATCH --gres={gres}
+#SBATCH --constraint={options}
+#SBATCH --chdir={homedir}
+#SBATCH -e /data/home/{username}/jh-slurm.err
+#SBATCH -o /data/home/{username}/jh-slurm.out
+{cmd}
+'''
+c.ProfilesSpawner.profiles = [
+    ("Cluster (16 cores, 60GB RAM) $0.768/hr", "cluster-16cores-60G",
+     "batchspawner.SlurmSpawner",
+     {"req_partition": "gen-queue", "req_nprocs": "16", "req_memory": "60G",
+      "req_gres": "none"}, set()),
+    ("Cluster (1 NVIDIA L4 Tensor Core GPU, 16 cores, 64GB RAM, 24GB VRAM) $1.3232/hr",
+     "cluster-1L4-16cores-64G", "batchspawner.SlurmSpawner",
+     {"req_partition": "gpu-large-queue", "req_nprocs": "16", "req_memory": "60G",
+      "req_gres": "gpu:l4:1", "req_options": "g6.4xlarge"}, set()),
+]
+"""
+
+
+def test_the_reporting_cluster_s_profiles_get_their_cores(tmp_path):
+    """``-n {nprocs}`` gives a batch job that many CPUs. Dropped, the app's
+    step got one CPU and the pipeline ran one worker on a 16-core node; kept
+    as ``--ntasks``, srun would run the pipeline sixteen times. It is the
+    step's CPU count."""
+    ok, profiles, detail = parse_jupyterhub_profiles_json(_discover(tmp_path, _REAL_CONFIG))
+    assert ok, detail
+    launchers = dict(profiles)
+    assert launchers["Cluster (16 cores, 60GB RAM) $0.768/hr"] == (
+        "srun --partition=gen-queue --mem=60G --gres=none --cpus-per-task=16")
+    assert launchers[
+        "Cluster (1 NVIDIA L4 Tensor Core GPU, 16 cores, 64GB RAM, 24GB VRAM) $1.3232/hr"
+    ] == ("srun --partition=gpu-large-queue --mem=60G --gres=gpu:l4:1 "
+          "--constraint=g6.4xlarge --cpus-per-task=16")
+    # The CPU profile sets no constraint; that is not a loss worth reporting.
+    assert detail == ""
+
+
+@pytest.mark.parametrize("flags, expected", [
+    (["--ntasks=16"], ["--cpus-per-task=16"]),
+    (["--ntasks=4", "--cpus-per-task=2"], ["--cpus-per-task=8"]),
+    (["--cpus-per-task=8"], ["--cpus-per-task=8"]),
+    (["-p", "x"], ["-p", "x"]),
+    (["--ntasks=lots", "--mem=4G"], ["--mem=4G"]),
+])
+def test_a_task_count_becomes_the_one_task_s_cpus(flags, expected):
+    assert single_task(flags) == expected
+
+
 def test_a_bare_word_with_no_template_is_left_out_and_named():
     """Without a site template, batchspawner writes ``req_options`` as a bare
     ``#SBATCH`` line, where a lone word is no option at all. It must not reach
@@ -99,14 +162,16 @@ def test_a_bare_word_with_no_template_is_left_out_and_named():
 
 
 def test_only_resource_options_reach_the_launcher():
-    """--output would take the stream the app reads, --export would strip the
-    job's environment, and --ntasks 4 would run the pipeline four times."""
+    """--output would take the stream the app reads and --export would strip
+    the job's environment. --ntasks 4 is the batch way of asking for four
+    tasks' worth of CPUs; on the step it would run the pipeline four times, so
+    it becomes one task with all of them."""
     made = launcher_from_batch_script(
         "#SBATCH --output=/tmp/x.log\n#SBATCH --export=NONE\n#SBATCH --ntasks 4\n"
         "#SBATCH -p {partition} -c 8 --gres gpu:{ngpus} --exclusive\n",
         {"req_partition": "gpu", "req_ngpus": 2})
-    assert made.launcher == ("srun --partition=gpu --cpus-per-task=8 "
-                             "--gres=gpu:2 --exclusive")
+    assert made.launcher == ("srun --partition=gpu --gres=gpu:2 --exclusive "
+                             "--cpus-per-task=32")
     assert made.dropped == []
 
 

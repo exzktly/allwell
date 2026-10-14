@@ -23,6 +23,7 @@ Mixed in ahead of `QWidget` on each page class, so `self` is the page.
 
 from __future__ import annotations
 
+from core.log_mirror import mirror_line
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -133,6 +134,11 @@ class LogPanelMixin:
     # ── the three members that were byte-identical six times over ────────
     def append_log(self, text: str) -> None:
         self._status.appendPlainText(text)
+        # Warnings and errors also go to the application log, so one place
+        # holds every pane's failures (core/log_mirror.py). The logger is
+        # named for the tool's package — ``allwell.datasets.subset`` and so on.
+        tool = type(self).__module__.split(".")[1:2] or ["tool"]
+        mirror_line(f"datasets.{tool[0]}", text)
 
     def log_text(self) -> str:
         """Everything in the raw log, for a caller that needs to read it back.

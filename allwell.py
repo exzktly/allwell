@@ -1364,7 +1364,11 @@ class AllWellApp(QMainWindow):
         handler on the *root* logger, as this used to be, never receives those
         records and the drawer stays empty. Attach directly to ``"review"``
         (plus root, for the few ``__name__`` loggers under ``services/`` that
-        still propagate). Called once at startup so records emitted before the
+        still propagate). Every other ``allwell.*`` logger propagates to root
+        too, which is how the warnings and errors that the Analyze and Datasets
+        panes show in their own logs get here (``core/log_mirror.py``), along
+        with uncaught exceptions and Qt warnings (``startup/boot_diag.py``).
+        Called once at startup so records emitted before the
         drawer is first opened are captured. Idempotent."""
         if getattr(self, "_log_ring_attached", False):
             return
@@ -1406,6 +1410,11 @@ class AllWellApp(QMainWindow):
             if lg.level == _logging.NOTSET or lg.level > _logging.INFO:
                 lg.setLevel(_logging.INFO)
             lg.addHandler(h)
+        # Python ``warnings.warn`` calls (numpy, pandas, matplotlib, our own)
+        # print to stderr by default, which a double-clicked app does not
+        # have. Captured, they arrive on ``py.warnings``, which propagates to
+        # the root handler above.
+        _logging.captureWarnings(True)
         self._log_ring_attached = True
 
     def _open_dataset(self) -> None:

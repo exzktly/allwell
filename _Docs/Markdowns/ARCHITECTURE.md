@@ -425,6 +425,8 @@ allwell/
 │   ├── worker_bridge.py        ← run_off_thread, the one-shot queued-signal bridge
 │   │                              (+ progress / stage reporting), and GuiLogRelay,
 │   │                              which puts a worker's log lines on the GUI thread
+│   ├── log_mirror.py           ← mirror_line(): copies the warnings and errors the Analyze
+│   │                              and Datasets panes show in their own logs into the app log
 │   └── panes.py                ← PANE_MODES and the index/name lookups either way —
 │                                  the roster of the application's three panes
 ├── domain/                      ← Qt-free models and pure logic that more than ONE pane
@@ -14161,8 +14163,35 @@ remote UTF-8 stream is decoded on a cp1252 Windows client).
   `logging.getLogger("review")` (the viewer) or
   `logging.getLogger("review.auto_threshold")` (per-domain children).
 - `allwell._attach_log_ring_buffer` captures every record into a ring
-  buffer that the Help drawer's log tab and the Analyze tab's live log
-  view both read from.
+  buffer that the application log drawer (`⌘L`) reads from. It is attached to
+  `"review"` (which does not propagate) and to the root logger, so every
+  `allwell.*` and `__name__` logger reaches it too. It also turns on
+  `logging.captureWarnings`, so Python `warnings.warn` calls arrive on
+  `py.warnings` instead of only on stderr.
+- **The application log holds every pane's warnings and errors.** Two of the
+  app's logs are not fed by `logging` at all: the Analyze run log is the
+  pipeline subprocess's stdout written straight into a widget
+  (`analyze/log_pane.py::_log_lines`), and each Datasets tool page's raw log is
+  its worker's `logLine` signal (`datasets/core/log_panel.py::append_log`).
+  Both of those single entry points call `core.log_mirror.mirror_line`, which
+  forwards a line to `allwell.analyze` / `allwell.datasets.<tool>` only when it
+  is a WARNING or an ERROR — Analyze passes the tag it already coloured the line
+  by, so the two surfaces cannot disagree; a Datasets line is an ERROR when it
+  opens with the tools' `✗` failure mark and is otherwise judged by
+  `services.pipeline_runner.classify_log_line`. The pipeline's own
+  `asctime  LEVEL` prefix is stripped, since the app log stamps its own.
+  The mirror loggers sit outside `"review"` on purpose: that logger also feeds
+  Review's bottom status log, which is Review's own diary. Nothing in the app
+  log is fed back into either pane, so the mirror cannot loop. Ordinary INFO
+  lines stay in their pane only — a run says tens of thousands of them.
+- **What no pane reports reaches it too.** `startup.boot_diag.install_excepthook`
+  writes an uncaught exception to `allwell.uncaught` as well as the boot log,
+  and installs a `threading.excepthook` that does the same for an exception
+  that kills a background thread (which `sys.excepthook` never sees).
+  `install_qt_cross_thread_trace`'s Qt message handler forwards Qt warnings,
+  criticals and fatals to `allwell.qt`, behind a thread-local re-entrancy guard
+  because the log handler's own queued signal can raise a Qt warning at
+  teardown. `tests/test_errors_reach_the_app_log.py` drives each route.
 - **A `logging.Handler` runs on whichever thread logged the record**, and in
   this app that includes every background thread there is: the remote runner's
   batch loop and its fetcher, the smFISH and cell-browser loaders, the gating

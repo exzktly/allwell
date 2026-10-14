@@ -9,6 +9,8 @@ conda / wait snippets, never the runner.
 
 from __future__ import annotations
 
+import base64
+import gzip
 import re
 import shlex
 
@@ -377,3 +379,54 @@ def _launch(launcher: str, inner: str, remote_pidfile: str) -> str:
         f"echo $$ > {_remote_quote(remote_pidfile)}; "
         f"exec {shlex.join(shlex.split(launcher))} bash -lc {shlex.quote(inner)}"
     )
+
+
+#: What the login shell prints, and the code it exits with, when the packed
+#: launch command cannot be unpacked (no ``base64`` or ``gzip`` on the remote).
+UNPACK_FAILED_EXIT = 97
+
+_PACKED_RE = re.compile(r"printf %s ([A-Za-z0-9+/=]+) \| base64 -d \| gzip -dc")
+
+
+def pack_for_login_shell(script: str) -> str:
+    """*script* as a short, quote-free command the login shell unpacks and runs.
+
+    The launch command is passed to ``ssh`` as one argument on the local
+    command line, and on Windows that line goes through ``list2cmdline`` and
+    then Git for Windows' ``ssh.exe``, which parses it again by its own rules
+    before sending it. The scripts grew past 8,000 characters — the conda guard,
+    the ``srun`` retry wrapper and, for a batched run, the driver loop — with
+    hundreds of quotes and seventeen lines, and a batched launch from Windows
+    then failed with ``bash: -c: line 17: syntax error: unexpected end of
+    file``: the last line, which holds most of the script, arrived with its
+    quoting unbalanced. A command that is short and contains only base64
+    characters cannot be truncated or re-quoted on the way.
+
+    The script is gzipped (a 9,000-character launch packs to about 3,500) and
+    run by ``eval`` in the login shell itself, so ``$$`` is still the login
+    shell's PID and ``exec`` still replaces it — the pidfile and the
+    ``kill -TERM`` cancel channel are unchanged. If ``base64`` or ``gzip`` is
+    missing the shell says so and exits :data:`UNPACK_FAILED_EXIT` rather than
+    evaluating nothing and exiting 0, which would read as a run that succeeded.
+    """
+    blob = base64.b64encode(
+        gzip.compress(script.encode("utf-8"), mtime=0)).decode("ascii")
+    return (
+        f"if _aw_s=$(printf %s {blob} | base64 -d | gzip -dc) "
+        '&& [ -n "$_aw_s" ]; then eval "$_aw_s"; else '
+        'echo "[remote] ERROR could not unpack the launch command — the remote '
+        'needs base64 and gzip"; '
+        f"exit {UNPACK_FAILED_EXIT}; fi"
+    )
+
+
+def unpack_login_shell_command(command: str) -> str:
+    """The script :func:`pack_for_login_shell` packed into *command*.
+
+    For tests and for diagnosis: the packed form is unreadable in a log or an
+    argv, so anything that needs to see what the remote runs reads it here.
+    """
+    m = _PACKED_RE.search(command)
+    if m is None:
+        raise ValueError("not a packed launch command")
+    return gzip.decompress(base64.b64decode(m.group(1))).decode("utf-8")

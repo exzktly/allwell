@@ -125,10 +125,41 @@ def _cellpose_plan(method: str, workers: int, available: int,
         f"context on one device; each worker logs the device its model loaded on")
 
 
+def slurm_cpu_shortfall(cpu_count: int, *, node_cpus: int | None = None,
+                        env: dict | None = None) -> str:
+    """A warning when a Slurm job was given one or two of a bigger node's CPUs.
+
+    A scheduler command with no CPU request (no ``--cpus-per-task``) gets
+    Slurm's minimum, one core — one or two CPUs — however large the node, and
+    the worker pool is sized from the CPUs the job has, so such a run quietly
+    used one worker on a 16-core node and clamped ``--workers 6`` to one. The
+    run log is the only place the user sees the job from the inside, so it says
+    what happened and what to add. Returns "" outside Slurm, when the job has
+    more than two CPUs, or when the node has no more to give.
+    """
+    env = os.environ if env is None else env
+    if not env.get("SLURM_JOB_ID"):
+        return ""
+    node = node_cpus if node_cpus is not None else (os.cpu_count() or cpu_count)
+    if cpu_count > 2 or node <= cpu_count:
+        return ""
+    asked = str(env.get("SLURM_CPUS_PER_TASK") or "").strip()
+    why = (f"the scheduler command asks for --cpus-per-task={asked}" if asked
+           else "the scheduler command asks for no CPUs, so Slurm gave the job its "
+                "minimum")
+    return (f"Slurm gave this job {cpu_count} of the node's {node} CPUs — {why}. "
+            f"The run has one worker, and --workers cannot raise that. Add "
+            f"--cpus-per-task=<number of cores> to the scheduler command in the "
+            f"remote's settings (up to {node} on this node).")
+
+
 def plan_parallelism(args, log: logging.Logger) -> ParallelPlan:
     """The run's worker count, threads per worker and device notes, from *args*."""
     cpu_count = _cpu_count()
     available = max(1, cpu_count - 1)
+    shortfall = slurm_cpu_shortfall(cpu_count)
+    if shortfall:
+        log.warning("%s", shortfall)
     # Pinning applies whenever workers share cores, --cpu_only or not: an
     # unpinned TF worker takes every core and the workers contend. The default
     # is clamped to the core budget so a 2-core host does not run 4 threads on

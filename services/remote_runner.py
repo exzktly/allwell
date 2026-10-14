@@ -98,7 +98,7 @@ from services.remote_transport import (
     _rsync_with_retry,
 )
 from services.remote_suspend import request_suspend as _request_suspend
-from services.remote_commands import _compose_remote_cmd
+from services.remote_commands import _compose_remote_cmd, pack_for_login_shell
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
 from services.remote_run_id import (
@@ -722,7 +722,7 @@ class RemoteRunner:
             upload_heartbeat=remote_heartbeat if overlap else "",
             scratch_dir=self.host.remote_scratch_dir,
         )
-        ssh_argv = self.host.ssh_argv(allocate_tty=True) + [remote_cmd]
+        ssh_argv = self.host.ssh_argv(allocate_tty=True) + [pack_for_login_shell(remote_cmd)]
 
         # Name the environment before the run starts. When it turns out not to
         # exist, the guard's error names the same thing, so the two lines read

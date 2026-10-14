@@ -61,7 +61,7 @@ from services.remote_commands import (
     BATCH_DONE,
     BATCH_READY,
     _batch_driver_snippet,
-    _compose_driver_cmd,
+    _compose_driver_cmd, pack_for_login_shell,
 )
 from services.remote_run_id import (
     _compute_run_id,
@@ -817,10 +817,10 @@ class _BatchedRemoteProcess:
                                            getattr(self, "_link_blank_stems", ())
                                            if blanks else ()),
                                        suspend_request=paths.suspend_request)
-        ssh_argv = host.ssh_argv(allocate_tty=True) + [
+        ssh_argv = host.ssh_argv(allocate_tty=True) + [pack_for_login_shell(
             _compose_driver_cmd(launcher, run.remote_pidfile, driver,
                                 env_selector=self._runner.env_selector,
-                                scratch_dir=host.remote_scratch_dir)
+                                scratch_dir=host.remote_scratch_dir))
         ]
         proc = subprocess.Popen(
             ssh_argv,

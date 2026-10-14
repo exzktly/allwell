@@ -2001,6 +2001,7 @@ def test_required_files_list_is_what_we_promised():
         # parsing, timepoint parsing, logged-swallow).
         "util/__init__.py",
         "util/aw_safe.py",
+        "util/nanowell_address.py",
         # One os.scandir in place of a stat per directory entry; client-side
         # only, listed because the manifest mirrors every util/ file.
         "util/dir_scan.py",
@@ -2052,6 +2053,7 @@ def test_required_files_list_is_what_we_promised():
         # The Qt-free ``pipeline`` package (analysis-domain modules +
         # segmenters/writers), re-imported at module top level.
         "pipeline/__init__.py",
+        "pipeline/nanowell_lattice.py",
         "pipeline/auto_threshold.py",
         # The post-run pass over that sampler — which estimator this
         # run's arguments call for, and the merge into

@@ -84,8 +84,9 @@ def test_actual_cli_refuses_invalid_record_before_pixel_setup(tmp_path, monkeypa
         publication_marker(path).write_text("{}")
     monkeypatch.setattr(sys, "argv", ["process_microscopy.py", "--input_dir", str(root / "in"),
                                      "--output_dir", str(root / "out")])
-    monkeypatch.setattr(pm._suspend, "install_handlers", lambda **kw: None)
-    monkeypatch.setattr(pm._suspend, "watch_parent", lambda *a, **kw: None)
+    import pipeline.suspend as suspend
+    monkeypatch.setattr(suspend, "install_handlers", lambda **kw: None)
+    monkeypatch.setattr(suspend, "watch_parent", lambda *a, **kw: None)
     reached = []
 
     class ReachedSetup(RuntimeError):

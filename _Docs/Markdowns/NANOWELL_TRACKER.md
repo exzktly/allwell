@@ -10,7 +10,10 @@ where the work stands.
 It plans a new kind of analysis for All-Well: plates whose wells each hold a
 molded array of roughly a thousand **nanowells**, imaged as a tiled grid of
 fields, where the question is what happens *inside each nanowell* over time and
-how that differs between plate wells.
+how that differs between plate wells. It also plans the two changes the
+acquisition side needs first: the CZI converter recording where each tile was
+taken and when, and the Concatenate tool merging separate acquisitions of one
+plate into one timelapse.
 
 ---
 
@@ -20,9 +23,9 @@ It is not a record of what was decided; it is the instruction for what happens
 next, and it is wrong the moment it stops matching the tree.
 
 1. **Read it before touching anything.** The first act of any session working
-   on nanowells is to open this file and find the first row that is not `done`
-   or `declined` in the lowest-numbered pull request that is not yet merged.
-   That row is the work.
+   on this is to open this file and find the first row that is not `done` or
+   `declined` in the lowest-numbered pull request that is not yet merged. That
+   row is the work.
 2. **The row and the code move in the same commit.** Never a batch at the end
    of a session, never "once CI is green".
 3. **What a row learns goes into the row.** A measurement, a refuted
@@ -36,11 +39,11 @@ next, and it is wrong the moment it stops matching the tree.
 5. **A row that turns out to be wrong is `declined` with the reason, never
    deleted.** A deleted row and a forgotten row look identical later.
 6. **Report progress by reading this file, not by remembering.**
-7. **The design sections are rewritten, not annotated.** When a measurement
-   changes the design, the prose in §3 is rewritten to say what is now true in
-   the same commit. As each pull request merges, the part of §3 it implemented
-   moves into `ARCHITECTURE.md` (which describes the tree as it is) and is
-   replaced here by a one-line pointer to that section.
+7. **The design sections are rewritten, not annotated.** When a measurement or
+   an answer changes the design, the prose in §3 is rewritten to say what is
+   now true, in the same commit. As each pull request merges, the part of §3 it
+   implemented moves into `ARCHITECTURE.md` (which describes the tree as it is)
+   and is replaced here by a one-line pointer to that section.
 
 ## How to read the rows
 
@@ -76,21 +79,29 @@ These are the user's statements. They outrank anything inferred below.
 
 - Each plate well (a 96-well plate in the illustration) holds a molded array of
   nanowells. **The central nanowell is square; every other nanowell is
-  circular.** The layout is the illustrated one: rows of circles offset by half
-  a spacing (a hexagonal lattice) filling a circular area. Some arrays are the
-  same layout "just smaller".
-- Nanowells are on average **100 µm in diameter**, imaged at **10x**, about
-  **1,100 nanowells per well**.
-- **Each well is imaged as a 5×5 grid of overlapping fields.** The fields must
-  be registered and assembled at the start of each well's analysis.
-- **Air bubbles** sometimes make nanowells look black instead of light. Because
-  the grid is regular, **every nanowell's position must always be deduced and
-  never skipped.**
-- **The edge of the array may be clipped**, and that must not make the
-  analysis fail.
+  circular. The square is always physically at the centre of the array.** The
+  layout is the illustrated one: rows of circles offset by half a spacing (a
+  hexagonal lattice) filling a circular area.
+- Nanowells are usually **100 µm in diameter**; an alternative plate format has
+  **50 µm** nanowells. Imaged at **10x**, about **1,100 nanowells per well** in
+  the 100 µm format.
+- **Each well is imaged as a 5×5 grid of tiles with 10 % overlap**, as set in
+  the acquisition software. The tiles must be registered and assembled at the
+  start of each well's analysis.
+- **The CZI file records each tile's position.** The converter may need
+  changing to record it.
+- **In phase contrast, nanowells appear light and the lattice between them
+  appears black, at every timepoint.** Air bubbles make nanowells look black
+  instead of light. Because the grid is regular, **every nanowell's position
+  must always be deduced and never skipped.**
+- **The edge of the array may be clipped**, and that must not make the analysis
+  fail.
 - **The phase channel is used to find ("segment") each nanowell.**
-- Cells are **15–30 µm**. **Every timepoint has phase contrast; only some
-  have fluorescence. Label-free analysis is critical.**
+- Cells are **15–30 µm**. **Every timepoint has phase contrast; only some have
+  fluorescence. Label-free analysis is critical.**
+- **The plate may be removed from the microscope between timepoints**, and the
+  software must support that. Separate acquisitions will probably be merged
+  across time with the Datasets tools.
 - The goal: an addressing scheme anchored on the central square that lets the
   same nanowell be compared across timepoints (cell count, brightness), per-
   nanowell metrics such as fold change over time, and comparison of those
@@ -101,50 +112,62 @@ These are the user's statements. They outrank anything inferred below.
 
 Arithmetic on the reported numbers, so later measurements have something to be
 checked against. Each line states what it assumes. None of these values is
-hard-coded anywhere: the pitch, radius and orientation are **measured from each
-dataset**; these are sanity bounds.
+hard-coded anywhere: pixel size and tile positions are **read from the CZI**,
+and the pitch, radius and orientation are **measured from the images**; these
+are sanity bounds.
 
-- **Pixel scale.** Assuming a 6.5 µm camera pixel and no extra magnification,
-  10x gives 0.65 µm/px. A nanowell is then about **154 px** across and a cell
-  **23–46 px** — close to Cellpose `cyto3`'s native 30 px scale. (Assumption:
-  question Q1.)
+- **Pixel scale.** For illustration, a 6.5 µm camera pixel with no extra
+  magnification gives 0.65 µm/px at 10x. A 100 µm nanowell is then about
+  **154 px** across, a 50 µm one about **77 px**, and a cell **23–46 px** —
+  close to Cellpose `cyto3`'s native 30 px scale. The real value comes from the
+  CZI's scaling metadata (row R2).
 - **Pitch.** A hexagonal lattice of pitch *p* has (√3/2)·*p*² of floor per
   site. 1,100 sites inside an array of radius 3.0 mm (a 96-well floor is about
-  6.4 mm across) gives *p* ≈ **172 µm**, about 1.7× the nanowell diameter. The
-  illustration draws the gaps narrower (pitch ≈ 1.3–1.5× diameter); at 130–150
-  µm the same circle would hold 1,450–1,950 sites. The two agree only if the
-  array is smaller than the well floor or the drawing is schematic. This is not
-  something to settle by reasoning: the pitch is measured.
+  6.4 mm across) gives *p* ≈ **172 µm** for the 100 µm format, about 1.7× the
+  diameter. The illustration draws narrower gaps; it is schematic, and the
+  pitch is measured. If the 50 µm format's pitch scales with its diameter
+  (~86 µm), the same array area holds about **4,400 sites**.
 - **Rings.** With the square at the centre, a circular array of 1,100 sites
-  reaches about **17–20 rings** from the centre (17 along the lattice axes, up
-  to 20 between them).
-- **Tile coverage.** A 2048-px tile at 0.65 µm/px is 1.33 mm. Five tiles with
-  overlap fraction *o* span 1.33·(5 − 4*o*) mm: at 10 % overlap, 6.12 mm — less
-  than a 6.4 mm well floor, so on that camera the outermost ring(s) of a
-  full-well array would be partly unimaged. That is one concrete source of the
-  "clipped edge" the user reports.
-- **Overlap versus nanowell size.** For every nanowell to lie *wholly* inside
-  at least one tile, the overlap must exceed the nanowell diameter plus a
-  margin — about 120 µm, i.e. ≥ 9 % of a 1.33 mm tile. This is the single most
-  consequential assumption in the design (§3.2.4; question Q2).
-- **Sites per tile.** About 1.77 mm² / (0.866 × 0.172²) mm² ≈ **69 sites** per
-  tile, so each tile carries enough nanowells to fit the lattice on its own.
-- **Montage size.** At full resolution a 5×5 montage is about 9,400 px a side —
-  ~89 Mpx, ~355 MB per channel in float32, per (well, timepoint), per worker.
-  This is why the design never fuses tiles for analysis (§3.2.5).
+  reaches about **17–20 rings**; 4,400 sites reach about **35–40**.
+- **Overlap is a per-axis length, and it decides the design.** With 10 %
+  overlap, the overlap along an axis is 0.1 × the tile's extent on that axis.
+  For every nanowell to lie wholly inside at least one tile, that overlap must
+  be at least the nanowell diameter plus a margin for position error — call it
+  *d* + 20 µm. So the tile must be at least **1.2 mm** along *both* axes for the
+  100 µm format, and **0.7 mm** for the 50 µm format. A 2048-px sensor at
+  0.65 µm/px (1.33 mm) passes for 100 µm with 13 µm to spare; a sensor whose
+  short side images under 1.2 mm at 10x fails on that axis. The CZI says which
+  (row T2); the design handles both (§3.2.4).
+- **Coverage.** Five tiles at 10 % overlap span 4.6 tile extents: 6.12 mm for a
+  1.33 mm tile, a little under a 6.4 mm well floor, so the outermost ring of a
+  full-well array can be partly unimaged — one concrete source of the clipped
+  edge the user reports.
+- **Sites per tile.** About 69 for a 1.33 mm tile in the 100 µm format, so each
+  tile carries enough nanowells to fit the lattice on its own.
+- **Montage size.** At full resolution a 5×5 montage of 2048-px tiles is about
+  9,400 px a side — ~89 Mpx, ~355 MB per channel in float32, per (well,
+  timepoint), per worker. This is why the design never fuses tiles for analysis
+  except where a nanowell straddles a seam (§3.2.4–3.2.5).
+- **Data volume per timepoint.** A 2048² 16-bit tile is 8.4 MB uncompressed;
+  96 wells × 25 tiles is about **20 GB per channel per timepoint**. This is the
+  number behind question Q9: Concatenate writes a fresh copy of the whole
+  dataset each time it appends one.
 
 ### 1.3 Scope
 
-**In:** tile registration, nanowell detection in phase, the addressing scheme,
-per-nanowell label-free and fluorescence measurements, per-cell rows tagged with
-their nanowell, per-nanowell tables, Analyze form settings and a detection
-preview, a Review page for per-nanowell and per-well comparison over time, and
-the incremental / remote / completeness plumbing every pipeline output already
-has.
+**In:** recording tile positions, pixel size and acquisition time at CZI
+conversion; merging separate single-timepoint acquisitions of one plate into one
+timelapse; tile registration; nanowell detection in phase; the addressing
+scheme; per-nanowell label-free and fluorescence measurements; per-cell rows
+tagged with their nanowell; per-nanowell tables; Analyze form settings and a
+detection preview; a Review page for per-nanowell and per-well comparison over
+time; and the incremental / remote / completeness / Datasets-tool plumbing every
+output already has.
 
 **Out, unless a row is added:** cell tracking between timepoints (nanowells are
 compared as units, not cells), stitched full-resolution exports, a fine-tuned
-segmentation model, and any new third-party dependency.
+segmentation model, positions recorded by the OME and ND2 converters (row I5
+opens it), and any new third-party dependency.
 
 ---
 
@@ -156,8 +179,13 @@ segmentation model, and any new third-party dependency.
 `pipeline/` from importing `review` / `widgets` / Qt. `tests/test_remote_manifest.py`
 requires an entry in `services/remote_manifest.py` for **every** `.py` in
 `pipeline/` and `util/`. The pipeline imports nothing from `domain/` today, so
-anything both the pipeline and Review need (the address format) goes in `util/`,
-not `domain/`.
+anything both the pipeline and Review need (the address format, the acquisition
+record) goes in `util/`, not `domain/`.
+
+The CZI reader has a constraint of its own: a header scan runs in spawned
+worker processes and must not import numpy
+(`tests/test_a_scan_worker_imports_no_pixels.py`). Reading positions, scaling
+and times is header work, so it stays numpy-free.
 
 ### 2.2 No new third-party dependency
 
@@ -179,9 +207,11 @@ Measured against `tests/test_monolith_budgets.py` on the base of this branch:
 | `services/remote_fetch.py` | 2049 | 2052 | 3 |
 | `analyze/form.py` | 715 | 729 | 14 |
 
+The CZI modules and the Datasets tools carry no line budget.
+
 CLAUDE.md §4: ratchets only move down; a budget failure is answered by
 extracting a cohesive module. **Every hook into these files therefore carries
-an extraction**, and those extractions are rows of their own (P1, P8, A1)
+an extraction**, and those extractions are rows of their own (R6, P1, P9, A1)
 rather than surprises at CI time. Re-measure at the start of each pull request;
 other branches move these numbers.
 
@@ -203,14 +233,17 @@ The user's "never skipped" is honoured by the **roster**: every nanowell in the
 array has a row at every timepoint, whatever its state. Rows are never dropped;
 metrics inside a row are undefined when they cannot be measured.
 
+The same rule governs merging across time: a timepoint whose real acquisition
+time is unknown is never given an invented one (§3.0.3).
+
 ### 2.5 Tests must be able to tell a right answer from a wrong one
 
 CLAUDE.md §7.8. For every behavioural row: name the wrong implementation that
 would still pass, build the fixture so it does not, and before calling the row
 `done`, make the breaking edit in a `git worktree` of HEAD and watch a named
-test fail with an `AssertionError`. The fixtures for this work are synthetic
-until real data arrives (Q7), so each section also has a real-data row that is
-`blocked` until it does.
+test fail with an `AssertionError`. The fixtures are synthetic until real data
+arrives (Q7), so each section also has a real-data row that is `blocked` until
+it does.
 
 ### 2.6 Every section ends with a scientific-Python review
 
@@ -222,6 +255,92 @@ Its findings become rows.
 ---
 
 ## 3. Design
+
+### 3.0 From the microscope to one dataset
+
+Because the plate leaves the microscope between timepoints, each timepoint is a
+separate acquisition and a separate CZI. Two things must happen before the
+nanowell analysis can run, and neither exists today.
+
+#### 3.0.1 The converter records where and when each tile was taken
+
+Today the CZI converter writes `<dataset>/in/<WELL>.zip` and nothing else
+(`pipeline/czi_explode.py:301`, `datasets/czi_import/apply.py:109`). The reader
+already parses each tile's X/Y start from the subblock directory
+(`pipeline/czi_read.SubBlock.dims`) and can read a plane's acquisition time
+(`czi_read.parse_acquisition_time`), but neither is written out, and the pixel
+size (the document's `Scaling`) is not read at all. Once the converter
+finishes, where each tile was taken is gone.
+
+The converter will write an **acquisition record**, `in/acquisition.json`,
+through a stdlib-only `util/acquisition_record.py` that the converter, the
+pipeline, the Datasets tools and Review all share:
+
+- per dataset: the source files, pixel size in µm, tile size in px, the
+  objective if the file names one, and the declared tile overlap if the file
+  states it;
+- per (well, field, timepoint): the tile's mosaic position in px (subblock
+  directory) and its stage position in µm (metadata), each when present;
+- per timepoint: the absolute acquisition start, ISO 8601.
+
+It lives at the dataset level rather than inside each well's archive because
+Concatenate copies non-image archive members under their own names, and two
+datasets' same-named record members would collide and fail its verification.
+At the dataset level each tool merges it explicitly instead.
+
+Which of those fields the user's ZEN version actually populates is not known
+until real files are read (R8, blocked on Q7). In particular, whether mosaic
+positions are absolute stage-derived coordinates or are re-based per file
+decides whether they can be compared *across* acquisitions, which §3.4.3's third
+fallback needs.
+
+#### 3.0.2 Concatenate exists, and cannot merge these acquisitions yet
+
+`datasets/concatenate/` appends one dataset's timepoints after another's. For
+this use case it refuses at three separate points, all confirmed in code:
+
+1. **Both datasets must already be analysed.** `datasets/core/dataset_paths.resolve_dataset`
+   (`:99-104`) requires `in/` and `out/`, and `read_info` (`:109-111`) requires
+   `out/pipeline_info.json`. A freshly converted acquisition has neither.
+2. **Dataset 1 must have at least two timepoints.** `concatenate_compute._interval_hours`
+   (`:233-240`) refuses a single-timepoint dataset 1, and every acquisition here
+   is one timepoint. The very first merge — t0 plus t1 — is refused.
+3. **The time offset is guessed, not read.** `compute_offset` (`:262-272`)
+   places dataset 2's first timepoint at dataset 1's last plus dataset 1's
+   median interval. For acquisitions taken whenever the plate was put back,
+   that invents the elapsed time.
+
+It also writes a fresh destination every time and leaves both sources
+untouched, so a timelapse built one timepoint at a time is copied in full at
+every step (Q9).
+
+#### 3.0.3 What Concatenate will do
+
+- **Use recorded time when both datasets carry it.** Dataset 2 is offset by the
+  difference between the two acquisitions' recorded starts; its labels are named
+  by `pipeline.timepoints`' existing naming rules (which already refuse to round
+  a reading further than its jitter allows) and rendered in dataset 1's format.
+  An overlap is refused. The median-interval rule stays exactly as it is for
+  datasets without records, including its refusal of a single-timepoint
+  dataset 1 — there it is still the only information available.
+- **Accept unanalysed datasets** — `in/` plus an acquisition record, no `out/`.
+  Compatibility is then checked from the two records (filename schema, channels,
+  pixel size, tile size, grid), and raw + raw gives a raw destination.
+- **Accept analysed + unanalysed.** The destination keeps dataset 1's outputs,
+  and dataset 2's timepoints are left for an incremental Analyze run, which
+  processes exactly those (incremental runs already skip done units).
+- **Merge the acquisition record**, keeping each timepoint's own positions —
+  after the plate was put back they differ.
+- **Optionally, merge several datasets in one run**, ordered by recorded start,
+  which is one copy instead of one per added timepoint (M7).
+
+#### 3.0.4 The workflows this gives
+
+- **All timepoints already acquired:** convert each CZI → Concatenate them in
+  order (or once, with M7) → run Analyze once.
+- **An experiment still running:** day 0, convert and analyse. Each later day,
+  convert the new CZI → Concatenate (analysed dataset + new raw acquisition) →
+  run Analyze incrementally; only the new timepoint is processed.
 
 ### 3.1 The pipeline's unit of work becomes (well, timepoint)
 
@@ -239,9 +358,12 @@ together**:
 for each timepoint of the well:
     tiles complete?  ──no──▶ status "incomplete_grid"; nothing processed; rerun picks it up
         │yes
-    register tiles (3.2) ─▶ detect lattice + nanowells in phase (3.3)
+    place tiles from the acquisition record, then register (3.2)
+        ─▶ detect lattice + nanowells in phase (3.3)
         ─▶ anchor addresses on the square (3.4) ─▶ classify every site (3.5)
         ─▶ measure contents, label-free first (3.6) ─▶ write rows (3.7)
+after every well:
+    re-anchor any (well, timepoint) left unaddressed, from the plate's other wells (3.4.3)
 ```
 
 The surrounding well lifecycle is reused unchanged — extracting the well's
@@ -255,16 +377,15 @@ headroom (§2.3).
 
 #### 3.2.1 Which tile is where
 
-Each tile arrives as an FOV token (`util/fov.py` orders tokens such as `1`,
-`f07`, `fov13`). Its grid position comes from a **scan pattern**: raster or
-serpentine, row- or column-major, starting at one of four corners — sixteen
-patterns. The pattern is a setting (default to be set from Q3). An optional
-auto-detection scores every pattern by how consistent the pairwise overlaps
-are, and is accepted only when the best pattern beats the second by a margin;
-otherwise the run asks for the setting rather than picking one. The imported
-formats' stage positions are not persisted into the dataset today
-(`datasets/ome_import/stage_layout.py` uses them only to infer the layout at
-conversion time), so positions come from the pattern, not the stage.
+For CZI data, from the acquisition record: each tile's recorded position, in
+µm via the recorded pixel size. The overlap is *measured* from those positions
+along each axis and compared with the declared 10 %; a large disagreement is
+reported, because one of the two is wrong about the acquisition.
+
+For data with no record (loose TIFFs, until the OME and ND2 converters record
+positions too), the grid position comes from a **scan pattern** setting —
+raster or serpentine, row- or column-major, starting corner — and a nominal
+overlap.
 
 A timepoint with fewer than rows×cols tiles is **not** processed into a partial
 montage: it is reported as `incomplete_grid`, naming the missing tiles, and an
@@ -272,13 +393,14 @@ incremental rerun processes it once the scan is complete.
 
 #### 3.2.2 Three independent sources of tile position
 
-1. **Nominal.** Grid position × tile size × (1 − overlap), rotated by the
-   camera's angle to the stage. Accurate to the stage's repeatability.
+1. **Recorded.** The acquisition record's position (or the scan pattern's,
+   without one). Accurate to the stage's repeatability.
 2. **Lattice phase.** Every tile sees the same physical lattice. Fitting the
    lattice in a tile gives the sub-pixel position of its sites, which fixes the
    tile's offset **modulo one lattice vector**. The integer number of lattice
-   vectors comes from the nominal position, which works whenever the nominal
-   error is under half a pitch (~85 µm) — far above a stage's error. This uses
+   vectors comes from the recorded position, which works whenever that is
+   accurate to under half a pitch (~85 µm for the 100 µm format, ~43 µm for the
+   50 µm one) — far above a stage's error within one acquisition. This uses
    every nanowell in the tile, not just the overlap strip, and is unaffected by
    bubbles in the overlap.
 3. **Overlap correlation.** Phase correlation of the overlap strip between
@@ -290,22 +412,24 @@ incremental rerun processes it once the scan is complete.
 The nanowell array is periodic, so an unconstrained correlation of two
 overlapping tiles has a peak at the true shift **and at every lattice vector
 from it**, and can lock onto the wrong one with high confidence. Overlap
-correlation is therefore searched only within ±pitch/2 of the nominal offset.
+correlation is therefore searched only within ±pitch/2 of the recorded offset.
 The test fixture for this (T4) is built so that the unconstrained search *does*
 lock one pitch off — otherwise the test cannot tell the constrained search from
 the unconstrained one.
 
 All pairwise constraints are combined in a weighted least-squares solve. Each
-tile records which source placed it (`lattice`, `overlap`, or `nominal`) and its
-residual. Corner tiles that hold little or no array (a 5×5 grid over a circular
-well) fall back to nominal and say so; they never fail the solve.
+tile records which source placed it (`lattice`, `overlap`, or `recorded`) and
+its residual. Corner tiles that hold little or no array (a 5×5 grid over a
+circular well) fall back to the recorded position and say so; they never fail
+the solve.
 
-#### 3.2.4 Ownership: every nanowell is measured in exactly one tile
+#### 3.2.4 Ownership: every nanowell is measured in one place
 
-If the overlap exceeds the nanowell diameter plus a margin (§1.2), every
-nanowell lies wholly inside at least one tile. Each nanowell is then **owned**
-by one tile — the one that contains its disk with margin, nearest-centre on a
-tie — and is measured only there. This one rule does three things:
+Where the overlap along both axes is at least the nanowell diameter plus the
+margin (§1.2), every nanowell lies wholly inside at least one tile. Each is then
+**owned** by one tile — the one that contains its disk with margin,
+nearest-centre on a tie — and is measured only there. That one rule does three
+things:
 
 - no pixel fusion is needed for analysis;
 - a cell in an overlap is counted once, because only cells inside sites the
@@ -315,38 +439,45 @@ tie — and is measured only there. This one rule does three things:
   (`domain/image_identity.py`), the per-tile `_labels` images and every Image
   Browser surface keep working unchanged.
 
-If Q2 shows the overlap is smaller than a nanowell, sites wholly inside no tile
-are measured from a crop fused from the two to four tiles that cover them, and
-are marked `fused` in their row. That fallback is a row (G7a, opened only if
-needed), not the main path.
+With 10 % overlap this holds for the 50 µm format on any ordinary 10x camera,
+and for the 100 µm format only when the tile images at least ~1.2 mm on both
+axes (§1.2). So the **fused-site path is planned, not hypothetical** (T9): a
+site that no single tile wholly contains is measured from a crop fused from the
+two to four tiles covering it; its cells are attributed to the tile holding most
+of its disk; and its row says `fused`. Which sites need it is computed from the
+measured overlap per axis, and the Analyze preview states how many.
 
 #### 3.2.5 The montage is built for looking, not for measuring
 
 The user's "assemble the well first" is honoured by a **downsampled montage**
 of the phase channel per (well, timepoint) — long side at most 4,096 px,
-blended in overlaps, written into the well's output archive as a new image role.
-It is what the detection preview, the Array QC view and the Image Browser show.
-Analysis reads the full-resolution owner tile instead, for the memory reason in
-§1.2. A full-resolution montage export stays out of scope (§1.3).
+blended in overlaps, written into the well's output archive as a new image
+role. It is what the detection preview, the Array QC view and the Image Browser
+show. Analysis reads the full-resolution owner tile (or the fused crop, for a
+seam site) instead, for the memory reason in §1.2. A full-resolution montage
+export stays out of scope (§1.3).
 
 ### 3.3 Finding nanowells in the phase channel
 
-The phase channel is the existing `--phase_token`; in phase, nanowells read as
-light disks on a darker floor (bubbles turn them black, per §1.1).
+The phase channel is the existing `--phase_token`. Nanowells are **light disks
+on a black lattice** at every timepoint; a bubble turns a nanowell black, so an
+occluded nanowell is a black disk on the black lattice.
 
 1. **Lattice first, nanowells second.** The 2-D Fourier transform of the
    downsampled montage has peaks at the reciprocal lattice, which give the
    lattice's pitch and angle from the whole well at once. This survives a bubble
    covering a hundred nanowells, because those hundred contribute nothing and
    the other thousand still do.
-2. **Candidates** are found by a matched filter (a disk of the expected radius,
-   from the setting or the measured pitch) on the montage, and the lattice is
-   refined by least squares on the candidates that sit on lattice sites.
-3. **Per-site refinement** at full resolution in the owner tile fits each
-   nanowell's centre and radius from its radial edge profile. A site where the
-   fit succeeds is `geometry = fitted`; one where it does not (a bubble, debris,
-   a clipped edge) takes the lattice position and the well's median radius and
-   is `geometry = predicted`. **No site is ever dropped for lack of evidence.**
+2. **Candidates** are found by a matched filter — a light disk on a dark ground,
+   at the radius of the selected **plate format** (100 µm by default, 50 µm, or
+   a custom diameter) converted to pixels with the recorded pixel size — and the
+   lattice is refined by least squares on the candidates that sit on lattice
+   sites.
+3. **Per-site refinement** at full resolution fits each nanowell's centre and
+   radius from its radial edge profile. A site where the fit succeeds is
+   `geometry = fitted`; one where it does not (a bubble, debris, a clipped edge)
+   takes the lattice position and the well's median radius and is
+   `geometry = predicted`. **No site is ever dropped for lack of evidence.**
 4. **Per-site focus** comes free: the nanowell rim is a strong, identical edge
    in every site, and `pipeline.field_quality.edge_focus(image, mask)` already
    measures transition width at an outline. A nanowell's focus is therefore
@@ -374,6 +505,8 @@ square at `(0, 0)`:
   `(q, r)` is the join key everywhere; the label is for people. The pair is
   stored, the label is derived, and `util/nanowell_address.py` holds both
   directions as exact inverses.
+- The scheme is the same for both plate formats; the 50 µm format simply has
+  more rings.
 - A square lattice, if one is ever used, keeps the same integer coordinates;
   only the ring rule changes (`max(|i|, |j|)`, 8*k* per ring).
 
@@ -382,38 +515,45 @@ square at `(0, 0)`:
 The square looks the same every 90° and the hexagonal lattice every 60°; the
 only rotation that preserves both is 180°. A plate sits in its holder by its
 chamfered A1 corner and cannot be 180° out, so with a placement tilt under 30°
-the direction nearest east is unambiguous. A camera that mirrors the image
-mirrors every image in the dataset the same way and is a single setting.
+the direction nearest east is unambiguous — including after the plate has been
+taken out and put back. A camera that mirrors the image mirrors every image the
+same way and is a single setting.
 
-#### 3.4.3 Where the origin comes from when the square cannot be seen
+#### 3.4.3 Where the origin comes from, at every timepoint
 
-The square can be under a bubble. The origin is resolved by a fixed chain, and
-the method used is recorded on every timepoint:
+Because the plate is removed between timepoints, **every timepoint is anchored
+on its own**; nothing is carried over from a previous timepoint on the
+assumption that the plate stayed put. The origin is resolved by a fixed chain,
+and the method used is recorded on every (well, timepoint):
 
 1. **Fiducial** — the central-region site whose shape scores most square-like
    (square-versus-circle template at the lattice's angle), beating the
    runner-up by a set margin.
-2. **Array boundary** — the array is circular and centred on the square (Q4
-   confirms), so a circle fitted to the outermost sites — a partial arc is
-   enough — gives the centre, which is rounded to the nearest site.
-3. **Same well, other timepoints** — the lattice phase is known exactly, so
-   only the integer part of the offset is missing; another timepoint's anchored
-   origin supplies it if the plate moved less than half a pitch between them
-   (Q5 says whether that holds).
-4. **Otherwise the timepoint is `unaddressed`**, with the reason, and no
-   address is written for it.
+2. **Array centre** — the square is always at the centre of the array, so a
+   circle fitted to the outermost sites (a partial arc is enough) gives the
+   centre, rounded to the nearest site.
+3. **The rest of the plate** — a plate is rigid, so putting it back moves every
+   well by the same rotation and translation. Fitted to the wells anchored at
+   both timepoints, that transform predicts where a hidden square must be; the
+   lattice phase supplies the sub-pitch part exactly, so the prediction only
+   has to be right to within half a pitch. This runs as an end-of-run pass after
+   every well, and needs stage positions comparable across acquisitions (R8
+   says whether the CZI provides them).
+4. **Otherwise the (well, timepoint) is `unaddressed`**, with the reason, and
+   no address is written for it.
 
-When the fiducial and the boundary are both available they must agree; a
-disagreement is recorded on the timepoint (`origin_conflict`) and shown in the
-Array QC view rather than resolved silently.
+When the fiducial and the array centre are both available they must agree; a
+disagreement is recorded (`origin_conflict`) and shown in the Array QC view
+rather than resolved silently.
 
 #### 3.4.4 The roster
 
 The set of sites that exist in a well is defined by the array model — every
 lattice site whose centre lies inside the array boundary — not by which sites
 happened to be detected. It is therefore the same at every timepoint of the
-well, whatever the bubbles do, and a timepoint's rows are always the full
-roster. Within one well, pitch (±0.5 %), angle (±0.5°) and roster must agree
+well, whatever the bubbles do and however the plate was put back, and a
+timepoint's rows are always the full roster. Within one well, pitch (±0.5 %),
+angle (±0.5° after removing the plate's measured rotation) and roster must agree
 across timepoints; a violation is a named status on the timepoint, not an
 exception.
 
@@ -426,6 +566,7 @@ exception.
 | occluded | `visible_fraction` below the setting (bubble, debris) | yes | empty (undefined) |
 | clipped | `imaged_fraction` below the setting (array edge, well wall, coverage) | yes | empty (undefined) |
 | partially visible | between the two thresholds and 1 | yes | yes, with the fraction recorded |
+| fused | no single tile wholly contains it; measured from a fused crop | yes | yes, flagged |
 | unaddressed timepoint | no origin (§3.4.3) | tile coordinates only | yes, but no address, so not joinable over time |
 
 `visible_fraction` and `imaged_fraction` are stored on every row, so a
@@ -440,68 +581,84 @@ to it when present.
    shape, so the rim's phase halo and the illumination inside a nanowell are
    nearly identical from site to site. A per-(well, timepoint) template is the
    median of the aligned crops of the least-textured quarter of visible sites;
-   when too few remain (a confluent late timepoint), the well's earliest
-   template is used, and which one was used is recorded.
-2. **Rim-suppressed phase image.** Each owned site's crop is divided by the
-   template; everything outside the sites is set flat. The segmenter then sees
-   cells on a flat floor rather than cells beside a bright ring — the main
-   source of false cells along a nanowell's edge. The image is optionally
-   written as an output role so it can be inspected.
+   when too few remain (a confluent late timepoint, or the 50 µm format at high
+   loading), the well's earliest template is used, and which one was used is
+   recorded. The earliest template is aligned by the lattice, so it remains
+   valid after the plate is put back.
+2. **Rim-suppressed phase image.** Each site's crop is divided by the template;
+   everything outside the sites is set flat. The segmenter then sees cells on a
+   flat floor rather than cells beside a bright ring — the main source of false
+   cells along a nanowell's edge. The image is optionally written as an output
+   role so it can be inspected.
 3. **Confluence** — the fraction of a site's interior covered by cells — from
    local texture on the rim-suppressed image, thresholded against the texture
    of the empty sites. This needs no instance segmentation and is the most
-   robust label-free number when cells clump.
+   robust label-free number when cells clump. In the 50 µm format a few cells
+   fill a nanowell, so confluence saturates early and the count carries more of
+   the information.
 4. **Cell count** from Cellpose's label-free path (`pipeline.cellpose._segment_cellpose`,
    `cyto3`, diameter from the cell-size setting) on the rim-suppressed owner
    tile: one call per tile, as today, keeping only cells whose centroid lies in
-   an owned site's interior.
+   an owned site's interior. Fused sites are segmented on their fused crop.
 5. **Area-based estimate** — foreground area divided by the median area of
    isolated cells — stored beside the count, with a `count_disagreement` flag
    when the two diverge, because a clump segmented as one cell undercounts
    silently otherwise.
 6. **Fluorescence, when present**: the existing per-cell intensities, plus a
    per-site integrated and mean intensity over the interior minus the empty-site
-   background — defined even where segmentation fails.
+   background — defined even where segmentation fails. A timepoint without a
+   fluorescence channel has those columns empty, not zero.
 
 ### 3.7 Outputs
 
 | Output | Contents |
 |---|---|
+| `in/acquisition.json` (new, written by the converter) | §3.0.1 |
 | per-cell CSV (`<prefix>_<well>.csv`, existing) | unchanged columns, `fov` = owner tile, plus `nw_q`, `nw_r`, `nw_ring`, `nw_label`, `well_x_um`, `well_y_um`. The new columns exist only in nanowell mode — absent, not blank, otherwise |
-| `nanowells/<well>.csv` (new) | one row per (timepoint, roster site): address, well-frame position (µm), owner tile and tile-local centre and radius (px), `geometry`, `imaged_fraction`, `visible_fraction`, state, `focus`, `n_cells`, `confluence`, `area_est_cells`, `count_disagreement`, per-channel site intensities |
-| `nanowells/<well>_grid.json` (new) | per timepoint: scan pattern, tile offsets with source and residual, lattice pitch and angle, origin method and agreement, array radius, roster size, status and reasons |
+| `nanowells/<well>.csv` (new) | one row per (timepoint, roster site): address, well-frame position (µm), owner tile and tile-local centre and radius (px), `geometry`, `fused`, `imaged_fraction`, `visible_fraction`, state, `focus`, `n_cells`, `confluence`, `area_est_cells`, `count_disagreement`, per-channel site intensities |
+| `nanowells/<well>_grid.json` (new) | per timepoint: tile positions with source and residual, measured overlap per axis, lattice pitch and angle, origin method and agreement, array radius, roster size, status and reasons |
 | `<well>_out.zip` (existing) | per-tile `_labels` as today; new roles for the downsampled montage and (optionally) the rim-suppressed tiles, declared in `domain/image_identity.ROLE_CATALOG` |
-| `pipeline_info.json` (existing) | a `nanowell` block: settings, conventions (east axis, counter-clockwise, mirror), and a scheme version so Review can refuse a scheme it does not understand |
+| `pipeline_info.json` (existing) | an `acquisition` block (pixel size, tile size) so Review can draw in µm, and a `nanowell` block: plate format, settings, conventions (east axis, counter-clockwise, mirror), and a scheme version so Review can refuse a scheme it does not understand |
 
 The tables live in a `nanowells/` subdirectory because Review loads every
 top-level `*.csv` as a well's cell table (`review/core/load_controller.py:402`).
 
-### 3.8 Incremental runs, resume, completeness, remote
+### 3.8 Incremental runs, resume, completeness, remote, Datasets tools
 
 - **Incremental.** The done unit is a (well, timepoint) present in the well's
   nanowell table with a terminal status. Every nanowell setting joins the reuse
   key, with a row in `tests/test_reuse_is_keyed_completely.py` per setting —
   otherwise turning nanowell mode on over an existing dataset finds every
-  timepoint "done" and writes no table.
+  timepoint "done" and writes no table. This is also what makes the daily
+  Concatenate-then-Analyze workflow (§3.0.4) process only the new timepoint.
 - **Resume.** Checkpoints are per (well, timepoint) (`pipeline/fov_checkpoint.py`).
 - **Completeness.** `pipeline/completeness.py` is the one definition of "is this
   well complete", shared with the Datasets Validate tool; nanowell mode extends
   it there, so Validate and the run agree.
-- **Remote.** New modules join the manifest; the upload planner keeps a
-  timepoint's tiles together (a partial upload is an `incomplete_grid`); the
-  fetch brings `nanowells/` back. Both remote files have ≤ 3 lines of headroom.
+- **Remote.** New modules join the manifest; the acquisition record is uploaded
+  with the input; the upload planner keeps a timepoint's tiles together (a
+  partial upload is an `incomplete_grid`); the fetch brings `nanowells/` back.
+  Both remote files have ≤ 3 lines of headroom.
+- **Datasets tools.** Subset, Merge Plates and Concatenate carry the acquisition
+  record (filtered, well-remapped, timepoint-shifted respectively) and, once the
+  pipeline writes them, the `nanowells/` tables; Validate checks both against
+  the archives. A tool that cannot carry them refuses with a reason rather than
+  dropping them.
 
 ### 3.9 Analyze form
 
 A **Nanowells** section (its own module, because `analyze/tab.py` has no
-headroom): enable, grid rows × columns, scan pattern, overlap, pixel size,
-nanowell diameter, cell diameter, occlusion and clipping thresholds. Its
-centrepiece is **Test detection**: run registration and detection on one
+headroom): enable, plate format (100 µm / 50 µm / custom diameter), cell
+diameter, occlusion and clipping thresholds — and, only for data with no
+acquisition record, grid rows × columns, scan pattern, overlap and pixel size.
+Its centrepiece is **Test detection**: run registration and detection on one
 (well, timepoint) in a worker and show the montage with every site labelled,
-occluded and clipped sites marked, the origin method, and a few rim-suppressed
-crops with their segmentation. Nobody should start a plate-wide run without
-seeing the addresses land. Preflight reports missing tiles and an overlap
-smaller than a nanowell.
+occluded, clipped and fused sites marked, the origin method, the measured
+overlap per axis, and a few rim-suppressed crops with their segmentation.
+Nobody should start a plate-wide run without seeing the addresses land.
+Preflight reports missing tiles, a missing acquisition record, an overlap
+smaller than a nanowell (with the number of seam sites it affects), and a
+missing phase channel.
 
 ### 3.10 Review
 
@@ -515,10 +672,13 @@ never zero, and every undefined case is listed:
 | count fold change | n(t) / n(baseline) | n(baseline) = 0 — reported as its own "seeded later" class — or either timepoint unmeasurable |
 | log₂ count fold change | log₂((n + 1) / (n₀ + 1)); the +1 is printed in the axis label | either timepoint unmeasurable |
 | confluence fold change | c(t) / c(baseline) | c(baseline) = 0, or unmeasurable |
-| brightness fold change | mean per-cell intensity, t over baseline | no cells at either, or no fluorescence channel |
-| site-signal fold change | site-integrated intensity, t over baseline | unmeasurable at either |
-| growth rate | slope of ln n over time | fewer than three measurable timepoints with n > 0 |
+| brightness fold change | mean per-cell intensity, t over baseline | no cells at either, or no fluorescence at either timepoint |
+| site-signal fold change | site-integrated intensity, t over baseline | unmeasurable, or no fluorescence, at either |
+| growth rate | slope of ln n against recorded time | fewer than three measurable timepoints with n > 0 |
 | occupancy class | 0 / 1 / 2 / 3+ cells at baseline | baseline unmeasurable |
+
+Time is the recorded elapsed time from §3.0.3, so a growth rate over unevenly
+spaced acquisitions is a rate per real hour.
 
 **Baseline**: the earliest timepoint by default; a site unmeasurable there has
 no fold change. An explicit, labelled alternative uses each site's first
@@ -557,8 +717,8 @@ nanowell's trajectory.
   median and spread over time.
 - **Position effects** — metric against ring, as an edge-effect check.
 - **Array QC** — the montage with lattice, tile seams, each tile's placement
-  source, the origin method per timepoint, and every status the pipeline
-  recorded.
+  source, fused sites, the origin method per timepoint, and every status the
+  pipeline recorded.
 - **Export** — a long-format CSV of every site, timepoint and metric.
 
 It joins the shared machinery every page joins: the Properties panel, Saved
@@ -569,25 +729,30 @@ topics, and the one-line-removable feature test.
 
 ## 4. The pull-request stack
 
-Nine pull requests, each based on the one below it, so each diff contains only
-its own section. Each leaves `main` working if merged alone: the early ones add
-modules whose only callers are their tests, and nothing user-visible appears
-until P.
+Eleven pull requests, each based on the one below it, so each diff contains
+only its own section. Each leaves `main` working if merged alone: the
+acquisition PRs (2, 3) are useful on their own for any separately acquired
+timelapse; the geometry and image PRs (1, 4–6) add modules whose only callers
+are their tests; nothing nanowell-specific is user-visible until PR 7.
 
 | PR | Branch | Base | Section | Delivers | Version |
 |---|---|---|---|---|---|
-| 1 | `claude/nanowell-1-geometry` | `main` | G | this tracker; addressing; lattice fitting on point sets; origin chain; roster; ownership | patch |
-| 2 | `claude/nanowell-2-tiles` | PR 1 | T | scan patterns; three-source registration; periodicity guard; montage preview; synthetic tile renderer | patch |
-| 3 | `claude/nanowell-3-sites` | PR 2 | N | phase-channel detection; fiducial; per-site refinement; occlusion; clipping; focus | patch |
-| 4 | `claude/nanowell-4-contents` | PR 3 | C | template; rim suppression; confluence; label-free count; fluorescence | patch |
-| 5 | `claude/nanowell-5-run` | PR 4 | P | the (well, timepoint) task; CLI; outputs; incremental; resume; completeness; remote | patch |
-| 6 | `claude/nanowell-6-analyze` | PR 5 | A | Analyze section; Test detection preview; preflight | patch |
-| 7 | `claude/nanowell-7-review-data` | PR 6 | D | loader; per-site and per-well metrics; export; persistence | patch |
-| 8 | `claude/nanowell-8-review-page` | PR 7 | V | the Nanowells page and its views | minor (new page) |
-| 9 | `claude/nanowell-9-integration` | PR 8 | I | optional: Image Browser, Spatial, Plotting, Batch Export hooks | patch |
+| 1 | `claude/nanowell-1-geometry` | `main` | G | this tracker; addressing; lattice fitting on point sets; origin chain; plate-rigid transform; roster; ownership | patch |
+| 2 | `claude/nanowell-2-acquisition` | PR 1 | R | the acquisition record; the CZI converter writes it; Subset, Merge Plates, Validate and remote carry it | patch |
+| 3 | `claude/nanowell-3-merge-time` | PR 2 | M | Concatenate: recorded-time offsets, single-timepoint and unanalysed datasets, record merging | patch |
+| 4 | `claude/nanowell-4-tiles` | PR 3 | T | recorded placement; three-source registration; periodicity guard; fused-site crops; montage preview | patch |
+| 5 | `claude/nanowell-5-sites` | PR 4 | N | phase-channel detection for both formats; fiducial; per-site refinement; occlusion; clipping; focus | patch |
+| 6 | `claude/nanowell-6-contents` | PR 5 | C | template; rim suppression; confluence; label-free count; fluorescence | patch |
+| 7 | `claude/nanowell-7-run` | PR 6 | P | the (well, timepoint) task; end-of-run re-anchoring; CLI; outputs; incremental; resume; completeness; remote; Datasets tools carry `nanowells/` | patch |
+| 8 | `claude/nanowell-8-analyze` | PR 7 | A | Analyze section; Test detection preview; preflight | patch |
+| 9 | `claude/nanowell-9-review-data` | PR 8 | D | loader; per-site and per-well metrics; export; persistence | patch |
+| 10 | `claude/nanowell-10-review-page` | PR 9 | V | the Nanowells page and its views | minor (new page) |
+| 11 | `claude/nanowell-11-integration` | PR 10 | I | optional: Image Browser, Spatial, Plotting, Batch Export hooks; OME / ND2 records | patch |
 
-PR 6 and PR 7 depend only on PR 5 and could be siblings; they are stacked
-linearly so there is one retargeting chain to manage.
+PRs 2–3 do not depend on PR 1's code, and PRs 8 and 9 depend only on PR 7; all
+are stacked linearly anyway so there is one retargeting chain to manage. If PR 1
+stalls in review, PRs 2–3 can be rebased onto `main` and opened as their own
+stack before anything is pushed above them.
 
 ### 4.1 Rules for the stack
 
@@ -629,14 +794,16 @@ Answers are written into the row. Rows that depend on an answer say so.
 
 | # | Question | Default until answered | State | Answer / evidence |
 |---|---|---|---|---|
-| Q1 | Pixel size at 10x (µm/px) and tile size in pixels | 0.65 µm/px, 2048×2048 | `todo` | |
-| Q2 | Tile overlap: fraction or µm. Is it at least ~120 µm (one nanowell plus margin)? | assume yes; §3.2.4 fallback otherwise | `todo` | |
-| Q3 | How the 25 tiles are numbered: raster or serpentine, row- or column-major, starting corner; acquisition software and file format | must be set; auto-detect as a check | `todo` | |
-| Q4 | Is the square always at the centre of the circular array? | assume yes (origin fallback 2 depends on it) | `todo` | |
-| Q5 | Is the plate taken off the microscope between timepoints, and how far can it move? | assume moved, by more than half a pitch (fallback 3 off) | `todo` | |
-| Q6 | "Sometimes just smaller": smaller nanowells, a smaller array, or a smaller well format (384)? | diameter and pitch measured per dataset, with a prior from settings | `todo` | |
-| Q7 | Sample data: 2–3 wells × 2+ timepoints, including a bubble, a clipped edge, and if possible a hidden square | blocks every real-data row | `todo` | |
-| Q8 | Are nanowells light on a dark floor in phase at every timepoint (cells inside do not invert them)? | yes, per the report | `todo` | |
+| Q1 | Pixel size at 10x and tile size in pixels | — | `done` | Read from the CZI's scaling metadata and subblock sizes (R2); no user input needed. Real values recorded in R8 |
+| Q2 | Tile overlap | — | `done` | 10 %, set in the acquisition software. Whether that clears a 100 µm nanowell depends on the tile's extent per axis (§1.2); measured per dataset (T2) |
+| Q3 | How the 25 tiles are numbered and where each sits | — | `done` | The CZI records each tile's position; the converter will record it (R2–R3). The scan-pattern setting remains only for data with no record |
+| Q4 | Is the square always at the centre of the array? | — | `done` | Yes, physically. Origin fallback 2 (§3.4.3) relies on it |
+| Q5 | Is the plate taken off the microscope between timepoints? | — | `done` | It can be, and must be supported. Every timepoint is anchored on its own; acquisitions are merged across time with Concatenate (§3.0) |
+| Q6 | What does "sometimes smaller" mean? | — | `done` | Nanowells are usually 100 µm; an alternative plate format has 50 µm nanowells. Plate format becomes a setting (§3.3, §3.9) |
+| Q7 | Sample data: CZIs of 2–3 wells at 2+ timepoints with the plate removed between them, including a bubble, a clipped edge, and if possible a hidden square; one plate of each format if available | blocks every real-data row | `todo` | |
+| Q8 | How do nanowells look in phase? | — | `done` | Light nanowells on a black lattice, at every timepoint (§3.3) |
+| Q9 | How many timepoints, channels and wells does a typical experiment have, and is a full copy of the dataset per added timepoint acceptable (~20 GB per channel per timepoint for 96 wells, §1.2)? | keep Concatenate's fresh-copy rule | `todo` | |
+| Q10 | Is each timepoint saved as one CZI holding every well, or as a Split Scenes folder of per-well CZIs? Is the same ZEN experiment (same tile plan) reused at every timepoint? | either is read; same plan assumed | `todo` | |
 
 ### Section G — Geometry and addressing (PR 1)
 
@@ -646,103 +813,138 @@ Answers are written into the row. Rows that depend on an answer say so.
 | G2 | Lattice fit from a point set: basis vectors from nearest-neighbour displacement clustering, robust to 30 % missing points and outliers; returns pitch, angle, RMS residual, inlier mask | `pipeline/nanowell_lattice.py` | `todo` | |
 | G3 | Index points to integer `(q, r)` with sub-pixel residual; points more than a quarter pitch from any site are outliers, not forced onto one | `pipeline/nanowell_lattice.py` | `todo` | |
 | G4 | Basis convention (a₁ nearest east, a₂ +60° on screen) under rotations −25°…+25° and a mirror flag | `pipeline/nanowell_lattice.py` | `todo` | |
-| G5 | Origin chain (fiducial → boundary → other timepoint → `unaddressed`), recording method and agreement; never guesses | `pipeline/nanowell_lattice.py` | `todo` | |
+| G5 | Origin chain (fiducial → array centre → plate-rigid prediction → `unaddressed`), recording method and agreement; never guesses | `pipeline/nanowell_lattice.py` | `todo` | |
 | G6 | Array-boundary circle fit from a partial arc; roster = sites inside; roster identical for shifted observation windows of one array | `pipeline/nanowell_lattice.py` | `todo` | |
-| G7 | Ownership: owner tile per site; with overlap ≥ diameter, no site is unowned | `pipeline/nanowell_lattice.py` | `todo` | |
-| G8 | Synthetic point-set generator: hex array, central square, circular boundary, bubble holes, rotation, translation | `tests/_nanowell_synth.py` | `todo` | |
-| G9 | The discriminating fixture: two observations of one array, the second shifted 1.5 pitches and rotated 3°, window centre not on the square — every site keeps its address. Mutation: origin = "site nearest window centre" must fail it | `tests/test_nanowell_addressing.py` | `todo` | |
-| G10 | Manifest entries for the new `util/` and `pipeline/` modules; confirm no guard rejects a module whose only importer is tests | `services/remote_manifest.py` | `todo` | |
-| G11 | Close-out: guard family, ruff, touched tests, scientific review, ARCHITECTURE section for the addressing, version, PR opened with stack note | — | `todo` | |
+| G7 | Ownership per axis: owner tile per site, and the set of sites no tile wholly contains (the fused set), from tile rectangles and the nanowell diameter | `pipeline/nanowell_lattice.py` | `todo` | |
+| G8 | Plate-rigid transform between two timepoints from the anchored wells' origins in stage coordinates (rotation + translation, robust to outlier wells); prediction for a well whose square is hidden | `pipeline/nanowell_lattice.py` | `todo` | |
+| G9 | Synthetic point-set generator: hex array in both formats, central square, circular boundary, bubble holes, rotation, translation, a plate moved between timepoints | `tests/_nanowell_synth.py` | `todo` | |
+| G10 | The discriminating fixture: two observations of one array, the second shifted 1.5 pitches and rotated 3°, window centre not on the square — every site keeps its address. Mutation: origin = "site nearest window centre" must fail it | `tests/test_nanowell_addressing.py` | `todo` | |
+| G11 | Plate-rigid fixture: a plate moved by more than a pitch between timepoints with one well's square hidden; G8 recovers its address. Mutation: carry the previous timepoint's origin unchanged — must fail | `tests/test_nanowell_addressing.py` | `todo` | |
+| G12 | Manifest entries for the new `util/` and `pipeline/` modules; confirm no guard rejects a module whose only importer is tests | `services/remote_manifest.py` | `todo` | |
+| G13 | Close-out: guard family, ruff, touched tests, scientific review, ARCHITECTURE section for the addressing, version, PR opened with stack note | — | `todo` | |
 
-### Section T — Tiles and registration (PR 2)
+### Section R — The acquisition record (PR 2)
 
 | # | Item | Place | State | Evidence |
 |---|---|---|---|---|
-| T1 | Scan patterns (16) and FOV token → (row, col); a timepoint short of rows×cols tiles is `incomplete_grid` naming the missing tiles | `pipeline/tile_grid.py` | `todo` | |
-| T2 | Nominal offsets from tile size, overlap and camera angle, in px and µm | `pipeline/tile_grid.py` | `todo` | |
-| T3 | Lattice-phase registration: offset modulo the lattice from each tile's fit; integer part from nominal; reports when nominal error approaches half a pitch | `pipeline/tile_register.py` | `todo` | |
-| T4 | Overlap correlation constrained to ±pitch/2 of nominal. Fixture built so the unconstrained search locks one pitch off — the test must fail if the constraint is removed | `pipeline/tile_register.py` | `todo` | |
-| T5 | Weighted least-squares solve; per-tile source and residual; corner tiles with no array fall back to nominal without failing | `pipeline/tile_register.py` | `todo` | |
-| T6 | Scan-pattern auto-detection with an acceptance margin; explicit setting always wins | `pipeline/tile_grid.py` | `todo` | |
-| T7 | Downsampled phase montage (long side ≤ 4,096 px), blended in overlaps, 8-bit with the stretch recorded | `pipeline/tile_register.py` | `todo` | |
-| T8 | Synthetic tile renderer: the G8 array rendered into 5×5 overlapping tiles with stage jitter, camera rotation, vignetting, noise, cells, debris and a bubble | `tests/_nanowell_synth.py` | `todo` | |
-| T9 | Real-data check of registration residuals on Q7 data | — | `blocked` | Q7 |
-| T10 | Close-out (as G11) | — | `todo` | |
+| R1 | Record format, reader and writer (stdlib only, atomic write through `util/json_write`, a format version); validation against the dataset's archives (a record naming wells or fields that are not there, or missing ones that are, is reported) | `util/acquisition_record.py` | `todo` | |
+| R2 | CZI reader exposes pixel size (`Scaling`), each tile's mosaic X/Y from the subblock directory, stage positions from the metadata, and each timepoint's absolute start — numpy-free (`tests/test_a_scan_worker_imports_no_pixels.py`) | `pipeline/czi_read.py` | `todo` | |
+| R3 | The CZI exploder writes the record with the wells it converted, in the same publish; a resumed or partial conversion records exactly the wells it wrote | `pipeline/czi_explode.py`, `datasets/czi_import/apply.py` | `todo` | |
+| R4 | Split Scenes sets (`pipeline/czi_set.py`): the record is assembled across the set's files | `pipeline/czi_set.py` | `todo` | |
+| R5 | Subset filters the record to the kept wells and timepoints; Merge Plates remaps its wells; Validate recognises it and checks it against the archives | `datasets/subset/`, `datasets/merge_plates/`, `datasets/validate/` | `todo` | |
+| R6 | Remote: the record is uploaded with the input and read by the remote pipeline; extraction to pay for any line in `services/remote_runner.py` | `services/` | `todo` | |
+| R7 | The CZI import page states what was recorded (pixel size, positions present, start time) so a file that lacks them is visible before analysis | `datasets/czi_import/view.py` | `todo` | |
+| R8 | Real data: which fields the user's ZEN version populates, and whether mosaic or stage positions are comparable across separate acquisitions (decides whether G8's fallback can run) — recorded here | — | `blocked` | Q7 |
+| R9 | Close-out: README CZI import section, ARCHITECTURE, version | — | `todo` | |
 
-### Section N — Nanowells in the phase channel (PR 3)
+### Section M — Merging acquisitions across time (PR 3)
+
+| # | Item | Place | State | Evidence |
+|---|---|---|---|---|
+| M1 | Recorded-time offset when both datasets carry a record: dataset 2 offset by the difference of recorded starts, named by `pipeline.timepoints`' rules, rendered in dataset 1's format; overlap refused; the median-interval rule unchanged for datasets without records | `datasets/concatenate/concatenate_compute.py` | `todo` | |
+| M2 | Single-timepoint dataset 1 accepted when M1 applies; still refused otherwise | `datasets/concatenate/concatenate_compute.py` | `todo` | |
+| M3 | Unanalysed datasets (`in/` + record, no `out/`): compatibility from the records; raw + raw gives a raw destination; verification checks images rather than rows | `datasets/concatenate/`, `datasets/core/dataset_paths.py` | `todo` | |
+| M4 | Analysed + unanalysed: destination keeps dataset 1's outputs; a test runs an incremental Analyze on the result and checks that exactly dataset 2's timepoints are processed | `datasets/concatenate/` | `todo` | |
+| M5 | Record merge: dataset 2's timepoint keys shifted; each timepoint keeps its own positions and absolute start | `datasets/concatenate/apply.py` | `todo` | |
+| M6 | The discriminating fixture: dataset 1 at 0 h and 24 h, dataset 2 recorded 30 h after dataset 1's start — the old rule says 48 h, the new one 30 h. Mutation: revert to the interval rule — must fail | `tests/test_concatenate_compute.py` | `todo` | |
+| M7 | Several datasets in one run, ordered by recorded start (one copy instead of one per added timepoint) | `datasets/concatenate/` | `todo` | |
+| M8 | The copy cost at the user's scale, and whether an append that avoids a full copy is needed — a layout question, because a zip archive cannot be extended atomically without being rewritten | — | `blocked` | Q9 |
+| M9 | Close-out: README Concatenate section rewritten for the new rules (including the refusal it no longer makes), ARCHITECTURE §6b, version | — | `todo` | |
+
+### Section T — Tiles and registration (PR 4)
+
+| # | Item | Place | State | Evidence |
+|---|---|---|---|---|
+| T1 | Placement from the acquisition record; scan-pattern placement (16 patterns) for data without one; a timepoint short of rows×cols tiles is `incomplete_grid` naming the missing tiles | `pipeline/tile_grid.py` | `todo` | |
+| T2 | Overlap measured per axis from positions; compared with the declared overlap; ownership condition evaluated per axis; fused-site count reported | `pipeline/tile_grid.py` | `todo` | |
+| T3 | Lattice-phase registration: offset modulo the lattice from each tile's fit; integer part from the recorded position; reports when the recorded error approaches half a pitch | `pipeline/tile_register.py` | `todo` | |
+| T4 | Overlap correlation constrained to ±pitch/2 of the recorded offset. Fixture built so the unconstrained search locks one pitch off — the test must fail if the constraint is removed | `pipeline/tile_register.py` | `todo` | |
+| T5 | Weighted least-squares solve; per-tile source and residual; corner tiles with no array fall back to the recorded position without failing | `pipeline/tile_register.py` | `todo` | |
+| T6 | Scan-pattern auto-detection | — | `declined` | The CZI records positions (Q3), so CZI data never needs it; data without a record uses the explicit setting, and a guessed layout that scores well is still a guess |
+| T7 | Downsampled phase montage (long side ≤ 4,096 px), blended in overlaps, 8-bit with the stretch recorded | `pipeline/tile_register.py` | `todo` | |
+| T8 | Synthetic tile renderer: G9's array rendered into 5×5 tiles at 10 % overlap with stage jitter, camera rotation, vignetting, noise, cells, debris and a bubble; one tile geometry where 100 µm sites all have owners and one where they do not | `tests/_nanowell_synth.py` | `todo` | |
+| T9 | Fused-site crops: the covering tiles blended into one crop per seam site; cells attributed to the tile with most of the disk; row flagged `fused` | `pipeline/tile_register.py` | `todo` | |
+| T10 | Real-data check of registration residuals and measured overlap on Q7 data | — | `blocked` | Q7 |
+| T11 | Close-out (as G13) | — | `todo` | |
+
+### Section N — Nanowells in the phase channel (PR 5)
 
 | # | Item | Place | State | Evidence |
 |---|---|---|---|---|
 | N1 | Lattice pitch and angle from the montage's 2-D Fourier peaks; survives a bubble covering 10 % of the array | `pipeline/nanowell_detect.py` | `todo` | |
-| N2 | Matched-filter candidates at the expected radius; least-squares lattice refinement on candidates at sites (G2/G3) | `pipeline/nanowell_detect.py` | `todo` | |
+| N2 | Matched filter for a light disk on a dark lattice at the plate format's radius (100 µm, 50 µm, custom) via the recorded pixel size; least-squares lattice refinement on candidates at sites (G2/G3) | `pipeline/nanowell_detect.py` | `todo` | |
 | N3 | Fiducial: square-versus-circle score per central site at the lattice angle; margin over runner-up; score recorded | `pipeline/nanowell_detect.py` | `todo` | |
-| N4 | Per-site centre and radius refinement in the owner tile; `fitted` versus `predicted`; no site dropped | `pipeline/nanowell_detect.py` | `todo` | |
-| N5 | Occlusion: bubble mask from the montage plus per-site interior contrast against the well's typical site; `visible_fraction` | `pipeline/nanowell_detect.py` | `todo` | |
+| N4 | Per-site centre and radius refinement; `fitted` versus `predicted`; no site dropped | `pipeline/nanowell_detect.py` | `todo` | |
+| N5 | Occlusion: bubble mask from the montage plus per-site contrast against the lattice (an occluded site is a black disk on black); `visible_fraction` | `pipeline/nanowell_detect.py` | `todo` | |
 | N6 | `imaged_fraction` and clipping at the coverage edge, the array edge and the well wall; a clipped edge never raises | `pipeline/nanowell_detect.py` | `todo` | |
 | N7 | Per-site rim focus through `pipeline.field_quality.edge_focus` | `pipeline/nanowell_detect.py` | `todo` | |
-| N8 | Cross-timepoint consistency (pitch, angle, roster) as a named status | `pipeline/nanowell_detect.py` | `todo` | |
-| N9 | Real data: addresses checked by hand on 3 wells × 2 timepoints, including a bubble and a clipped edge; counts recorded here | — | `blocked` | Q7 |
-| N10 | Close-out (as G11) | — | `todo` | |
+| N8 | Cross-timepoint consistency (pitch, angle after the plate's rotation, roster) as a named status | `pipeline/nanowell_detect.py` | `todo` | |
+| N9 | Both formats in the synthetic tests: every N row passes at 100 µm and at 50 µm, and a 50 µm array analysed with the 100 µm setting is reported as a format mismatch rather than detected wrongly | `tests/` | `todo` | |
+| N10 | Real data: addresses checked by hand on 3 wells × 2 timepoints, including a bubble and a clipped edge; counts recorded here | — | `blocked` | Q7 |
+| N11 | Close-out (as G13) | — | `todo` | |
 
-### Section C — Contents, label-free first (PR 4)
+### Section C — Contents, label-free first (PR 6)
 
 | # | Item | Place | State | Evidence |
 |---|---|---|---|---|
-| C1 | Empty-nanowell template per (well, timepoint) from the least-textured visible quarter; fallback to the earliest template; source and n recorded | `pipeline/nanowell_measure.py` | `todo` | |
+| C1 | Empty-nanowell template per (well, timepoint) from the least-textured visible quarter; fallback to the earliest template, aligned by the lattice; source and n recorded | `pipeline/nanowell_measure.py` | `todo` | |
 | C2 | Rim-suppressed phase tile (crop ÷ template inside sites, flat outside) | `pipeline/nanowell_measure.py` | `todo` | |
 | C3 | Confluence from local texture against the empty-site texture distribution | `pipeline/nanowell_measure.py` | `todo` | |
-| C4 | Label-free count: Cellpose on the rim-suppressed owner tile, one call per tile; cells kept only in owned site interiors | `pipeline/nanowell_measure.py` | `todo` | |
+| C4 | Label-free count: Cellpose on the rim-suppressed owner tile, one call per tile; cells kept only in owned site interiors; fused sites segmented on their crop | `pipeline/nanowell_measure.py` | `todo` | |
 | C5 | Area-based estimate and `count_disagreement` | `pipeline/nanowell_measure.py` | `todo` | |
 | C6 | Per-cell records through the existing quantification, plus address and well-frame columns | `pipeline/nanowell_measure.py` | `todo` | |
-| C7 | Fluorescence when present: per-cell (existing) and per-site integrated and mean minus empty-site background | `pipeline/nanowell_measure.py` | `todo` | |
+| C7 | Fluorescence when present: per-cell (existing) and per-site integrated and mean minus empty-site background; empty, not zero, at a timepoint without the channel | `pipeline/nanowell_measure.py` | `todo` | |
 | C8 | Per-site record for every state in §3.5. Test: an empty site (0) and an occluded site (empty) can never be confused | `pipeline/nanowell_measure.py` | `todo` | |
 | C9 | Mutation: remove the ownership filter — a test counting cells in a synthetic overlap must fail on the double count | `tests/test_nanowell_contents.py` | `todo` | |
-| C10 | Real data: Cellpose `cyto3` on rim-suppressed versus raw phase, counts against hand counts on 50 sites | — | `blocked` | Q7 |
-| C11 | Close-out (as G11) | — | `todo` | |
+| C10 | Real data: Cellpose `cyto3` on rim-suppressed versus raw phase, counts against hand counts on 50 sites per format | — | `blocked` | Q7 |
+| C11 | Close-out (as G13) | — | `todo` | |
 
-### Section P — The pipeline run (PR 5)
+### Section P — The pipeline run (PR 7)
 
 | # | Item | Place | State | Evidence |
 |---|---|---|---|---|
-| P1 | Extraction from `process_microscopy.py` sized to pay for the dispatch hook (headroom 0) | `process_microscopy.py` → a `pipeline/` module | `todo` | |
+| P1 | Extraction from `process_microscopy.py` sized to pay for the dispatch hook and the `pipeline_info` blocks (headroom 0) | `process_microscopy.py` → a `pipeline/` module | `todo` | |
 | P2 | The (well, timepoint) task body: group tiles by timepoint, grid check, registration, detection, contents, records; per-(well, timepoint) failure trace in `errors/` | `pipeline/nanowell_run.py` | `todo` | |
-| P3 | CLI flags and their validation messages | `pipeline/cli_args.py` | `todo` | |
-| P4 | Writers: `nanowells/<well>.csv`, `_grid.json`, per-cell columns, new roles in `ROLE_CATALOG`, the `pipeline_info` block | `pipeline/nanowell_run.py`, `domain/image_identity.py`, `process_microscopy.write_pipeline_info` | `todo` | |
-| P5 | Incremental: (well, timepoint) done unit; every setting in the reuse key with a roster row each | `pipeline/incremental_keys.py`, `tests/test_reuse_is_keyed_completely.py` | `todo` | |
-| P6 | Resume checkpoints per (well, timepoint) | `pipeline/fov_checkpoint.py` | `todo` | |
-| P7 | Completeness for nanowell mode, shared with Validate | `pipeline/completeness.py` | `todo` | |
-| P8 | Remote: manifest, tiles kept together on upload, `nanowells/` fetched; extractions to pay for `remote_runner.py` and `remote_fetch.py` | `services/` | `todo` | |
-| P9 | End-to-end CLI test on synthetic tiles with a deterministic stand-in segmenter (fast lane); real Cellpose in the slow segmentation lane | `tests/` | `todo` | |
-| P10 | Real-data run: time and peak memory per (well, timepoint) recorded here | — | `blocked` | Q7 |
-| P11 | Close-out: ARCHITECTURE §6.2 section, README CLI flags, version | — | `todo` | |
+| P3 | End-of-run re-anchoring pass: G8's plate-rigid transform for every unaddressed (well, timepoint); rewrites only those wells' rows; reports how many it anchored and how many remain unaddressed | `pipeline/nanowell_run.py` | `todo` | |
+| P4 | CLI flags and their validation messages (plate format, cell diameter, thresholds, and the no-record fallbacks) | `pipeline/cli_args.py` | `todo` | |
+| P5 | Writers: `nanowells/<well>.csv`, `_grid.json`, per-cell columns, new roles in `ROLE_CATALOG`, the `acquisition` and `nanowell` blocks of `pipeline_info.json` | `pipeline/nanowell_run.py`, `domain/image_identity.py` | `todo` | |
+| P6 | Incremental: (well, timepoint) done unit; every setting in the reuse key with a roster row each | `pipeline/incremental_keys.py`, `tests/test_reuse_is_keyed_completely.py` | `todo` | |
+| P7 | Resume checkpoints per (well, timepoint) | `pipeline/fov_checkpoint.py` | `todo` | |
+| P8 | Completeness for nanowell mode, shared with Validate | `pipeline/completeness.py` | `todo` | |
+| P9 | Remote: manifest, tiles kept together on upload, `nanowells/` fetched; extractions to pay for `remote_runner.py` and `remote_fetch.py` | `services/` | `todo` | |
+| P10 | Datasets tools carry `nanowells/`: Subset filters, Merge Plates remaps wells, Concatenate shifts timepoints; Validate checks the tables against the archives | `datasets/` | `todo` | |
+| P11 | End-to-end CLI test on synthetic tiles with a deterministic stand-in segmenter (fast lane); real Cellpose in the slow segmentation lane | `tests/` | `todo` | |
+| P12 | End-to-end over a merge: two single-timepoint raw datasets (plate moved between them) → Concatenate → Analyze → every site joined across the two timepoints | `tests/` | `todo` | |
+| P13 | Real-data run: time and peak memory per (well, timepoint) recorded here | — | `blocked` | Q7 |
+| P14 | Close-out: ARCHITECTURE §6.2 section, README CLI flags, version | — | `todo` | |
 
-### Section A — Analyze form (PR 6)
+### Section A — Analyze form (PR 8)
 
 | # | Item | Place | State | Evidence |
 |---|---|---|---|---|
 | A1 | Nanowells section as its own mixin, Qt-free fields and validation beside it; extraction to pay for the `analyze/tab.py` hook (headroom 0) | `analyze/nanowell_section.py`, `analyze/domain/nanowell_fields.py` | `todo` | |
 | A2 | Run-spec wiring, tested through `analyze.run_spec._collect_run_spec` down to the argv | `analyze/run_spec.py` | `todo` | |
-| A3 | Preflight: missing tiles, overlap smaller than a nanowell, no phase channel | `analyze/preflight.py` | `todo` | |
-| A4 | Test detection preview in a worker: montage, labelled sites, occluded and clipped marks, origin method, sample crops with segmentation | `analyze/nanowell_preview.py` | `todo` | |
-| A5 | A test that presses the real controls (enable → argv; preview → worker started) — CLAUDE.md §7.6 | `tests/` | `todo` | |
+| A3 | Preflight: missing tiles, missing acquisition record, overlap smaller than a nanowell (with the seam-site count), no phase channel | `analyze/preflight.py` | `todo` | |
+| A4 | Test detection preview in a worker: montage, labelled sites, occluded / clipped / fused marks, origin method, measured overlap, sample crops with segmentation | `analyze/nanowell_preview.py` | `todo` | |
+| A5 | A test that presses the real controls (enable → argv; plate format → argv; preview → worker started) — CLAUDE.md §7.6 | `tests/` | `todo` | |
 | A6 | Close-out: README Analyze section, rendering reviewed, version | — | `todo` | |
 
-### Section D — Review data and calculations (PR 7)
+### Section D — Review data and calculations (PR 9)
 
 | # | Item | Place | State | Evidence |
 |---|---|---|---|---|
 | D1 | Loader for `nanowells/`; test that the top-level `*.csv` glob never picks the tables up | `review/features/nanowell/collect.py` | `todo` | |
 | D2 | Per-site time series joined on `(well, q, r)`; refuses an unknown scheme version | `review/features/nanowell/compute.py` | `todo` | |
-| D3 | The §3.10.1 metrics, each with its undefined cases tested | `review/features/nanowell/compute.py` | `todo` | |
+| D3 | The §3.10.1 metrics, each with its undefined cases tested, against recorded time | `review/features/nanowell/compute.py` | `todo` | |
 | D4 | Baselines: earliest (default) and first measurable (labelled) | `review/features/nanowell/compute.py` | `todo` | |
 | D5 | Per-(well, timepoint) summaries with sites used and excluded by reason | `review/features/nanowell/compute.py` | `todo` | |
 | D6 | Group summaries via Sample Definitions; vs-control uses the same statistic top and bottom | `review/features/nanowell/compute.py` | `todo` | |
 | D7 | Wells as the replicate unit; no public path pools sites as replicates | `review/features/nanowell/compute.py` | `todo` | |
 | D8 | Long-format CSV export | `review/features/nanowell/controller.py` | `todo` | |
 | D9 | Persistence block, reset on dataset switch | `review/persistence/nanowell.py` | `todo` | |
-| D10 | Close-out (as G11) | — | `todo` | |
+| D10 | Close-out (as G13) | — | `todo` | |
 
-### Section V — The Nanowells page (PR 8)
+### Section V — The Nanowells page (PR 10)
 
 | # | Item | Place | State | Evidence |
 |---|---|---|---|---|
@@ -757,15 +959,16 @@ Answers are written into the row. Rows that depend on an answer say so.
 | V9 | Real-constructor test in the slow lane; `test_no_tab_builder_raised_while_draining` stays green with the page | `tests/` | `todo` | |
 | V10 | Close-out: ARCHITECTURE §5 section, README section, minor version | — | `todo` | |
 
-### Section I — Integration with existing surfaces (PR 9, optional)
+### Section I — Integration with existing surfaces (PR 11, optional)
 
 | # | Item | Place | State | Evidence |
 |---|---|---|---|---|
 | I1 | Image Browser: montage with lattice overlay; site crop gallery | `review/features/image_browser/` | `todo` | |
-| I2 | Spatial reads well-frame coordinates on nanowell datasets | `review/features/spatial/` | `todo` | |
+| I2 | Spatial reads well-frame coordinates in µm on nanowell datasets | `review/features/spatial/` | `todo` | |
 | I3 | Nanowell as a replicate unit in Bar / Line plots — scoped separately first, because it touches `fold_change`'s tuples | `review/domain/` | `todo` | |
 | I4 | Batch Export nanowell mode | `review/features/batch_export/` | `todo` | |
-| I5 | Close-out; delete this tracker if every row is `done` or `declined`, and say so in the PR body | — | `todo` | |
+| I5 | The OME and ND2 converters write the same acquisition record. The OME reader already holds stage coordinates (`pipeline/ome_explode.py` `stage_positions`); the ND2 reader names stage positions, and whether it reads their coordinates is unchecked | `pipeline/ome_explode.py`, `pipeline/nd2_explode.py` | `todo` | |
+| I6 | Close-out; delete this tracker if every row is `done` or `declined`, and say so in the PR body | — | `todo` | |
 
 ---
 
@@ -773,19 +976,32 @@ Answers are written into the row. Rows that depend on an answer say so.
 
 Each of these, if it turns out true, changes a section rather than a row.
 
-- **The overlap is smaller than a nanowell (Q2).** Ownership fails for the
-  sites in the seams, and the fused-crop fallback becomes a main path, with
-  per-tile label images no longer covering every cell. PR 4 grows.
+- **The CZI's positions are not comparable across acquisitions (R8).** Origin
+  fallback 3 then has nothing to work from, and a timepoint whose square is
+  hidden depends on fallback 2 alone — still sound, because the square is
+  always at the array's centre, but with one fewer cross-check.
+- **The CZI does not record what §3.0.1 expects** (no scaling, no stage
+  positions, no start time on some ZEN versions). The record then carries what
+  exists and says what is missing, Concatenate falls back to its interval rule
+  for those datasets, and the Analyze no-record settings become the main path
+  for them.
+- **The copy cost of one Concatenate per timepoint is unacceptable (Q9).** M7
+  helps only when all timepoints are already acquired. A running experiment
+  then needs an input layout that can grow without rewriting — a decision about
+  every reader of `in/`, not a Concatenate change.
+- **Most 100 µm datasets have overlap smaller than a nanowell.** The fused-site
+  path stops being the seam exception and becomes a large share of sites; its
+  cost and its effect on per-tile label images must then be measured, not
+  assumed.
 - **The lattice is not uniform across a well** (molding distortion, optical
   field curvature). Lattice-phase registration then biases tiles; overlap
   correlation becomes primary, and the per-tile residual is the signal.
-- **The square is not at the array's centre (Q4).** Origin fallback 2 is gone,
-  and a timepoint with a hidden square depends on fallback 3 (Q5).
 - **Cells fill nanowells so that the empty-site template is contaminated** at
-  late timepoints. The earliest-template fallback covers it only if the plate
-  does not move between timepoints by more than the template tolerates.
+  late timepoints, most likely in the 50 µm format. The earliest-template
+  fallback is aligned by the lattice and survives the plate being moved, but
+  not a change in illumination between acquisitions; C10 measures it.
 - **Cellpose `cyto3` is poor on these cells in phase (C10).** The answer is not
   a new model (§2.2) without a row and a measurement; confluence remains the
   robust readout either way.
-- **Wells are not always 5×5.** The grid size is a setting from the start, so
-  this costs nothing unless grids vary *within* a plate.
+- **Wells are not always 5×5.** The grid comes from the record, so this costs
+  nothing unless grids vary *within* a plate.

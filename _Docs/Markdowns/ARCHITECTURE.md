@@ -8177,7 +8177,12 @@ without importing Torch, and Cellpose runs are capped at
 `CELLPOSE_WORKERS_PER_GPU` workers per GPU unless `--workers` is given;
 `--cpu_only` stays StarDist's switch because a remote host's `cpu_only` is
 written from the login node's TensorFlow, which is false on most clusters;
-`tests/test_cellpose_uses_the_gpu.py`), `pipeline.stardist` (StarDist segmenters +
+`tests/test_cellpose_uses_the_gpu.py`; and `slurm_cpu_shortfall`, a run-log
+warning when a Slurm job was given one or two of a larger node's CPUs — what a
+scheduler command with no `--cpus-per-task` gets — naming the cause and the
+flag to add, because the worker pool and any `--workers` are clamped to the
+CPUs the job has and the clamp alone does not say why;
+`tests/test_a_starved_slurm_job_says_so.py`), `pipeline.stardist` (StarDist segmenters +
 per-worker model state behind `set_model`/`set_fov_label`; TensorFlow lazy), and
 `pipeline.io` (atomic image/CSV/overlay writers). The two ML runtimes stay
 behind lazy imports, so importing `process_microscopy` pulls in **neither TF nor

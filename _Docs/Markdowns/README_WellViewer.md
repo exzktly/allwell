@@ -1091,7 +1091,10 @@ to run. Only the parts of the template that choose a node — partition, CPUs,
 memory, time, GPUs, constraint and the like — are carried over. A template that
 asks for cores as a number of tasks (`-n 16`) becomes `--cpus-per-task=16`: the
 run is one program that spreads its own workers over the cores it is given, and
-`-n 16` would instead start it sixteen times. When a setting
+`-n 16` would instead start it sixteen times. A run whose job was given only one
+core of a bigger node — what a scheduler command with no `--cpus-per-task` gets —
+says so in its log, with the number of CPUs the node has, because it runs a
+single worker and `--workers` in Extra args cannot raise that. When a setting
 cannot be placed, because it is attached to no option or needs a value the
 profile does not give, it is left out, and the line under the SSH controls says
 which profile lost what. Check the filled-in command before saving.

@@ -48,6 +48,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # process_microscopy at module top level, so the remote needs the package.
     "util/__init__.py",
     "util/aw_safe.py",
+    # Nanowell addressing and geometry are Qt-free; the manifest mirrors
+    # these packages even while their only callers are synthetic tests.
+    "util/nanowell_address.py",
     # One `os.scandir` in place of a `stat` per directory entry. Client-side
     # only — its importers are the Analyze input scan and the remote runner's
     # own staging, both of which run here — but the manifest must list every
@@ -111,6 +114,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # top level (Torch/TensorFlow stay lazy), so the remote needs the whole
     # package or the run aborts with ModuleNotFoundError.
     "pipeline/__init__.py",
+    "pipeline/nanowell_lattice.py",
     "pipeline/auto_threshold.py",
     # The post-run pass over that sampler: which estimator this run's
     # arguments call for, and the merge into pipeline_info.json.

@@ -8147,6 +8147,36 @@ actually given — rather than on the reporter calls behind it, because a scan
 that computes a perfect count and never writes it to the label leaves exactly
 the frozen page this fixes.
 
+### 6.2e Nanowell geometry primitives
+
+`util/nanowell_address.py` is stdlib-only: frozen integer axial addresses,
+hexagonal ring labels by default, explicit square-lattice labels, and exact
+parsing. Positive r advances counter-clockwise from east in the lattice frame;
+labels identify a site within its ring, while `(q, r)` is the join key. A label
+alone does not identify its lattice kind; square parsing must name that kind.
+
+`pipeline/nanowell_lattice.py` is Qt-free. `TileRectangle` carries an id and
+finite axis-aligned bounds in the same units as the site centres.
+`assign_owners` tests the entire nanowell disk plus the caller's margin against
+each tile and chooses the containing tile nearest its centre. Equal distances
+are resolved by lexical tile-id order. Its frozen result retains every input
+site, with a tile id or `None`, and explicitly lists every unowned site's index.
+Those indices include both seams and sites outside coverage; ownership alone
+cannot decide whether a crop can be fused or is unmeasurable.
+
+`fit_plate_rigid` fits a proper 2-D rotation and translation (no scale) to
+common well origins. Pair hypotheses minimise median radial residual; a
+median-plus-three-scaled-MAD cutoff selects at least three consensus wells for
+Kabsch refinement. Frozen results carry per-well residuals, consensus ids, RMS,
+and failure reasons. `predict_origin` returns a position and a one-sigma radial
+prediction standard error derived from residual variance and rotational
+leverage. This assumes independent isotropic residuals; it is not a guaranteed
+error bound and does not account for calibration uncertainty. No caller yet
+uses this number to accept or reject a nanowell origin.
+
+These modules are listed in the remote manifest and currently have only test
+callers. They do not enable nanowell processing in Analyze or change outputs.
+
 ### 6.2 `process_microscopy.py`
 
 The pipeline. **Self-sufficient by design** — no import from `review/`,

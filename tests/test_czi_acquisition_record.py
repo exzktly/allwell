@@ -62,14 +62,17 @@ def test_single_file_conversion_writes_exact_tiles_and_one_shared_time(tmp_path)
     assert not publication_marker(dest / "in" / "acquisition.json").exists()
 
 
-def test_subset_keeps_whole_acquisition_clock_but_only_published_tiles(tmp_path):
-    source = _source(tmp_path)
+@pytest.mark.parametrize("split", [False, True])
+def test_subset_keeps_whole_acquisition_clock_but_only_published_tiles(tmp_path, split):
+    source = _source(tmp_path, split=split)
     directory = tmp_path / "arbitrary-output-folder"
     explode_czi(source, directory, well_subset=("A01",))
     record = read_record_file(directory / "acquisition.json")
     assert {tile["well"] for tile in record["tiles"]} == {"A01"}
     assert record["timepoints"]["0h"]["started_at"] == "2024-06-12T09:00:00+00:00"
     assert not (directory / "in").exists()
+    if split:
+        assert set(record.get("clock_source_file_stats", {})) == {"part-0.czi", "part-1.czi"}
 
 
 def test_cancelled_conversion_records_only_archives_that_were_published(tmp_path):
@@ -234,7 +237,7 @@ def test_shared_hour_tokens_use_existing_rounding_and_unknown_clock_reason():
     assert reason is None
     assert tokens == {0: '0h', 1: '4h'}
     tokens, reason = shared_timepoint_tokens({0: {'started_at': None}})
-    assert tokens == {0: 't0'} and reason == 'Some shared acquisition starts are unknown'
+    assert tokens == {0: '0h'} and reason == 'Some shared acquisition starts are unknown'
 
 
 def test_relabel_closes_old_archive_before_atomic_replace(tmp_path, monkeypatch):
@@ -296,3 +299,52 @@ def test_conversion_without_comparable_starts_keeps_positional_names(tmp_path):
     assert all(data['started_at'] is None for data in record['timepoints'].values())
     assert record['timepoint_naming']['reason'] == 'Some shared acquisition starts are unknown'
     assert validate_against_archives(target, record).ok
+
+
+def test_unselected_old_rule_archive_is_refused_instead_of_silently_relabelled(tmp_path):
+    import zipfile
+    from util.zip_write import atomic_zip
+    source = _source(tmp_path)
+    source.write_bytes(source.read_bytes().replace(b'T13:00:00Z', b'T15:00:00Z'))
+    target = tmp_path / 'dataset' / 'in'
+    explode_czi(source, target, well_subset=('A01',))
+    path = target / 'A01.zip'
+    with zipfile.ZipFile(path) as archive:
+        members = [(info.filename.replace('_5h.tif', '_4h.tif'), archive.read(info))
+                   for info in archive.infolist()]
+    with atomic_zip(path) as archive:
+        for name, payload in members:
+            archive.writestr(name, payload)
+    before = path.read_bytes()
+    error = None
+    try:
+        explode_czi(source, target, well_subset=('B02',), resume=True)
+    except AcquisitionRecordError as caught:
+        error = caught
+    assert error is not None and 'A01' in str(error) and 're-converted' in str(error)
+    assert path.read_bytes() == before
+    assert not (target / 'B02.zip').exists()
+
+
+def test_mixed_source_tile_clocks_leave_shared_start_unknown(tmp_path):
+    source = _source(tmp_path)
+    source.write_bytes(source.read_bytes().replace(b'T09:00:00Z', b'T09:00:00 '))
+    target = tmp_path / 'dataset'
+    result = explode_czi(source, target / 'in', well_subset=('A01',))
+    assert result.timepoints == ['t0', 't1']
+    record = read_record(target)
+    assert record['timepoints']['t0']['started_at'] is None
+    assert record['timepoints']['t0']['start_reason'] == 'Tile acquisition times mix zoned and unzoned clocks'
+    assert validate_against_archives(target, record).ok
+
+
+def test_single_frame_without_stamp_is_zero_hours_but_start_is_unknown(tmp_path):
+    source = write_czi(tmp_path / 'single.czi', [Tile(np.ones((3, 4), 'uint16'), acquired=None)],
+                       xml=plate_metadata_xml(scene_wells={0: 'A01'}, channels=['phase']))
+    target = tmp_path / 'dataset'
+    result = explode_czi(source, target / 'in')
+    assert result.timepoints == ['0h']
+    record = read_record(target)
+    assert record['timepoints']['0h']['started_at'] is None
+    assert record['timepoints']['0h']['tiles_without_time'] == 1
+    assert record['timepoints']['0h']['start_reason'] == 'No tiles carry a readable acquisition time'

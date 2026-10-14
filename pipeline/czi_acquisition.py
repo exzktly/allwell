@@ -38,6 +38,10 @@ def shared_timepoint_tokens(timepoints):
     """Shared starts feed the existing rounded naming rules; timezone stays native."""
     indices = sorted(timepoints)
     positional = {index: f"t{index}" for index in indices}
+    if len(indices) == 1:
+        index = indices[0]
+        reason = "Some shared acquisition starts are unknown" if timepoints[index]["started_at"] is None else None
+        return {index: "0h"}, reason
     if any(timepoints[index]["started_at"] is None for index in indices):
         return positional, "Some shared acquisition starts are unknown"
     stamps = {index: datetime.fromisoformat(timepoints[index]["started_at"])
@@ -197,6 +201,7 @@ class RecordBuilder:
         """Retained archives must belong to the source before pixels change."""
         self._unchanged()
         retained = self._published_tiles(ignore_wells=selected_wells)
+        self._check_retained_names(selected_wells)
         active = {position.path for key, (position, _t) in self.positions.items()
                   if key[0] in selected_wells or key in retained}
         if len({path.name for path in active}) != len(active):
@@ -209,6 +214,17 @@ class RecordBuilder:
             if len(known) > 1:
                 raise AcquisitionRecordError(
                     f"CZI files disagree about pixel_size_um.{axis}: {sorted(known)}")
+
+    def _check_retained_names(self, selected_wells):
+        for path in sorted(self.directory.glob("*.zip")):
+            if path.stem in selected_wells:
+                continue
+            with zipfile.ZipFile(path) as archive:
+                if any(not self._correct_name(info, path.stem) for info in archive.infolist()
+                       if is_run_input_member(info.filename)):
+                    raise AcquisitionRecordError(
+                        f"{path.stem} uses the former timepoint naming rule; include that well "
+                        "in the resumed selection so it can be re-converted")
 
     def build(self):
         self._unchanged()
@@ -255,6 +271,9 @@ class RecordBuilder:
             record["timepoints"][token] = metadata
         paths = set().union(*used_paths.values()) if used_paths else set()
         record["source_files"] = sorted(path.name for path in paths)
+        record["clock_source_file_stats"] = {
+            path.name: {"size": stamp[0], "mtime_ns": stamp[1]}
+            for path, stamp in sorted(self.stamps.items())}
         record["source_file_stats"] = {
             path.name: {"size": self.stamps[path][0], "mtime_ns": self.stamps[path][1]}
             for path in sorted(paths)}

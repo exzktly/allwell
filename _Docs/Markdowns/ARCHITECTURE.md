@@ -7158,17 +7158,22 @@ The pipeline's input-image predicate excludes metadata, directories and macOS
 sidecars. Missing/extra wells or tiles, unreadable archives and bad image names
 are explicit issues. An unreadable well's field coverage is not fabricated as
 empty. The CZI converter produces this record; dataset-tool and remote input
-transport integration are tracked separately in Section R.
+transport integration carry the record as described below.
 
 `pipeline/czi_acquisition.RecordBuilder` catalogs the conversion's filenames and
 source positions, then reads actual published ZIP member headers. Only those
-field/timepoint/channel identities contribute native directory/stage positions
-and the shared acquisition start. Split Scenes files retain their own source
+field/timepoint/channel identities contribute recorded directory/stage positions
+and dimensions. Shared starts and missing-reading counts reduce metadata from
+every spatial tile and timepoint of the whole acquisition before pixel
+conversion, including every file of a Split Scenes set. This keeps labels and
+starts identical across partial and full conversions. Split Scenes files retain their own source
 attribution, including several files naming one well. Unknown scale axes are
 not borrowed from another file, and conflicting known scales are refused before
 pixels are written. Coordinate disagreement across stored channel/Z planes
 leaves the coordinate unknown. Source size/mtime identities must remain unchanged
-during conversion and metadata assembly; those used are retained as provenance.
+during conversion and metadata assembly. Published-image sources retain their
+stats; clock_source_file_stats additionally identifies every source contributing
+the whole-acquisition clock, including files excluded from the image subset.
 
 The record's nullable objective and declared overlap remain unknown because the
 reader does not yet expose an unambiguous native selected-objective or declared-
@@ -7181,13 +7186,35 @@ when JSON is absent. After worker shutdown, also on cancellation, the builder
 reconstructs the exact published roster, atomically replaces the JSON through
 `util/json_write`, and clears the guard. Metadata failure or hard interruption
 leaves the guard and the previous JSON; a matching resume rebuilds it without
-reprojecting pixels. Native ordinals in ZIP member comments and timepoint
+reprojecting pixels when their labels already match. Old-rule archives selected
+for resume are re-converted; an unselected retained old-rule well is refused
+with its name and the instruction to include it. Native ordinals in ZIP member comments and timepoint
 provenance preserve identity through label changes. The final labels use elapsed
 hours from shared starts, using the existing jitter rounding; unknown or incomparable
-starts use ordinal tokens and retain a naming reason. Retained ZIPs are rewritten
+starts use ordinal tokens and retain a naming reason. A single frame is always
+0h even if its absolute start remains unknown. Retained ZIPs are rewritten
 only when labels or lineage comments change. ZIP and JSON are individually atomic, not a two-
 file atomic transaction. Dataset-root APIs delegate to explicit file APIs so
 CLI conversions into an arbitrary input-folder name do not append another in/.
+
+Subset keeps exact published identities and their shared timepoint metadata.
+Merge Plates remaps wells and qualifies source-file provenance by input; it
+refuses conflicting shared metadata or a record present in only one input before
+destination writes. Validate reports record presence, corrupt/pending records and
+archive-coverage mismatches using the dataset's schema.
+
+`services/acquisition_transport` carries the record through staged inputs,
+scoped well selections and batched uploads, filtering it to actual uploaded
+identities. Full and batch transfers include a temporary `acquisition.json`,
+removed when the transfer ends. Upload and re-attach identity include record
+content, so metadata-only changes invalidate reuse. `pipeline.sidecar` reads and
+validates the input record before local or remote pipeline image work. Legacy
+inputs without a record retain their existing behavior.
+
+The CZI page shows known/unknown pixel-size axes and identifies preview labels
+as provisional. After a successful conversion, including the final page refresh,
+it shows the record's per-timepoint scale, mosaic/stage coverage and known-start
+coverage before the dataset is opened in Analyze.
 
 **CZI acquisition metadata.** `CziLayout.pixel_size_um` reads x/y scaling from
 `Scaling/Items/Distance[@Id]/Value` during the same cached parse that resolves

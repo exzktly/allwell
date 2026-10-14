@@ -375,9 +375,9 @@ def explode_czi(
     # names it, and a stride that filtered one list without the other would
     # write the right image under the wrong timepoint.
     # The set's tokens, not the layout's: elapsed hours where the files'
-    # acquisition stamps supported them, positional otherwise. Resolved once
-    # for the plate in ``czi_set``, so the page's readout and the archives
-    # cannot be named two different ways.
+    # acquisition stamps supported them, positional otherwise. These sampled
+    # tokens identify legacy archives and the provisional preview. Publication
+    # names images from starts reduced across the whole source acquisition.
     tp_plan = timepoint_plan(czi_set.timepoint_tokens, timepoint_stride)
     tp_tokens = [token for _index, token in tp_plan]
     n_kept_t = len(tp_plan)

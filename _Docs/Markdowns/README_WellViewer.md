@@ -5468,7 +5468,8 @@ Analyze.
 Conversion also writes `in/acquisition.json` with the pixel size and tile size
 for each timepoint, the available mosaic and stage positions, and **one shared
 acquisition start per timepoint**. That start is the earliest recorded tile
-among the wells written, even when scanning the plate takes an hour. Missing
+across the whole source acquisition, whichever wells this conversion writes,
+even when scanning the plate takes an hour. Missing
 readings are counted; mixing zoned and unzoned clocks leaves the start unknown
 with a reason. No per-well or per-tile acquisition time is saved downstream.
 Unknown metadata remains unknown, including the selected objective and declared
@@ -5801,8 +5802,11 @@ under the former sampled-field rule. Native timepoint ordinals in ZIP member com
 metadata publication recoverable without guessing which acquisition an hour
 label denoted. A complete resume with unchanged labels leaves archives alone.
 
-**When the times cannot be used, timepoints are named by position** — `t0`,
-`t1`, … — and the page says so before you run, in the line under the settings,
+**A single frame is always named `0h`.** If it has no timestamp, its absolute
+start remains unknown and the record says why. No absolute clock is invented.
+
+**When a multi-frame acquisition has no usable times, timepoints are named by
+position** — `t0`, `t1`, … — and the page identifies the sampled preview before you run, in the line under the settings,
 rather than leaving you to notice afterwards. That happens when the file
 records no acquisition times at all, when some timepoints have one and others
 do not, when two of them work out to the same label, or when the first

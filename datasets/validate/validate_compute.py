@@ -58,6 +58,7 @@ from pipeline.completeness import (
     reduce_csv_state,
 )
 from pipeline.incremental_keys import fov_keys_from_member_names
+from util.acquisition_record import AcquisitionRecordError, read_record, validate_against_archives
 from util.timepoint import parse_hours, sort_key as tp_sort_key
 from util.aw_safe import swallow
 from util.well_token import canonical_well_label
@@ -1099,6 +1100,8 @@ def build_report(
     findings = [*collision_findings, *csv_findings, *well_findings,
                 *availability_findings, *override_findings]
 
+    findings.extend(_acquisition_findings(paths.root, schema_fields, sep))
+
     return DatasetReport(
         root=paths.root,
         wells=tuple(well_reports),
@@ -1111,3 +1114,16 @@ def build_report(
         missing_available_fovs=missing_fovs,
         stale_override_count=stale_override_count,
     )
+
+
+def _acquisition_findings(root, schema, sep):
+    try:
+        record = read_record(root)
+        if record is None:
+            return []
+        validation = validate_against_archives(root, record, schema=":".join(schema), sep=sep)
+    except (AcquisitionRecordError, OSError) as error:
+        return [Finding("error", "acquisition_invalid", str(error))]
+    if validation.ok:
+        return [Finding("info", "acquisition_present", "Acquisition record matches input archives")]
+    return [Finding("error", "acquisition_mismatch", issue) for issue in validation.issues]

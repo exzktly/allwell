@@ -58,6 +58,7 @@ def new_timepoint(*, started_at=None) -> dict:
         "started_at": started_at,
         "start_reason": None,
         "tiles_without_time": 0,
+        "source_timepoint_index": None,
         "pixel_size_um": {"x": None, "y": None},
         "tile_size_px": {"x": None, "y": None},
         "objective": None,
@@ -111,6 +112,9 @@ def _timepoints(payload, issues):
         missing = metadata.get("tiles_without_time")
         if type(missing) is not int or missing < 0:
             local_issues.append("tiles_without_time must be a nonnegative integer")
+        source_index = metadata.get("source_timepoint_index")
+        if source_index is not None and (type(source_index) is not int or source_index < 0):
+            local_issues.append("source_timepoint_index must be a nonnegative integer or null")
         issues.extend(f"Timepoint {token!r}: {issue}" for issue in local_issues)
         start = metadata["started_at"]
         if start is None:
@@ -204,7 +208,18 @@ def _json_object(pairs):
 
 def read_record(dataset_dir: str | Path) -> dict | None:
     """Return absent as None; corrupt or unsupported metadata is an explicit error."""
-    path = record_path(dataset_dir)
+    return read_record_file(record_path(dataset_dir))
+
+
+def publication_marker(path: str | Path) -> Path:
+    return Path(path).with_name("acquisition.pending.json")
+
+
+def read_record_file(path: str | Path) -> dict | None:
+    """Explicit-file API; incomplete publication is never read as absent."""
+    path = Path(path)
+    if publication_marker(path).exists():
+        raise AcquisitionRecordError(f"Acquisition publication is incomplete in {path.parent}; resume the conversion")
     try:
         with path.open(encoding="utf-8") as stream:
             payload = json.load(stream, object_pairs_hook=_json_object)
@@ -218,8 +233,13 @@ def read_record(dataset_dir: str | Path) -> dict | None:
 
 def write_record(dataset_dir: str | Path, payload) -> None:
     """Validate before the atomic replacement; failures preserve the old record."""
+    write_record_file(record_path(dataset_dir), payload)
+
+
+def write_record_file(path: str | Path, payload) -> None:
+    """Explicit-file writer; the publisher clears its guard only after this."""
     _require_valid(payload)
-    write_json_atomic(record_path(dataset_dir), payload)
+    write_json_atomic(Path(path), payload)
 
 
 def _archive_tiles(path, well, fields, sep, issues) -> set[tuple[str, str, str]] | None:
@@ -253,6 +273,11 @@ def validate_against_archives(dataset_dir: str | Path, payload, *,
     the pipeline's input-member predicate. Unreadable archives are reported and
     their field coverage is not fabricated as an empty set.
     """
+    return validate_record_paths((Path(dataset_dir) / "in").glob("*.zip"), payload,
+                                 schema=schema, sep=sep)
+
+
+def validate_record_paths(paths, payload, *, schema=DEFAULT_SCHEMA, sep=DEFAULT_SEP):
     validation = validate_record(payload)
     if not validation.ok:
         return validation
@@ -264,7 +289,7 @@ def validate_against_archives(dataset_dir: str | Path, payload, *,
     actual = set()
     archive_wells = set()
     unreadable = set()
-    for path in sorted((Path(dataset_dir) / "in").glob("*.zip")):
+    for path in sorted(paths):
         well = canonical_well_label(path.stem)
         if well is None:
             issues.append(f"Archive {path.name!r} does not name a plate well")
@@ -289,3 +314,77 @@ def validate_against_archives(dataset_dir: str | Path, payload, *,
     for key in sorted(actual - recorded):
         issues.append(f"Record is missing tile {key!r}")
     return AcquisitionValidation(tuple(issues))
+
+
+def filter_record_to_archives(dataset_dir, payload, *, schema=DEFAULT_SCHEMA, sep=DEFAULT_SEP):
+    """Keep exact published identities; retain the acquisition's shared clock."""
+    return filter_record_to_paths((Path(dataset_dir) / "in").glob("*.zip"), payload,
+                                  schema=schema, sep=sep)
+
+
+def filter_record_to_paths(paths, payload, *, schema=DEFAULT_SCHEMA, sep=DEFAULT_SEP):
+    paths = tuple(paths)
+    import copy
+    fields = parse_schema(schema)
+    actual = set()
+    issues = []
+    for path in sorted(paths):
+        well = canonical_well_label(path.stem)
+        sites = _archive_tiles(path, well, fields, sep, issues)
+        if sites is not None:
+            actual.update(sites)
+    if issues:
+        raise AcquisitionRecordError("; ".join(issues))
+    result = copy.deepcopy(payload)
+    result["tiles"] = [tile for tile in result["tiles"]
+                       if (tile["well"], tile["field"], tile["timepoint"]) in actual]
+    tokens = {tile["timepoint"] for tile in result["tiles"]}
+    result["timepoints"] = {token: data for token, data in result["timepoints"].items()
+                            if token in tokens}
+    sources = {tile["source_file"] for tile in result["tiles"] if "source_file" in tile}
+    result["source_files"] = [name for name in result["source_files"] if name in sources]
+    if "source_file_stats" in result:
+        result["source_file_stats"] = {name: data for name, data in result["source_file_stats"].items()
+                                       if name in sources}
+    validation = validate_record_paths(paths, result, schema=schema, sep=sep)
+    if not validation.ok:
+        raise AcquisitionRecordError("; ".join(validation.issues))
+    return result
+
+
+def merge_plate_records(first, second, well_map) -> dict | None:
+    """Combine wells only when their shared timepoint metadata agrees."""
+    import copy
+    if first is None and second is None:
+        return None
+    if first is None or second is None:
+        raise AcquisitionRecordError("Merge Plates requires both acquisition records or neither; one input has no record")
+    for token in first["timepoints"].keys() & second["timepoints"].keys():
+        left, right = first["timepoints"][token], second["timepoints"][token]
+        differences = sorted(key for key in left.keys() | right.keys()
+                             if key != "source_timepoint_index" and left.get(key) != right.get(key))
+        if differences:
+            raise AcquisitionRecordError(
+                f"Merge Plates: acquisition metadata conflicts at {token!r}: {', '.join(differences)}. "
+                "Use Concatenate for successive acquisitions of the same wells.")
+    result = new_record()
+    result["source_records"] = [copy.deepcopy(first), copy.deepcopy(second)]
+    for ordinal, payload in enumerate((first, second), 1):
+        prefix = f"dataset{ordinal}/"
+        result["source_files"].extend(prefix + name for name in payload["source_files"])
+        for token, metadata in payload["timepoints"].items():
+            if token not in result["timepoints"]:
+                result["timepoints"][token] = copy.deepcopy(metadata)
+            else:
+                result["timepoints"][token]["source_timepoint_index"] = None
+        for original in payload["tiles"]:
+            tile = copy.deepcopy(original)
+            if ordinal == 2:
+                tile["well"] = well_map.get(tile["well"], tile["well"])
+            if "source_file" in tile:
+                tile["source_file"] = prefix + tile["source_file"]
+            result["tiles"].append(tile)
+    validation = validate_record(result)
+    if not validation.ok:
+        raise AcquisitionRecordError("; ".join(validation.issues))
+    return result

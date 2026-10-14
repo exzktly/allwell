@@ -1728,6 +1728,7 @@ class CziTileMetadata:
     mosaic_xy_px: tuple[int, int] | None = None
     stage_xy_um: tuple[float, float] | None = None
     acquired_at: str | None = None
+    tile_size_px: tuple[int, int] | None = None
 
 
 @dataclass
@@ -1864,7 +1865,8 @@ class CziReader:
     def has_plane(self, scene: int, tile: int, t: int, c: int, z: int) -> bool:
         return (scene, tile, t, c, z) in self._index
 
-    def position_metadata(self, scene: int, tile: int, t: int) -> list[CziTileMetadata]:
+    def position_metadata(self, scene: int, tile: int, t: int, *,
+                          channels=None) -> list[CziTileMetadata]:
         """Transient readings for the planes at one spatial tile, no pixels.
 
         Conversion uses every stored plane's reading so channel/Z ordering
@@ -1874,7 +1876,7 @@ class CziReader:
         if self._fh is None:
             raise CziReadError("The CZI is not open; use CziReader as a context manager.")
         return [self.read_tile_metadata(scene, tile, t, channel, z)
-                for channel in range(self._layout.size_c)
+                for channel in (range(self._layout.size_c) if channels is None else channels)
                 for z in self._z_planes.get((scene, tile, t, channel), ())]
 
     def read_tile_metadata(self, scene: int, tile: int, t: int, c: int,
@@ -1896,16 +1898,18 @@ class CziReader:
                 f"{tile}, timepoint {t}, channel {c}, Z {z}.")
         mosaic = ((block.start("X"), block.start("Y"))
                   if "X" in block.dims and "Y" in block.dims else None)
+        size = ((block.size("X"), block.size("Y")) if mosaic is not None else None)
         xml = read_subblock_metadata(self._fh, block)
         with _PARSE_LOCK:
             try:
                 root = ET.fromstring(xml)
             except ET.ParseError:
-                return CziTileMetadata(mosaic_xy_px=mosaic)
+                return CziTileMetadata(mosaic_xy_px=mosaic, tile_size_px=size)
             stamp = _acquisition_time_from_root(root)
             stage = _stage_xy_um(root)
         return CziTileMetadata(mosaic_xy_px=mosaic, stage_xy_um=stage,
-                               acquired_at=stamp.isoformat() if stamp else None)
+                               acquired_at=stamp.isoformat() if stamp else None,
+                               tile_size_px=size)
 
     def read_plane(self, scene: int, tile: int, t: int, c: int,
                    z: int) -> np.ndarray:

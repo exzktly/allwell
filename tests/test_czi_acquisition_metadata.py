@@ -90,9 +90,9 @@ print(json.dumps([asdict(first), asdict(second)]))
     first, second = json.loads(result.stdout)
     assert first == {"mosaic_xy_px": [-32, 120],
                      "stage_xy_um": [-1200.5, 0.0],
-                     "acquired_at": "2024-06-12T14:02:03+02:00"}
+                     "acquired_at": "2024-06-12T14:02:03+02:00", "tile_size_px": [4, 3]}
     assert second == {"mosaic_xy_px": [400, -8], "stage_xy_um": None,
-                      "acquired_at": None}
+                      "acquired_at": None, "tile_size_px": [4, 3]}
 
 
 @pytest.mark.parametrize("tags", [

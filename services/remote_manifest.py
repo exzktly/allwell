@@ -173,6 +173,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/czi_read.py",
     "pipeline/czi_set.py",
     "pipeline/czi_explode.py",
+    "pipeline/czi_acquisition.py",
     # How a plate's files are read at once — across worker processes, because
     # reading one is a Python parser rather than a wait. ``czi_set`` imports
     # it at module scope, so it travels with it whether or not a remote run

@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import csv
 import json
+from util.acquisition_record import (
+    AcquisitionRecordError, read_record, write_record, merge_plate_records, validate_against_archives,
+)
 import threading
 from datasets.core.containers import container_dest, publish_container
 from util.json_write import write_json_atomic
@@ -421,6 +424,12 @@ def execute_plan(
         "dataset 2 (after remap)."
     )
 
+    try:
+        acquisition = merge_plate_records(read_record(plan.ds1.root), read_record(plan.ds2.root),
+                                          plan.well_map)
+    except AcquisitionRecordError as error:
+        raise MergePlatesError(str(error)) from error
+
     if plan.dest_is_restart:
         emit("Destination has leftover files from an earlier attempt — clearing.")
         clear_destination(plan.dest)
@@ -487,6 +496,12 @@ def execute_plan(
     _verify(plan, row_counts, mismatches)
 
     _merge_cell_overrides(plan, emit)
+    if acquisition is not None:
+        validation = validate_against_archives(
+            plan.dest.root, acquisition, schema=":".join(plan.schema.fields), sep=plan.schema.sep)
+        if not validation.ok:
+            raise MergePlatesError("; ".join(validation.issues))
+        write_record(plan.dest.root, acquisition)
 
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)

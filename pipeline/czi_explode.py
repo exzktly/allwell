@@ -42,11 +42,13 @@ from typing import Callable
 
 from pipeline.czi_read import CziReader, CziReadError
 from pipeline.czi_set import CziSet, ScenePosition, read_czi_set
+from pipeline.czi_acquisition import (
+    acquisition_publication, source_catalog, frame_comment, prepare_publication, resumable_wells,
+)
 from pipeline.explode_common import (
     ExplodeCancelled,
     ExplodeResult,
     encode_tiff,
-    expected_members,
     pick_workers,
     publishing_total,
     resolve_positions,
@@ -55,7 +57,6 @@ from pipeline.explode_common import (
     uneven_fields_note,
     subset_note,
     timepoint_plan,
-    well_is_complete,
     wells_to_convert,
     worker_groups,
 )
@@ -344,7 +345,8 @@ def explode_czi(
     def _abort() -> bool:
         return bool(should_abort and should_abort())
 
-    czi_set = read_czi_set(czi_path, files=files)
+    source_paths, source_stamps = source_catalog(czi_path, files)
+    czi_set = read_czi_set(czi_path, files=source_paths)
     # Refuse an unsound source before a single archive is written. Everything
     # this catches would otherwise reach the dataset as images that look like
     # data: a well short of a timepoint, two channels under one filename, a
@@ -415,6 +417,9 @@ def explode_czi(
     if uneven:
         _log(f"[czi] {uneven}\n")
 
+    acquisition = prepare_publication(out_in_dir, czi_set, well_map, tp_plan,
+                                      exp_tok, source_stamps, selected)
+
     # Wells a previous attempt already finished. Each archive is published
     # atomically, so one that exists holding every member these settings call
     # for is complete and correct. Off by default: leaving wells alone is only
@@ -422,14 +427,7 @@ def explode_czi(
     # conversion's interrupted output.
     resumable: set[str] = set()
     if resume:
-        resumable = {
-            well_map.wells[index] for index in selected
-            if well_is_complete(
-                out_in_dir / f"{well_map.wells[index]}.zip",
-                expected_members(exp_tok, layout.channel_names,
-                                 well_map.wells[index], field_counts[index],
-                                 tp_tokens))
-        }
+        resumable = resumable_wells(acquisition, well_map, selected)
         if resumable:
             _log(f"[czi] Resuming: {len(resumable)} of {n_selected} well(s) are "
                  f"already converted and will be left alone.\n")
@@ -519,8 +517,10 @@ def explode_czi(
                                 started = time.perf_counter()
                                 member = (
                                     f"{exp_tok}_{layout.channel_names[channel]}_"
-                                    f"{label}_f{fov}_{tp_token}.tif")
-                                archive.writestr(member, encode_tiff(plane))
+                                    f"{label}_f{fov}_t{t_index}.tif")
+                                info = zipfile.ZipInfo(member)
+                                info.comment = frame_comment(t_index)
+                                archive.writestr(info, encode_tiff(plane))
                                 write_s += time.perf_counter() - started
                                 written += 1
                                 well_written += 1
@@ -541,7 +541,7 @@ def explode_czi(
     all_resumed: list[str] = []
     read_total = write_total = 0.0
     started_at = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+    with acquisition_publication(acquisition), ThreadPoolExecutor(max_workers=n_workers) as pool:
         futures = [pool.submit(_convert_wells, group)
                    for group in worker_groups(selected, n_workers)]
         for future in as_completed(futures):
@@ -553,6 +553,7 @@ def explode_czi(
             all_resumed.extend(resumed)
             read_total += read_time
             write_total += write_time
+    result.timepoints = acquisition.final_tokens
     result.wells = sorted(set(all_wells) | set(all_resumed))
     result.wells_resumed = sorted(set(all_resumed))
 

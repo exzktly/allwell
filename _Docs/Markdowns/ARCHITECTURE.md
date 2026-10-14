@@ -7157,8 +7157,37 @@ planes share a tile; opaque field/timepoint spellings are not numerically merged
 The pipeline's input-image predicate excludes metadata, directories and macOS
 sidecars. Missing/extra wells or tiles, unreadable archives and bad image names
 are explicit issues. An unreadable well's field coverage is not fabricated as
-empty. This primitive is currently exercised only by tests; the converter does
-not yet write or carry the record automatically.
+empty. The CZI converter produces this record; dataset-tool and remote input
+transport integration are tracked separately in Section R.
+
+`pipeline/czi_acquisition.RecordBuilder` catalogs the conversion's filenames and
+source positions, then reads actual published ZIP member headers. Only those
+field/timepoint/channel identities contribute native directory/stage positions
+and the shared acquisition start. Split Scenes files retain their own source
+attribution, including several files naming one well. Unknown scale axes are
+not borrowed from another file, and conflicting known scales are refused before
+pixels are written. Coordinate disagreement across stored channel/Z planes
+leaves the coordinate unknown. Source size/mtime identities must remain unchanged
+during conversion and metadata assembly; those used are retained as provenance.
+
+The record's nullable objective and declared overlap remain unknown because the
+reader does not yet expose an unambiguous native selected-objective or declared-
+overlap tag/unit contract; tracker R3d records the evidence required. Neither an
+instrument inventory nor measured tile spacing is treated as a declaration.
+
+`acquisition_publication` guards the multi-file operation with
+`in/acquisition.pending.json`. Record reads explicitly refuse that state, even
+when JSON is absent. After worker shutdown, also on cancellation, the builder
+reconstructs the exact published roster, atomically replaces the JSON through
+`util/json_write`, and clears the guard. Metadata failure or hard interruption
+leaves the guard and the previous JSON; a matching resume rebuilds it without
+reprojecting pixels. Native ordinals in ZIP member comments and timepoint
+provenance preserve identity through label changes. The final labels use elapsed
+hours from shared starts, using the existing jitter rounding; unknown or incomparable
+starts use ordinal tokens and retain a naming reason. Retained ZIPs are rewritten
+only when labels or lineage comments change. ZIP and JSON are individually atomic, not a two-
+file atomic transaction. Dataset-root APIs delegate to explicit file APIs so
+CLI conversions into an arbitrary input-folder name do not append another in/.
 
 **CZI acquisition metadata.** `CziLayout.pixel_size_um` reads x/y scaling from
 `Scaling/Items/Distance[@Id]/Value` during the same cached parse that resolves

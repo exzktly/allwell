@@ -49,7 +49,6 @@ Filename convention (underscore-separated):
 from __future__ import annotations
 
 import importlib.util
-import json
 import logging
 import os
 import shutil
@@ -198,7 +197,7 @@ from pipeline.run_report import (
     record_well_completeness,
 )
 from pipeline.completeness import record_run_check
-from pipeline.sidecar import USER_SIDE_BLOCKS
+from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
 
 
 def _report_worker_failure(well_label: str, output_dir: Path | None, exc: BaseException) -> None:
@@ -3164,6 +3163,7 @@ def write_pipeline_info(
     """Serialize the run metadata sidecar to ``<output_dir>/pipeline_info.json``."""
     if segmentation_method != "stardist_seeded_watershed_cell":
         cytoplasm_token = ""
+    check_acquisition_inputs(input_dir, filename_schema, filename_sep)
     fields = [f.strip() for f in filename_schema.split(":")]
     info = {
         "schema_version": PIPELINE_INFO_SCHEMA_VERSION,
@@ -3198,29 +3198,7 @@ def write_pipeline_info(
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     p = output_dir / PIPELINE_INFO_FILENAME
-    # Preserve user-side blocks that the GUI writes back into this file
-    # (cell_gating thresholds, saved selections, ratios, notes). Re-running
-    # the pipeline against the same output dir must not clobber them.
-    if p.exists():
-        try:
-            existing = json.loads(p.read_text())
-        except (OSError, json.JSONDecodeError) as exc:
-            # Corrupt existing sidecar: back it up + surface at ERROR rather
-            # than silently overwriting (which drops the user-side blocks —
-            # cell_gating/sample_definitions/ratios/notes — audit E3).
-            backup = p.with_suffix(p.suffix + ".corrupt.bak")
-            try:
-                if not backup.exists():
-                    shutil.copy2(p, backup)
-            except OSError:
-                backup = None
-            log.error("existing %s unreadable (%s); backed up to %s",
-                      p.name, exc, backup if backup is not None else "(backup failed)")
-            existing = None
-        if isinstance(existing, dict):
-            for preserved_key in USER_SIDE_BLOCKS:
-                if preserved_key in existing and preserved_key not in info:
-                    info[preserved_key] = existing[preserved_key]
+    preserve_existing_user_blocks(p, info, logger=log)
     write_json_atomic(p, info)
     return p
 

@@ -1093,3 +1093,18 @@ def test_a_malformed_grid_still_has_convert_off(controller, tmp_path,
     finally:
         released.set()
         _settle(page)
+
+
+def test_completed_conversion_exposes_actual_acquisition_coverage(controller, tmp_path):
+    page = controller.page
+    _set_source(page, _named_czi(tmp_path, wells=("A01",), channels=("phase",)), tmp_path)
+    assert "X unknown" in page._readout.text()
+    assert "preview labels are provisional" in page._readout.text()
+    controller._launch()
+    controller._worker.wait(30_000)
+    QApplication.processEvents()
+    assert page._dashboard.outcome() == "done"
+    assert "Recorded pixel size" in page._readout.text()
+    assert "Positions: 1/1 mosaic" in page._readout.text()
+    assert "Shared starts: 0/1 timepoints" in page._readout.text()
+    assert "Some shared acquisition starts are unknown" in page._readout.text()

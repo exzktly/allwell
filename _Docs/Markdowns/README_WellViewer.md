@@ -5465,6 +5465,21 @@ Turns a Zeiss `.czi` plate scan into an ordinary dataset folder of per-well
 images, the layout Analyze processes. Do this first, then open the result in
 Analyze.
 
+Conversion also writes `in/acquisition.json` with the pixel size and tile size
+for each timepoint, the available mosaic and stage positions, and **one shared
+acquisition start per timepoint**. That start is the earliest recorded tile
+among the wells written, even when scanning the plate takes an hour. Missing
+readings are counted; mixing zoned and unzoned clocks leaves the start unknown
+with a reason. No per-well or per-tile acquisition time is saved downstream.
+Unknown metadata remains unknown, including the selected objective and declared
+overlap whose native declarations have not yet been established.
+
+The record covers the archives actually written, including a stopped conversion
+and complete wells kept by resume. If metadata publication fails or the process
+is interrupted during publication, reading the record reports incomplete
+publication. Resume the matching conversion to rebuild it; do not edit the JSON
+to make an incomplete publication appear complete.
+
 **ZEN saves a plate two ways, and this page reads both.** The ordinary raw save
 is one file holding every scene, mosaic tile, channel, Z-plane and timepoint of
 the run. The *Split Scenes* export — which is how a long acquisition is usually
@@ -5772,19 +5787,19 @@ honestly is refused there rather than part-way through a run. What it catches:
   is the image cannot be decided. This is what a file concatenated from two
   acquisitions looks like; convert them separately.
 
-**Timepoints are named by elapsed time when the file records it** — `0h`,
-`4h`, `8h`, the same names the OME-TIFF converter writes. A CZI stamps each
-plane's acquisition time into that plane's own metadata rather than anywhere
-central, so the converter reads one well's series and measures the rest from
-its first image.
+**Timepoints are named by measured elapsed hours** — `0h`, `4h`, `8h`
+when those are the recorded intervals. Each timepoint has one shared start:
+the earliest readable tile instant across every tile of the source acquisition. Every
+well uses that same time, including a scan that takes an hour. The first shared
+start is the elapsed-time origin. Labels use the existing acquisition-jitter rounding rules; the record
+retains the precise absolute starts.
 
-It reads **the first well the scan visited**, and only that one. A plate scan
-crosses its wells in turn, so the last well of a round can be half an hour
-behind the first, and mixing them would fold the time it takes to cross the
-plate into the numbers on your axis. Every well's images therefore carry the
-timepoint names taken from that first well's clock, which is what makes them
-comparable. For a Split Scenes folder the first file is that well, and it is
-the only file read for timing.
+The source preview samples one position and its labels are provisional. Before converting pixels, the converter reads tile metadata across every
+source file and generates labels from the whole acquisition. Partial and full
+conversions therefore use identical labels. A resume re-converts archives named
+under the former sampled-field rule. Native timepoint ordinals in ZIP member comments make a failed
+metadata publication recoverable without guessing which acquisition an hour
+label denoted. A complete resume with unchanged labels leaves archives alone.
 
 **When the times cannot be used, timepoints are named by position** — `t0`,
 `t1`, … — and the page says so before you run, in the line under the settings,

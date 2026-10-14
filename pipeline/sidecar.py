@@ -23,6 +23,7 @@ listed in ``services.remote_runner._REQUIRED_REMOTE_FILES``.
 from __future__ import annotations
 
 import json
+import shutil
 from util.aw_safe import swallow
 from util.json_write import write_json_atomic
 from pathlib import Path
@@ -130,3 +131,42 @@ def install_provisional_sidecar(tmp: Path, dest: Path, *, run_id: str) -> None:
         json.dump(info, fh, indent=2)
     with swallow("mid-run sidecar temp cleanup"):
         tmp.unlink()
+
+
+def preserve_existing_user_blocks(p, info, *, logger):
+    # Preserve user-side blocks that the GUI writes back into this file
+    # (cell_gating thresholds, saved selections, ratios, notes). Re-running
+    # the pipeline against the same output dir must not clobber them.
+    if p.exists():
+        try:
+            existing = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            # Corrupt existing sidecar: back it up + surface at ERROR rather
+            # than silently overwriting (which drops the user-side blocks —
+            # cell_gating/sample_definitions/ratios/notes — audit E3).
+            backup = p.with_suffix(p.suffix + ".corrupt.bak")
+            try:
+                if not backup.exists():
+                    shutil.copy2(p, backup)
+            except OSError:
+                backup = None
+            logger.error("existing %s unreadable (%s); backed up to %s",
+                      p.name, exc, backup if backup is not None else "(backup failed)")
+            existing = None
+        if isinstance(existing, dict):
+            for preserved_key in USER_SIDE_BLOCKS:
+                if preserved_key in existing and preserved_key not in info:
+                    info[preserved_key] = existing[preserved_key]
+
+
+def check_acquisition_inputs(input_dir, schema, sep):
+    """Read and check acquisition metadata before local or remote image work."""
+    from util.acquisition_record import (
+        AcquisitionRecordError, RECORD_FILENAME, read_record_file, validate_record_paths,
+    )
+    record = read_record_file(Path(input_dir) / RECORD_FILENAME)
+    if record is None:
+        return
+    validation = validate_record_paths(Path(input_dir).glob("*.zip"), record, schema=schema, sep=sep)
+    if not validation.ok:
+        raise AcquisitionRecordError("; ".join(validation.issues))

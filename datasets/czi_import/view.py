@@ -42,6 +42,7 @@ from core.safe import swallow
 from datasets.core.channel_roles_row import ChannelRolesMixin
 from datasets.core.dataset_fields import promote_open_button
 from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.czi_import.metadata_readout import source_metadata_summary, recorded_metadata_summary
 from datasets.czi_import.dashboard import CziImportDashboard
 from datasets.czi_import.czi_import_compute import (
     ConversionParams,
@@ -619,6 +620,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
     def set_outcome(self, outcome: str, message: str = "") -> None:
         """Show how the run ended: ``done`` / ``failed`` / ``cancelled``."""
         if outcome == "done":
+            self._readout.setText(recorded_metadata_summary(self.destination_path()))
             self._dashboard.set_done(message)
         elif outcome == "cancelled":
             self._dashboard.set_cancelled(message)
@@ -893,7 +895,10 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._update_run_gate(False)
             return
 
-        self._readout.setText(czi_set.describe())
+        details = czi_set.describe() + "\n" + source_metadata_summary(czi_set)
+        if self._dashboard.outcome() == "done":
+            details += "\n" + recorded_metadata_summary(self.destination_path())
+        self._readout.setText(details)
         self._rebuild_channels(list(czi_set.layout.channel_names))
         if problems:
             self._set_verdict(" ".join(problems), "error")

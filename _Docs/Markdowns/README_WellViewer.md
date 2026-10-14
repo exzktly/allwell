@@ -1265,6 +1265,10 @@ and by `remote_fetch_report.txt` in the output folder.
   forgets the offer and deletes nothing — the results already written stay
   exactly as they are, and you can still finish the plate later by re-running
   that input with **incremental** ticked.
+  Pressing Run on an input with an unfinished run behind it processes
+  incrementally on its own, and the log says so. **Force reprocess all wells**
+  overrides that: every well is recomputed from scratch, and on a remote run
+  every well is uploaded whole, even one that is already complete locally.
 - **Stop** signals the entire pipeline process group (sub-workers included) and
   discards whatever is in flight. Press it a second time during a Suspend if you
   do not want to wait for the in-flight fields.

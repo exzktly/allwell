@@ -56,12 +56,12 @@ from util.aw_safe import swallowed
 #: :func:`~pipeline.czi_read.parse_plate_metadata` could produce a different
 #: answer from the same bytes. Every cached entry on every user's disk was
 #: produced by the old one and the file stamp cannot know that.
-PARSER_VERSION = 1
+PARSER_VERSION = 2
 
 #: The on-disk shape itself, as distinct from the reader that filled it. Bumped
 #: when a field is added, removed or re-spelled, so an old file is dropped
 #: rather than half-read.
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 #: ``ALLWELL_SCAN_CACHE=off`` disables it; any other value is a directory to
 #: use instead of the default. For a machine where the cache directory is not

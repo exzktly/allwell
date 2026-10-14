@@ -7716,6 +7716,13 @@ Four things about it are load-bearing:
   substitution, not a crash. Every key carries its written reason in
   `tests/test_reuse_is_keyed_completely.py` and is watched declining in
   `tests/test_the_scan_is_remembered_on_disk.py`.
+  The reader and format signatures include acquisition scaling and absolute
+  sampled timestamps. Entries produced before those fields existed are
+  discarded and reparsed rather than decoded into misleading null values.
+  The complete round-trip fixtures cover `CziLayout`, `_PlateMetadata` and
+  `TimeScan`, including non-default scale and timestamp values. A real cold/
+  warm scan verifies that both survive disk storage without opening the source
+  again; stale-reader and stale-format fixtures independently require reparsing.
 - **It never writes into the images' own folder.** A plate is routinely on a
   read-only archive, a share somebody else administers, or a cloud-sync root.
   The cache lives beside the boot log — `%LOCALAPPDATA%\allwell\czi-scans` or

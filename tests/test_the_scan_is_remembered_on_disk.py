@@ -28,11 +28,12 @@ import builtins
 import dataclasses
 import json
 
+import numpy as np
 import pytest
 
 from pipeline import czi_read, scan_cache
 from pipeline.czi_set import peek_wells, read_czi_set
-from tests._czi_fixture import plate_metadata_xml, plate_tiles, write_czi
+from tests._czi_fixture import Tile, plate_metadata_xml, plate_tiles, write_czi
 
 
 @pytest.fixture(autouse=True)
@@ -116,6 +117,59 @@ def test_the_acquisition_times_survive_too(plate, monkeypatch):
 
     assert first.layouts[0].time_scan is not None
     assert again.layouts[0].time_scan == first.layouts[0].time_scan
+
+
+def _measured_plate(tmp_path):
+    xml = plate_metadata_xml(scene_wells={0: "A01"}, channels=["DAPI"])
+    xml = xml.replace("</Metadata>", '<Scaling><Items><Distance Id="X">'
+                      '<Value>6.5e-7</Value></Distance><Distance Id="Y">'
+                      '<Value>8e-7</Value></Distance></Items></Scaling></Metadata>')
+    return write_czi(tmp_path / "measured.czi", [
+        Tile(np.zeros((3, 4), "uint16"), t=0,
+             acquired="2024-06-12T10:00:00+02:00"),
+        Tile(np.ones((3, 4), "uint16"), t=1,
+             acquired="2024-06-12T14:00:00+02:00"),
+    ], xml=xml)
+
+
+def test_measured_scale_and_absolute_stamps_survive_the_disk_cache(
+        tmp_path, monkeypatch):
+    path = _measured_plate(tmp_path)
+    first, again, opens = _second_scan(path, monkeypatch)
+    assert opens.count == 0
+    assert again.layouts[0].pixel_size_um == pytest.approx(
+        {"x": 0.65, "y": 0.8}, rel=1e-12)
+    assert again.layouts[0].time_scan.instants_by_index == {
+        0: "2024-06-12T10:00:00+02:00",
+        1: "2024-06-12T14:00:00+02:00",
+    }
+    assert again.layouts[0] == first.layouts[0]
+
+
+@pytest.mark.parametrize("old_key", ["parser", "format"])
+def test_pre_acquisition_metadata_cache_is_reparsed(tmp_path, monkeypatch, old_key):
+    """Hold the other version current, so either missing bump is observable."""
+    path = _measured_plate(tmp_path)
+    read_czi_set(path)
+    where = scan_cache.cache_file_for(path.parent)
+    assert where is not None
+    body = json.loads(where.read_text())
+    body[old_key] = 1
+    entry = body["files"][path.name]
+    entry["meta"]["f"].pop("pixel_size_um")
+    for cached in entry["layouts"].values():
+        cached["f"].pop("pixel_size_um")
+        timing = cached["f"].get("time_scan")
+        if timing:
+            timing["f"].pop("instants_by_index")
+    where.write_text(json.dumps(body))
+    czi_read.forget_plate_metadata()
+    opens = _Opens(monkeypatch)
+    again = read_czi_set(path)
+    assert opens.count > 0, "old cache must be reparsed, not default metadata to null"
+    assert again.layouts[0].pixel_size_um == pytest.approx(
+        {"x": 0.65, "y": 0.8}, rel=1e-12)
+    assert again.layouts[0].time_scan.instants_by_index[1] == "2024-06-12T14:00:00+02:00"
 
 
 def test_a_peek_is_remembered_as_well(plate, monkeypatch):
@@ -409,7 +463,12 @@ def _every_field_filled(cls):
         "has_metadata": False, "from_directory": False,
         "time_scan": czi_read.TimeScan(hours_by_index={0: 0.0, 1: 4.5},
                                        reasons=["a reason"], scene=3,
-                                       bytes_read=99),
+                                       bytes_read=99, instants_by_index={
+                                           0: "2024-06-12T10:00:00+02:00",
+                                           1: "2024-06-12T14:30:00+02:00"}),
+        "pixel_size_um": {"x": 0.65, "y": None},
+        "hours_by_index": {0: 0.0, 1: 4.5}, "reasons": ["a reason"],
+        "scene": 3, "instants_by_index": {1: "2024-06-12T14:30:00+02:00"},
         "warnings": ["a warning"],
         "declared_scene_indices": (3, 4), "parse_error": "a parse error",
         "bytes_read": 4096,
@@ -419,7 +478,8 @@ def _every_field_filled(cls):
     return cls(**{f.name: samples[f.name] for f in dataclasses.fields(cls)})
 
 
-@pytest.mark.parametrize("cls", [czi_read.CziLayout, czi_read._PlateMetadata])
+@pytest.mark.parametrize("cls", [czi_read.CziLayout, czi_read._PlateMetadata,
+                                czi_read.TimeScan])
 def test_every_field_survives_the_round_trip(cls):
     """Including the ones plain JSON cannot carry: ``tiles`` and
     ``scene_wells`` are keyed by *integer* and JSON object keys are strings, so
@@ -475,7 +535,7 @@ def test_a_changed_reader_invalidates_every_cached_scan():
     ])
     digest = hashlib.sha256(material.encode()).hexdigest()[:16]
 
-    assert (scan_cache.PARSER_VERSION, digest) == (1, "e21c609d39c01c3a"), (
+    assert (scan_cache.PARSER_VERSION, digest) == (2, "e3831b4a4b6d749f"), (
         "the CZI reader has changed. Every cached scan on every user's disk "
         "was produced by the old one and the file stamps do not know that. "
         f"Bump PARSER_VERSION, then put the new digest here: {digest}")

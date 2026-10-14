@@ -1620,7 +1620,11 @@ class PipelineRunner:
                 nuclear_token=opts["nuclear_token"] if self._selective_channels else None,
                 log_fn=lambda m: self._enqueue(("line", m)),
                 move_source_tifs=bool(opts.get("move_source_tifs", False)),
-                incremental=bool(opts.get("incremental", False)),
+                # Never under --force: an incremental staging drops every well
+                # that is complete locally before it is uploaded, and the
+                # pipeline's own --force cannot reprocess what never arrived.
+                incremental=(bool(opts.get("incremental", False))
+                             and not bool(opts.get("force", False))),
                 prior_output_dir=output_dir,
                 csv_prefix=opts.get("csv_prefix", "measurements"),
                 force_wells=opts.get("force_wells"),

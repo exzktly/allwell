@@ -837,7 +837,11 @@ class AnalyzeSuspendMixin:
         """
         try:
             raw = str((spec.opts or {}).get("raw") or "").strip()
-            if not raw or spec.opts.get("incremental"):
+            # Force means recompute from scratch, and this function's own log
+            # line tells the user to tick it for exactly that. Turning
+            # incremental on under it made Force do nothing on a remote run:
+            # staging drops every locally complete well before the upload.
+            if not raw or spec.opts.get("incremental") or spec.opts.get("force"):
                 return spec
             cause = self._input_has_unfinished_work(raw)
             if cause is None:

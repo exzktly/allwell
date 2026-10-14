@@ -52,6 +52,7 @@ this way.
 from __future__ import annotations
 
 import copy
+import math
 import os
 import re
 import struct
@@ -453,6 +454,45 @@ class _PlateMetadata:
     parse_error: str = ""
     #: What reading the document cost, counted at the read that took it.
     bytes_read: int = 0
+    pixel_size_um: dict[str, float | None] = field(
+        default_factory=lambda: {"x": None, "y": None})
+
+
+def _finite_metadata_number(text: str) -> float | None:
+    """A finite measured number, retaining signed coordinates and zero."""
+    try:
+        value = float(text)
+    except (ValueError, OverflowError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _pixel_size_um(index: _DocIndex) -> dict[str, float | None]:
+    """Scaling/Items/Distance values are metres, not DefaultUnitFormat.
+
+    ZEISS libCZI's ScalingInfo defines this convention. Restrict the lookup
+    to Scaling's direct Items/Distance children rather than unrelated XML
+    Distance elements. Conflicting declarations leave the affected axis null.
+    """
+    readings: dict[str, list[float | None]] = {"x": [], "y": []}
+    for scaling in index.all("Scaling"):
+        for items in scaling:
+            if _localname(items.tag) != "Items":
+                continue
+            for distance in items:
+                axis = distance.get("Id", "").lower()
+                if _localname(distance.tag) != "Distance" or axis not in readings:
+                    continue
+                values = [child for child in distance
+                          if _localname(child.tag) == "Value"]
+                value = (_finite_metadata_number(values[0].text or "")
+                         if len(values) == 1 else None)
+                converted = value * 1e6 if value is not None else None
+                readings[axis].append(
+                    converted if converted is not None and
+                    math.isfinite(converted) and converted > 0 else None)
+    return {axis: values[0] if values and len(set(values)) == 1 else None
+            for axis, values in readings.items()}
 
 
 def parse_plate_metadata(xml: str, *, bytes_read: int = 0) -> _PlateMetadata:
@@ -476,6 +516,7 @@ def parse_plate_metadata(xml: str, *, bytes_read: int = 0) -> _PlateMetadata:
         declared_scene_indices=tuple(_declared_scene_indices(index)),
         channel_names=tuple(_channel_names(index)),
         bytes_read=bytes_read,
+        pixel_size_um=_pixel_size_um(index),
     )
 
 
@@ -916,12 +957,17 @@ def parse_acquisition_time(xml: str) -> "datetime | None":
             root = ET.fromstring(xml)
         except ET.ParseError:
             return None
-        raw = ""
-        for element in root.iter():
-            if _localname(element.tag).lower() in _ACQUISITION_TIME_TAGS:
-                raw = (element.text or "").strip()
-                if raw:
-                    break
+        return _acquisition_time_from_root(root)
+
+
+def _acquisition_time_from_root(root: ET.Element) -> datetime | None:
+    """An acquisition timestamp from an already parsed subblock document."""
+    raw = ""
+    for element in root.iter():
+        if _localname(element.tag).lower() in _ACQUISITION_TIME_TAGS:
+            raw = (element.text or "").strip()
+            if raw:
+                break
     if not raw:
         return None
     text = normalise_instant(raw)
@@ -1019,12 +1065,14 @@ def scan_timepoint_hours(fh: BinaryIO, blocks: list[SubBlock],
         return TimeScan(reasons=[f"the file could not be read for its "
                                  f"acquisition times ({exc})"], scene=scene)
     read = counted.bytes_read
+    instants = {t: stamp.isoformat() for t, stamp in stamps.items()}
 
     if 0 not in stamps:
         return TimeScan(reasons=[
             f"{len(stamps)} of {size_t} timepoint(s) carry a readable "
             f"acquisition time, and the first is not among them, so there is "
-            f"no zero to measure the rest from"], scene=scene, bytes_read=read)
+            f"no zero to measure the rest from"], scene=scene, bytes_read=read,
+            instants_by_index=instants)
     # Mixing a naive stamp with an aware one raises on subtraction, and a file
     # that spells its instants two ways has not told us which clock either is
     # on. Refusing the lot is the only reading that cannot be wrong.
@@ -1033,7 +1081,7 @@ def scan_timepoint_hours(fh: BinaryIO, blocks: list[SubBlock],
         return TimeScan(reasons=[
             "the acquisition times mix zoned and unzoned instants, so the "
             "intervals between them are not decidable"], scene=scene,
-            bytes_read=read)
+            bytes_read=read, instants_by_index=instants)
     origin = stamps[0]
     hours = {t: (stamp - origin).total_seconds() / 3600.0
              for t, stamp in stamps.items()}
@@ -1043,7 +1091,7 @@ def scan_timepoint_hours(fh: BinaryIO, blocks: list[SubBlock],
             f"only {len(hours)} of {size_t} timepoint(s) carry a readable "
             f"acquisition time")
     return TimeScan(hours_by_index=hours, reasons=reasons, scene=scene,
-                    bytes_read=read)
+                    bytes_read=read, instants_by_index=instants)
 
 
 def _channel_names(index: "_DocIndex") -> list[str]:
@@ -1148,6 +1196,9 @@ class CziLayout:
     #: :func:`scan_timepoint_hours`.
     time_scan: "TimeScan | None" = None
     warnings: list[str] = field(default_factory=list)
+    #: Nullable per-axis scale; no square-pixel assumption fills a missing Y.
+    pixel_size_um: dict[str, float | None] = field(
+        default_factory=lambda: {"x": None, "y": None})
 
     @property
     def n_scenes(self) -> int:
@@ -1394,7 +1445,8 @@ def _build_layout(blocks: list[SubBlock], meta: _PlateMetadata, *,
                   from_directory: bool) -> CziLayout:
     """Turn the directory entries (and the metadata, if any) into a layout."""
     layout = CziLayout(has_metadata=meta.has_metadata,
-                       from_directory=from_directory)
+                       from_directory=from_directory,
+                       pixel_size_um=dict(meta.pixel_size_um))
     acquisition = [b for b in blocks if not b.is_pyramid]
     layout.n_blocks = len(acquisition)
     if not acquisition:
@@ -1664,6 +1716,42 @@ def _shaped(plane: np.ndarray, width: int, height: int) -> np.ndarray:
     return plane
 
 
+@dataclass(frozen=True)
+class CziTileMetadata:
+    """Metadata for one exact stored plane, without decoding its pixels.
+
+    The acquisition instant belongs to this plane; it is not a plate-wide
+    timepoint start. Stage coordinates use the micrometre convention of
+    OME Bio-Formats' ZeissCZIReader, independently of metre-valued Scaling.
+    """
+
+    mosaic_xy_px: tuple[int, int] | None = None
+    stage_xy_um: tuple[float, float] | None = None
+    acquired_at: str | None = None
+
+
+def _stage_xy_um(root: ET.Element) -> tuple[float, float] | None:
+    """Read the two native stage tags, refusing absent or invalid axes."""
+    axes: dict[str, list[float | None]] = {"StageXPosition": [],
+                                           "StageYPosition": []}
+    for tags in root:
+        if _localname(tags.tag) != "Tags":
+            continue
+        for tag in tags:
+            name = _localname(tag.tag)
+            if name in axes:
+                # These native tags have no unit attribute in the format
+                # convention. Never reinterpret an explicitly different
+                # unit as micrometres.
+                unit = tag.get("Unit", "µm")
+                axes[name].append(_finite_metadata_number(tag.text or "")
+                                  if unit in ("µm", "um", "μm") else None)
+    x, y = axes.values()
+    if len(x) != 1 or len(y) != 1 or x[0] is None or y[0] is None:
+        return None
+    return x[0], y[0]
+
+
 class CziReader:
     """An open CZI, indexed by ``(scene, tile, timepoint, channel, Z)``.
 
@@ -1726,6 +1814,36 @@ class CziReader:
 
     def has_plane(self, scene: int, tile: int, t: int, c: int, z: int) -> bool:
         return (scene, tile, t, c, z) in self._index
+
+    def read_tile_metadata(self, scene: int, tile: int, t: int, c: int,
+                           z: int) -> CziTileMetadata:
+        """Read one exact plane's directory coordinates and XML, no pixels.
+
+        Lazy by design: a plate header scan still samples only one position
+        per timepoint. Conversion can request metadata as it visits planes
+        without eagerly seeking to every subblock during the initial scan.
+        Missing planes or a closed reader raise rather than inventing zeros.
+        """
+        if self._fh is None:
+            raise CziReadError("The CZI is not open; use CziReader as a "
+                               "context manager.")
+        block = self._index.get((scene, tile, t, c, z))
+        if block is None:
+            raise CziReadError(
+                f"{self._path.name} holds no image for scene {scene}, tile "
+                f"{tile}, timepoint {t}, channel {c}, Z {z}.")
+        mosaic = ((block.start("X"), block.start("Y"))
+                  if "X" in block.dims and "Y" in block.dims else None)
+        xml = read_subblock_metadata(self._fh, block)
+        with _PARSE_LOCK:
+            try:
+                root = ET.fromstring(xml)
+            except ET.ParseError:
+                return CziTileMetadata(mosaic_xy_px=mosaic)
+            stamp = _acquisition_time_from_root(root)
+            stage = _stage_xy_um(root)
+        return CziTileMetadata(mosaic_xy_px=mosaic, stage_xy_um=stage,
+                               acquired_at=stamp.isoformat() if stamp else None)
 
     def read_plane(self, scene: int, tile: int, t: int, c: int,
                    z: int) -> np.ndarray:

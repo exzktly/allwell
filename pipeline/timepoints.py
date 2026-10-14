@@ -58,6 +58,10 @@ class TimeScan:
     #: positions would fold that spread into the elapsed times.
     scene: int = -1
     bytes_read: int = 0
+    #: ISO 8601 instants at the sampled position, before elapsed-time naming.
+    #: Preserve offset presence even when no elapsed interval is decidable.
+    #: These are not necessarily the earliest tile times across a plate.
+    instants_by_index: dict[int, str] = field(default_factory=dict)
 
 
 def hours_token(hours: float) -> str:

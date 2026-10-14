@@ -7158,6 +7158,34 @@ are explicit issues. An unreadable well's field coverage is not fabricated as
 empty. This primitive is currently exercised only by tests; the converter does
 not yet write or carry the record automatically.
 
+**CZI acquisition metadata.** `CziLayout.pixel_size_um` reads x/y scaling from
+`Scaling/Items/Distance[@Id]/Value` during the same cached parse that resolves
+the plate's names. Values are metres according to ZEISS libCZI's `ScalingInfo`;
+`DefaultUnitFormat` is only a display suggestion. Each axis is independently
+nullable, and invalid or conflicting declarations are not filled from its peer.
+
+`CziReader.read_tile_metadata(scene, tile, t, c, z)` reads an exact plane's
+directory X/Y starts and subblock XML without importing NumPy or reading pixel
+bytes. It returns `CziTileMetadata` with signed `mosaic_xy_px`, nullable
+`stage_xy_um`, and a nullable ISO `acquired_at` preserving timezone presence.
+Stage tags are the direct `METADATA/Tags/StageXPosition` and `StageYPosition`
+children. Their native micrometre convention follows OME Bio-Formats'
+`ZeissCZIReader`; it is independent of the metre-valued image scaling. Both
+stage axes must be finite and unambiguous. Absent, invalid or explicitly
+unsupported units leave the pair null. Closed readers and absent planes raise
+`CziReadError` rather than inventing a coordinate. Each requested subblock XML
+is parsed once for its stage coordinates and timestamp under the parsing lock.
+
+Metadata access is lazy: the initial header scan retains its one-position-per-
+timepoint seek budget. `TimeScan.instants_by_index` retains that representative
+position's absolute readings even when missing the first stamp or mixing zoned
+and unzoned stamps prevents calculating elapsed hours. Those instants do not
+claim the earliest start across all plate tiles. The dataset record's start-time
+aggregation remains unspecified in tracker R2b; no converter producer is wired
+until that distinction is resolved. Synthetic ZISRAW tests establish these
+parser conventions; real ZEN tag population and coordinate comparability across
+acquisitions remain R8/Q7.
+
 
 A Zeiss plate scan arrives as one `.czi` holding every scene, mosaic tile,
 channel, Z-plane and timepoint of the run. *Convert CZI*

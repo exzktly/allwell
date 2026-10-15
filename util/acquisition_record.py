@@ -388,3 +388,53 @@ def merge_plate_records(first, second, well_map) -> dict | None:
     if not validation.ok:
         raise AcquisitionRecordError("; ".join(validation.issues))
     return result
+
+
+def concatenate_records(first, second, *, relabel, offset_hours: float, gap_hours: float,
+                        gap_source: str) -> dict | None:
+    """The record of two acquisitions placed one after the other.
+
+    Dataset 1's timepoints keep their tokens; dataset 2's are renamed by
+    *relabel* (the same shift the images' filenames got), so a tile's
+    identity matches the member it describes. Every timepoint keeps its own
+    calibration and its own absolute start, and every tile keeps its own
+    positions, because a plate put back on the stage does not sit where it
+    did. The gap the user chose and where it came from are written beside
+    them. Both records or neither: with one missing the merged timepoints
+    could not all be described, so the caller says so and writes none.
+    """
+    import copy
+    if first is None and second is None:
+        return None
+    if first is None or second is None:
+        raise AcquisitionRecordError(
+            "Concatenate carries acquisition records only when both datasets have one")
+    result = new_record()
+    result["concatenations"] = (list(first.get("concatenations", []))
+                                + list(second.get("concatenations", []))
+                                + [{"gap_hours": gap_hours, "gap_source": gap_source,
+                                    "offset_hours": offset_hours}])
+    for ordinal, payload in enumerate((first, second), 1):
+        prefix = f"dataset{ordinal}/"
+        result["source_files"].extend(prefix + name for name in payload["source_files"])
+        for key in ("source_file_stats", "clock_source_file_stats"):
+            if key in payload:
+                result.setdefault(key, {}).update(
+                    {prefix + name: copy.deepcopy(data) for name, data in payload[key].items()})
+        rename = (lambda token: token) if ordinal == 1 else relabel
+        for token, metadata in payload["timepoints"].items():
+            new_token = rename(token)
+            if new_token in result["timepoints"]:
+                raise AcquisitionRecordError(
+                    f"Timepoint {new_token!r} would exist twice after the merge")
+            result["timepoints"][new_token] = copy.deepcopy(metadata)
+        for original in payload["tiles"]:
+            tile = copy.deepcopy(original)
+            tile["timepoint"] = rename(tile["timepoint"])
+            if "source_file" in tile:
+                tile["source_file"] = prefix + tile["source_file"]
+            result["tiles"].append(tile)
+    validation = validate_record(result)
+    if not validation.ok:
+        raise AcquisitionRecordError("; ".join(validation.issues))
+    return result

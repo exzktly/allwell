@@ -47,6 +47,11 @@ from datasets.core.containers import (
     unstamped_note,
 )
 from datasets.core.member_names import is_os_junk_member
+from util.acquisition_record import (
+    AcquisitionRecordError, concatenate_records, read_record, validate_against_archives,
+    write_record,
+)
+from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
 from datasets.concatenate.concatenate_compute import (
     IN_PROGRESS_MARKER,
     ConcatError,
@@ -550,6 +555,46 @@ def _ds2_members(container: Path) -> dict[str, int | None]:
     return members
 
 
+def _merge_acquisition_records(plan: MergePlan, emit: Callable[[str], None]) -> None:
+    """Write the merged ``in/acquisition.json``, or say why none is written.
+
+    Both datasets' records, with dataset 2's timepoints renamed as its images
+    were and the gap recorded beside them. The result is checked against the
+    archives just written: a record that does not describe them would stop the
+    next Analyze run, so it stops the merge here instead.
+    """
+    try:
+        first, second = read_record(plan.ds1.root), read_record(plan.ds2.root)
+    except AcquisitionRecordError as exc:
+        raise ConcatError(f"An acquisition record can't be read, so the merge can't carry it: {exc}") from exc
+    if first is None and second is None:
+        return
+    if first is None or second is None:
+        which = "dataset 1" if first is None else "dataset 2"
+        emit(f"Note: {which} has no acquisition record, so none is written for the "
+             "merged dataset (tile positions and start times are not carried).")
+        return
+    fmt = plan.tp_format
+
+    def relabel(token: str) -> str:
+        return remap_timepoint_label(token, plan.offset_hours, fmt)
+
+    try:
+        merged = concatenate_records(
+            first, second, relabel=relabel, offset_hours=plan.offset_hours,
+            gap_hours=plan.gap_hours, gap_source=plan.gap_source)
+        write_record(plan.dest.root, merged)
+        problems = validate_against_archives(
+            plan.dest.root, merged, schema=plan.merged_info.get("schema") or DEFAULT_SCHEMA,
+            sep=plan.merged_info.get("separator") or DEFAULT_SEP)
+    except AcquisitionRecordError as exc:
+        raise ConcatError(f"Verification failed: the merged acquisition record is not valid: {exc}") from exc
+    if not problems.ok:
+        raise ConcatError("Verification failed: the merged acquisition record does not match "
+                          "the merged images: " + "; ".join(problems.issues[:3]))
+    emit("Wrote the merged acquisition record.")
+
+
 def _verify_raw(plan: MergePlan, dropped_members: dict[str, frozenset[str]]) -> None:
     """The raw merge's check, made on the archives it wrote.
 
@@ -778,6 +823,7 @@ def execute_plan(
     emit("Verifying the merged output before finishing…")
     if plan.raw:
         _verify_raw(plan, dropped_members)
+        _merge_acquisition_records(plan, emit)
         marker_path.unlink(missing_ok=True)
         emit("Raw merge complete: images only, to be analysed once as one plate.")
         return (
@@ -785,6 +831,7 @@ def execute_plan(
             f"(dataset 2 shifted +{plan.offset_hours:g}h)."
         )
     _verify(plan, well_stats, dropped_members)
+    _merge_acquisition_records(plan, emit)
 
     _merge_cell_overrides(plan, emit)
 

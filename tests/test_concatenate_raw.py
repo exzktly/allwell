@@ -232,3 +232,92 @@ def test_an_unrecorded_pixel_size_is_not_a_mismatch(tmp_path):
     _raw(tmp_path / "d2", timepoints=["0h"])
     _scaled_record(tmp_path / "d1", "0h", pixel_um=0.65, tile_px=2048, start="2026-03-01T09:00:00+00:00")
     assert cc.gap_preview(tmp_path / "d1", tmp_path / "d2", "24h").warning == ""
+
+
+# ── the merged acquisition record (M9) ───────────────────────────────────────
+def _raw_with_record(root, token, *, start, pixel_um, tile_px, offset_um):
+    from util.acquisition_record import new_record, new_timepoint, write_record
+    _raw(root, timepoints=[token])
+    record = new_record(source_files=[f"{root.name}.czi"])
+    entry = new_timepoint(started_at=start)
+    entry["pixel_size_um"] = {"x": pixel_um, "y": pixel_um}
+    entry["tile_size_px"] = {"x": tile_px, "y": tile_px}
+    record["timepoints"][token] = entry
+    record["tiles"] = [{"well": "A01", "field": field, "timepoint": token,
+                        "mosaic_xy_px": [i * tile_px, 0],
+                        "stage_xy_um": [offset_um + i * 1000.0, 5.0],
+                        "source_file": f"{root.name}.czi"}
+                       for i, field in enumerate(("f0", "f1"))]
+    write_record(root, record)
+
+
+def _merged_record(tmp_path):
+    from util.acquisition_record import read_record
+    return read_record(tmp_path / "dest")
+
+
+def test_the_merged_record_keeps_each_timepoints_own_clock_calibration_and_positions(tmp_path):
+    _raw_with_record(tmp_path / "d1", "0h", start="2026-03-01T09:00:00+00:00",
+                     pixel_um=0.65, tile_px=2048, offset_um=100.0)
+    _raw_with_record(tmp_path / "d2", "0h", start="2026-03-02T11:30:00+00:00",
+                     pixel_um=0.65, tile_px=1024, offset_um=777.0)     # the plate went back differently
+    _merge(tmp_path, gap_hours=26.5)
+    record = _merged_record(tmp_path)
+    assert sorted(record["timepoints"]) == ["0h", "26.5h"]
+    assert record["timepoints"]["0h"]["tile_size_px"]["x"] == 2048          # dataset 1's own
+    assert record["timepoints"]["26.5h"]["tile_size_px"]["x"] == 1024       # dataset 2's own
+    starts = {e["started_at"] for e in record["timepoints"].values()}
+    assert starts == {"2026-03-01T09:00:00+00:00", "2026-03-02T11:30:00+00:00"}   # each its own, unshifted
+    sizes = sorted(e["tile_size_px"]["x"] for e in record["timepoints"].values())
+    assert sizes == [1024, 2048]                                                  # plans differ and stay different
+    shifted = [t for t in record["tiles"] if t["timepoint"] == "26.5h"]
+    assert sorted(t["stage_xy_um"][0] for t in shifted) == [777.0, 1777.0]        # dataset 2's own positions
+    assert {t["source_file"] for t in record["tiles"]} == {"dataset1/d1.czi", "dataset2/d2.czi"}
+    assert record["concatenations"] == [{"gap_hours": 26.5, "gap_source": "entered",
+                                         "offset_hours": 26.5}]
+
+
+def test_the_record_names_the_same_tiles_as_the_merged_images(tmp_path):
+    from util.acquisition_record import validate_against_archives
+    _raw_with_record(tmp_path / "d1", "0h", start="2026-03-01T09:00:00+00:00",
+                     pixel_um=0.65, tile_px=2048, offset_um=0.0)
+    _raw_with_record(tmp_path / "d2", "0h", start="2026-03-02T09:00:00+00:00",
+                     pixel_um=0.65, tile_px=2048, offset_um=0.0)
+    _merge(tmp_path, gap_hours=24.0)
+    assert validate_against_archives(tmp_path / "dest", _merged_record(tmp_path),
+                                     schema="experiment:channel:well:fov:timepoint").ok
+
+
+def test_a_dataset_without_a_record_leaves_none_and_says_so(tmp_path):
+    _raw_with_record(tmp_path / "d1", "0h", start="2026-03-01T09:00:00+00:00",
+                     pixel_um=0.65, tile_px=2048, offset_um=0.0)
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=24.0)
+    lines: list[str] = []
+    apply.execute_plan(plan, lines.append)
+    assert _merged_record(tmp_path) is None
+    assert any("has no acquisition record" in line for line in lines)
+
+
+def test_two_datasets_without_records_write_none_quietly(tmp_path):
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=24.0)
+    lines: list[str] = []
+    apply.execute_plan(plan, lines.append)
+    assert _merged_record(tmp_path) is None
+    assert not any("acquisition record" in line for line in lines)
+
+
+def test_analysed_datasets_carry_their_records_too_with_the_gap_source(tmp_path):
+    from tests.fixtures.dataset_builder import build_dataset
+    from tests.test_concatenate_gap import _record
+    build_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h"])
+    build_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0h"])
+    _record(tmp_path / "d1", {"0h": "2026-03-01T09:00:00+00:00", "24h": "2026-03-02T09:00:00+00:00"})
+    _record(tmp_path / "d2", {"0h": "2026-03-03T15:00:00+00:00"})
+    plan, _ = _merge(tmp_path)                      # the gap comes from the records
+    record = _merged_record(tmp_path)
+    assert sorted(record["timepoints"]) == ["0h", "24h", "54h"]
+    assert record["concatenations"][-1]["gap_source"] == "recorded"
+    assert record["concatenations"][-1]["gap_hours"] == 30.0

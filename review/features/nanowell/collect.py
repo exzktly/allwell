@@ -76,6 +76,16 @@ class NanowellData:
     channels: list = field(default_factory=list)
     #: Wells left out and why, as sentences.
     problems: list = field(default_factory=list)
+    #: Where the run's files are, for the readers of images (crops, montages): the output folder holding
+    #: ``nanowells/``, and the input folder holding ``<well>.zip`` (``None`` when it is not beside the data).
+    out_dir: Path | None = None
+    in_dir: Path | None = None
+    #: ``timepoint -> {"pixel_size_um": {...}, "tile_size_px": {...}}`` from the sidecar's acquisition block.
+    acquisition: dict = field(default_factory=dict)
+    #: The filename schema, separator and phase token the run read its images with (for the crop reader).
+    schema: str = ""
+    separator: str = ""
+    phase_token: str = ""
 
     @property
     def wells(self) -> list[str]:
@@ -326,5 +336,12 @@ def load_nanowell_data(data_dir) -> NanowellData | None:
         if f"brightness_{channel}" not in sites:
             sites[f"brightness_{channel}"] = np.nan
     sites["time_h"] = sites["timepoint"].map(times_h).astype(float)
+    acquisition = sidecar.get("acquisition") if isinstance(sidecar.get("acquisition"), dict) else {}
+    in_dir = next((p.parent for p in _record_candidates(data_dir) if p.parent.is_dir()), None)
+    options = sidecar.get("execution_options") if isinstance(sidecar.get("execution_options"), dict) else {}
     return NanowellData(sites=sites, grids=grids, times_h=times_h, time_source=source, time_note=note,
+                        out_dir=folder.parent, in_dir=in_dir, acquisition=acquisition,
+                        schema=str(options.get("filename_schema") or sidecar.get("schema") or ""),
+                        separator=str(options.get("filename_sep") or sidecar.get("separator") or ""),
+                        phase_token=str(options.get("phase_token") or sidecar.get("phase_token") or ""),
                         channels=channels, problems=problems)

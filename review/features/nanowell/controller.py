@@ -14,8 +14,15 @@ if TYPE_CHECKING:
     from review.core.ui_helpers import EmptyReason
 
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
-from review.features.nanowell.distribution_compute import distribution_model, match_channel
-from review.features.nanowell.renderer import render_distribution, render_site_detail
+from review.features.nanowell import views_compute as vc
+from review.features.nanowell.distribution_compute import (
+    METRICS, PER_NANOWELL, distribution_model, match_channel, metric_column,
+)
+from review.features.nanowell.image_compute import read_montage, site_crops, tile_boxes
+from review.features.nanowell.renderer import (
+    render_array_map, render_array_qc, render_distribution, render_message, render_position, render_site_detail,
+    render_trajectories,
+)
 from review.features.nanowell.series_compute import long_format, site_metrics, site_series
 
 log = logging.getLogger("review")
@@ -247,10 +254,90 @@ def redraw(ctx) -> None:
         return
     if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
         return                                           # the right metrics are on their way
+    metric, channel, note = _resolved_metric(ctx, st)
+    view = st.view
+    if view == "array_map":
+        _draw_map(ctx, st, fig, metric, channel, note)
+    elif view == "trajectories":
+        render_trajectories(fig, vc.trajectory_panels(st.metrics, page_wells(ctx), metric_column(metric, channel)),
+                            label=_label(metric, channel), time_source=st.data.time_source, note=note)
+        st.hits = None
+    elif view == "position":
+        tp = shown_timepoint(ctx)[1]
+        render_position(fig, vc.position_series(st.metrics, page_wells(ctx), tp, metric_column(metric, channel)),
+                        label=_label(metric, channel), timepoint=tp, note=note)
+        st.hits = None
+    elif view == "array_qc":
+        _draw_qc(ctx, st, fig, page_well(ctx))
+        st.hits = None
+    else:
+        _draw_distribution(ctx, st, fig, metric, channel, note)
+    from review.core.plot_style import apply_export_style_to_current
+
+    apply_export_style_to_current(ctx, fig, canvas)
+    canvas.draw_idle()
+    redraw_detail(ctx)
+
+
+_CHANNEL_METRICS = ("brightness", "signal", "brightness_fc", "signal_fc")
+
+
+def _resolved_metric(ctx, st) -> tuple[str, str | None, str]:
+    """The metric drawn, the shared channel spelled as the data spells it, and a note when the chosen metric
+    cannot be drawn: a channel metric with no site intensities for the shared channel, or a metric with one
+    value per nanowell on Trajectories, which draws values over time."""
     channel = match_channel(ctx.state.channel.active_channel, st.data.channels)
-    metric = st.metric
-    if metric in ("brightness", "signal", "brightness_fc", "signal_fc") and channel is None:
-        metric = "n"                                     # the channel metric cannot be drawn; say so below
+    if st.view == "trajectories" and st.metric in PER_NANOWELL:
+        return "n", None, (f"{METRICS[st.metric][0]} has one value per nanowell, not one per timepoint, so "
+                           f"Trajectories shows Cell count.")
+    if st.metric in _CHANNEL_METRICS and channel is None:
+        return "n", None, (f"{st.metric.replace('_', ' ')} needs a channel with site intensities; the shared channel "
+                           f"({ctx.state.channel.active_channel}) has none, so Cell count is shown.")
+    return st.metric, channel, ""
+
+
+def _label(metric: str, channel: str | None) -> str:
+    return METRICS[metric][0] + (f" · {channel}" if METRICS[metric][1] and channel else "")
+
+
+def page_wells(ctx) -> list[str]:
+    """The wells the page draws, in group order: the wells the Array map and Array QC can show."""
+    return [w for members in page_groups(ctx).values() for w in members]
+
+
+def page_well(ctx) -> str:
+    """The one well the Array map and Array QC show: the page's choice if it is drawn, else the first."""
+    st = _state(ctx)
+    wells = page_wells(ctx)
+    return st.well if st is not None and st.well in wells else (wells[0] if wells else "")
+
+
+def page_timepoint(ctx, well: str) -> str:
+    """The timepoint the Array map and Array QC show: the page's choice if the well has it, else its first."""
+    st = _state(ctx)
+    tps = st.data.timepoints(well) if st is not None and st.data is not None else []
+    return st.timepoint if st.timepoint in tps else (tps[0] if tps else "")
+
+
+def shown_timepoint(ctx) -> tuple[list, str]:
+    """The timepoints the page's timepoint control offers for the current view, in order, and the one drawn.
+
+    The Array map and Array QC show one well, so they offer that well's timepoints and start at its first
+    (the seeding); Position and *Along x: Wells* compare wells at one timepoint, so they offer every
+    timepoint and start at the latest (U13). One ``timepoint`` on the state serves all of them, so a choice
+    made on one view carries to the next wherever that timepoint exists.
+    """
+    st = _state(ctx)
+    if st is None or st.data is None:
+        return [], ""
+    if st.view in ("array_map", "array_qc"):
+        well = page_well(ctx)
+        return list(st.data.timepoints(well)), page_timepoint(ctx, well)
+    tps = list(st.data.timepoints())
+    return tps, st.timepoint if st.timepoint in tps else (tps[-1] if tps else "")
+
+
+def _draw_distribution(ctx, st, fig, metric, channel, note) -> None:
     model = distribution_model(st.metrics, metric, channels=st.data.channels, channel=channel, axis=st.axis,
                                groups=page_groups(ctx), timepoint=st.timepoint, control=st.control,
                                time_source=st.data.time_source, baseline=st.baseline)
@@ -258,17 +345,31 @@ def redraw(ctx) -> None:
     if tableless:
         model.notes.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
                               f"{', '.join(tableless)}.")
-    if metric != st.metric:
-        model.notes.insert(0, f"{st.metric.replace('_', ' ')} needs a channel with site intensities; the shared "
-                              f"channel ({ctx.state.channel.active_channel}) has none, so Cell count is shown.")
-    selected = [tuple(s) for s in st.selected_sites]
-    st.hits = render_distribution(fig, model, selected=selected)
+    if note:
+        model.notes.insert(0, note)
+    st.hits = render_distribution(fig, model, selected=[tuple(s) for s in st.selected_sites])
     st.model = model
-    from review.core.plot_style import apply_export_style_to_current
 
-    apply_export_style_to_current(ctx, fig, canvas)
-    canvas.draw_idle()
-    redraw_detail(ctx)
+
+def _draw_map(ctx, st, fig, metric, channel, note) -> None:
+    well = page_well(ctx)
+    model = vc.map_model(st.metrics, st.data, well, page_timepoint(ctx, well), metric_column(metric, channel))
+    if model is None:
+        render_message(fig, f"{well or 'No well'} has no addressed nanowells and no measured pitch to place them "
+                            f"on, so there is no map to draw." if well else "Select a well with a nanowell table.",
+                       gid="nw-map-missing")
+        st.hits = None
+        return
+    st.hits = render_array_map(fig, model, label=_label(metric, channel), selected=[tuple(s) for s in st.selected_sites],
+                               note=note)
+
+
+def _draw_qc(ctx, st, fig, well: str) -> None:
+    tp = page_timepoint(ctx, well)
+    montage, why = read_montage(st.data, well, tp)
+    sites = st.metrics[(st.metrics["well"] == well) & (st.metrics["timepoint"] == tp)]
+    render_array_qc(fig, montage, tile_boxes(st.data, well, tp), sites, st.data.grids.get(well) or {},
+                    timepoint=tp, why=why)
 
 
 def redraw_detail(ctx) -> None:
@@ -289,8 +390,35 @@ def redraw_detail(ctx) -> None:
     if not series:
         return
     channel = match_channel(ctx.state.channel.active_channel, st.data.channels)
-    render_site_detail(fig, series, channel=channel, time_source=st.data.time_source)
+    first = tuple(series[0][0])
+    crops = st.crops.get(first)
+    if crops is None:
+        _load_crops(ctx, first)
+    render_site_detail(fig, series, channel=channel, time_source=st.data.time_source, crops=crops)
     canvas.draw_idle()
+
+
+def _load_crops(ctx, site) -> None:
+    """Cut *site*'s crops on a worker (they read the input archive), then redraw the detail with them."""
+    from core.worker_bridge import run_off_thread
+
+    st = _state(ctx)
+    if site in st.crops_pending:
+        return
+    st.crops_pending.add(site)
+    data, metrics = st.data, st.metrics
+
+    def done(crops):
+        st.crops_pending.discard(site)
+        if st.data is data:                               # not for a dataset loaded since
+            st.crops[site] = crops
+            redraw_detail(ctx)
+
+    def failed(message):
+        st.crops_pending.discard(site)
+        log.warning("Nanowells: crops for %s could not be cut: %s", site, message)
+
+    st.crop_bridges.append(run_off_thread(lambda: site_crops(data, metrics, site), on_done=done, on_failed=failed))
 
 
 def on_click(ctx, event) -> None:
@@ -399,6 +527,10 @@ def set_metric(ctx, metric: str) -> None:
 
 def set_axis(ctx, axis: str) -> None:
     _set(ctx, "axis", axis)
+
+
+def set_well(ctx, well: str) -> None:
+    _set(ctx, "well", well or "")
 
 
 def set_timepoint(ctx, timepoint: str) -> None:

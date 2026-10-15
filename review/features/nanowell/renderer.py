@@ -323,21 +323,27 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
 DETAIL_ROWS = (("n", "Cell count"), ("c", "Confluence"))
 
 
-def render_site_detail(fig, series: list, *, channel: str | None = None, time_source: str | None = None) -> None:
+def render_site_detail(fig, series: list, *, channel: str | None = None, time_source: str | None = None,
+                       crops: dict | None = None) -> None:
     """One row per measurement, one line per selected nanowell, against recorded time (tracker V3).
 
     *series* is ``[(site, frame)]`` with ``frame`` from :func:`series_compute.site_series`. A timepoint
     without a value is a gap in the line, never a zero; a timepoint whose state carries no number is a
-    hatched band naming the state.
+    hatched band naming the state. *crops* (``timepoint -> image_compute.Crop`` for the first nanowell) adds a
+    row of its crops at every timepoint, each titled with its timepoint and where it was cut from (V3c); a
+    timepoint without one says why in its place.
     """
     fig.clear()
     rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", f"Brightness · {channel}"),
                                  (f"signal_{channel}", f"Site signal · {channel}")] if channel else [])
     if not series:
         return
-    axes = fig.subplots(len(rows), 1, sharex=True)
-    axes = np.atleast_1d(axes)
-    fig.subplots_adjust(left=0.16, right=0.97, top=0.94 - 0.03 * len(series), bottom=0.12, hspace=0.25)
+    crop_row = bool(crops)
+    grid = fig.add_gridspec(len(rows) + (2 if crop_row else 0), 1, hspace=0.25)
+    axes = [fig.add_subplot(grid[0, 0])]
+    axes += [fig.add_subplot(grid[i, 0], sharex=axes[0]) for i in range(1, len(rows))]
+    axes = np.array(axes)
+    fig.subplots_adjust(left=0.16, right=0.97, top=0.94 - 0.03 * len(series), bottom=0.06, hspace=0.25)
     _bg, ink, faint = _inks(axes[0])
     colours = selection_colours()
     use_time = all(frame["time_h"].notna().all() for _site, frame in series)
@@ -360,6 +366,26 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
     axes[-1].set_xlabel("Hours since the first timepoint" + (" (from labels)" if time_source == "label" else "")
                         if use_time else "Timepoint (order; times unknown)", fontsize=8, color=ink)
     _ink(axes[-1].xaxis.label)
+    if crop_row:
+        _crop_strip(fig, grid[len(rows):, 0], crops, series[0][0], ink, faint)
+
+
+def _crop_strip(fig, cell, crops: dict, site, ink, faint) -> None:
+    items = list(crops.items())
+    sub = cell.subgridspec(1, len(items), wspace=0.08)
+    for k, (tp, crop) in enumerate(items):
+        ax = fig.add_subplot(sub[0, k])
+        ax.set_xticks([])
+        ax.set_yticks([])
+        if crop.image is not None:
+            ax.imshow(crop.image, cmap="gray", interpolation="nearest")
+        else:
+            _ink(ax.text(0.5, 0.5, crop.note, ha="center", va="center", wrap=True, fontsize=5.5,
+                         transform=ax.transAxes, color=faint, gid="nw-crop-missing"), muted=True)
+        _ink(ax.set_title(tp + ("" if crop.source != "montage" else " (montage)"), fontsize=6.5, color=ink,
+                          gid="nw-crop-title"))
+    _ink(fig.text(0.16, 0.012, f"Crops: {site[0]} · q {site[1]}, r {site[2]}, from its owner tile at each timepoint",
+                  fontsize=6.5, color=faint, gid="nw-crop-caption"), muted=True)
 
 
 def _band(x) -> float:
@@ -372,3 +398,274 @@ def _state_text(row: dict) -> str:
     flags = [name for name in ("fused", "partially_visible") if row.get(name) is True]
     state = str(row.get("state", ""))
     return state + (f" ({', '.join(f.replace('_', ' ') for f in flags)})" if flags else "")
+
+
+# ── array map (V2) ───────────────────────────────────────────────────────────
+#: Colour maps the map offers; a grey map is refused, because grey is how a nanowell without a value is drawn.
+MAP_CMAP = "viridis"
+_STATE_STYLE = {"occluded": ("////", "solid"), "clipped": ("", "dashed"), "absent": ("", "dotted"),
+                "not_located": ("", "dotted"), "unaddressed": ("", "dotted")}
+
+
+def _map_hits(ax, model, hits) -> None:
+    hits.entries.append((ax, model.x, model.y, list(model.sites)))
+
+
+def render_array_map(fig, model, *, label: str, selected=(), note: str = "") -> HitMap:
+    """One well at one timepoint: every roster nanowell at its lattice place (U4), coloured by *label*'s metric;
+    a nanowell without a value is grey and outlined by its state, never coloured as a value."""
+    from matplotlib.collections import EllipseCollection
+    from matplotlib.patches import Rectangle
+
+    from ui.theme import Colors
+
+    fig.clear()
+    hits = HitMap()
+    ax = fig.add_subplot(1, 1, 1)
+    fig.subplots_adjust(left=0.04, right=0.86, top=0.90, bottom=0.12)
+    _bg, ink, muted = _inks(ax)
+    ax.set_aspect("equal")
+    ax.set_axis_off()
+    pad = model.pitch_um
+    ax.set_xlim(model.x.min() - pad, model.x.max() + pad)
+    ax.set_ylim(model.y.max() + pad, model.y.min() - pad)              # y down
+    width = np.full(len(model.x), 2 * model.radius_um)
+    offsets = np.column_stack([model.x, model.y])
+    has = np.isfinite(model.values)
+    if has.any():
+        coll = EllipseCollection(width[has], width[has], np.zeros(has.sum()), units="xy", offsets=offsets[has],
+                                 offset_transform=ax.transData, cmap=MAP_CMAP, edgecolors="none")
+        coll.set_array(model.values[has])
+        ax.add_collection(coll)
+        bar = fig.colorbar(coll, ax=ax, fraction=0.04, pad=0.02)
+        _ink(bar.ax.set_ylabel(label, fontsize=8, color=ink))
+        bar.ax.tick_params(labelsize=7, colors=muted)
+    states = np.array(model.state, dtype=object)
+    plain = ~has & np.isin(states, ["measured", "empty"])
+    groups = [(plain, "", "solid", "no value")] + [
+        (~has & (states == s), hatch, style, s) for s, (hatch, style) in _STATE_STYLE.items()]
+    for mask, hatch, style, _name in groups:
+        if not mask.any():
+            continue
+        coll = EllipseCollection(width[mask], width[mask], np.zeros(mask.sum()), units="xy", offsets=offsets[mask],
+                                 offset_transform=ax.transData, facecolors="none",
+                                 edgecolors=Colors.plot_undefined_ink, linewidths=0.8)
+        coll.set_linestyle(style)
+        if hatch:
+            coll.set_hatch(hatch)
+        ax.add_collection(coll)
+    fused = np.asarray(model.fused, dtype=bool)
+    if fused.any():
+        ax.scatter(model.x[fused], model.y[fused], marker="+", s=12, color=ink, linewidths=0.8, zorder=4)
+    side = model.radius_um * 1.6
+    ax.add_patch(Rectangle((-side / 2, -side / 2), side, side, fill=False, edgecolor=ink, linewidth=1.0, zorder=5))
+    for site, colour in zip(map(tuple, selected), selection_colours()):
+        if site in model.sites:
+            k = model.sites.index(site)
+            ax.add_patch(_ring(model.x[k], model.y[k], model.radius_um * 1.35, colour))
+    _map_hits(ax, model, hits)
+    _ink(ax.set_title(f"{model.well} · {model.timepoint}", fontsize=9, loc="left", color=ink))
+    counts = " · ".join(f"{k.replace('_', ' ')} {v:,}" for k, v in sorted(model.counts.items(), key=lambda kv: -kv[1]))
+    lines = [f"{len(model.x):,} nanowells in the roster · with a value {int(has.sum()):,} · {counts}",
+             f"Lattice positions at the measured pitch {model.pitch_um:.1f} µm (the square is the central nanowell); "
+             "grey outlines have no value: hatched occluded, dashed clipped, dotted not seen."]
+    if model.reason:
+        lines.insert(0, f"No addresses at this timepoint: {model.reason}")
+    if note:
+        lines.insert(0, note)
+    for i, text in enumerate(reversed(lines)):
+        _ink(fig.text(0.04, _FOOTER_BASE + i * _LINE, text, fontsize=7.5, color=ink if i == len(lines) - 1 else muted,
+                      gid="nw-map-footer"), muted=i != len(lines) - 1)
+    return hits
+
+
+def render_message(fig, text: str, *, gid: str) -> None:
+    """A figure that says why there is nothing to draw, rather than an empty canvas."""
+    fig.clear()
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_axis_off()
+    _bg, _ink_colour, muted = _inks(ax)
+    _ink(ax.text(0.5, 0.5, text, ha="center", va="center", wrap=True, transform=ax.transAxes, fontsize=9,
+                 color=muted, gid=gid), muted=True)
+
+
+def _ring(x, y, radius, colour):
+    from matplotlib.patches import Circle
+
+    return Circle((x, y), radius, fill=False, edgecolor=colour, linewidth=1.8, zorder=6)
+
+
+# ── trajectories (V4) ────────────────────────────────────────────────────────
+def render_trajectories(fig, panels, *, label: str, time_source: str | None = None, note: str = "") -> None:
+    """One panel per well: a thin line per nanowell, a thick median per occupancy class at baseline."""
+    from matplotlib.collections import LineCollection
+
+    from widgets.plot_card import theme_paired_colours
+
+    fig.clear()
+    shown = panels[:MAX_PANELS]
+    rows, cols = _grid(len(shown))
+    fig.subplots_adjust(left=0.07, right=0.98, top=0.88, bottom=0.10 + _FOOTER_BASE + 2 * _LINE, wspace=0.2,
+                        hspace=0.45)
+    axes = [fig.add_subplot(rows, cols, i + 1) for i in range(len(shown))]
+    inks = _inks(axes[0] if axes else fig.add_subplot(1, 1, 1))
+    _bg, ink, muted = inks
+    drawn = without = 0
+    for ax, panel in zip(axes, shown):
+        segments, occupancy = [], []
+        for _site, occ, y in panel.lines:
+            segments.append(np.column_stack([panel.times, y]))
+            occupancy.append(occ)
+        if segments:
+            screen, publication = _occupancy_colours(occupancy)
+            edges = (publication if _is_publication(ax) else screen)[1]
+            coll = LineCollection(segments, colors=edges, linewidths=0.5, alpha=0.45)
+            ax.add_collection(coll)
+            theme_paired_colours(coll, screen=("none", screen[1]), publication=("none", publication[1]))
+            ax.autoscale_view()
+        for cls, median in panel.class_medians.items():
+            screen, publication = _occupancy_colours([cls])
+            colour = (publication if _is_publication(ax) else screen)[1][0]
+            ax.plot(panel.times, median, color=colour, linewidth=2.4, zorder=4, label=f"{cls} at baseline")
+        ax.set_xticks(panel.times)
+        ax.set_xticklabels(panel.labels, fontsize=7, rotation=0)
+        _ink(ax.set_title(panel.well, fontsize=9, loc="left", color=ink))
+        ax.grid(alpha=0.3)
+        drawn += len(panel.lines)
+        without += panel.n_without_value
+    if axes:
+        _ink(axes[0].set_ylabel(label, color=ink))
+    lines = [f"{drawn:,} nanowells drawn, one line each; {without:,} with no value at any timepoint not drawn. "
+             "A gap in a line is a timepoint without a value.",
+             "Thick lines: the median of each occupancy class at baseline, over the nanowells with a value at each "
+             "timepoint." + (" Times read from the timepoint labels." if time_source == "label" else "")]
+    if len(panels) > len(shown):
+        lines.append(f"{len(panels) - len(shown)} more well(s) not drawn; select fewer wells.")
+    if note:
+        lines.insert(0, note)
+    for i, text in enumerate(reversed(lines)):
+        _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=7.5, color=muted, gid="nw-traj-footer"),
+             muted=True)
+
+
+# ── position effects (V6) ────────────────────────────────────────────────────
+def render_position(fig, series, *, label: str, timepoint: str, note: str = "") -> None:
+    """Metric against ring, per well (median and interquartile band), with each ring's excluded share below."""
+    from ui.theme import WELL_COLORS_TUPLE
+
+    fig.clear()
+    grid = fig.add_gridspec(2, 1, height_ratios=(3, 1), hspace=0.15)
+    ax, share = fig.add_subplot(grid[0]), fig.add_subplot(grid[1])
+    fig.subplots_adjust(left=0.09, right=0.97, top=0.90, bottom=0.10 + _FOOTER_BASE + _LINE)
+    _bg, ink, muted = _inks(ax)
+    width = 0.8 / max(len(series), 1)
+    for k, s in enumerate(series):
+        colour = WELL_COLORS_TUPLE[k % len(WELL_COLORS_TUPLE)]
+        ax.fill_between(s.rings, s.q1, s.q3, color=colour, alpha=0.18, linewidth=0)
+        ax.plot(s.rings, s.median, color=colour, marker="o", markersize=3, linewidth=1.4, label=s.well)
+        share.bar(s.rings + (k - (len(series) - 1) / 2) * width, s.excluded_share, width=width, color=colour)
+    ax.set_ylabel(label, color=ink)
+    _ink(ax.set_title(f"By ring from the central nanowell · {timepoint}", fontsize=9, loc="left", color=ink))
+    ax.tick_params(labelbottom=False)
+    ax.grid(alpha=0.3)
+    if series:
+        ax.legend(fontsize=7, frameon=False)
+    share.set_ylabel("excluded", fontsize=7.5, color=muted)
+    share.set_ylim(0, 1)
+    share.set_xlabel("Ring (lattice steps from the central nanowell)", color=ink)
+    share.grid(alpha=0.3)
+    lines = ["Median and interquartile range over the nanowells with a value in each ring; the bars are the share "
+             "of each ring's nanowells without one. Descriptive: no test is made."]
+    if note:
+        lines.insert(0, note)
+    for i, text in enumerate(reversed(lines)):
+        _ink(fig.text(0.09, _FOOTER_BASE + i * _LINE, text, fontsize=7.5, color=muted, gid="nw-position-footer"),
+             muted=True)
+
+
+# ── Array QC (V7) ────────────────────────────────────────────────────────────
+def render_array_qc(fig, montage, boxes, sites, grid_blocks: dict, *, timepoint: str, why: str = "") -> None:
+    """The montage with each tile's placement (by how it was placed), the measured nanowell positions marked
+    by state, and every timepoint's status."""
+    from matplotlib.patches import Rectangle
+
+    from ui.theme import Colors
+
+    fig.clear()
+    ax = fig.add_subplot(1, 1, 1)
+    fig.subplots_adjust(left=0.04, right=0.70, top=0.92, bottom=0.06)
+    _bg, ink, muted = _inks(ax)
+    ax.set_aspect("equal")
+    if montage is None:
+        ax.set_axis_off()
+        _ink(ax.text(0.5, 0.5, why or "No montage.", ha="center", va="center", transform=ax.transAxes,
+                     fontsize=9, color=muted, gid="nw-qc-missing"), muted=True)
+    else:
+        ax.imshow(montage.image, cmap="gray", extent=montage.extent(), interpolation="nearest")
+        # How each tile was placed (pipeline/tile_register.py): on the lattice phase, by overlap correlation, or
+        # where the acquisition record put it when neither could be measured.
+        source_colour = {"lattice": Colors.success, "overlap": Colors.accent, "recorded": Colors.warn}
+        unsized = 0
+        for box in boxes:
+            colour = source_colour.get(box.source, Colors.danger)
+            if box.width_um and box.height_um:
+                ax.add_patch(Rectangle((box.left_um, box.top_um), box.width_um, box.height_um, fill=False,
+                                       edgecolor=colour, linewidth=1.2))
+                at = (box.left_um + 0.02 * box.width_um, box.top_um + 0.06 * box.height_um)
+            else:
+                # The acquisition record gives no tile size: mark the corner the grid record placed, never a
+                # guessed outline.
+                unsized += 1
+                ax.plot([box.left_um], [box.top_um], marker="+", markersize=9, color=colour)
+                at = (box.left_um, box.top_um)
+            _ink(ax.text(*at, f"{box.tile} · {box.source}" + (f" · {box.residual_um:.1f} µm"
+                                                              if box.residual_um is not None else ""),
+                         fontsize=6.5, color=colour, gid="nw-qc-tile"))
+        if unsized:
+            _ink(ax.text(0.01, 0.01, f"{unsized} tile(s) without a size in the acquisition record: their placed "
+                         "corner is marked (+), not an outline.", transform=ax.transAxes, fontsize=6.5,
+                         color=muted, gid="nw-qc-unsized"), muted=True)
+        _qc_sites(ax, sites)
+        ax.set_axis_off()
+    block = grid_blocks.get(timepoint) or {}
+    lines = [f"{timepoint}: {block.get('status', 'no record')}"
+             + (f" — origin from the {str(block.get('origin_method', '')).replace('_', ' ')}"
+                f" ({block.get('origin_agreement') or 'single source'})" if block.get("origin_method") else ""),
+             f"pitch {_num(block.get('pitch_um'), 1)} µm · angle {_num(block.get('angle_deg'), 2)}° · "
+             f"overlap {block.get('overlap_um')} µm · {block.get('n_detected', '?')} detected of "
+             f"{block.get('roster_size', '?')}"]
+    lines += [f"{tp}: {b.get('status', '?')}" + (f" — {b.get('reason')}" if b.get("reason") else "")
+              for tp, b in grid_blocks.items() if tp != timepoint]
+    for i, text in enumerate(lines[:24]):
+        _ink(fig.text(0.72, 0.92 - i * 0.032, text, fontsize=7, color=ink if i < 2 else muted, wrap=True,
+                      gid="nw-qc-status"), muted=i >= 2)
+    _ink(fig.text(0.72, 0.10, "Tiles: green placed on the lattice, blue by overlap correlation, amber where the "
+                  "acquisition record put them. Nanowells at their measured positions: amber occluded, red clipped, "
+                  "+ fused.", fontsize=6.5, color=muted, wrap=True, gid="nw-qc-key"), muted=True)
+
+
+def _num(value, places: int) -> str:
+    """A grid record's number for the status lines, or ``?`` where the record has none."""
+    return f"{value:.{places}f}" if isinstance(value, (int, float)) and not isinstance(value, bool) else "?"
+
+
+def _qc_sites(ax, sites) -> None:
+    """The nanowells at their *measured* well-frame positions, outlined where they carry no number."""
+    from matplotlib.collections import EllipseCollection
+
+    from ui.theme import Colors
+
+    if sites is None or not len(sites):
+        return
+    placed = sites[sites["well_x_um"].notna() & sites["well_y_um"].notna()]
+    for state, colour in (("occluded", Colors.warn), ("clipped", Colors.danger)):
+        rows = placed[placed["state"] == state]
+        if len(rows):
+            w = 2 * rows["radius_um"].to_numpy(dtype=float)
+            ax.add_collection(EllipseCollection(w, w, np.zeros(len(rows)), units="xy",
+                                                offsets=rows[["well_x_um", "well_y_um"]].to_numpy(dtype=float),
+                                                offset_transform=ax.transData, facecolors="none", edgecolors=colour,
+                                                linewidths=0.8))
+    fused = placed[placed["fused"].eq(True)]
+    if len(fused):
+        ax.scatter(fused["well_x_um"], fused["well_y_um"], marker="+", s=14, color=Colors.danger, linewidths=0.8)

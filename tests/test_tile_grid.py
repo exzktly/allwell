@@ -217,3 +217,19 @@ def test_a_site_inside_the_outer_margin_band_is_edge_not_blend():
     assert report.edge_indices == (1,) and report.blend_indices == ()
     assert report.unimaged_indices == (2,)
     assert report.holds == (None, None)
+
+
+def test_mosaic_and_stage_positions_are_never_mixed_in_one_grid():
+    tiles = [RecordedTile("A", (0.0, 0.0), (0.0, 0.0)), RecordedTile("B", None, (90.0, 0.0))]
+    plan = place_from_record(tiles, tile_size_px={"x": 100, "y": 100}, pixel_size_um={"x": 1.0, "y": 1.0},
+                             stage_to_image=(1.0, 1.0))
+    assert plan.status == BAD_GRID and "different frames" in plan.reason
+
+
+def test_ownership_follows_the_registered_position_not_the_recorded_one():
+    plan = _place([RecordedTile("L", (0.0, 0.0)), RecordedTile("R", (900.0, 0.0))], (1000, 1000), scale=1.0)
+    site = np.array([[1010.0, 500.0]])                  # inside R only if R sits at 900, left of 950 if it moved
+    recorded = ownership_report(plan, site, 100.0, 10.0)
+    assert recorded.owners == ("R",)
+    moved = ownership_report(plan, site, 100.0, 10.0, positions_um={"R": (990.0, 0.0), "L": (0.0, 0.0)})
+    assert moved.owners == (None,) and moved.fused_indices == (0,)

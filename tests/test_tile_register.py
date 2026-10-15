@@ -86,7 +86,7 @@ def test_the_search_is_confined_so_the_periodicity_trap_cannot_be_entered():
     truth = np.subtract(rendered.true_left_top_um["F1"], rendered.true_left_top_um["F0"]) / PX
     expected = truth + (0.3 * pitch_px, 0.0)         # the stage is 0.3 pitch off
     narrow = correlate_overlap(rendered.images["F0"], rendered.images["F1"], expected,
-                               search_radius=search_radius_px(PITCH, PX))
+                               search_radius=int(0.475 * pitch_px))
     wide = correlate_overlap(rendered.images["F0"], rendered.images["F1"], expected,
                              search_radius=int(1.3 * pitch_px))
     # The fixture is only worth anything if the unconstrained search really is fooled: it locks

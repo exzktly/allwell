@@ -248,6 +248,9 @@ def place_from_record(tiles, *, tile_size_px: dict, pixel_size_um: dict,
         return GridPlan(BAD_GRID, f"Tile(s) {', '.join(sorted(unplaced))} {why}; place them from a scan pattern instead")
     if not positions:
         return GridPlan(BAD_GRID, "The timepoint has no tiles")
+    if len(set(sources.values())) > 1:
+        return GridPlan(BAD_GRID, "Some tiles are placed from mosaic positions and others from stage "
+                                  "positions; the two are in different frames, so they cannot share a grid")
 
     ids = list(positions)
     xs = np.array([positions[i][0] for i in ids])
@@ -362,8 +365,16 @@ class OwnershipReport:
     unimaged_indices: tuple[int, ...]
 
 
+def _moved(placement: TilePlacement, positions_um: dict | None) -> TileRectangle:
+    """The tile's rectangle at its registered position when one is given."""
+    if positions_um is None or placement.tile_id not in positions_um:
+        return placement.rectangle()
+    left, top = positions_um[placement.tile_id]
+    return TileRectangle(placement.tile_id, left, top, left + placement.width_um, top + placement.height_um)
+
+
 def ownership_report(plan: GridPlan, site_xy_um, nanowell_diameter_um: float,
-                     margin_um: float) -> OwnershipReport:
+                     margin_um: float, *, positions_um: dict | None = None) -> OwnershipReport:
     """How many sites each ownership class holds, and whether the overlap guarantees it.
 
     Where the overlap along both axes is at least ``diameter + 2 * margin``,
@@ -376,13 +387,12 @@ def ownership_report(plan: GridPlan, site_xy_um, nanowell_diameter_um: float,
     """
     if not plan.usable:
         raise ValueError(f"Ownership needs a usable grid, not {plan.status}: {plan.reason}")
-    result: OwnershipResult = assign_owners(
-        site_xy_um, nanowell_diameter_um, [p.rectangle() for p in plan.placements], margin_um)
+    rectangles = [_moved(p, positions_um) for p in plan.placements]
+    result: OwnershipResult = assign_owners(site_xy_um, nanowell_diameter_um, rectangles, margin_um)
     required = nanowell_diameter_um + 2 * margin_um
     holds = tuple(None if o is None else o >= required for o in plan.overlap_um)
     sites = np.asarray(site_xy_um, dtype=float)
     radius = nanowell_diameter_um / 2
-    rectangles = [p.rectangle() for p in plan.placements]
     blend, edge = [], []
     for index in result.fused_indices:
         x, y = sites[index]

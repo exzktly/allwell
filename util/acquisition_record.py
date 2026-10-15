@@ -215,6 +215,22 @@ def publication_marker(path: str | Path) -> Path:
     return Path(path).with_name("acquisition.pending.json")
 
 
+def parse_record_text(text: str, *, source="record") -> dict:
+    """Parse and validate record text strictly (duplicate keys, malformed JSON and invalid
+    content all raise :class:`AcquisitionRecordError`), without the publication-marker check.
+
+    A resumed conversion reads the record its interrupted predecessor left, while the
+    marker is still present, so it cannot go through :func:`read_record_file`; it must
+    still be as strict as that is.
+    """
+    try:
+        payload = json.loads(text, object_pairs_hook=_json_object)
+    except ValueError as error:
+        raise AcquisitionRecordError(f"Cannot read {source}: {error}") from error
+    _require_valid(payload)
+    return payload
+
+
 def read_record_file(path: str | Path) -> dict | None:
     """Explicit-file API; incomplete publication is never read as absent."""
     path = Path(path)

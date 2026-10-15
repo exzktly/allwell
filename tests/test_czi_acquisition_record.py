@@ -237,7 +237,8 @@ def test_shared_hour_tokens_use_existing_rounding_and_unknown_clock_reason():
     assert reason is None
     assert tokens == {0: '0h', 1: '4h'}
     tokens, reason = shared_timepoint_tokens({0: {'started_at': None}})
-    assert tokens == {0: '0h'} and reason == 'Some shared acquisition starts are unknown'
+    # One frame is always 0h, so an unknown clock degrades nothing about the name.
+    assert tokens == {0: '0h'} and reason is None
 
 
 def test_relabel_closes_old_archive_before_atomic_replace(tmp_path, monkeypatch):
@@ -348,3 +349,35 @@ def test_single_frame_without_stamp_is_zero_hours_but_start_is_unknown(tmp_path)
     assert record['timepoints']['0h']['started_at'] is None
     assert record['timepoints']['0h']['tiles_without_time'] == 1
     assert record['timepoints']['0h']['start_reason'] == 'No tiles carry a readable acquisition time'
+
+
+def test_a_cancel_stays_a_cancel_when_the_partial_record_cannot_be_published(tmp_path):
+    # A conversion of experiment A completes. Experiment B is then started over the same folder and
+    # cancelled before it replaces A's archive. Building the partial record finds A's archive in a
+    # well B selected, and that failure used to replace the cancel: the caller saw an
+    # AcquisitionRecordError, and the marker stayed.
+    source = _source(tmp_path)
+    dest = tmp_path / "dataset"
+    explode_czi(source, dest / "in", workers=1, experiment="A")
+    with pytest.raises(CziExplodeCancelled):
+        explode_czi(source, dest / "in", workers=1, experiment="B", should_abort=lambda: True)
+    # The dataset is still marked as needing its conversion resumed: the record could not be published.
+    with pytest.raises(AcquisitionRecordError, match="resume"):
+        read_record(dest)
+
+
+def test_a_resume_reads_the_previous_record_as_strictly_as_any_other_reader(tmp_path):
+    # An interrupted conversion leaves the record and the publication marker. A resume reads that
+    # record directly (read_record refuses while the marker is present), and it used to do so with
+    # plain json.loads, accepting what every other reader rejects.
+    source = _source(tmp_path)
+    dest = tmp_path / "dataset"
+    explode_czi(source, dest / "in", workers=1)
+    path = dest / "in" / "acquisition.json"
+    text = path.read_text()
+    path.write_text(text.replace('"format_version": 1', '"format_version": 1, "format_version": 1', 1))
+    with pytest.raises(AcquisitionRecordError, match="Duplicate JSON key"):
+        explode_czi(source, dest / "in", workers=1)
+    path.write_text("{ not json")
+    with pytest.raises(AcquisitionRecordError, match="Cannot read"):
+        explode_czi(source, dest / "in", workers=1)

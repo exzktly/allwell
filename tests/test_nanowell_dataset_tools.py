@@ -11,7 +11,6 @@ import pytest
 from datasets.concatenate.concatenate_compute import ConcatError, build_merge_plan
 from datasets.core.dataset_paths import DatasetPaths
 from datasets.core.nanowell_tables import has_nanowell_tables, nanowell_findings, refuse_nanowell_tables
-from datasets.merge_plates.merge_plates_compute import MergePlatesError, build_plate_merge_plan
 from datasets.subset.subset_compute import SubsetError, SubsetFilter, build_subset_plan
 
 SCHEMA = ["experiment", "channel", "well", "fov", "timepoint"]
@@ -60,22 +59,17 @@ def test_a_dataset_with_nanowell_tables_is_recognised(nanowell_ds, plain_ds):
     assert has_nanowell_tables(_paths(nanowell_ds)) and not has_nanowell_tables(_paths(plain_ds))
 
 
-def test_the_shared_refusal_names_the_tool_and_the_way_out(nanowell_ds):
-    with pytest.raises(ValueError, match="Run Analyze again on the combined raw input") as raised:
+def test_the_concatenate_refusal_names_the_tool_and_the_way_out(nanowell_ds):
+    with pytest.raises(ValueError, match="Concatenate the raw input and run Analyze once") as raised:
         refuse_nanowell_tables(_paths(nanowell_ds), "Dataset 1", ValueError, "Concatenate")
     assert "Concatenate cannot carry them" in str(raised.value) and "Dataset 1" in str(raised.value)
 
 
-def test_subset_refuses_a_nanowell_dataset_before_writing_anything(nanowell_ds, tmp_path):
-    with pytest.raises(SubsetError, match="nanowell results"):
-        build_subset_plan(nanowell_ds, tmp_path / "dest", SubsetFilter())
+def test_subset_refuses_a_field_selection_of_a_nanowell_dataset_before_writing_anything(nanowell_ds, tmp_path):
+    with pytest.raises(SubsetError, match="cannot be cut to a set of fields"):
+        build_subset_plan(nanowell_ds, tmp_path / "dest", SubsetFilter(fovs=frozenset({"F1"})))
     assert not (tmp_path / "dest").exists()
-
-
-def test_merge_plates_refuses_either_dataset(nanowell_ds, plain_ds, tmp_path):
-    for first, second, which in ((nanowell_ds, plain_ds, "Dataset 1"), (plain_ds, nanowell_ds, "Dataset 2")):
-        with pytest.raises(MergePlatesError, match=f"{which} holds nanowell results"):
-            build_plate_merge_plan(first, second, tmp_path / "dest")
+    build_subset_plan(nanowell_ds, tmp_path / "dest", SubsetFilter())        # wells and timepoints are fine
 
 
 def test_concatenate_refuses_either_dataset(nanowell_ds, plain_ds, tmp_path):

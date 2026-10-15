@@ -250,9 +250,15 @@ edge), the end of the run addresses it from the plate's other wells, which move 
 and says how many it anchored and how many remain unaddressed.
 
 `--incremental` adds only new timepoints (onto the same set of nanowells); a changed setting or a changed tile
-record recomputes the timepoint. Subset, Merge Plates and Concatenate refuse a dataset holding nanowell results
-for now, and say so; Validate checks the tables against the grid record and the archives. The Analyze form and
-the Review pages for nanowells are not built yet.
+record recomputes the timepoint.
+
+**Datasets tools and nanowell results.** *Subset* carries the nanowell tables of the wells and timepoints it
+keeps; it refuses a selection of fields, because a well's nanowell results are measured over all of its tiles
+together. *Merge Plates* carries both plates' tables, with dataset 2's wells renamed by the remap; it refuses two
+plates analysed under different nanowell settings, and says when only one plate has nanowell results (the
+other's wells then show on the Nanowells page as wells without a table). *Concatenate* refuses a dataset with
+nanowell results: concatenate the raw input and analyse the result once, so every timepoint is addressed
+against one set of nanowells. *Validate* checks the tables against the grid record and the archives.
 
 ### Windows (from source)
 

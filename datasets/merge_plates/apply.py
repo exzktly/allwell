@@ -27,7 +27,8 @@ from util.aw_safe import swallow
 from util.well_token import canonical_well_label
 from datasets.core.concurrency import pick_workers
 from datasets.core.provenance import record_derivation
-from datasets.core.dataset_paths import split_stem_well
+from datasets.core.dataset_paths import dataset_wells, split_stem_well
+from datasets.core.nanowell_tables import carry_nanowell_tables
 from datasets.core.containers import (
     FILENAME_COLUMN,
     OVERRIDES_FILENAME,
@@ -496,6 +497,13 @@ def execute_plan(
     _verify(plan, row_counts, mismatches)
 
     _merge_cell_overrides(plan, emit)
+    nanowell_rows = carry_nanowell_tables(plan.ds1.out_dir, plan.dest.out_dir,
+                                          {well: well for well in dataset_wells(plan.ds1)})
+    nanowell_rows.update(carry_nanowell_tables(
+        plan.ds2.out_dir, plan.dest.out_dir, {well: plan.well_map.get(well, well) for well in dataset_wells(plan.ds2)}))
+    if nanowell_rows:
+        emit(f"Carried the nanowell tables of {len(nanowell_rows)} well(s) "
+             f"({sum(nanowell_rows.values()):,} site rows).")
     if acquisition is not None:
         validation = validate_against_archives(
             plan.dest.root, acquisition, schema=":".join(plan.schema.fields), sep=plan.schema.sep)

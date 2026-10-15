@@ -4,8 +4,11 @@ A nanowell analysis leaves, beside the usual per-well CSV and archive, ``out/nan
 row per site and timepoint) and ``<well>_grid.json`` (the registration, lattice and status of each
 timepoint). A tool that rewrites a dataset's wells, timepoints or fields and does not know about them
 would write a destination whose cells have no nanowells behind them: the tables silently dropped, the
-rest looking whole. So Subset, Merge Plates and Concatenate **refuse** such a dataset by name until each
-learns to carry the tables (tracker P10b-d), and Validate checks the tables against the archives.
+rest looking whole. So each tool either carries them or refuses: Subset carries the tables of the wells
+and timepoints it keeps (:func:`carry_nanowell_tables`) and refuses a field-level selection, which the
+tables are not keyed on; Merge Plates carries them with the wells remapped; Concatenate refuses, because
+two analyses' addresses cannot be joined without re-anchoring — the supported route is to concatenate the
+raw input and analyse once (tracker P10b-d). Validate checks the tables against the archives.
 
 Qt-free. The refusal takes the calling tool's own error class, so each keeps its user-facing voice.
 """
@@ -37,9 +40,92 @@ def refuse_nanowell_tables(paths, label: str, error_cls, action: str) -> None:
     """Raise *error_cls* when *paths* carries nanowell tables this tool cannot yet carry through *action*."""
     if has_nanowell_tables(paths):
         raise error_cls(
-            f"{label} holds nanowell results ({nanowell_dir(paths.out_dir)}), and {action} cannot carry them "
-            "yet: the destination would have cells with no nanowells behind them. Run Analyze again on the "
-            "combined raw input, or choose a dataset without nanowell results.")
+            f"{label} holds nanowell results ({nanowell_dir(paths.out_dir)}), and {action} cannot carry them: "
+            "each analysis addressed its own nanowells, and two analyses' addresses are not joined without "
+            "re-anchoring, so the destination would have cells with no nanowells behind them. Concatenate the "
+            "raw input and run Analyze once on the result, or choose a dataset without nanowell results.")
+
+
+def sites_table(folder: Path, well: str) -> Path | None:
+    """The well's sites table, ``<well>.csv`` or ``<well>.csv.gz`` (the plain file wins, as Review reads it)."""
+    for name in (f"{well}.csv", f"{well}.csv.gz"):
+        if (Path(folder) / name).is_file():
+            return Path(folder) / name
+    return None
+
+
+def _open_text(path: Path, mode: str):
+    import gzip
+
+    return gzip.open(path, mode + "t", newline="", encoding="utf-8") if path.suffix == ".gz" else \
+        path.open(mode, newline="", encoding="utf-8")
+
+
+def carry_nanowell_tables(src_out, dest_out, well_map: dict, *, keep_timepoint=None) -> dict[str, int]:
+    """Copy each source well's nanowell tables to its destination well; ``{dest well: rows written}``.
+
+    *well_map* maps a source well to its destination well, both canonical (``A01``, as the tools' well maps
+    are), so a table written under an unpadded spelling (``A1_grid.json``) is still found; a source well the
+    map does not name is not carried. The grid record's ``well`` is rewritten to the destination well, and with *keep_timepoint* (a predicate on a timepoint token) only the timepoints it
+    keeps survive, in the sites table and in the grid record alike, so the two always name the same
+    timepoints. A source well with no grid record has no tables and is skipped; one whose kept timepoints are
+    none writes nothing rather than an empty table that would read as an analysis that found nothing. Each
+    file is written beside its destination and renamed into place.
+    """
+    import os
+
+    from util.well_token import canonical_well_label
+
+    src, dest = nanowell_dir(src_out), nanowell_dir(dest_out)
+    written: dict[str, int] = {}
+    for grid_path in sorted(src.glob("*_grid.json")) if src.is_dir() else []:
+        src_well = grid_path.name[: -len("_grid.json")]
+        dest_well = well_map.get(canonical_well_label(src_well) or src_well)
+        table = sites_table(src, src_well)
+        if dest_well is None or table is None:
+            continue
+        grid, problem = _read_json(grid_path)
+        if problem:
+            raise ValueError(f"The nanowell grid record of {src_well} cannot be carried: {problem}")
+        blocks = grid.get("timepoints", {})
+        kept = {tp for tp in blocks if keep_timepoint is None or keep_timepoint(tp)}
+        with _open_text(table, "r") as fh:
+            reader = csv.DictReader(fh)
+            fieldnames = list(reader.fieldnames or [])
+            rows = [row for row in reader if keep_timepoint is None or keep_timepoint(row.get("timepoint", ""))]
+        if not kept:
+            continue
+        dest.mkdir(parents=True, exist_ok=True)
+        grid = dict(grid, well=dest_well, timepoints={tp: b for tp, b in blocks.items() if tp in kept})
+        out_table = dest / (dest_well + table.name[len(src_well):])
+        tmp = out_table.with_name(out_table.name + ".tmp")
+        with _open_text(tmp, "w") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        os.replace(tmp, out_table)
+        out_grid = dest / f"{dest_well}_grid.json"
+        tmp = out_grid.with_name(out_grid.name + ".tmp")
+        tmp.write_text(json.dumps(grid, indent=1), encoding="utf-8")
+        os.replace(tmp, out_grid)
+        written[dest_well] = len(rows)
+    return written
+
+
+def nanowell_block_conflict(info1: dict, info2: dict) -> str | None:
+    """Why two datasets' nanowell analyses cannot share one plate, or ``None`` when they can.
+
+    The sidecar's ``nanowell`` block names the scheme and the settings the tables were computed under; a plate
+    holding wells analysed under two of them would draw one figure from two analyses with nothing to say so.
+    A dataset without the block has no tables to disagree with.
+    """
+    first, second = info1.get("nanowell"), info2.get("nanowell")
+    if not first or not second:
+        return None
+    for key, label in (("scheme_version", "table scheme"), ("settings", "nanowell settings")):
+        if first.get(key) != second.get(key):
+            return f"the two datasets' nanowell results were computed under different {label}"
+    return None
 
 
 def _input_timepoints(zip_path: Path, schema, sep: str) -> set[str] | None:

@@ -591,15 +591,56 @@ class GapPreview:
     error: str = ""                        # the merge cannot proceed as typed
 
 
+#: Pairs whose reading the gap preview keeps: a page holds one pair at a time, so a few is plenty.
+_PREVIEW_PAIRS_KEPT = 4
+_preview_pairs: dict = {}
+
+
+def _disk_signature(root: Path | str) -> tuple:
+    """What changes when a dataset's readable state does: the folders' and sidecars' modification times. A
+    member added, removed or an archive replaced renames into ``in/`` or ``out/`` and moves its time."""
+    root = Path(root)
+    stamps = []
+    for path in (root, root / "in", root / "out", root / "out" / "pipeline_info.json",
+                 root / "in" / "acquisition.json", root / "acquisition.json"):
+        try:
+            stamps.append(path.stat().st_mtime_ns)
+        except OSError:
+            stamps.append(None)
+    return (str(root.resolve()), *stamps)
+
+
+def _open_pair_for_preview(ds1_root, ds2_root):
+    """:func:`open_pair`, remembered per pair while neither dataset changes on disk (tracker M21).
+
+    A raw dataset's schema is inferred by opening every archive in ``in/``; on the user's 60-well plate that
+    measured about 75 ms a call, and the page asks on every keystroke of the gap field, twice. The datasets do
+    not change between keystrokes, so the reading is kept and only the typed gap is recomputed. A refusal is
+    remembered too, as the same message. The run itself never reads through this.
+    """
+    key = (_disk_signature(ds1_root), _disk_signature(ds2_root))
+    if key not in _preview_pairs:
+        try:
+            _preview_pairs[key] = ("ok", open_pair(ds1_root, ds2_root))
+        except ConcatError as exc:
+            _preview_pairs[key] = ("error", str(exc))
+        while len(_preview_pairs) > _PREVIEW_PAIRS_KEPT:
+            _preview_pairs.pop(next(iter(_preview_pairs)))
+    kind, value = _preview_pairs[key]
+    if kind == "error":
+        raise ConcatError(value)
+    return value
+
+
 def gap_preview(ds1_root: Path | str, ds2_root: Path | str, text: str) -> GapPreview:
     """The default, the resulting labels and any warning, before anything is copied.
 
-    Reads only the two sidecars and acquisition records. *text* is the field's
-    contents; empty means "use the default", which is an error only when there
-    is none.
+    Reads only the two sidecars and acquisition records, through a reading kept while neither dataset
+    changes (:func:`_open_pair_for_preview`). *text* is the field's contents; empty means "use the default",
+    which is an error only when there is none.
     """
     try:
-        ds1, ds2, info1, info2, _kind = open_pair(ds1_root, ds2_root)
+        ds1, ds2, info1, info2, _kind = _open_pair_for_preview(ds1_root, ds2_root)
         default = default_gap(ds1, ds2, info1, info2)
         default_text = format_gap(default.hours) if default.hours is not None else ""
         shown = dict(default_text=default_text, default_source=default.source,

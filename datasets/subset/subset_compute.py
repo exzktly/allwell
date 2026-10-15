@@ -41,7 +41,7 @@ from datasets.core.containers import (
     TIMEPOINT_HOURS_COLUMN,
 )
 from datasets.core.member_names import discover_parsed_member
-from datasets.core.nanowell_tables import refuse_nanowell_tables
+from datasets.core.nanowell_tables import has_nanowell_tables
 from datasets.core.dataset_paths import known_channel_tokens
 
 IN_PROGRESS_MARKER = ".aw_subset_in_progress"
@@ -167,7 +167,12 @@ def build_subset_plan(
     dest_is_restart = destination_is_failed_run(dest)
 
     _refuse_well_collisions(src, "The source dataset")
-    refuse_nanowell_tables(src, "The source dataset", SubsetError, "Subset")
+    if has_nanowell_tables(src) and filt.fovs is not None:
+        raise SubsetError(
+            "The source dataset holds nanowell results, which are per well and measured over all of the "
+            "well's tiles together, so they cannot be cut to a set of fields: the destination would hold "
+            "tables measured from tiles it does not have. Subset by wells and timepoints instead (the "
+            "nanowell tables are carried for those), or choose a dataset without nanowell results.")
 
     if has_folder_mode_output(src):
         raise SubsetError(
@@ -232,11 +237,17 @@ def member_matches(
         return True
     if filt.fovs is not None and parsed.fov not in filt.fov_tokens:
         return False
-    if filt.timepoint_hours is not None:
-        hours = parse_hours(parsed.fields.get("timepoint", ""))
-        if hours is None or not any(tp_close(hours, h) for h in filt.timepoint_hours):
-            return False
-    return True
+    return timepoint_kept(parsed.fields.get("timepoint", ""), filt)
+
+
+def timepoint_kept(token: str, filt: SubsetFilter) -> bool:
+    """Whether the timepoint *token* (as a member name spells it) survives *filt*'s timepoint axis — the one
+    test the images and the nanowell tables are both cut by, so a kept table never names a timepoint whose
+    images were left behind."""
+    if filt.timepoint_hours is None:
+        return True
+    hours = parse_hours(token or "")
+    return hours is not None and any(tp_close(hours, h) for h in filt.timepoint_hours)
 
 
 #: What :func:`row_verdict` decided about one measurement row. ``UNJUDGEABLE``
@@ -345,4 +356,5 @@ __all__ = [
     "row_hours",
     "row_matches",
     "row_verdict",
+    "timepoint_kept",
 ]

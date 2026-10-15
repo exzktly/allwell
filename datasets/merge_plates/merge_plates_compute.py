@@ -46,7 +46,7 @@ from datasets.core.dataset_paths import (
     out_zips,
 )
 from datasets.core.dataset_paths import check_compatible, known_channel_tokens
-from datasets.core.nanowell_tables import refuse_nanowell_tables
+from datasets.core.nanowell_tables import has_nanowell_tables, nanowell_block_conflict
 
 IN_PROGRESS_MARKER = ".aw_merge_in_progress"
 
@@ -331,6 +331,26 @@ class PlateMergePlan:
     blocks_warning: str | None = None
 
 
+def _merge_nanowell_blocks(merged_info: dict, info1: dict, info2: dict, ds1, ds2) -> str | None:
+    """Put the nanowell analysis's sidecar blocks on *merged_info*; a note when only one plate has the tables.
+
+    ``nanowell`` (scheme, settings, conventions) is the same for both or absent from one, which
+    :func:`~datasets.core.nanowell_tables.nanowell_block_conflict` has already established, so whichever
+    dataset has it supplies it. ``acquisition`` (pixel and tile size per timepoint) is the union: a timepoint
+    both hold has one calibration, or the acquisition records' merge refuses the run.
+    """
+    if not info1.get("nanowell") and info2.get("nanowell"):
+        merged_info["nanowell"] = info2["nanowell"]
+    if info1.get("acquisition") or info2.get("acquisition"):
+        merged_info["acquisition"] = {**(info2.get("acquisition") or {}), **(info1.get("acquisition") or {})}
+    one, two = has_nanowell_tables(ds1), has_nanowell_tables(ds2)
+    if one == two:
+        return None
+    holder, other = (ds1, ds2) if one else (ds2, ds1)
+    return (f"Only {holder.root.name} has nanowell results; {other.root.name}'s wells will have none, and the "
+            "Nanowells page names them as wells without a table.")
+
+
 def build_plate_merge_plan(
     ds1_root: Path | str, ds2_root: Path | str, dest_root: Path | str,
     well_map: dict[str, str] | None = None,
@@ -369,8 +389,11 @@ def build_plate_merge_plan(
 
     _refuse_well_collisions(ds1, "Dataset 1")
     _refuse_well_collisions(ds2, "Dataset 2")
-    refuse_nanowell_tables(ds1, "Dataset 1", MergePlatesError, "Merge Plates")
-    refuse_nanowell_tables(ds2, "Dataset 2", MergePlatesError, "Merge Plates")
+    conflict = nanowell_block_conflict(info1, info2)
+    if conflict:
+        raise MergePlatesError(
+            f"Merge Plates can't combine these: {conflict}, so one plate would hold numbers from two analyses. "
+            "Analyse the combined raw input once instead.")
 
     if has_folder_mode_output(ds1) or has_folder_mode_output(ds2):
         which = "dataset 1" if has_folder_mode_output(ds1) else "dataset 2"
@@ -461,6 +484,9 @@ def build_plate_merge_plan(
     # and is noise rather than a warning.
     blocks_warning = _dropped_blocks_warning(
         info1, info2, ds1_label=ds1.root.name, ds2_label=ds2.root.name)
+    nanowells = _merge_nanowell_blocks(merged_info, info1, info2, ds1, ds2)
+    if nanowells:
+        blocks_warning = f"{blocks_warning} {nanowells}" if blocks_warning else nanowells
 
     return PlateMergePlan(
         ds1=ds1, ds2=ds2, dest=dest,

@@ -368,6 +368,10 @@ def filter_record_to_paths(paths, payload, *, schema=DEFAULT_SCHEMA, sep=DEFAULT
     return result
 
 
+#: A timepoint's calibration: what the image files state about scale and tiling, as opposed to its clock.
+_CALIBRATION_KEYS = frozenset({"pixel_size_um", "tile_size_px", "objective", "declared_overlap_percent"})
+
+
 def merge_plate_records(first, second, well_map) -> dict | None:
     """Combine wells only when their shared timepoint metadata agrees."""
     import copy
@@ -379,6 +383,16 @@ def merge_plate_records(first, second, well_map) -> dict | None:
         left, right = first["timepoints"][token], second["timepoints"][token]
         differences = sorted(key for key in left.keys() | right.keys()
                              if key != "source_timepoint_index" and left.get(key) != right.get(key))
+        if differences and set(differences) <= _CALIBRATION_KEYS:
+            # Same clock, different calibration: one source stated a scale or tile size the other did not
+            # (or another one). The merged record can describe only one per timepoint, and taking the known
+            # value would claim it for tiles whose file never stated it — so refuse, saying what differs.
+            detail = "; ".join(f"{key}: {left.get(key)} against {right.get(key)}" for key in differences)
+            raise AcquisitionRecordError(
+                f"Merge Plates: the two datasets' records disagree about the calibration of timepoint {token!r} "
+                f"({detail}), and a merged record can state only one. An unknown value means a source file did "
+                "not record it: convert both from files that state it, or merge datasets with matching "
+                "calibration.")
         if differences:
             raise AcquisitionRecordError(
                 f"Merge Plates: acquisition metadata conflicts at {token!r}: {', '.join(differences)}. "

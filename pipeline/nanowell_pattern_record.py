@@ -89,3 +89,20 @@ def record_from_pattern(well: str, fields_by_timepoint: dict, tile_size_px: dict
     record["placement"] = {"from": "scan pattern", **{k: pattern[k] for k in sorted(pattern)},
                            "field_order": "field names, numerically"}
     return record
+
+
+def unplaced_wells(record: dict) -> list[str]:
+    """Wells the record names but the run cannot place: a tile with no mosaic position, or a timepoint of the
+    well with no pixel size.
+
+    A stage position alone does not place a tile: the run does not know whether each stage axis runs with
+    the image's or against it (``tile_grid.place_from_record``'s ``stage_to_image``, tracker R8), and a wrong
+    sign mirrors the grid. The OME and ND2 converters record stage positions and no mosaic positions
+    (``pipeline.converter_record``), so their wells are placed from a described grid, and without one are
+    refused naming it — before any image is read, rather than tile by tile (tracker I5)."""
+    tps = {tp: (meta.get("pixel_size_um") or {}).get("x") for tp, meta in (record.get("timepoints") or {}).items()}
+    out = set()
+    for tile in record.get("tiles") or []:
+        if tile["mosaic_xy_px"] is None or not tps.get(tile["timepoint"]):
+            out.add(tile["well"])
+    return sorted(out)

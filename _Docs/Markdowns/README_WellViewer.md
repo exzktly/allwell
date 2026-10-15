@@ -235,7 +235,9 @@ The same run from the command line:
 A plate imaged as overlapping tiles of a nanowell array can be analysed one well at one timepoint at a time,
 with every tile of the well together. The input is the usual `in/<WELL>.zip` per well, one phase image per
 tile per timepoint, plus `in/acquisition.json`, the record that says where each tile sits in its well (the
-converters write it). Add the nanowell flags:
+converters write it). A CZI record places the tiles by itself; an OME-TIFF or ND2 record carries the stage
+positions and pixel size but cannot say which way the stage axes run against the image's, so such a dataset is
+run with the tile grid described, as below. Add the nanowell flags:
 
 ```sh
 python process_microscopy.py --input_dir plate/in --output_dir plate/out \
@@ -5634,6 +5636,16 @@ well were taken in the order you expect. It is anchored at whichever well
 position 1 will land in: the **Origin** you typed, or the first well of a
 hand-drawn path.
 
+An OME-TIFF or ND2 conversion also writes `in/acquisition.json`: each tile's
+stage position in µm where the file states one with a unit, the pixel size where
+the file states a calibration, and the tile size. Anything the file does not
+state is left unknown rather than guessed (an ND2 that was never calibrated
+records no pixel size). The log says how many tiles got a stage position. A
+destination that already holds well archives from a different conversion gets no
+record, and the log says which archive is in the way. For a nanowell run the
+stage positions are not enough to place the tiles, so describe the tile grid in
+Analyze (see *Nanowell mode*).
+
 ### Convert CZI
 
 Turns a Zeiss `.czi` plate scan into an ordinary dataset folder of per-well
@@ -6185,6 +6197,10 @@ application, so nothing is needed if you installed All-Well that way. Running
 from source, `pip install -r requirements.txt` brings it in; without it this
 page says so and names the command, and points at Convert OME-TIFF as the way
 round it, rather than failing part-way through a run.
+
+Like the OME-TIFF converter, an ND2 conversion writes `in/acquisition.json` with
+each position's stage coordinates, the pixel size when the file was calibrated,
+and the tile size — see the end of [Convert OME-TIFF](#convert-ome-tiff).
 
 ### Concatenate datasets
 

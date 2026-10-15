@@ -2112,6 +2112,8 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/czi_set.py",
         "pipeline/czi_explode.py",
         "pipeline/czi_acquisition.py",
+        "pipeline/converter_record.py",
+        "pipeline/ome_acquisition.py",
         "pipeline/scan_pool.py",
         # The Nikon ND2 adapter and its per-well explode; client-side for the
         # same reason, listed for the same manifest completeness.

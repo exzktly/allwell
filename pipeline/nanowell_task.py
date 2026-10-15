@@ -71,6 +71,28 @@ def _read_tif(path: Path):
     return np.asarray(tifffile.imread(str(path)), dtype=np.float32)
 
 
+def _placing_record(record: dict | None, well: str, pattern: dict | None) -> dict | None:
+    """*record*, or ``None`` when it cannot place *well* and a grid is described to place it instead.
+
+    An OME or ND2 conversion records stage positions only, and any converter may lack a calibration; the
+    described grid then places such a well (``nanowell_pattern_record.unplaced_wells``). Without a grid the well
+    is refused naming what the record lacks, rather than refused tile by tile as an unplaceable grid.
+    """
+    from pipeline.nanowell_pattern_record import unplaced_wells
+
+    if record is None or well not in unplaced_wells(record):
+        return record
+    if pattern:
+        log.info("Well %s: the acquisition record has no mosaic position or no pixel size for it, so it is "
+                 "placed from the described grid.", well)
+        return None
+    raise NanowellInputError(
+        f"The acquisition record does not say where {well}'s tiles sit in the image frame: a tile has no mosaic "
+        "position (a stage position alone cannot be placed while the stage axes' direction is unknown), or a "
+        "timepoint has no pixel size. Describe the tile grid instead: --nanowell_grid, --nanowell_scan, "
+        "--nanowell_overlap_percent and --nanowell_pixel_size_um")
+
+
 def _pattern_record(well: str, zip_path, index: dict, pattern: dict) -> dict:
     """The in-memory record for a dataset with none, from the grid the run was given (tracker P15).
 
@@ -341,8 +363,8 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     from util.acquisition_record import read_record_file
 
     settings = settings_from_kwargs(shared_kwargs_template)
-    record = read_record_file(Path(zip_path).parent / "acquisition.json")
     pattern = shared_kwargs_template["_nanowell"].get("pattern")
+    record = _placing_record(read_record_file(Path(zip_path).parent / "acquisition.json"), well_label, pattern)
     if record is None and not pattern:
         raise NanowellInputError(
             f"Nanowell mode needs the acquisition record ({Path(zip_path).parent / 'acquisition.json'}), which "

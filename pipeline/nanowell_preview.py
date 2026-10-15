@@ -81,7 +81,11 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
 
     zip_path = Path(zip_path)
     result = PreviewResult("error", well=well, timepoint=timepoint)
-    record = read_record_file(zip_path.parent / "acquisition.json")
+    try:
+        record = nt._placing_record(read_record_file(zip_path.parent / "acquisition.json"), well, pattern)
+    except nt.NanowellInputError as exc:
+        result.reason = str(exc)
+        return result
     if record is None and not pattern:
         result.reason = f"There is no acquisition record next to {zip_path.name}, and no tile grid was given."
         return result

@@ -33,6 +33,7 @@ What the adapter is *for*, beyond translation:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -51,6 +52,8 @@ from util.well_token import canonical_well_label
 #: because a frame never holds a stack.
 _LOOP_AXES = ("P", "T", "Z")
 
+
+log = logging.getLogger(__name__)
 
 class Nd2ReadError(Exception):
     """A user-facing reason an ND2 cannot be read or converted."""
@@ -408,6 +411,36 @@ def read_nd2_layout(path: Path | str, *, read_times: bool = False,
             layout.time_scan = scan_timepoint_hours(handle, layout,
                                                     report=report)
     return layout
+
+
+def read_stage_calibration(path: Path | str) -> tuple[list, tuple[float, float] | None]:
+    """``(stage per position, pixel size)`` for the acquisition record (tracker I5).
+
+    The stage is each position-loop point's ``stagePositionUm`` — the format's own unit is µm — or an empty
+    list when the file has no position loop. The pixel size is the calibration only when the file flags
+    both axes calibrated: an uncalibrated ND2 reports ``1.0``, which is a placeholder, not a measurement.
+    Never raises: a record that cannot be read is a record of unknowns.
+    """
+    stages: list = []
+    pixel = None
+    try:
+        with _open(path) as handle:
+            for loop in getattr(handle, "experiment", []) or []:
+                if getattr(loop, "type", "") == "XYPosLoop":
+                    for point in getattr(getattr(loop, "parameters", None), "points", []) or []:
+                        at = getattr(point, "stagePositionUm", None)
+                        stages.append(None if at is None else (float(at[0]), float(at[1])))
+            # Separately guarded: ``metadata`` is the call ``nd2`` 0.9.0 raises from on a file without a
+            # fluorescent-probe block (module docstring), and the stage positions are still good then.
+            try:
+                volume = handle.metadata.channels[0].volume
+                if all(volume.axesCalibrated[:2]) and all(v > 0 for v in volume.axesCalibration[:2]):
+                    pixel = (float(volume.axesCalibration[0]), float(volume.axesCalibration[1]))
+            except Exception as exc:    # the record then says it does not know the pixel size
+                log.warning("ND2 calibration could not be read from %s: %s", Path(path).name, exc)
+    except Exception as exc:            # the images convert either way; the record says what it does not know
+        log.warning("ND2 stage positions could not be read from %s: %s", Path(path).name, exc)
+    return stages, pixel
 
 
 def frame_index_for(layout: Nd2Layout, position: int, t: int, z: int = 0) -> int:

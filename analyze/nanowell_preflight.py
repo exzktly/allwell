@@ -91,6 +91,20 @@ def nanowell_input_report(raw: str, opts: dict) -> tuple[list[str], list[str]]:
                     "each well; the CZI, ND2 and OME converters write it. For a dataset converted before they did, "
                     "describe the tile grid instead (Tile grid, Scan order, Tile overlap, Pixel size)."], warnings
         return _pattern_report(zips, opts)
+    unplaced = _unplaced(record)
+    described = bool(str(opts.get("nanowell_grid") or "").strip())
+    if unplaced and not described:
+        return _listed("The acquisition record does not say where the tiles sit in the image frame (no mosaic "
+                       "position, or no pixel size), so describe the tile grid instead (Tile grid, Scan order, Tile "
+                       "overlap, Pixel size)", unplaced), warnings
+    if unplaced:
+        problems, warnings = _pattern_report([z for z in zips if z.stem in unplaced], opts)
+        warnings.append(f"The acquisition record cannot place {len(unplaced)} well(s); they are placed from the "
+                        "tile grid.")
+        record = {**record, "tiles": [t for t in record["tiles"] if t["well"] not in unplaced]}
+        zips = [z for z in zips if z.stem not in unplaced]
+        if not record["tiles"]:
+            return problems, warnings
     schema = str(opts.get("filename_schema") or "")
     sep = str(opts.get("filename_sep") or "_")
     if schema:
@@ -149,6 +163,12 @@ def _channel_of(name: str, schema: str, sep: str) -> str | None:
     if "channel" not in fields or len(parts) < len(fields):
         return None
     return parts[fields.index("channel")].lower()
+
+
+def _unplaced(record: dict) -> list[str]:
+    from pipeline.nanowell_pattern_record import unplaced_wells
+
+    return unplaced_wells(record)
 
 
 def _listed(lead: str, items) -> list[str]:

@@ -323,6 +323,12 @@ allwell/
 │   │                              the pipeline still imports without it installed
 │   ├── nd2_explode.py          ← the ND2's per-well explode — stage positions →
 │   │                              wells, Z max-projected, one archive per well
+│   ├── converter_record.py     ← the acquisition record the OME and ND2 exploders
+│   │                              leave beside their archives: stage positions in
+│   │                              µm, calibration, tile size; withheld when the
+│   │                              folder holds an archive they did not produce
+│   ├── ome_acquisition.py      ← an OME-XML's stage positions and PhysicalSize per
+│   │                              (Image, TheT), units honoured, for that record
 │   ├── explode_common.py       ← what all three exploders do identically: the
 │   │                              member-name set, the resume check over it, the
 │   │                              worker split and count, the in-memory TIFF encode,
@@ -7172,8 +7178,9 @@ planes share a tile; opaque field/timepoint spellings are not numerically merged
 The pipeline's input-image predicate excludes metadata, directories and macOS
 sidecars. Missing/extra wells or tiles, unreadable archives and bad image names
 are explicit issues. An unreadable well's field coverage is not fabricated as
-empty. The CZI converter produces this record; dataset-tool and remote input
-transport integration carry the record as described below.
+empty. All three converters produce this record — the CZI converter as below, the
+OME-TIFF and ND2 converters as §6.2b's last paragraph describes; dataset-tool and
+remote input transport integration carry the record as described below.
 
 `pipeline/czi_acquisition.RecordBuilder` catalogs the conversion's filenames and
 source positions, then reads actual published ZIP member headers. Only those
@@ -8162,6 +8169,30 @@ pages put only five of thirty-one shared names byte-identical, and the large
 ones — `_build_params`, `_build_ui`, `refresh_readout` — diverge substantially.
 A common view base would be a base full of flags, which is the shape
 `datasets/core/tool_controller.py`'s own docstring warns against.
+
+**The OME-TIFF and ND2 acquisition records** (`pipeline/converter_record.py`).
+Both exploders remove any `in/acquisition.json` before writing their first
+archive and, once every well is published, write one for the archives in the
+folder that hold exactly the members this conversion's settings call for — the
+wells written, resumed, or written earlier under the same settings. A folder
+that also holds an archive these settings did not produce gets no record, said
+in the run log, because a record must name every archive
+(`validate_against_archives`). Each tile carries a stage position in µm and no
+mosaic position: from an OME `<Plane>`'s `PositionX`/`PositionY` only when both
+carry a length unit (`pipeline/ome_acquisition.py`, keyed per `(Image, TheT)`,
+a packed single-image file's frame found by the same `_frame_index` the planes
+were read with), from an ND2's position-loop points (µm by the format,
+`nd2_read.read_stage_calibration`). Pixel size is OME's `PhysicalSizeX`/`Y`
+(defaulting to µm, as the schema does) or the ND2 calibration only when its
+`bCalibrated` flag is set — an uncalibrated ND2 reports `1.0`, a placeholder —
+and tile size the image dimensions, each per timepoint only when every tile
+agrees. `started_at` is `null` with its reason: both converters already name
+timepoints by elapsed time. **A stage position alone does not place a tile for
+nanowell mode**: the run does not know whether a stage axis runs with the
+image's or against it (`place_from_record`'s `stage_to_image`, tracker R8), so
+`nanowell_pattern_record.unplaced_wells` counts such wells unplaceable, the run
+(`nanowell_task._placing_record`), its preview and the Analyze pre-flight place
+them from a described grid, and without one refuse naming it.
 
 ### 6.2c Converting part of a plate
 

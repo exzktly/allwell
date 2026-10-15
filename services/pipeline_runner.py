@@ -20,6 +20,10 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
                              remote scheduler, or has just been granted its
                              node. ``state`` is "waiting" | "queued" | "granted";
                              ``job_id`` is "" until the scheduler names it.
+    slurm_job     tuple      ("specs", {field: value}) — what the node a job was
+                             granted is (``services.slurm_node_specs``); or
+                             ("closed", {}) — the job is no longer open. Both
+                             parsed out of the log stream by ProgressTracker.
     done          str        Pipeline finished successfully.
     error         str        Pipeline failed; payload is a message.
     finished      None       Final event, always emitted in a finally.
@@ -51,6 +55,7 @@ from services.remote_runner import (
 )
 from services import run_journal, run_provenance
 from services.subprocess_kill import signal_subprocess
+from services.slurm_node_specs import JOB_CLOSED_LINE, parse_node_specs
 from util.aw_safe import swallow, swallowed
 from pipeline.suspend import LOG_MARKER as _SUSPEND_LOG_MARKER
 
@@ -240,6 +245,8 @@ _RE_SCHED_QUEUED = re.compile(
     r"srun: job (\d+) queued and waiting for resources", re.IGNORECASE)
 _RE_SCHED_ALLOCATED = re.compile(
     r"srun: job (\d+) has been allocated resources", re.IGNORECASE)
+_RE_JOB_CLOSED = re.compile(
+    re.escape(JOB_CLOSED_LINE.strip()) + r"|\[remote\] releasing the allocation")
 # Remote per-well lifecycle: input zip uploaded, then the output is fetched as
 # TWO separate transfers — the well's output zip AND its per-well CSV(s). A well
 # is only "downloaded" once BOTH have landed; the ``✓ materialised`` line fires
@@ -488,6 +495,16 @@ class ProgressTracker:
             if msg:
                 events.append(("sched", ("granted", msg.group(1), "")))
                 break
+        # What the granted node is, and the end of the job — for the Analyze
+        # pane's job indicator. "Closed" has two sources: the batched driver
+        # handing its allocation back, and the runner noting that the remote
+        # process which held the job has exited (the single-run launch execs
+        # the pipeline, so nothing inside the job can say it is over).
+        specs = parse_node_specs(line)
+        if specs is not None:
+            events.append(("slurm_job", ("specs", specs)))
+        if _RE_JOB_CLOSED.search(line):
+            events.append(("slurm_job", ("closed", {})))
         # Finalize-phase status — replace the generic "Finalizing…" with what
         # the run is actually doing so it doesn't read as a hang.
         if _RE_TF_SCAN.search(line):
@@ -1746,6 +1763,11 @@ class PipelineRunner:
             finally:
                 with swallow("waiting for the pipeline subprocess"):
                     proc.wait()
+                # The process that held the scheduler job has exited, so the
+                # job has too; the Analyze pane's job indicator goes out on it.
+                held = self._remote_runner
+                if held is not None and held.host.compute_launcher.strip():
+                    self._enqueue(("line", JOB_CLOSED_LINE))
             rc = proc.returncode
             cleanup_mode = self._settle_remote_suspend()
 

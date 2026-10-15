@@ -1,23 +1,25 @@
 """Bring home what an earlier remote run of this plate already finished.
 
-A resumed remote run is an *incremental* one (``analyze.suspend`` forces the
-flag on), and incremental staging decides what to upload from the **local**
-output folder alone: a well with no local CSV and no local ``<well>_out.zip``
+Every unforced remote run asks this first. Staging decides what to upload from
+the **local** output folder alone — incremental staging by its done-set, a
+batched run by its per-well CSV check, a plain single-shot run not at all: a well with no local CSV and no local ``<well>_out.zip``
 is uploaded whole and recomputed. That is the right answer for a well nobody
 has processed, and exactly the wrong one for a well the previous run finished
 on the server and never downloaded — the case a Suspend, a Stop, a dropped
 connection or a closed laptop leaves behind once the remote compute is done.
 Every well of such a plate was uploaded again and recomputed from scratch,
-while its finished output sat in the previous run's remote directory, which an
-incremental run deliberately never re-attaches to.
+while its finished output sat in the previous run's remote directory — which an
+incremental run deliberately never re-attaches to, a batched run never lists,
+and a plain run re-attaches to only after uploading the whole plate anyway.
 
 So before staging, this asks the one record that knows where that output went
 — the run journal's remote address, keyed on the same images, the same
 settings and the same host (:func:`services.run_journal.stored_remote_address`)
 — and runs the ordinary end-of-run fetch against that directory: the sidecar
 merge, ``errors/``, and the per-well pull of every well the remote holds output
-for and the local folder lacks. Once those wells are local, the incremental
-split sees them as done and uploads only what is genuinely missing.
+for and the local folder lacks. Once those wells are local, the caller stages
+the run incrementally, so the split sees them as done and uploads only what is
+genuinely missing.
 
 The pull is the existing :class:`services.remote_fetch.FetchedOutputVerifier`,
 pointed at the recorded directory, rather than a second implementation of
@@ -42,6 +44,7 @@ from services.remote_fetch import (
 from services.remote_run_id import (
     _forced_from_argv,
     _local_input_dir_from_argv,
+    legacy_argv_digests,
     pipeline_argv_digest,
 )
 from services.remote_run_state import LocalInputMode, OutputFilter, _RemoteRun
@@ -70,6 +73,11 @@ class Recovery:
     #: Verify's own account of what is still missing after the pull.
     still_missing: tuple[str, ...] = ()
 
+    @property
+    def pulled(self) -> bool:
+        """Whether wells were brought home, so staging must not resend them."""
+        return self.ok and bool(self.missing_locally)
+
 
 def recover_finished_outputs(
     runner,
@@ -96,17 +104,12 @@ def recover_finished_outputs(
     forced, forced_wells = _forced_from_argv(pipeline_argv)
     if forced or forced_wells:
         return Recovery()
-    try:
-        stored = run_journal.stored_remote_address(
-            local_output_dir,
-            argv_digest=pipeline_argv_digest(
-                pipeline_argv, extras=runner._host_argv_extras(output_filter)),
-            source_key=source_fingerprint(_local_input_dir_from_argv(pipeline_argv)),
-            host_alias=runner.host.ssh_alias,
-        )
-    except OSError:
-        swallowed(f"could not read the run journal in {local_output_dir}")
+    # Nothing recorded, nothing to find — asked before the input is
+    # fingerprinted, which reads every archive's metadata on the plate.
+    journal = run_journal.read_journal(local_output_dir)
+    if journal is None or not (journal.remote or {}).get("remote_output_dir"):
         return Recovery()
+    stored = _stored_address(runner, local_output_dir, pipeline_argv, output_filter)
     remote_dir = str((stored or {}).get("remote_output_dir") or "")
     if not remote_dir:
         return Recovery()
@@ -150,6 +153,33 @@ def recover_finished_outputs(
     return Recovery(ok=verdict.passed, remote_dir=remote_dir,
                     on_remote=on_remote, missing_locally=missing_wells,
                     still_missing=tuple(verdict.missing))
+
+
+def _stored_address(runner, local_output_dir: Path, pipeline_argv: list[str],
+                    output_filter: OutputFilter) -> dict | None:
+    """The address an earlier run of this configuration recorded, or ``None``.
+
+    Asked with the current digest first and then with the ones an earlier build
+    would have recorded (:func:`legacy_argv_digests`), so a plate left finished
+    on the server before the digest stopped hashing execution knobs is still
+    found. Each candidate is still matched on all three keys.
+    """
+    extras = runner._host_argv_extras(output_filter)
+    source_key = source_fingerprint(_local_input_dir_from_argv(pipeline_argv))
+    candidates = dict.fromkeys((
+        pipeline_argv_digest(pipeline_argv, extras=extras),
+        *legacy_argv_digests(pipeline_argv, extras=extras)))
+    for digest in candidates:
+        try:
+            stored = run_journal.stored_remote_address(
+                local_output_dir, argv_digest=digest, source_key=source_key,
+                host_alias=runner.host.ssh_alias)
+        except OSError:
+            swallowed(f"could not read the run journal in {local_output_dir}")
+            return None
+        if stored:
+            return stored
+    return None
 
 
 def _sample(wells: frozenset[str], n: int = 6) -> str:

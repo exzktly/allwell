@@ -109,19 +109,29 @@ def _pipeline_runner(host, stop_fetchers):
     return r
 
 
-def _run_one_finished_on_the_server(plate, host, remote, stop_fetchers):
+def _run_one_finished_on_the_server(plate, host, remote, stop_fetchers, *,
+                                    batch_size: int = 0, opts=None):
     """Run one: spawned, computed every well on the host, suspended before a
-    single well was downloaded. Returns the remote directory it wrote to."""
+    single well was downloaded. Returns the remote directory it wrote to.
+
+    ``batch_size`` > 0 spawns the batched driver instead; its stream ends at
+    once, which is a run that lost its driver — what matters here is only the
+    address it journalled and the output directory it owns.
+    """
     from services.pipeline_service import build_pipeline_args
     from services.remote_runner import OutputFilter, stage_local_zips
 
     inp, out = plate
+    opts = opts or _opts()
     r = _pipeline_runner(host, stop_fetchers)
-    args = build_pipeline_args(Path("process_microscopy.py"), inp, out, _opts())
-    r._open_journal(inp, out, args, _opts())
+    args = build_pipeline_args(Path("process_microscopy.py"), inp, out, opts)
+    r._open_journal(inp, out, args, opts)
     zipped = stage_local_zips(inp, filename_schema=SCHEMA, filename_sep="_",
                               prior_output_dir=out)
-    r._remote_runner.spawn(zipped, out, args, output_filter=OutputFilter.FULL)
+    proc = r._remote_runner.spawn(zipped, out, args, output_filter=OutputFilter.FULL,
+                                  batch_size=batch_size)
+    if batch_size:
+        proc.wait(timeout=30)
     remote_out = r._remote_runner._run.remote_output_dir
     seeded = remote.path(remote_out)
     seeded.mkdir(parents=True, exist_ok=True)
@@ -132,6 +142,9 @@ def _run_one_finished_on_the_server(plate, host, remote, stop_fetchers):
         rows = "".join(f"{well},{fov},T01,1\n" for fov in (1, 2))
         (seeded / f"measurements_{well}.csv").write_text(
             f"well,fov,timepoint,nucleus_id\n{rows}")
+        marker = seeded / ".aw_settings" / f"{well}.json"
+        marker.parent.mkdir(exist_ok=True)
+        marker.write_text(f'{{"well": "{well}", "digest": "d-{well}"}}')
     r._suspend_requested.set()
     r._close_journal()
     assert not list(out.glob("*_out.zip")) + list(out.glob("measurements_*")), (
@@ -139,12 +152,13 @@ def _run_one_finished_on_the_server(plate, host, remote, stop_fetchers):
     return remote_out
 
 
-def _resume(plate, host, stop_fetchers, **opts_extra):
-    """Run two, as Resume starts it: the recorded spec, incremental forced on."""
+def _resume(plate, host, stop_fetchers, *, incremental=True, **opts_extra):
+    """Run two: the recorded spec, as Resume starts it (incremental forced on)
+    or as a plain Run with incremental unticked."""
     from services.pipeline_service import build_pipeline_args
 
     inp, out = plate
-    opts = _opts(incremental=True, **opts_extra)
+    opts = _opts(**({"incremental": True} if incremental else {}), **opts_extra)
     r = _pipeline_runner(host, stop_fetchers)
     args = build_pipeline_args(Path("process_microscopy.py"), inp, out, opts)
     r._open_journal(inp, out, args, opts)
@@ -159,13 +173,18 @@ def _text(events):
     return "".join(str(e[1]) for e in events if e[0] in ("line", "done", "error"))
 
 
+@pytest.mark.parametrize("incremental", [True, False],
+                         ids=["resume-incremental", "run-incremental-unticked"])
+@pytest.mark.parametrize("batch_size", [0, 2], ids=["single-shot", "batched"])
 def test_resume_downloads_the_finished_wells_and_uploads_nothing(
-        plate, host, remote, stop_fetchers):
-    _run_one_finished_on_the_server(plate, host, remote, stop_fetchers)
+        plate, host, remote, stop_fetchers, incremental, batch_size):
+    _run_one_finished_on_the_server(plate, host, remote, stop_fetchers,
+                                    batch_size=batch_size)
     launches = len(remote.launched)
     uploads_before = list(remote.uploads)
 
-    _r, events = _resume(plate, host, stop_fetchers)
+    _r, events = _resume(plate, host, stop_fetchers, incremental=incremental,
+                         remote_batch_size=batch_size)
     text = _text(events)
 
     assert remote.uploads == uploads_before, (
@@ -175,6 +194,9 @@ def test_resume_downloads_the_finished_wells_and_uploads_nothing(
     _inp, out = plate
     for well in WELLS:
         assert (out / f"{well}_out.zip").is_file(), text
+        # The record of which settings produced it comes home too, or a later
+        # run with different settings would reuse these numbers unchecked.
+        assert (out / ".aw_settings" / f"{well}.json").is_file(), text
         body = gzip.decompress((out / f"measurements_{well}.csv.gz").read_bytes())
         rows = list(csv.DictReader(body.decode().splitlines()))
         assert [(r["fov"], r["timepoint"]) for r in rows] == [("1", "T01"), ("2", "T01")]
@@ -184,15 +206,17 @@ def test_resume_downloads_the_finished_wells_and_uploads_nothing(
                     "locally.\n") in events, text
 
 
+@pytest.mark.parametrize("incremental", [True, False],
+                         ids=["resume-incremental", "run-incremental-unticked"])
 def test_resume_uploads_only_the_well_the_server_had_not_finished(
-        plate, host, remote, stop_fetchers):
+        plate, host, remote, stop_fetchers, incremental):
     """The recovery narrows the upload; it does not replace it."""
     remote_out = _run_one_finished_on_the_server(plate, host, remote, stop_fetchers)
     for name in ("B02_out.zip", "measurements_B02.csv"):
         (remote.path(remote_out) / name).unlink()
     uploads_before = list(remote.uploads)
 
-    _r, events = _resume(plate, host, stop_fetchers)
+    _r, events = _resume(plate, host, stop_fetchers, incremental=incremental)
 
     assert remote.uploads[len(uploads_before):] == [["B02"]], _text(events)
     assert (plate[1] / "A01_out.zip").is_file()
@@ -244,3 +268,76 @@ def test_the_reuse_digest_ignores_the_client_side_incremental_flags():
     assert pipeline_argv_digest(resumed) == pipeline_argv_digest(base)
     assert pipeline_argv_digest(base + ["--nuclear_token", "H"]) \
         != pipeline_argv_digest(base)
+
+
+def test_reloaded_settings_that_differ_only_in_execution_knobs_still_find_it(
+        plate, host, remote, stop_fetchers):
+    """"Load previous run" does not restore ``allow_low_disk``; worker counts
+    and the run check are machine choices. None of them changes a byte of the
+    output, so none of them may hide the finished wells."""
+    _run_one_finished_on_the_server(
+        plate, host, remote, stop_fetchers,
+        opts=_opts(allow_low_disk=True, workers=8))
+    uploads_before = list(remote.uploads)
+
+    _r, events = _resume(plate, host, stop_fetchers, incremental=False,
+                         workers=2, run_check=False)
+
+    assert remote.uploads == uploads_before, _text(events)
+    assert (plate[1] / "B02_out.zip").is_file(), _text(events)
+
+
+def test_a_plate_recorded_under_the_old_digest_is_still_found(
+        plate, host, remote, stop_fetchers):
+    """A plate left finished on the server by the previous build carries a
+    digest that hashed ``--incremental``; it is exactly the one stuck today."""
+    from services.remote_run_id import legacy_argv_digests
+
+    _run_one_finished_on_the_server(plate, host, remote, stop_fetchers)
+    _inp, out = plate
+    record = J.read_journal(out).remote
+    from services.pipeline_service import build_pipeline_args
+    from services.remote_runner import OutputFilter, RemoteRunner
+    old_args = build_pipeline_args(Path("process_microscopy.py"), plate[0], out,
+                                   _opts(incremental=True))
+    old = legacy_argv_digests(
+        old_args, extras=RemoteRunner(host)._host_argv_extras(OutputFilter.FULL))[0]
+    assert old != record["argv_digest"]
+    J.record_remote(out, **{**{k: record[k] for k in (
+        "run_id", "cache_key", "host_alias", "remote_input_dir",
+        "remote_output_dir", "source_key")}, "argv_digest": old})
+    uploads_before = list(remote.uploads)
+
+    _r, events = _resume(plate, host, stop_fetchers)
+
+    assert remote.uploads == uploads_before, _text(events)
+    assert (plate[1] / "A01_out.zip").is_file(), _text(events)
+
+
+def test_changed_settings_never_download_the_old_output(
+        plate, host, remote, stop_fetchers):
+    """The other half: a setting that changes the numbers must not match."""
+    _run_one_finished_on_the_server(plate, host, remote, stop_fetchers)
+    uploads_before = list(remote.uploads)
+
+    _r, events = _resume(plate, host, stop_fetchers, min_nucleus_area_px=200)
+
+    assert "[remote] resume:" not in _text(events), _text(events)
+    assert not (plate[1] / "A01_out.zip").exists()
+    assert remote.uploads[len(uploads_before):] == [list(WELLS)]
+
+
+def test_a_plain_rerun_of_a_plate_the_server_holds_whole_uploads_nothing(
+        plate, host, remote, stop_fetchers):
+    """Nothing missing locally, everything on the host: the pre-flight finds a
+    full cache hit and the pipeline is replaced by ``true``. The upload used to
+    run anyway, so a plate whose staged archives keyed differently from the
+    last run's was sent in full for a run that computes nothing."""
+    _run_one_finished_on_the_server(plate, host, remote, stop_fetchers)
+    _resume(plate, host, stop_fetchers)          # downloads both wells
+    uploads_before = list(remote.uploads)
+
+    _r, events = _resume(plate, host, stop_fetchers, incremental=False)
+
+    assert "FULL CACHE HIT" in _text(events), _text(events)
+    assert remote.uploads == uploads_before, _text(events)

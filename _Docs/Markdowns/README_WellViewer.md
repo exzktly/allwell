@@ -1300,13 +1300,20 @@ and by `remote_fetch_report.txt` in the output folder.
   *Interrupted run* for one cut short because All-Well closed or crashed — and
   the lines under it name the plate, say when the run started and how it ended,
   and report how many wells it recorded as finished, failed, or produced on a
-  remote machine but never downloaded. **Resume** picks it up from there. On a
-  remote run it first downloads every well the host already finished — those
-  are not uploaded or computed again — and then uploads only what is still
-  missing; if every well was finished, nothing is uploaded and the run ends
-  with "Nothing to upload". If that download fails, the run stops with an error
-  rather than re-uploading the wells: press Resume again to retry it, or tick
-  **Force reprocess all wells** to recompute the plate from scratch.
+  remote machine but never downloaded. **Resume** picks it up from there.
+- **A remote run never re-uploads what the host already finished.** Every
+  remote run that is not forced — Resume, or Run with **incremental** ticked or
+  not, single-shot or batched, including after **Load previous run** — first
+  asks the host for the wells the last run of this plate finished there and
+  never downloaded, and downloads them. They are not uploaded or computed
+  again; only what is still missing is sent, and if nothing is, the run ends
+  with "Nothing to upload". This needs the same images, the same host, and the
+  same settings that change the numbers (segmentation, channels, corrections,
+  QC gates and so on); worker counts, the low-disk override and the run check
+  do not matter. Change one that alters the numbers and the old output is
+  correctly not reused. If the download fails, the run stops with an error
+  rather than re-uploading the wells: run it again to retry, or tick **Force
+  reprocess all wells** to recompute the plate from scratch.
 - The offer is about **the folder in the input field**. If you have not chosen
   one yet — the state the pane opens in — it offers the most recent unfinished
   run on any plate, which is how you carry on with something from yesterday.

@@ -1686,41 +1686,49 @@ class PipelineRunner:
         return True
 
     def _recover_remote_outputs(self, output_dir: Path, args: list[str],
-                                opts: dict) -> bool:
-        """Download what an earlier run of this plate finished on the remote.
+                                opts: dict) -> bool | None:
+        """Download what an earlier run of this plate finished on the remote,
+        and say whether staging must be incremental.
 
-        Runs before an incremental remote run stages its upload, because that
-        staging decides what to send from the *local* folder alone: a well the
-        previous run finished on the server and never downloaded looks
-        unprocessed, so it was uploaded again and recomputed. See
-        :mod:`services.remote_recover`.
+        Runs before every unforced remote run stages its upload — incremental
+        or not, single-shot or batched — because staging decides what to send
+        from the *local* folder alone: a well the previous run finished on the
+        server and never downloaded looks unprocessed, so it was uploaded again
+        and recomputed. See :mod:`services.remote_recover`.
 
-        ``False`` means the run has been ended with an error and the caller
+        Returns whether to stage incrementally: what the run asked for, or
+        ``True`` once wells were pulled, because only the incremental split
+        leaves a locally complete well out of the upload on every path. Never
+        under ``force`` (its wells are to be reprocessed, and staging must send
+        them whole), which also skips the pull: the old output is not wanted.
+        ``None`` means the run has been ended with an error and the caller
         returns: the recorded directory holds finished wells the pull could not
         bring home, and staging past that would re-upload and recompute them.
-        Only an incremental, unforced run asks: any other run uploads every
-        well whatever is local, and a forced one wants the old output replaced.
         """
-        if not opts.get("incremental", False) or opts.get("force", False):
-            return True
+        if opts.get("force", False):
+            return False
         recovery = recover_finished_outputs(
             self._remote_runner, output_dir, args,
             output_filter=OutputFilter(self._output_filter),
             log_fn=lambda m: self._enqueue(("line", m)),
             stop_event=self._stop_requested,
         )
+        if recovery.pulled and not opts.get("incremental", False):
+            self._enqueue(("line", "[remote] resume: staging incrementally, so "
+                                   "the wells just downloaded are not uploaded "
+                                   "again\n"))
         if recovery.ok:
-            return True
+            return bool(opts.get("incremental", False)) or recovery.pulled
         if self._stop_requested.is_set():
             self._enqueue_stopped(where="Remote run")
-            return False
+            return None
         self._enqueue_error(
             f"Could not download {len(recovery.still_missing)} file(s) that the "
             f"previous run of this plate already finished on the remote "
             f"({recovery.remote_dir}). Not re-uploading those wells — resume "
             f"again to retry the download, or tick Force to recompute the "
             f"plate from scratch.\n")
-        return False
+        return None
 
     def _run_pipeline_remote(
         self,
@@ -1744,7 +1752,8 @@ class PipelineRunner:
         zipped = None
         try:
             self._enqueue(("line", f"[remote] target: {self._remote.name}\n"))
-            if not self._recover_remote_outputs(output_dir, args, opts):
+            incremental = self._recover_remote_outputs(output_dir, args, opts)
+            if incremental is None:
                 return
             zipped = stage_local_zips(
                 input_dir,
@@ -1757,8 +1766,7 @@ class PipelineRunner:
                 # Never under --force: an incremental staging drops every well
                 # that is complete locally before it is uploaded, and the
                 # pipeline's own --force cannot reprocess what never arrived.
-                incremental=(bool(opts.get("incremental", False))
-                             and not bool(opts.get("force", False))),
+                incremental=incremental,
                 prior_output_dir=output_dir,
                 csv_prefix=opts.get("csv_prefix", "measurements"),
                 force_wells=opts.get("force_wells"),

@@ -457,7 +457,8 @@ class RemoteRunner:
                     swallowed("releasing the allocation after a failed sentinel")
                 raise
         else:
-            upload()
+            if not cache_hit:  # the remote already holds every well's output
+                upload()
             popen = self._start_ssh(ssh_argv)
 
         fetcher = Fetcher(

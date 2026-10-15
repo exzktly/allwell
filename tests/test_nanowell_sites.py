@@ -233,15 +233,25 @@ def test_a_50um_array_analysed_with_the_100um_setting_is_a_format_mismatch():
     assert estimate.ok and estimate.pitch_um == pytest.approx(86.0, rel=0.005)
     wrong = check_format(estimate.pitch_um, 100.0)
     assert wrong.ok is False and wrong.status == "format_mismatch"
-    assert "100 um" in wrong.reason and "85." in wrong.reason or "86." in wrong.reason
-    assert check_format(estimate.pitch_um, 50.0).ok
+    assert "100 um" in wrong.reason and ("85." in wrong.reason or "86." in wrong.reason)
+    # The right setting passes the pitch test but the pitch alone cannot confirm it: a setting that is
+    # too small passes too, so without fitted sites the answer is "unverified", not "ok".
+    unverified = check_format(estimate.pitch_um, 50.0)
+    assert unverified.ok is None and unverified.status == "unverified"
+    assert check_format(estimate.pitch_um, 50.0, [25.0, 24.8, 25.2]).ok is True
 
 
 def test_a_setting_that_fits_the_pitch_can_still_be_wrong_about_the_fitted_nanowells():
     assert check_format(172.0, 100.0, [50.0, 49.0, 51.0, None, float("nan")]).ok
     mismatch = check_format(172.0, 100.0, [30.0, 31.0, 29.0])            # the nanowells are 60 um across
     assert mismatch.ok is False and "60.0 um across" in mismatch.reason
-    assert check_format(172.0, 100.0, []).ok and check_format(172.0, 100.0, None).ok
+    for nothing in ([], None, [None, float("nan")]):
+        unverified = check_format(172.0, 100.0, nothing)
+        assert unverified.ok is None and unverified.status == "unverified"
+    assert check_format(None, 100.0).status == "unverified"                    # no measured pitch: no error either
+    assert check_format(float("nan"), 100.0, [50.0]).status == "unverified"
+    # A 100 um array read with the 50 um setting fits no site; that is unverified, never "ok".
+    assert check_format(172.0, 50.0, []).ok is None
     # A hair inside the 25 % tolerance passes, a hair outside fails.
     assert check_format(172.0, 100.0, [37.6]).ok is True
     assert check_format(172.0, 100.0, [37.4]).ok is False
@@ -254,3 +264,77 @@ def test_the_detection_with_the_matching_setting_agrees_with_the_format_check():
         geometries = refine_sites(image, px, detection.points_um, diameter)
         radii = [g.radius_um for g in geometries if g.geometry == FITTED]
         assert check_format(detection.fit.pitch, diameter, radii).ok
+
+
+# ── review findings ──────────────────────────────────────────────────────────
+def test_illumination_falling_to_a_third_at_the_rim_is_not_read_as_a_bubble():
+    # With one global midpoint, an array whose illumination falls to 36 % at its rim flagged 102 of 313
+    # sites occluded with no bubble in the image. The reference is now local.
+    rendered, image, pitch, diameter, px, radius = _scene("100um", bubble_share=0.0)
+    yy, xx = np.mgrid[0:900, 0:900]
+    rho = np.hypot((xx + 0.5) * px - rendered.array.origin[0], (yy + 0.5) * px - rendered.array.origin[1])
+    dimmed = (image * (1 - 0.64 * np.clip(rho / radius, 0, 1) ** 2)).astype(np.float32)
+    sites, geometries = _geometries(rendered, dimmed, px, diameter, pitch)
+    seen = site_visibility(dimmed, px, geometries)
+    assert not any(s.occluded for s in seen)
+    assert np.mean([s.visible_fraction > 0.9 for s in seen]) > 0.95
+
+
+def test_a_dark_cell_on_part_of_a_nanowell_is_not_an_occlusion_but_one_covering_most_of_it_is():
+    # A cell on a third of a disk leaves it mostly bright. One covering most of it reads as occluded, as a
+    # bubble does: telling them apart is the contents section's job, and the limit is stated.
+    rendered, image, pitch, diameter, px, radius = _scene("100um", bubble_share=0.0)
+    sites, geometries = _geometries(rendered, image, px, diameter, pitch)
+    target = geometries[len(geometries) // 2]
+    cx, cy = target.centre_um[0] / px - 0.5, target.centre_um[1] / px - 0.5
+    celled = image.copy()
+    yy, xx = np.mgrid[0:900, 0:900]
+    celled[(xx - cx - 3.0) ** 2 + (yy - cy) ** 2 <= 6.5 ** 2] = 0.15       # about a third of the disk
+    seen = site_visibility(celled, px, geometries)[len(geometries) // 2]
+    assert seen.visible_fraction < 0.8                          # part of the disk really is dark
+    assert seen.occluded is False                               # but the nanowell is there
+    assert site_visibility(image, px, geometries)[len(geometries) // 2].visible_fraction > 0.95
+    big = image.copy()
+    big[(xx - cx - 1.0) ** 2 + (yy - cy) ** 2 <= 9.5 ** 2] = 0.15
+    assert site_visibility(big, px, geometries)[len(geometries) // 2].occluded is True
+
+
+def test_the_bubble_mask_survives_most_of_the_array_being_hidden():
+    # The typical amplitude used to be the array's own 80th percentile, which is itself bubble when most of
+    # the array is hidden: with 84 % hidden the mask flagged 69 % of it, and with all of it hidden, 10 %.
+    pitch, diameter, px = FORMATS["100um"]
+    extent = 900 * px
+    radius = 0.42 * extent
+    rendered = render_tiles(TilePlan(1, 1, (900, 900), 0.0, px), pitch_um=pitch, diameter_um=diameter,
+                            radius_um=radius, rotation_deg=7.0, noise_sigma=0.05, seed=1, blur_px=1.0,
+                            bubble=(extent / 2 + 0.3 * radius, extent / 2, radius * 0.92))
+    image = rendered.images["F0"]
+    bx, by, br = rendered.bubble
+    detection = detect_sites(image, px, diameter, expected_pitch_um=pitch)
+    assert detection.ok, detection.reason
+    centre = rendered.array.origin
+    ys, xs = np.mgrid[0:900, 0:900]
+    x_um, y_um = (xs + 0.5) * px, (ys + 0.5) * px
+    interior = np.hypot(x_um - centre[0], y_um - centre[1]) <= radius - pitch / 2
+    truth = (np.hypot(x_um - bx, y_um - by) <= br) & interior
+    assert truth.sum() > 0.7 * interior.sum()                   # the bubble really is most of the array
+    mask = bubble_mask(image, px, detection.fit, centre, radius, reference_points_um=detection.points_um)
+    assert (mask & truth).sum() / truth.sum() > 0.75            # most of the true bubble is flagged
+    assert (mask & ~truth).sum() < 0.1 * interior.sum()         # and little of the clear array
+    # Without the sites to read the typical amplitude from, the old percentile reference is the fallback.
+    fallback = bubble_mask(image, px, detection.fit, centre, radius)
+    assert (fallback & truth).sum() < (mask & truth).sum()
+
+
+def test_disk_samples_are_spread_evenly_over_the_area():
+    from pipeline.nanowell_sites import _disk_samples
+    samples = _disk_samples()
+    assert np.hypot(samples[:, 0], samples[:, 1]).max() <= 1.0
+    # The share of the points beyond a chord at c is the share of the disk's area there.
+    for c in (0.0, 0.3, 0.6, 0.9):
+        area = (np.arccos(c) - c * np.sqrt(1 - c * c)) / np.pi
+        assert (samples[:, 0] > c).mean() == pytest.approx(area, abs=0.02)
+    # And a site centred on the array's edge reads as half inside it.
+    centred = site_coverage([_site((1000.0, 500.0))], [(0.0, 0.0, 2000.0, 1000.0)],
+                            array_centre_um=(500.0, 500.0), array_radius_um=500.0)[0]
+    assert centred.inside_array_fraction == pytest.approx(0.5, abs=0.04)

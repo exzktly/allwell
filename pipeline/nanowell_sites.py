@@ -35,31 +35,42 @@ _MAX_DIAMETER_TO_PITCH = 0.95
 
 # ── N5: occlusion ────────────────────────────────────────────────────────────
 def bubble_mask(image, pixel_size_um: float, fit: LatticeFit, array_centre_um, array_radius_um: float, *,
-                threshold: float = 0.3) -> np.ndarray:
+                reference_points_um=None, threshold: float = 0.3) -> np.ndarray:
     """True where the lattice's own signal is missing inside the array: a bubble.
 
     The image is demodulated at the lattice's first-order frequencies and smoothed over about
     one pitch. Where nanowells repeat, the amplitude is that of the lattice; under a bubble the
     texture is gone and the amplitude falls to nothing. Pixels below *threshold* times the
-    array's typical amplitude (its 80th percentile) are flagged. Outside the array the floor is
-    flat too, and is never flagged: the mask says "a bubble is here", not "no nanowell is here".
+    typical lattice amplitude are flagged. The typical amplitude is read at *reference_points_um*
+    (the detected sites, which are by construction where the lattice is) when they are given,
+    and otherwise is the array's own 80th percentile, which fails when most of the array is
+    hidden: with 84 % of it under a bubble the percentile is itself bubble. Outside the array the
+    floor is flat too, and is never flagged: the mask says "a bubble is here", not "no nanowell
+    is here". The demodulation runs on an image block-averaged to about 8 px per pitch, because
+    the amplitude is smooth over a pitch, and the mask is returned at full size.
     """
     from scipy import ndimage
 
     if not fit.ok:
         raise ValueError(f"Cannot find a bubble mask without a lattice: {fit.reason}")
-    image = np.asarray(image, dtype=np.float64)
-    h, w = image.shape
+    full = np.asarray(image, dtype=np.float64)
+    h, w = full.shape
+    pitch_px = fit.pitch / pixel_size_um
+    f = max(1, int(pitch_px // 8))
+    hh, ww = (h // f) * f, (w // f) * f
+    image = full[:hh, :ww].reshape(hh // f, f, ww // f, f).mean(axis=(1, 3)) if f > 1 else full
+    ch, cw = image.shape
+    scale = pixel_size_um * f
     basis = np.column_stack((fit.a1, fit.a2))                    # um
     dual = np.linalg.inv(basis).T                                # columns: g1, g2 in cycles/um
     frequencies = [dual[:, 0], dual[:, 1]]
     if fit.kind == "hex":
         frequencies.append(dual[:, 0] + dual[:, 1])
-    ys, xs = np.mgrid[0:h, 0:w]
-    x_um, y_um = (xs + 0.5) * pixel_size_um, (ys + 0.5) * pixel_size_um
-    sigma = 0.6 * fit.pitch / pixel_size_um
-    centred = image - ndimage.gaussian_filter(image, 2.0 * fit.pitch / pixel_size_um)
-    amplitude = np.zeros((h, w))
+    ys, xs = np.mgrid[0:ch, 0:cw]
+    x_um, y_um = (xs + 0.5) * scale, (ys + 0.5) * scale
+    sigma = 0.6 * fit.pitch / scale
+    centred = image - ndimage.gaussian_filter(image, 2.0 * fit.pitch / scale)
+    amplitude = np.zeros((ch, cw))
     for g in frequencies:
         carrier = np.exp(-2j * np.pi * (g[0] * x_um + g[1] * y_um))
         product = centred * carrier
@@ -68,8 +79,17 @@ def bubble_mask(image, pixel_size_um: float, fit: LatticeFit, array_centre_um, a
     inside = np.hypot(x_um - array_centre_um[0], y_um - array_centre_um[1]) <= array_radius_um - fit.pitch / 2
     if not inside.any():
         return np.zeros((h, w), dtype=bool)
-    typical = float(np.percentile(amplitude[inside], 80))
-    return inside & (amplitude < threshold * typical)
+    if reference_points_um is not None and len(reference_points_um):
+        pts = np.asarray(reference_points_um, dtype=float)
+        px_idx = np.clip(np.rint(pts[:, 0] / scale - 0.5).astype(int), 0, cw - 1)
+        py_idx = np.clip(np.rint(pts[:, 1] / scale - 0.5).astype(int), 0, ch - 1)
+        typical = float(np.median(amplitude[py_idx, px_idx]))
+    else:
+        typical = float(np.percentile(amplitude[inside], 80))
+    coarse = inside & (amplitude < threshold * typical)
+    mask = np.zeros((h, w), dtype=bool)
+    mask[:hh, :ww] = np.kron(coarse, np.ones((f, f), dtype=bool)) if f > 1 else coarse
+    return mask
 
 
 @dataclass(frozen=True)
@@ -97,16 +117,26 @@ def _disk_pixels(image_shape, centre_px, inner: float, outer: float):
     return yy[keep], xx[keep]
 
 
-def site_visibility(image, pixel_size_um: float, geometries, *, mask=None) -> list[SiteVisibility]:
+def site_visibility(image, pixel_size_um: float, geometries, *, mask=None, neighbours: int = 12
+                    ) -> list[SiteVisibility]:
     """Each site's visible fraction and contrast, from the image at its fitted geometry.
 
     A nanowell is a light disk on a dark lattice, so its disk is bright; a site under a bubble
-    is a black disk on the black lattice, with no brightness over its surroundings. The well's
-    typical site and typical lattice level come from the *fitted* sites (the percentiles of the
-    whole image when fewer than three fitted), and a disk pixel counts as visible when it lies
-    above their midpoint. With a bubble *mask* a pixel under it is not visible whatever its
-    brightness. A site off the image has ``None`` for both numbers, not zero.
+    is a black disk on the black lattice, with no brightness over its surroundings. A disk pixel
+    counts as visible when it lies above the midpoint between a typical site's brightness and a
+    typical lattice level, and **typical means local**: the median over the *neighbours* nearest
+    fitted sites, so illumination that falls toward the array's rim (to 36 % in one test) moves
+    the midpoint with it instead of reading as a bubble. With fewer than three fitted sites the
+    percentiles of the whole image stand in. With a bubble *mask* a pixel under it is not visible
+    whatever its brightness. A site off the image has ``None`` for both numbers, not zero.
+
+    ``occluded`` is simply a visible fraction under :data:`OCCLUDED_BELOW`. **A dark cell that
+    covers most of a nanowell therefore reads as occluded**, exactly as a bubble does: telling
+    the two apart (a cell has internal structure, a bubble is flat) is for the contents section,
+    and a cell on a third of the disk, as in the tests, is not flagged.
     """
+    from scipy import spatial
+
     image = np.asarray(image, dtype=np.float64)
     h, w = image.shape
     pack = []
@@ -116,19 +146,27 @@ def site_visibility(image, pixel_size_um: float, geometries, *, mask=None) -> li
         disk = _disk_pixels((h, w), centre, 0.0, 0.85 * radius)
         ring = _disk_pixels((h, w), centre, 1.35 * radius, 1.8 * radius)
         pack.append((g, disk, ring))
-    inside = [float(image[d].mean()) for g, d, r in pack if g.geometry == FITTED and len(d[0])]
-    around = [float(image[r].mean()) for g, d, r in pack if g.geometry == FITTED and len(r[0])]
-    if len(inside) >= 3:
-        bright, dark = float(np.median(inside)), float(np.median(around))
-    else:
-        bright, dark = float(np.percentile(image, 90)), float(np.percentile(image, 10))
-    midpoint = (bright + dark) / 2
-    span = bright - dark
+    fitted = [(g.centre_um, float(image[d].mean()), float(image[r].mean()))
+              for g, d, r in pack if g.geometry == FITTED and len(d[0]) and len(r[0])]
+    tree = bright_at = dark_at = None
+    if len(fitted) >= 3:
+        tree = spatial.cKDTree(np.array([f[0] for f in fitted]))
+        bright_at = np.array([f[1] for f in fitted])
+        dark_at = np.array([f[2] for f in fitted])
+        k = min(neighbours, len(fitted))
+    fallback = (float(np.percentile(image, 90)), float(np.percentile(image, 10)))
     out = []
     for g, disk, ring in pack:
         if not len(disk[0]):
             out.append(SiteVisibility(g.index, None, None, None))
             continue
+        if tree is not None:
+            _, near = tree.query(g.centre_um, k=k)
+            near = np.atleast_1d(near)
+            bright, dark = float(np.median(bright_at[near])), float(np.median(dark_at[near]))
+        else:
+            bright, dark = fallback
+        midpoint, span = (bright + dark) / 2, bright - dark
         values = image[disk]
         seen = values >= midpoint
         if mask is not None:
@@ -137,7 +175,7 @@ def site_visibility(image, pixel_size_um: float, geometries, *, mask=None) -> li
         contrast = None
         if len(ring[0]) and span > 0:
             contrast = float((values.mean() - image[ring].mean()) / span)
-        out.append(SiteVisibility(g.index, fraction, contrast, fraction < OCCLUDED_BELOW))
+        out.append(SiteVisibility(g.index, fraction, contrast, bool(fraction < OCCLUDED_BELOW)))
     return out
 
 
@@ -150,15 +188,18 @@ class SiteCoverage:
     inside_well_fraction: float | None      # share inside the well wall; None without one
 
 
-def _disk_samples(count_rings: int = 4) -> np.ndarray:
-    """Deterministic sample points over a unit disk, each ring weighted by its area."""
-    points = [(0.0, 0.0)]
-    for ring in range(1, count_rings + 1):
-        radius = ring / count_rings
-        n = 6 * ring
-        angles = 2 * math.pi * (np.arange(n) + 0.5 * (ring % 2)) / n
-        points.extend(zip(radius * np.cos(angles), radius * np.sin(angles)))
-    return np.asarray(points)
+def _disk_samples(count: int = 127) -> np.ndarray:
+    """Deterministic sample points spread evenly over the area of a unit disk (a Vogel spiral).
+
+    Every point stands for the same area, so the share of them inside a boundary is the share of
+    the disk's area. (Concentric rings of 6, 12, 18 ... points weighted each ring equally per
+    point, which gave the outer ring 39 % of the points for 23 % of the area and overstated a
+    chord's outside share by up to 2.5x.)
+    """
+    k = np.arange(count)
+    radius = np.sqrt((k + 0.5) / count)
+    angle = k * math.pi * (3 - math.sqrt(5))
+    return np.column_stack((radius * np.cos(angle), radius * np.sin(angle)))
 
 
 def site_coverage(geometries, tile_rects, *, array_centre_um=None, array_radius_um=None,
@@ -307,12 +348,14 @@ def shared_array_radius(boundaries: dict, pitch_um: float) -> SharedRadius:
 # ── N9: the plate format ─────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class FormatCheck:
-    ok: bool
-    status: str                         # "ok" or "format_mismatch"
+    #: True when the format setting is consistent with *both* the pitch and the fitted nanowells;
+    #: False for a mismatch; ``None`` (undefined) when there is nothing to check it against.
+    ok: bool | None
+    status: str                         # "ok", "format_mismatch" or "unverified"
     reason: str = ""
 
 
-def check_format(pitch_um: float, nominal_diameter_um: float, fitted_radii_um=None) -> FormatCheck:
+def check_format(pitch_um: float | None, nominal_diameter_um: float, fitted_radii_um=None) -> FormatCheck:
     """Whether the plate format setting can be right for what was measured.
 
     Two independent tests. The lattice's pitch is read from the image before any matched filter
@@ -321,17 +364,27 @@ def check_format(pitch_um: float, nominal_diameter_um: float, fitted_radii_um=No
     are fitted, their median diameter must be within 25 % of the setting's. Either failing is
     reported as a format mismatch instead of letting a template of the wrong size detect the
     wrong thing.
+
+    **Passing the pitch test alone proves little**: a setting too small for the array passes it.
+    With no fitted radii the answer is therefore ``unverified`` (``ok=None``), not ``ok``; a
+    caller that has no fitted sites at all (detection failed) must not read the setting as
+    confirmed. An unreadable pitch is likewise ``unverified``.
     """
+    if pitch_um is None or not math.isfinite(pitch_um) or pitch_um <= 0:
+        return FormatCheck(None, "unverified", "The lattice pitch could not be measured, so the plate format "
+                                               "setting cannot be checked")
     if nominal_diameter_um >= _MAX_DIAMETER_TO_PITCH * pitch_um:
         return FormatCheck(False, "format_mismatch",
                            f"The plate format sets a {nominal_diameter_um:g} um nanowell but the lattice pitch "
                            f"measures {pitch_um:.1f} um, so neighbouring nanowells would touch: the setting is "
                            f"probably for a different plate format")
     radii = [r for r in (fitted_radii_um or []) if r is not None and math.isfinite(r)]
-    if radii:
-        measured = 2 * float(np.median(radii))
-        if abs(measured / nominal_diameter_um - 1) > FORMAT_RADIUS_TOLERANCE:
-            return FormatCheck(False, "format_mismatch",
-                               f"The fitted nanowells measure {measured:.1f} um across but the plate format "
-                               f"sets {nominal_diameter_um:g} um")
+    if not radii:
+        return FormatCheck(None, "unverified", "No nanowell was fitted, so only the pitch could be checked "
+                                               "against the setting (which a setting that is too small passes)")
+    measured = 2 * float(np.median(radii))
+    if abs(measured / nominal_diameter_um - 1) > FORMAT_RADIUS_TOLERANCE:
+        return FormatCheck(False, "format_mismatch",
+                           f"The fitted nanowells measure {measured:.1f} um across but the plate format "
+                           f"sets {nominal_diameter_um:g} um")
     return FormatCheck(True, "ok")

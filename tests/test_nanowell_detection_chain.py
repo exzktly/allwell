@@ -29,7 +29,7 @@ def _render(fmt, *, rotation, bubble=None, square_hidden=False, seed=1):
 def _addresses(rendered, image, pitch, diameter, px, *, margin=0.3):
     """Run the chain; returns (detected centres, the addresses assigned to them, the resolution)."""
     estimate = estimate_lattice_fft(image, px, expected_pitch_um=pitch)
-    assert estimate.ok and check_format(estimate.pitch_um, diameter).ok
+    assert estimate.ok and check_format(estimate.pitch_um, diameter).status != "format_mismatch"
     detection = detect_sites(image, px, diameter, expected_pitch_um=estimate.pitch_um)
     assert detection.ok, detection.reason
     candidate, scores = score_fiducial(image, px, diameter, detection.points_um,

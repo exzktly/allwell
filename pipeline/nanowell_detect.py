@@ -43,8 +43,22 @@ PREDICTED = "predicted"
 _PEAK_MAGNITUDE_TOLERANCE = 0.08
 #: ... and their directions within this many degrees of 60 or 90 from it.
 _PEAK_ANGLE_TOLERANCE_DEG = 8.0
+#: A peak must carry at least this share of the strongest peak's power to be taken as a lattice's
+#: first order when it lies below it in frequency.
+_FUNDAMENTAL_POWER_FRACTION = 0.02
 #: The orientation tolerance for the square against the lattice axis (tracker N3a).
 SQUARE_AXIS_TOLERANCE_DEG = 15.0
+#: How far the fitted basis may depart from an ideal lattice (length ratio, 5 degrees) before the
+#: lattice is called stretched rather than used.
+_MAX_BASIS_DISTORTION = 0.05
+#: Below this a nanowell is too few pixels across for a ray fit to be trusted. Measured on rendered arrays with
+#: noise: 8 % of 1,285 sites fitted at a 5.8 px radius, 24 % at 7.1 px, 57 % at 8.3 px, and all but one of 313
+#: at 11.6 px. At a 10x objective's 0.65 um per pixel a 50 um nanowell is 38 px in radius, so this bites only
+#: on a heavily downsampled montage, which is not what refinement reads.
+MIN_REFINE_RADIUS_PX = 10.0
+#: The width, in pixels, of an in-focus rim in this imaging (plateau drop over steepest slope); softness beyond
+#: it relaxes the scatter limit.
+_SHARP_EDGE_WIDTH_PX = 4.0
 #: Rays cast per site when fitting its edge, and the share that must find an edge.
 _RAYS = 32
 _MIN_RAY_FRACTION = 0.6
@@ -124,30 +138,55 @@ def estimate_lattice_fft(image, pixel_size_um: float, *, expected_pitch_um: floa
     if len(candidates) < 2:
         return LatticeEstimate(False, "No lattice peaks stand out of the spectrum: the image holds "
                                       "no periodic structure at the expected pitch")
-    order = np.argsort(power[tuple(candidates.T)])[::-1][:16]
+    order = np.argsort(power[tuple(candidates.T)])[::-1][:24]
     refined = []
     for index in candidates[order]:
         y, x = int(index[0]), int(index[1])
         ry, rx, rp = _zoom_peak(windowed, float(fy[y, 0]), float(fx[0, x]), 0.1)
         refined.append((np.array([rx, ry]), rp))
-    strongest, strongest_power = refined[0]
 
     def angle_between(a, b):
         cosine = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
         return math.degrees(math.acos(np.clip(abs(cosine), 0, 1)))        # modulo 180: 0..90
 
-    same_ring = [v for v, _ in refined[1:]
-                 if abs(np.linalg.norm(v) / np.linalg.norm(strongest) - 1) <= _PEAK_MAGNITUDE_TOLERANCE]
-    at_60 = [v for v in same_ring if abs(angle_between(strongest, v) - 60) <= _PEAK_ANGLE_TOLERANCE_DEG]
-    at_90 = [v for v in same_ring if abs(angle_between(strongest, v) - 90) <= _PEAK_ANGLE_TOLERANCE_DEG]
-    if kind == "hex" or (kind == "auto" and at_60 and len(at_60) >= len(at_90)):
-        found, partners = "hex", at_60
-    elif kind == "square" or (kind == "auto" and at_90):
-        found, partners = "square", at_90
-    else:
+    def family(anchor, minimum_hex_partners) -> tuple[str, list] | None:
+        """The kind and partner peaks of the lattice whose first order contains *anchor*, or None."""
+        same_ring = [v for v, _ in refined
+                     if v is not anchor and abs(np.linalg.norm(v) / np.linalg.norm(anchor) - 1) <= _PEAK_MAGNITUDE_TOLERANCE]
+        at_60 = [v for v in same_ring if abs(angle_between(anchor, v) - 60) <= _PEAK_ANGLE_TOLERANCE_DEG]
+        at_90 = [v for v in same_ring if abs(angle_between(anchor, v) - 90) <= _PEAK_ANGLE_TOLERANCE_DEG]
+        if kind == "hex" or (kind == "auto" and at_60 and len(at_60) >= len(at_90)):
+            return ("hex", at_60) if len(at_60) >= minimum_hex_partners else None
+        if kind == "square" or (kind == "auto" and at_90):
+            return ("square", at_90) if at_90 else None
+        return None
+
+    strongest, strongest_power = refined[0]
+    chosen = family(strongest, 1)
+    if chosen is None:
         return LatticeEstimate(False, "The spectrum's peaks are neither hexagonal nor square")
-    if not partners:
-        return LatticeEstimate(False, f"The spectrum has no second {found} peak beside the strongest")
+    found, partners = chosen
+    # A lattice's harmonics are peaks too, and a high-pass image (a halo, a flattened background) can
+    # make one stronger than the fundamental: a pitch of 172 read as 65 (172 / sqrt 7). A harmonic is
+    # an integer combination of the fundamental's reciprocal vectors, so if a lower-frequency family
+    # with real power (two partners for a hexagonal one, as chance peaks do not have) has the strongest
+    # peak on its reciprocal lattice, the strongest was a harmonic and the lowest such family is the
+    # lattice. A lower family that does not explain the strongest peak is not used: a spurious one
+    # chosen only for being lowest put the pitch 3.6 % off.
+    for vector, vector_power in sorted(refined, key=lambda item: float(np.linalg.norm(item[0]))):
+        if (np.linalg.norm(vector) >= 0.9 * np.linalg.norm(strongest)
+                or vector_power < _FUNDAMENTAL_POWER_FRACTION * strongest_power):
+            continue
+        lower = family(vector, 2)
+        if lower is None:
+            continue
+        basis_rows = np.array([vector, lower[1][0]])
+        if abs(np.linalg.det(basis_rows)) < 1e-12:
+            continue
+        coordinates = strongest @ np.linalg.inv(basis_rows)
+        if np.all(np.abs(coordinates - np.round(coordinates)) < 0.1):
+            strongest, strongest_power, (found, partners) = vector, vector_power, lower
+            break
     reciprocal = np.array([strongest, partners[0]])                       # rows: g1, g2 in cycles/px
     if abs(np.linalg.det(reciprocal)) < 1e-12:
         return LatticeEstimate(False, "The spectrum's peaks are collinear")
@@ -220,8 +259,7 @@ def detect_sites(image, pixel_size_um: float, nanowell_diameter_um: float, *,
     if len(coords) < 6:
         return SiteDetection(False, "Fewer than six candidate sites were found")
     values = response[tuple(coords.T)]
-    strong = float(np.percentile(values, 90))
-    keep = values >= 0.5 * strong
+    keep = values >= 0.5 * _site_response(values)
     coords, values = coords[keep], values[keep]
     centres = np.empty((len(coords), 2))
     for n, (y, x) in enumerate(coords):
@@ -231,11 +269,46 @@ def detect_sites(image, pixel_size_um: float, nanowell_diameter_um: float, *,
     if not fit.ok:
         return SiteDetection(False, f"The lattice could not be fitted to the candidates: {fit.reason}",
                              points_um, values, fit)
+    ideal = 60.0 if fit.kind == "hex" else 90.0
+    if abs((fit.length_ratio or 1.0) - 1.0) > _MAX_BASIS_DISTORTION or abs(fit.basis_angle_deg - ideal) > 5.0:
+        return SiteDetection(
+            False, f"The fitted lattice is stretched (basis length ratio {fit.length_ratio:.3f}, angle "
+                   f"{fit.basis_angle_deg:.1f} degrees against {ideal:g}): anisotropic pixels or optics, or a "
+                   "wrong lattice kind. Pitch, angle and every address would be wrong", points_um, values, fit)
     inliers = points_um[np.asarray(fit.inlier_mask, dtype=bool)]
     boundary = fit_array_boundary(inliers)
     centre = tuple(boundary.centre) if boundary.status == "fitted" else None
     radius = boundary.radius if boundary.status == "fitted" else None
     return SiteDetection(True, "", points_um, values, fit, centre, radius)
+
+
+def _site_response(values) -> float:
+    """The typical response of a real site among local maxima that include noise ones.
+
+    In a small array most local maxima of the filtered image are noise outside it, so a
+    percentile of all of them sits in the noise (a 199-site array in a 1500 px image gave 3,147
+    candidates and no lattice fit). The maxima split into two populations on a log scale; when
+    the split is clear (the upper class's mean is more than twice the lower's) the typical
+    site is the upper class's median, and otherwise every maximum is a site and it is the median.
+    """
+    values = np.sort(np.asarray(values, dtype=float))
+    logs = np.log(values)
+    edges = np.linspace(logs[0], logs[-1] + 1e-9, 65)
+    best = None
+    for cut in edges[1:-1]:
+        low, high = logs < cut, logs >= cut
+        if low.sum() < 3 or high.sum() < 3:
+            continue
+        weight = low.mean() * high.mean() * (logs[high].mean() - logs[low].mean()) ** 2
+        if best is None or weight > best[0]:
+            best = (weight, cut)
+    if best is None:
+        return float(np.median(values))
+    upper = values[logs >= best[1]]
+    lower = values[logs < best[1]]
+    if upper.mean() > 2.0 * lower.mean():
+        return float(np.median(upper))
+    return float(np.median(values))
 
 
 def _parabolic_centre(response, y: int, x: int) -> tuple[float, float]:
@@ -260,8 +333,9 @@ def _parabolic_centre(response, y: int, x: int) -> tuple[float, float]:
 class SquareScore:
     """How square one site's outline is, and which way its edges run."""
     position_um: tuple[float, float]
-    coherence: float                    # 0 for a circle, near 1 for a square
+    coherence: float                    # squareness: near 0 for a circle or a single straight edge, near 1 for a square
     orientation_deg: float              # edge direction modulo 90, in (-45, 45], geometry convention
+    straightness: float = 0.0           # the two-fold sum: high where one edge direction dominates
 
 
 def square_score(image, pixel_size_um: float, nanowell_diameter_um: float, position_um) -> SquareScore | None:
@@ -293,20 +367,32 @@ def square_score(image, pixel_size_um: float, nanowell_diameter_um: float, posit
         return None
     angle = np.arctan2(gy, gx)
     z = complex(np.sum(weight * np.exp(4j * angle)))
+    z2 = complex(np.sum(weight * np.exp(2j * angle)))
     orientation = -math.degrees(math.atan2(z.imag, z.real)) / 4          # image y is down: flip the sign
     orientation = (orientation + 45.0) % 90.0 - 45.0
-    return SquareScore((float(position_um[0]), float(position_um[1])), abs(z) / total, orientation)
+    # A straight edge (a bubble's rim crossing a circle) has its gradients in one direction, so its
+    # four-fold sum is as large as a square's; but it has a two-fold sum too, and a square's two
+    # edges 90 degrees apart cancel in that. Squareness is the four-fold sum beyond the two-fold one.
+    return SquareScore((float(position_um[0]), float(position_um[1])), max(abs(z) - abs(z2), 0.0) / total,
+                       orientation, abs(z2) / total)
+
+
+#: A fiducial must be at least this square in absolute terms, whatever its margin over the runner-up:
+#: a clean square scores about 0.74 and a circle near 0, and a margin alone would anchor the well on
+#: the least circular of a set of circles.
+MIN_SQUARENESS = 0.4
 
 
 def score_fiducial(image, pixel_size_um: float, nanowell_diameter_um: float, points_um, *,
-                   centre_um=None, search_radius_um: float | None = None
+                   centre_um=None, search_radius_um: float | None = None,
+                   min_squareness: float = MIN_SQUARENESS
                    ) -> tuple[FiducialCandidate | None, list[SquareScore]]:
     """Square-versus-circle score of every candidate near the array centre, and the best one.
 
     Returns ``(candidate, scores)``. The candidate carries the best site's score and the
     runner-up's, for ``resolve_origin``'s margin test; the margin is the caller's, not
     calibrated here. ``None`` with fewer than two scorable sites, because a margin over
-    nothing is not a margin. Every score is returned so that it can be recorded.
+    nothing is not a margin, and ``None`` when even the best is under *min_squareness*. Every score is returned so that it can be recorded.
     """
     points = np.asarray(points_um, dtype=float)
     if centre_um is not None and search_radius_um is not None:
@@ -316,6 +402,8 @@ def score_fiducial(image, pixel_size_um: float, nanowell_diameter_um: float, poi
     if len(scores) < 2:
         return None, scores
     ranked = sorted(scores, key=lambda s: s.coherence, reverse=True)
+    if ranked[0].coherence < min_squareness:
+        return None, scores
     return FiducialCandidate(ranked[0].position_um, ranked[0].coherence, ranked[1].coherence), scores
 
 
@@ -383,7 +471,8 @@ def _edge_points(image, centre_px, radius_px, contrast):
     slope = np.gradient(profile, rhos, axis=1)
     peak = np.argmin(slope, axis=1)                                  # steepest fall outward
     found = []
-    reach = max(int(round(1.5 / step)), 1)                           # the drop is read 1.5 px either side
+    inner_zone = rhos <= 0.7 * radius_px                              # inside the disk, away from its rim
+    outer_zone = rhos >= 1.3 * radius_px                              # the lattice just outside it
     for ray in range(_RAYS):
         k = int(peak[ray])
         if k < 2 or k > len(rhos) - 3:
@@ -391,9 +480,13 @@ def _edge_points(image, centre_px, radius_px, contrast):
         a, b, c = slope[ray, k - 1], slope[ray, k], slope[ray, k + 1]
         denom = a - 2 * b + c
         rho = rhos[k] + (0.5 * (a - c) / denom * step if denom > 0 else 0.0)
-        drop = profile[ray, max(k - reach, 0)] - profile[ray, min(k + reach, len(rhos) - 1)]
+        # The contrast an edge must show is the disk's plateau over the lattice's, not the drop across
+        # a pixel or two: a defocused or haloed rim has a soft, wide edge and the same plateaus.
+        drop = profile[ray, inner_zone].mean() - profile[ray, outer_zone].mean()
         if drop >= contrast:
-            found.append((angles[ray], rho))
+            # The edge's width in pixels, as its plateau-to-plateau drop over its steepest slope: the
+            # measure of how soft this rim is, which sets how precisely its position can be read.
+            found.append((angles[ray], rho, drop / max(-slope[ray, k], 1e-9)))
     return found
 
 
@@ -412,7 +505,7 @@ def refine_sites(image, pixel_size_um: float, sites_um, nominal_diameter_um: flo
     """Fit every site's centre and radius from its radial edge profile; never drop one.
 
     A site whose fit holds up (enough rays find an edge, the circle through them has small
-    scatter (6 % of the radius), a radius within 30 % of nominal, a centre within a radius of the lattice
+    scatter (6 % of the radius plus a quarter of the rim's width), a radius within 30 % of nominal, a centre within a radius of the lattice
     position) is ``fitted``. Any other site takes the lattice position and the well's
     median fitted radius and is ``predicted``: a bubble, debris or a clipped edge costs a
     site its measurement, not its row. *relaxed* lists sites whose outline is not a circle
@@ -421,6 +514,9 @@ def refine_sites(image, pixel_size_um: float, sites_um, nominal_diameter_um: flo
     """
     image = np.asarray(image, dtype=np.float64)
     nominal_px = nominal_diameter_um / 2 / pixel_size_um
+    if nominal_px < MIN_REFINE_RADIUS_PX:
+        raise ValueError(f"A nanowell is {nominal_px:.1f} px in radius at this pixel size; per-site fitting "
+                         f"needs at least {MIN_REFINE_RADIUS_PX:g} px (use a finer image for refinement)")
     if contrast is None:
         contrast = 0.4 * float(np.percentile(image, 98) - np.percentile(image, 5))
     relaxed = set(relaxed)
@@ -433,7 +529,8 @@ def refine_sites(image, pixel_size_um: float, sites_um, nominal_diameter_um: flo
             edges = _edge_points(image, centre, radius, contrast)
             if len(edges) < max(int(_MIN_RAY_FRACTION * _RAYS), 6):
                 break
-            pts = np.array([centre + rho * np.array([math.cos(a), math.sin(a)]) for a, rho in edges])
+            pts = np.array([centre + rho * np.array([math.cos(a), math.sin(a)]) for a, rho, _ in edges])
+            softness = float(np.median([width for _, _, width in edges]))
             new_centre, new_radius = _circle_fit(pts)
             residual = np.abs(np.linalg.norm(pts - new_centre, axis=1) - new_radius)
             keep = residual <= max(2.5 * 1.4826 * np.median(residual), 0.02 * new_radius)
@@ -442,9 +539,13 @@ def refine_sites(image, pixel_size_um: float, sites_um, nominal_diameter_um: flo
             new_centre, new_radius = _circle_fit(pts[keep])
             rms = float(np.sqrt(np.mean((np.linalg.norm(pts[keep] - new_centre, axis=1) - new_radius) ** 2)))
             centre, radius = new_centre, new_radius
-            accepted = (rms, int(keep.sum()))
-        scatter_limit = 0.2 if index in relaxed else 0.06
-        if (accepted is not None and accepted[0] <= scatter_limit * radius
+            accepted = (rms, int(keep.sum()), softness)
+        # Scatter is held to 6 % of the radius plus a quarter of the rim's width beyond a sharp edge's:
+        # a defocused rim is a soft edge whose position is read less precisely, but a garbage fit (a bubble's rim, a
+        # neighbour) scatters by a large part of the radius whatever the softness.
+        limit = (0.2 * radius if index in relaxed
+                 else 0.06 * radius + (0.25 * max(accepted[2] - _SHARP_EDGE_WIDTH_PX, 0.0) if accepted else 0.0))
+        if (accepted is not None and accepted[0] <= limit
                 and abs(radius - nominal_px) <= 0.3 * nominal_px
                 and np.linalg.norm(centre - (np.array(site) / pixel_size_um - 0.5)) <= nominal_px):
             fits.append(SiteGeometry(index, (float((centre[0] + 0.5) * pixel_size_um),

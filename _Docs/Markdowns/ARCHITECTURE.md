@@ -8559,12 +8559,25 @@ peaks in the ring a pitch range allows, each refined with a local DFT on a grid 
 of a bin wide (the FFT's own bin is a one-in-a-hundred step in pitch at 40 px per
 pitch), and the first-order peaks identified as hexagonal (partners at 60 degrees) or
 square (partners at 90). It uses the whole array at once, so a bubble over a tenth of
-it moves nothing, and it needs no expected pitch, which is why it can run before any
-matched filter is chosen. `detect_sites` then runs a matched filter (a light disk at the
+it moves nothing, and it needs no expected pitch (an expected pitch only narrows the
+search to a factor of two either side; one outside that range is not ignored but
+excluded), which is why it can run before any matched filter is chosen. A lattice's
+harmonics are peaks too and a high-pass image can make one stronger than the
+fundamental, so the strongest peak is switched for a lower-frequency family only when
+that family has real power, has both of a hexagonal family's partners, and has the
+strongest peak on its own reciprocal lattice (an integer combination of its vectors);
+a lower family that does not explain the strongest peak is not used, because one chosen
+only for being lowest put the pitch 3.6 % off on a small array. Fewer lattice periods
+across the image give a wider peak: 0.6 % at 13 periods. `detect_sites` then runs a matched filter (a light disk at the
 plate format's radius inside a dark annulus; the template sums to zero, so an
-illumination offset or ramp changes no candidate), takes local maxima a half-pitch
-apart that clear half the strong ones' response, refines the lattice with `fit_lattice`
-on them and fits the array boundary. A site under a bubble responds weakly, is not a
+additive illumination offset or ramp changes no candidate; a multiplicative ramp does,
+since it scales the response), takes local maxima a half-pitch apart that clear half the
+typical site's response, refines the lattice with `fit_lattice` on them and fits the
+array boundary. The typical site's response comes from a two-class split of the maxima
+on a log scale, because in a small array most local maxima are noise outside it and a
+percentile of all of them sits in the noise. A fitted lattice whose basis is stretched
+(length ratio or angle off by more than 5 %) is refused as anisotropic pixels or a wrong
+kind, not used with the wrong pitch. A site under a bubble responds weakly, is not a
 candidate, and is predicted from the lattice later.
 
 **The central square.** `square_score` is the four-fold coherence of the outline's
@@ -8574,8 +8587,13 @@ directions 90 degrees apart) adds toward one, and the argument of the sum is fou
 the edge direction, so the same number is the orientation. `score_fiducial` scores the
 sites near the array centre and returns a `FiducialCandidate` carrying the best score
 and the runner-up's for `resolve_origin`'s margin test; the margin is the caller's. With
-the square under a bubble the margin vanishes, the fiducial is rejected, and the array
-centre anchors the well, giving the same addresses. `check_orientation` (tracker N3a)
+the square under a bubble no site is square, `score_fiducial` returns no candidate, and
+the array centre anchors the well, giving the same addresses. The score is the four-fold
+sum minus the two-fold one: a bubble's rim crossing a circle concentrates its gradients in
+one direction, which the four-fold sum alone scores as high as a square (one such case
+anchored a well 1.7 pitches off), but a straight edge has a two-fold sum and a square's two
+edges cancel in it. A fiducial must also be at least 0.4 square in absolute terms, whatever
+its margin. `check_orientation` (tracker N3a)
 compares the square's edge direction with the lattice axis the fit chose: a hexagonal
 array rotated 40 degrees is fitted at -20, inside the limit and wrong by a sixth of a
 turn, and the square still reads 40, so the well is refused with the reason. The angle
@@ -8586,9 +8604,15 @@ of zero (edges parallel to a lattice row) is an assumption real data has to conf
 **Per-site geometry.** `refine_sites` casts rays from each site's lattice position,
 finds the outward intensity fall along each, fits a circle by least squares to the edge
 points with outlier rejection, and accepts the fit as `fitted` only when at least 60 %
-of the rays found an edge, the scatter is under 6 % of the radius (20 % for the square,
-named in `relaxed`), the radius is within 30 % of nominal and the centre within a radius
-of where the lattice put it. Any other site keeps its lattice position, takes the well's
+of the rays found an edge, the scatter is under 6 % of the radius plus a quarter of the
+rim's width beyond a sharp edge's (20 % for the square, named in `relaxed`), the radius is
+within 30 % of nominal and the centre within a radius of where the lattice put it. An edge
+must show the disk's plateau over the lattice's, not a drop across two pixels: a defocused
+or haloed rim is soft and wide with the same plateaus, and the two-pixel form fitted none
+from a blur of 2.5 px. Below a 10 px radius the fit is refused (a `ValueError`) rather than
+returning every site predicted: 8 % of sites fit at 5.8 px, 24 % at 7.1 px, and all but one
+of 313 at 11.6 px. At a 10x objective a 50 um nanowell is 38 px in radius, so this bites
+only on a heavily downsampled montage, which is not what refinement reads. Any other site keeps its lattice position, takes the well's
 median fitted radius and is `predicted`; no site is dropped. The ray-fraction rule is a
 conservatism, not a necessity: a fit through half of a clean rim is accurate, and the rule
 exists so that it is never reported as a measurement.
@@ -8596,10 +8620,16 @@ exists so that it is never reported as a measurement.
 **Site state (`nanowell_sites`).** Nothing here drops a site and an unmeasurable number is
 `None`, never zero. `bubble_mask` demodulates the image at the lattice's first-order
 frequencies and flags where that amplitude is under 30 % of the array's typical, inside the
-array only (the flat floor outside is not a bubble). `site_visibility` gives each site the
-share of its disk that is bright against the lattice (above the midpoint of the well's
-typical site and typical floor, both taken from the fitted sites) and outside any bubble,
-and a contrast relative to the typical site, so a black disk on the black lattice reads 0.
+array only (the flat floor outside is not a bubble). The typical amplitude is read at the
+detected sites when they are given, because the array's own 80th percentile is itself bubble
+when most of the array is hidden, and the demodulation runs on an image block-averaged to
+about 8 px per pitch. `site_visibility` gives each site the share of its disk that is
+bright against the lattice (above the midpoint of the *local* typical site and floor, the
+median over the twelve nearest fitted sites, so illumination falling to a third at the rim
+is not read as a bubble) and outside any bubble, and a contrast relative to the local
+typical site, so a black disk on the black lattice reads 0. `occluded` is a visible
+fraction under one half: a dark cell covering most of a nanowell reads as occluded, as a
+bubble does, and telling them apart is the contents section's job.
 `site_coverage` gives the shares of a site's disk inside the union of the tiles, inside the
 fitted array boundary and inside the well wall; the last two are `None` without a boundary.
 `rim_focus` calls `pipeline.field_quality.edge_focus` on the fitted disk and is `None` for a
@@ -8611,11 +8641,16 @@ radius per well, records each timepoint's deviation, and flags a timepoint more 
 pitch away `radius_disagrees` and one with no boundary `no_boundary`. `check_format` refuses
 a plate-format setting two ways: a nanowell nearly as wide as the measured pitch cannot be
 right, which is decidable from the Fourier estimate alone before any filter is chosen, and
-fitted nanowells more than 25 % off the setting's diameter are a mismatch.
+fitted nanowells more than 25 % off the setting's diameter are a mismatch. Passing the pitch
+test alone proves little (a setting too small for the array passes it), so with no fitted
+nanowell the answer is `unverified` (`ok` is `None`), never `ok`; an unreadable pitch is
+unverified too. A 100 um array read with the 50 um setting fits no site and is unverified:
+only the 50 um array with the 100 um setting is reported as a mismatch.
 
 **What is and is not established.** All of this is checked on tiles rendered by
 `tests/_nanowell_synth.render_tiles` at both plate formats (100 um, pitch 172 um; 50 um,
-pitch 86 um, both imaged at 40 px per pitch), including a bubble over a tenth of the array
+pitch 86 um, both imaged at 40 px per pitch, and each also at another pixel scale so that
+nothing assumes 40 px per pitch), including a bubble over a tenth of the array
 and over the square, and the chain from image to addresses assigns every detected
 nanowell the address it was drawn with. The renderer's bubble is a flat grey disk; what a
 real bubble does to a phase image is not established, and neither is whether a real square

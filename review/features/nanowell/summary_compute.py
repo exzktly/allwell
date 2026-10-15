@@ -59,26 +59,40 @@ def well_summary(metrics: pd.DataFrame, metric: str, channels=(), *,
     # Occupancy classes are ordinal; "3+" stands at 3 for the median and quartiles, as the class it is.
     values = (metrics[metric].map({"0": 0.0, "1": 1.0, "2": 2.0, "3+": 3.0}) if metric == "occupancy_class"
               else pd.to_numeric(metrics[metric], errors="coerce"))
-    frame = metrics.assign(_value=values, _reason=exclusion_reason(metrics, metric, channels))
-    rows = []
-    for (well, tp), group in frame.groupby(["well", "timepoint"], sort=False):
-        values = group["_value"].dropna()
-        numeric = values
-        counted = group["n"].dropna()
-        reasons = group.loc[group["_value"].isna(), "_reason"].value_counts()
-        rows.append({
-            "well": well, "timepoint": tp, "time_h": group["time_h"].iloc[0], "tp_order": group["tp_order"].iloc[0],
-            "n_sites": len(group), "n_used": len(values), "excluded": {str(k): int(v) for k, v in reasons.items()},
-            "median": float(numeric.median()) if len(numeric) else math.nan,
-            "q1": float(numeric.quantile(0.25)) if len(numeric) else math.nan,
-            "q3": float(numeric.quantile(0.75)) if len(numeric) else math.nan,
-            "fraction_responding": (float((numeric > threshold).mean())
-                                    if threshold is not None and len(numeric) else math.nan),
-            "fraction_occupied": float((counted > 0).mean()) if len(counted) else math.nan,
-        })
+    keys = ["well", "timepoint"]
     columns = ["well", "timepoint", "time_h", "tp_order", "n_sites", "n_used", "excluded", "median", "q1", "q3",
                "fraction_responding", "fraction_occupied"]
-    return pd.DataFrame(rows, columns=columns).sort_values(["well", "tp_order"], kind="stable").reset_index(drop=True)
+    if not len(metrics):
+        return pd.DataFrame(columns=columns)
+    # Vectorised over every (well, timepoint) at once: the page calls this on each redraw, and a Python loop
+    # over a plate's groups took seconds on the GUI thread.
+    frame = metrics[keys + ["time_h", "tp_order", "n"]].assign(_value=values.astype(float))
+    grouped = frame.groupby(keys, sort=False)
+    out = grouped.agg(time_h=("time_h", "first"), tp_order=("tp_order", "first"), n_sites=("_value", "size"),
+                      n_used=("_value", "count"), median=("_value", "median"))
+    quantiles = grouped["_value"].quantile([0.25, 0.75]).unstack()
+    out["q1"], out["q3"] = quantiles[0.25], quantiles[0.75]
+    has = frame["_value"].notna()
+    if threshold is None:
+        out["fraction_responding"] = math.nan
+    else:
+        above = (frame["_value"] > threshold).where(has).astype(float)
+        out["fraction_responding"] = above.groupby([frame[k] for k in keys], sort=False).mean()
+    counted = frame["n"].notna()
+    occupied = (frame["n"] > 0).where(counted).astype(float)
+    out["fraction_occupied"] = occupied.groupby([frame[k] for k in keys], sort=False).mean()
+    missing = ~has
+    reasons = exclusion_reason(metrics, metric, channels)[missing]   # on the whole frame: a reason reads the baseline row
+    counts = (pd.DataFrame({"well": frame.loc[missing, "well"], "timepoint": frame.loc[missing, "timepoint"],
+                            "reason": reasons}).groupby(keys + ["reason"], sort=False).size())
+    excluded: dict = {}
+    for (well, tp, reason), n in counts.items():
+        excluded.setdefault((well, tp), {})[str(reason)] = int(n)
+    out = out.reset_index()
+    out["excluded"] = [excluded.get((w, t), {}) for w, t in zip(out["well"], out["timepoint"])]
+    out["n_sites"] = out["n_sites"].astype(int)
+    out["n_used"] = out["n_used"].astype(int)
+    return out[columns].sort_values(["well", "tp_order"], kind="stable").reset_index(drop=True)
 
 
 def _t95(dof: int) -> float:

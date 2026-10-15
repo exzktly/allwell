@@ -562,6 +562,7 @@ review/
 │   │   plot_card_actions.py, figure_saver.py
 │   ├── timepoint_sync.py             ← shared "focus timepoint" across plotting tabs
 │   ├── rail_plate.py                 ← the sidebar's one well-picker slot
+│   ├── section_icons.py              ← the glyph beside each rail entry
 │   └── ui_helpers.py, notifications.py, dnd.py
 ├── data/                          ← IO + decode
 │   ├── data_loading.py, image_discovery.py, image_resolver.py,
@@ -672,8 +673,11 @@ review/
 │   │                                 [removable]
 │   ├── spatial/      controller.py, collect.py, renderer.py, state.py, tab_view.py
 │   ├── nanowell/     collect.py, series_compute.py, summary_compute.py,
-│   │                 controller.py, state.py  ← nanowell tables, per-nanowell
-│   │                 metrics, well and group summaries (no page registered yet)
+│   │                 beeswarm_compute.py, distribution_compute.py, renderer.py,
+│   │                 controller.py, state.py, tab_view.py, view_state_io.py,
+│   │                 cell_scope_compute.py  ← the Nanowells page: nanowell
+│   │                 tables, per-nanowell metrics, the Distribution beeswarm
+│   │                 and site detail [removable]
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
 │   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
 │   │                 + _svg_shapes.py (the PowerPoint export),
@@ -8823,8 +8827,7 @@ Validate checks the tables against the grid record and the input archives.
 ### 6.2j Nanowells in Review: data and calculations
 
 `review/features/nanowell/` reads what a nanowell-mode run wrote and computes everything the Nanowells page
-draws. All of it is Qt-free; no feature descriptor registers it yet, so nothing in the app calls
-it until the page exists.
+draws (§6.2k). The modules this section describes are Qt-free.
 
 **Loading** (`collect.load_nanowell_data`). The tables are `nanowells/<well>.csv` and `_grid.json` beside
 the per-cell CSVs; the well loader (`review/core/load_controller.load_directory`) lists only top-level
@@ -8877,8 +8880,71 @@ baseline, one row per nanowell and timepoint, through a temporary file.
 
 **Persistence** (`review/persistence/nanowell.py`). The page's choices (`state.NanowellState.to_config`) are
 the `nanowell` section of `persistence.json`; a dataset without one lands on the defaults, and
-`apply_config` takes only values the page can show. The functions take the state object; registering the
-feature slice, the persistence domain and its place in the view-reset tier comes with the page.
+`apply_config` takes only values the page can show. The `nanowell` slice is registered by the page's feature
+descriptor, the domain by `persistence/registry.py` (when the build profile includes the page), and the
+section sits in the view tier of `persistence/reset_scopes.py`, which resets the configuration and leaves the
+loaded tables alone.
+
+### 6.2k The Nanowells page
+
+The **Nanowells** rail entry (Analysis, after Spatial; `FeatureDescriptor("Nanowells")`, slice `nanowell`,
+lazy-built, removable by profile) draws §6.2j's numbers. It was planned before it was built:
+`_Docs/design/nanowell_page/PLAN.md` holds the interface plan and wireframes, and the nanowell tracker's page section the
+decisions taken on it (U1–U13). This section describes what the page does; the decisions say why.
+
+**Layers.** `beeswarm_compute.swarm_layout` places one swarm's dots in data units: a continuous metric keeps
+each value exact, each dot taking the free slot nearest the centre line, so no two overlap; a whole-number
+metric is packed into a band within ±0.4 of its value (U1). A dot that does not fit the slot is counted by
+value in `SwarmLayout.overflow` (once per swarm, with its range, for an exact-value swarm), never dropped.
+Band rows fill centre-out, so a value with few dots is drawn on it; a dot taller than the band falls back to
+the exact layout, which cannot overlap across values. `distribution_compute.distribution_model` turns the metrics
+frame into a `DistributionModel` — panels, swarms with their sites, exclusions labelled by `reason_label`
+(which raises on a reason it has no label for, so a new reason cannot reach a figure unnamed), the per-well
+medians joined over time, and the per-group statistics from `group_summary`. *Along x: Time* is one panel per
+well, or per replicate set with each member well its own sub-swarm (U2); *Along x: Wells* is one timepoint
+(the latest by default, U13), groups along x with sub-swarms per well, the centre and 95% interval over wells
+and the comparison with a control group (U11). A metric with one value per nanowell (growth rate, occupancy) is
+drawn across wells only, each well's first timepoint summarised under one label so wells imaged from different
+first timepoints stay one comparison. Whether a metric is packed is decided by the metric (`INTEGER_METRICS`),
+not by its values. `renderer.render_distribution` draws the model and returns a `HitMap` of every dot
+drawn; every number a reader can count is a text artist with a `gid` (`nw-used`, `nw-excluded`, `nw-hidden`,
+`nw-footer-used`), so tests read the figure, not the model. A swarm's hidden dots are counted under it, in the
+gutter beside its exclusions; a slot too narrow for level labels writes them rotated. The footer sums the
+panels drawn only, names the panels past `MAX_PANELS`, counts the wells, and a key at the top right decodes
+the occupancy colours and names the baseline. A set of more than `DENSITY_ABOVE` wells is drawn as densities.
+Every text and line is in the plot's ink and tagged `follows_theme`; the dots take `occupancy_ramp` from
+`Colors` or `CPub` by the figure's ground (U7), class 0 hollow, and carry both through
+`widgets.plot_card.theme_paired_colours`, the hook `PlotCard.setPlotTheme` uses to repaint a paired data
+palette — so a capture, which flips the theme without a redraw, puts the publication shades on white. `render_site_detail` draws the selected nanowells' series
+against recorded time, a timepoint without a number as a gap and a hatched band, with each timepoint's state
+written above.
+
+**The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (listing
+only the views this build draws, U3), Metric, Along x, Baseline, Timepoint and *vs* (both shown on *Along x:
+Wells*), Save and Properties. Wells are the plate selection or, in replicate mode, the visible sets' wells and
+the active solo wells — never every loaded well as a fallback — grouped by `replicate_groups` over those wells
+only. Brightness and site signal follow the app's shared channel (U6); the Metric entries are greyed, with the
+reason, when that channel has no site intensities. `ensure_loaded` reads the tables and computes the metrics
+on `core.worker_bridge.run_off_thread`; each request is numbered and a result for an older one is discarded,
+so a slow load can never replace a newer baseline's figure — including when the baseline goes back to the one
+already loaded, which invalidates the request in flight. `redraw` never computes; when the state's baseline
+is not the one the metrics were computed for (a reset or restore wrote it directly), it asks for them and draws
+nothing stale meanwhile. The page's saved choices are loaded once per dataset, on the dataset load and on first
+activation (`_load_config`), so one dataset's choices never carry into another. `nanowell_empty_reason`
+names each state: no dataset, tables unreadable (with the refused scheme version), reading, no nanowell
+tables, no usable well, and no nanowell wells selected (listing the wells that have tables). A click on the
+figure selects the nearest drawn dot within 6 px; Shift, ⌘ or Ctrl adds (up to six, read from matplotlib's
+`event.modifiers`); empty space clears; the plate selection is never touched.
+
+**Shared machinery.** The page is on every roster a plot page joins: `plot_style._FIG_PREF_KEY_MAP`
+(`nanowell`, `nanowell_detail`), the Properties dock and open-panel maps in `features/export/style.py`, the
+feature redraw in `features/export/sidebar_view._FIGURE_OWNING_FEATURES`, and `plot_card_actions._CARDS` for
+both cards. `view_state_io` makes a Saved Plot restore the whole configuration, the selected nanowells
+included. *Save nanowell data…* writes `long_format`; *Save cell data…* exports the per-cell rows of the drawn
+wells that carry a nanowell address (`cell_scope_compute`). The rail glyph map lives in
+`review/core/section_icons.py`. The Properties panel's Lines & Markers controls restyle the median line and
+the statistic marks; the beeswarm dots are deliberately not tagged `_aw_marker_collection`, because a dot's
+size is the unit the layout packs by, and a larger dot from the panel would overlap its neighbours.
 
 ### 6.2 `process_microscopy.py`
 

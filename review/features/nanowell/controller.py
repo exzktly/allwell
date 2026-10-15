@@ -180,7 +180,15 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         return
     data_dir = ctx.state.dataset.data_dir
     key = (str(data_dir or ""), st.baseline)
-    if not force and (st.loaded_for == key or (st.computing and st.pending_for == key)):
+    if not force and st.computing and st.pending_for == key:
+        return                                           # this very request is already running
+    if not force and st.loaded_for == key:
+        if st.computing:
+            # The current data is what is wanted again (a baseline changed and changed back): whatever is
+            # running is for another key and now stale, so it must not land when it finishes.
+            st.request += 1
+            st.computing, st.pending_for = False, None
+            _call(ctx, "_nw_show_computing")
         return
     st.request += 1
     request, baseline = st.request, st.baseline
@@ -229,17 +237,28 @@ def redraw(ctx) -> None:
     fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")
     if st is None or fig is None or canvas is None:
         return
+    if st.loaded_for is not None and st.loaded_for[1] != st.baseline and not st.computing:
+        # The baseline changed without a load (a reset, a restore): what is on hand was computed for another
+        # one, so fetch the right metrics rather than draw fold changes against the wrong baseline.
+        ensure_loaded(ctx)
+    _call(ctx, "_nw_refresh_controls")
     _call(ctx, "_nw_show_computing")
     _refresh_empty(ctx)
     if st.metrics is None or nanowell_empty_reason(ctx) is not None:
         return
+    if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
+        return                                           # the right metrics are on their way
     channel = match_channel(ctx.state.channel.active_channel, st.data.channels)
     metric = st.metric
     if metric in ("brightness", "signal", "brightness_fc", "signal_fc") and channel is None:
         metric = "n"                                     # the channel metric cannot be drawn; say so below
     model = distribution_model(st.metrics, metric, channels=st.data.channels, channel=channel, axis=st.axis,
                                groups=page_groups(ctx), timepoint=st.timepoint, control=st.control,
-                               time_source=st.data.time_source)
+                               time_source=st.data.time_source, baseline=st.baseline)
+    tableless = [w for w in active_wells(ctx) if w not in set(st.data.wells)]
+    if tableless:
+        model.notes.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
+                              f"{', '.join(tableless)}.")
     if metric != st.metric:
         model.notes.insert(0, f"{st.metric.replace('_', ' ')} needs a channel with site intensities; the shared "
                               f"channel ({ctx.state.channel.active_channel}) has none, so Cell count is shown.")
@@ -325,7 +344,22 @@ def _save_soon(ctx) -> None:
 
 
 # ── lifecycle hooks and setters ──────────────────────────────────────────────
+def _load_config(ctx) -> None:
+    """Put this dataset's saved page choices on the state, once per dataset (D9): a dataset without a saved
+    block gets the defaults, so nothing of the previous dataset's well, timepoint or nanowells carries over."""
+    from core.safe import swallow
+
+    st = _state(ctx)
+    data_dir = str(ctx.state.dataset.data_dir or "")
+    if st is None or st.config_for == data_dir:
+        return
+    st.config_for = data_dir
+    with swallow("load the Nanowells page's saved choices"):
+        ctx.persistence.load("nanowell")
+
+
 def nw_on_activate(ctx) -> None:
+    _load_config(ctx)
     if ctx.widgets.get_or_none("_nw_canvas") is None:
         return
     _call(ctx, "_nw_refresh_controls")
@@ -342,9 +376,12 @@ def nw_on_dataset_loaded(ctx) -> None:
     st.reset_data()
     st.computing = False
     st.hits = None
-    if ctx.widgets.get_or_none("_nw_canvas") is not None and ctx.widgets.get_or_none("_nw_page_visible") is not None:
-        if ctx.widgets.get("_nw_page_visible")():
-            ensure_loaded(ctx)
+    st.config_for = None
+    _load_config(ctx)
+    visible = ctx.widgets.get_or_none("_nw_page_visible")
+    if ctx.widgets.get_or_none("_nw_canvas") is not None and callable(visible) and visible():
+        ensure_loaded(ctx)
+        redraw(ctx)
 
 
 def nw_on_selection_changed(ctx) -> None:

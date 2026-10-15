@@ -162,11 +162,12 @@ def test_the_figure_s_own_numbers_add_up_to_the_roster(page, qtbot):
     used = [int(t.split("= ")[1].replace(",", "")) for t in _texts(page, "nw-used")]
     excluded = [int(t.split("excl. ")[1].replace(",", "")) for t in _texts(page, "nw-excluded")]
     footer = next(t for t in _texts(page, "nw-footer-used"))
-    match = re.match(r"Nanowells used ([\d,]+) of ([\d,]+) · excluded ([\d,]+): (.*)", footer)
+    match = re.match(r"Nanowell × timepoint values used ([\d,]+) of ([\d,]+) · excluded ([\d,]+): (.*) · wells (\d+)",
+                     footer)
     assert match, footer
     u, roster, e = (int(match.group(i).replace(",", "")) for i in (1, 2, 3))
     assert (sum(used), sum(excluded)) == (u, e) == (14, 2) and roster == 16 and u + e == roster
-    assert match.group(4) == "occluded 2"
+    assert match.group(4) == "occluded 2" and match.group(5) == "2"
     assert page.widgets.get("_nw_canvas").isVisible()                          # the figure, not a placeholder
     assert any("packed within ±0.4" in t for t in _texts(page, "nw-footer"))
 
@@ -178,8 +179,8 @@ def test_choosing_a_metric_in_the_real_combo_redraws_with_its_label(page, qtbot)
     fig = page.widgets.get("_nw_fig")
     assert fig.axes[0].get_ylabel() == "Confluence fold change"
     footer = next(t for t in _texts(page, "nw-footer-used"))
-    assert footer == ("Nanowells used 10 of 16 · excluded 6: no confluence at baseline 3 · occluded 2 · "
-                      "baseline occluded 1")
+    assert footer == ("Nanowell × timepoint values used 10 of 16 · excluded 6: no confluence at baseline 3 · "
+                      "occluded 2 · baseline occluded 1 · wells 2")
 
 
 def test_a_channel_metric_is_greyed_when_the_shared_channel_has_no_site_intensities(page, qtbot):
@@ -206,11 +207,18 @@ def test_along_wells_draws_one_timepoint_with_the_statistic_over_wells(page, qtb
 
 # ── V3 / V3a: clicking a dot opens its history ───────────────────────────────
 def _click_dot(qtbot, ctx, site, modifier=Qt.NoModifier):
+    """Click where *site*'s dot is drawn — its position read from the scatter on the figure, checked against
+    the hit map, so a hit map that disagrees with the drawing cannot pass."""
+    import numpy as np
+
     st = ctx.state.feature_slice("nanowell")
     canvas = ctx.widgets.get("_nw_canvas")
+    drawn = np.concatenate([c.get_offsets() for ax in ctx.widgets.get("_nw_fig").axes for c in ax.collections
+                            if c.get_gid() == "nw-dots"])
     for ax, xs, ys, sites in st.hits.entries:
         for x, y, s in zip(xs, ys, sites):
             if tuple(s) == tuple(site):
+                assert np.min(np.hypot(drawn[:, 0] - x, drawn[:, 1] - y)) < 1e-9, "hit map is not the drawing"
                 px, py = ax.transData.transform((x, y))
                 ratio = canvas.devicePixelRatioF()
                 QTest.mouseClick(canvas, Qt.LeftButton, modifier,
@@ -254,3 +262,79 @@ def test_an_occluded_timepoint_is_a_gap_in_the_detail_not_a_zero(page, qtbot):
     ys = list(line.get_ydata())
     assert ys[0] == 0.0 and pd.isna(ys[1])
     assert [t.get_text() for t in fig.texts] == ["B01 · q 1, r 0 — t_c: empty, t_a: occluded"]
+
+
+# ── what the review of PR 10a found ──────────────────────────────────────────
+def test_changing_the_baseline_and_back_never_lands_the_stale_result(page, qtbot, monkeypatch):
+    """Earliest loaded → First measurable (slow) → Earliest again: the slow result must not be applied."""
+    import review.features.nanowell.controller as controller
+
+    st = _loaded(qtbot, page)
+    real = controller.site_metrics
+    monkeypatch.setattr(controller, "site_metrics",
+                        lambda data, baseline: (time.sleep(1.2), real(data, baseline))[1])
+    baseline_cb = page.widgets.get("_nw_baseline_cb")
+    baseline_cb.setCurrentIndex(baseline_cb.findData("first_measurable"))
+    baseline_cb.setCurrentIndex(baseline_cb.findData("earliest"))
+    qtbot.wait(1800)
+    assert st.baseline == "earliest" and st.loaded_for[1] == "earliest" and not st.computing
+    footer = next(t for t in _texts(page, "nw-footer-used"))
+    assert footer.startswith("Nanowell × timepoint values used 14 of 16")
+
+
+def test_a_baseline_changed_without_a_load_is_fetched_before_it_is_drawn(page, qtbot):
+    """A reset or a restore writes the baseline straight onto the state; the next draw must not use stale
+    fold changes for it."""
+    st = _loaded(qtbot, page)
+    st.apply_config({"baseline": "first_measurable", "metric": "count_fc"})
+    nwc.redraw(page)
+    qtbot.waitUntil(lambda: st.loaded_for[1] == "first_measurable" and not st.computing, timeout=20000)
+    assert set(st.metrics["baseline_timepoint"].dropna()) <= {"t_c", "t_a"}
+    legend = " ".join(_texts(page, "nw-legend"))
+    assert "Cells at baseline (first measurable)" in legend
+
+
+def test_the_figure_keys_the_occupancy_colours_and_counts_the_wells(page, qtbot):
+    _loaded(qtbot, page)
+    legend = _texts(page, "nw-legend")
+    assert legend[0] == "Cells at baseline (earliest):" and legend[1:] == ["0", "1", "2", "3+", "?"]
+
+
+def test_a_capture_paints_the_dots_and_the_ink_for_white(page, qtbot):
+    """Save / Copy flip the card to publication without a redraw: the dots must take the publication ramp."""
+    from matplotlib.colors import to_hex
+
+    from ui.theme import Colors, CPub
+
+    _loaded(qtbot, page)
+    card = page.widgets.get("_nw_card")
+    fig = page.widgets.get("_nw_fig")
+    dots = [c for ax in fig.axes for c in ax.collections if c.get_gid() == "nw-dots"]
+    on_screen = {to_hex(c) for coll in dots for c in coll.get_edgecolors()}
+    assert on_screen <= {c.lower() for c in Colors.occupancy_ramp + (Colors.occupancy_unknown,)}
+    with card._publication_capture():
+        captured = {to_hex(c) for coll in dots for c in coll.get_edgecolors()}
+        footer = next(t for t in fig.texts if t.get_gid() == "nw-footer-used")
+        assert to_hex(footer.get_color()) != to_hex(Colors.text_primary) or CPub.bg != Colors.plot_bg
+    assert captured <= {c.lower() for c in CPub.occupancy_ramp + (Colors.occupancy_unknown,)}
+    assert captured != on_screen
+
+
+def test_a_selected_well_without_a_nanowell_table_is_named(page, qtbot):
+    page.state.dataset.well_paths["C09"] = page.state.dataset.well_paths["A01"]
+    page.state.selection.selected_wells = {"A01", "C09"}
+    _loaded(qtbot, page)
+    nwc.redraw(page)
+    assert any("C09" in t and "without a nanowell table" in t for t in _texts(page, "nw-footer"))
+
+
+def test_the_page_reloads_after_a_dataset_switch_even_from_its_empty_state(qtbot, tmp_path):
+    ctx = _page(qtbot, _write_nanowell_dataset(tmp_path / "a"))
+    st = _loaded(qtbot, ctx)                                     # no wells selected: the empty state shows
+    assert not ctx.widgets.get("_nw_canvas").isVisible()
+    from tests._minimal_shell import load_dataset
+
+    load_dataset(ctx, _write_nanowell_dataset(tmp_path / "b"))
+    nwc.nw_on_dataset_loaded(ctx)
+    qtbot.waitUntil(lambda: st.loaded_for is not None and not st.computing, timeout=20000)
+    assert st.loaded_for[0] == str(ctx.state.dataset.data_dir)

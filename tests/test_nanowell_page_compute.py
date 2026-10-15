@@ -8,6 +8,7 @@ from __future__ import annotations
 
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from review.features.nanowell import distribution_compute as dc
@@ -42,9 +43,31 @@ def test_integer_values_are_packed_within_the_band_and_overflow_is_counted_by_va
     drawn = values[layout.index]
     assert np.all(np.abs(layout.y - drawn) <= BAND + 1e-9)
     assert _overlaps(layout, 0.05, 0.1) == 0
-    capacity = 17 * 8                           # 17 slots across 0.9, 8 sub-rows in ±0.4 of 0.1-high dots
+    capacity = 17 * 7                           # 17 slots across 0.9; rows at 0, ±0.1, ±0.2, ±0.3 inside ±0.4
     assert layout.overflow == {0.0: 300 - capacity}
     assert len(layout.index) + layout.n_hidden == 343           # NaN are not dots: the caller counts them
+
+
+def test_a_value_with_few_dots_is_drawn_on_its_value_not_below_it():
+    values = np.array([0.0] * 3 + [1.0] + [2.0] * 2)
+    layout = swarm_layout(values, half_width=0.45, dot_w=0.05, dot_h=0.1)
+    assert set(layout.y) == {0.0, 1.0, 2.0}                     # one row's worth: the centre row, on the value
+
+
+def test_dots_taller_than_the_band_are_laid_out_exactly_and_never_overlap_across_values():
+    values = np.random.default_rng(3).poisson(15, 600).astype(float)
+    layout = swarm_layout(values, half_width=0.45, dot_w=0.05, dot_h=1.03)
+    assert np.array_equal(layout.y, values[layout.index])
+    assert _overlaps(layout, 0.05, 1.03) == 0
+    assert len(layout.index) + layout.n_hidden == 600
+
+
+def test_a_crowded_continuous_swarm_reports_its_hidden_dots_once_with_their_range():
+    values = np.random.default_rng(4).uniform(0, 1, 2000)
+    layout = swarm_layout(values, half_width=0.45, dot_w=0.05, dot_h=0.01)
+    assert len(layout.overflow) == 1 and layout.n_hidden == 2000 - len(layout.index) > 0
+    lo, hi = layout.overflow_range
+    assert lo == min(layout.overflow) and 0 <= lo < hi <= 1
 
 
 def test_exact_rows_keeps_integer_values_on_their_value():
@@ -159,3 +182,100 @@ def test_the_state_s_metric_keys_are_the_page_s_metrics():
     from review.features.nanowell.state import METRIC_KEYS
 
     assert tuple(dc.METRICS) == METRIC_KEYS
+
+
+
+def test_a_fold_change_on_one_timepoint_is_not_packed_like_a_count(tmp_path):
+    metrics, data = _plate(tmp_path, {"A01": {"t_c": [1, 2, 3]}}, tps=("t_c",))
+    for metric, integer in (("count_fc", False), ("n", True), ("occupancy_class", True)):
+        model = dc.distribution_model(metrics, metric, channels=data.channels, groups={"A01": ["A01"]})
+        assert model.integer is integer, metric
+        assert any("packed" in n for n in model.notes) is integer
+
+
+def test_per_nanowell_metrics_keep_every_well_when_wells_start_at_different_timepoints(tmp_path):
+    rows_a = {"t_c": [1, 2], "t_a": [2, 4], "t_d": [4, 8]}
+    metrics, data = _plate(tmp_path, {"A01": rows_a}, tps=("t_c", "t_a", "t_d"))
+    tmp2 = tmp_path / "second"
+    tmp2.mkdir()
+    other, _ = _plate(tmp2, {"A02": {"t_a": [1, 1], "t_d": [2, 2], "t_b": [4, 4]}}, tps=("t_a", "t_d", "t_b"))
+    both = pd.concat([metrics, other], ignore_index=True)
+    model = dc.distribution_model(both, "occupancy_class", channels=data.channels,
+                                  groups={"set": ["A01", "A02"]})
+    stat = model.panels[0].stats[0]
+    assert stat.n_wells == 2 and stat.wells_without_value == []
+
+
+def test_past_the_panel_cap_the_footer_counts_only_what_is_drawn():
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.renderer import MAX_PANELS, render_distribution
+
+    swarms = [dc.Swarm("t", f"W{i:02d}", 0.0, np.ones(10), [(f"W{i:02d}", j, 0) for j in range(10)], ["1"] * 10, 10)
+              for i in range(MAX_PANELS + 2)]
+    model = dc.DistributionModel("n", "n", "Cell count", dc.TIME, True,
+                                 [dc.Panel(s.well, [s], [(0.0, "t")]) for s in swarms])
+    fig = Figure(figsize=(8, 6.4))
+    render_distribution(fig, model)
+    texts = [t.get_text() for t in fig.texts]
+    assert texts and any(t.startswith(f"Nanowell × timepoint values used {MAX_PANELS * 10} of {MAX_PANELS * 10}")
+                         for t in texts)
+    assert any(t.startswith("2 more panel(s) not drawn (20 values") for t in texts)
+
+
+def test_a_set_of_more_than_four_wells_is_drawn_as_densities_and_says_so(tmp_path):
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.renderer import render_distribution
+
+    wells = [f"A{i:02d}" for i in range(1, 6)]
+    metrics, data = _plate(tmp_path, {w: {"t_c": [1, 2, 3], "t_a": [2, 3, 5]} for w in wells})
+    model = dc.distribution_model(metrics, "n", channels=data.channels, groups={"set": wells})
+    fig = Figure(figsize=(8, 6.4))
+    hits = render_distribution(fig, model)
+    assert not hits.entries                                      # no dots to click: densities
+    assert any(c.get_gid() == "nw-density" for c in fig.axes[0].collections)
+    assert any("drawn as densities" in t.get_text() for t in fig.texts)
+
+
+def test_the_comparison_to_control_keeps_three_significant_figures():
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.renderer import render_distribution
+
+    swarm = dc.Swarm("A01", "A01", 0.0, np.array([1.0, 1.1]), [("A01", 0, 0), ("A01", 1, 0)], ["1", "1"], 2)
+    stat = dc.GroupStat("g", 0.0, 1.04, 1.0, 1.08, 2, 1, 1.04, [])
+    model = dc.DistributionModel("count_fc", "count_fc", "Count fold change", dc.WELLS, False,
+                                 [dc.Panel("t", [swarm], [(0.0, "g")], stats=[stat])])
+    fig = Figure(figsize=(8, 6.4))
+    render_distribution(fig, model)
+    assert [t.get_text() for t in fig.axes[0].texts if t.get_gid() == "nw-vs-control"] == [" ×1.04"]
+
+
+def test_a_swarm_too_full_for_its_slot_says_how_many_dots_are_hidden_under_it():
+    """Read from the figure: each swarm's 'n =' is every value, '+N at v' the ones not drawn as dots, and the
+    dots on the axes are the difference — so a gutter that counted only the drawn dots would be caught."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.renderer import render_distribution
+
+    values = np.array([0.0] * 3000 + [1.0] * 40)
+    swarm = dc.Swarm("t_c", "A01", 0.0, values, [("A01", i, 0) for i in range(3040)], ["0"] * 3000 + ["1"] * 40,
+                     3050, {"occluded": 10})
+    model = dc.DistributionModel("n", "n", "Cell count", dc.TIME, True, [dc.Panel("A01", [swarm], [(0.0, "t_c")])])
+    fig = Figure(figsize=(5, 4))
+    hits = render_distribution(fig, model)
+    ax = fig.axes[0]
+    texts = {t.get_gid(): t.get_text() for t in ax.texts}
+    drawn = sum(len(entry[1]) for entry in hits.entries)
+    hidden = int(texts["nw-hidden"].split(" ")[0].lstrip("+").replace(",", ""))
+    assert texts["nw-used"] == "n = 3,040" and texts["nw-excluded"] == "excl. 10"
+    assert texts["nw-hidden"].endswith("at 0") and drawn + hidden == 3040 and hidden > 0

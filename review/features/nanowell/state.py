@@ -40,6 +40,7 @@ class NanowellState:
     model: object = None                    # distribution_compute.DistributionModel on screen
     pending_for: object = None              # the (data_dir, baseline) of the request running
     bridge: object = None                   # core.worker_bridge.WorkerBridge of the running request
+    config_for: object = None               # the data dir whose saved choices are on the state
 
     def reset_data(self) -> None:
         self.data, self.metrics, self.load_error, self.loaded_for = None, None, "", None

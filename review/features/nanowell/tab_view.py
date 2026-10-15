@@ -170,7 +170,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         computing.raise_()
 
     def page_visible() -> bool:
-        return card.isVisible()
+        return band.isVisible()          # the band shows whenever the page does, empty state or not
 
     def refresh_controls() -> None:
         channel = match_channel(ctx.state.channel.active_channel, st.data.channels) if st.data else None

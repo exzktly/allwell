@@ -49,6 +49,11 @@ PER_NANOWELL = frozenset({"growth_rate", "occupancy_class"})
 BASELINE_METRICS = frozenset({"count_fc", "log2_count_fc", "confluence_fc", "brightness_fc", "signal_fc",
                               "occupancy_class"})
 _OCCUPANCY_VALUE = {"0": 0.0, "1": 1.0, "2": 2.0, "3+": 3.0}
+#: Metrics whose values are whole numbers by definition, packed into bands (U1). Decided by the metric, not by
+#: the values: a fold change on one timepoint is all 1.0 and is still a continuous quantity.
+INTEGER_METRICS = frozenset({"n", "occupancy_class"})
+#: The timepoint label the per-nanowell metrics are summarised under (each well's own first timepoint).
+PER_NANOWELL_LABEL = "per nanowell"
 
 #: Short labels for :func:`series_compute.exclusion_reason`'s strings, as the figure prints them.
 _REASON_LABELS = {
@@ -140,6 +145,7 @@ class DistributionModel:
     panels: list
     timepoint: str = ""
     control: str = ""
+    baseline: str = "earliest"
     notes: list = field(default_factory=list)          # sentences printed in the footer
 
     def swarms(self):
@@ -181,7 +187,7 @@ def _swarm(rows: pd.DataFrame, column: str, reasons: pd.Series, *, label: str, w
 
 def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), channel: str | None = None,
                        axis: str = TIME, groups: dict, timepoint: str = "", control: str = "",
-                       time_source: str | None = None) -> DistributionModel:
+                       time_source: str | None = None, baseline: str = "earliest") -> DistributionModel:
     """The Distribution view for *groups* (``name -> wells``, as ``controller.replicate_groups`` gives).
 
     A group of one well is that well; a group of several is a replicate set. Only the wells named in
@@ -191,13 +197,15 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
     label = METRICS[metric][0] + (f" · {channel}" if METRICS[metric][1] else "")
     wells = [w for members in groups.values() for w in members]
     frame = metrics[metrics["well"].isin(wells)]
-    if metric in PER_NANOWELL:
-        axis = WELLS
-        frame = frame[frame["tp_order"] == 0]
     reasons = exclusion_reason(frame, column, channels)
-    finite = _values(frame, column).dropna()
-    integer = bool(len(finite)) and bool(np.all(finite == np.round(finite)))
-    model = DistributionModel(metric, column, label, axis, integer, [], control=control)
+    if metric in PER_NANOWELL:
+        # One row per nanowell: each well's own first timepoint (``tp_order`` is per well), summarised under one
+        # label so wells imaged from different first timepoints are still one comparison.
+        axis = WELLS
+        first = frame["tp_order"] == 0
+        frame, reasons = frame[first].assign(timepoint=PER_NANOWELL_LABEL), reasons[first]
+    model = DistributionModel(metric, column, label, axis, metric in INTEGER_METRICS, [], control=control,
+                              baseline=baseline)
     if axis == TIME:
         _time_panels(model, frame, column, reasons, groups, channels)
     else:

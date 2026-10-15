@@ -4204,15 +4204,20 @@ use them.
 **Reading the figure**
 
 - Dots are coloured by the number of cells in the nanowell at baseline: an open ring for 0, then 1, 2 and 3+
-  from darker to brighter (on a white publication figure, lighter to darker). Grey is a nanowell whose count
-  at baseline is unknown.
+  (the key at the top right names the baseline). Grey ("?") is a nanowell whose count at baseline is unknown.
+  Saved and copied figures use the white-background shades of the same key.
 - Counts and occupancy are whole numbers, so hundreds of nanowells share a value; their dots are packed into
-  a band within ±0.4 of the value, and the footer says so. A tie too large for its slot is labelled "+N more
-  at v" — every nanowell with a value is either a dot or counted in such a label.
+  a band within ±0.4 of the value, starting on the value itself, and the footer says so.
+- A swarm with more dots than its slot can hold says how many were not drawn under it — "+N at 0", or
+  "+N at 0–4" — beside its exclusions. Every nanowell with a value is either a dot or counted there.
+- A replicate set of more than four wells is drawn as one density per well, with its median, instead of dots;
+  select fewer wells to see (and click) single nanowells.
 - **Nothing without a number is drawn, and nothing is dropped silently.** Under each swarm, "excl. N" counts
   the nanowells that have no value there, and the footer lists them by reason: occluded, clipped, no address,
   not located, fused (no count), empty at baseline, seeded later (empty at baseline, cells later), and so on.
-  "Nanowells used U of R" adds them up.
+  "Nanowells used U of R" (on *Along x: Time*, "Nanowell × timepoint values", since a nanowell is counted at
+  each timepoint) adds up the panels drawn, and the number of wells; past twelve panels the rest are named,
+  not counted. A selected well with no nanowell table is named in the footer, not drawn.
 - **Wells are the replicate unit, not nanowells.** On *Along x: Wells* each group's diamond and bar are the
   mean of its wells' medians and a 95% t interval over wells; with two or three wells that interval is wide,
   and the footer prints its degrees of freedom. "×1.5" beside a group is its centre over the control group's,

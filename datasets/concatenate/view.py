@@ -47,6 +47,9 @@ from datasets.concatenate.raw_compute import is_raw_dataset
 from datasets.core.dataset_fields import is_dataset, is_free_destination
 from datasets.core.dataset_fields import promote_open_button
 
+# Wide enough for "1d 6h 30m"; the gap is a short duration, not a path.
+_GAP_FIELD_W = 140
+
 
 
 
@@ -185,7 +188,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._gap_edit = QLineEdit(self._gap_box)
         self._gap_edit.setObjectName("ConcatGapField")
         self._gap_edit.setPlaceholderText("e.g. 24h")
-        self._gap_edit.setMaximumWidth(140)
+        self._gap_edit.setMaximumWidth(_GAP_FIELD_W)
         self._gap_edit.setToolTip(
             "The time from dataset 1's last timepoint to dataset 2's first, as "
             "6, 24h, 1d or 1d2h30m. Pre-filled from the two datasets' recorded "

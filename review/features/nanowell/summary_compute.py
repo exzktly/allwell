@@ -48,12 +48,14 @@ def responding_threshold(metric: str) -> float | None:
 
 
 def well_summary(metrics: pd.DataFrame, metric: str, channels=(), *,
-                 responding_above: float | None = None) -> pd.DataFrame:
+                 responding_above: float | None = None, reasons: pd.Series | None = None) -> pd.DataFrame:
     """One row per (well, timepoint): the metric's distribution over the well's nanowells.
 
     ``n_sites`` is the roster; ``n_used`` the nanowells with a value; ``excluded`` maps each reason (from
     :func:`series_compute.exclusion_reason`) to its count, so ``n_used + sum(excluded) == n_sites``.
-    ``fraction_occupied`` is over nanowells with a count at that timepoint, whatever the metric.
+    ``fraction_occupied`` is over nanowells with a count at that timepoint, whatever the metric. *reasons*, when
+    given, is each row's exclusion reason already worked out (the fixed cohort adds one of its own); otherwise it
+    is computed here.
     """
     threshold = responding_threshold(metric) if responding_above is None else responding_above
     # Occupancy classes are ordinal; "3+" stands at 3 for the median and quartiles, as the class it is.
@@ -82,7 +84,8 @@ def well_summary(metrics: pd.DataFrame, metric: str, channels=(), *,
     occupied = (frame["n"] > 0).where(counted).astype(float)
     out["fraction_occupied"] = occupied.groupby([frame[k] for k in keys], sort=False).mean()
     missing = ~has
-    reasons = exclusion_reason(metrics, metric, channels)[missing]   # on the whole frame: a reason reads the baseline row
+    # On the whole frame: a reason reads the baseline row.
+    reasons = (exclusion_reason(metrics, metric, channels) if reasons is None else reasons)[missing]
     counts = (pd.DataFrame({"well": frame.loc[missing, "well"], "timepoint": frame.loc[missing, "timepoint"],
                             "reason": reasons}).groupby(keys + ["reason"], sort=False).size())
     excluded: dict = {}

@@ -11,7 +11,7 @@ a control that does not work (CLAUDE.md §7.6).
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QLabel, QPushButton, QSlider, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QSlider, QSplitter, QVBoxLayout, QWidget
 
 from review.features.export.service import export_cell_data_from
 from review.features.nanowell import controller as nwc
@@ -35,6 +35,9 @@ _VIEW_TIP = ("Distribution: one dot per nanowell, per well and timepoint.\n"
              "Trajectories: each nanowell's metric over time, with the median of each occupancy class.\n"
              "Position: the metric by ring from the central nanowell — an edge-effect check.\n"
              "Array QC: the montage, how each tile was placed, and the grid record of every timepoint.")
+_COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their well, so each line over time follows "
+               "one set of nanowells. Off, each timepoint's median is over whichever nanowells could be measured "
+               "then. The others are counted as outside the fixed cohort.")
 _WELL_TIP = "The well the Array map and Array QC show (one of the wells the page draws)."
 _SLIDER_TIP = "The timepoint the Array map and Array QC show; drag to step through the well's timepoints."
 _METRIC_TIP = ("What each dot is. Brightness and site signal use the channel chosen in the app's channel "
@@ -108,6 +111,12 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         lambda _i: nwc.set_page_baseline(ctx, baseline_cb.currentData() or "earliest"))
     reg.register("_nw_baseline_cb", baseline_cb)
     grp_baseline = band.add_scope("Baseline", baseline_cb)
+
+    cohort_box = QCheckBox("Fixed cohort")
+    cohort_box.setToolTip(_COHORT_TIP)
+    cohort_box.toggled.connect(lambda on: nwc.set_cohort(ctx, on))
+    reg.register("_nw_cohort_box", cohort_box)
+    grp_cohort = band.add_scope("", cohort_box)
 
     well_cb = QComboBox()
     well_cb.setToolTip(_WELL_TIP)
@@ -199,7 +208,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     def page_visible() -> bool:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
-    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider)
+    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box)
 
     def refresh_controls() -> None:
         channel = match_channel(ctx.state.channel.active_channel, st.data.channels) if st.data else None
@@ -249,6 +258,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_metric.setVisible(view != "array_qc")
             grp_baseline.setVisible(view != "array_qc")
             grp_axis.setVisible(distribution)
+            cohort_box.setChecked(st.cohort)
+            # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
+            grp_cohort.setVisible((distribution or view == "trajectories") and not per_nanowell)
             grp_control.setVisible(wells_axis)
             grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position")
             grp_well.setVisible(view in ONE_WELL_VIEWS)

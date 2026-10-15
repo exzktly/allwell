@@ -104,8 +104,10 @@ class TrajectoryPanel:
     n_without_value: int                  # nanowells with no value at any timepoint (not drawn)
 
 
-def trajectory_panels(metrics: pd.DataFrame, wells, column: str) -> list[TrajectoryPanel]:
-    """One panel per well: a line per nanowell over time, and the median of each occupancy class."""
+def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool = False) -> list[TrajectoryPanel]:
+    """One panel per well: a line per nanowell over time, and the median of each occupancy class. With *cohort*,
+    only the nanowells with a value at every timepoint are drawn and pooled (tracker I8); the rest are counted
+    among those not drawn."""
     out = []
     for well in wells:
         rows = metrics[metrics["well"] == well]
@@ -122,7 +124,7 @@ def trajectory_panels(metrics: pd.DataFrame, wells, column: str) -> list[Traject
         lines, empty = [], 0
         for (q, r), series in wide.iterrows():
             y = series.to_numpy(dtype=float)
-            if not np.isfinite(y).any():
+            if not np.isfinite(y).any() or (cohort and not np.isfinite(y).all()):
                 empty += 1
                 continue
             occ = occupancy.get((q, r))

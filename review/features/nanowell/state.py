@@ -28,6 +28,7 @@ class NanowellState:
     timepoint: str = ""                     # the array map's timepoint; "" = the earliest
     selected_sites: list = field(default_factory=list)  # [[well, q, r], ...] — not a plate selection
     control: str = ""                       # the group compared against on *Along x: Wells* ("" = none)
+    cohort: bool = False                    # only nanowells with a value at every timepoint (tracker I8)
 
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
@@ -52,7 +53,7 @@ class NanowellState:
 
     def to_config(self) -> dict:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,
-                "well": self.well, "timepoint": self.timepoint, "control": self.control,
+                "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
                 "selected_sites": [list(s) for s in self.selected_sites]}
 
     def apply_config(self, config: dict) -> None:
@@ -65,6 +66,7 @@ class NanowellState:
         for name in ("well", "timepoint", "control"):
             value = config.get(name)
             setattr(self, name, value if isinstance(value, str) else getattr(fresh, name))
+        self.cohort = config.get("cohort") is True
         sites = []
         for item in config.get("selected_sites") or []:
             if (isinstance(item, (list, tuple)) and len(item) == 3 and isinstance(item[0], str)

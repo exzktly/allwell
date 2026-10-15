@@ -259,7 +259,8 @@ def redraw(ctx) -> None:
     if view == "array_map":
         _draw_map(ctx, st, fig, metric, channel, note)
     elif view == "trajectories":
-        render_trajectories(fig, vc.trajectory_panels(st.metrics, page_wells(ctx), metric_column(metric, channel)),
+        render_trajectories(fig, vc.trajectory_panels(st.metrics, page_wells(ctx), metric_column(metric, channel),
+                                                      cohort=st.cohort), cohort=st.cohort,
                             label=_label(metric, channel), time_source=st.data.time_source, note=note)
         st.hits = None
     elif view == "position":
@@ -343,7 +344,7 @@ def shown_timepoint(ctx) -> tuple[list, str]:
 def _draw_distribution(ctx, st, fig, metric, channel, note) -> None:
     model = distribution_model(st.metrics, metric, channels=st.data.channels, channel=channel, axis=st.axis,
                                groups=page_groups(ctx), timepoint=st.timepoint, control=st.control,
-                               time_source=st.data.time_source, baseline=st.baseline)
+                               time_source=st.data.time_source, baseline=st.baseline, cohort=st.cohort)
     tableless = [w for w in active_wells(ctx) if w not in set(st.data.wells)]
     if tableless:
         model.notes.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
@@ -549,6 +550,10 @@ def nw_on_channel_changed(ctx) -> None:
 
 def set_view(ctx, view: str) -> None:
     _set(ctx, "view", view)
+
+
+def set_cohort(ctx, on: bool) -> None:
+    _set(ctx, "cohort", bool(on))
 
 
 def set_metric(ctx, metric: str) -> None:

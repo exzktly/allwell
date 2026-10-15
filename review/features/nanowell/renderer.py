@@ -504,7 +504,8 @@ def _ring(x, y, radius, colour):
 
 
 # ── trajectories (V4) ────────────────────────────────────────────────────────
-def render_trajectories(fig, panels, *, label: str, time_source: str | None = None, note: str = "") -> None:
+def render_trajectories(fig, panels, *, label: str, time_source: str | None = None, note: str = "",
+                        cohort: bool = False) -> None:
     """One panel per well: a thin line per nanowell, a thick median per occupancy class at baseline."""
     from matplotlib.collections import LineCollection
 
@@ -543,8 +544,10 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
         without += panel.n_without_value
     if axes:
         _ink(axes[0].set_ylabel(label, color=ink))
-    lines = [f"{drawn:,} nanowells drawn, one line each; {without:,} with no value at any timepoint not drawn. "
-             "A gap in a line is a timepoint without a value.",
+    lines = [(f"Fixed cohort: {drawn:,} nanowells with a value at every timepoint drawn, one line each; {without:,} "
+              "without one at some timepoint not drawn." if cohort else
+              f"{drawn:,} nanowells drawn, one line each; {without:,} with no value at any timepoint not drawn. "
+              "A gap in a line is a timepoint without a value."),
              "Thick lines: the median of each occupancy class at baseline, over the nanowells with a value at each "
              "timepoint." + (" Times read from the timepoint labels." if time_source == "label" else "")]
     if len(panels) > len(shown):

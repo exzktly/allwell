@@ -56,6 +56,9 @@ INTEGER_METRICS = frozenset({"n", "occupancy_class"})
 PER_NANOWELL_LABEL = "per nanowell"
 
 #: Short labels for :func:`series_compute.exclusion_reason`'s strings, as the figure prints them.
+#: The reason a value is left out under the fixed cohort (tracker I8): its nanowell lacks one at some timepoint.
+COHORT_REASON = "not measured at every timepoint"
+
 _REASON_LABELS = {
     "occluded": "occluded", "clipped": "clipped", "unaddressed": "no address", "not_located": "not located",
     "absent": "not in roster", "never measured": "never measured",
@@ -66,6 +69,7 @@ _REASON_LABELS = {
     "no signal above background at baseline": "no signal at baseline",
     "fewer than three timepoints with cells and a time": "< 3 timepoints with cells",
     "no count at baseline": "no count at baseline",
+    COHORT_REASON: "outside the fixed cohort",
 }
 
 
@@ -185,9 +189,30 @@ def _swarm(rows: pd.DataFrame, column: str, reasons: pd.Series, *, label: str, w
     return Swarm(label, well, x, values[has].to_numpy(dtype=float), sites, occupancy, len(rows), excluded)
 
 
+def fixed_cohort(frame: pd.DataFrame, column: str, reasons: pd.Series) -> tuple[pd.DataFrame, pd.Series, int, int]:
+    """Only the nanowells with a value at every timepoint of their well (tracker I8): ``(frame, reasons, kept,
+    sites)``. A value of any other nanowell becomes undefined with :data:`COHORT_REASON`, so it is counted among
+    the exclusions rather than vanishing, and every line over time follows one set of nanowells — without it the
+    median at each timepoint is over whichever nanowells could be measured then, which can move with no
+    nanowell changing."""
+    values = pd.to_numeric(frame[column], errors="coerce") if column != "occupancy_class" else frame[column]
+    has = values.notna()
+    key = [frame["well"], frame["nw_q"], frame["nw_r"]]
+    complete = has.groupby(key).transform("all")
+    out = has & ~complete
+    frame = frame.copy()
+    frame.loc[out, column] = np.nan
+    reasons = reasons.copy()
+    reasons[out] = COHORT_REASON
+    sites = frame.drop_duplicates(["well", "nw_q", "nw_r"])
+    kept = int(complete.groupby(key).first().sum())
+    return frame, reasons, kept, len(sites)
+
+
 def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), channel: str | None = None,
                        axis: str = TIME, groups: dict, timepoint: str = "", control: str = "",
-                       time_source: str | None = None, baseline: str = "earliest") -> DistributionModel:
+                       time_source: str | None = None, baseline: str = "earliest",
+                       cohort: bool = False) -> DistributionModel:
     """The Distribution view for *groups* (``name -> wells``, as ``controller.replicate_groups`` gives).
 
     A group of one well is that well; a group of several is a replicate set. Only the wells named in
@@ -206,6 +231,10 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
         frame, reasons = frame[first].assign(timepoint=PER_NANOWELL_LABEL), reasons[first]
     model = DistributionModel(metric, column, label, axis, metric in INTEGER_METRICS, [], control=control,
                               baseline=baseline)
+    if cohort and metric not in PER_NANOWELL:
+        frame, reasons, kept, sites = fixed_cohort(frame, column, reasons)
+        model.notes.append(f"Fixed cohort: only the {kept:,} of {sites:,} nanowells with a value at every timepoint "
+                           "of their well are used; the rest are counted as outside the fixed cohort.")
     if axis == TIME:
         _time_panels(model, frame, column, reasons, groups, channels)
     else:
@@ -226,7 +255,7 @@ def _time_label(frame: pd.DataFrame, tp: str) -> str:
 
 
 def _time_panels(model, frame, column, reasons, groups, channels) -> None:
-    summary = well_summary(frame, column, channels) if len(frame) else None
+    summary = well_summary(frame, column, channels, reasons=reasons) if len(frame) else None
     for name, members in groups.items():
         rows = frame[frame["well"].isin(members)]
         tps = _order(rows)
@@ -257,7 +286,7 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
         reasons = reasons[frame.index]
     model.timepoint = timepoint if model.metric not in PER_NANOWELL else ""
     panel = Panel(title=(f"{timepoint}" if model.timepoint else "One value per nanowell"), swarms=[], ticks=[])
-    summary = well_summary(frame, column, channels) if len(frame) else pd.DataFrame(
+    summary = well_summary(frame, column, channels, reasons=reasons) if len(frame) else pd.DataFrame(
         columns=["well", "timepoint", "median", "n_used", "excluded", "time_h", "tp_order"])
     stats = group_summary(summary, groups, metric=column if column in LOG_METRICS else "",
                           control=control if control in groups else None)
@@ -287,6 +316,9 @@ def _notes(model: DistributionModel, metric: str, time_source: str | None) -> No
         dfs = sorted({s.df for p in model.panels for s in p.stats if s.df is not None})
         model.notes.append("Statistics are per well (mean of well medians, 95% t interval"
                            + (f", df {', '.join(map(str, dfs))}" if dfs else "") + "); nanowells are not replicates.")
+    elif any(n.startswith("Fixed cohort") for n in model.notes):
+        model.notes.append("The line joins each well's median over its fixed cohort, the same nanowells at every "
+                           "timepoint.")
     else:
         model.notes.append("The line joins each well's median over the nanowells with a value at that timepoint.")
     if time_source == "label":

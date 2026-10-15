@@ -799,10 +799,27 @@ nanowell's trajectory.
   those. Clicking a second site adds it to the plot for comparison; clicking
   empty space clears the selection. The selection is not a plate selection
   (`_selected_wells` is untouched).
+- **Distribution (the primary view, and the page's default)** — a beeswarm
+  of the chosen metric over the nanowells: one dot per nanowell, drawn
+  per well (or per replicate group) and per timepoint, so the same figure
+  serves both questions: how a well's nanowells spread **over time**
+  (timepoints along the axis, one swarm each, the well median joined across
+  them) and how **wells or groups compare** at one timepoint (wells along the
+  axis, one swarm each). Which axis carries wells and which carries time is
+  a control, as is the metric (count, confluence, brightness, site signal,
+  or any §3.10.1 fold change). Dots are coloured by occupancy class and a
+  state that carries no number (occluded, clipped, unmeasured) is not drawn
+  and is counted in the figure's footer, never plotted at zero. Clicking a
+  dot opens the site detail view. Replicate wells are assigned exactly as in
+  the regular plot tabs, from Sample Definitions; the swarm is the picture of
+  the nanowells, and the **statistic beside it is on wells**: each group's
+  centre and interval come from one value per well (§3.10.2), the number of
+  wells and of nanowells used and the number excluded by reason are printed
+  on the figure. Violin and box overlays are options, not the default.
 - **Trajectories** — one line per site with the well median over them,
-  coloured by occupancy class.
-- **Well comparison** — per-well or per-group distributions at a timepoint;
-  median and spread over time.
+  coloured by occupancy class: the same data as the Distribution view's
+  over-time layout, drawn as lines when the question is "which nanowells
+  went where" rather than "how spread".
 - **Position effects** — metric against ring, as an edge-effect check.
 - **Array QC** — the montage with lattice, tile seams, each tile's placement
   source, fused sites, the origin method per timepoint, and every status the
@@ -1156,8 +1173,9 @@ Answers are written into the row. Rows that depend on an answer say so.
 | V2 | Array map | `review/features/nanowell/renderer.py` | `todo` | |
 | V3 | Site detail: the clicked nanowell's statistics over time (count, confluence, brightness, site signal against recorded time, state marked per timepoint, undefined drawn as a gap) and its crop at every timepoint from the owner tile | `review/features/nanowell/` | `todo` | Feature requested by the user. Data comes from D2's per-site series, never recomputed in the view |
 | V3a | Click-to-select, tested through the real widget (CLAUDE.md §7.6): a synthetic mouse press on the array map's canvas at a site's pixel position selects that `(well, q, r)` and the detail plot receives that series; a press between sites clears; a second press adds; `_selected_wells` is unchanged. Name the wrong implementation: a hit-test that picks the nearest site regardless of distance, or one that is off by half a site in the axes' y-down transform | `tests/` | `todo` | Slow lane (needs the built page); the hit-test itself is a pure function in `renderer.py` and is tested in the fast lane |
+| V3b | Distribution view: the beeswarm over nanowells, the page's default view and the first thing it shows. Per well or per replicate group, over time or across wells (the axes are a control), metric selectable; states without a number are not drawn and are counted in the footer; click a dot opens V3. Replicate wells from Sample Definitions as in the regular plot tabs (D6); group statistics are on wells, never on nanowells (D7); wells used, nanowells used and excluded-by-reason on the figure. The swarm layout is a pure function in `renderer.py` (dots never overlap, are deterministic, and a dot's y is its value exactly), tested in the fast lane; a real-widget test selects it as the default and presses a dot. Name the wrong implementation: pooling every nanowell of a group into one swarm and computing its interval over nanowells (a thousand false replicates), and plotting an unmeasured site at zero | `review/features/nanowell/renderer.py`, `tab_view.py` | `todo` | Feature requested by the user: beeswarm over nanowells is the primary/default view. Renders on the Screen/Publication toggle like the other plot tabs |
 | V4 | Trajectories | `review/features/nanowell/renderer.py` | `todo` | |
-| V5 | Well comparison | `review/features/nanowell/renderer.py` | `todo` | |
+| V5 | Well comparison: the Distribution view (V3b) with wells on the axis at one timepoint, plus the median and spread of each well over time as a secondary layout | `review/features/nanowell/renderer.py` | `todo` | Shares V3b's renderer; not a second implementation |
 | V6 | Position effects | `review/features/nanowell/renderer.py` | `todo` | |
 | V7 | Array QC | `review/features/nanowell/renderer.py` | `todo` | |
 | V8 | Properties panel, Saved Plots, Copy / Save; redraw ends with `apply_export_style_to_current` | `review/features/nanowell/controller.py` | `todo` | |

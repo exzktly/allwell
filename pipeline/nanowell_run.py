@@ -87,6 +87,28 @@ class Located:
     detected_common: np.ndarray | None = None             # detected centres, common frame
     indexed: tuple = ()
     mirrored: bool = False
+    stage_offset_um: tuple[float, float] | None = None    # the common frame's place in stage coordinates
+
+
+def stage_offset(record: dict, well: str, timepoint: str, positions: dict) -> tuple[float, float] | None:
+    """Where the registration's common frame sits in stage coordinates: the median of stage minus registered position.
+
+    ``None`` unless every tile of the (well, timepoint) has a stage position. The stage and image axes
+    are taken to be parallel (a stage axis running against the image's would need a sign the record does
+    not carry: tracker R8), so this is a translation only; a rotation of the plate is not in it, it is in
+    the origins that are compared across timepoints.
+    """
+    offsets = []
+    for tile in record["tiles"]:
+        if tile["well"] != well or tile["timepoint"] != timepoint:
+            continue
+        if tile["stage_xy_um"] is None or tile["field"] not in positions:
+            return None
+        left, top = positions[tile["field"]]
+        offsets.append((tile["stage_xy_um"][0] - left, tile["stage_xy_um"][1] - top))
+    if not offsets:
+        return None
+    return float(np.median([o[0] for o in offsets])), float(np.median([o[1] for o in offsets]))
 
 
 def _tile_fit(image, pixel_size_um: float, settings: NanowellSettings):
@@ -154,6 +176,7 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     positions = registration.positions()
     montage = build_montage(images, positions, px)
     located = Located(timepoint, OK, "", plan=plan, positions=positions, pixel_size_um=px, montage=montage)
+    located.stage_offset_um = stage_offset(record, well, timepoint, positions)
 
     def refuse(status, reason, **extra):
         located.status, located.reason = status, reason
@@ -201,7 +224,13 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
 
 def _lattice_block(located: Located, estimate, status: str, reason: str) -> dict:
     fit = located.fit
+    origin_stage = None
+    if located.origin_montage is not None and located.stage_offset_um is not None:
+        common = _montage_to_common(located.origin_montage, located.montage)
+        origin_stage = [float(common[0] + located.stage_offset_um[0]), float(common[1] + located.stage_offset_um[1])]
     return {"status": status, "reason": reason, "lattice_kind": fit.kind, "pitch_um": fit.pitch,
+            "stage_offset_um": None if located.stage_offset_um is None else list(located.stage_offset_um),
+            "origin_stage_um": origin_stage, "montage_origin_um": list(located.montage.origin_um),
             "angle_deg": fit.angle_deg, "mirrored": located.mirrored,
             "origin_method": located.origin_method, "origin_agreement": located.origin_agreement,
             "array_boundary": located.boundary, "montage_um_per_px": located.montage.um_per_px,

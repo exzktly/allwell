@@ -198,7 +198,7 @@ from pipeline.run_report import (
 )
 from pipeline.completeness import record_run_check
 from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
-from pipeline.nanowell_task import record_nanowell_info, refuse_nanowell_without_zips
+from pipeline.nanowell_task import nanowell_endgame, record_nanowell_info, refuse_nanowell_without_zips
 
 
 def _report_worker_failure(well_label: str, output_dir: Path | None, exc: BaseException) -> None:
@@ -3554,6 +3554,9 @@ def main() -> None:
             sep=sep,
             settings_key=settings_key,
         )
+        nanowell_endgame(nanowell, output_dir, well_zips, shared_kwargs, args.nuclear_token,
+                         fluor_tokens_for_quant, args.csv_prefix, schema, sep, settings_key,
+                         grouper=find_image_groups_in_zip, parse=parse_filename)
     elif well_folders:
         log.info("Folder mode: %d well folder(s) detected.", len(well_folders))
         failed_wells = process_well_folders(

@@ -125,7 +125,7 @@ def _json_default(value):
     raise TypeError(f"{type(value).__name__} is not JSON serialisable")
 
 
-def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, record):
+def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, record) -> dict | None:
     """What an earlier run of this well left, if it is still valid for this one: ``(grid, site rows, cell rows)``.
 
     Valid means: the settings that produced it are this run's (the same check the per-field path makes),
@@ -174,7 +174,7 @@ def _write_montages(outcome: nr.WellOutcome, well_label: str, staging: Path) -> 
 
 def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
                      csv_prefix, schema, sep, *, grouper, parse, extract, scratch_dir, write_csv, segmenter=None,
-                     incremental=False, prior_dir=None, settings_key="", staging_dir=None):
+                     incremental=False, prior_dir=None, settings_key="", staging_dir=None, plate_rigid=None):
     """Run one zipped well in nanowell mode; returns ``(records, failed_timepoints)`` like its counterpart.
 
     *grouper*, *parse*, *extract*, *write_csv* are ``process_microscopy``'s ``find_image_groups_in_zip``,
@@ -223,7 +223,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     channels = {t: channel_loader(t) for t in fluor_tokens}
     fixed = None if prior is None else prior["grid"].get("array_radius", {}).get("radius_um")
     outcome = nr.run_well(well_label, record, todo, load_phase, settings, segmenter=segmenter, channels=channels,
-                          fixed_radius_um=fixed)
+                          fixed_radius_um=fixed, plate_rigid=plate_rigid)
     px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)
@@ -248,7 +248,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
 
 def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
                  csv_prefix, schema, sep, settings_key, *, grouper, parse, segmenter=None, incremental=False,
-                 incremental_prior_dir=None):
+                 incremental_prior_dir=None, plate_rigid=None):
     """The whole lifecycle of one zipped well in nanowell mode (what ``process_well_zip_task`` does otherwise).
 
     Extract to scratch, run, write the three tables and the montage archive, record completeness (in
@@ -275,7 +275,7 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
             well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
             schema, sep, grouper=grouper, parse=parse, extract=extract_zip, scratch_dir=scratch,
             write_csv=_write_single_csv, segmenter=segmenter, incremental=incremental,
-            prior_dir=incremental_prior_dir, settings_key=settings_key, staging_dir=staging)
+            prior_dir=incremental_prior_dir, settings_key=settings_key, staging_dir=staging, plate_rigid=plate_rigid)
         if not (output_dir / NANOWELL_DIR / f"{well_label}_grid.json").is_file():
             return records, failed
         grid = json.loads((output_dir / NANOWELL_DIR / f"{well_label}_grid.json").read_text(encoding="utf-8"))
@@ -334,3 +334,132 @@ def refuse_nanowell_without_zips(options, well_zips, error) -> None:
     """Nanowell mode reads each well from ``in/<well>.zip``; a folder-mode plate is refused by name (*error* exits)."""
     if options and not well_zips:
         error("--nanowell_format needs the wells as zips (in/<well>.zip); no well zips were found.")
+
+
+# ── the end-of-run pass: addresses from the rest of the plate (tracker P3) ───
+#: Methods that anchored a timepoint on its own evidence; a plate-rigid anchor is not evidence for another well.
+_INDEPENDENT = ("fiducial", "array_centre")
+
+
+def _read_grids(output_dir: Path) -> dict[str, dict]:
+    grids = {}
+    for path in sorted((Path(output_dir) / NANOWELL_DIR).glob("*_grid.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if payload.get("scheme_version") == SCHEME_VERSION:
+            grids[payload["well"]] = payload
+    return grids
+
+
+def _origin(grids: dict, well: str, timepoint: str) -> tuple | None:
+    block = grids.get(well, {}).get("timepoints", {}).get(timepoint, {})
+    if block.get("status") == nr.OK and block.get("origin_method") in _INDEPENDENT and block.get("origin_stage_um"):
+        return tuple(block["origin_stage_um"])
+    return None
+
+
+def plan_reanchor(grids: dict[str, dict]) -> tuple[dict, dict]:
+    """``(predictions, reasons)`` for every unaddressed (well, timepoint) the rest of the plate can anchor.
+
+    The plate is taken out between timepoints and put back moved, but it moves as one rigid object, so
+    the wells anchored on their own evidence at both a reference timepoint and this one fix a rotation
+    and translation (``fit_plate_rigid``); the target's origin at the reference, carried through it, is
+    where its origin is now. ``predictions[well][timepoint]`` is an ``OriginPrediction`` in that
+    well's montage frame, ready for ``resolve_origin``. Whatever cannot be predicted is in *reasons*
+    with why: no stage positions, no reference origin, fewer than three other wells, an imprecise fit.
+    """
+    from pipeline.nanowell_lattice import OriginPrediction, fit_plate_rigid, predict_origin
+
+    predictions: dict[str, dict] = {}
+    reasons: dict[tuple[str, str], str] = {}
+    for well, grid in grids.items():
+        for tp, block in grid["timepoints"].items():
+            if block.get("status") != nr.UNADDRESSED:
+                continue
+            key = (well, tp)
+            if block.get("stage_offset_um") is None:
+                reasons[key] = "the record has no stage position for every tile, so wells cannot be compared"
+                continue
+            reference = next((r for r in grid["timepoints"] if r != tp and _origin(grids, well, r)), None)
+            if reference is None:
+                reasons[key] = "this well was never anchored on its own at another timepoint"
+                continue
+            others = [w for w in grids if w != well and _origin(grids, w, reference) and _origin(grids, w, tp)]
+            fit = fit_plate_rigid({w: _origin(grids, w, reference) for w in others},
+                                  {w: _origin(grids, w, tp) for w in others})
+            if not fit.ok:
+                reasons[key] = f"the plate's motion could not be fitted from {len(others)} other well(s): {fit.reason}"
+                continue
+            stage = predict_origin(fit, _origin(grids, well, reference))
+            if not stage.ok:
+                reasons[key] = stage.reason
+                continue
+            offset, montage_origin = block["stage_offset_um"], block["montage_origin_um"]
+            position = (stage.position[0] - offset[0] - montage_origin[0],
+                        stage.position[1] - offset[1] - montage_origin[1])
+            predictions.setdefault(well, {})[tp] = OriginPrediction(
+                True, "", position, stage.uncertainty, stage.uncertainty_with_site)
+    return predictions, reasons
+
+
+def reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix, schema,
+                   sep, settings_key, *, grouper, parse, segmenter=None) -> dict:
+    """Re-run the unaddressed (well, timepoint)s the rest of the plate can anchor; report what it did.
+
+    Only those wells' rows for those timepoints are rewritten (an incremental run with the prediction
+    handed in; every other timepoint is kept as it is). Returns the counts the sidecar records:
+    ``anchored`` (now addressed), ``remaining`` (still unaddressed) and why for each.
+    """
+    output_dir = Path(output_dir)
+    grids = _read_grids(output_dir)
+    predictions, reasons = plan_reanchor(grids)
+    zips = dict(well_zips)
+    for well, by_tp in predictions.items():
+        if well not in zips:
+            continue
+        log.info("Well %s — re-anchoring %s from the plate's other wells.", well, ", ".join(sorted(by_tp)))
+        run_zip_task(well, zips[well], output_dir, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
+                     schema, sep, settings_key, grouper=grouper, parse=parse, segmenter=segmenter, incremental=True,
+                     incremental_prior_dir=output_dir, plate_rigid=by_tp)
+    after = _read_grids(output_dir)
+    anchored, remaining = [], {}
+    for well, grid in after.items():
+        for tp, block in grid["timepoints"].items():
+            was = grids.get(well, {}).get("timepoints", {}).get(tp, {}).get("status")
+            if was != nr.UNADDRESSED:
+                continue
+            if block.get("status") == nr.OK:
+                anchored.append(f"{well}/{tp}")
+            else:
+                remaining[f"{well}/{tp}"] = reasons.get((well, tp)) or block.get("reason", "")
+    return {"anchored": sorted(anchored), "remaining": remaining}
+
+
+def nanowell_endgame(options, output_dir, well_zips, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
+                     schema, sep, settings_key, *, grouper, parse) -> None:
+    """What nanowell mode does after every well has run; a no-op when the mode is off (the caller does not branch)."""
+    if not options:
+        return
+    summary = reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
+                             schema, sep, settings_key, grouper=grouper, parse=parse)
+    if summary["anchored"] or summary["remaining"]:
+        log.info("Re-anchoring: %d (well, timepoint) anchored from the plate, %d still unaddressed.",
+                 len(summary["anchored"]), len(summary["remaining"]))
+        for key, why in summary["remaining"].items():
+            log.warning("Unaddressed %s: %s", key, why)
+    _record_reanchor(Path(output_dir) / "pipeline_info.json", summary)
+
+
+def _record_reanchor(info_path: Path, summary: dict) -> None:
+    from pipeline.io import _safe_atomic_text_write
+    from pipeline.run_report import merge_into_pipeline_info
+
+    try:
+        existing = json.loads(info_path.read_text(encoding="utf-8")) if info_path.exists() else {}
+        block = dict(existing.get("nanowell", {}))
+        block["reanchor"] = summary
+        merge_into_pipeline_info(info_path, {"nanowell": block}, atomic_writer=_safe_atomic_text_write)
+    except (OSError, ValueError) as exc:
+        log.warning("Could not record the re-anchoring summary in %s: %s", info_path, exc)

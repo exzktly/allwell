@@ -40,7 +40,7 @@ def _write_plate(tmp_path, rendered, record, *, token="0h", fluorescence=None):
     return plate
 
 
-def _run_main(monkeypatch, plate, *extra):
+def _run_main(monkeypatch, plate, *extra, run_check=False):
     from pipeline import well_skip
 
     def _serial(*, well_zips, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
@@ -60,7 +60,8 @@ def _run_main(monkeypatch, plate, *extra):
     monkeypatch.setattr(_suspend, "watch_parent", lambda *a, **k: None)
     argv = ["process_microscopy.py", "--input_dir", str(plate / "in"), "--output_dir", str(plate / "out"),
             "--phase_token", "PHASE", "--fluor_tokens", "GFP", "--filename_schema", ":".join(SCHEMA), "--workers", "1",
-            "--background", "none", "--flatfield", "none", "--no_auto_threshold", "--no_run_check", *extra]
+            "--background", "none", "--flatfield", "none", "--no_auto_threshold",
+            *([] if run_check else ["--no_run_check"]), *extra]
     monkeypatch.setattr(sys, "argv", argv)
     pm.main()
     return plate / "out"
@@ -211,3 +212,12 @@ def test_a_changed_setting_or_a_changed_record_recomputes_the_timepoint(tmp_path
     _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental", "--nanowell_margin_um", "5")
     assert located_calls["measure"] == ["0h"]                                    # only the timepoint whose record changed
     assert (out / f"{WELL}_out.zip").stat().st_size > 0
+
+
+def test_the_completeness_check_counts_a_nanowell_well_in_timepoints_and_finds_it_whole(tmp_path, monkeypatch, rendered_well):
+    rendered, record, _ = rendered_well
+    plate = _write_plate(tmp_path, rendered, record)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", run_check=True)
+    info = json.loads((out / "pipeline_info.json").read_text())
+    well = info["run_check"]["wells"][WELL]
+    assert (well["intent"], well["covered_csv"], well["missing_count"], well["health"]) == (1, 1, 0, "complete")

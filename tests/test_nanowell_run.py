@@ -151,3 +151,15 @@ def test_an_unaddressed_timepoint_keeps_its_detected_sites_with_no_address():
                                     segmenter=threshold_segmenter())
     assert measured.sites and all(r["nw_q"] is None and r["nw_r"] is None for r in measured.sites)
     assert any(r["n_cells"] == 0 for r in measured.sites)                   # still measured, just not joinable
+
+
+def test_a_fixed_radius_decides_the_roster_not_the_timepoints_own_boundary():
+    rendered, record = build_well(rows=1, cols=1, tile=(900, 900))
+    load = lambda tp, tile: rendered.images.get(tile)           # noqa: E731
+    own = nr.run_well("A01", record, ["T0"], load, SETTINGS, segmenter=threshold_segmenter())
+    radius = own.radius["radius_um"]
+    fixed = nr.run_well("A01", record, ["T0"], load, SETTINGS, segmenter=threshold_segmenter(),
+                        fixed_radius_um=0.6 * radius)
+    assert fixed.radius["radius_um"] == pytest.approx(0.6 * radius) and fixed.radius["status"] == "shared"
+    assert len(fixed.sites) < 0.6 * len(own.sites)                  # ~0.36 of the area
+    assert fixed.timepoints["T0"]["radius_deviation_um"] == pytest.approx(radius - 0.6 * radius, rel=0.05)

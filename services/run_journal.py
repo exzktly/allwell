@@ -356,6 +356,7 @@ def open_run(
             f"{', '.join(RUN_MODES)}")
     prior = _read_run_payload(output_dir) or {}
     carried = prior.get("remote")
+    history = prior.get("remote_history")
     now = time.time()
     payload = {
         "version": JOURNAL_VERSION,
@@ -369,6 +370,7 @@ def open_run(
         "argv": [str(a) for a in argv],
         "spec": spec if isinstance(spec, dict) else {},
         "remote": carried if isinstance(carried, dict) else {},
+        "remote_history": history if isinstance(history, list) else [],
         "queued": bool(queued),
     }
     ok = _atomic_write_json(_run_path(output_dir), payload)
@@ -417,6 +419,19 @@ def record_remote(
     payload = _read_run_payload(output_dir)
     if payload is None:
         return False
+    # The address it replaces is kept, not dropped. Each run records its own
+    # address before it uploads a byte, so a run stopped during its upload used
+    # to erase the only record of where an *earlier* run's finished, never-
+    # downloaded output was — and the next run then looked in the empty
+    # directory and uploaded the plate again. :func:`stored_remote_addresses`
+    # reads every one of these.
+    previous = payload.get("remote")
+    history = [h for h in (payload.get("remote_history") or [])
+               if isinstance(h, dict)]
+    if isinstance(previous, dict) and previous.get("remote_output_dir"):
+        history = [h for h in history if h.get("remote_output_dir")
+                   != previous["remote_output_dir"]] + [previous]
+    payload["remote_history"] = history[-REMOTE_HISTORY_MAX:]
     payload["remote"] = {
         "run_id": str(run_id),
         "cache_key": str(cache_key),
@@ -636,6 +651,40 @@ def _read_wells(output_dir: Path | str) -> dict[str, WellRecord]:
             at=float(rec.get("at") or 0.0),
         )
     return out
+
+
+#: How many earlier remote addresses a journal keeps. Each is a few hundred
+#: bytes; the bound exists only so a plate re-run every day for years does not
+#: grow its journal for ever.
+REMOTE_HISTORY_MAX = 20
+
+
+def stored_remote_addresses(
+    output_dir: Path | str, *, argv_digests, source_key: str, host_alias: str,
+) -> list[dict]:
+    """Every recorded remote address that matches, newest first.
+
+    The current address and the earlier ones :func:`record_remote` kept, each
+    held to the same three keys as :func:`stored_remote_address` — any of
+    *argv_digests* may match the first. For finding output to download, not for
+    choosing where a new run writes, which stays the latest address alone.
+    """
+    payload = _read_run_payload(output_dir)
+    if payload is None:
+        return []
+    entries = [payload.get("remote"), *reversed(payload.get("remote_history") or [])]
+    wanted = {str(d) for d in argv_digests if d}
+    found: list[dict] = []
+    for remote in entries:
+        if not isinstance(remote, dict) or not remote.get("remote_output_dir"):
+            continue
+        if (str(remote.get("argv_digest") or "") in wanted
+                and source_key and remote.get("source_key") == source_key
+                and host_alias and remote.get("host_alias") == host_alias
+                and all(f["remote_output_dir"] != remote["remote_output_dir"]
+                        for f in found)):
+            found.append(dict(remote))
+    return found
 
 
 def stored_remote_address(

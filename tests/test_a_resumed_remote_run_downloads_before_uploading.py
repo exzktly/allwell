@@ -322,7 +322,7 @@ def test_changed_settings_never_download_the_old_output(
 
     _r, events = _resume(plate, host, stop_fetchers, min_nucleus_area_px=200)
 
-    assert "[remote] resume:" not in _text(events), _text(events)
+    assert "never downloaded" not in _text(events), _text(events)
     assert not (plate[1] / "A01_out.zip").exists()
     assert remote.uploads[len(uploads_before):] == [list(WELLS)]
 
@@ -341,3 +341,97 @@ def test_a_plain_rerun_of_a_plate_the_server_holds_whole_uploads_nothing(
 
     assert "FULL CACHE HIT" in _text(events), _text(events)
     assert remote.uploads == uploads_before, _text(events)
+
+
+# ── a later run overwrote the address (the second report) ───────────────────
+
+def _a_stopped_run_overwrites_the_address(plate, host, remote, *, keep_history):
+    """What pressing Resume on the old build and stopping it during the upload
+    left behind: its own, empty directory recorded as *the* address. With
+    ``keep_history=False`` the journal is shaped as that build wrote it — the
+    original address gone, not kept."""
+    _inp, out = plate
+    current = J.read_journal(out).remote
+    empty = current["remote_output_dir"].replace("/run-", "/run-stopped-")
+    remote.path(empty).mkdir(parents=True)
+    J.record_remote(out, **{**{k: current[k] for k in (
+        "run_id", "cache_key", "host_alias", "remote_input_dir", "argv_digest",
+        "source_key")}, "remote_output_dir": empty})
+    if not keep_history:
+        import json
+        path = out / ".aw_journal" / "run.json"
+        payload = json.loads(path.read_text())
+        payload.pop("remote_history", None)
+        path.write_text(json.dumps(payload))
+
+
+@pytest.mark.parametrize("incremental", [True, False],
+                         ids=["start-made-incremental", "start-plain"])
+@pytest.mark.parametrize("keep_history", [True, False],
+                         ids=["journal-keeps-history", "address-already-lost"])
+def test_a_stopped_later_run_does_not_hide_the_finished_wells(
+        plate, host, remote, stop_fetchers, keep_history, incremental):
+    """Loaded the old pipeline_info and pressed Start, after a Resume on the old
+    build had been stopped mid-upload: the batched run's finished wells were not
+    downloaded and the plate was uploaded again. Start is made incremental by
+    ``resume_aware_spec`` whenever an unfinished run is on record, which is the
+    case the user hit — and an incremental run never re-attaches, so only the
+    recovery can find the wells."""
+    _run_one_finished_on_the_server(plate, host, remote, stop_fetchers,
+                                    batch_size=2)
+    _a_stopped_run_overwrites_the_address(plate, host, remote,
+                                          keep_history=keep_history)
+    uploads_before = list(remote.uploads)
+
+    _r, events = _resume(plate, host, stop_fetchers, incremental=incremental)
+
+    text = _text(events)
+    assert remote.uploads == uploads_before, text
+    for well in WELLS:
+        assert (plate[1] / f"{well}_out.zip").is_file(), text
+
+
+def test_the_blank_alone_is_not_uploaded_once_every_well_is_here(
+        plate, host, remote, stop_fetchers):
+    """The empty-well blank is staged whole on every run. With every sample
+    well already here and the blank's own output too, it was the only thing in
+    the upload, and a node was asked for to recompute it."""
+    opts = _opts(flatfield="empty_well", background_well="B02")
+    _run_one_finished_on_the_server(plate, host, remote, stop_fetchers, opts=opts)
+    launches = len(remote.launched)
+    uploads_before = list(remote.uploads)
+
+    _r, events = _resume(plate, host, stop_fetchers, flatfield="empty_well",
+                         background_well="B02")
+
+    text = _text(events)
+    assert remote.uploads == uploads_before, text
+    assert len(remote.launched) == launches, text
+    assert ("done", "Nothing to upload: every well is already complete "
+                    "locally.\n") in events, text
+
+
+def test_the_journal_keeps_an_address_the_name_cannot_be_recomputed_from(
+        plate, host, remote, stop_fetchers):
+    """A run whose upload was *rewritten* (a channel filter that dropped enough
+    bytes) addresses a directory keyed on a fresh copy, which nothing can
+    recompute. Only the kept history finds it once a later run has recorded
+    its own address."""
+    import shutil
+
+    remote_out = _run_one_finished_on_the_server(plate, host, remote, stop_fetchers)
+    _inp, out = plate
+    rewritten = remote_out.replace("/runs/run-", "/runs/run-rewritten-")
+    shutil.move(str(remote.path(str(Path(remote_out).parent))),
+                str(remote.path(str(Path(rewritten).parent))))
+    current = J.read_journal(out).remote
+    J.record_remote(out, **{**{k: current[k] for k in (
+        "run_id", "cache_key", "host_alias", "remote_input_dir", "argv_digest",
+        "source_key")}, "remote_output_dir": rewritten})
+    _a_stopped_run_overwrites_the_address(plate, host, remote, keep_history=True)
+    uploads_before = list(remote.uploads)
+
+    _r, events = _resume(plate, host, stop_fetchers)
+
+    assert remote.uploads == uploads_before, _text(events)
+    assert (out / "A01_out.zip").is_file(), _text(events)

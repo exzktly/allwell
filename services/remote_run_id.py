@@ -91,9 +91,18 @@ def pipeline_argv_digest(
     because nothing local produces them, and leaving them out made two runs
     that compute different numbers hash identically. They are appended rather
     than merged, so the digest is stable in their order.
+
+    Skips ``--incremental`` and ``--incremental_prior_dir`` as well. Both are
+    client-side on a remote run — :meth:`RemoteRunner._build_remote_argv` drops
+    them before the host sees the command — so they cannot change a byte of
+    what the remote writes. Hashing them made a resumed run (which is always
+    incremental) a "differently configured" run than the one it resumes, so the
+    journal's recorded address never matched it, and the wells that run had
+    finished on the server were uploaded and recomputed instead of downloaded
+    (``services.remote_recover``).
     """
-    skip_with_value = {"--input_dir", "--output_dir"}
-    skip_flags = {"--force"}
+    skip_with_value = {"--input_dir", "--output_dir", "--incremental_prior_dir"}
+    skip_flags = {"--force", "--incremental"}
     filtered: list[str] = []
     pipeline_argv = _without_launcher(pipeline_argv)
     i = 0

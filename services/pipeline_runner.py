@@ -54,6 +54,7 @@ from services.remote_runner import (
     stage_local_zips,
 )
 from services import run_journal, run_provenance
+from services.remote_recover import recover_finished_outputs
 from services.subprocess_kill import signal_subprocess
 from pipeline.slurm_node import parse_node_specs
 from util.aw_safe import swallow, swallowed
@@ -1623,6 +1624,104 @@ class PipelineRunner:
             return None
         return zipped, argv_with_only_wells(args, sent), grouped, len(scoped)
 
+    def _announce_staged_plate(self, zipped, grouped: list[str],
+                               download_n: int) -> None:
+        """Tell the dashboard what staging produced, before anything uploads."""
+        # Incremental: wells whose local output already covers every input
+        # FOV were dropped from the upload. Surface a synthetic per-well
+        # marker so the dashboard shows them complete (they're already
+        # current locally) rather than stuck pending.
+        for tok in zipped.up_to_date_wells:
+            self._enqueue(("line", f"[remote] ✓ {tok}: up to date (local)\n"))
+        self._enqueue((
+            "line",
+            f"[remote] {len(zipped.well_zips)} well-zip(s) staged "
+            f"({zipped.mode.value} mode).\n",
+        ))
+        # The remote grouping runs inside stage_local_zips (not the local
+        # zipper subprocess), so it never emitted the per-well group events
+        # the dashboard's Group stage listens for — Group sat at 0 on remote
+        # runs. Surface them now that staging is complete.
+        # Group's population is the whole plate, not the upload's subset:
+        # every well was grouped locally, including the ones the
+        # incremental split then decided not to send. Announcing only the
+        # survivors narrowed the rail's shared denominator while the set of
+        # grouped wells kept all of them, which is how the rail came to read
+        # "Group 40/6".
+        self._enqueue(("zipper_start", len(grouped)))
+        for stem in grouped:
+            self._enqueue(("zipper_well", stem))
+        self._enqueue(("zipper_done", None))
+        # Group and Download both end up covering the whole plate — a well
+        # that was already current locally is, by the end, fetched locally.
+        # The stages between them only ever see what was uploaded, which is
+        # what the run's own total counts. Upload is given that number here
+        # rather than left to inherit the plate's: the run's own total does
+        # not arrive until the pipeline announces it, which is after the
+        # upload is over, so until then the Upload rail row (and the
+        # headline naming the same count) divided the wells being sent by
+        # the whole plate.
+        # Download is the run's wells, which on a --only_wells run is the
+        # subset rather than the plate that was grouped.
+        for _stage, _n in (("group", len(grouped)),
+                           ("download", download_n),
+                           ("upload", len(zipped.well_zips))):
+            self._enqueue(("stage_total", (_stage, _n)))
+
+    def _nothing_left_to_upload(self, zipped) -> bool:
+        """End an incremental run whose staging left nothing to send.
+
+        Every well is already complete locally — typically because
+        :meth:`_recover_remote_outputs` just downloaded what the previous run
+        had finished on the server. Launching the host with an empty input
+        would be refused there, after a node had been asked for; there is
+        nothing left for it to do. ``True`` means the run has been ended.
+        """
+        if not zipped.incremental or zipped.well_zips:
+            return False
+        for tok in zipped.up_to_date_wells:
+            self._enqueue(("line", f"[remote] ✓ {tok}: up to date (local)\n"))
+        self._enqueue(("done", "Nothing to upload: every well is already "
+                               "complete locally.\n"))
+        return True
+
+    def _recover_remote_outputs(self, output_dir: Path, args: list[str],
+                                opts: dict) -> bool:
+        """Download what an earlier run of this plate finished on the remote.
+
+        Runs before an incremental remote run stages its upload, because that
+        staging decides what to send from the *local* folder alone: a well the
+        previous run finished on the server and never downloaded looks
+        unprocessed, so it was uploaded again and recomputed. See
+        :mod:`services.remote_recover`.
+
+        ``False`` means the run has been ended with an error and the caller
+        returns: the recorded directory holds finished wells the pull could not
+        bring home, and staging past that would re-upload and recompute them.
+        Only an incremental, unforced run asks: any other run uploads every
+        well whatever is local, and a forced one wants the old output replaced.
+        """
+        if not opts.get("incremental", False) or opts.get("force", False):
+            return True
+        recovery = recover_finished_outputs(
+            self._remote_runner, output_dir, args,
+            output_filter=OutputFilter(self._output_filter),
+            log_fn=lambda m: self._enqueue(("line", m)),
+            stop_event=self._stop_requested,
+        )
+        if recovery.ok:
+            return True
+        if self._stop_requested.is_set():
+            self._enqueue_stopped(where="Remote run")
+            return False
+        self._enqueue_error(
+            f"Could not download {len(recovery.still_missing)} file(s) that the "
+            f"previous run of this plate already finished on the remote "
+            f"({recovery.remote_dir}). Not re-uploading those wells — resume "
+            f"again to retry the download, or tick Force to recompute the "
+            f"plate from scratch.\n")
+        return False
+
     def _run_pipeline_remote(
         self,
         input_dir: Path,
@@ -1645,6 +1744,8 @@ class PipelineRunner:
         zipped = None
         try:
             self._enqueue(("line", f"[remote] target: {self._remote.name}\n"))
+            if not self._recover_remote_outputs(output_dir, args, opts):
+                return
             zipped = stage_local_zips(
                 input_dir,
                 filename_schema=opts["filename_schema"],
@@ -1676,46 +1777,9 @@ class PipelineRunner:
             if scope is None:
                 return
             zipped, args, grouped, download_n = scope
-            # Incremental: wells whose local output already covers every input
-            # FOV were dropped from the upload. Surface a synthetic per-well
-            # marker so the dashboard shows them complete (they're already
-            # current locally) rather than stuck pending.
-            for tok in zipped.up_to_date_wells:
-                self._enqueue(("line", f"[remote] ✓ {tok}: up to date (local)\n"))
-            self._enqueue((
-                "line",
-                f"[remote] {len(zipped.well_zips)} well-zip(s) staged "
-                f"({zipped.mode.value} mode).\n",
-            ))
-            # The remote grouping runs inside stage_local_zips (not the local
-            # zipper subprocess), so it never emitted the per-well group events
-            # the dashboard's Group stage listens for — Group sat at 0 on remote
-            # runs. Surface them now that staging is complete.
-            # Group's population is the whole plate, not the upload's subset:
-            # every well was grouped locally, including the ones the
-            # incremental split then decided not to send. Announcing only the
-            # survivors narrowed the rail's shared denominator while the set of
-            # grouped wells kept all of them, which is how the rail came to read
-            # "Group 40/6".
-            self._enqueue(("zipper_start", len(grouped)))
-            for stem in grouped:
-                self._enqueue(("zipper_well", stem))
-            self._enqueue(("zipper_done", None))
-            # Group and Download both end up covering the whole plate — a well
-            # that was already current locally is, by the end, fetched locally.
-            # The stages between them only ever see what was uploaded, which is
-            # what the run's own total counts. Upload is given that number here
-            # rather than left to inherit the plate's: the run's own total does
-            # not arrive until the pipeline announces it, which is after the
-            # upload is over, so until then the Upload rail row (and the
-            # headline naming the same count) divided the wells being sent by
-            # the whole plate.
-            # Download is the run's wells, which on a --only_wells run is the
-            # subset rather than the plate that was grouped.
-            for _stage, _n in (("group", len(grouped)),
-                               ("download", download_n),
-                               ("upload", len(zipped.well_zips))):
-                self._enqueue(("stage_total", (_stage, _n)))
+            if self._nothing_left_to_upload(zipped):
+                return
+            self._announce_staged_plate(zipped, grouped, download_n)
 
             est = self._remote_runner.estimate(zipped)
             self._enqueue(("line", f"[remote] {est.format()}\n"))

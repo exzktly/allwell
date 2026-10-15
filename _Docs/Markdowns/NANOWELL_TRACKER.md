@@ -84,7 +84,9 @@ These are the user's statements. They outrank anything inferred below.
   hexagonal lattice) filling a circular area.
 - Nanowells are usually **100 µm in diameter**; an alternative plate format has
   **50 µm** nanowells. Imaged at **10x**, about **1,100 nanowells per well** in
-  the 100 µm format.
+  the 100 µm format. **A well is physically built with about 1,100 nanowells in
+  the 100 µm format and about 1,600 in the 50 µm format.** (The user wrote
+  "100nm" and "50nm"; read as µm, the only formats there are.)
 - **Each well is imaged as a grid of overlapping tiles** — 5×5 with 10 %
   overlap in the current experiments, set in the acquisition software. The
   tiles must be registered and assembled at the start of each well's analysis.
@@ -133,10 +135,13 @@ are **measured from the images**; these are sanity bounds.
   site. 1,100 sites inside an array of radius 3.0 mm (a 96-well floor is about
   6.4 mm across) gives *p* ≈ **172 µm** for the 100 µm format, about 1.7× the
   diameter. The illustration draws narrower gaps; it is schematic, and the
-  pitch is measured. If the 50 µm format's pitch scales with its diameter
-  (~86 µm), the same array area holds about **4,400 sites**.
+  pitch is measured. For the 50 µm format, 1,600 sites in the same 3.0 mm
+  radius give *p* ≈ **143 µm** — not the ~86 µm (pitch scaling with diameter)
+  first assumed here, which would have meant about 4,400 sites. The array's
+  radius in that format is not reported, so 143 µm is an estimate; row Q12.
 - **Rings.** With the square at the centre, a circular array of 1,100 sites
-  reaches about **17–20 rings**; 4,400 sites reach about **35–40**.
+  reaches about **19 rings** (3n² + 3n + 1 = 1,100 gives n ≈ 18.7); 1,600 sites
+  about **23**.
 - **Overlap is a per-axis length, and it decides the design.** With the
   current 10 % overlap, the overlap along an axis is 0.1 × the tile's extent on that axis.
   For every nanowell to lie wholly inside at least one tile, that overlap must
@@ -970,6 +975,7 @@ Answers are written into the row. Rows that depend on an answer say so.
 | Q9 | How many timepoints, channels and wells does a typical experiment have, and is a full copy of the dataset per added timepoint acceptable (~20 GB per channel per timepoint for 96 wells, §1.2)? | keep Concatenate's fresh-copy rule | `todo` | |
 | Q10 | Is each timepoint saved as one CZI holding every well, or as a Split Scenes folder of per-well CZIs? Is the tile plan reused? | — | `done` | Both layouts occur, and `pipeline/czi_set.py` already reads both. The tile plan changes between experiments, so grid size, overlap and positions are read per (well, timepoint) and never assumed (§3.2.1) |
 | Q11 | Is the central square cut with its edges parallel to a lattice row (so its orientation equals the lattice axis modulo 90 degrees), or at some other fixed angle? | 0 degrees (parallel); `check_orientation(..., square_to_axis_deg=0.0)` | `todo` | N3a's check compares the square's edge direction with the lattice axis the fit chose. It is only as right as this assumption, which the renderer shares (it draws the square aligned), so the tests cannot tell. A mask whose square were cut 30 degrees off a row would read as a folded rotation on every well |
+| Q12 | The 50 µm format's lattice pitch. The pipeline's nominal value (`pipeline/nanowell_run.PLATE_FORMATS["50um"] = (86.0, 50.0)`) was the pitch scaled with the diameter; the user's count of ~1,600 nanowells per well implies about 143 µm at a 3.0 mm array radius. The nominal pitch only seeds the search: `estimate_lattice_fft` looks from half to twice it and the measured pitch is used from then on. Probe (synthetic 50 µm array, 2×2 tiles, nominal 86 µm): true pitch 86 µm → measured 85.998, `ok`; true pitch 143 µm → measured 142.999, `ok`. So nothing is broken at 143 µm, but a true pitch above 172 µm would be outside the search. Owed: the pitch measured on a real 50 µm plate (Q7's sample data), then the nominal value set to it — a settings change that re-keys reuse for 50 µm runs | `pipeline/nanowell_run.py` | `todo` | |
 
 ### Section G — Geometry and addressing (PR 1)
 

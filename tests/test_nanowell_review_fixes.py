@@ -130,6 +130,7 @@ def test_only_a_timepoint_with_no_rows_counts_as_failed(tmp_path, monkeypatch, s
         located = real(tp, *a, **k)
         if status == nr.UNADDRESSED:
             located.status = status
+            located.grid = {**located.grid, "status": status}                 # as locate_timepoint records it
         elif status != nr.OK:
             located.status, located.reason, located.fit, located.indexed, located.grid = status, "forced", None, (), {}
         return located
@@ -243,3 +244,28 @@ def test_a_folder_mode_plate_is_refused_before_the_sidecar_claims_nanowell_mode(
     assert "needs the wells as zips" in capsys.readouterr().err
     info = json.loads((plate / "out" / "pipeline_info.json").read_text())
     assert "nanowell" not in info
+
+
+def test_a_checkpoint_is_keyed_on_how_the_timepoint_was_located(two_timepoints):
+    record, load = two_timepoints
+    keys = []
+
+    class Spy:
+        def load(self, tp, key):
+            keys.append(("load", tp, key))
+            return None
+
+        def save(self, tp, key, measured):
+            keys.append(("save", tp, key))
+
+    nr.run_well("A01", record, ["24h"], load, SETTINGS, segmenter=threshold_segmenter(), checkpoint=Spy())
+    (_, _, load_key), (_, _, save_key) = keys
+    assert load_key == save_key and load_key["located"] == ["ok", "fiducial"]
+
+
+def test_a_pass_that_cannot_even_read_the_plate_is_recorded_not_raised(tmp_path, monkeypatch):
+    monkeypatch.setattr(nt, "reanchor_plate", lambda *a, **k: (_ for _ in ()).throw(OSError("disk gone")))
+    nt.nanowell_endgame({"plate_format": "100um"}, tmp_path, [], {"_nanowell": {"plate_format": "100um"}}, "PHASE",
+                        ["GFP"], "measurements", SCHEMA, "_", "key", grouper=None, parse=None)
+    info = json.loads((tmp_path / "pipeline_info.json").read_text()) if (tmp_path / "pipeline_info.json").exists() else {}
+    assert info.get("nanowell", {}).get("reanchor", {}).get("error") == "OSError: disk gone"

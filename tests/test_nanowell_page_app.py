@@ -41,6 +41,35 @@ def test_the_page_builds_from_the_rail_and_draws_the_dataset(nanowell_app, qtbot
     assert any(t.startswith("Nanowell × timepoint values used 14 of 16") for t in texts)
 
 
+def test_every_view_draws_in_the_real_app_and_a_saved_plot_restores_the_view_and_well(nanowell_app, qtbot, caplog):
+    """Each view through the real app's figure chrome (Properties styling, the card), and the one-well views'
+    choices through a Saved Plot round trip."""
+    from review.features.nanowell import controller as nwc
+    from review.features.saved_plots.controller import get_store, restore_saved_plot, save_plot_from_card
+    from review.persistence import view_state
+
+    caplog.set_level(logging.WARNING, logger="review")
+    ctx, st = _open(nanowell_app, qtbot)
+    fig = ctx.widgets.get("_nw_fig")
+    footers = {"array_map": "nw-map-missing", "trajectories": "nw-traj-footer", "position": "nw-position-footer",
+               "array_qc": "nw-qc-missing"}                      # this dataset's grid records have no pitch or montage
+    for view, gid in footers.items():
+        nwc.set_view(ctx, view)
+        if view == "array_qc":
+            qtbot.waitUntil(lambda: ("A01", "t_c") in st.montages, timeout=30000)
+        found = [t for t in list(fig.texts) + [t for ax in fig.axes for t in ax.texts] if t.get_gid() == gid]
+        assert found, view
+    assert not [r for r in caplog.records if "Nanowells" in r.getMessage() and r.levelno >= logging.ERROR]
+    nwc.set_view(ctx, "array_map")
+    nwc.set_well(ctx, "B01")
+    nwc.set_timepoint(ctx, "t_a")
+    assert save_plot_from_card(ctx, "Nanowells", b"\x89PNG", "Nanowells").startswith("Saved")
+    view_state._activate_tab(ctx, "Home")
+    st.view, st.well, st.timepoint = "distribution", "", ""
+    restore_saved_plot(ctx, get_store(ctx).records[-1].id)
+    assert (st.view, st.well, st.timepoint) == ("array_map", "B01", "t_a")
+
+
 def test_a_saved_plot_restores_the_metric_the_axis_and_the_selected_nanowells(nanowell_app, qtbot):
     from review.features.saved_plots.controller import get_store, restore_saved_plot, save_plot_from_card
     from review.persistence import view_state

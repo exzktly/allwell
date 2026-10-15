@@ -585,9 +585,12 @@ def execute_plan(
     report_fraction = sub_progress or _null_sub_progress
 
     emit(
-        f"Dataset 1 last timepoint {plan.ds1_last_hours:g}h, interval "
-        f"{plan.ds1_interval_hours:g}h → dataset 2 shifted by {plan.offset_hours:g}h."
+        f"Dataset 1 last timepoint {plan.ds1_last_hours:g}h; dataset 2 follows "
+        f"{plan.gap_hours:g}h later ({plan.gap_source}) → dataset 2 shifted by "
+        f"{plan.offset_hours:g}h."
     )
+    if plan.gap_warning:
+        emit(f"Note: {plan.gap_warning}")
     if plan.format_warning:
         emit(f"Note: {plan.format_warning}")
     for warning in plan.column_warnings:
@@ -718,7 +721,8 @@ def execute_plan(
     marker_path.unlink(missing_ok=True)
     emit("Wrote merged pipeline_info.json.")
     record_derivation(plan.dest, tool="concatenate", sources=(plan.ds1, plan.ds2),
-                      offset_hours=plan.offset_hours)
+                      offset_hours=plan.offset_hours, gap_hours=plan.gap_hours,
+                      gap_source=plan.gap_source)
 
     return (
         f"Concatenated {len(all_wells)} well(s) into {plan.dest.root} "

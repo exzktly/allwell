@@ -34,9 +34,11 @@ import math
 import re
 import statistics
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from util.aw_safe import swallow
+from util.acquisition_record import AcquisitionRecordError, read_record
 from util.timepoint import parse_hours, sort_key
 from domain.image_identity import PipelineSchema, load_schema
 from datasets.core.dataset_paths import (
@@ -236,8 +238,8 @@ def _interval_hours(sorted_hours: list[float]) -> float:
     if len(uniq) < 2:
         raise ConcatError(
             "Dataset 1 has only one timepoint, so its imaging interval is "
-            "unknown — there's no cadence to continue. Concatenation needs "
-            "dataset 1 to have at least two timepoints."
+            "unknown — there's no cadence to continue. Enter the time between "
+            "dataset 1's timepoint and dataset 2's first one."
         )
     diffs = [later - earlier for earlier, later in zip(uniq, uniq[1:])]
     return statistics.median(diffs)
@@ -259,17 +261,163 @@ def _refuse_well_collisions(paths: DatasetPaths, label: str) -> None:
         raise ConcatError(f"{label} can't be concatenated. {message}")
 
 
-def compute_offset(info1: dict, info2: dict) -> tuple[float, float, float]:
-    """Compute the additive hour offset that makes dataset 2 continue after
-    dataset 1. Returns ``(offset_hours, ds1_last_hours, ds1_interval_hours)``."""
+def compute_offset(info1: dict, info2: dict, *,
+                   gap_hours: float | None = None) -> tuple[float, float, float | None]:
+    """The additive hour offset that makes dataset 2 continue after dataset 1.
+
+    Dataset 2's first timepoint lands *gap_hours* after dataset 1's last. With
+    no gap given, the gap is dataset 1's median interval, the rule this tool
+    always had, and a dataset 1 with one timepoint is refused because it has
+    no interval to continue. Returns ``(offset_hours, ds1_last_hours,
+    ds1_interval_hours)``; the interval is ``None`` when dataset 1 has no
+    cadence and the caller supplied the gap instead.
+    """
     tp1 = _timepoint_hours(info1, label="dataset 1")
     tp2 = _timepoint_hours(info2, label="dataset 2")
 
     ds1_last = tp1[-1][1]
-    interval = _interval_hours([hours for _, hours in tp1])
-    target_first = ds1_last + interval
-    ds2_first = tp2[0][1]
-    return target_first - ds2_first, ds1_last, interval
+    if gap_hours is None:
+        interval = _interval_hours([hours for _, hours in tp1])
+        gap_hours = interval
+    else:
+        if not math.isfinite(gap_hours) or gap_hours <= 0:
+            raise ConcatError("The time gap must be a positive number of hours.")
+        uniq = sorted({hours for _, hours in tp1})
+        interval = (statistics.median([b - a for a, b in zip(uniq, uniq[1:])])
+                    if len(uniq) > 1 else None)
+    return ds1_last + gap_hours - tp2[0][1], ds1_last, interval
+
+
+# ── the time gap between the two datasets ────────────────────────────────────
+#: How far an entered gap may sit from the recorded one before the page says
+#: so: two per cent of the gap, but never less than a minute. A stage that
+#: takes a minute per round makes a nominal schedule and a stopwatch reading
+#: differ by about that much, and that is not a disagreement worth a warning.
+_GAP_TOLERANCE_FRACTION = 0.02
+_GAP_TOLERANCE_FLOOR_H = 1.0 / 60.0
+
+GAP_ENTERED = "entered"
+GAP_RECORDED = "recorded"
+GAP_INTERVAL = "interval"
+
+
+@dataclass(frozen=True)
+class GapDefault:
+    """What the page pre-fills the time-gap field with, and why."""
+
+    hours: float | None          # None → nothing to pre-fill; the field is required
+    source: str | None           # GAP_RECORDED / GAP_INTERVAL / None
+    recorded_hours: float | None = None
+    note: str = ""               # why there is no (or a lesser) default
+
+
+@dataclass(frozen=True)
+class GapChoice:
+    """The gap a merge uses, where it came from, and any warning about it."""
+
+    hours: float
+    source: str                  # GAP_ENTERED / GAP_RECORDED / GAP_INTERVAL
+    recorded_hours: float | None = None
+    warning: str | None = None
+
+
+def format_gap(hours: float) -> str:
+    """A gap as the text the field shows; ``parse_hours`` reads it back."""
+    return f"{round(hours * 60) / 60:.4g}h"
+
+
+def parse_gap_hours(text: str) -> float:
+    """The hours in a typed gap (``6``, ``6h``, ``1d``, ``1d2h30m``), or raise."""
+    text = (text or "").strip()
+    if not text:
+        raise ConcatError("Enter the time between dataset 1's last timepoint "
+                          "and dataset 2's first one (for example 24h).")
+    hours = parse_hours(text)
+    if hours is None or not math.isfinite(hours):
+        raise ConcatError(f"The time gap {text!r} can't be read as a duration "
+                          "(use forms like 6, 24h, 1d or 1d2h30m).")
+    if hours <= 0:
+        raise ConcatError("The time gap must be longer than zero.")
+    return hours
+
+
+def _recorded_start(ds: DatasetPaths, token: str) -> tuple[datetime | None, str]:
+    """The recorded absolute start of timepoint *token*, and why it is absent."""
+    try:
+        record = read_record(ds.root)
+    except AcquisitionRecordError as exc:
+        return None, f"its acquisition record is unreadable ({exc})"
+    if record is None:
+        return None, "it has no acquisition record"
+    entry = (record.get("timepoints") or {}).get(token)
+    if not entry or entry.get("started_at") is None:
+        return None, f"its record has no start time for timepoint {token!r}"
+    return datetime.fromisoformat(entry["started_at"].replace("Z", "+00:00")), ""
+
+
+def recorded_gap_hours(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict,
+                       info2: dict) -> tuple[float | None, str]:
+    """Hours from dataset 1's last recorded start to dataset 2's first.
+
+    ``(None, reason)`` unless both datasets recorded those two instants on
+    comparable clocks (both with a timezone, or both without) and dataset 2's
+    is later. Rounded to the minute: the record keeps the precise instants.
+    """
+    last1 = _timepoint_hours(info1, label="dataset 1")[-1][0]
+    first2 = _timepoint_hours(info2, label="dataset 2")[0][0]
+    start1, why1 = _recorded_start(ds1, last1)
+    if start1 is None:
+        return None, f"dataset 1: {why1}"
+    start2, why2 = _recorded_start(ds2, first2)
+    if start2 is None:
+        return None, f"dataset 2: {why2}"
+    if (start1.tzinfo is None) != (start2.tzinfo is None):
+        return None, ("the two recorded start times mix a clock with a timezone "
+                      "and one without, so their difference is not decidable")
+    hours = (start2 - start1).total_seconds() / 3600.0
+    if hours <= 0:
+        return None, (f"dataset 2 was recorded {format_gap(abs(hours))} before "
+                      "dataset 1's last timepoint — check the order of the datasets")
+    return round(hours * 60) / 60, ""
+
+
+def default_gap(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict,
+                info2: dict) -> GapDefault:
+    """Pre-fill order: the recorded gap, then dataset 1's interval, then nothing."""
+    recorded, why = recorded_gap_hours(ds1, ds2, info1, info2)
+    if recorded is not None:
+        return GapDefault(recorded, GAP_RECORDED, recorded_hours=recorded)
+    hours = sorted({h for _, h in _timepoint_hours(info1, label="dataset 1")})
+    if len(hours) > 1:
+        interval = statistics.median([b - a for a, b in zip(hours, hours[1:])])
+        return GapDefault(interval, GAP_INTERVAL, note=f"No recorded gap: {why}.")
+    return GapDefault(None, None, note=(
+        f"Dataset 1 has one timepoint and no recorded gap ({why}), so there is "
+        "no interval to continue: enter the time gap."))
+
+
+def choose_gap(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict, info2: dict,
+               entered_hours: float | None) -> GapChoice:
+    """The gap to merge with: the user's entry, else the pre-filled default.
+
+    An entered gap always wins. When it differs from the recorded one by more
+    than the tolerance the choice carries a warning naming both numbers.
+    """
+    default = default_gap(ds1, ds2, info1, info2)
+    if entered_hours is None:
+        if default.hours is None:
+            raise ConcatError(default.note)
+        return GapChoice(default.hours, default.source or GAP_INTERVAL,
+                         default.recorded_hours)
+    recorded = default.recorded_hours
+    warning = None
+    if recorded is not None:
+        tolerance = max(_GAP_TOLERANCE_FRACTION * recorded, _GAP_TOLERANCE_FLOOR_H)
+        if abs(entered_hours - recorded) > tolerance:
+            warning = (f"You entered {format_gap(entered_hours)}, but the "
+                       f"acquisition records are {format_gap(recorded)} apart. "
+                       "Using the gap you entered.")
+    return GapChoice(entered_hours, GAP_ENTERED, recorded, warning)
 
 
 # ── sidecar merge ────────────────────────────────────────────────────────────
@@ -401,13 +549,16 @@ class MergePlan:
     offset_hours: float                 # added to every dataset-2 timepoint
     tp_format: TimepointFormat
     ds1_last_hours: float
-    ds1_interval_hours: float
+    ds1_interval_hours: float | None    # None: dataset 1 has one timepoint
+    gap_hours: float                    # dataset 2's first timepoint lands this long after dataset 1's last
+    gap_source: str                     # GAP_ENTERED / GAP_RECORDED / GAP_INTERVAL
     wells_ds1_only: tuple[str, ...]
     wells_ds2_only: tuple[str, ...]
     wells_both: tuple[str, ...]
     merged_info: dict                   # full merged pipeline_info.json content
     dest_is_restart: bool = False       # dest has leftovers from an earlier, unfinished attempt
     format_warning: str | None = None
+    gap_warning: str | None = None
     column_warnings: tuple[str, ...] = ()
     #: User-side blocks dataset 2 carried that the merged sidecar does not.
     #: ``merge_info`` takes these from dataset 1 wholesale — the documented
@@ -417,10 +568,13 @@ class MergePlan:
     ds2_blocks_dropped: tuple[str, ...] = ()
 
 
-def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path | str) -> MergePlan:
+def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path | str,
+                     *, gap_hours: float | None = None) -> MergePlan:
     """Validate two datasets and a destination, and produce a :class:`MergePlan`.
 
-    Raises :class:`ConcatError` (user-facing message) on any incompatibility.
+    *gap_hours* is the time the user entered between dataset 1's last timepoint
+    and dataset 2's first; ``None`` takes the pre-filled default
+    (:func:`default_gap`). Raises :class:`ConcatError` (user-facing message) on any incompatibility.
     Reads only — the destination is not created or cleared here.
     """
     ds1 = resolve_dataset(ds1_root, label="dataset 1")
@@ -476,7 +630,8 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
             "output, or zip the folders manually, then try again."
         )
 
-    offset, ds1_last, interval = compute_offset(info1, info2)
+    gap = choose_gap(ds1, ds2, info1, info2, gap_hours)
+    offset, ds1_last, interval = compute_offset(info1, info2, gap_hours=gap.hours)
     tp_format, format_warning = detect_timepoint_format(
         [str(t) for t in info1.get("available_timepoints", []) or []]
     )
@@ -502,6 +657,9 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         tp_format=tp_format,
         ds1_last_hours=ds1_last,
         ds1_interval_hours=interval,
+        gap_hours=gap.hours,
+        gap_source=gap.source,
+        gap_warning=gap.warning,
         wells_ds1_only=tuple(sorted(wells1 - wells2)),
         wells_ds2_only=tuple(sorted(wells2 - wells1)),
         ds2_blocks_dropped=ds2_blocks_dropped,

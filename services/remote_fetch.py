@@ -1791,6 +1791,14 @@ class FetchedOutputVerifier:
                 if not out_zip.exists() or out_zip.stat().st_size == 0 or stale:
                     _pull(f"{run.remote_output_dir}/{well}_out.zip")
                 _report_zip(well, time.monotonic() - zip_t0)
+            # The record of which settings produced it, as the in-stream fetch
+            # brings (`Fetcher._pull_settings_marker`): without it a well
+            # recovered here reads as grandfathered, and a later run with
+            # different settings would keep its numbers as though they matched.
+            pull_small_file(
+                host, f"{run.remote_output_dir}/{SETTINGS_DIRNAME}/{well}.json",
+                run.local_output_dir / SETTINGS_DIRNAME / f"{well}.json",
+                stop_event=self._cancelled, what=f"the settings marker for {well}")
         # Whether any of this actually recovered a well is not decided here —
         # see ``_journal_retry_outcomes``, which reads verify's answer.
         return wells

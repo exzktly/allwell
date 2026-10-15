@@ -27,7 +27,7 @@ def _runner(monkeypatch, tmp_path, *, launches: list, cancels: list):
     import services.pipeline_runner as pr
 
     zipped = types.SimpleNamespace(
-        up_to_date_wells=(), well_zips=(), mode=types.SimpleNamespace(value="zip"),
+        up_to_date_wells=(), well_zips=(), incremental=False, mode=types.SimpleNamespace(value="zip"),
         on_pipeline_success=None, cleanup=None)
     monkeypatch.setattr(pr, "stage_local_zips", lambda *a, **k: zipped)
     uploading = threading.Event()

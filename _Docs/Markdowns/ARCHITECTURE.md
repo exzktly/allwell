@@ -5764,8 +5764,9 @@ an exit of 0 with `_stop_requested` set as a stop (`_enqueue_stopped`), never as
 Stop, and a remote one keeps its remote output. A Suspend that winds down
 cleanly exits 0 and is reported as its own `suspended` event (below); a remote
 one keeps the configured cleanup, which fires only after the fetch is verified,
-because the resume uploads only the missing groups and never re-attaches, so
-nothing on the host is read again. While one
+because the resume uploads only the missing groups and never re-attaches —
+it reads the previous directory only for wells that were never downloaded,
+and a verified fetch leaves none. While one
 that dies by signal arrives as an `error` like a Stop. A Stop, Suspend or queue
 Pause that lands while the input is still being grouped ends the grouping
 subprocess, and the resolver (`AnalyzeInputMixin._input_failure_text`) words
@@ -8910,6 +8911,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_run_id.py` | Where a remote run lives, and whether an earlier one's work may be reused — two questions sharing a module because they are keyed on the same facts, and every reuse defect here came from one being keyed on less than the other. `_compute_run_id` and `pipeline_argv_digest` decide the address; `_choose_remote_output_dir` decides whether a recorded one may be used instead; `remote_run_dir` / `remote_run_paths` are its single spelling. Pure — no ssh, no filesystem — which is what lets the highest-stakes predicate in the remote path be tested directly rather than through a harness. |
 | `remote_commands.py` | The shell a remote run sends, as strings: `_compose_remote_cmd` (the single-launch line — record the pidfile, optionally exec the scheduler launcher, activate conda, wait for the upload, exec the pipeline), `_compose_driver_cmd` and `_batch_driver_snippet` (the batched driver that holds one allocation and runs a pipeline per batch, stopping early when the run's suspend request appears), `_remote_scratch_export`, the batch handshake names (`BATCH_READY`, `BATCH_DONE`, `BATCH_DONE_MARKER`), and `pack_for_login_shell` / `unpack_login_shell_command`. Both launch paths send their command through `pack_for_login_shell` — gzip + base64 into one short line of plain characters that the login shell unpacks and `eval`s, so `$$` and `exec` still act on the login shell and the pidfile and cancel channel are unchanged. The scripts are thousands of characters across seventeen lines with hundreds of quotes, and on a Windows client the one `ssh` argument they travel in is rebuilt by `list2cmdline` and parsed again by Git for Windows' `ssh.exe`; a batched launch past 8,191 characters failed there with `bash: -c: line 17: syntax error: unexpected end of file`. A remote without `base64` or `gzip` fails with exit `UNPACK_FAILED_EXIT` and a line saying so, never with an empty `eval` that would exit 0. Tests read a spawned command through `unpack_login_shell_command`. No ssh and no I/O, so a quoting decision is tested by reading the string and the driver by running it in `bash`. Re-exported by `remote_runner`; imports the transport's quoting and the conda / wait snippets, never the runner. |
 | `remote_suspend.py` | Asking a running remote pipeline to suspend: `request_suspend` (touch the run's request file over ssh, bounded by `SUSPEND_REQUEST_TIMEOUT_S`, telling a batched run's local loop first), and `_AnySet`, the Event-shaped view a batch upload watches so either a Stop or a suspend ends it. `RemoteRunner.request_suspend` is a one-line delegate; `remote_runner` binds `request_suspend` for that and nothing else from here. |
+| `remote_recover.py` | Before any unforced remote run stages its upload, `recover_finished_outputs` downloads what the previous run of the plate finished on the host and never brought home: it finds that run's directory through the journal's recorded address (`stored_remote_address`, the three re-attach keys) and runs `FetchedOutputVerifier.verify` against it. Matches on the current argv digest, then on `legacy_argv_digests` so plates recorded by an earlier build are found. Returns a `Recovery`; `pulled` makes `PipelineRunner` stage incrementally, `ok=False` means listed wells could not be pulled and the run is ended rather than re-uploading them. Declines for a forced run. |
 | `remote_scratch.py` | The leaves of the remote staging work, stdlib + `util` only: where transient bytes go while a transfer is in flight (`_scratch_dir`, `_transit_dir`, `TRANSIT_SUBDIR`), how a stale one is swept (`sweep_stale_scratch`), whether an archive arrived whole (`_zip_is_complete`), and what the user's own input archives hash to (`fingerprint_archives`, `source_fingerprint` — the discriminator the remote re-attach is keyed on). Nine functions whose only tie to `remote_runner` was one constant; every caller, the runner's own `source_fingerprint` read included, imports them from here. |
 | `remote_upload.py` | Getting a run's input onto the remote host, once. `DatasetCache` keys each upload by a stat-based fingerprint of the staged archives, so re-running the same input is a metadata round trip rather than a re-upload; streams rsync's output well by well (`_run_rsync_streaming`, `_UploadWellProgress`) so the Upload rail and each well's dial fill as its archive lands; and keeps the remote cache inside the host's budget. Its short ssh control commands are bounded by `SSH_CONTROL_TIMEOUT_S`. Line-budgeted (`REMOTE_UPLOAD_BUDGET`). |
 | `remote_jobs.py` | The scheduler jobs a remote run holds, and making sure none outlives it. `close_remote_job` is the teardown backstop every exit the app survives goes through (it reads the job id from `<pidfile>.slurm` and `scancel`s it); `sweep_orphaned_allocation` is what the next run of the same plate does about an exit the app did not survive, and returns its verdict (`swept`, `owned`, `notmine`, `unknown`, `none`) because the batched path acts on it. Both refuse to cancel a job that is not the caller's (`_only_my_job`), and both are no-ops on a host with no `compute_launcher`. `RemoteRunner.close_remote_job` and `_sweep_orphaned_allocation` delegate here. Line-budgeted (`REMOTE_JOBS_BUDGET`). |
@@ -9023,6 +9025,45 @@ was declared complete over a partial well. For the same reason the pre-flight's
 full-cache-hit check (`remote_run_id._pipeline_launch_is_pointless`) never fires
 for an incremental run, and otherwise asks whether every *uploaded* well is
 present, not whether the directory holds as many out.zips as were uploaded.
+
+**What the previous run finished is downloaded before any run stages.**
+Staging decides what to upload from the *local* folder alone — the incremental
+split by its done-set, batched mode by its per-well CSV check, a plain
+single-shot run not at all — so a well the previous run finished on the host
+and never downloaded (the state a Suspend, Stop, dropped connection or closed
+laptop leaves once the remote compute is done) looks unprocessed and would be
+uploaded whole and recomputed, while its output sits in a directory that an
+incremental run never re-attaches to and a batched run never lists. So
+`PipelineRunner._recover_remote_outputs` runs before `stage_local_zips` on
+**every unforced remote run**, incremental or not, single-shot or batched:
+`services/remote_recover.recover_finished_outputs` looks the recorded address up
+with the same three keys as the re-attach (and, for finding work only, the
+digests an earlier build recorded — `remote_run_id.legacy_argv_digests` — so a
+plate already stuck on a host is found), lists it, and — when it holds wells
+this folder lacks — runs the ordinary `FetchedOutputVerifier.verify` against
+that directory: sidecar merge, `errors/`, the per-well pull (which brings each
+well's `.aw_settings` marker too, as the in-stream fetch does), the fetch
+report. One fetch implementation, not a second one for this case. When it
+pulled anything the run is **staged incrementally** whatever was ticked,
+because only the split leaves a locally complete well out of the upload on
+every path; when nothing is left, `_nothing_left_to_upload` ends the run with
+"Nothing to upload" rather than launching the host on an empty input. A pull
+that cannot bring every listed well home **ends the run with an error** instead
+of falling through to the upload: the wells that failed would be re-uploaded
+and recomputed, and the incremental run then empties its own output directory,
+which can be the very one still holding them. A forced run skips all of it.
+`tests/test_a_resumed_remote_run_downloads_before_uploading.py` drives the
+app's sequence — run one (single-shot or batched) suspended before its
+download, run two through the real `_run_pipeline_remote`, with incremental on
+and off — against the fake host, and holds the other direction too: a changed
+setting that alters the numbers never matches.
+
+A **full cache hit uploads nothing.** When the pre-flight finds every staged
+well's output already in the (re-attached) directory, the pipeline is replaced
+by `true` and the upload is skipped with it: nothing will read that input, and
+a plate whose staged archives keyed differently from the last run's was
+otherwise sent in full for a run that computes nothing.
+
 Only the *output*
 directory moves: the input keys on this run's own staged archives, and the
 pidfile, sentinel and heartbeat stay under this run's own `run_id`, because
@@ -9071,6 +9112,21 @@ the checkout lived, and which Python was on PATH — each miss re-uploading the
 plate and recomputing it with nothing logged. `test_the_launcher_does_not_reach_the_digest`
 compares the three shapes directly, which a pinned digest literal cannot do:
 one computed from `sys.executable` is itself machine-specific.
+
+The flags `util.settings_digest.NOT_KEYED_ON` lists as execution or
+re-processing knobs are sliced off for the same reason
+(`_DIGEST_SKIP_VALUE` / `_DIGEST_SKIP_FLAG`: `--incremental`,
+`--incremental_prior_dir`, `--workers`, `--tf_threads`, `--focus_min`,
+`--allow_low_disk`, `--no_run_check`, beside `--force`). None changes what the
+remote writes, and two of them cost the most: `_build_remote_argv` drops the
+incremental pair before the host sees the command, yet hashed they made a
+resume — which is always incremental — a differently configured run from the
+one it resumed, so the download-before-staging step above could never fire;
+and "Load previous run" does not restore `--allow_low_disk`, so ticking it once
+hid a plate's finished output from every later run. A settings round trip
+through a remote run's `pipeline_info.json` and "Load previous run" otherwise
+reproduces the argv exactly — measured, not assumed — so the reloaded form
+finds the plate.
 
 Every call that turns a configuration into an address or a reuse key folds
 those extras in — `spawn`'s two, and `_BatchedRemoteProcess`'s run id *and* its

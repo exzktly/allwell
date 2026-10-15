@@ -254,28 +254,22 @@ def redraw(ctx) -> None:
         return
     if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
         return                                           # the right metrics are on their way
-    metric, channel, note = _resolved_metric(ctx, st)
-    view = st.view
-    if view == "array_map":
-        _draw_map(ctx, st, fig, metric, channel, note)
-    elif view == "trajectories":
-        render_trajectories(fig, vc.trajectory_panels(st.metrics, page_wells(ctx), metric_column(metric, channel),
-                                                      cohort=st.cohort), cohort=st.cohort,
-                            label=_label(metric, channel), time_source=st.data.time_source, note=note)
-        st.hits = None
-    elif view == "position":
-        tp = shown_timepoint(ctx)[1]
-        series, missing = vc.position_series(st.metrics, page_wells(ctx), tp, metric_column(metric, channel))
-        if missing:
-            note = " ".join(filter(None, [note, f"No addressed nanowells at {tp}, so not drawn: "
-                                                f"{', '.join(missing)}."]))
-        render_position(fig, series, label=_label(metric, channel), timepoint=tp, note=note)
-        st.hits = None
-    elif view == "array_qc":
+    if st.view == "array_qc":
         _draw_qc(ctx, st, fig, page_well(ctx))
         st.hits = None
     else:
-        _draw_distribution(ctx, st, fig, metric, channel, note)
+        metric, channel, note = resolve_metric(st.view, st.metric, ctx.state.channel.active_channel,
+                                               st.data.channels)
+        well = page_well(ctx)
+        tableless = [w for w in active_wells(ctx) if w not in set(st.data.wells)]
+        st.hits, model = draw_view(
+            fig, st.view, st.metrics, st.data, groups=page_groups(ctx), metric=metric, channel=channel,
+            axis=st.axis, timepoint=shown_timepoint(ctx)[1] if st.view == "position" else st.timepoint,
+            control=st.control, baseline=st.baseline, cohort=st.cohort, well=well,
+            well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
+            selected=[tuple(s) for s in st.selected_sites])
+        if model is not None:
+            st.model = model
     from review.core.plot_style import apply_export_style_to_current
 
     apply_export_style_to_current(ctx, fig, canvas)
@@ -286,18 +280,60 @@ def redraw(ctx) -> None:
 _CHANNEL_METRICS = ("brightness", "signal", "brightness_fc", "signal_fc")
 
 
-def _resolved_metric(ctx, st) -> tuple[str, str | None, str]:
+def resolve_metric(view: str, metric: str, active_channel, channels) -> tuple[str, str | None, str]:
     """The metric drawn, the shared channel spelled as the data spells it, and a note when the chosen metric
     cannot be drawn: a channel metric with no site intensities for the shared channel, or a metric with one
-    value per nanowell on Trajectories, which draws values over time."""
-    channel = match_channel(ctx.state.channel.active_channel, st.data.channels)
-    if st.view == "trajectories" and st.metric in PER_NANOWELL:
-        return "n", None, (f"{METRICS[st.metric][0]} has one value per nanowell, not one per timepoint, so "
+    value per nanowell on Trajectories, which draws values over time. The page and Batch Export both ask."""
+    channel = match_channel(active_channel, channels)
+    if view == "trajectories" and metric in PER_NANOWELL:
+        return "n", None, (f"{METRICS[metric][0]} has one value per nanowell, not one per timepoint, so "
                            f"Trajectories shows Cell count.")
-    if st.metric in _CHANNEL_METRICS and channel is None:
-        return "n", None, (f"{st.metric.replace('_', ' ')} needs a channel with site intensities; the shared channel "
-                           f"({ctx.state.channel.active_channel}) has none, so Cell count is shown.")
-    return st.metric, channel, ""
+    if metric in _CHANNEL_METRICS and channel is None:
+        return "n", None, (f"{metric.replace('_', ' ')} needs a channel with site intensities; the shared channel "
+                           f"({active_channel}) has none, so Cell count is shown.")
+    return metric, channel, ""
+
+
+def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
+              timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
+              note: str = "", tableless=(), selected=()) -> tuple[object, object]:
+    """Draw *view* (Distribution, Array map, Trajectories or Position) into *fig*: ``(hit map, model)``.
+
+    **The one composition of each view**, called by the page and by Batch Export's Nanowells mode (tracker I4),
+    so a saved batch figure is the page's figure for the same choices — the notes, the exclusions and the
+    empty states included — and fixing one fixes both. *groups* is ``group -> wells``; *timepoint* is the
+    timepoint Position and *Along x: Wells* compare at; *well* and *well_timepoint* are what the Array map shows.
+    The hit map is ``None`` for views with nothing to click.
+    """
+    wells = [w for members in groups.values() for w in members]
+    if view == "array_map":
+        model = vc.map_model(metrics, data, well, well_timepoint, metric_column(metric, channel))
+        if model is None:
+            render_message(fig, f"{well or 'No well'} has no addressed nanowells and no measured pitch to place "
+                                f"them on, so there is no map to draw." if well else
+                           "Select a well with a nanowell table.", gid="nw-map-missing")
+            return None, None
+        return render_array_map(fig, model, label=_label(metric, channel), selected=selected, note=note), None
+    if view == "trajectories":
+        render_trajectories(fig, vc.trajectory_panels(metrics, wells, metric_column(metric, channel), cohort=cohort),
+                            cohort=cohort, label=_label(metric, channel), time_source=data.time_source, note=note)
+        return None, None
+    if view == "position":
+        series, missing = vc.position_series(metrics, wells, timepoint, metric_column(metric, channel))
+        if missing:
+            note = " ".join(filter(None, [note, f"No addressed nanowells at {timepoint}, so not drawn: "
+                                                f"{', '.join(missing)}."]))
+        render_position(fig, series, label=_label(metric, channel), timepoint=timepoint, note=note)
+        return None, None
+    model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
+                               timepoint=timepoint, control=control, time_source=data.time_source,
+                               baseline=baseline, cohort=cohort)
+    if tableless:
+        model.notes.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
+                              f"{', '.join(tableless)}.")
+    if note:
+        model.notes.insert(0, note)
+    return render_distribution(fig, model, selected=selected), model
 
 
 def _label(metric: str, channel: str | None) -> str:
@@ -339,33 +375,6 @@ def shown_timepoint(ctx) -> tuple[list, str]:
         return list(st.data.timepoints(well)), page_timepoint(ctx, well)
     tps = list(st.data.timepoints())
     return tps, st.timepoint if st.timepoint in tps else (tps[-1] if tps else "")
-
-
-def _draw_distribution(ctx, st, fig, metric, channel, note) -> None:
-    model = distribution_model(st.metrics, metric, channels=st.data.channels, channel=channel, axis=st.axis,
-                               groups=page_groups(ctx), timepoint=st.timepoint, control=st.control,
-                               time_source=st.data.time_source, baseline=st.baseline, cohort=st.cohort)
-    tableless = [w for w in active_wells(ctx) if w not in set(st.data.wells)]
-    if tableless:
-        model.notes.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
-                              f"{', '.join(tableless)}.")
-    if note:
-        model.notes.insert(0, note)
-    st.hits = render_distribution(fig, model, selected=[tuple(s) for s in st.selected_sites])
-    st.model = model
-
-
-def _draw_map(ctx, st, fig, metric, channel, note) -> None:
-    well = page_well(ctx)
-    model = vc.map_model(st.metrics, st.data, well, page_timepoint(ctx, well), metric_column(metric, channel))
-    if model is None:
-        render_message(fig, f"{well or 'No well'} has no addressed nanowells and no measured pitch to place them "
-                            f"on, so there is no map to draw." if well else "Select a well with a nanowell table.",
-                       gid="nw-map-missing")
-        st.hits = None
-        return
-    st.hits = render_array_map(fig, model, label=_label(metric, channel), selected=[tuple(s) for s in st.selected_sites],
-                               note=note)
 
 
 def _draw_qc(ctx, st, fig, well: str) -> None:

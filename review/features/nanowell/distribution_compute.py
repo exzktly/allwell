@@ -43,6 +43,12 @@ METRICS = {
     "growth_rate": ("Growth rate (per hour, from ln n)", False),
     "occupancy_class": ("Occupancy at baseline (cells)", False),
 }
+def metric_labels() -> dict:
+    """``metric -> label``, in the page's order — for a caller outside this feature (Batch Export) that reaches
+    it through a lazy proxy, which can only call."""
+    return {key: label for key, (label, _needs) in METRICS.items()}
+
+
 #: Metrics with one value per nanowell, not per timepoint: drawn across wells only (interface plan §6.2 #4).
 PER_NANOWELL = frozenset({"growth_rate", "occupancy_class"})
 #: Metrics that depend on the baseline (the Baseline control is greyed for the others).
@@ -207,6 +213,23 @@ def fixed_cohort(frame: pd.DataFrame, column: str, reasons: pd.Series) -> tuple[
     sites = frame.drop_duplicates(["well", "nw_q", "nw_r"])
     kept = int(complete.groupby(key).first().sum())
     return frame, reasons, kept, len(sites)
+
+
+def wells_summary(metrics: pd.DataFrame, wells, metric: str, *, channels=(), channel: str | None = None,
+                  cohort: bool = False) -> pd.DataFrame:
+    """``summary_compute.well_summary`` for *wells*, prepared exactly as the Distribution view prepares it: a
+    per-nanowell metric at each well's own first timepoint, labelled :data:`PER_NANOWELL_LABEL`, and the fixed
+    cohort applied when *cohort* (its exclusions then counted under :data:`COHORT_REASON`). Batch Export's
+    Nanowells mode writes this beside each figure (tracker I4), so the CSV's numbers are the figure's."""
+    column = metric_column(metric, channel)
+    frame = metrics[metrics["well"].isin(list(wells))]
+    reasons = exclusion_reason(frame, column, channels)
+    if metric in PER_NANOWELL:
+        first = frame["tp_order"] == 0
+        frame, reasons = frame[first].assign(timepoint=PER_NANOWELL_LABEL), reasons[first]
+    elif cohort:
+        frame, reasons, _kept, _sites = fixed_cohort(frame, column, reasons)
+    return well_summary(frame, column, channels, reasons=reasons)
 
 
 def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), channel: str | None = None,

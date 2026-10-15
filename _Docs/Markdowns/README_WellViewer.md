@@ -5017,7 +5017,7 @@ panel-local state so a batch run isn't tied to whatever the on-screen
 plot has set.
 
 Pick the mode from the tab strip in the window's top band — *Line · Bar ·
-Scatter (cells) · Scatter (aggregate) · Response*, beside the Review / Analyze /
+Scatter (cells) · Scatter (aggregate) · Response · Nanowells*, beside the Review / Analyze /
 Datasets selector, where every other page's tabs are. The groups you build are
 **shared by every mode** — define them once and they are there whichever you
 export. They describe your plate's conditions, not the shape of
@@ -5037,9 +5037,25 @@ row per curve's fit — including a fit that was refused, carrying the reason.
 A group with no placeable points writes nothing at all rather than an empty
 figure and an empty file.
 
-Fold change is the one setting the Response panel does not carry: response
+**Nanowells** (on a dataset with nanowell tables) exports the
+[Nanowells](#nanowells) page's figures one group at a time. Choose the **View**
+(Distribution, Array map, Trajectories or Position), tick the **Metrics**, and
+set **Along x**, **Baseline**, **Timepoint** (Latest, Earliest or one of the
+dataset's) and **Fixed cohort** as on the page — each greyed where it does not
+reach the view. Each group writes one figure per metric, drawn exactly as the
+page draws it (the Array map, which shows one well, writes one figure per well),
+and one summary CSV: for each metric, well and timepoint the median, quartiles,
+fraction responding and occupied, the nanowells used, and those excluded by
+reason. A group's replicate sets are drawn as sets and its single wells on their
+own, as on the page. A well of the group with no nanowell table is named on the
+figure and gets its own row in the CSV; a group with none at all is skipped and
+the run says so. Saved Plots records made by this mode restore the Nanowells page
+to the figure's view and metric.
+
+Fold change is a setting the Response panel does not carry: response
 curves normalise through the shared fold-change setting on the plotting band,
-the same one the tabs use, so set it there. Every other mode keeps its own.
+the same one the tabs use, so set it there. Line, Bar and Scatter keep their own; Nanowells measures a
+fold change against the baseline chosen on its panel.
 
 Groups are built on a **plate map**, the same plate control used everywhere else
 in the app rather than a separate grid of squares. Left-drag across it to add

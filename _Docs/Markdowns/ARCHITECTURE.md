@@ -692,7 +692,8 @@ review/
 │   ├── qc/           controller.py, params.py, tab_view.py   ← support lib
 │   ├── export/       service.py, style.py, sidebar_view.py
 │   ├── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
-│   │                 scatter_panel.py, response_panel.py, service.py,
+│   │                 scatter_panel.py, response_panel.py, nanowell_panel.py,
+│   │                 service.py,
 │   │                 _common.py, _line_series_runner.py,
 │   │                 _destinations.py (gallery + PowerPoint),
 │   │                 _panels.py (which panels, what axes),
@@ -1036,7 +1037,7 @@ and registers every centre page. The current page-list:
 | Images | **smFISH** | — |
 | Data | **Review CSV** | — |
 | Data | **Saved Plots** | — (the plot gallery; decorates every plot card with a "save to gallery" button, and exports the gallery as a PDF report or a PowerPoint deck — each chart as editable shapes, each Image Table grid as one editable group per field of view) |
-| Data | **Batch Export** | — (one figure + CSV per export group, in five modes — Line, Bar, Scatter cells, Scatter aggregate, Response — and optionally into the Saved Plots gallery and a PowerPoint deck as well as into files) |
+| Data | **Batch Export** | — (one figure + CSV per export group, in six modes — Line, Bar, Scatter cells, Scatter aggregate, Response, Nanowells — and optionally into the Saved Plots gallery and a PowerPoint deck as well as into files) |
 
 **Plotting** is a `NamedPageStack`; **Image Browser** (`QTabWidget`: the unified
 home for the disparate image-review surfaces — the review-image **Segmentation**
@@ -3299,8 +3300,9 @@ inherited them silently would file its figures under the line tab's name.
 
 A mode whose figure comes from a **removable** feature names that feature in
 `_MODES`, and `_offered_modes` derives the bar from the registry: Response mode
-reuses Response Curves' own collector and renderer, so a profile that drops that
-leaf gets four tabs rather than a fifth that builds and then raises on Run. The
+reuses Response Curves' own collector and renderer, and Nanowells mode the
+Nanowells page's, so a profile that drops either feature gets no tab for it
+rather than one that builds and then raises on Run. The
 list is derived rather than written twice, and `_show_batch_mode` falls back to
 the default mode for a key this build does not offer — a saved view naming
 `response` in such a build lands on Line rather than on nothing.
@@ -3587,7 +3589,29 @@ was left out**, and a row per fit including a refused one. A group with no
 placeable points writes nothing at all rather than blank axes beside an empty
 CSV.
 
-It is the one mode with **no fold-change controls**, and that is a decision
+**Nanowells mode** (`nanowell_panel.py`) draws each figure through the
+Nanowells page's own composition, `nanowell/controller.draw_view` — the one
+function the page's redraw calls for Distribution, Array map, Trajectories and
+Position, notes and empty states included — and `resolve_metric` for the
+channel and per-nanowell fallbacks. Per export group it writes the chosen view
+for each ticked metric (the Array map, which draws one well, once per well) and
+one CSV of `distribution_compute.wells_summary`, the per-well summary prepared as
+the Distribution view prepares it (per-nanowell metrics at each well's first
+timepoint, the fixed cohort when ticked), with the exclusions spelled out by
+reason and a row naming each of the group's wells with no nanowell table. A
+group's replicate sets stay sets and its solo wells stand alone, as the page
+groups a selection (`_figure_groups`); a group with no nanowell table at all is
+skipped and says so. The tables and the metrics at the chosen baseline are read
+once per run — from the page's state when it holds this dataset — and every
+control once, before the first job. There is no AXES block (a Nanowells figure
+is several panels the page lays out itself), no per-cell CSV and no fold-change
+or spread control: a nanowell fold change is against the baseline chosen here.
+`_capture_group_params` sets the page's view, metric, axis, baseline, cohort,
+well and timepoint to the figure's for the capture and puts them back, so a
+gallery record restores to the figure beside it rather than to whatever the page
+was showing.
+
+Response mode carries **no fold-change controls** either, and that is a decision
 rather than an omission: the other modes normalise through the panel's own
 fold-change state, while a response curve normalises inside its collector off
 the shared `ctx.state.plot` state every plotting page shares. A panel-local

@@ -8226,8 +8226,11 @@ margin has no synthetic default or absolute-score calibration. A
 `FiducialCandidate(position, score, runner_up_score)` is accepted only when its
 score exceeds its runner-up by more than the supplied margin. Accepted evidence
 is snapped through the fitted phase in priority order: fiducial, array centre,
-then plate-rigid prediction. Three times the prediction's one-sigma uncertainty
-must be strictly below half a pitch. With no accepted source, the frozen
+then plate-rigid prediction. A fiducial or array centre more than a quarter
+pitch from every site is refused, with the distance in the reason, because the
+nearest site to a point that lies nowhere near one is arbitrary. Three times the
+prediction's one-sigma uncertainty for the target's *true origin*
+(`uncertainty_with_site`) must be strictly below half a pitch. With no accepted source, the frozen
 `OriginResolution` is `unaddressed` with a reason and no origin. Accepted
 results carry `origin_xy`, the method, and `agreement` (`agree`, `conflict`, or
 `single_source`). Disagreeing sources remain an explicit conflict; the
@@ -8256,17 +8259,27 @@ cannot be sent to the seam-fusion path.
 
 `fit_plate_rigid` fits a proper 2-D rotation and translation without scale or
 reflection to at least three common well origins. Pair hypotheses minimise the
-median radial residual. Consensus is refitted and reselected, permitting genuine
+median radial residual; the first cutoff takes its scale from the wells the winning
+pair did not define, because the pair fits exactly and its zero residuals would
+otherwise pull the median toward zero (with three wells it is always zero, which
+rejected the third well of every noisy fit). Consensus is refitted and reselected, permitting genuine
 wells to rejoin, with a conservative six-sigma radial cutoff whose scale is the
 Rayleigh median divided by `sqrt(2 ln 2)`. This avoids the small-sample trimming
 bias from treating radial residuals as signed Gaussian deviations. Frozen
 `PlateRigidFit` results include per-well residuals, consensus ids, RMS and failure
-reasons. `predict_origin` returns an `OriginPrediction` with position and a
-one-sigma radial prediction standard error. Residual variance is SSE/(2n−3);
-translation and rotational leverage give variance times `(2/n + distance²/spread)`.
-The seeded 500-fit simulation measures prediction error independently with 5 µm
-per-axis noise in each acquisition and checks near and far predictions within
-10% of empirical RMS while retaining all wells in nearly every fit. Separate
+reasons. `predict_origin` returns an `OriginPrediction` with position and two
+one-sigma radial numbers. `uncertainty` is the standard error of the transform at
+the point; residual variance is SSE/(2n−3); translation and rotational leverage
+give variance times `(2/n + distance²/spread)`. `uncertainty_with_site` adds the
+target well's own scatter about the rigid motion, variance times
+`(1 + 2/n + distance²/spread)`, and is the error of the target's true origin: near
+the centroid of twelve wells the first is under half of the second, and it is the
+second that `resolve_origin` tests against a pitch.
+The seeded 500-fit simulation measures the transform's error at noiseless
+prediction sites independently with 5 µm per-axis noise in each acquisition and
+checks near and far predictions within 10% of empirical RMS; a second simulation
+scatters the target well too and checks `uncertainty_with_site` against the error
+of the target's true origin while retaining all wells in nearly every fit. Separate
 planted-outlier tests require rejection. The uncertainty assumes independent
 isotropic residuals and treats the prediction input as fixed; it excludes new
 measurement noise in that input and stage-calibration uncertainty, and is not a

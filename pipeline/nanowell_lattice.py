@@ -136,7 +136,14 @@ class OriginPrediction:
     ok: bool
     reason: str
     position: tuple[float, float] | None = None
+    #: One-sigma radial standard error of the transform at this point: how well the
+    #: rigid motion is known there. It excludes the target well's own scatter about
+    #: the rigid motion, so it is **not** the error of the target's true origin.
     uncertainty: float | None = None
+    #: One-sigma radial error of the target's *true origin*: the transform's error plus
+    #: the well's own scatter about the rigid motion (``variance * (1 + leverage)``).
+    #: This is the number to test against a pitch.
+    uncertainty_with_site: float | None = None
 
 
 def _kabsch(source, target):
@@ -177,11 +184,16 @@ def fit_plate_rigid(origins_a, origins_b) -> PlateRigidFit:
         residuals = _rigid_residuals(source, target, rotation, translation)
         score = (float(np.median(residuals)), float(np.mean(np.sort(residuals)[:3])))
         if best is None or score < best[0]:
-            best = score, residuals
+            best = score, residuals, indices
     if best is None:
         return PlateRigidFit(False, "Well origins have no spatial spread")
     residuals = best[1]
-    cutoff = max(floor, 6 * np.median(residuals) / math.sqrt(2 * math.log(2)))
+    # The two wells that define the winning pair fit it exactly, so their zero residuals
+    # drag the median toward zero: with three wells it is always zero, and a cutoff built
+    # from it rejects the third well and the fit fails, however small the noise. The scale
+    # comes from the wells the hypothesis did not define.
+    others = np.delete(residuals, best[2])
+    cutoff = max(floor, 6 * np.median(others) / math.sqrt(2 * math.log(2)))
     inliers = residuals <= cutoff
     if inliers.sum() < 3:
         return PlateRigidFit(False, "Fewer than three wells support one rigid transform")
@@ -216,6 +228,9 @@ def predict_origin(transform: PlateRigidFit, origin_a) -> OriginPrediction:
     independent isotropic residuals: variance * (2/n + distance²/spread). It
     includes rotational leverage away from the anchored wells' centroid. It is
     not a hard error bound and does not include stage calibration uncertainty.
+    It is the error of the *transform* at the point. The error of the target's
+    true origin also holds the well's own scatter about the rigid motion, and is
+    returned as ``uncertainty_with_site``.
     """
     if not transform.ok:
         return OriginPrediction(False, transform.reason)
@@ -225,7 +240,8 @@ def predict_origin(transform: PlateRigidFit, origin_a) -> OriginPrediction:
     position = np.asarray(transform.rotation) @ point + transform.translation
     distance2 = float(np.sum((point - transform.source_centroid) ** 2))
     leverage = 2 / len(transform.inlier_wells) + distance2 / transform.source_spread
-    return OriginPrediction(True, "", tuple(position), math.sqrt(transform.residual_variance * leverage))
+    return OriginPrediction(True, "", tuple(position), math.sqrt(transform.residual_variance * leverage),
+                            math.sqrt(transform.residual_variance * (1 + leverage)))
 
 
 @dataclass(frozen=True)
@@ -354,6 +370,10 @@ def _refine_lattice(points, basis):
         if converged:
             break
     indices, residuals = _nearest_sites(points, basis, origin)
+    provisional = residuals <= 0.25 * pitch
+    radial = residuals[provisional] if provisional.any() else residuals
+    median = np.median(radial)
+    cutoff = min(0.25 * pitch, max(0.01 * pitch, median + 4 * np.median(abs(radial - median))))
     keep = _unique_inliers(indices, residuals, cutoff)
     if keep.sum() < max(6, math.ceil(0.6 * len(points))):
         raise ValueError("Fewer than sixty percent of points support one lattice")
@@ -445,9 +465,10 @@ class OriginResolution:
 
 
 def _snap_origin(fit, position):
+    """The lattice site nearest *position*, and how far *position* was from it."""
     basis = np.column_stack((fit.a1, fit.a2))
-    indices, _ = _nearest_sites(_coordinate(position)[None, :], basis, np.asarray(fit.phase_origin))
-    return tuple(np.asarray(fit.phase_origin) + basis @ indices[0])
+    indices, residuals = _nearest_sites(_coordinate(position)[None, :], basis, np.asarray(fit.phase_origin))
+    return tuple(np.asarray(fit.phase_origin) + basis @ indices[0]), float(residuals[0])
 
 
 def resolve_origin(fit: LatticeFit, *, fiducial=None, array_centre=None,
@@ -456,26 +477,45 @@ def resolve_origin(fit: LatticeFit, *, fiducial=None, array_centre=None,
 
     The caller supplies its score margin; it is not calibrated from synthetic
     data. Plate-rigid uncertainty is one-sigma radial: three sigma must be
-    strictly below half a pitch. Every accepted position is snapped to a site.
+    strictly below half a pitch, where the one-sigma used is the error of the
+    target's true origin (``uncertainty_with_site``), not only of the transform.
+    Every accepted position is snapped to a site, and a fiducial or array centre
+    farther than a quarter pitch from every site is refused instead of snapped.
     """
     if not math.isfinite(fiducial_margin) or fiducial_margin < 0:
         raise ValueError("fiducial_margin must be finite and non-negative")
     if not fit.ok:
         return OriginResolution("unaddressed", None, None, "single_source", fit.reason)
     candidates = []
+    rejected = []
+
+    def offer(method, position):
+        site, distance = _snap_origin(fit, position)
+        # Evidence that lies nowhere near a site is not evidence of which site is the origin:
+        # snapping it would anchor the well on an arbitrary site and report success.
+        if distance > fit.pitch / 4:
+            rejected.append(f"the {method} lies {distance:.1f} from the nearest site "
+                            f"({distance / fit.pitch * 100:.0f} % of a pitch)")
+        else:
+            candidates.append((method, site))
+
     if fiducial is not None:
         scores = (fiducial.score, fiducial.runner_up_score)
         if all(math.isfinite(v) for v in scores) and scores[0] - scores[1] > fiducial_margin:
-            candidates.append(("fiducial", _snap_origin(fit, fiducial.position)))
+            offer("fiducial", fiducial.position)
     if array_centre is not None:
-        candidates.append(("array_centre", _snap_origin(fit, array_centre)))
+        offer("array_centre", array_centre)
     if (plate_rigid is not None and plate_rigid.ok and plate_rigid.uncertainty is not None
             and math.isfinite(plate_rigid.uncertainty) and plate_rigid.uncertainty >= 0
-            and 3 * plate_rigid.uncertainty < fit.pitch / 2):
-        candidates.append(("plate_rigid", _snap_origin(fit, plate_rigid.position)))
+            and 3 * (plate_rigid.uncertainty_with_site
+                     if plate_rigid.uncertainty_with_site is not None else plate_rigid.uncertainty)
+            < fit.pitch / 2):
+        candidates.append(("plate_rigid", _snap_origin(fit, plate_rigid.position)[0]))
     if not candidates:
-        return OriginResolution("unaddressed", None, None, "single_source",
-                                "No accepted fiducial, array centre, or precise plate-rigid prediction")
+        reason = "No accepted fiducial, array centre, or precise plate-rigid prediction"
+        if rejected:
+            reason += "; " + "; ".join(rejected)
+        return OriginResolution("unaddressed", None, None, "single_source", reason)
     method, origin = candidates[0]
     agreement = "single_source"
     if len(candidates) > 1:
@@ -575,6 +615,11 @@ def fit_array_boundary(site_xy) -> ArrayBoundary:
 
 def roster(fit: LatticeFit, origin, radius) -> tuple[tuple[int, int], ...]:
     """Enumerate the entire model disk, independent of observed or hidden sites.
+
+    Addresses are relative to the anchored origin and the square nanowell sits at
+    the array's physical centre, so the disk is centred on address ``(0, 0)``
+    whatever the origin's position in the image; *origin* is validated and not
+    otherwise used.
 
     Use one shared array-model radius across observations. Independently noisy
     radius estimates can select different edge sites; this function does not

@@ -308,3 +308,64 @@ def test_a_short_overlap_does_not_stop_the_run_but_is_said_in_the_log(tab, refus
     tab._nanowell_cb.setChecked(True)
     assert tab._validate_run_request() is not None and refused == []
     assert [t for t, _ in logged] == ["WARNING"] and "on a seam" in logged[0][1]
+
+
+# ── the rules, without a form ────────────────────────────────────────────────
+from analyze.domain.nanowell_fields import nanowell_option_errors  # noqa: E402
+
+_ON = {"nanowell_format": "100um", "phase_token": "PHASE"}
+
+
+def test_a_form_with_the_mode_off_is_never_refused_for_nanowell_reasons():
+    off = {"nanowell_format": "", "phase_token": "", "nanowell_margin_um": "x", "nanowell_cell_diameter_um": "-4"}
+    assert nanowell_option_errors(off) == [] and nanowell_option_errors({}) == []
+
+
+@pytest.mark.parametrize("key, value, bad", [
+    ("nanowell_margin_um", "0", False), ("nanowell_margin_um", "-0.1", True),
+    ("nanowell_cell_diameter_um", "0", True), ("nanowell_cell_diameter_um", "0.1", False),
+    ("nanowell_square_edge_deg", "45", False), ("nanowell_square_edge_deg", "45.1", True),
+    ("nanowell_square_edge_deg", "-45", False), ("nanowell_square_edge_deg", "-45.1", True),
+    ("nanowell_occluded_below", "0", True), ("nanowell_occluded_below", "1", False),
+    ("nanowell_occluded_below", "1.01", True), ("nanowell_clipped_below", "0.001", False),
+    ("nanowell_clipped_below", "1.5", True), ("nanowell_clipped_below", "abc", True),
+    ("nanowell_clipped_below", "nan", True), ("nanowell_margin_um", "", False),
+])
+def test_each_numeric_field_is_refused_exactly_at_its_bounds(key, value, bad):
+    assert bool(nanowell_option_errors({**_ON, key: value})) is bad
+
+
+def test_a_format_the_pipeline_does_not_know_and_a_missing_phase_channel_are_refused():
+    assert any("is not one of" in e for e in nanowell_option_errors({**_ON, "nanowell_format": "75um"}))
+    assert any("Phase channel" in e for e in nanowell_option_errors({"nanowell_format": "100um", "phase_token": " "}))
+    assert nanowell_option_errors(_ON) == []
+
+
+# ── the two input checks, each on its own ────────────────────────────────────
+def test_a_tile_missing_from_the_record_and_a_tile_missing_from_the_archive_are_each_found(tmp_path):
+    import zipfile
+
+    opts = {"filename_schema": ":".join(SCHEMA), "filename_sep": "_", "nanowell_format": "100um"}
+    short_record, _ = _plate(tmp_path / "a", drop_tile="F3")                  # the archive holds all four, the record three
+    problems, _ = nanowell_input_report(str(short_record), opts)
+    placed = [p for p in problems if "cannot be placed" in p]
+    assert len(placed) == 1 and "A01 at 0h" in placed[0] and "1 of 4 tiles are missing" in placed[0]
+    short_archive, _ = _plate(tmp_path / "b")                                  # the record names four, the archive three
+    zip_path = short_archive / "in" / f"{WELL}.zip"
+    kept = []
+    with zipfile.ZipFile(zip_path) as zf:
+        kept = [(n, zf.read(n)) for n in zf.namelist() if "_F3_" not in n]
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        for name, data in kept:
+            zf.writestr(name, data)
+    problems, _ = nanowell_input_report(str(short_archive), opts)
+    assert len(problems) == 1 and "not in the archives" in problems[0] and "F3" in problems[0]     # the grid is whole
+
+
+def test_addresses_are_written_on_the_montage_only_where_a_nanowell_is_drawn_large_enough_to_hold_them(qtbot):
+    import numpy as np
+
+    result = PreviewResult("ok", montage=np.zeros((100, 200), np.uint8), um_per_px=4.0, origin_um=(0.0, 0.0))
+    result.sites = [_site(3, 4, "empty", x=400.0, y=200.0)]
+    assert render_montage(result, 1.0).toImage() == render_montage(result, 1.0, show_addresses=False).toImage()
+    assert render_montage(result, 4.0).toImage() != render_montage(result, 4.0, show_addresses=False).toImage()

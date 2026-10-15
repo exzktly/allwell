@@ -239,8 +239,14 @@ allwell/
 │   │   ├── input.py            ← run-dir resolver, OME-TIFF redirect, channel rows,
 │   │   │                          browse-time folder scan
 │   │   ├── job_edit.py         ← the inverse of collect_spec, for the queue's edit flow
+│   │   ├── nanowell_fields.py  ← the Nanowells fields' meaning, bounds and errors, Qt-free
 │   │   └── well_list.py        ← the one parse of a typed well list, and the sentence a
 │   │                              --only_wells run announces itself with
+│   ├── nanowell_section.py     ← the Nanowells section: mode, plate format, the numeric
+│   │                              fields, Test detection, and the run validation
+│   ├── nanowell_preflight.py   ← what is checkable before a nanowell run without reading an
+│   │                              image: record, archives, grids, overlap and seam estimate
+│   ├── nanowell_preview.py     ← the Test detection window and the marks drawn on the montage
 │   ├── qc_section.py           ← the Quality Control section: the pixel
 │   │                              corrections, the debris gate, and the
 │   │                              per-cell focus measurement and its cut
@@ -8781,6 +8787,26 @@ motion (`fit_plate_rigid`), and the well's origin at the reference carried throu
 `resolve_origin` as a prediction, accepted only when its error is under a third of half a pitch. It needs a
 stage position for every tile (otherwise the reason is recorded) and treats the stage and image axes as
 parallel. Only those wells' rows for those timepoints are rewritten.
+
+**The Analyze form.** The Nanowells section (`analyze/nanowell_section.py`, folded by default) holds the mode
+checkbox, the plate format, the cell diameter, the margin, the square's edge angle and the occlusion and
+clipping thresholds; a blank number sends no flag and the pipeline's default applies. Its option keys are
+the pipeline's destinations (`nanowell_format` and so on), so a job's `opts`, the argv, and a sidecar's
+`execution_options` all name the same things and the edit-a-queued-job round trip and the sidecar restore
+need no translation; a sidecar that states `nanowell_format: null` switches the mode off, and one that
+predates the keys leaves it alone. Run validation adds `nanowell_option_errors` (bounds, a Phase channel)
+to the numeric checks, then, with an input folder, `nanowell_input_report`: **problems** stop the run (no
+well zips, no acquisition record, a tile the record names that an archive lacks, a grid that cannot be
+placed) and **warnings** are logged and the run goes on (an overlap shorter than a nanowell needs, with the
+expected seam-site count from `ownership_report` laid over an ideal lattice at several phases; an upper
+bound, since the array may be smaller than the tiles). **Test detection** opens a non-modal window that
+runs `pipeline.nanowell_preview.preview_timepoint` on a `QThread`: the same locate-and-measure the run does for
+one (well, timepoint), returning the montage, every site with its address, state and fused flag, the origin
+method, the measured overlap against the needed one, and a few rim-suppressed crops beside their
+segmentation. What is drawn is `site_marks` of the result, a pure function; addresses are written only
+where a nanowell is drawn at least 34 pixels across. The square's edge angle and the two thresholds are
+read by the analysis (`check_orientation`'s `square_to_axis_deg`, `site_state`'s cut-offs), not only
+validated and keyed.
 
 **Remote and Datasets tools.** The acquisition record already travels with the upload; the fetch brings
 `nanowells/<well>.csv` and `_grid.json` back (`services/remote_fetch_nanowells`). Subset, Merge Plates and

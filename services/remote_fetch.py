@@ -80,6 +80,7 @@ from services.remote_run_state import (
     _canonical_well_from_path,
 )
 from services.remote_staging import input_well_containers
+from services.remote_fetch_nanowells import fetch_nanowell_tables
 from services.remote_wire import (
     TRANSIENT_PREFIX,
     _BREADCRUMB_INTERVAL_S,
@@ -1042,6 +1043,7 @@ class Fetcher:
             with _csv_dir_heartbeat(csv_dest):
                 csv_count = self._pull_listed(csv_host, csv_files, csv_dest)
         csv_elapsed = time.monotonic() - t1
+        fetch_nanowell_tables(self, well)
         # Held back until the zip is in place: this line is the half that
         # paints the well fetched on the plate (ProgressTracker._mark_fetch_part).
         csv_line = (

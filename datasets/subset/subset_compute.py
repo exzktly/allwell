@@ -41,6 +41,7 @@ from datasets.core.containers import (
     TIMEPOINT_HOURS_COLUMN,
 )
 from datasets.core.member_names import discover_parsed_member
+from datasets.core.nanowell_tables import refuse_nanowell_tables
 from datasets.core.dataset_paths import known_channel_tokens
 
 IN_PROGRESS_MARKER = ".aw_subset_in_progress"
@@ -166,6 +167,7 @@ def build_subset_plan(
     dest_is_restart = destination_is_failed_run(dest)
 
     _refuse_well_collisions(src, "The source dataset")
+    refuse_nanowell_tables(src, "The source dataset", SubsetError, "Subset")
 
     if has_folder_mode_output(src):
         raise SubsetError(

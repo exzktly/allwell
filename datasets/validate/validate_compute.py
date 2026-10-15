@@ -50,6 +50,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from datasets.core.concurrency import pick_workers
+from datasets.core.nanowell_tables import nanowell_findings
 from pipeline.completeness import (
     csv_keys_from_rows,
     done_keys,
@@ -1101,6 +1102,7 @@ def build_report(
                 *availability_findings, *override_findings]
 
     findings.extend(_acquisition_findings(paths.root, schema_fields, sep))
+    findings.extend(Finding(*f) for f in nanowell_findings(paths, in_containers(paths), schema_fields, sep))
 
     return DatasetReport(
         root=paths.root,

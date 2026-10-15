@@ -46,6 +46,7 @@ from datasets.core.dataset_paths import (
     out_zips,
 )
 from datasets.core.dataset_paths import check_compatible, known_channel_tokens
+from datasets.core.nanowell_tables import refuse_nanowell_tables
 
 IN_PROGRESS_MARKER = ".aw_merge_in_progress"
 
@@ -368,6 +369,8 @@ def build_plate_merge_plan(
 
     _refuse_well_collisions(ds1, "Dataset 1")
     _refuse_well_collisions(ds2, "Dataset 2")
+    refuse_nanowell_tables(ds1, "Dataset 1", MergePlatesError, "Merge Plates")
+    refuse_nanowell_tables(ds2, "Dataset 2", MergePlatesError, "Merge Plates")
 
     if has_folder_mode_output(ds1) or has_folder_mode_output(ds2):
         which = "dataset 1" if has_folder_mode_output(ds1) else "dataset 2"

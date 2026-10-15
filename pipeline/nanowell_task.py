@@ -95,6 +95,26 @@ def cell_records(outcome: nr.WellOutcome, well: str, fluor_tokens, px_by_tp: dic
     return rows
 
 
+def cell_columns(fluor_tokens) -> list[str]:
+    """The per-cell CSV's columns, in the order :func:`cell_records` writes them."""
+    return (["well", "fov", "timepoint", "nucleus_id", "area_px"] + [f"{t}_mean_intensity" for t in fluor_tokens]
+            + ["nw_q", "nw_r", "nw_ring", "nw_label", "well_x_um", "well_y_um"])
+
+
+def write_empty_cells_csv(path: Path, fluor_tokens) -> None:
+    """A per-cell CSV with its header and no rows, for a well none of whose nanowells holds a cell.
+
+    The well is whole, and the rest of the app (the remote fetch's check that a finished well has its CSV,
+    the skip of wells already done, Review's loader) reads a missing CSV as a well that did not finish.
+    An empty one says "measured, found no cells".
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".csv.part")
+    with tmp.open("w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerow(cell_columns(fluor_tokens))
+    tmp.replace(path)
+
+
 def write_sites_csv(path: Path, rows: list[dict], fluor_tokens) -> None:
     columns = list(SITE_COLUMNS) + [f"{t}_{kind}" for t in fluor_tokens for kind in ("integrated", "mean_bg")]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -270,6 +290,8 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     all_cells = sorted((prior["cells"] if prior else []) + records, key=lambda r: rank[r["timepoint"]])
     if all_cells:
         write_csv(all_cells, output_dir / f"{csv_prefix}_{well_label}.csv")
+    else:
+        write_empty_cells_csv(output_dir / f"{csv_prefix}_{well_label}.csv", fluor_tokens)
     write_sites_csv(output_dir / NANOWELL_DIR / f"{well_label}.csv", all_sites, fluor_tokens)
     write_grid_json(output_dir / NANOWELL_DIR / f"{well_label}_grid.json", well_label, outcome, settings)
     if staging_dir is not None:

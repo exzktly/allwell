@@ -56,6 +56,7 @@ from datasets.core.dataset_paths import (
     known_channel_tokens as _known_channel_tokens,
 )
 from datasets.core.member_names import rewrite_member_field
+from datasets.core.nanowell_tables import refuse_nanowell_tables
 from datasets.concatenate.raw_compute import (
     check_raw_compatible, is_raw_dataset, raw_info, raw_paths,
 )
@@ -830,6 +831,8 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
     _refuse_well_collisions(ds1, "Dataset 1")
     _refuse_well_collisions(ds2, "Dataset 2")
     _refuse_mixed_spelling(ds1, ds2)
+    refuse_nanowell_tables(ds1, "Dataset 1", ConcatError, "Concatenate")
+    refuse_nanowell_tables(ds2, "Dataset 2", ConcatError, "Concatenate")
 
     if not raw and (has_folder_mode_output(ds1) or (not ds2_raw and has_folder_mode_output(ds2))):
         which = "dataset 1" if has_folder_mode_output(ds1) else "dataset 2"

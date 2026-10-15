@@ -221,3 +221,15 @@ def test_the_completeness_check_counts_a_nanowell_well_in_timepoints_and_finds_i
     info = json.loads((out / "pipeline_info.json").read_text())
     well = info["run_check"]["wells"][WELL]
     assert (well["intent"], well["covered_csv"], well["missing_count"], well["health"]) == (1, 1, 0, "complete")
+
+
+def test_a_well_with_no_cells_still_has_its_cell_csv_so_it_reads_as_finished(tmp_path, monkeypatch):
+    rendered, record = build_well(timepoint="0h")            # nothing painted: every nanowell is empty
+    plate = _write_plate(tmp_path, rendered, record)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", run_check=True)
+    lines = (out / f"measurements_{WELL}.csv").read_text().splitlines()
+    assert len(lines) == 1 and lines[0].startswith("well,fov,timepoint,nucleus_id,area_px,PHASE_mean_intensity,GFP_mean_intensity,nw_q")
+    sites = _rows(out, f"{WELL}.csv")
+    assert sites and all(r["n_cells"] == "0" for r in sites if r["state"] == "empty")
+    info = json.loads((out / "pipeline_info.json").read_text())
+    assert info["run_check"]["wells"][WELL]["health"] == "complete"

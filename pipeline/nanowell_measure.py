@@ -57,11 +57,12 @@ COUNT_DISAGREEMENT = 0.3
 TEMPLATE_HEADROOM = 1.3
 #: Below this a departure from the template is division noise, not texture (a flat noise-free tile has a spread of 0).
 MIN_TEXTURE_THRESHOLD = 0.02
-#: A timepoint's template departing from the earliest one's by more than this share of its level, after both are
-#: scaled to their own central level (so an exposure change does not count), is flagged: measured on rendered
-#: 40-site wells, the departure is at most 0.01 up to 34 loaded sites, with or without a 1.6x exposure change,
-#: and 0.83 or more from 35 on, where the least-textured quarter is no longer empty (tracker C12).
-TEMPLATE_DRIFT_LIMIT = 0.15
+#: A timepoint's template whose floor-to-surround ratio (:func:`floor_ratio`) has moved by more than a factor of two
+#: from the earliest timepoint's is flagged (tracker C12). Measured as ``|ln|`` on rendered 40-site wells: 0.012 or
+#: less up to 34 loaded sites, 1.12 or more from 35, where the least-textured quarter is no longer empty; a 1.6x
+#: exposure change 0.002; noise up to 0.15 at most 0.009; a Gaussian defocus of 2.5 px (a fifth of the radius)
+#: 0.17 and of 4 px 0.41 — below the limit, though a defocus that severe is not a measurable timepoint anyway.
+TEMPLATE_DRIFT_LIMIT = math.log(2.0)
 
 EMPTY = "empty"
 MEASURED = "measured"
@@ -163,6 +164,18 @@ def _azimuthal_texture(crops, half: int, radius: float) -> np.ndarray:
     return np.sqrt(residual / disk.sum())
 
 
+def as_fallback(earliest: Template | None) -> Template | None:
+    """*earliest* as this timepoint's template: the same pixels, ``source="earliest"`` and no ``used`` crops.
+
+    Handing back the earliest template object unchanged left it saying ``own`` with the earliest timepoint's crop
+    indices, so the caller read them as this timepoint's empty nanowells — an ``IndexError`` when there were
+    fewer crops here, and the wrong nanowells silently otherwise (found with tracker C16).
+    """
+    from dataclasses import replace
+
+    return None if earliest is None else replace(earliest, source=SOURCE_EARLIEST, used=())
+
+
 def build_template(crops, *, interior_radius_px: float, quarter: float = TEMPLATE_QUARTER,
                    min_sites: int = MIN_TEMPLATE_SITES, earliest: Template | None = None) -> Template | None:
     """The empty-nanowell template: the median of the least-textured quarter of the visible crops.
@@ -182,7 +195,7 @@ def build_template(crops, *, interior_radius_px: float, quarter: float = TEMPLAT
     """
     crops = np.asarray(crops, dtype=np.float64)
     if crops.ndim != 3 or len(crops) == 0:
-        return earliest
+        return as_fallback(earliest)
     half = crops.shape[1] // 2
     disk = _disk(half, interior_radius_px)
     usable = ~np.isnan(crops[:, disk]).any(axis=1)
@@ -190,7 +203,7 @@ def build_template(crops, *, interior_radius_px: float, quarter: float = TEMPLAT
     crops = crops[usable]
     candidates = len(crops)
     if candidates == 0:
-        return earliest
+        return as_fallback(earliest)
     texture = _azimuthal_texture(crops, half, interior_radius_px)
     take = max(int(math.floor(quarter * candidates)), 1)
     first = np.argsort(texture, kind="stable")[:take]
@@ -201,7 +214,7 @@ def build_template(crops, *, interior_radius_px: float, quarter: float = TEMPLAT
     order = np.argsort(texture, kind="stable")[:take]
     if take < min_sites:
         if earliest is not None:
-            return earliest
+            return as_fallback(earliest)
         source = SOURCE_OWN_SPARSE
     else:
         source = SOURCE_OWN
@@ -209,23 +222,78 @@ def build_template(crops, *, interior_radius_px: float, quarter: float = TEMPLAT
                     tuple(int(positions[k]) for k in sorted(order)))
 
 
-def template_drift(template: Template, earliest: Template) -> float | None:
-    """How far *template* departs from *earliest*: the mean absolute difference over their central disk, each
-    first divided by its own central level. ``None`` when the two do not cover the same crop or a level is unusable.
+def save_template(path, template: Template, timepoint: str) -> None:
+    """Write *template* (and the timepoint it was built at) to *path*, an ``.npz``, atomically (tracker C16).
 
-    A template built where most nanowells hold cells is cell-coloured, and every site divided by it reads
-    emptier than it is; from one timepoint's crops alone that cannot be told from a well of unusually bright
-    cells, but against the same well's earliest template it stands out (tracker C12). Scaling each by its own
-    level keeps an exposure change between timepoints from reading as drift.
+    A template object does not survive a run: a checkpoint keeps its summary, and so does a kept timepoint's grid
+    block. Kept beside them, a resumed or incremental run can still fall back to the earliest template when a
+    later timepoint has too few empty nanowells to build its own.
     """
-    if template.half != earliest.half:
+    import os
+    from pathlib import Path
+
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp.npz")
+    np.savez(tmp, array=np.asarray(template.array, dtype=np.float64), half=template.half, source=template.source,
+             n_sites=template.n_sites, candidates=template.candidates,
+             texture_cut=np.nan if template.texture_cut is None else template.texture_cut,
+             used=np.asarray(template.used, dtype=np.int64), timepoint=timepoint)
+    os.replace(tmp, path)
+
+
+def load_template(path) -> tuple[Template, str] | None:
+    """``(template, timepoint)`` from :func:`save_template`, or ``None`` when absent or unreadable."""
+    from pathlib import Path
+
+    path = Path(path)
+    if not path.is_file():
         return None
-    disk = _disk(template.half, template.half * 0.6)
-    a, b = np.asarray(template.array, dtype=np.float64)[disk], np.asarray(earliest.array, dtype=np.float64)[disk]
-    level_a, level_b = float(np.median(a)), float(np.median(b))
-    if not (math.isfinite(level_a) and math.isfinite(level_b)) or level_a <= 0 or level_b <= 0:
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            cut = float(data["texture_cut"])
+            template = Template(np.array(data["array"]), int(data["half"]), str(data["source"]), int(data["n_sites"]),
+                                int(data["candidates"]), None if math.isnan(cut) else cut,
+                                tuple(int(v) for v in data["used"]))
+            return template, str(data["timepoint"])
+    except (OSError, ValueError, KeyError):
         return None
-    return float(np.mean(np.abs(a / level_a - b / level_b)))
+
+
+def floor_ratio(template: Template) -> float | None:
+    """The template's floor over its surround: the median inside 0.6 of the site radius over the median beyond
+    1.2 site radii (the lattice floor between nanowells, at the crop's corners). ``None`` when unusable.
+
+    It is what changes when a template is built from loaded nanowells — cells on the floor move the floor's level
+    and not the surround's — and what does not change with exposure (a ratio) or focus (both regions are flat,
+    away from the rim). The crop's half-width carries 30 % headroom over 1.05 site radii, so the site radius is
+    the half-width over 1.365. A number on the timepoint's ``template`` block, so a later run can compare with
+    a timepoint an earlier run kept, which a template object cannot be (tracker C12).
+    """
+    half = template.half
+    yy, xx = np.mgrid[-half:half + 1, -half:half + 1]
+    r = np.hypot(xx, yy)
+    site = half / (TEMPLATE_HEADROOM * SUPPRESSION_RADIUS)
+    array = np.asarray(template.array, dtype=np.float64)
+    floor, surround = array[r <= 0.6 * site], array[r >= 1.2 * site]
+    if not len(floor) or not len(surround):
+        return None
+    top, bottom = float(np.nanmedian(floor)), float(np.nanmedian(surround))
+    if not (math.isfinite(top) and math.isfinite(bottom)) or top <= 0 or bottom <= 0:
+        return None
+    return round(top / bottom, 6)
+
+
+def ratio_drift(ratio: float | None, earliest: float | None) -> float | None:
+    """``|ln(ratio / earliest)|``: how many e-folds the floor-to-surround ratio moved, either way (cells may be
+    brighter or darker than the floor). ``None`` when either is missing."""
+    if not ratio or not earliest or ratio <= 0 or earliest <= 0:
+        return None
+    return abs(math.log(ratio / earliest))
+
+
+def template_drift(template: Template, earliest: Template) -> float | None:
+    """:func:`ratio_drift` of two template objects."""
+    return ratio_drift(floor_ratio(template), floor_ratio(earliest))
 
 
 # ── C2: the rim-suppressed tile ──────────────────────────────────────────────

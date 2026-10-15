@@ -8667,8 +8667,15 @@ nothing assumes 40 px per pitch), including a bubble over a tenth of the array
 and over the square, and the chain from image to addresses assigns every detected
 nanowell the address it was drawn with. The 50 um format's nominal pitch in
 `nanowell_run.PLATE_FORMATS` is 143 um — what the ~1,600 nanowells per well the user reports
-imply in a 3.0 mm array — and a 50 um array is found from it at a true pitch of 143 um or
-86 um. The renderer's bubble is a flat grey disk; what a real bubble does to a phase image is
+imply in a 3.0 mm array. A nominal pitch is a guess at the plate, and the per-tile fits keep
+only neighbours within 20 % of the pitch they are seeded with, so `locate_timepoint` first
+measures it: `working_pitch` runs the lattice search (half to twice the nominal) on the
+`PITCH_PROBE_TILES` tiles nearest the grid's centre and takes their median, and that pitch, then
+the lattice fit's own, seeds the per-tile fits, registration, the stage tolerance, the fiducial
+search, site de-duplication and the roster radius. The grid record states it
+(`pitch_seed_um`, `pitch_seed_source` — `tiles` or `nominal`) with `tile_lattice_fits` (fitted,
+of tiles), and a timepoint where no tile's lattice fits says so in `registration_warnings`. A
+rendered 50 um array registers every tile on its lattice at a true pitch of 143 um or 86 um. The renderer's bubble is a flat grey disk; what a real bubble does to a phase image is
 not established. The user reports the square's edges parallel to the plate's, which matches
 a lattice row (modulo the square's 90°) for either regular placement of a hex lattice on the
 plate. Nothing has run on real phase-contrast images (tracker N10, blocked on Q7).
@@ -8689,18 +8696,30 @@ radial mean, which needs no reference, because the obvious reference (the median
 crops) is the loaded crop when more than half of the sites hold cells; a second pass
 re-ranks against the template the first pass made, which removes a round cell sitting
 exactly at the centre (radially symmetric, so the first ranking cannot see it). With
-fewer than `MIN_TEMPLATE_SITES` sites in the quarter it returns the earliest template
-of the well unchanged (`source="earliest"`), or the quarter marked `own_sparse` when
-there is none; `Template.used` says which crops formed it. Above about three quarters
+fewer than `MIN_TEMPLATE_SITES` sites in the quarter it returns the well's earliest
+template through `as_fallback` — the same pixels, `source="earliest"` and no `used` crops,
+because the earliest's crop indices index another timepoint's crops — or the quarter marked
+`own_sparse` when there is none. The earliest template survives between runs: the task keeps
+it as `nanowells/<well>_template.npz` (`save_template` / `load_template`, the first own
+template in time, fetched back from a remote run with the tables) and passes it to `run_well`
+on an incremental run, a checkpoint keeps each timepoint's own template beside it, and
+`run_well` measures its timepoints in time order, so "earliest" means the earliest; `Template.used` says which crops formed it. Above about three quarters
 of the sites loaded the quarter reaches into loaded sites and the template turns
 cell-coloured while still `own`; from one timepoint's crops alone that cannot be told from a
-well of unusually bright cells, so the run compares it with the well's earliest template:
-`template_drift` is the mean absolute difference over their central disk after each is
-divided by its own central level (so an exposure change does not count). Above
-`TEMPLATE_DRIFT_LIMIT` (0.15; measured on rendered 40-site wells at 0.01 or less up to 34
-loaded and 0.83 or more from 35) the timepoint's `template` block records
-`drift_vs_earliest` and `suspect`, a note says the counts may be biased, and Array QC shows it.
-The measurement itself is not changed.
+well of unusually bright cells, so the run compares it with the well's earliest. `floor_ratio`
+is the median of the template's floor (inside 0.6 of the site radius) over the median of its
+surround (beyond 1.2 radii, the lattice floor between nanowells): cells on the floor move it,
+while exposure (a ratio) and focus (both regions flat, away from the rim) barely do. Each
+measured template's ratio is stored on its timepoint's `template` block, and
+`nanowell_run.flag_template_drift` — called at the end of `run_well` and again by the task
+after an incremental run merges its kept timepoints — takes the first timepoint **in time**
+with a ratio of its own as the earliest, whichever run measured it, and records each later
+timepoint's `drift_vs_earliest` (`|ln|` of the ratio of ratios) and `earliest_timepoint`. Beyond a
+factor of two (`TEMPLATE_DRIFT_LIMIT`; measured on rendered 40-site wells: 0.012 or less up to 34
+loaded, 1.12 or more from 35, a 1.6x exposure 0.002, noise up to 0.15 at most 0.009, a 2.5 px
+defocus 0.17) it is `suspect`, a note says the counts may be biased, and Array QC shows it. The
+pass is recomputed whole each time, so a kept block is never flagged twice or against a stale
+earliest. The measurement itself is not changed.
 
 **Rim suppression.** `rim_suppress` divides every site's pixels (out to 1.05 times its
 radius, which takes in the rim) by the template at the same offset from the site centre,

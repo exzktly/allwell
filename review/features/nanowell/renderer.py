@@ -649,7 +649,7 @@ def render_array_qc(fig, montage, boxes, sites, grid_blocks: dict, *, timepoint:
               + (" — template suspect" if (b.get("template") or {}).get("suspect") else "")
               for tp, b in grid_blocks.items() if tp != timepoint]
     for i, text in enumerate(lines[:24]):
-        flagged = "template suspect" in text or "departs from the earliest" in text
+        flagged = "template suspect" in text or "floor moved" in text
         item = fig.text(0.72, 0.92 - i * 0.032, text, fontsize=7, wrap=True, gid="nw-qc-status",
                         color=Colors.warn if flagged else ink if i < 2 else muted)
         if not flagged:                                  # a warning keeps its colour; plain lines follow the theme
@@ -666,8 +666,11 @@ def _template_line(template) -> str:
     line = f"template: {template['source']}, {template.get('n_sites', '?')} of {template.get('candidates', '?')} sites"
     drift = template.get("drift_vs_earliest")
     if template.get("suspect") and isinstance(drift, (int, float)):
-        line += (f" — departs from the earliest by {drift:.0%}: most nanowells may hold cells, so counts and "
-                 "confluence here may be biased")
+        import math
+
+        earliest = template.get("earliest_timepoint") or "the earliest timepoint"
+        line += (f" — its floor moved {math.exp(drift):.1f}-fold against {earliest}'s: most nanowells may hold "
+                 "cells, so counts and confluence here may be biased")
     return line
 
 

@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from pipeline import nanowell_measure as nm
 from pipeline import nanowell_run as nr
 from tests._nanowell_run_fixture import (
     build_well, paint_cell, record_for, threshold_segmenter,
@@ -165,39 +166,45 @@ def test_a_fixed_radius_decides_the_roster_not_the_timepoints_own_boundary():
     assert fixed.timepoints["T0"]["radius_deviation_um"] == pytest.approx(radius - 0.6 * radius, rel=0.05)
 
 
-def _template_case(change):
-    """Measure T0 against an 'earliest' template made from T0's own by *change*: what the run records."""
-    from dataclasses import replace
+def _block(ratio, **template):
+    return {"status": "ok", "notes": ["kept note"],
+            "template": {"source": "own", "n_sites": 10, "candidates": 40, "floor_ratio": ratio, **template}}
 
+
+def test_drift_is_measured_against_the_earliest_timepoint_in_time_not_the_first_one_measured():
+    """The blocks arrive kept-first or measured-first; the earliest is the first in time with a ratio of its own
+    (24h fell back to an earlier template and has none). 48h's floor moved threefold: suspect, and noted once
+    however often the pass runs."""
+    blocks = {"48h": _block(3.0), "72h": _block(1.2), "24h": {"status": "ok", "template": {"source": "earliest"}},
+              "0h": _block(1.0)}
+    order = ["0h", "24h", "48h", "72h"]
+    nr.flag_template_drift(blocks, order)
+    nr.flag_template_drift(blocks, order)
+    late, fine = blocks["48h"]["template"], blocks["72h"]["template"]
+    assert (late["earliest_timepoint"], late["suspect"]) == ("0h", True)
+    assert late["drift_vs_earliest"] == pytest.approx(np.log(3.0))
+    assert [n for n in blocks["48h"]["notes"] if n.startswith("The empty-nanowell template departs")] == [
+        "The empty-nanowell template departs from the earliest timepoint's (0h): its floor against the surround "
+        "is 3.00x the earliest's (beyond a factor of two). Most nanowells here may hold cells, so the template may "
+        "be cell-coloured and this timepoint's counts and confluence biased"]
+    assert blocks["48h"]["notes"][0] == "kept note"
+    assert fine["drift_vs_earliest"] == pytest.approx(np.log(1.2)) and "suspect" not in fine
+    assert "drift_vs_earliest" not in blocks["24h"]["template"] and "earliest_timepoint" not in blocks["0h"]["template"]
+
+
+def test_a_floor_that_darkens_is_flagged_as_well_as_one_that_brightens():
+    blocks = {"0h": _block(1.0), "24h": _block(0.4)}
+    nr.flag_template_drift(blocks, ["0h", "24h"])
+    assert blocks["24h"]["template"]["suspect"] is True
+
+
+def test_a_template_measured_now_carries_its_floor_ratio_for_later_runs():
     rendered, record = build_well()
     located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
-    first = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
-                                 segmenter=threshold_segmenter())
-    own = first.template["_object"]
-    earliest = replace(own, array=change(own.array.copy(), own.half))
-    return nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
-                                segmenter=threshold_segmenter(), earliest_template=earliest)
-
-
-def _cell_coloured(array, half):
-    yy, xx = np.mgrid[-half:half + 1, -half:half + 1]
-    array[np.hypot(xx, yy) <= 0.5 * half] *= 4.0                   # a bright blob over the centre
-    return array
-
-
-def test_a_template_that_departs_from_the_earliest_is_flagged_on_the_record_and_in_the_notes():
-    measured = _template_case(_cell_coloured)
-    assert measured.template["source"] == "own" and measured.template["suspect"] is True
-    assert measured.template["drift_vs_earliest"] > 0.15
-    assert any(n.startswith("The empty-nanowell template departs from the earliest timepoint's by ")
-               for n in measured.notes)
-
-
-@pytest.mark.parametrize("change", [lambda a, h: a, lambda a, h: a * 1.6], ids=["same", "exposure x1.6"])
-def test_a_template_that_matches_the_earliest_up_to_exposure_is_not_flagged(change):
-    measured = _template_case(change)
-    assert measured.template["drift_vs_earliest"] < 0.02 and "suspect" not in measured.template
-    assert not any("template departs" in n for n in measured.notes)
+    measured = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
+                                    segmenter=threshold_segmenter())
+    assert measured.template["floor_ratio"] == pytest.approx(
+        nm.floor_ratio(measured.template["_object"])) and measured.template["floor_ratio"] > 0
 
 
 def test_a_site_whose_interior_is_off_its_owner_tile_s_image_is_clipped_not_empty():
@@ -223,3 +230,79 @@ def test_a_site_whose_interior_is_off_its_owner_tile_s_image_is_clipped_not_empt
     kept = {(r["nw_q"], r["nw_r"]): r["state"] for r in measured.sites
             if r["owner"] == "F0" and r["well_x_um"] - left < width_um - 60}
     assert kept and all(state == before[a] for a, state in kept.items())                # nothing else moved
+
+
+@pytest.mark.parametrize("true_pitch, px", [(143.0, 3.0), (86.0, 2.15)])
+def test_a_50um_array_registers_on_its_lattice_whichever_pitch_it_really_has(true_pitch, px, monkeypatch):
+    """The 50 µm format's nominal pitch (143 µm, tracker N25) is a guess at the plate. Seeding the per-tile fits
+    with it directly made every tile's fit fail on an 86 µm array (and the old 86 µm seed did the same on a 143 µm
+    one), leaving registration with no lattice constraint and saying nothing. The pitch is measured on the tiles
+    first, so every tile fits and is placed on the lattice either way."""
+    from tests import _nanowell_run_fixture as fx
+    from tests._nanowell_synth import TilePlan, render_tiles
+
+    monkeypatch.setattr(fx, "PX", px)
+    plan = TilePlan(2, 2, (700, 700), 0.15, px)
+    extent = (plan.step_um[0] + plan.extent_um[0], plan.step_um[1] + plan.extent_um[1])
+    rendered = render_tiles(plan, pitch_um=true_pitch, diameter_um=50.0, radius_um=0.3 * min(extent),
+                            rotation_deg=7.0, noise_sigma=0.05, blur_px=1.0, seed=1)
+    located = nr.locate_timepoint("T0", record_for(rendered), "A01", rendered.images, nr.NanowellSettings("50um"))
+    grid = located.grid
+    assert located.status == nr.OK
+    assert (grid["pitch_seed_source"], grid["tile_lattice_fits"]) == ("tiles", [4, 4])
+    assert grid["pitch_seed_um"] == pytest.approx(true_pitch, rel=0.03)    # a seed: the fits keep ±20 % of it
+    assert located.pitch_um == pytest.approx(true_pitch, rel=0.005)        # the fit's own pitch
+    assert [t["source"] for t in grid["tiles"]] == ["lattice"] * 4 and grid["registration_warnings"] == []
+
+
+def test_a_timepoint_where_no_tile_s_lattice_fits_says_so(monkeypatch):
+    rendered, record = build_well()
+    monkeypatch.setattr(nr, "working_pitch", lambda *a, **k: (300.0, "nominal"))      # far from the array's 172
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    assert located.grid["tile_lattice_fits"] == [0, 4]
+    assert located.grid["registration_warnings"][-1].startswith(
+        "No tile's lattice could be fitted (working pitch 300.0 um, nominal): every tile was placed")
+
+
+def test_a_checkpoint_gives_back_the_timepoint_s_own_template(tmp_path):
+    """A resumed run reads its earliest timepoint back from the checkpoint; with the template object kept beside
+    it, that timepoint can still be the fallback for a later, crowded one (tracker C16)."""
+    from pipeline.nanowell_task import TimepointCheckpoints
+
+    rendered, record = build_well()
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    measured = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
+                                    segmenter=threshold_segmenter())
+    checkpoints = TimepointCheckpoints(tmp_path / "staging", "key")
+    checkpoints.save("T0", {"k": 1}, measured)
+    back = checkpoints.load("T0", {"k": 1}).template["_object"]
+    original = measured.template["_object"]
+    assert np.array_equal(back.array, original.array)
+    assert (back.half, back.source, back.n_sites, back.used) == (original.half, original.source, original.n_sites,
+                                                                 original.used)
+
+
+def test_the_earliest_template_is_the_earliest_timepoint_s_even_when_it_was_not_anchored(monkeypatch):
+    """T0's square was not found (unaddressed), T1's was. The run measured anchored timepoints first, so T1's
+    template became "the earliest" and T0 was compared with it — the flag on the wrong timepoint. Measured in
+    time, the earliest is T0's, and T1 is the one compared."""
+    rendered, record = build_well()
+    again, again_record = build_well(rotation=9.0, array_shift_um=(120.0, -80.0), seed=2, timepoint="T1")
+    record["timepoints"].update(again_record["timepoints"])
+    record["tiles"] += again_record["tiles"]
+    images = {("T0", t): v for t, v in rendered.images.items()} | {("T1", t): v for t, v in again.images.items()}
+    real = nr.locate_timepoint
+
+    def t0_unaddressed(tp, *args, **kwargs):
+        located = real(tp, *args, **kwargs)
+        if tp == "T0":
+            located.status, located.reason, located.indexed = nr.UNADDRESSED, "no square found", ()
+            located.grid = dict(located.grid, status=nr.UNADDRESSED)
+        return located
+
+    monkeypatch.setattr(nr, "locate_timepoint", t0_unaddressed)
+    outcome = nr.run_well("A01", record, ["T0", "T1"], lambda tp, tile: images.get((tp, tile)), SETTINGS,
+                          segmenter=threshold_segmenter())
+    assert outcome.earliest_template[0] == "T0"
+    assert outcome.timepoints["T1"]["template"]["earliest_timepoint"] == "T0"
+    assert "earliest_timepoint" not in outcome.timepoints["T0"]["template"]

@@ -30,12 +30,13 @@ def _sidecar(path, **blocks):
     (path / "pipeline_info.json").write_text(json.dumps(blocks))
 
 
-def test_both_tables_are_pulled_by_exact_name_into_the_nanowells_directory(tmp_path):
+def test_the_tables_and_the_template_are_pulled_by_exact_name_into_the_nanowells_directory(tmp_path):
     _sidecar(tmp_path, nanowell={"scheme_version": 1})
-    fetcher = _Fetcher(tmp_path, {"A01.csv", "A01_grid.json", "A010.csv"})
-    assert fetch_nanowell_tables(fetcher, "A01") == 2
-    assert fetcher.listed == ["gpu:/scratch/out/nanowells/A01.csv", "gpu:/scratch/out/nanowells/A01_grid.json"]
-    assert [f for f, _ in fetcher.pulled] == ["/scratch/out/nanowells/A01.csv", "/scratch/out/nanowells/A01_grid.json"]
+    fetcher = _Fetcher(tmp_path, {"A01.csv", "A01_grid.json", "A01_template.npz", "A010.csv"})
+    assert fetch_nanowell_tables(fetcher, "A01") == 3
+    names = ["A01.csv", "A01_grid.json", "A01_template.npz"]
+    assert fetcher.listed == [f"gpu:/scratch/out/nanowells/{n}" for n in names]
+    assert [f for f, _ in fetcher.pulled] == [f"/scratch/out/nanowells/{n}" for n in names]
     assert {d for _, d in fetcher.pulled} == {str(tmp_path / "nanowells")} and (tmp_path / "nanowells").is_dir()
 
 
@@ -98,4 +99,4 @@ def test_fetching_a_well_through_the_fetcher_brings_its_tables(tmp_path, monkeyp
         fetcher._fetch_one("A01")
     finally:
         fetcher.cancel()
-    assert sorted(p.name for p in (out / "nanowells").iterdir()) == ["A01.csv", "A01_grid.json"]
+    assert sorted(p.name for p in (out / "nanowells").iterdir()) == ["A01.csv", "A01_grid.json", "A01_template.npz"]

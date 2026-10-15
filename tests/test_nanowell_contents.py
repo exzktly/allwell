@@ -105,7 +105,9 @@ def test_template_falls_back_to_the_earliest_and_says_so():
     crops = _crops(_paint(CENTRES))
     earliest = nm.build_template(crops, interior_radius_px=RADIUS, min_sites=2)
     sparse = nm.build_template(crops[:6], interior_radius_px=RADIUS, earliest=earliest)      # 1 site in a quarter
-    assert sparse is earliest
+    # The earliest's pixels, saying so, and with none of its crop indices: they index another timepoint's crops.
+    assert sparse.source == nm.SOURCE_EARLIEST and sparse.used == ()
+    assert np.array_equal(sparse.array, earliest.array) and earliest.source == nm.SOURCE_OWN
     own = nm.build_template(crops[:6], interior_radius_px=RADIUS)
     assert own.source == nm.SOURCE_OWN_SPARSE and own.n_sites == 1
     assert nm.build_template(np.empty((0, 33, 33)), interior_radius_px=RADIUS) is None
@@ -476,21 +478,26 @@ def test_a_site_whose_interior_was_not_seen_is_clipped_whatever_the_rectangles_s
 
 
 # ── C12: a timepoint's template against the earliest ─────────────────────────
-def _template_for(loaded, *, seed, gain=1.0):
+def _template_for(loaded, *, seed, gain=1.0, blur=0.0, noise=0.004):
+    from scipy import ndimage
+
     centres = _centres(n=7)[:40]
     rng = np.random.default_rng(seed)
     cells = {i: [(rng.uniform(-6, 6), rng.uniform(-6, 6), 5) for _ in range(5)] for i in range(loaded)}
-    image = _paint(centres, cells, size=300, seed=seed) * gain
+    image = _paint(centres, cells, size=300, seed=seed, noise=noise) * gain
+    if blur:
+        image = ndimage.gaussian_filter(image, blur)
     return nm.build_template(nm.site_crops(image, PX, centres, 16), interior_radius_px=1.05 * RADIUS)
 
 
-def test_template_drift_flags_a_mostly_loaded_well_and_not_an_exposure_change():
+def test_the_floor_ratio_flags_a_mostly_loaded_well_and_not_exposure_noise_or_focus():
     """The reviewer's case: 36 of 40 sites loaded leaves no empty quarter, and the template is cell-coloured
-    while still reported ``own``. Against the earliest template it departs far past the limit; 30 loaded, or
-    the same well at 1.6x the exposure, stays near zero."""
+    while still reported ``own``. Its floor-to-surround ratio moves far past a factor of two; 30 loaded, 1.6x
+    the exposure, three times the noise and a 2.5 px defocus do not."""
     earliest = _template_for(4, seed=3)
     loaded = _template_for(36, seed=43)
     assert loaded.source == nm.SOURCE_OWN                         # nothing in the template itself says so
-    assert nm.template_drift(loaded, earliest) > 0.5
-    assert nm.template_drift(_template_for(30, seed=37), earliest) < 0.02
-    assert nm.template_drift(_template_for(30, seed=37, gain=1.6), earliest) < 0.02
+    assert nm.template_drift(loaded, earliest) > 1.0
+    for other in (_template_for(30, seed=37), _template_for(30, seed=37, gain=1.6),
+                  _template_for(10, seed=11, noise=0.15), _template_for(10, seed=11, blur=2.5)):
+        assert nm.template_drift(other, earliest) < 0.5 * nm.TEMPLATE_DRIFT_LIMIT

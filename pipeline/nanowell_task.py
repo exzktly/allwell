@@ -20,11 +20,14 @@ from pathlib import Path
 
 import numpy as np
 
+from pipeline import nanowell_measure as nm
 from pipeline import nanowell_run as nr
 
 log = logging.getLogger("allwell.nanowell")
 
 NANOWELL_DIR = "nanowells"
+#: The well's earliest empty-nanowell template, kept beside its tables for later incremental runs (tracker C16).
+TEMPLATE_SUFFIX = "_template.npz"
 #: Version of the on-disk scheme (columns, conventions) so Review can refuse one it does not understand.
 SCHEME_VERSION = 1
 
@@ -190,9 +193,8 @@ class TimepointCheckpoints:
     scratch sweep that keeps resumable directories keeps these too), under the id ``nw_<timepoint>``.
     A checkpoint is only taken back under the key it was written with: the roster radius and the record
     digest. The settings key is the staging directory's name, so a run under other settings never
-    reaches it. A template carried from an earlier timepoint (``earliest``) is not checkpointed, so a
-    resumed run may build its own where an uninterrupted one would have reused the first; both are
-    recorded in the timepoint's ``template`` block.
+    reaches it. A timepoint's own template is kept beside its checkpoint (``nw_<timepoint>.template.npz``), so
+    a resumed run still has the earliest one to fall back to (tracker C16).
     """
 
     def __init__(self, staging: Path, settings_key: str):
@@ -204,6 +206,9 @@ class TimepointCheckpoints:
         payload = {"sites": measured.sites, "cells": measured.cells, "notes": measured.notes,
                    "template": {k: v for k, v in measured.template.items() if k != "_object"}}
         self.staging.mkdir(parents=True, exist_ok=True)
+        template = measured.template.get("_object")
+        if template is not None and measured.template.get("source") != "earliest":
+            nm.save_template(self._template_path(timepoint), template, timepoint)
         _save_fov_checkpoint(self.staging, f"nw_{timepoint}", [json.loads(json.dumps(payload, default=_json_default))],
                              self.settings_key, quality=key)
 
@@ -214,7 +219,14 @@ class TimepointCheckpoints:
         if found is None or found[1] != json.loads(json.dumps(key, default=_json_default)) or len(found[0]) != 1:
             return None
         payload = found[0][0]
-        return nr.Measured(timepoint, payload["sites"], payload["cells"], payload["template"], payload["notes"])
+        template = dict(payload["template"])
+        kept = nm.load_template(self._template_path(timepoint))
+        if kept is not None:
+            template["_object"] = kept[0]
+        return nr.Measured(timepoint, payload["sites"], payload["cells"], template, payload["notes"])
+
+    def _template_path(self, timepoint: str) -> Path:
+        return self.staging / f"nw_{timepoint}.template.npz"
 
 
 def _reference_of(prior: dict | None) -> dict | None:
@@ -319,15 +331,20 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
 
     channels = {t: channel_loader(k) for k, t in enumerate(fluor_tokens)}
     fixed = None if prior is None else prior["grid"].get("array_radius", {}).get("radius_um")
+    template_path = output_dir / NANOWELL_DIR / f"{well_label}{TEMPLATE_SUFFIX}"
+    saved = nm.load_template(Path(prior_dir or output_dir) / NANOWELL_DIR / template_path.name) if prior else None
     outcome = nr.run_well(well_label, record, todo, load_phase, settings, segmenter=segmenter, channels=channels,
                           fixed_radius_um=fixed, plate_rigid=plate_rigid, reference=_reference_of(prior),
-                          checkpoint=None if staging_dir is None else TimepointCheckpoints(staging_dir, settings_key))
+                          checkpoint=None if staging_dir is None else TimepointCheckpoints(staging_dir, settings_key),
+                          earliest_template=None if saved is None else saved[0])
     px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)
     if prior is not None:
         outcome.timepoints = {**{tp: prior["grid"]["timepoints"][tp] for tp in prior["kept"]}, **outcome.timepoints}
         outcome.radius = prior["grid"].get("array_radius", outcome.radius) if fixed is not None else outcome.radius
+        # The earliest template may be a kept timepoint's: compare every timepoint against it, in time order.
+        nr.flag_template_drift(outcome.timepoints, timepoints)
     rank = {tp: k for k, tp in enumerate(timepoints)}
     all_sites = sorted((prior["sites"] if prior else []) + outcome.sites, key=lambda r: rank[r["timepoint"]])
     all_cells = sorted((prior["cells"] if prior else []) + records, key=lambda r: rank[r["timepoint"]])
@@ -337,6 +354,12 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         write_empty_cells_csv(output_dir / f"{csv_prefix}_{well_label}.csv", fluor_tokens)
     write_sites_csv(output_dir / NANOWELL_DIR / f"{well_label}.csv", all_sites, fluor_tokens)
     write_grid_json(output_dir / NANOWELL_DIR / f"{well_label}_grid.json", well_label, outcome, settings)
+    rank_of = {tp: k for k, tp in enumerate(timepoints)}
+    if outcome.earliest_template is not None and (
+            saved is None or rank_of.get(outcome.earliest_template[0], 0) < rank_of.get(saved[1], len(rank_of))):
+        nm.save_template(template_path, outcome.earliest_template[1], outcome.earliest_template[0])
+    elif saved is not None and not template_path.is_file():
+        nm.save_template(template_path, saved[0], saved[1])           # a separate prior folder: carry it over
     if staging_dir is not None:
         _write_montages(outcome, well_label, staging_dir)
         update_montage_archive(output_dir / f"{well_label}_out.zip", staging_dir, well_label, todo)

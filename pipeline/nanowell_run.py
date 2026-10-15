@@ -23,10 +23,11 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-#: The plate formats the pipeline knows: (lattice pitch, nanowell diameter), micrometres. The pitch is nominal:
-#: it centres the lattice search (``estimate_lattice_fft`` looks from half to twice it) and is then replaced by
-#: the measured one. 172 um is what ~1,100 nanowells in a 3.0 mm array imply for the 100 um format, and 143 um
-#: what ~1,600 imply for the 50 um format — not the diameter-scaled 86 um, which would be ~4,400 nanowells.
+#: The plate formats the pipeline knows: (lattice pitch, nanowell diameter), micrometres. The pitch is nominal: it
+#: seeds :func:`working_pitch`, a lattice search on the tiles from half to twice it, and the pitch measured there
+#: (or by the lattice fit) is what every later step uses — the per-tile fits, registration, the fiducial search,
+#: site de-duplication and the roster radius. 172 um is what ~1,100 nanowells in a 3.0 mm array imply for the
+#: 100 um format, and 143 um what ~1,600 imply for the 50 um format, not the diameter-scaled 86 um (~4,400).
 PLATE_FORMATS = {"100um": (172.0, 100.0), "50um": (143.0, 50.0)}
 
 OK = "ok"
@@ -94,6 +95,7 @@ class Located:
     indexed: tuple = ()
     mirrored: bool = False
     stage_offset_um: tuple[float, float] | None = None    # the common frame's place in stage coordinates
+    pitch_um: float | None = None                         # the pitch this timepoint was located with (measured)
 
 
 def stage_offset(record: dict, well: str, timepoint: str, positions: dict,
@@ -124,23 +126,50 @@ def stage_offset(record: dict, well: str, timepoint: str, positions: dict,
     return float(median[0]), float(median[1])
 
 
-def _tile_fit(image, pixel_size_um: float, settings: NanowellSettings):
+def _tile_fit(image, pixel_size_um: float, settings: NanowellSettings, pitch_um: float | None = None):
     """The lattice fitted to one tile alone (tile-local um), or ``None`` when it has too few sites to fit.
 
     Registration's lattice-phase constraint needs it; a tile of bare floor or a wholly occluded one
-    simply contributes the other two sources.
+    simply contributes the other two sources. *pitch_um* is the working pitch (the nominal one by default).
     """
     from pipeline.nanowell_detect import detect_sites
 
-    found = detect_sites(image, pixel_size_um, settings.diameter_um, expected_pitch_um=settings.pitch_um)
+    found = detect_sites(image, pixel_size_um, settings.diameter_um, expected_pitch_um=pitch_um or settings.pitch_um)
     return found.fit if found.ok else None
+
+
+#: Tiles nearest the grid's centre whose lattice pitch is measured before anything else uses one.
+PITCH_PROBE_TILES = 3
+
+
+def working_pitch(images: dict, plan, pixel_size_um: float, settings: NanowellSettings) -> tuple[float, str]:
+    """The pitch to locate this timepoint with, and where it came from: ``"tiles"`` or ``"nominal"``.
+
+    The format's nominal pitch is a guess at the plate (tracker Q12): seeding the per-tile fits with it when the
+    array's real pitch differs makes every tile's fit fail (they keep neighbours within 20 % of the seed), and
+    registration then falls back to overlap or recorded positions with no fit at all. So the pitch is first
+    measured by the lattice search (half to twice the nominal) on the tiles nearest the grid's centre, and their
+    median is used; with none measurable, the nominal pitch, and the grid record says which.
+    """
+    from pipeline.nanowell_detect import estimate_lattice_fft
+
+    rects = {p.tile_id: (p.left_um + p.width_um / 2, p.top_um + p.height_um / 2) for p in plan.placements}
+    cx = float(np.mean([c[0] for c in rects.values()]))
+    cy = float(np.mean([c[1] for c in rects.values()]))
+    nearest = sorted(rects, key=lambda t: (np.hypot(rects[t][0] - cx, rects[t][1] - cy), t))[:PITCH_PROBE_TILES]
+    measured = []
+    for tile in nearest:
+        estimate = estimate_lattice_fft(images[tile], pixel_size_um, expected_pitch_um=settings.pitch_um)
+        if estimate.ok and estimate.pitch_um:
+            measured.append(float(estimate.pitch_um))
+    return (float(np.median(measured)), "tiles") if measured else (settings.pitch_um, "nominal")
 
 
 def _montage_to_common(point, montage) -> np.ndarray:
     return np.asarray(point, dtype=float) + np.asarray(montage.origin_um, dtype=float)
 
 
-def _grid_block(plan, registration, extra: dict) -> dict:
+def _grid_block(plan, registration, extra: dict, warnings=()) -> dict:
     block = {"grid_status": plan.status if plan is not None else None,
              "rows": getattr(plan, "rows", None), "cols": getattr(plan, "cols", None),
              "missing": list(getattr(plan, "missing", ())),
@@ -150,7 +179,7 @@ def _grid_block(plan, registration, extra: dict) -> dict:
         block["tiles"] = [{"tile": t.tile_id, "left_um": t.left_um, "top_um": t.top_um, "source": t.source,
                            "residual_um": t.residual_um, "correction_um": t.correction_um}
                           for t in registration.tiles]
-        block["registration_warnings"] = list(registration.warnings)
+        block["registration_warnings"] = list(registration.warnings) + list(warnings)
     block.update(extra)
     return block
 
@@ -182,21 +211,29 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         return Located(timepoint, NO_IMAGES, f"No image for tile(s) {', '.join(absent)}",
                        _grid_block(plan, None, {"status": NO_IMAGES}), plan)
     px = float(pixel_size["x"])
+    pitch, pitch_source = working_pitch(images, plan, px, settings)
     observations = [TileObservation(p.tile_id, (p.left_um, p.top_um), (p.width_um, p.height_um),
-                                    _tile_fit(images[p.tile_id], px, settings))
+                                    _tile_fit(images[p.tile_id], px, settings, pitch))
                     for p in plan.placements]
-    registration = register_tiles(observations, images=images, pixel_size_um=px, pitch_um=settings.pitch_um)
+    fitted = sum(o.fit is not None for o in observations)
+    warnings = [] if fitted else [
+        f"No tile's lattice could be fitted (working pitch {pitch:.1f} um, {pitch_source}): every tile was placed "
+        "by overlap correlation or where the acquisition record put it, with no lattice constraint"]
+    registration = register_tiles(observations, images=images, pixel_size_um=px, pitch_um=pitch)
     positions = registration.positions()
     montage = build_montage(images, positions, px)
-    located = Located(timepoint, OK, "", plan=plan, positions=positions, pixel_size_um=px, montage=montage)
-    located.stage_offset_um = stage_offset(record, well, timepoint, positions, tolerance_um=settings.pitch_um)
+    located = Located(timepoint, OK, "", plan=plan, positions=positions, pixel_size_um=px, montage=montage,
+                      pitch_um=pitch)
+    located.stage_offset_um = stage_offset(record, well, timepoint, positions, tolerance_um=pitch)
+    seed = {"pitch_seed_um": pitch, "pitch_seed_source": pitch_source, "tile_lattice_fits": [fitted, len(observations)]}
 
     def refuse(status, reason, **extra):
         located.status, located.reason = status, reason
-        located.grid = _grid_block(plan, registration, {"status": status, "reason": reason, **extra})
+        located.grid = _grid_block(plan, registration, {"status": status, "reason": reason, **seed, **extra},
+                                   warnings)
         return located
 
-    estimate = estimate_lattice_fft(montage.image, montage.um_per_px, expected_pitch_um=settings.pitch_um)
+    estimate = estimate_lattice_fft(montage.image, montage.um_per_px, expected_pitch_um=pitch)
     if not estimate.ok:
         return refuse(NO_LATTICE, estimate.reason)
     fmt = check_format(estimate.pitch_um, settings.diameter_um)
@@ -209,7 +246,7 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         return refuse(NO_LATTICE, detection.reason)
     candidate, scores = score_fiducial(montage.image, montage.um_per_px, settings.diameter_um,
                                        detection.points_um, centre_um=detection.boundary_centre_um,
-                                       search_radius_um=2.2 * settings.pitch_um)
+                                       search_radius_um=2.2 * estimate.pitch_um)
     if scores:
         square = max(scores, key=lambda s: s.coherence)
         orientation = check_orientation(detection.fit, square.orientation_deg,
@@ -220,6 +257,7 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     resolved = resolve_origin(detection.fit, fiducial=candidate, array_centre=detection.boundary_centre_um,
                               plate_rigid=plate_rigid, fiducial_margin=FIDUCIAL_MARGIN)
     located.fit = detection.fit
+    located.pitch_um = float(detection.fit.pitch)
     located.mirrored = bool(detection.fit.mirrored)
     located.detected_common = _montage_to_common(detection.points_um, montage)
     located.boundary = None if detection.boundary_centre_um is None else {
@@ -227,12 +265,14 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         "radius_um": detection.boundary_radius_um}
     if resolved.status != "anchored":
         located.status, located.reason = UNADDRESSED, resolved.reason
-        located.grid = _grid_block(plan, registration, _lattice_block(located, estimate, UNADDRESSED, resolved.reason))
+        located.grid = _grid_block(plan, registration,
+                                   {**seed, **_lattice_block(located, estimate, UNADDRESSED, resolved.reason)}, warnings)
         return located
     located.origin_montage, located.origin_method = resolved.origin_xy, resolved.method
     located.origin_agreement = resolved.agreement
     located.indexed = index_points(detection.points_um, detection.fit, resolved.origin_xy)
-    located.grid = _grid_block(plan, registration, _lattice_block(located, estimate, OK, resolved.reason))
+    located.grid = _grid_block(plan, registration, {**seed, **_lattice_block(located, estimate, OK, resolved.reason)},
+                               warnings)
     return located
 
 
@@ -378,7 +418,7 @@ def _pooled_template(located: Located, images: dict, settings: NanowellSettings,
         template = nm.build_template(np.concatenate(crops),
                                      interior_radius_px=nm.SUPPRESSION_RADIUS * settings.diameter_um / 2 / px,
                                      earliest=earliest)
-    template = template or earliest
+    template = template or nm.as_fallback(earliest)
     if template is None or template.source == nm.SOURCE_EARLIEST:
         return template, set()
     return template, {crop_sites[k] for k in template.used}
@@ -462,7 +502,7 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
         # No origin: only the sites actually detected, with no address (they cannot be joined over time).
         points_m = located.detected_common - np.asarray(montage.origin_um)
         addresses = [None] * len(points_m)
-    centres, detected = _initial_sites(located, points_m, settings.pitch_um)
+    centres, detected = _initial_sites(located, points_m, located.pitch_um or settings.pitch_um)
     report = ownership_report(located.plan, centres, settings.diameter_um, settings.margin,
                               positions_um=located.positions)
     fused = set(report.fused_indices)
@@ -476,15 +516,8 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     else:
         out.template = {"source": template.source, "n_sites": template.n_sites, "candidates": template.candidates,
                         "_object": template}
-        if earliest_template is not None and template is not earliest_template:
-            drift = nm.template_drift(template, earliest_template)
-            out.template["drift_vs_earliest"] = drift
-            if drift is not None and drift > nm.TEMPLATE_DRIFT_LIMIT:
-                out.template["suspect"] = True
-                out.notes.append(
-                    f"The empty-nanowell template departs from the earliest timepoint's by {drift:.0%} of its level "
-                    f"(more than {nm.TEMPLATE_DRIFT_LIMIT:.0%}): most nanowells here may hold cells, so the "
-                    f"template may be cell-coloured and this timepoint's counts and confluence biased")
+        if template.source != nm.SOURCE_EARLIEST:                  # its own: what flag_template_drift compares
+            out.template["floor_ratio"] = nm.floor_ratio(template)
     segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)
     contents: dict[int, dict] = {}
     for owner, indices in by_tile.items():
@@ -520,6 +553,48 @@ class WellOutcome:
     radius: dict = field(default_factory=dict)           # the shared array radius and each timepoint's deviation
     located: dict = field(default_factory=dict)          # timepoint -> Located (not written; the end-of-run pass reads it)
     notes: list = field(default_factory=list)
+    earliest_template: tuple | None = None               # (timepoint, Template): the first own template in time
+
+
+_DRIFT_NOTE = "The empty-nanowell template departs from the earliest timepoint's"
+
+
+def flag_template_drift(blocks: dict, order) -> None:
+    """Compare each timepoint's template with the well's earliest one, in place on the grid blocks (tracker C12).
+
+    *blocks* maps a timepoint to its grid block and *order* is the well's timepoints in time. The earliest is the
+    first timepoint in *order* whose block carries a ``floor_ratio`` of its own (one that fell back to an earlier
+    template has none), whichever run measured it — kept by an incremental run, restored from a
+    checkpoint, or measured now — so a later run never compares with whatever it happened to measure first.
+    Every later timepoint with a ratio records ``drift_vs_earliest`` and ``earliest_timepoint``; over
+    ``TEMPLATE_DRIFT_LIMIT`` it is ``suspect`` and its notes say so. Recomputed whole on every call, so a kept
+    block is never flagged twice or against a stale earliest.
+    """
+    from pipeline import nanowell_measure as nm
+
+    earliest_tp = earliest = None
+    for tp in order:
+        block = blocks.get(tp) or {}
+        template = block.get("template")
+        if not isinstance(template, dict):
+            continue
+        for key in ("drift_vs_earliest", "earliest_timepoint", "suspect"):
+            template.pop(key, None)
+        block["notes"] = [n for n in block.get("notes") or [] if not n.startswith(_DRIFT_NOTE)]
+        ratio = template.get("floor_ratio")
+        if not ratio:
+            continue
+        if earliest is None:
+            earliest_tp, earliest = tp, ratio
+            continue
+        drift = nm.ratio_drift(ratio, earliest)
+        template.update(drift_vs_earliest=drift, earliest_timepoint=earliest_tp)
+        if drift is not None and drift > nm.TEMPLATE_DRIFT_LIMIT:
+            template["suspect"] = True
+            block["notes"].append(
+                f"{_DRIFT_NOTE} ({earliest_tp}): its floor against the surround is {ratio / earliest:.2f}x the "
+                "earliest's (beyond a factor of two). Most nanowells here may hold cells, so the template may be "
+                "cell-coloured and this timepoint's counts and confluence biased")
 
 
 def record_digest(record: dict, well: str, timepoint: str) -> str:
@@ -558,10 +633,46 @@ def _bounds(located: Located):
     return ArrayBoundary("fitted", "", tuple(located.boundary["centre_um"]), located.boundary["radius_um"])
 
 
+def _shared_radius(located: dict, timepoints, settings: NanowellSettings, fixed_radius_um: float | None):
+    """One array radius for the well's roster, from the timepoints' boundaries, or the earlier run's *fixed* one,
+    each timepoint's deviation flagged past half the array's measured pitch (not the format's nominal guess)."""
+    from pipeline.nanowell_sites import shared_array_radius
+
+    measured = [located[tp].pitch_um for tp in timepoints if located[tp].pitch_um]
+    pitch = float(np.median(measured)) if measured else settings.pitch_um
+    shared = shared_array_radius({tp: _bounds(located[tp]) for tp in timepoints}, pitch)
+    if fixed_radius_um is None:
+        return shared
+    own = {tp: located[tp].boundary["radius_um"] for tp in timepoints if located[tp].boundary is not None}
+    return replace(shared, radius_um=fixed_radius_um, status="shared",
+                   deviations_um={tp: r - fixed_radius_um for tp, r in own.items()},
+                   flags={tp: ("radius_disagrees" if abs(r - fixed_radius_um) > pitch / 2 else None)
+                          for tp, r in own.items()})
+
+
+def _consistency(located: dict, anchored, radius_um: float, reference: dict | None) -> dict:
+    """``timepoint -> consistency`` of the anchored timepoints' lattices with each other (and an earlier run's)."""
+    from pipeline.nanowell_sites import TimepointLattice, check_consistency
+
+    lattices = []
+    for tp in anchored:
+        addresses, _ = _roster_positions(located[tp], radius_um)
+        lattices.append(TimepointLattice(tp, located[tp].fit.pitch, located[tp].fit.angle_deg, 0.0,
+                                         frozenset(addresses)))
+    if reference is not None:
+        lattices.insert(0, TimepointLattice(reference["timepoint"], reference["pitch_um"], reference["angle_deg"],
+                                            0.0, None))
+    reference_angle = lattices[0].angle_deg if lattices else 0.0
+    # The plate's rotation between timepoints is only measurable across wells; within one well the angle
+    # is not checked (and the grid block says so), so a plate put back rotated is not called inconsistent.
+    lattices = [replace(t, plate_rotation_deg=t.angle_deg - reference_angle) for t in lattices]
+    return {c.timepoint: c for c in check_consistency(lattices)}
+
+
 def run_well(well: str, record: dict, timepoints, load_phase, settings: NanowellSettings, *,
              segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
              expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None,
-             reference: dict | None = None) -> WellOutcome:
+             reference: dict | None = None, earliest_template=None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -577,8 +688,6 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     ``roster_size`` from its grid block): the new timepoints are checked for consistency against it, as they
     would have been had they run together.
     """
-    from pipeline.nanowell_sites import TimepointLattice, check_consistency, shared_array_radius
-
     outcome = WellOutcome(well)
     timepoints = list(timepoints)
     for tp in timepoints:
@@ -591,15 +700,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         del images
     anchored = [tp for tp in timepoints if outcome.located[tp].status == OK]
     unaddressed = [tp for tp in timepoints if outcome.located[tp].status == UNADDRESSED]
-    shared = shared_array_radius({tp: _bounds(outcome.located[tp]) for tp in anchored + unaddressed},
-                                 settings.pitch_um)
-    if fixed_radius_um is not None:
-        own = {tp: outcome.located[tp].boundary["radius_um"] for tp in anchored + unaddressed
-               if outcome.located[tp].boundary is not None}
-        shared = replace(shared, radius_um=fixed_radius_um, status="shared",
-                         deviations_um={tp: r - fixed_radius_um for tp, r in own.items()},
-                         flags={tp: ("radius_disagrees" if abs(r - fixed_radius_um) > settings.pitch_um / 2 else None)
-                                for tp, r in own.items()})
+    shared = _shared_radius(outcome.located, anchored + unaddressed, settings, fixed_radius_um)
     outcome.radius = {"radius_um": shared.radius_um, "status": shared.status,
                       "deviations_um": shared.deviations_um, "flags": shared.flags}
     if shared.radius_um is None:
@@ -608,22 +709,13 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
                                                                    "no roster radius could be shared")
         return outcome
 
-    lattices = []
-    for tp in anchored:
-        located = outcome.located[tp]
-        addresses, _ = _roster_positions(located, shared.radius_um)
-        lattices.append(TimepointLattice(tp, located.fit.pitch, located.fit.angle_deg, 0.0, frozenset(addresses)))
-    if reference is not None:
-        lattices.insert(0, TimepointLattice(reference["timepoint"], reference["pitch_um"], reference["angle_deg"],
-                                            0.0, None))
-    reference_angle = lattices[0].angle_deg if lattices else 0.0
-    # The plate's rotation between timepoints is only measurable across wells; within one well the angle
-    # is not checked (and the grid block says so), so a plate put back rotated is not called inconsistent.
-    lattices = [replace(t, plate_rotation_deg=t.angle_deg - reference_angle) for t in lattices]
-    consistency = {c.timepoint: c for c in check_consistency(lattices)}
+    consistency = _consistency(outcome.located, anchored, shared.radius_um, reference)
 
-    earliest = None
-    for tp in anchored + unaddressed:
+    # The template a timepoint with too few empty nanowells falls back to: an earlier run's (incremental), else the
+    # first this run builds in time. A resumed run gets it back from the checkpoint (tracker C16).
+    earliest = earliest_template
+    measurable = set(anchored) | set(unaddressed)
+    for tp in [t for t in timepoints if t in measurable]:          # in time, so "earliest" means it
         located = outcome.located[tp]
         key = {"radius_um": shared.radius_um, "record_digest": outcome.timepoints[tp]["record_digest"],
                "located": [located.status, located.origin_method]}
@@ -639,6 +731,9 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         if earliest is None and measured.template.get("_object") is not None \
                 and measured.template["source"] != "earliest":
             earliest = measured.template["_object"]
+        if outcome.earliest_template is None and measured.template.get("_object") is not None \
+                and measured.template["source"] != "earliest":
+            outcome.earliest_template = (tp, measured.template["_object"])
         block = outcome.timepoints[tp]
         agree = consistency.get(tp)
         block.update(consistency=None if agree is None else agree.status,
@@ -660,4 +755,5 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         for name, values in measured.cells.items():
             outcome.cells.setdefault(name, []).extend(values)
         outcome.cells.setdefault("timepoint", []).extend([tp] * len(measured.cells.get("label", ())))
+    flag_template_drift(outcome.timepoints, timepoints)     # the caller re-runs it over kept timepoints too
     return outcome

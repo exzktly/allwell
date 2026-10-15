@@ -236,3 +236,62 @@ def test_a_well_with_no_cells_still_has_its_cell_csv_so_it_reads_as_finished(tmp
     assert sites and all(r["n_cells"] == "0" for r in sites if r["state"] == "empty")
     info = json.loads((out / "pipeline_info.json").read_text())
     assert info["run_check"]["wells"][WELL]["health"] == "complete"
+
+
+def test_an_incremental_run_compares_the_new_timepoint_s_template_with_the_kept_earliest(tmp_path, monkeypatch):
+    """Tracker C12, in the order the app runs it: 0h is analysed, then an incremental run adds 24h. The earliest
+    template is 0h's, which the second run never measures, so the comparison has to reach the kept grid record
+    (a run-local "first one measured" compared 24h with nothing, and a third timepoint with 24h)."""
+    import math
+
+    plate, _record, _ = _two_timepoint_plate(tmp_path, with_second=False)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--fluor_tokens", "GFP")
+    first = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())["timepoints"]["0h"]["template"]
+    assert first["source"] == "own" and first["floor_ratio"] > 0 and "drift_vs_earliest" not in first
+
+    plate2, record2, _ = _two_timepoint_plate(tmp_path / "second")
+    (plate / "in" / f"{WELL}.zip").write_bytes((plate2 / "in" / f"{WELL}.zip").read_bytes())
+    write_record_file(plate / "in" / "acquisition.json", record2)
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    blocks = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())["timepoints"]
+    later = blocks["24h"]["template"]
+    assert later["earliest_timepoint"] == "0h"
+    assert later["drift_vs_earliest"] == pytest.approx(abs(math.log(later["floor_ratio"] / first["floor_ratio"])))
+    assert "suspect" not in later and "earliest_timepoint" not in blocks["0h"]["template"]
+
+
+def test_an_incremental_timepoint_too_crowded_for_its_own_template_falls_back_to_the_kept_earliest(
+        tmp_path, monkeypatch):
+    """Tracker C16: 24h, added by an incremental run, has every nanowell crowded with cells, so too few empty
+    ones to build a template. It falls back to 0h's — kept on disk by the first run, since this run never
+    measures 0h — rather than building one from the one or two sites it has."""
+    import numpy as np
+    import tifffile
+
+    from tests._nanowell_run_fixture import paint_cell
+
+    plate, _record, _ = _two_timepoint_plate(tmp_path, with_second=False)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--fluor_tokens", "GFP")
+    assert (out / "nanowells" / f"{WELL}_template.npz").is_file()
+
+    second, _ = build_well(rows=1, cols=1, tile=(900, 900), rotation=9.0, array_shift_um=(120.0, -80.0),
+                           seed=2, timepoint="24h", radius_fraction=0.26)
+    rng = np.random.default_rng(5)
+    for site in second.sites_um:
+        for _ in range(6):
+            paint_cell(second, site, dx_um=rng.uniform(-22, 22), dy_um=rng.uniform(-22, 22), radius_px=3.0)
+    plate2, record2, _ = _two_timepoint_plate(tmp_path / "second")
+    with zipfile.ZipFile(plate2 / "in" / f"{WELL}.zip") as zf:
+        members = {name: zf.read(name) for name in zf.namelist() if not name.endswith("_24h.tif")}
+    tif = tmp_path / "crowded.tif"
+    with zipfile.ZipFile(plate / "in" / f"{WELL}.zip", "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+        for fov, image in second.images.items():
+            for channel, frame in (("PHASE", image), ("GFP", image * 0 + 10.0)):
+                tifffile.imwrite(str(tif), frame.astype("float32"))
+                zf.write(tif, f"exp_{channel}_{WELL}_{fov}_24h.tif")
+    write_record_file(plate / "in" / "acquisition.json", record2)
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    later = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())["timepoints"]["24h"]["template"]
+    assert later["source"] == "earliest"

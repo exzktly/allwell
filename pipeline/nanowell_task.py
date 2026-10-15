@@ -43,7 +43,8 @@ class NanowellInputError(RuntimeError):
 def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:
     spec = kwargs["_nanowell"]
     return nr.NanowellSettings(spec["plate_format"], spec.get("margin_um"), spec.get("cell_diameter_um", 15.0),
-                               spec.get("square_edge_deg", 0.0))
+                               spec.get("square_edge_deg", 0.0), spec.get("occluded_below", 0.5),
+                               spec.get("clipped_below", 0.5))
 
 
 def timepoint_order(record: dict, well: str) -> list[str]:

@@ -494,6 +494,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--nanowell_square_edge_deg", type=float, default=0.0,
                    help=("Angle of the central square nanowell's edges to a lattice row, degrees (assumed 0: the "
                          "square is cut parallel to a row). Used to refuse a lattice fitted a sixth of a turn off."))
+    p.add_argument("--nanowell_occluded_below", type=float, default=0.5,
+                   help=("A nanowell visible in less than this share (0 to 1) is occluded and carries no cell count "
+                         "or confluence, only its state."))
+    p.add_argument("--nanowell_clipped_below", type=float, default=0.5,
+                   help=("A nanowell imaged in less than this share (0 to 1) of its disk, at the edge of the "
+                         "tiles, the array or the well, is clipped and carries no cell count or confluence."))
 
     return p
 
@@ -513,13 +519,19 @@ def nanowell_options_from_args(args, error) -> dict | None:
         error("--nanowell_cell_diameter_um must be a positive number of micrometres.")
     if args.nanowell_margin_um is not None and not (args.nanowell_margin_um >= 0):
         error("--nanowell_margin_um must be zero or more.")
+    for flag, value in (("--nanowell_occluded_below", args.nanowell_occluded_below),
+                        ("--nanowell_clipped_below", args.nanowell_clipped_below)):
+        if not (0.0 < value <= 1.0):
+            error(f"{flag} must be a share above 0 and at most 1.")
     if not (-45.0 <= args.nanowell_square_edge_deg <= 45.0):
         error("--nanowell_square_edge_deg must be within -45 and 45 degrees (a square repeats every 90).")
     args.nuclear_token = str(args.phase_token).strip()
     args.segmentation_method = "cellpose_labelfree"      # no StarDist model is built for a run that never calls it
     return {"plate_format": args.nanowell_format, "cell_diameter_um": float(args.nanowell_cell_diameter_um),
             "margin_um": None if args.nanowell_margin_um is None else float(args.nanowell_margin_um),
-            "square_edge_deg": float(args.nanowell_square_edge_deg)}
+            "square_edge_deg": float(args.nanowell_square_edge_deg),
+            "occluded_below": float(args.nanowell_occluded_below),
+            "clipped_below": float(args.nanowell_clipped_below)}
 
 
 def qc_options_from_args(args) -> dict:

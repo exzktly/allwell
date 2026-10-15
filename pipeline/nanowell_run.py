@@ -49,6 +49,8 @@ class NanowellSettings:
     margin_um: float | None = None      # ownership margin around a disk; None = a tenth of the diameter
     cell_diameter_um: float = 15.0      # for the segmenter's scale
     square_edge_deg: float = 0.0        # the central square's edge angle to a lattice row (Q11, assumed)
+    occluded_below: float = 0.5         # a site seen less than this is occluded and carries no count
+    clipped_below: float = 0.5          # a site imaged less than this is clipped and carries no count
 
     @property
     def pitch_um(self) -> float:
@@ -65,7 +67,8 @@ class NanowellSettings:
     def key(self) -> dict:
         """Everything here changes the output, so all of it joins the reuse key."""
         return {"plate_format": self.plate_format, "margin_um": self.margin,
-                "cell_diameter_um": self.cell_diameter_um, "square_edge_deg": self.square_edge_deg}
+                "cell_diameter_um": self.cell_diameter_um, "square_edge_deg": self.square_edge_deg,
+                "occluded_below": self.occluded_below, "clipped_below": self.clipped_below}
 
 
 @dataclass
@@ -206,7 +209,8 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
                                        search_radius_um=2.2 * settings.pitch_um)
     if scores:
         square = max(scores, key=lambda s: s.coherence)
-        orientation = check_orientation(detection.fit, square.orientation_deg)
+        orientation = check_orientation(detection.fit, square.orientation_deg,
+                                        square_to_axis_deg=settings.square_edge_deg)
         if not orientation.ok:
             return refuse(ORIENTATION_REFUSED, orientation.reason if hasattr(orientation, "reason") else
                           "The square's edges disagree with the fitted lattice axis")
@@ -485,7 +489,8 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
                               imaged_fraction=coverage[i].imaged_fraction,
                               n_cells=None if got is None else got["n_cells"],
                               confluence=None if got is None else got["confluence"], fused=i in fused,
-                              addressed=addressed)
+                              addressed=addressed, occluded_below=settings.occluded_below,
+                              clipped_below=settings.clipped_below)
         out.sites.append(_site_row(located.timepoint, i, address, geoms[i], visibility[i], coverage[i], got, state,
                                    report.owners[i], detected[i], i in fused, channels))
     return out

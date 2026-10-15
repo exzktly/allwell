@@ -114,6 +114,8 @@ def test_nanowell_mode_without_a_record_names_what_is_missing(tmp_path, monkeypa
     (["--nanowell_cell_diameter_um", "0"], "positive"),
     (["--nanowell_margin_um", "-1"], "zero or more"),
     (["--nanowell_square_edge_deg", "60"], "-45 and 45"),
+    (["--nanowell_occluded_below", "0"], "above 0 and at most 1"),
+    (["--nanowell_clipped_below", "1.5"], "above 0 and at most 1"),
 ])
 def test_nanowell_options_are_validated_with_a_message(tmp_path, monkeypatch, rendered_well, capsys, flags, message):
     rendered, record, _ = rendered_well

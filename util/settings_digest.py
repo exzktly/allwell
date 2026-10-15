@@ -113,6 +113,10 @@ KEYED_ON: dict[str, str] = {
                                    "own it, hence which pixels its cells are counted from",
     "nanowell_square_edge_deg":    "the orientation check that refuses a lattice fitted a sixth "
                                    "of a turn off, so which timepoints are addressed at all",
+    "nanowell_occluded_below":     "the visibility under which a nanowell carries no count, so "
+                                   "which sites have a number at all",
+    "nanowell_clipped_below":      "the same for a nanowell cut by the edge of the tiles, the "
+                                   "array or the well",
     # ── how a filename is read ──────────────────────────────────────────────
     "filename_schema":             "decides which token is the well, fov, timepoint",
     "filename_sep":                "the same, and a wrong one groups nothing",

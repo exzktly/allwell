@@ -102,6 +102,8 @@ OTHER = {
     "nanowell_cell_diameter_um": 20.0,
     "nanowell_margin_um": 5.0,
     "nanowell_square_edge_deg": 3.0,
+    "nanowell_occluded_below": 0.7,
+    "nanowell_clipped_below": 0.7,
 }
 
 

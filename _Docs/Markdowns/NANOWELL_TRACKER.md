@@ -787,8 +787,18 @@ nanowell's trajectory.
 
 - **Array map** — every roster site of one well, coloured by a metric at a
   timepoint, with a time slider; occluded sites hatched, clipped outlined.
-- **Site detail** — click a site: its trajectory, and its crop at every
-  timepoint from that timepoint's owner tile.
+- **Site detail** — click a nanowell on the array map (or on the Array QC
+  montage) and its statistics over time appear beside the map: cell count,
+  confluence, brightness and site signal against recorded time, with the
+  state at each timepoint (empty, measured, occluded, clipped, fused) marked
+  on the curve so a gap reads as "not seen", never as zero, and its crop at
+  every timepoint from that timepoint's owner tile. The selection is the
+  site's `(well, q, r)` address, so it follows the same nanowell across
+  timepoints even when the plate moved between acquisitions; a site that
+  exists at some timepoints only (unaddressed, or off the image) shows just
+  those. Clicking a second site adds it to the plot for comparison; clicking
+  empty space clears the selection. The selection is not a plate selection
+  (`_selected_wells` is untouched).
 - **Trajectories** — one line per site with the well median over them,
   coloured by occupancy class.
 - **Well comparison** — per-well or per-group distributions at a timepoint;
@@ -1124,6 +1134,7 @@ Answers are written into the row. Rows that depend on an answer say so.
 |---|---|---|---|---|
 | D1 | Loader for `nanowells/`; test that the top-level `*.csv` glob never picks the tables up | `review/features/nanowell/collect.py` | `todo` | |
 | D2 | Per-site time series joined on `(well, q, r)`; refuses an unknown scheme version | `review/features/nanowell/compute.py` | `todo` | |
+| D2a | `site_series(table, well, q, r)` returns that nanowell's every timepoint in recorded-time order with its state and each metric, `NaN` where undefined; a timepoint where the site was occluded, clipped or unaddressed is present with its state, not omitted | `review/features/nanowell/compute.py` | `todo` | Feeds V3; unknown address returns an empty series, not an error |
 | D3 | The §3.10.1 metrics, each with its undefined cases tested, against recorded time | `review/features/nanowell/compute.py` | `todo` | |
 | D4 | Baselines: earliest (default) and first measurable (labelled) | `review/features/nanowell/compute.py` | `todo` | |
 | D5 | Per-(well, timepoint) summaries with sites used and excluded by reason | `review/features/nanowell/compute.py` | `todo` | |
@@ -1139,7 +1150,8 @@ Answers are written into the row. Rows that depend on an answer say so.
 |---|---|---|---|---|
 | V1 | Package registered; build profile; help topic; feature-removal and profile tests | `review/features/nanowell/`, `features/registry.py`, `ui/help_topics.py` | `todo` | |
 | V2 | Array map | `review/features/nanowell/renderer.py` | `todo` | |
-| V3 | Site detail: trajectory and per-timepoint crops from owner tiles | `review/features/nanowell/` | `todo` | |
+| V3 | Site detail: the clicked nanowell's statistics over time (count, confluence, brightness, site signal against recorded time, state marked per timepoint, undefined drawn as a gap) and its crop at every timepoint from the owner tile | `review/features/nanowell/` | `todo` | Feature requested by the user. Data comes from D2's per-site series, never recomputed in the view |
+| V3a | Click-to-select, tested through the real widget (CLAUDE.md §7.6): a synthetic mouse press on the array map's canvas at a site's pixel position selects that `(well, q, r)` and the detail plot receives that series; a press between sites clears; a second press adds; `_selected_wells` is unchanged. Name the wrong implementation: a hit-test that picks the nearest site regardless of distance, or one that is off by half a site in the axes' y-down transform | `tests/` | `todo` | Slow lane (needs the built page); the hit-test itself is a pure function in `renderer.py` and is tested in the fast lane |
 | V4 | Trajectories | `review/features/nanowell/renderer.py` | `todo` | |
 | V5 | Well comparison | `review/features/nanowell/renderer.py` | `todo` | |
 | V6 | Position effects | `review/features/nanowell/renderer.py` | `todo` | |

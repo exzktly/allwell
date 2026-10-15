@@ -82,14 +82,12 @@ def test_a_single_timepoint_dataset_1_needs_no_interval_when_raw(tmp_path):
                                gap_hours=6.0).offset_hours == 6.0
 
 
-def test_a_raw_dataset_beside_an_analysed_one_is_refused_naming_which(tmp_path):
+def test_a_raw_dataset_1_beside_an_analysed_dataset_2_is_refused_with_the_order_to_use(tmp_path):
     from tests.fixtures.dataset_builder import build_dataset
     _raw(tmp_path / "d1", timepoints=["0h"])
     build_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0h", "24h"])
-    with pytest.raises(cc.ConcatError, match="dataset 1 is a raw"):
+    with pytest.raises(cc.ConcatError, match="Put the analysed dataset first"):
         cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=6.0)
-    with pytest.raises(cc.ConcatError, match="dataset 2 is a raw"):
-        cc.build_merge_plan(tmp_path / "d2", tmp_path / "d1", tmp_path / "dest", gap_hours=6.0)
 
 
 def test_filenames_laid_out_differently_are_not_joined(tmp_path):
@@ -321,3 +319,64 @@ def test_analysed_datasets_carry_their_records_too_with_the_gap_source(tmp_path)
     assert sorted(record["timepoints"]) == ["0h", "24h", "54h"]
     assert record["concatenations"][-1]["gap_source"] == "recorded"
     assert record["concatenations"][-1]["gap_hours"] == 30.0
+
+
+# ── an analysed dataset 1 with a raw dataset 2 (M12) ─────────────────────────
+def _analysed_then_raw(tmp_path):
+    from tests.fixtures.dataset_builder import build_dataset
+    build_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h"])
+    _raw(tmp_path / "d2", timepoints=["0h"], fields=("F001",), channels=("GFP", "NIR"), exp="exp")
+
+
+def _pending(dest, well="A01"):
+    """What the pipeline's incremental run would still have to process."""
+    from pipeline.incremental_keys import fov_keys_from_member_names, read_done_fov_keys
+    schema, sep = "experiment:channel:well:fov:timepoint", "_"
+    with zipfile.ZipFile(dest / "in" / f"{well}.zip") as archive:
+        present = fov_keys_from_member_names(archive.namelist(), schema=schema, sep=sep,
+                                             images_only=True)
+    return present - read_done_fov_keys(dest / "out" / f"measurements_{well}.csv")
+
+
+def test_dataset_1_s_results_are_kept_and_exactly_dataset_2_s_timepoints_are_left_to_analyse(tmp_path):
+    import csv
+    _analysed_then_raw(tmp_path)
+    plan, summary = _merge(tmp_path, gap_hours=24.0)
+    assert plan.ds2_raw is True and "Run Analyze" in summary
+    with (tmp_path / "dest" / "out" / "measurements_A01.csv").open() as handle:
+        timepoints = {row["timepoint"] for row in csv.DictReader(handle)}
+    assert timepoints == {"0h", "24h"}                       # dataset 1's rows, nothing invented
+    # The pipeline's own incremental rule: dataset 2's shifted timepoint is what is left.
+    assert _pending(tmp_path / "dest") == {("F001", "48h")}
+
+
+def test_the_sidecar_stays_dataset_1_s_and_takes_nothing_from_a_filename_reading(tmp_path):
+    import json
+    _analysed_then_raw(tmp_path)
+    _merge(tmp_path, gap_hours=24.0)
+    merged = json.loads((tmp_path / "dest" / "out" / "pipeline_info.json").read_text())
+    original = json.loads((tmp_path / "d1" / "out" / "pipeline_info.json").read_text())
+    assert merged["available_timepoints"] == original["available_timepoints"] == ["0h", "24h"]
+    assert merged["fluor_tokens"] == original["fluor_tokens"]   # not unioned with the inferred channels
+
+
+def test_a_well_only_dataset_2_holds_is_added_as_images_and_no_well_is_flagged_for_missing_rows(tmp_path):
+    from tests.fixtures.dataset_builder import build_dataset
+    build_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h"])
+    _raw(tmp_path / "d2", wells=["A01", "B02"], timepoints=["0h"], fields=("F001",),
+         channels=("GFP", "NIR"), exp="exp")
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=24.0)
+    stages: list[tuple[str, str]] = []
+    apply.execute_plan(plan, progress=lambda well, stage: stages.append((well, stage)))
+    assert ("A01", "warned") not in stages and ("B02", "warned") not in stages
+    assert all(name.endswith("_F001_48h.tif") for name in _members(tmp_path / "dest", "B02"))
+
+
+def test_dataset_2_s_images_are_verified_in_a_mixed_merge_too(tmp_path, monkeypatch):
+    """The image check is what covers dataset 2 when it has no rows to cross-check."""
+    _analysed_then_raw(tmp_path)
+    calls = []
+    real = apply._verify_raw
+    monkeypatch.setattr(apply, "_verify_raw", lambda plan, dropped: (calls.append(plan.ds2_raw), real(plan, dropped)))
+    _merge(tmp_path, gap_hours=24.0)
+    assert calls == [True]

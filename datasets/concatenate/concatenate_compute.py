@@ -458,31 +458,40 @@ def choose_gap(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict, info2: dict,
     return GapChoice(entered_hours, GAP_ENTERED, recorded, warning)
 
 
-def open_pair(ds1_root: Path | str, ds2_root: Path | str):
-    """Resolve both datasets and read their sidecars: ``(ds1, ds2, info1, info2, raw)``.
+KIND_ANALYSED = "analysed"
+KIND_RAW = "raw"
+KIND_ANALYSED_RAW = "analysed+raw"
 
-    Two analysed datasets, or two raw ones (``in/`` only, schema read from the
-    archives). A raw dataset beside an analysed one is refused: with the
-    analysed one first its outputs would have to be kept and the raw one
-    analysed afterwards (not supported yet), and with the raw one first the
-    earliest timepoints would be left unanalysed beneath analysed later ones.
+
+def open_pair(ds1_root: Path | str, ds2_root: Path | str):
+    """Resolve both datasets and read their sidecars: ``(ds1, ds2, info1, info2, kind)``.
+
+    *kind* is :data:`KIND_ANALYSED` (two analysed datasets), :data:`KIND_RAW`
+    (two raw ones: ``in/`` only, schema read from the archives) or
+    :data:`KIND_ANALYSED_RAW` (an analysed dataset 1 and a raw dataset 2: the
+    analysed outputs are kept and dataset 2's timepoints wait for an
+    incremental Analyze run). A raw dataset 1 beside an analysed dataset 2 is
+    refused: the earliest timepoints would be left unanalysed beneath analysed
+    later ones, which the other three combinations cover better.
     """
     raw1, raw2 = is_raw_dataset(ds1_root), is_raw_dataset(ds2_root)
-    if raw1 != raw2:
-        raw_label = "dataset 1" if raw1 else "dataset 2"
-        other = "dataset 2" if raw1 else "dataset 1"
+    if raw1 and not raw2:
         raise ConcatError(
-            f"{raw_label} is a raw (not yet analysed) dataset and {other} is analysed. "
-            "Concatenate two raw datasets, or two analysed ones; to analyse the "
-            "merged plate once, concatenate the raw datasets first.")
-    if raw1:
-        ds1, ds2 = raw_paths(ds1_root), raw_paths(ds2_root)
-        info1 = raw_info(ds1, label="dataset 1", error_cls=ConcatError)
+            "Dataset 1 is a raw (not yet analysed) dataset and dataset 2 is analysed. "
+            "That would leave the earliest timepoints unanalysed beneath analysed later "
+            "ones. Put the analysed dataset first, or concatenate the raw datasets "
+            "first and analyse the merged plate once.")
+    if raw2:
+        ds2 = raw_paths(ds2_root)
         info2 = raw_info(ds2, label="dataset 2", error_cls=ConcatError)
-        return ds1, ds2, info1, info2, True
+        if raw1:
+            ds1 = raw_paths(ds1_root)
+            return ds1, ds2, raw_info(ds1, label="dataset 1", error_cls=ConcatError), info2, KIND_RAW
+        ds1 = resolve_dataset(ds1_root, label="dataset 1")
+        return ds1, ds2, read_info(ds1, label="dataset 1"), info2, KIND_ANALYSED_RAW
     ds1 = resolve_dataset(ds1_root, label="dataset 1")
     ds2 = resolve_dataset(ds2_root, label="dataset 2")
-    return ds1, ds2, read_info(ds1, label="dataset 1"), read_info(ds2, label="dataset 2"), False
+    return ds1, ds2, read_info(ds1, label="dataset 1"), read_info(ds2, label="dataset 2"), KIND_ANALYSED
 
 
 @dataclass(frozen=True)
@@ -505,7 +514,7 @@ def gap_preview(ds1_root: Path | str, ds2_root: Path | str, text: str) -> GapPre
     is none.
     """
     try:
-        ds1, ds2, info1, info2, _raw = open_pair(ds1_root, ds2_root)
+        ds1, ds2, info1, info2, _kind = open_pair(ds1_root, ds2_root)
         default = default_gap(ds1, ds2, info1, info2)
         default_text = format_gap(default.hours) if default.hours is not None else ""
         shown = dict(default_text=default_text, default_source=default.source,
@@ -670,6 +679,9 @@ class MergePlan:
     #: Both datasets are raw (``in/`` only): the merge writes a raw ``in/`` and
     #: no ``out/`` at all, and is verified on its images rather than on rows.
     raw: bool = False
+    #: Dataset 1 is analysed and dataset 2 raw: dataset 1's outputs are kept as
+    #: they are, and dataset 2's images wait for an incremental Analyze run.
+    ds2_raw: bool = False
     column_warnings: tuple[str, ...] = ()
     #: User-side blocks dataset 2 carried that the merged sidecar does not.
     #: ``merge_info`` takes these from dataset 1 wholesale — the documented
@@ -688,7 +700,9 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
     (:func:`default_gap`). Raises :class:`ConcatError` (user-facing message) on any incompatibility.
     Reads only — the destination is not created or cleared here.
     """
-    ds1, ds2, info1, info2, raw = open_pair(ds1_root, ds2_root)
+    ds1, ds2, info1, info2, kind = open_pair(ds1_root, ds2_root)
+    raw = kind == KIND_RAW
+    ds2_raw = kind == KIND_ANALYSED_RAW
     dest_root = Path(dest_root)
     dest = DatasetPaths(root=dest_root, in_dir=dest_root / "in", out_dir=dest_root / "out")
 
@@ -717,10 +731,10 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         )
     dest_is_restart = destination_is_failed_run(dest)
 
-    if raw:
-        check_raw_compatible(info1, info2, error_cls=ConcatError)
-    else:
+    if kind == KIND_ANALYSED:
         check_compatible(info1, info2)
+    else:
+        check_raw_compatible(info1, info2, error_cls=ConcatError)
 
     tp_index = int(info1.get("tp_index", -1))
     if tp_index < 0:
@@ -732,7 +746,7 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
     _refuse_well_collisions(ds1, "Dataset 1")
     _refuse_well_collisions(ds2, "Dataset 2")
 
-    if not raw and (has_folder_mode_output(ds1) or has_folder_mode_output(ds2)):
+    if not raw and (has_folder_mode_output(ds1) or (not ds2_raw and has_folder_mode_output(ds2))):
         which = "dataset 1" if has_folder_mode_output(ds1) else "dataset 2"
         raise ConcatError(
             f"{which} stores its QC images as per-well folders (out/<WELL>/) "
@@ -746,8 +760,11 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
     tp_format, format_warning = detect_timepoint_format(
         [str(t) for t in info1.get("available_timepoints", []) or []]
     )
-    merged_info = merge_info(info1, info2, offset_hours=offset, tp_format=tp_format)
-    ds2_blocks_dropped = () if raw else tuple(
+    # Dataset 2's inferred sidecar is a reading of filenames, not an analysis:
+    # nothing of it (channel tokens, say) belongs in dataset 1's sidecar.
+    merged_info = (dict(info1) if ds2_raw
+                   else merge_info(info1, info2, offset_hours=offset, tp_format=tp_format))
+    ds2_blocks_dropped = () if (raw or ds2_raw) else tuple(
         name for name in ("sample_definitions", "notes", "ratios", "cell_gating")
         if (info2 or {}).get(name)
     )
@@ -777,8 +794,9 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         ds2_blocks_dropped=ds2_blocks_dropped,
         wells_both=wells_both,
         raw=raw,
+        ds2_raw=ds2_raw,
         merged_info=merged_info,
         dest_is_restart=dest_is_restart,
         format_warning=format_warning,
-        column_warnings=() if raw else column_warnings(ds1, ds2, wells_both),
+        column_warnings=() if (raw or ds2_raw) else column_warnings(ds1, ds2, wells_both),
     )

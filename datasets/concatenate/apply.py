@@ -697,6 +697,10 @@ def execute_plan(
         emit(f"Note: {plan.format_warning}")
     for warning in plan.column_warnings:
         emit(f"Note: {warning}")
+    if plan.ds2_raw:
+        emit("Dataset 2 is raw: dataset 1's measurements and QC images are kept as "
+             "they are, and dataset 2's images are added for an incremental Analyze "
+             "run to process.")
     emit(
         f"Wells: {len(plan.wells_ds1_only)} from dataset 1 only, "
         f"{len(plan.wells_ds2_only)} from dataset 2 only, "
@@ -783,7 +787,7 @@ def execute_plan(
         if (in1.get(well) or zip1.get(well)) and not csv1.get(well):
             well_images_without_csv.append(f"{well} (dataset 1)")
             well_warned = True
-        if (in2.get(well) or zip2.get(well)) and not csv2.get(well):
+        if not plan.ds2_raw and (in2.get(well) or zip2.get(well)) and not csv2.get(well):
             well_images_without_csv.append(f"{well} (dataset 2)")
             well_warned = True
         return (well, stats, unmatched_total, well_dropped, well_images_without_csv,
@@ -831,6 +835,8 @@ def execute_plan(
             f"(dataset 2 shifted +{plan.offset_hours:g}h)."
         )
     _verify(plan, well_stats, dropped_members)
+    if plan.ds2_raw:
+        _verify_raw(plan, {})        # dataset 2 has images only; check them as a raw merge does
     _merge_acquisition_records(plan, emit)
 
     _merge_cell_overrides(plan, emit)
@@ -842,7 +848,8 @@ def execute_plan(
                       offset_hours=plan.offset_hours, gap_hours=plan.gap_hours,
                       gap_source=plan.gap_source)
 
+    extra = " Run Analyze on it to process dataset 2's timepoints." if plan.ds2_raw else ""
     return (
         f"Concatenated {len(all_wells)} well(s) into {plan.dest.root} "
-        f"(dataset 2 shifted +{plan.offset_hours:g}h)."
+        f"(dataset 2 shifted +{plan.offset_hours:g}h).{extra}"
     )

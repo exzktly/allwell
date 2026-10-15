@@ -97,6 +97,7 @@ class Template:
     n_sites: int                        # crops the median was taken over
     candidates: int                     # visible sites it was chosen from
     texture_cut: float | None           # the largest residual texture among the sites used
+    used: tuple[int, ...] = ()          # which of the crops passed in the median was taken over
 
 
 def _azimuthal_texture(crops, half: int, radius: float) -> np.ndarray:
@@ -140,6 +141,7 @@ def build_template(crops, *, interior_radius_px: float, quarter: float = TEMPLAT
     half = crops.shape[1] // 2
     disk = _disk(half, interior_radius_px)
     usable = ~np.isnan(crops[:, disk]).any(axis=1)
+    positions = np.flatnonzero(usable)
     crops = crops[usable]
     candidates = len(crops)
     if candidates == 0:
@@ -158,7 +160,8 @@ def build_template(crops, *, interior_radius_px: float, quarter: float = TEMPLAT
         source = SOURCE_OWN_SPARSE
     else:
         source = SOURCE_OWN
-    return Template(np.median(crops[order], axis=0), half, source, take, candidates, float(texture[order].max()))
+    return Template(np.median(crops[order], axis=0), half, source, take, candidates, float(texture[order].max()),
+                    tuple(int(positions[k]) for k in sorted(order)))
 
 
 # ── C2: the rim-suppressed tile ──────────────────────────────────────────────

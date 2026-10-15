@@ -87,6 +87,20 @@ def test_template_is_not_fooled_by_a_cell_at_the_same_place_in_every_loaded_site
     assert template.array[template.half + 2, template.half + 2] == pytest.approx(FLOOR, abs=0.03)
 
 
+def test_a_centred_round_cell_is_not_taken_for_an_empty_site():
+    # Radially symmetric, so the first (azimuthal) ranking cannot see it and puts it first; the second
+    # pass, against the template the others make, drops it for the next empty site.
+    rng = np.random.default_rng(1)
+    y, x = np.mgrid[-16:17, -16:17]
+    base = np.where(np.hypot(x, y) <= 12, FLOOR, BACKGROUND)
+    bump = 0.4 * (np.rint(np.hypot(x, y)) <= 4)
+    crops = [base + rng.normal(0, 0.002, base.shape) for _ in range(5)]
+    crops.insert(0, base + bump + rng.normal(0, 0.0003, base.shape))                          # index 0
+    crops += [base + 0.4 * (np.hypot(x - 7, y + 5) <= 4) + rng.normal(0, 0.002, base.shape) for _ in range(10)]
+    template = nm.build_template(np.array(crops), interior_radius_px=RADIUS, min_sites=2)
+    assert 0 not in template.used and set(template.used) <= set(range(1, 6)) and len(template.used) == 4
+
+
 def test_template_falls_back_to_the_earliest_and_says_so():
     crops = _crops(_paint(CENTRES))
     earliest = nm.build_template(crops, interior_radius_px=RADIUS, min_sites=2)
@@ -187,6 +201,16 @@ def test_a_touching_clump_undercounts_and_the_area_estimate_flags_it():
     assert est[6].area_count > 2.0 and est[6].count_disagreement is True
     assert all(est[i].count_disagreement is False for i in (1, 2, 5))
     assert est[0].count_disagreement is False                # 0 cells, 0 area: they agree
+
+
+def test_a_sub_cell_area_gap_is_not_a_disagreement():
+    # One cell counted, half a cell of area: a 50 % gap, but less than one cell, so no flag.
+    labels = np.zeros((190, 190), dtype=int)
+    x, y = CENTRES[0]
+    labels[int(y) - 3:int(y) + 4, int(x) - 3:int(x) + 4] = 1                  # 49 px
+    counts = nm.count_cells(labels, PX, GEOMS)
+    est = nm.area_estimate(labels, PX, GEOMS, counts, isolated_area_um2=98.0)
+    assert est[0].area_count == pytest.approx(0.5) and est[0].count_disagreement is False
 
 
 def test_area_estimate_is_undefined_not_zero_without_an_isolated_cell():

@@ -5454,6 +5454,7 @@ The **Spatial** tab (`review/features/spatial/`) is the Review-side
 analysis of **per-cell physical positions in the well plane**. It's the
 only feature that consumes the pipeline's always-on
 `shape_centroid_row` / `shape_centroid_col` columns for anything analytical
+(or, on a nanowell dataset, each cell's `well_x_um` / `well_y_um` — see below)
 — the Multivariate tab treats those centroids as ordinary shape features
 in z-scored feature space, not as physical coordinates. Spatial is a
 one-file-per-role package that mirrors Multivariate (see §5.3 recipe): a
@@ -5467,6 +5468,18 @@ occupant is the shared **Properties (Export-Style) panel** — the
 `ctx.figures.open_style_panel("spatial")`, so the Spatial figure now styles
 identically to every other plotting tab (`render_spatial` re-applies the
 export-style prefs at the end of each recompute so edits survive it).
+
+**Which frame positions are in** (`spatial/collect.position_columns`). A nanowell
+run's cell table states each cell's position in the well frame, `well_x_um` /
+`well_y_um`, shared by every tile of the well; those win, and every payload
+carries `unit="µm"`. Otherwise the segmentation's centroid in its field's pixels
+(`unit="px"`), which places cells correctly only within one field — a nanowell
+well's tiles overlap in pixel space, so reading its centroids put cells from
+different tiles on top of one another. The renderer labels axes, nearest-neighbour
+distances and Ripley's radius with the payload's unit (`renderer.in_unit`). A
+nanowell cell table has a `timepoint` label and no `timepoint_hours`, so
+`collect._hours` and the tab's timepoint list go through
+`data_loading.resolved_timepoints`, the loader's one label-to-hours resolver.
 
 **Multi-well faceting.** The per-frame levels (Cell / Colony /
 Intra-colony) now draw **one panel per selected well** — a faceted grid
@@ -8968,6 +8981,15 @@ measurement exists (the pipeline records `measured` with no count where no templ
 fused nanowell has a confluence but no count). The growth rate is the least-squares slope of
 ln n against hours over at least three timepoints with n > 0. A plate of 96 wells × 1,000 nanowells × 10
 timepoints takes about 5 s to compute.
+
+**The fixed cohort** (`distribution_compute.fixed_cohort`, `NanowellState.cohort`, the *Fixed cohort* box on
+*Distribution* and *Trajectories*). Off, the median at each timepoint is over whichever nanowells could be
+measured then, so it can move with no nanowell changing. On, a nanowell's values count only when it has a value
+at every timepoint of its well; any other value becomes undefined with the reason "not measured at every
+timepoint" (labelled "outside the fixed cohort"), so it is counted among the exclusions rather than vanishing,
+and the footer states the cohort as kept of sites. `well_summary(reasons=…)`, `distribution_model(cohort=…)`
+and `views_compute.trajectory_panels(cohort=…)` all apply it, so the beeswarm, the summaries and the trajectory
+medians follow the same nanowells.
 
 **Summaries** (`summary_compute`). `well_summary` describes one well per timepoint: median, interquartile
 range, fraction responding (above 1 for a fold change, above 0 for a log₂ fold change, undefined for a

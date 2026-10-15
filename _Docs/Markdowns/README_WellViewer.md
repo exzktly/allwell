@@ -4115,7 +4115,9 @@ scatter and the phenotype-composition bars.
 
 The **Spatial** tab (Analysis rail, next to Multivariate) analyses per-cell
 positions in the well plane — the pipeline emits `shape_centroid_row` /
-`shape_centroid_col` for every segmented cell, and this tab uses them to
+`shape_centroid_col` for every segmented cell (in pixels of its field), and a
+nanowell run also each cell's position across the whole well in µm, which the
+tab then uses instead, labelling distances in µm. The tab uses them to
 answer questions the plotting and multivariate tabs can't: *"Do my cells
 form colonies, and are they growing or sparse?"*, *"Do edge cells behave
 differently from interior cells?"*, *"How much of the GFP variability is
@@ -4225,6 +4227,10 @@ use them.
 - **Baseline** — what a fold change is measured from: the well's *earliest* timepoint, or each nanowell's
   *first measurable* one (for a bubble that clears after the first timepoint).
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
+- **Fixed cohort** (on *Distribution* and *Trajectories*) — use only the nanowells with a value at every
+  timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
+  measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
+  the footer gives the cohort's size.
 - **Well** and the **Timepoint** slider (on *Array map* and *Array QC*) — the one well drawn, from the wells
   selected, and its timepoint; these views start at the well's first timepoint. One timepoint is shared by
   every view, so a timepoint chosen on one carries to the next wherever it exists.

@@ -1,0 +1,51 @@
+"""Spatial on a nanowell run (tracker I2): cells placed in the well frame in µm, timed from their labels.
+
+A nanowell run's cell table states each cell's position in the well frame (``well_x_um``, ``well_y_um``), shared by
+every tile of the well, and carries the timepoint as a label with no ``timepoint_hours`` column. Spatial used to
+need a pixel centroid and that column, so it showed nothing for these datasets. Driven through the real builder
+on a real run's output."""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+import pytest
+
+pytest.importorskip("PySide6")
+
+from review.features.spatial import collect  # noqa: E402
+from tests.test_nanowell_review_load import run_with_a_cell  # noqa: E402,F401  (module fixture)
+
+
+def test_the_well_frame_wins_over_the_field_centroid_and_names_its_unit():
+    both = pd.DataFrame(columns=["well_x_um", "well_y_um", "shape_centroid_row", "shape_centroid_col"])
+    assert collect.position_columns(both) == ("well_x_um", "well_y_um", "µm")
+    assert collect.position_columns(pd.DataFrame(columns=["shape_centroid_row", "shape_centroid_col"])) == (
+        "shape_centroid_col", "shape_centroid_row", "px")
+    assert collect.position_columns(pd.DataFrame(columns=["well_x_um"])) is None
+
+
+def test_the_spatial_tab_draws_a_nanowell_run_s_cells_at_their_well_frame_positions(qtbot, run_with_a_cell):  # noqa: F811
+    from PySide6.QtWidgets import QHBoxLayout, QWidget
+
+    from review.features.spatial import controller as spc
+    from review.features.spatial.tab_view import build_spatial_tab
+    from tests._minimal_shell import load_dataset, minimal_shell
+
+    ctx, window = minimal_shell(qtbot)
+    window._ctx, window._app_state, window._features = ctx, ctx.state, ctx.features
+    load_dataset(ctx, run_with_a_cell)
+    frame = QWidget()
+    QHBoxLayout(frame)
+    window.setCentralWidget(frame)
+    build_spatial_tab(ctx, frame)
+    ctx.state.selection.selected_wells = {"A01"}
+    assert collect.available_timepoints(ctx) == [0.0]                         # "0h", read from the label
+    spc.sp_recompute(ctx)
+    cells = pd.read_csv(run_with_a_cell / "measurements_A01.csv")
+    st = ctx.state.feature_slice("spatial")
+    points = st.frames[0]["points"]
+    assert np.allclose(points, cells[["well_x_um", "well_y_um"]].to_numpy())
+    fig = ctx.widgets.get("_sp_fig") if ctx.widgets.get_or_none("_sp_fig") else ctx.widgets.get("_sp_canvas").figure
+    labels = {(ax.get_xlabel(), ax.get_ylabel()) for ax in fig.axes}
+    assert ("x (µm)", "y (µm)") in labels

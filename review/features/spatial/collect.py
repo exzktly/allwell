@@ -25,7 +25,7 @@ from typing import Any
 import numpy as np
 
 from pipeline.shape_features import is_shape_column
-from review.data.data_loading import df_included_mask, resolve_value_series
+from review.data.data_loading import df_included_mask, resolve_value_series, resolved_timepoints
 from review.domain import spatial_compute as spc
 from review.domain.metric_registry import METRICS
 from domain.tp_match import tp_close_mask
@@ -34,6 +34,29 @@ _logger = logging.getLogger(__name__)
 
 CENTROID_ROW_COL = "shape_centroid_row"
 CENTROID_COL_COL = "shape_centroid_col"
+#: A nanowell run's per-cell position in the well frame (tracker I2): one frame for every tile of the well, in µm.
+WELL_X_COL = "well_x_um"
+WELL_Y_COL = "well_y_um"
+
+
+def position_columns(df) -> tuple[str, str, str] | None:
+    """``(x column, y column, unit)`` for the cells' positions, or ``None`` when the frame has none.
+
+    A nanowell run states each cell's position in the well frame (``well_x_um``, ``well_y_um``), shared by every
+    tile of the well, so a well's cells from several tiles land where they are; that frame wins. Otherwise the
+    segmentation's centroid in its field's pixels, which places cells correctly only within one field.
+    """
+    if WELL_X_COL in df.columns and WELL_Y_COL in df.columns:
+        return WELL_X_COL, WELL_Y_COL, "µm"
+    if CENTROID_ROW_COL in df.columns and CENTROID_COL_COL in df.columns:
+        return CENTROID_COL_COL, CENTROID_ROW_COL, "px"
+    return None
+
+
+def _hours(df) -> np.ndarray:
+    """Each row's timepoint in hours: ``timepoint_hours``, else the ``timepoint`` label read as hours (a nanowell
+    run's cell table has only the label), through the loader's one resolver."""
+    return np.asarray(resolved_timepoints(df), dtype=float)
 
 
 def _cached_df(ctx, well_label: str) -> pd.DataFrame | None:
@@ -66,13 +89,14 @@ def collect_spatial_frame(
     df = _cached_df(ctx, well_label)
     if df is None or df.empty:
         return empty
-    if CENTROID_ROW_COL not in df.columns or CENTROID_COL_COL not in df.columns:
+    columns = position_columns(df)
+    if columns is None:
         return empty
-    if "timepoint_hours" not in df.columns:
-        return empty
+    x_col, y_col, unit = columns
+    empty["unit"] = unit
 
     import pandas as pd
-    tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
+    tp = _hours(df)
     finite_tp = np.isfinite(tp)
     if not finite_tp.any():
         return empty
@@ -88,8 +112,8 @@ def collect_spatial_frame(
     if not mask.any():
         return {**empty, "timepoint": target}
 
-    row = pd.to_numeric(df[CENTROID_ROW_COL], errors="coerce").to_numpy()
-    col = pd.to_numeric(df[CENTROID_COL_COL], errors="coerce").to_numpy()
+    col = pd.to_numeric(df[x_col], errors="coerce").to_numpy()
+    row = pd.to_numeric(df[y_col], errors="coerce").to_numpy()
     mask &= np.isfinite(row) & np.isfinite(col)
     if not mask.any():
         return {**empty, "timepoint": target}
@@ -118,6 +142,7 @@ def collect_spatial_frame(
         "timepoint": target,
         "well": well_label,
         "n_cells": int(points.shape[0]),
+        "unit": unit,
     }
 
 
@@ -183,15 +208,14 @@ def available_timepoints(ctx) -> list[float]:
 
     Pure ``ctx.state`` reader; empty when nothing has been loaded.
     """
-    import pandas as pd
     seen: set = set()
     cache = getattr(ctx.state.dataset, "cache", None) or {}
     for _label, df in cache.items():
-        if df is None or df.empty or "timepoint_hours" not in df.columns:
+        if df is None or df.empty:
             continue
-        mask = df_included_mask(df, include_gate=False)
-        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").where(mask)
-        seen.update(float(t) for t in tp.dropna().unique())
+        mask = df_included_mask(df, include_gate=False).to_numpy()
+        tp = _hours(df)
+        seen.update(float(t) for t in np.unique(tp[mask & np.isfinite(tp)]))
     return sorted(seen)
 
 
@@ -245,16 +269,19 @@ def collect_summary_matrix(
         }
 
     ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
+    units: set = set()
     for i, w in enumerate(valid_wells):
         df = cache.get(w)
-        if df is None or df.empty or "timepoint_hours" not in df.columns:
+        columns = None if df is None or df.empty else position_columns(df)
+        if columns is None:
             continue
-        tp_col = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
+        units.add(columns[2])
+        tp_col = _hours(df)
         finite_tp = np.isfinite(tp_col)
         base_mask = df_included_mask(df, include_gate=include_gate).to_numpy(copy=True)
         base_mask &= finite_tp
-        row = pd.to_numeric(df[CENTROID_ROW_COL], errors="coerce").to_numpy()
-        col = pd.to_numeric(df[CENTROID_COL_COL], errors="coerce").to_numpy()
+        col = pd.to_numeric(df[columns[0]], errors="coerce").to_numpy()
+        row = pd.to_numeric(df[columns[1]], errors="coerce").to_numpy()
         base_mask &= np.isfinite(row) & np.isfinite(col)
         metric_vals: np.ndarray | None = None
         if metric_col:
@@ -285,6 +312,8 @@ def collect_summary_matrix(
         "timepoints": tps,
         "summaries": summaries,
         "metric_col": metric_col,
+        # One unit for the table; wells in two frames (a merged plate) cannot share distances, and say so.
+        "unit": next(iter(units)) if len(units) == 1 else ("mixed: µm and px" if units else "px"),
     }
 
 

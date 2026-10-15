@@ -340,6 +340,7 @@ def _compute_frame_payload(ctx, st, well: str) -> dict:
         "metric": frame.get("metric"),
         "metric_col": st.metric_col,
         "n_cells": n_cells,
+        "unit": frame.get("unit") or "px",
     }
     if n_cells == 0:
         payload["error"] = "No cells at the selected timepoint."

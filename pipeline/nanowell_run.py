@@ -532,7 +532,7 @@ def _bounds(located: Located):
 
 def run_well(well: str, record: dict, timepoints, load_phase, settings: NanowellSettings, *,
              segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
-             expected_shape=None, fixed_radius_um: float | None = None) -> WellOutcome:
+             expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -540,7 +540,10 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     in that well's montage frame (from the end-of-run pass; absent on a first run). A timepoint whose
     first stage refuses keeps its status and no rows; the others go on. *fixed_radius_um* is the array
     radius an earlier run of this well already shared across its timepoints: an incremental run adds a
-    timepoint to the same roster instead of choosing a new one.
+    timepoint to the same roster instead of choosing a new one. *checkpoint* has ``load(timepoint, key)``
+    (a :class:`Measured` or ``None``) and ``save(timepoint, key, measured)``: a timepoint measured before
+    the process was killed is taken back instead of measured again, but only under the same *key* (the
+    shared radius and the record's digest), because a different roster or tile placement makes it wrong.
     """
     from pipeline.nanowell_sites import TimepointLattice, check_consistency, shared_array_radius
 
@@ -587,19 +590,25 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     earliest = None
     for tp in anchored + unaddressed:
         located = outcome.located[tp]
-        images = _images_for(record, well, tp, load_phase)
-        loaders = {name: (lambda tile, _f=f, _tp=tp: _f(_tp, tile)) for name, f in (channels or {}).items()}
-        measured = measure_timepoint(located, images, settings, shared.radius_um, segmenter=segmenter,
-                                     channels=loaders, earliest_template=earliest)
-        del images
+        key = {"radius_um": shared.radius_um, "record_digest": outcome.timepoints[tp]["record_digest"]}
+        measured = checkpoint.load(tp, key) if checkpoint is not None else None
+        if measured is None:
+            images = _images_for(record, well, tp, load_phase)
+            loaders = {name: (lambda tile, _f=f, _tp=tp: _f(_tp, tile)) for name, f in (channels or {}).items()}
+            measured = measure_timepoint(located, images, settings, shared.radius_um, segmenter=segmenter,
+                                         channels=loaders, earliest_template=earliest)
+            del images
+            if checkpoint is not None:
+                checkpoint.save(tp, key, measured)
         if earliest is None and measured.template.get("_object") is not None \
                 and measured.template["source"] != "earliest":
             earliest = measured.template["_object"]
         block = outcome.timepoints[tp]
         agree = consistency.get(tp)
         block.update(consistency=None if agree is None else agree.status,
-                     consistency_detail="" if agree is None else agree.detail, angle_checked=False, radius_flag=shared.flags.get(tp),
-                     radius_deviation_um=shared.deviations_um.get(tp), roster_size=len(measured.sites),
+                     consistency_detail="" if agree is None else agree.detail, angle_checked=False,
+                     radius_flag=shared.flags.get(tp), radius_deviation_um=shared.deviations_um.get(tp),
+                     roster_size=len(measured.sites),
                      template={k: v for k, v in measured.template.items() if k != "_object"},
                      notes=list(measured.notes))
         for row in measured.sites:

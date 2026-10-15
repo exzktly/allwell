@@ -155,6 +155,40 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
     return {"grid": grid, "kept": kept, "sites": sites, "cells": cells}
 
 
+class TimepointCheckpoints:
+    """Per-(well, timepoint) resume checkpoints in the well's staging directory (tracker P7).
+
+    The same atomic record-then-marker files the per-field path writes (``.fov_<id>.done``, so the
+    scratch sweep that keeps resumable directories keeps these too), under the id ``nw_<timepoint>``.
+    A checkpoint is only taken back under the key it was written with: the roster radius and the record
+    digest. The settings key is the staging directory's name, so a run under other settings never
+    reaches it. A template carried from an earlier timepoint (``earliest``) is not checkpointed, so a
+    resumed run may build its own where an uninterrupted one would have reused the first; both are
+    recorded in the timepoint's ``template`` block.
+    """
+
+    def __init__(self, staging: Path, settings_key: str):
+        self.staging, self.settings_key = Path(staging), settings_key
+
+    def save(self, timepoint: str, key: dict, measured: nr.Measured) -> None:
+        from pipeline.fov_checkpoint import _save_fov_checkpoint
+
+        payload = {"sites": measured.sites, "cells": measured.cells, "notes": measured.notes,
+                   "template": {k: v for k, v in measured.template.items() if k != "_object"}}
+        self.staging.mkdir(parents=True, exist_ok=True)
+        _save_fov_checkpoint(self.staging, f"nw_{timepoint}", [json.loads(json.dumps(payload, default=_json_default))],
+                             self.settings_key, quality=key)
+
+    def load(self, timepoint: str, key: dict) -> nr.Measured | None:
+        from pipeline.fov_checkpoint import _load_fov_checkpoint
+
+        found = _load_fov_checkpoint(self.staging, f"nw_{timepoint}", self.settings_key)
+        if found is None or found[1] != json.loads(json.dumps(key, default=_json_default)) or len(found[0]) != 1:
+            return None
+        payload = found[0][0]
+        return nr.Measured(timepoint, payload["sites"], payload["cells"], payload["template"], payload["notes"])
+
+
 def _read_rows(path: Path) -> list[dict]:
     if not path.is_file():
         return []
@@ -223,7 +257,8 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     channels = {t: channel_loader(t) for t in fluor_tokens}
     fixed = None if prior is None else prior["grid"].get("array_radius", {}).get("radius_um")
     outcome = nr.run_well(well_label, record, todo, load_phase, settings, segmenter=segmenter, channels=channels,
-                          fixed_radius_um=fixed, plate_rigid=plate_rigid)
+                          fixed_radius_um=fixed, plate_rigid=plate_rigid,
+                          checkpoint=None if staging_dir is None else TimepointCheckpoints(staging_dir, settings_key))
     px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)
@@ -256,6 +291,7 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
     writes the usual worker trace and re-raises, so the well is reported failed exactly as in the
     per-field path.
     """
+    from pipeline.fov_checkpoint import _staging_dir_for
     from pipeline.io import (
         _write_single_csv, compress_images_to_zip, extract_zip, merge_images_into_zip, remove_directory,
         scratch_base_for,
@@ -265,10 +301,11 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
 
     output_dir = Path(output_dir)
     scratch = scratch_base_for(output_dir) / f"_tmp_extract_{well_label}"
-    staging = scratch_base_for(output_dir) / f"_tmp_montage_{well_label}"
-    for stale in (scratch, staging):
-        if stale.exists():
-            remove_directory(stale)
+    staging = _staging_dir_for(output_dir, well_label, settings_key)
+    if scratch.exists():
+        remove_directory(scratch)
+    if staging.exists() and not any(staging.glob(".fov_*.done")):
+        remove_directory(staging)               # no checkpoint to resume from: start clean
     scratch.mkdir(parents=True, exist_ok=True)
     try:
         records, failed = process_well_zip(

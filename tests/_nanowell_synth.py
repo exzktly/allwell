@@ -161,7 +161,8 @@ def tile_id(plan: TilePlan, row: int, col: int) -> str:
 def render_tiles(plan: TilePlan, *, pitch_um: float, diameter_um: float, radius_um: float,
                  rotation_deg: float = 0.0, stage_jitter_um: float = 0.0, vignette: float = 0.0,
                  noise_sigma: float = 0.0, cells: int = 0, debris: int = 0,
-                 bubble=None, blur_px: float = 1.2, seed: int = 0) -> RenderedTiles:
+                 bubble=None, blur_px: float = 1.2, seed: int = 0,
+                 array_shift_um=(0.0, 0.0)) -> RenderedTiles:
     """Phase-contrast-like tiles of one hexagonal array: bright nanowells on a dark lattice.
 
     The array is the same physical object in every tile: the nanowells, cells,
@@ -180,7 +181,7 @@ def render_tiles(plan: TilePlan, *, pitch_um: float, diameter_um: float, radius_
     inverse = np.linalg.inv(basis)
     union_w = plan.step_um[0] * (plan.cols - 1) + plan.extent_um[0]
     union_h = plan.step_um[1] * (plan.rows - 1) + plan.extent_um[1]
-    centre = np.array([union_w / 2, union_h / 2])
+    centre = np.array([union_w / 2, union_h / 2]) + np.asarray(array_shift_um, dtype=float)
 
     reach = math.ceil(2 * radius_um / pitch_um)
     roster = [(q, r) for q in range(-reach, reach + 1) for r in range(-reach, reach + 1)

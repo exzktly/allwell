@@ -233,3 +233,21 @@ def test_ownership_follows_the_registered_position_not_the_recorded_one():
     assert recorded.owners == ("R",)
     moved = ownership_report(plan, site, 100.0, 10.0, positions_um={"R": (990.0, 0.0), "L": (0.0, 0.0)})
     assert moved.owners == (None,) and moved.fused_indices == (0,)
+
+
+@pytest.mark.parametrize("overlap, every_site_has_an_owner", [(0.30, True), (0.10, False)])
+def test_rendered_plans_cover_both_ownership_regimes(overlap, every_site_has_an_owner):
+    """100 um nanowells on a 200 px tile at 4.3 um/px: 30 % overlap is 258 um (>= 120), 10 % is 86 um."""
+    from tests._nanowell_synth import TilePlan, render_tiles
+    plan = TilePlan(3, 3, (200, 200), overlap, 4.3)
+    seam_x = (plan.step_um[0] + plan.extent_um[0]) / 2      # between the first and second columns
+    union_w = plan.step_um[0] * 2 + plan.extent_um[0]
+    # The array's central column is put on that seam, where a site straddles it if anything can.
+    rendered = render_tiles(plan, pitch_um=172.0, diameter_um=100.0, radius_um=1200.0, seed=0,
+                            array_shift_um=(seam_x - union_w / 2, 0.0))
+    tiles = [RecordedTile(n, (x / 4.3, y / 4.3)) for n, (x, y) in rendered.true_left_top_um.items()]
+    grid = _place(tiles, (200, 200), scale=4.3)
+    assert grid.usable and grid.overlap_um[0] == pytest.approx(plan.extent_um[0] * overlap, rel=0.01)
+    report = ownership_report(grid, rendered.sites_um, 100.0, 10.0)
+    assert report.holds == (every_site_has_an_owner, every_site_has_an_owner)
+    assert bool(report.blend_indices) != every_site_has_an_owner

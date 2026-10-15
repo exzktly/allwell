@@ -8408,6 +8408,106 @@ The synthetic shifted/rotated-window and moved-plate fixtures recover actual
 addresses through these functions; replacing the boundary centre with the
 window centre or carrying an old origin makes the discriminating tests fail.
 
+### 6.2f Tile placement and registration
+
+`pipeline/tile_grid.py` (numpy only) says where each tile of one (well,
+timepoint) sits and how much neighbours overlap; `pipeline/tile_register.py`
+(numpy and scipy) refines those positions and builds the pictures made from
+them. Both are Qt-free, in the remote manifest, and have only test callers: they
+do not change what Analyze runs or writes. Units are micrometres; image axes are
+x right, y down.
+
+**Placement (`tile_grid`).** `tiles_from_record` reads one (well, timepoint)'s
+tiles and that timepoint's own tile size, pixel size and declared overlap from
+the acquisition record, because acquisitions merged later may differ.
+`place_from_record` prefers a tile's mosaic position (pixels, in the image's own
+axes). A stage position is used only when the caller states the sign of each
+stage axis relative to the image's (`stage_to_image`): a stage axis can run
+against the image's, and a guessed sign would mirror the grid. A grid that mixes
+mosaic and stage placed tiles is refused, because they are in different frames.
+The grid's shape is inferred from the positions (tiles within a quarter of an
+extent of each other share a row or column), with one grid index per line that
+tolerates a whole absent line in the middle. A whole absent outer row or column
+cannot be seen from the positions, so `expected_shape` states the plan.
+Data with no record is placed by `place_from_pattern` from one of sixteen
+`ScanPattern`s (four starting corners, row- or column-major, plain or
+serpentine) and a nominal overlap; nothing there is checked against the images.
+A timepoint short of its grid is `incomplete_grid` and names the missing cells
+(`r2c3`); `GridPlan.usable` is true only for a complete, placed grid, which is
+the only kind a montage is built from.
+
+The overlap along each axis is the tile's extent minus the median spacing between
+neighbouring lines, so it is measured per (well, timepoint) and compared with the
+declared one; a difference over two percentage points is reported as one of the
+two being wrong. `ownership_report` classifies sites with `assign_owners` and
+states whether the overlap guarantees that no site straddles a seam: a nanowell
+lies wholly inside some tile with margin *m* only if the overlap along the axis is
+at least `diameter + 2m`, which is the number reported, and not `diameter + m`.
+`assign_owners`' fused class holds two different things, and the report splits
+them: `blend_indices` straddle a seam and need a crop blended from several tiles,
+`edge_indices` lie wholly inside one tile but within the margin of the union's
+outer edge and are measured from that one tile with a thinner margin. Ownership
+takes the registered positions (`Registration.positions()`) when given; the
+recorded ones are right for a preview and wrong for a run.
+
+**Three sources of position (`tile_register`).** Recorded, lattice phase and
+overlap correlation, combined in one weighted least-squares solve
+(`solve_placements`): each pairwise offset between tiles whose recorded
+rectangles overlap is a constraint with a standard deviation, and a weak prior on
+each tile's recorded position (50 um) fixes the overall translation and anchors a
+tile with no measurement. The two axes share one matrix. Each tile reports the
+source that placed it (`lattice`, `overlap`, or `recorded`), the rms disagreement
+with its own constraints, and how far it moved from the recorded position. A tile
+that no constraint reaches, such as a corner tile over a circular array, keeps its
+recorded position and says so; it never fails the solve.
+
+*Lattice phase.* A tile's fit gives a site position `p` in tile-local coordinates;
+for one physical lattice `o_j - o_i == p_i - p_j` modulo a lattice vector, where
+`o` is a tile's origin. The recorded offset chooses the vector (searched among
+the neighbouring integer pairs, because rounding in lattice coordinates is not
+always the nearest lattice point). This uses every nanowell in the tile and is
+unaffected by a bubble in the overlap. It is right while the recorded error
+*between two tiles* is under half a pitch; a pair whose recorded error passes 40 %
+of a pitch is warned about, and past 50 % it is wrong by exactly one lattice
+vector with nothing in the data to say so, a limit the tests pin rather than hide.
+Two fits whose bases differ by more than 5 % of a pitch are not treated as one
+lattice and give no constraint.
+
+*Overlap correlation.* An array is periodic, so correlating two tiles of it has a
+peak at the true shift and at every lattice vector from it, and an unconstrained
+search can lock one pitch off with a higher correlation than the right answer
+has. `correlate_overlap` scores only offsets within `search_radius_px` of the
+recorded one, just under half a pitch, so the wrong peaks are outside the window
+rather than rejected afterwards. At each offset the score is the Pearson
+correlation of the pixels the two tiles share at that offset, so the shared region
+shrinks as the offset grows and an offset leaving less than 24 px on either axis
+scores nothing. A fixed template cut from inside the overlap cannot be used: the
+usual 10 % overlap is narrower than one pitch, and a template that must stay
+inside it at every shift of up to half a pitch does not fit. The sums over the
+shared pixels come from summed-area tables and only the cross term needs an FFT;
+`downsample` block-averages both tiles first. A match with correlation under 0.25,
+or whose best peak does not beat the best peak elsewhere by 5 %, is not used and
+its reason is listed in `Registration.skipped`.
+
+**Pictures built from the registered tiles.** `build_montage` blends tiles by
+distance from each tile's edge into an 8-bit image whose long side is at most
+4,096 px (tiles are block-averaged by one integer factor and placed at the nearest
+montage pixel); it returns the percentile stretch it applied and a coverage mask,
+so uncovered pixels are marked and not painted as data. `fused_crop` samples every
+tile covering a seam site bilinearly at the crop's pixel centres and blends them
+by distance from each tile's edge; the site's cells belong to the tile holding the
+most of its disk (ties to the lexically first id, as `assign_owners` breaks them),
+and the crop reports the share of the disk no tile covers. Neither does any
+photometric matching between tiles: a gain or vignetting difference between
+neighbours shows as a seam in a blend.
+
+**What is and is not established.** All of this is checked on tiles rendered by
+`tests/_nanowell_synth.render_tiles`, which draws one array into overlapping
+tiles with stage jitter, camera rotation, vignetting, noise, cells, debris, a
+bubble and a square central nanowell, at more than one tile plan. Detection is a
+later section, so the lattice-phase tests fit sites taken from the ground truth
+plus noise. Nothing has run on real phase-contrast images or stage coordinates.
+
 ### 6.2 `process_microscopy.py`
 
 The pipeline. **Self-sufficient by design** — no import from `review/`,

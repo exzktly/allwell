@@ -21,6 +21,7 @@ import csv
 import json
 import math
 import threading
+import zipfile
 from datasets.core.containers import container_dest, publish_container
 from util.json_write import write_json_atomic
 from collections.abc import Callable
@@ -534,6 +535,60 @@ def _verify(
         )
 
 
+def _ds2_members(container: Path) -> dict[str, int | None]:
+    """Dataset 2's image members: name -> CRC (``None`` for a folder's files)."""
+    members: dict[str, int | None] = {}
+    if container.is_dir():
+        for path in sorted(container.rglob("*")):
+            if path.is_file():
+                members[path.name] = None
+        return members
+    with zipfile.ZipFile(container) as archive:
+        for info in archive.infolist():
+            if not info.is_dir():
+                members[info.filename] = info.CRC
+    return members
+
+
+def _verify_raw(plan: MergePlan, dropped_members: dict[str, frozenset[str]]) -> None:
+    """The raw merge's check, made on the archives it wrote.
+
+    A raw dataset has no measurement rows to cross-check, so the evidence is
+    the images. Independently of the copy: list every dataset-2 member, work
+    out the name the merge should have given it, and require that name in the
+    destination archive carrying the same stored checksum — so a member that
+    went missing, kept its old name, or arrived as someone else's bytes is
+    caught rather than reported as a merge.
+    """
+    if dropped_members:
+        well, names = next(iter(dropped_members.items()))
+        raise ConcatError(
+            f"Verification failed: {sum(len(v) for v in dropped_members.values())} "
+            f"file(s) collided by name during the merge and were dropped (e.g. well "
+            f"{well}: {sorted(names)[0]!r}) — dataset 2's images did not all survive.")
+    checked = 0
+    for well, source in in_containers(plan.ds2).items():
+        dest_zip = plan.dest.in_dir / f"{well}.zip"
+        if not dest_zip.exists():
+            raise ConcatError(f"Verification failed: well {well} has no merged archive.")
+        with zipfile.ZipFile(dest_zip) as merged:
+            landed = {i.filename: i.CRC for i in merged.infolist() if not i.is_dir()}
+        for name, crc in _ds2_members(source).items():
+            if is_os_junk_member(name):
+                continue
+            expected, _rewrote = rewrite_member_name(
+                name, schema=plan.schema, channels=plan.channels,
+                offset_hours=plan.offset_hours, tp_format=plan.tp_format)
+            if expected not in landed or (crc is not None and landed[expected] != crc):
+                raise ConcatError(
+                    f"Verification failed: well {well}'s image {name!r} should be "
+                    f"{expected!r} in the merged archive and is "
+                    f"{'missing' if expected not in landed else 'different bytes'}.")
+            checked += 1
+    if not checked and (plan.wells_ds2_only or plan.wells_both):
+        raise ConcatError("Verification failed: no dataset 2 image reached the merged archives.")
+
+
 # ── top-level execution ──────────────────────────────────────────────────────
 def execute_plan(
     plan: MergePlan,
@@ -591,6 +646,8 @@ def execute_plan(
     )
     if plan.gap_warning:
         emit(f"Note: {plan.gap_warning}")
+    if plan.scale_warning:
+        emit(f"Note: {plan.scale_warning}")
     if plan.format_warning:
         emit(f"Note: {plan.format_warning}")
     for warning in plan.column_warnings:
@@ -630,7 +687,8 @@ def execute_plan(
     marker_path = plan.dest.root / IN_PROGRESS_MARKER
     marker_path.write_text("")
     plan.dest.in_dir.mkdir(parents=True, exist_ok=True)
-    plan.dest.out_dir.mkdir(parents=True, exist_ok=True)
+    if not plan.raw:
+        plan.dest.out_dir.mkdir(parents=True, exist_ok=True)
 
     in1, in2 = in_containers(plan.ds1), in_containers(plan.ds2)
     csv1, csv2 = out_csvs(plan.ds1), out_csvs(plan.ds2)
@@ -657,6 +715,11 @@ def execute_plan(
         fraction = WellFraction(report_fraction, well, _SLICES_PER_WELL)
         unmatched_in, in_names, dropped_in, junk_in = merge_input(
             plan, well, in1.get(well), in2.get(well), fraction=fraction)
+        if plan.raw:
+            fraction.skip(_QC_SLICES)
+            fraction.finish()
+            return (well, WellCsvStats(), unmatched_in, dropped_in, [],
+                    bool(dropped_in), junk_in)
         unmatched_qc, dropped_qc, junk_qc = merge_qc_zip(
             plan, well, zip1.get(well), zip2.get(well), fraction=fraction)
         stats = merge_measurements(plan, well, csv1.get(well), csv2.get(well), ds2_in_names=in_names)
@@ -713,6 +776,14 @@ def execute_plan(
         )
 
     emit("Verifying the merged output before finishing…")
+    if plan.raw:
+        _verify_raw(plan, dropped_members)
+        marker_path.unlink(missing_ok=True)
+        emit("Raw merge complete: images only, to be analysed once as one plate.")
+        return (
+            f"Concatenated {len(all_wells)} well(s) of raw images into {plan.dest.root} "
+            f"(dataset 2 shifted +{plan.offset_hours:g}h)."
+        )
     _verify(plan, well_stats, dropped_members)
 
     _merge_cell_overrides(plan, emit)

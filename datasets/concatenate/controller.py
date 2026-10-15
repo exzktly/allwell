@@ -18,6 +18,7 @@ from datasets.core.dataset_paths import shorten_headline
 from datasets.concatenate.concatenate_compute import destination_has_marker
 from datasets.concatenate.view import ConcatenatePage
 from datasets.concatenate.worker import ConcatenateWorker
+from datasets.concatenate.raw_compute import is_raw_dataset
 from datasets.core.tool_controller import DestinationToolController
 
 
@@ -114,7 +115,11 @@ class ConcatenateController(DestinationToolController):
         # path buried in a sentence — the log line above (and the tooltip)
         # keeps the untouched original.
         self.page.dashboard.set_done(shorten_headline(summary, dest_root), tooltip=summary)
-        self.page.show_open_in_review(dest_root)
+        if is_raw_dataset(dest_root):
+            # Nothing for Review to open yet: a raw plate is analysed first.
+            self.page.append_log("Raw images only — analyse this folder in the Analyze tab.")
+        else:
+            self.page.show_open_in_review(dest_root)
         self._last_result = (True, summary, dest_root)
 
     def _on_failed(self, message: str) -> None:

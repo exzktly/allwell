@@ -43,6 +43,7 @@ from datasets.concatenate.concatenate_compute import (
     gap_preview,
 )
 from datasets.concatenate.dashboard import ConcatDashboard
+from datasets.concatenate.raw_compute import is_raw_dataset
 from datasets.core.dataset_fields import is_dataset, is_free_destination
 from datasets.core.dataset_fields import promote_open_button
 
@@ -50,7 +51,9 @@ from datasets.core.dataset_fields import promote_open_button
 
 
 
-_is_dataset = is_dataset
+def _is_dataset(root: Path) -> str:
+    """This page's dataset rule: the shared one, or a raw dataset (``in/`` only)."""
+    return "" if is_raw_dataset(root) else is_dataset(root)
 
 
 def _is_destination(root: Path) -> str:
@@ -111,7 +114,9 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         blurb = QLabel(
             "Append dataset 2 onto dataset 1. The two datasets should be the "
             "same plate imaged in separate sessions; dataset 2's timepoints are "
-            "relabelled to continue after dataset 1's last timepoint. The merged "
+            "relabelled to continue after dataset 1's last timepoint. Both can be "
+            "analysed datasets, or both raw (converted images with no analysis "
+            "yet — merge those first, then analyse the plate once). The merged "
             "result is written to the destination folder — both originals are "
             "left untouched.",
             self,

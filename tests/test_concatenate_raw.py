@@ -1,0 +1,234 @@
+"""Concatenating raw datasets: converted plates nobody has analysed yet.
+
+The fixture is a real converter-shaped plate (``in/<WELL>.zip`` holding
+``<exp>_<channel>_<well>_<field>_<timepoint>.tif``, nothing under ``out/``).
+Every assertion is made on the archives the merge wrote, because that is all a
+raw dataset is.
+"""
+
+from __future__ import annotations
+
+import zipfile
+
+import pytest
+
+from datasets.concatenate import apply
+from datasets.concatenate import concatenate_compute as cc
+from datasets.concatenate.raw_compute import is_raw_dataset
+
+
+def _raw(root, *, wells=("A01",), timepoints=("0h",), fields=("f0", "f1"),
+         channels=("DAPI", "GFP"), exp="E", extra=None):
+    (root / "in").mkdir(parents=True)
+    for well in wells:
+        with zipfile.ZipFile(root / "in" / f"{well}.zip", "w") as archive:
+            for tp in timepoints:
+                for field in fields:
+                    for channel in channels:
+                        archive.writestr(f"{exp}_{channel}_{well}_{field}_{tp}.tif",
+                                         f"{well}{field}{channel}{tp}".encode())
+            for name, data in (extra or {}).items():
+                archive.writestr(name, data)
+    return root
+
+
+def _members(dest, well="A01"):
+    with zipfile.ZipFile(dest / "in" / f"{well}.zip") as archive:
+        return sorted(archive.namelist())
+
+
+def _merge(tmp_path, **kwargs):
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", **kwargs)
+    return plan, apply.execute_plan(plan)
+
+
+def test_two_raw_datasets_merge_into_a_raw_destination_with_dataset_2_shifted(tmp_path):
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    plan, summary = _merge(tmp_path, gap_hours=24.0)
+    assert plan.raw is True and "raw" in summary
+    names = _members(tmp_path / "dest")
+    assert names == sorted(f"E_{c}_A01_{f}_{t}.tif" for c in ("DAPI", "GFP")
+                           for f in ("f0", "f1") for t in ("0h", "24h"))
+    assert not (tmp_path / "dest" / "out").exists()      # no analysis output, no sidecar
+
+
+def test_each_image_keeps_its_own_bytes_under_the_shifted_name(tmp_path):
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    _merge(tmp_path, gap_hours=24.0)
+    with zipfile.ZipFile(tmp_path / "dest" / "in" / "A01.zip") as archive:
+        assert archive.read("E_GFP_A01_f1_0h.tif") == b"A01f1GFP0h"          # dataset 1's
+        assert archive.read("E_GFP_A01_f1_24h.tif") == b"A01f1GFP0h"         # dataset 2's, renamed
+        assert archive.getinfo("E_GFP_A01_f1_0h.tif").file_size == archive.getinfo(
+            "E_GFP_A01_f1_24h.tif").file_size
+
+
+def test_wells_held_by_one_dataset_only_are_carried_across(tmp_path):
+    _raw(tmp_path / "d1", wells=["A01", "B02"], timepoints=["0h"])
+    _raw(tmp_path / "d2", wells=["A01", "C03"], timepoints=["0h"])
+    plan, _ = _merge(tmp_path, gap_hours=24.0)
+    assert (plan.wells_ds1_only, plan.wells_ds2_only, plan.wells_both) == (("B02",), ("C03",), ("A01",))
+    assert _members(tmp_path / "dest", "B02")[0].endswith("_0h.tif")
+    assert _members(tmp_path / "dest", "C03")[0].endswith("_24h.tif")   # shifted, though alone
+
+
+def test_a_single_timepoint_dataset_1_needs_no_interval_when_raw(tmp_path):
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    with pytest.raises(cc.ConcatError, match="enter the time gap"):
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest")
+    assert cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest",
+                               gap_hours=6.0).offset_hours == 6.0
+
+
+def test_a_raw_dataset_beside_an_analysed_one_is_refused_naming_which(tmp_path):
+    from tests.fixtures.dataset_builder import build_dataset
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    build_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0h", "24h"])
+    with pytest.raises(cc.ConcatError, match="dataset 1 is a raw"):
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=6.0)
+    with pytest.raises(cc.ConcatError, match="dataset 2 is a raw"):
+        cc.build_merge_plan(tmp_path / "d2", tmp_path / "d1", tmp_path / "dest", gap_hours=6.0)
+
+
+def test_filenames_laid_out_differently_are_not_joined(tmp_path):
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    # Same plate, but the channel and well slots swapped: a different schema.
+    (tmp_path / "d2" / "in").mkdir(parents=True)
+    with zipfile.ZipFile(tmp_path / "d2" / "in" / "A01.zip", "w") as archive:
+        for f in ("f0", "f1"):
+            for c in ("DAPI", "GFP"):
+                archive.writestr(f"A01_E_{c}_{f}_0h.tif", b"x")
+    with pytest.raises(cc.ConcatError, match="not laid out the same way|schema"):
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=6.0)
+
+
+def test_names_that_do_not_say_where_the_timepoint_is_are_refused(tmp_path):
+    (tmp_path / "d1" / "in").mkdir(parents=True)
+    with zipfile.ZipFile(tmp_path / "d1" / "in" / "A01.zip", "w") as archive:
+        archive.writestr("picture1.tif", b"x")
+        archive.writestr("picture2.tif", b"x")
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    with pytest.raises(cc.ConcatError, match="dataset 1"):
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=6.0)
+
+
+def test_a_dataset_with_analysis_output_is_not_raw(tmp_path):
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    (tmp_path / "d1" / "out").mkdir()
+    assert is_raw_dataset(tmp_path / "d1") is True        # empty out/
+    (tmp_path / "d1" / "out" / "x.csv").write_text("a")
+    assert is_raw_dataset(tmp_path / "d1") is False
+
+
+def test_a_dropped_image_fails_verification_rather_than_passing_as_a_merge(tmp_path):
+    _raw(tmp_path / "d1", timepoints=["0h"], extra={"notes.txt": b"one"})
+    _raw(tmp_path / "d2", timepoints=["0h"], extra={"notes.txt": b"two"})
+    with pytest.raises(cc.ConcatError, match="Verification failed"):
+        _merge(tmp_path, gap_hours=24.0)
+
+
+# ── through the real page ────────────────────────────────────────────────────
+@pytest.fixture(scope="module")
+def qapp():
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication([])
+
+
+def test_the_page_accepts_raw_datasets_merges_them_and_offers_no_review(qapp, tmp_path):
+    from datasets.concatenate.controller import ConcatenateController
+    from tests._datasets_worker import run_worker_to_completion
+
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    ctrl = ConcatenateController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._ds1_field.set_path(str(tmp_path / "d1"))
+    page._ds2_field.set_path(str(tmp_path / "d2"))
+    page._dest_field.set_path(str(tmp_path / "dest"))
+    for field in (page._ds1_field, page._ds2_field, page._dest_field):
+        field.changed.emit()
+    assert page._ds1_field.is_valid() and page._ds2_field.is_valid()
+    assert page._run_btn.isEnabled() is False               # needs a gap
+
+    page._gap_edit.setText("24h")
+    assert page._run_btn.isEnabled() is True
+    page.runRequested.emit()
+    run_worker_to_completion(ctrl)
+    assert _members(tmp_path / "dest")[-1].endswith("_24h.tif")
+    assert page._open_btn.isHidden()                        # Review has nothing to open
+    ctrl.shutdown()
+
+
+def test_a_schema_the_names_only_half_determine_is_refused_not_guessed(tmp_path):
+    """``well:timepoint`` names carry a timepoint slot but no channel: the
+    inference is not confident, and shifting by a guess could rename wrongly."""
+    (tmp_path / "d1" / "in").mkdir(parents=True)
+    with zipfile.ZipFile(tmp_path / "d1" / "in" / "A01.zip", "w") as archive:
+        archive.writestr("A01_0h.tif", b"x")
+        archive.writestr("A01_24h.tif", b"x")
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    with pytest.raises(cc.ConcatError, match="don't determine a schema"):
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=6.0)
+
+
+def test_verification_catches_a_member_that_arrived_as_someone_elses_bytes(tmp_path):
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    plan, _ = _merge(tmp_path, gap_hours=24.0)
+    dest_zip = tmp_path / "dest" / "in" / "A01.zip"
+    with zipfile.ZipFile(dest_zip) as archive:
+        members = {n: archive.read(n) for n in archive.namelist()}
+    members["E_GFP_A01_f0_24h.tif"] = b"not dataset 2's bytes"
+    with zipfile.ZipFile(dest_zip, "w") as archive:
+        for name, data in members.items():
+            archive.writestr(name, data)
+    with pytest.raises(cc.ConcatError, match="different bytes"):
+        apply._verify_raw(plan, {})
+
+
+# ── differing tile plans and pixel sizes (M8) ────────────────────────────────
+def _scaled_record(root, token, *, pixel_um, tile_px, start):
+    from util.acquisition_record import new_record, new_timepoint, write_record
+    record = new_record()
+    entry = new_timepoint(started_at=start)
+    entry["pixel_size_um"] = {"x": pixel_um, "y": pixel_um}
+    entry["tile_size_px"] = {"x": tile_px, "y": tile_px}
+    record["timepoints"][token] = entry
+    record["tiles"] = [{"well": "A01", "field": field, "timepoint": token,
+                        "mosaic_xy_px": [i * tile_px, 0], "stage_xy_um": None}
+                       for i, field in enumerate(("f0", "f1"))]
+    write_record(root, record)
+
+
+def test_acquisitions_with_different_tile_plans_merge_without_complaint(tmp_path):
+    _raw(tmp_path / "d1", timepoints=["0h"], fields=("f0", "f1"))
+    _raw(tmp_path / "d2", timepoints=["0h"], fields=("f0", "f1"))
+    _scaled_record(tmp_path / "d1", "0h", pixel_um=0.65, tile_px=2048, start="2026-03-01T09:00:00+00:00")
+    _scaled_record(tmp_path / "d2", "0h", pixel_um=0.65, tile_px=1024, start="2026-03-02T09:00:00+00:00")
+    plan, _ = _merge(tmp_path)                       # the gap comes from the records: 24h
+    assert (plan.gap_hours, plan.gap_source) == (24.0, cc.GAP_RECORDED)
+    assert plan.scale_warning == ""                  # same pixel size; a smaller tile is fine
+    assert _members(tmp_path / "dest")[-1].endswith("_24h.tif")
+
+
+def test_a_different_pixel_size_warns_in_the_preview_and_the_plan_but_still_merges(tmp_path):
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    _scaled_record(tmp_path / "d1", "0h", pixel_um=0.65, tile_px=2048, start="2026-03-01T09:00:00+00:00")
+    _scaled_record(tmp_path / "d2", "0h", pixel_um=1.30, tile_px=2048, start="2026-03-02T09:00:00+00:00")
+    preview = cc.gap_preview(tmp_path / "d1", tmp_path / "d2", "")
+    assert "different pixel sizes" in preview.warning and "0.65" in preview.warning and "1.3" in preview.warning
+    assert preview.error == ""
+    plan, _ = _merge(tmp_path)
+    assert "1.3" in plan.scale_warning
+
+
+def test_an_unrecorded_pixel_size_is_not_a_mismatch(tmp_path):
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    _scaled_record(tmp_path / "d1", "0h", pixel_um=0.65, tile_px=2048, start="2026-03-01T09:00:00+00:00")
+    assert cc.gap_preview(tmp_path / "d1", tmp_path / "d2", "24h").warning == ""

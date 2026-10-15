@@ -56,6 +56,9 @@ from datasets.core.dataset_paths import (
     known_channel_tokens as _known_channel_tokens,
 )
 from datasets.core.member_names import rewrite_member_field
+from datasets.concatenate.raw_compute import (
+    check_raw_compatible, is_raw_dataset, raw_info, raw_paths,
+)
 
 # Written at the start of a concatenation and removed only after the merged
 # sidecar is written — the sole authority for "a previous attempt into this
@@ -381,6 +384,41 @@ def recorded_gap_hours(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict,
     return round(hours * 60) / 60, ""
 
 
+#: Two pixel sizes this far apart (relative) are different magnifications.
+_SCALE_TOLERANCE = 0.01
+
+
+def scale_warning(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict, info2: dict) -> str:
+    """A sentence when the two acquisitions were taken at different pixel sizes.
+
+    Compares dataset 1's last timepoint with dataset 2's first, as the
+    acquisition records state them. Different tile plans are fine (each
+    timepoint keeps its own positions), but intensities measured at two
+    magnifications may not compare, so the page says so. ``""`` when the
+    sizes agree or either is not recorded: an unknown size is not a mismatch.
+    """
+    def size(ds: DatasetPaths, token: str) -> tuple[float | None, float | None] | None:
+        try:
+            record = read_record(ds.root)
+        except AcquisitionRecordError:
+            return None
+        entry = ((record or {}).get("timepoints") or {}).get(token) or {}
+        scale = entry.get("pixel_size_um") or {}
+        return scale.get("x"), scale.get("y")
+
+    first = size(ds1, _timepoint_hours(info1, label="dataset 1")[-1][0])
+    second = size(ds2, _timepoint_hours(info2, label="dataset 2")[0][0])
+    if not first or not second:
+        return ""
+    for axis, a, b in (("x", first[0], second[0]), ("y", first[1], second[1])):
+        if a is not None and b is not None and abs(a - b) > _SCALE_TOLERANCE * max(a, b):
+            return (f"The two datasets were imaged at different pixel sizes "
+                    f"({axis}: {a:g} and {b:g} µm per pixel). Their positions are "
+                    "kept as recorded, but intensities taken at different "
+                    "magnifications may not be comparable.")
+    return ""
+
+
 def default_gap(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict,
                 info2: dict) -> GapDefault:
     """Pre-fill order: the recorded gap, then dataset 1's interval, then nothing."""
@@ -420,6 +458,33 @@ def choose_gap(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict, info2: dict,
     return GapChoice(entered_hours, GAP_ENTERED, recorded, warning)
 
 
+def open_pair(ds1_root: Path | str, ds2_root: Path | str):
+    """Resolve both datasets and read their sidecars: ``(ds1, ds2, info1, info2, raw)``.
+
+    Two analysed datasets, or two raw ones (``in/`` only, schema read from the
+    archives). A raw dataset beside an analysed one is refused: with the
+    analysed one first its outputs would have to be kept and the raw one
+    analysed afterwards (not supported yet), and with the raw one first the
+    earliest timepoints would be left unanalysed beneath analysed later ones.
+    """
+    raw1, raw2 = is_raw_dataset(ds1_root), is_raw_dataset(ds2_root)
+    if raw1 != raw2:
+        raw_label = "dataset 1" if raw1 else "dataset 2"
+        other = "dataset 2" if raw1 else "dataset 1"
+        raise ConcatError(
+            f"{raw_label} is a raw (not yet analysed) dataset and {other} is analysed. "
+            "Concatenate two raw datasets, or two analysed ones; to analyse the "
+            "merged plate once, concatenate the raw datasets first.")
+    if raw1:
+        ds1, ds2 = raw_paths(ds1_root), raw_paths(ds2_root)
+        info1 = raw_info(ds1, label="dataset 1", error_cls=ConcatError)
+        info2 = raw_info(ds2, label="dataset 2", error_cls=ConcatError)
+        return ds1, ds2, info1, info2, True
+    ds1 = resolve_dataset(ds1_root, label="dataset 1")
+    ds2 = resolve_dataset(ds2_root, label="dataset 2")
+    return ds1, ds2, read_info(ds1, label="dataset 1"), read_info(ds2, label="dataset 2"), False
+
+
 @dataclass(frozen=True)
 class GapPreview:
     """What the page shows for the time-gap field, for two datasets and a typed gap."""
@@ -440,10 +505,7 @@ def gap_preview(ds1_root: Path | str, ds2_root: Path | str, text: str) -> GapPre
     is none.
     """
     try:
-        ds1 = resolve_dataset(ds1_root, label="dataset 1")
-        ds2 = resolve_dataset(ds2_root, label="dataset 2")
-        info1 = read_info(ds1, label="dataset 1")
-        info2 = read_info(ds2, label="dataset 2")
+        ds1, ds2, info1, info2, _raw = open_pair(ds1_root, ds2_root)
         default = default_gap(ds1, ds2, info1, info2)
         default_text = format_gap(default.hours) if default.hours is not None else ""
         shown = dict(default_text=default_text, default_source=default.source,
@@ -454,11 +516,13 @@ def gap_preview(ds1_root: Path | str, ds2_root: Path | str, text: str) -> GapPre
         except ConcatError as exc:
             return GapPreview(**shown, error=str(exc))
         offset, _last, _interval = compute_offset(info1, info2, gap_hours=choice.hours)
+        scale = scale_warning(ds1, ds2, info1, info2)
         fmt, _warn = detect_timepoint_format(
             [str(t) for t in info1.get("available_timepoints", []) or []])
         labels = tuple(remap_timepoint_label(str(t).strip(), offset, fmt)
                        for t in info2.get("available_timepoints", []) or [] if str(t).strip())
-        return GapPreview(**shown, labels=labels, warning=choice.warning or "")
+        warning = " ".join(w for w in (choice.warning or "", scale) if w)
+        return GapPreview(**shown, labels=labels, warning=warning)
     except ConcatError as exc:
         return GapPreview(error=str(exc))
 
@@ -602,6 +666,10 @@ class MergePlan:
     dest_is_restart: bool = False       # dest has leftovers from an earlier, unfinished attempt
     format_warning: str | None = None
     gap_warning: str | None = None
+    scale_warning: str = ""
+    #: Both datasets are raw (``in/`` only): the merge writes a raw ``in/`` and
+    #: no ``out/`` at all, and is verified on its images rather than on rows.
+    raw: bool = False
     column_warnings: tuple[str, ...] = ()
     #: User-side blocks dataset 2 carried that the merged sidecar does not.
     #: ``merge_info`` takes these from dataset 1 wholesale — the documented
@@ -620,8 +688,7 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
     (:func:`default_gap`). Raises :class:`ConcatError` (user-facing message) on any incompatibility.
     Reads only — the destination is not created or cleared here.
     """
-    ds1 = resolve_dataset(ds1_root, label="dataset 1")
-    ds2 = resolve_dataset(ds2_root, label="dataset 2")
+    ds1, ds2, info1, info2, raw = open_pair(ds1_root, ds2_root)
     dest_root = Path(dest_root)
     dest = DatasetPaths(root=dest_root, in_dir=dest_root / "in", out_dir=dest_root / "out")
 
@@ -650,9 +717,10 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         )
     dest_is_restart = destination_is_failed_run(dest)
 
-    info1 = read_info(ds1, label="dataset 1")
-    info2 = read_info(ds2, label="dataset 2")
-    check_compatible(info1, info2)
+    if raw:
+        check_raw_compatible(info1, info2, error_cls=ConcatError)
+    else:
+        check_compatible(info1, info2)
 
     tp_index = int(info1.get("tp_index", -1))
     if tp_index < 0:
@@ -664,7 +732,7 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
     _refuse_well_collisions(ds1, "Dataset 1")
     _refuse_well_collisions(ds2, "Dataset 2")
 
-    if has_folder_mode_output(ds1) or has_folder_mode_output(ds2):
+    if not raw and (has_folder_mode_output(ds1) or has_folder_mode_output(ds2)):
         which = "dataset 1" if has_folder_mode_output(ds1) else "dataset 2"
         raise ConcatError(
             f"{which} stores its QC images as per-well folders (out/<WELL>/) "
@@ -679,7 +747,7 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         [str(t) for t in info1.get("available_timepoints", []) or []]
     )
     merged_info = merge_info(info1, info2, offset_hours=offset, tp_format=tp_format)
-    ds2_blocks_dropped = tuple(
+    ds2_blocks_dropped = () if raw else tuple(
         name for name in ("sample_definitions", "notes", "ratios", "cell_gating")
         if (info2 or {}).get(name)
     )
@@ -703,12 +771,14 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         gap_hours=gap.hours,
         gap_source=gap.source,
         gap_warning=gap.warning,
+        scale_warning=scale_warning(ds1, ds2, info1, info2),
         wells_ds1_only=tuple(sorted(wells1 - wells2)),
         wells_ds2_only=tuple(sorted(wells2 - wells1)),
         ds2_blocks_dropped=ds2_blocks_dropped,
         wells_both=wells_both,
+        raw=raw,
         merged_info=merged_info,
         dest_is_restart=dest_is_restart,
         format_warning=format_warning,
-        column_warnings=column_warnings(ds1, ds2, wells_both),
+        column_warnings=() if raw else column_warnings(ds1, ds2, wells_both),
     )

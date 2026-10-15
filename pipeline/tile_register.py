@@ -197,7 +197,7 @@ def _padded_cumsum(a):
     return out
 
 
-def _window_scores(f, g, ex: int, ey: int, radius: int):
+def _window_scores(f, g, ex: int, ey: int, radius: int) -> tuple[np.ndarray | None, bool]:
     """Normalised cross-correlation of the overlap of *f* and *g* at every integer
     offset of *g*'s origin in ``[ex-radius, ex+radius] x [ey-radius, ey+radius]``.
 
@@ -208,7 +208,9 @@ def _window_scores(f, g, ex: int, ey: int, radius: int):
     pitch, and a template that must stay inside it at every shift of up to half
     a pitch would not fit at all. The sums over the shared pixels come from
     summed-area tables; only ``sum(f * g)`` needs an FFT. Offsets whose
-    overlap is thinner than :data:`_MIN_TEMPLATE_PX` on either axis score NaN.
+    overlap is thinner than :data:`_MIN_TEMPLATE_PX` on either axis, and
+    offsets whose shared pixels are flat, score NaN. Also returns whether any
+    offset had enough overlap, so a caller can tell *too small* from *flat*.
     """
     from scipy.signal import fftconvolve
 
@@ -219,7 +221,7 @@ def _window_scores(f, g, ex: int, ey: int, radius: int):
     gx0, gx1 = max(0, -(ex + radius)), min(wg, wf - (ex - radius))
     gy0, gy1 = max(0, -(ey + radius)), min(hg, hf - (ey - radius))
     if fx1 <= fx0 or fy1 <= fy0 or gx1 <= gx0 or gy1 <= gy0:
-        return None
+        return None, False
     fc = f[fy0:fy1, fx0:fx1].astype(np.float64)
     gc = g[gy0:gy1, gx0:gx1].astype(np.float64)
     hfc, wfc = fc.shape
@@ -250,7 +252,7 @@ def _window_scores(f, g, ex: int, ey: int, radius: int):
     level = 1e-6 * (sf2 / np.maximum(n, 1) + sg2 / np.maximum(n, 1)) + 1e-12
     informative = (var_f / np.maximum(n, 1) > level) & (var_g / np.maximum(n, 1) > level)
     score[~ok | ~informative] = np.nan
-    return score
+    return score, bool(ok.any())
 
 
 def correlate_overlap(image_i, image_j, expected_offset_px, *, search_radius: int,
@@ -287,9 +289,12 @@ def correlate_overlap(image_i, image_j, expected_offset_px, *, search_radius: in
     # tile pixels, so the radius shrinks by that much to keep every offset tried inside
     # +-search_radius of the recorded one (the confinement is the point of the window).
     r = max(int(math.floor((search_radius - ds / 2) / ds)), 0) if ds > 1 else int(search_radius)
-    score = _window_scores(a, b, ex, ey, r)
-    if score is None or not np.isfinite(score).any():
+    score, geometry_ok = _window_scores(a, b, ex, ey, r)
+    if score is None or not geometry_ok:
         return OverlapShift(False, f"The overlap is too small to correlate within ±{search_radius} px",
+                            search_radius_px=int(search_radius))
+    if not np.isfinite(score).any():
+        return OverlapShift(False, "The overlap holds no structure to match (flat or constant)",
                             search_radius_px=int(search_radius))
     filled = np.where(np.isfinite(score), score, -np.inf)
     py, px = np.unravel_index(int(np.argmax(filled)), score.shape)

@@ -335,8 +335,12 @@ def test_an_overlap_no_wider_than_the_search_radius_is_handled_not_crashed_on():
 
 
 def test_a_flat_or_non_finite_tile_is_refused_for_the_right_reason():
-    flat = np.full((200, 200), 65000.0, dtype=np.float32)
-    assert correlate_overlap(flat, flat, (120, 0), search_radius=20).ok is False
+    # 65535.3 is not exactly representable, so the squared sums carry rounding noise that an
+    # absolute variance threshold reads as structure and scores (a correlation of 1.0).
+    for level in (1.0, 65535.3):
+        flat = np.full((300, 300), level, dtype=np.float32)
+        result = correlate_overlap(flat, flat, (200, 0), search_radius=20)
+        assert result.ok is False and result.peak is None and "no structure" in result.reason
     noisy = _field(4, (200, 200))
     shifted = noisy.copy()
     shifted[100, 100] = np.nan
@@ -377,17 +381,32 @@ def test_the_overlap_offset_is_refined_below_a_pixel_in_the_right_direction(true
     assert np.allclose(result.correction_px, true_shift, atol=0.15)
 
 
-def test_downsampling_never_widens_the_search_past_the_stated_radius():
+@pytest.mark.parametrize("ds, radius, expected_x, expected_y", [
+    (8, 40, 803.0, 3.0), (8, 40, 797.0, -5.0), (5, 41, 803.4, 2.6), (6, 60, 1001.0, 0.0), (2, 17, 333.5, 1.5)])
+def test_downsampling_never_widens_the_search_past_the_stated_radius(monkeypatch, ds, radius, expected_x, expected_y):
+    import pipeline.tile_register as register
+    seen = []
+    real = register._window_scores
+    monkeypatch.setattr(register, "_window_scores", lambda f, g, ex, ey, r: (seen.append((ex, ey, r)), real(f, g, ex, ey, r))[1])
+    whole = _field(6, (300, 1500), sigma=4.0)
+    correlate_overlap(whole[:, :1100], whole[:, 800:1300], (expected_x, expected_y), search_radius=radius,
+                      downsample=ds)
+    (ex, ey, r), = seen
+    # The farthest offset tried, in tile pixels, along each axis: the window's centre has been
+    # rounded to the coarse grid, so the radius must leave room for that rounding.
+    assert abs(ex * ds - expected_x) + r * ds <= radius
+    assert abs(ey * ds - expected_y) + r * ds <= radius
+    assert r >= 1 or radius < 2 * ds                        # and it is not shrunk to nothing needlessly
+
+
+def test_downsampling_still_finds_a_shift_inside_the_window():
     from scipy import ndimage
-    whole = _field(6, (700, 1400), sigma=4.0)
+    whole = _field(6, (500, 1500), sigma=4.0)
     a = whole[:, :1100]
-    radius, expected_x = 40, 1003                         # 1003 is not a multiple of 8
-    for step in (-50, 50):                                # the true shift is outside the window
-        j = ndimage.shift(whole, (0, -(expected_x + step)), order=1, mode="nearest")[:, :400]
-        result = correlate_overlap(a, j, (expected_x, 0), search_radius=radius, downsample=8)
-        if result.correction_px is not None:
-            assert abs(result.correction_px[0]) <= radius + 1e-9
-            assert abs(result.correction_px[1]) <= radius + 1e-9
+    j = ndimage.shift(whole, (0, -(803 + 20)), order=1, mode="nearest")[:, :500]
+    inside = correlate_overlap(a, j, (803, 0), search_radius=60, downsample=8)
+    assert inside.ok, inside.reason
+    assert inside.correction_px[0] == pytest.approx(20, abs=4)
 
 
 def test_a_mis_recorded_tile_does_not_show_as_a_correction_on_every_other_tile():

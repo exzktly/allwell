@@ -169,12 +169,13 @@ class _PreviewWorker(QThread):
             import tempfile
 
             from pipeline.nanowell_preview import preview_timepoint
+            from util.schema import parse_schema
 
             job = self._job
             with tempfile.TemporaryDirectory(prefix="allwell-preview-") as scratch:
                 result = preview_timepoint(
                     job["zip"], job["well"], job["timepoint"], job["settings"], grouper=pm.find_image_groups_in_zip,
-                    parse=pm.parse_filename, schema=pm.parse_schema(job["schema"]), sep=job["sep"],
+                    parse=pm.parse_filename, schema=parse_schema(job["schema"]), sep=job["sep"],
                     phase_token=job["phase_token"], scratch=Path(scratch))
         except Exception as exc:          # a worker has no event loop to raise into; the window says what happened
             self.failed.emit(f"{type(exc).__name__}: {exc}")

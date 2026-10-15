@@ -60,6 +60,7 @@ class ConcatenateController(DestinationToolController):
             self.page.dataset1_path(),
             self.page.dataset2_path(),
             self.page.destination_path(),
+            gap_text=self.page.gap_text_if_entered(),
         )
         worker.logLine.connect(self.page.append_log)
         worker.wellsPlanned.connect(self._on_wells_planned)
@@ -77,6 +78,10 @@ class ConcatenateController(DestinationToolController):
             "dataset1": self.page.dataset1_path(),
             "dataset2": self.page.dataset2_path(),
             "destination": self.page.destination_path(),
+            # The text only when the user changed it: a queued run that left
+            # the pre-filled default alone should take whatever the default
+            # is when it runs, as a run started now would.
+            "gap": self.page.gap_text_if_entered(),
         }
 
     def _on_queue_requested(self) -> None:
@@ -87,6 +92,7 @@ class ConcatenateController(DestinationToolController):
         self.page.set_dataset1_path(spec.get("dataset1", ""))
         self.page.set_dataset2_path(spec.get("dataset2", ""))
         self.page.set_destination_path(spec.get("destination", ""))
+        self.page.set_gap_text(spec.get("gap", ""))
 
     def start_from_queue(self, spec: dict) -> None:
         """A queued run is unattended by definition, so a destination that

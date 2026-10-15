@@ -15,7 +15,9 @@ from PySide6.QtCore import QThread, Signal
 
 from util.aw_safe import swallowed
 from datasets.concatenate.apply import execute_plan
-from datasets.concatenate.concatenate_compute import ConcatError, build_merge_plan
+from datasets.concatenate.concatenate_compute import (
+    ConcatError, build_merge_plan, parse_gap_hours,
+)
 
 
 class ConcatenateWorker(QThread):
@@ -31,16 +33,20 @@ class ConcatenateWorker(QThread):
     succeeded = Signal(str, str)   # (destination root, summary line)
     failed = Signal(str)           # user-facing error message
 
-    def __init__(self, ds1_root: str, ds2_root: str, dest_root: str, parent=None) -> None:
+    def __init__(self, ds1_root: str, ds2_root: str, dest_root: str,
+                 gap_text: str = "", parent=None) -> None:
         super().__init__(parent)
         self._ds1_root = ds1_root
         self._ds2_root = ds2_root
         self._dest_root = dest_root
+        self._gap_text = gap_text        # "" → the pre-filled default
 
     def run(self) -> None:  # noqa: D401 — QThread entry point
         try:
             self.logLine.emit("Validating datasets…")
-            plan = build_merge_plan(self._ds1_root, self._ds2_root, self._dest_root)
+            gap = parse_gap_hours(self._gap_text) if self._gap_text.strip() else None
+            plan = build_merge_plan(self._ds1_root, self._ds2_root, self._dest_root,
+                                    gap_hours=gap)
         except ConcatError as exc:
             self.failed.emit(str(exc))
             return

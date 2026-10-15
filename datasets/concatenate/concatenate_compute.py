@@ -420,6 +420,49 @@ def choose_gap(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict, info2: dict,
     return GapChoice(entered_hours, GAP_ENTERED, recorded, warning)
 
 
+@dataclass(frozen=True)
+class GapPreview:
+    """What the page shows for the time-gap field, for two datasets and a typed gap."""
+
+    default_text: str = ""                 # what to pre-fill; "" when there is no default
+    default_source: str | None = None      # GAP_RECORDED / GAP_INTERVAL / None
+    note: str = ""                         # why the default is absent or weaker
+    labels: tuple[str, ...] = ()           # dataset 2's timepoint labels after the merge
+    warning: str = ""                      # entered gap disagrees with the records
+    error: str = ""                        # the merge cannot proceed as typed
+
+
+def gap_preview(ds1_root: Path | str, ds2_root: Path | str, text: str) -> GapPreview:
+    """The default, the resulting labels and any warning, before anything is copied.
+
+    Reads only the two sidecars and acquisition records. *text* is the field's
+    contents; empty means "use the default", which is an error only when there
+    is none.
+    """
+    try:
+        ds1 = resolve_dataset(ds1_root, label="dataset 1")
+        ds2 = resolve_dataset(ds2_root, label="dataset 2")
+        info1 = read_info(ds1, label="dataset 1")
+        info2 = read_info(ds2, label="dataset 2")
+        default = default_gap(ds1, ds2, info1, info2)
+        default_text = format_gap(default.hours) if default.hours is not None else ""
+        shown = dict(default_text=default_text, default_source=default.source,
+                     note=default.note)
+        try:
+            entered = parse_gap_hours(text) if (text or "").strip() else None
+            choice = choose_gap(ds1, ds2, info1, info2, entered)
+        except ConcatError as exc:
+            return GapPreview(**shown, error=str(exc))
+        offset, _last, _interval = compute_offset(info1, info2, gap_hours=choice.hours)
+        fmt, _warn = detect_timepoint_format(
+            [str(t) for t in info1.get("available_timepoints", []) or []])
+        labels = tuple(remap_timepoint_label(str(t).strip(), offset, fmt)
+                       for t in info2.get("available_timepoints", []) or [] if str(t).strip())
+        return GapPreview(**shown, labels=labels, warning=choice.warning or "")
+    except ConcatError as exc:
+        return GapPreview(error=str(exc))
+
+
 # ── sidecar merge ────────────────────────────────────────────────────────────
 def _ordered_union(first, second) -> list:
     """Concatenate two sequences, dropping later duplicates, preserving order."""

@@ -14,7 +14,9 @@ if TYPE_CHECKING:
     from review.core.ui_helpers import EmptyReason
 
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
-from review.features.nanowell.series_compute import long_format, site_metrics
+from review.features.nanowell.distribution_compute import distribution_model, match_channel
+from review.features.nanowell.renderer import render_distribution, render_site_detail
+from review.features.nanowell.series_compute import long_format, site_metrics, site_series
 
 log = logging.getLogger("review")
 
@@ -230,9 +232,6 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
 
 def redraw(ctx) -> None:
     """Draw the current view from the computed metrics; never computes."""
-    from review.features.nanowell.distribution_compute import distribution_model, match_channel
-    from review.features.nanowell.renderer import render_distribution
-
     st = _state(ctx)
     fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")
     if st is None or fig is None or canvas is None:
@@ -274,10 +273,6 @@ def redraw(ctx) -> None:
 
 def redraw_detail(ctx) -> None:
     """Draw the site detail for the selected nanowells, or hide it when none is selected."""
-    from review.features.nanowell.distribution_compute import match_channel
-    from review.features.nanowell.renderer import render_site_detail
-    from review.features.nanowell.series_compute import site_series
-
     st = _state(ctx)
     fig, canvas = ctx.widgets.get_or_none("_nw_detail_fig"), ctx.widgets.get_or_none("_nw_detail_canvas")
     show = ctx.widgets.get_or_none("_nw_show_detail")

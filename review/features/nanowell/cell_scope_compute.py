@@ -10,11 +10,10 @@ acquisition and the per-cell CSV's hours need not equal it.
 from __future__ import annotations
 
 from review.features.export.cell_scope_compute import CellScope, scope_from_ctx
+from review.features.nanowell.controller import page_groups
 
 
 def cell_scope(ctx) -> CellScope | None:
-    from review.features.nanowell.controller import page_groups
-
     st = ctx.state.feature_slice("nanowell")
     if st is None or st.metrics is None:
         return None

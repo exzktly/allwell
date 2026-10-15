@@ -13,7 +13,10 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QComboBox, QLabel, QPushButton, QSplitter, QVBoxLayout, QWidget
 
+from review.features.export.service import export_cell_data_from
 from review.features.nanowell import controller as nwc
+from review.features.nanowell.cell_scope_compute import cell_scope
+from review.features.nanowell.distribution_compute import BASELINE_METRICS, METRICS, PER_NANOWELL, match_channel
 from widgets.control_band import ControlBand
 
 #: The views this build draws, in order (the rest of §3.10.3 is Section V's PR 10b).
@@ -57,9 +60,6 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         apply_plot_card_decorators, build_plot_save_menu, make_plot_with_right_dock, make_properties_button,
         wrap_with_empty_state,
     )
-    from review.features.export.service import export_cell_data_from
-    from review.features.nanowell.cell_scope_compute import cell_scope
-    from review.features.nanowell.distribution_compute import METRICS, PER_NANOWELL, match_channel
     from widgets.plot_card import PlotCard
     from widgets.segmented_control import SegmentedControl
 
@@ -191,8 +191,6 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             axis_seg.setToolTip(_AXIS_TIP + ("\n\n(Time is greyed: this metric has one value per nanowell.)"
                                              if per_nanowell else ""))
             _select(baseline_cb, st.baseline)
-            from review.features.nanowell.distribution_compute import BASELINE_METRICS
-
             baseline_cb.setEnabled(st.metric in BASELINE_METRICS)
             tp_cb.clear()
             tps = st.data.timepoints() if st.data else []

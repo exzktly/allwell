@@ -2055,6 +2055,8 @@ def test_required_files_list_is_what_we_promised():
         # segmenters/writers), re-imported at module top level.
         "pipeline/__init__.py",
         "pipeline/nanowell_lattice.py",
+        "pipeline/tile_grid.py",
+        "pipeline/tile_register.py",
         "pipeline/auto_threshold.py",
         # The post-run pass over that sampler — which estimator this
         # run's arguments call for, and the merge into

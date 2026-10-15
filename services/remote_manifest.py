@@ -117,6 +117,8 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # package or the run aborts with ModuleNotFoundError.
     "pipeline/__init__.py",
     "pipeline/nanowell_lattice.py",
+    "pipeline/tile_grid.py",
+    "pipeline/tile_register.py",
     "pipeline/auto_threshold.py",
     # The post-run pass over that sampler: which estimator this run's
     # arguments call for, and the merge into pipeline_info.json.

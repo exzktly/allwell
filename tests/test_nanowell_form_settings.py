@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from pipeline import nanowell_run as nr
-from tests._nanowell_run_fixture import PITCH, build_well, threshold_segmenter
+from tests._nanowell_run_fixture import build_well, threshold_segmenter
 
 SETTINGS = nr.NanowellSettings("100um")
 

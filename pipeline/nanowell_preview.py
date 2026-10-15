@@ -87,7 +87,8 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
         return result
     groups, needed = grouper(zip_path, phase_token, [], scratch, schema=schema, sep=sep)
     index = nt._tile_index(groups, parse, schema, sep)
-    if record is None:                                  # placed from the described grid, as the run would be
+    described = record is None
+    if described:                                       # placed from the described grid, as the run would be
         record = nt._pattern_record(well, zip_path, index, pattern)
     wanted = {Path(nuclear).name for (tp, _fov), (nuclear, _fl) in index.items() if tp == timepoint}
     if not wanted:
@@ -95,7 +96,8 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
         return result
     extract_zip(zip_path, scratch, members_to_extract=wanted & set(needed))
     images = {fov: nt._read_tif(nuclear) for (tp, fov), (nuclear, _fl) in index.items() if tp == timepoint}
-    located = nr.locate_timepoint(timepoint, record, well, images, settings)
+    located = nr.locate_timepoint(timepoint, record, well, images, settings,
+                                  expected_shape=tuple(pattern["grid"]) if described else None)
     result.status, result.reason = located.status, located.reason
     result.tile_count = len(images)
     plan = located.plan

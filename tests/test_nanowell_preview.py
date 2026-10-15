@@ -76,3 +76,14 @@ def test_a_refusal_is_a_status_with_a_reason_not_an_exception(plate, tmp_path):
                                 parse=pm.parse_filename, schema=SCHEMA, sep="_", phase_token="PHASE",
                                 scratch=tmp_path / "s2")
     assert missing.status == "error" and "99h" in missing.reason
+
+
+def test_test_detection_refuses_a_described_grid_the_well_s_fields_do_not_fill(tmp_path):
+    """The run places a described grid against its shape; Test detection must agree with it, or it shows a
+    smaller grid as fine and the plate-wide run then refuses every well."""
+    rendered, record = build_well(timepoint="0h")
+    root = _write_plate(tmp_path, rendered, record)
+    (root / "in" / "acquisition.json").unlink()
+    pattern = {"grid": [3, 2], "scan": "top-left-row", "overlap_percent": 10.0, "pixel_size_um": 4.3}
+    result = _preview((root / "in" / f"{WELL}.zip", tmp_path), tmp_path, pattern=pattern)
+    assert result.status == nr.INCOMPLETE_GRID

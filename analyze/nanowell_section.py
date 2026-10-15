@@ -111,8 +111,13 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_scan_cb = QComboBox(row)
         for value in SCAN_CHOICES:
             self._nanowell_scan_cb.addItem(value.replace("-", " "), userData=value)
-        row.layout().addWidget(self._nanowell_scan_cb)
-        row.layout().addStretch(1)
+        # "bottom right column serpentine" is wider than the sidebar's field column: the closed combo elides
+        # it, the list shows it whole, and the tooltip names the current choice.
+        self._nanowell_scan_cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._nanowell_scan_cb.setMinimumContentsLength(12)
+        self._nanowell_scan_cb.currentIndexChanged.connect(
+            lambda _i: self._nanowell_scan_cb.setToolTip(self._nanowell_scan_cb.currentText()))
+        row.layout().addWidget(self._nanowell_scan_cb, 1)
         grid_rows = [self._nanowell_edit_row(sec, *spec) for spec in _GRID_FIELDS[:1]]
         grid_rows.append(row.parentWidget())
         grid_rows += [self._nanowell_edit_row(sec, *spec) for spec in _GRID_FIELDS[1:]]

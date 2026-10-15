@@ -285,3 +285,30 @@ def test_a_site_nothing_covers_reports_how_much_of_it_is_missing():
     crop = fused_crop((0.0, 25.0), 20.0, {"only": (image, 0.0, 0.0)}, 1.0)
     assert crop.uncovered_fraction == pytest.approx(0.5, abs=0.06)
     assert np.isnan(crop.crop).any() and crop.attributed_tile == "only"
+
+
+def test_only_tiles_whose_rectangles_overlap_are_neighbours():
+    from pipeline.tile_register import neighbour_pairs
+    extent = (100.0, 100.0)
+    row = [TileObservation(n, (x, 0.0), extent) for n, x in (("A", 0.0), ("B", 90.0), ("C", 180.0))]
+    diagonal = TileObservation("D", (90.0, 90.0), extent)
+    apart = TileObservation("E", (400.0, 0.0), extent)
+    assert neighbour_pairs(row + [diagonal, apart]) == [
+        ("A", "B"), ("A", "D"), ("B", "C"), ("B", "D"), ("C", "D")]
+    # Touching edges share no area, so they are not neighbours either.
+    assert neighbour_pairs([TileObservation("P", (0.0, 0.0), extent),
+                            TileObservation("Q", (100.0, 0.0), extent)]) == []
+
+
+def test_a_crop_aligned_to_the_pixel_grid_is_the_image_itself():
+    # With the crop's sample points on pixel centres, bilinear sampling must return the pixels
+    # unchanged: this pins the pixel-centre convention against an absolute truth, which comparing
+    # two crops made by the same function cannot do.
+    image = np.random.default_rng(7).random((60, 80)).astype(np.float32)
+    left, top, px, n = 12.0, 7.0, 2.0, 21
+    i0, j0 = 30, 25                                          # centre pixel (column, row)
+    site = (left + (i0 + 0.5) * px, top + (j0 + 0.5) * px)
+    crop = fused_crop(site, n * px, {"t": (image, left, top)}, px)
+    assert crop.crop.shape == (n, n)
+    assert np.allclose(crop.crop, image[j0 - 10:j0 + 11, i0 - 10:i0 + 11], atol=1e-6)
+    assert crop.origin_um == pytest.approx((left + (i0 - 10 + 0.5) * px, top + (j0 - 10 + 0.5) * px))

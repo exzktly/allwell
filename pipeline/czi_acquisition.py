@@ -8,8 +8,8 @@ Raw plane timestamps stay transient and reduce to one clock per timepoint.
 from __future__ import annotations
 
 import copy
-import json
 import zipfile
+import logging
 from contextlib import contextmanager
 from datetime import datetime
 from itertools import groupby
@@ -18,9 +18,8 @@ from pathlib import Path
 from pipeline.czi_read import AcquisitionClock, CziReader
 from pipeline.timepoints import elapsed_hour_tokens
 from util.acquisition_record import (
-    AcquisitionRecordError, RECORD_FILENAME, new_record, new_timepoint,
+    AcquisitionRecordError, RECORD_FILENAME, new_record, new_timepoint, parse_record_text,
     publication_marker, write_record_file,
-    validate_record,
 )
 from util.image_exts import is_run_input_member
 from util.json_write import write_json_atomic
@@ -39,9 +38,10 @@ def shared_timepoint_tokens(timepoints):
     indices = sorted(timepoints)
     positional = {index: f"t{index}" for index in indices}
     if len(indices) == 1:
-        index = indices[0]
-        reason = "Some shared acquisition starts are unknown" if timepoints[index]["started_at"] is None else None
-        return {index: "0h"}, reason
+        # A single frame is named 0h by rule, with or without a clock: nothing about the name is
+        # degraded, so no reason is given. The unknown start itself stays visible as the
+        # timepoint's null started_at with its own start_reason.
+        return {indices[0]: "0h"}, None
     if any(timepoints[index]["started_at"] is None for index in indices):
         return positional, "Some shared acquisition starts are unknown"
     stamps = {index: datetime.fromisoformat(timepoints[index]["started_at"])
@@ -84,10 +84,7 @@ class RecordBuilder:
         self.aliases = {token: index for index, token in timepoint_plan}
         previous = self.directory / RECORD_FILENAME
         if previous.exists():
-            payload = json.loads(previous.read_text())
-            validation = validate_record(payload)
-            if not validation.ok:
-                raise AcquisitionRecordError("; ".join(validation.issues))
+            payload = parse_record_text(previous.read_text(encoding="utf-8"), source=str(previous))
             self.aliases.update({token: data["source_timepoint_index"]
                                  for token, data in payload["timepoints"].items()
                                  if data.get("source_timepoint_index") is not None})
@@ -302,10 +299,25 @@ def acquisition_publication(builder):
     write_json_atomic(marker, {"source_files": sorted(p.name for p in builder.layouts)})
     try:
         yield
-    finally:
-        record = builder.build()
-        write_record_file(path, record)
-        marker.unlink()
+    except BaseException:
+        # The conversion failed or was cancelled. Publish what was actually written so a resume
+        # can pick it up, but never let a failure to publish replace the error that is in
+        # flight: a cancel must still reach the caller as a cancel. If publication fails the
+        # marker stays, which is the state that says the conversion has to be resumed.
+        try:
+            _publish_record(builder, path, marker)
+        except Exception as failure:
+            logging.getLogger(__name__).warning(
+                "Could not publish the partial acquisition record (%s); the dataset stays marked "
+                "for resumption", failure)
+        raise
+    else:
+        _publish_record(builder, path, marker)
+
+
+def _publish_record(builder, path, marker):
+    write_record_file(path, builder.build())
+    marker.unlink()
 
 
 def prepare_publication(directory, source, well_map, plan, experiment, stamps, selected):

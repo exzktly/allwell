@@ -8356,8 +8356,11 @@ margin has no synthetic default or absolute-score calibration. A
 `FiducialCandidate(position, score, runner_up_score)` is accepted only when its
 score exceeds its runner-up by more than the supplied margin. Accepted evidence
 is snapped through the fitted phase in priority order: fiducial, array centre,
-then plate-rigid prediction. Three times the prediction's one-sigma uncertainty
-must be strictly below half a pitch. With no accepted source, the frozen
+then plate-rigid prediction. A fiducial or array centre more than a quarter
+pitch from every site is refused, with the distance in the reason, because the
+nearest site to a point that lies nowhere near one is arbitrary. Three times the
+prediction's one-sigma uncertainty for the target's *true origin*
+(`uncertainty_with_site`) must be strictly below half a pitch. With no accepted source, the frozen
 `OriginResolution` is `unaddressed` with a reason and no origin. Accepted
 results carry `origin_xy`, the method, and `agreement` (`agree`, `conflict`, or
 `single_source`). Disagreeing sources remain an explicit conflict; the
@@ -8386,17 +8389,27 @@ cannot be sent to the seam-fusion path.
 
 `fit_plate_rigid` fits a proper 2-D rotation and translation without scale or
 reflection to at least three common well origins. Pair hypotheses minimise the
-median radial residual. Consensus is refitted and reselected, permitting genuine
+median radial residual; the first cutoff takes its scale from the wells the winning
+pair did not define, because the pair fits exactly and its zero residuals would
+otherwise pull the median toward zero (with three wells it is always zero, which
+rejected the third well of every noisy fit). Consensus is refitted and reselected, permitting genuine
 wells to rejoin, with a conservative six-sigma radial cutoff whose scale is the
 Rayleigh median divided by `sqrt(2 ln 2)`. This avoids the small-sample trimming
 bias from treating radial residuals as signed Gaussian deviations. Frozen
 `PlateRigidFit` results include per-well residuals, consensus ids, RMS and failure
-reasons. `predict_origin` returns an `OriginPrediction` with position and a
-one-sigma radial prediction standard error. Residual variance is SSE/(2n−3);
-translation and rotational leverage give variance times `(2/n + distance²/spread)`.
-The seeded 500-fit simulation measures prediction error independently with 5 µm
-per-axis noise in each acquisition and checks near and far predictions within
-10% of empirical RMS while retaining all wells in nearly every fit. Separate
+reasons. `predict_origin` returns an `OriginPrediction` with position and two
+one-sigma radial numbers. `uncertainty` is the standard error of the transform at
+the point; residual variance is SSE/(2n−3); translation and rotational leverage
+give variance times `(2/n + distance²/spread)`. `uncertainty_with_site` adds the
+target well's own scatter about the rigid motion, variance times
+`(1 + 2/n + distance²/spread)`, and is the error of the target's true origin: near
+the centroid of twelve wells the first is under half of the second, and it is the
+second that `resolve_origin` tests against a pitch.
+The seeded 500-fit simulation measures the transform's error at noiseless
+prediction sites independently with 5 µm per-axis noise in each acquisition and
+checks near and far predictions within 10% of empirical RMS; a second simulation
+scatters the target well too and checks `uncertainty_with_site` against the error
+of the target's true origin while retaining all wells in nearly every fit. Separate
 planted-outlier tests require rejection. The uncertainty assumes independent
 isotropic residuals and treats the prediction input as fixed; it excludes new
 measurement noise in that input and stage-calibration uncertainty, and is not a
@@ -10491,7 +10504,13 @@ entry (`MergePlan.gap_hours`, `gap_source` of `entered`, `recorded` or
 starts when both exist on comparable clocks (`default_gap`), else dataset 1's
 median interval, else leaves it empty and required; `choose_gap` warns, and
 goes with the entry, when it differs from the recorded gap by more than
-max(2 %, 1 minute). The worker parses the text in-thread (`parse_gap_hours`) so
+max(2 %, 1 minute). `parse_gap_hours` has its own strict grammar (a bare number of
+hours, or `<number><unit>` parts in descending order, a comma as the decimal
+point, nothing else) and is deliberately not the timepoint-label parser, whose
+trailing-digit fallback read `1,5` as 5 hours and `6h30` as 30. The gap is shown,
+stored and used at minute resolution (`format_gap`; the interval default is
+rounded to the minute) so the page shows exactly what the merge uses. The worker
+parses the text in-thread so
 the queue spec carries the text the user typed, and `show_job` restores it.
 `record_derivation` stores the gap and its source.
 
@@ -10501,7 +10520,14 @@ writes `in/` only, with no `out/` and no sidecar, and `_verify_raw` checks the
 destination archives against the *expected* shifted name and CRC of each
 dataset-2 member computed independently of what the copy reported as written
 (the copy's own `written` set includes dataset 1's members and is not evidence
-about dataset 2). An analysed dataset 1 followed by a raw dataset 2
+about dataset 2). It also returns the dataset-2 images the schema could not shift
+(no timepoint field), which `execute_plan` names in the log and counts in the
+summary, since they land unchanged and verification cannot call that wrong. Two
+datasets that name one well differently (`A01.zip`, `A1.zip`) are refused at
+planning (`_refuse_mixed_spelling`), because the merged archive's members would
+carry both spellings. A raw merge writes no `derived_from` (there is no sidecar);
+with no acquisition records either, the log says the gap is recorded nowhere else.
+An analysed dataset 1 followed by a raw dataset 2
 (`plan.ds2_raw`) keeps dataset 1's outputs untouched, adds dataset 2's images
 to `in/`, writes no "missing CSV" warning for dataset 2, and leaves its
 timepoints for an incremental Analyze run. A raw dataset 1 before an analysed

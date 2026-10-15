@@ -297,14 +297,40 @@ def test_a_dataset_without_a_record_leaves_none_and_says_so(tmp_path):
     assert any("has no acquisition record" in line for line in lines)
 
 
-def test_two_datasets_without_records_write_none_quietly(tmp_path):
+def test_two_raw_datasets_without_records_say_the_gap_is_recorded_nowhere_else(tmp_path):
+    # A raw merge has no sidecar for derived_from to live in, so with no acquisition records either
+    # the gap and its source exist only in the run log. That has to be said, not left implicit.
     _raw(tmp_path / "d1", timepoints=["0h"])
     _raw(tmp_path / "d2", timepoints=["0h"])
     plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=24.0)
     lines: list[str] = []
     apply.execute_plan(plan, lines.append)
     assert _merged_record(tmp_path) is None
-    assert not any("acquisition record" in line for line in lines)
+    notes = [line for line in lines if "acquisition record" in line]
+    assert len(notes) == 1
+    assert "24h" in notes[0] and "entered" in notes[0] and "nowhere except this log" in notes[0]
+
+
+def test_an_image_with_no_timepoint_is_named_in_the_log_and_the_summary(tmp_path):
+    # It lands unshifted, so verification (whose expected name is the original by the same rule)
+    # cannot call it wrong; the user has to be told.
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    _raw(tmp_path / "d2", timepoints=["0h"], extra={"E_DAPI_A01_f0.tif": b"x", "notes.txt": b"hi"})
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=24.0)
+    lines: list[str] = []
+    summary = apply.execute_plan(plan, lines.append)
+    note = next(line for line in lines if "no timepoint in their file name" in line)
+    assert "1 dataset 2 image(s)" in note and "A01/E_DAPI_A01_f0.tif" in note
+    assert "notes.txt" not in note                          # not an image: nothing to shift
+    assert "1 image(s) had no timepoint to shift" in summary
+
+
+def test_two_datasets_spelling_a_well_differently_are_refused(tmp_path):
+    _raw(tmp_path / "d1", wells=["A01"], timepoints=["0h"])
+    _raw(tmp_path / "d2", wells=["A1"], timepoints=["0h"])
+    with pytest.raises(cc.ConcatError, match="spell the same well differently") as caught:
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=24.0)
+    assert "'A01.zip'" in str(caught.value) and "'A1.zip'" in str(caught.value)
 
 
 def test_analysed_datasets_carry_their_records_too_with_the_gap_source(tmp_path):

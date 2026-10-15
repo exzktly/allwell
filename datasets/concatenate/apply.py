@@ -52,10 +52,12 @@ from util.acquisition_record import (
     write_record,
 )
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
+from util.image_exts import is_run_input_member
 from datasets.concatenate.concatenate_compute import (
     IN_PROGRESS_MARKER,
     ConcatError,
     MergePlan,
+    format_gap,
     in_containers,
     out_csvs,
     out_zips,
@@ -568,6 +570,12 @@ def _merge_acquisition_records(plan: MergePlan, emit: Callable[[str], None]) -> 
     except AcquisitionRecordError as exc:
         raise ConcatError(f"An acquisition record can't be read, so the merge can't carry it: {exc}") from exc
     if first is None and second is None:
+        if plan.raw:
+            # An analysed merge records its gap in derived_from; a raw one has no sidecar to hold
+            # that and, with no records either, nothing records it but this log.
+            emit(f"Note: neither dataset has an acquisition record and a raw merge has no sidecar, "
+                 f"so the gap used ({format_gap(plan.gap_hours)}, {plan.gap_source}) is recorded "
+                 f"nowhere except this log.")
         return
     if first is None or second is None:
         which = "dataset 1" if first is None else "dataset 2"
@@ -595,7 +603,7 @@ def _merge_acquisition_records(plan: MergePlan, emit: Callable[[str], None]) -> 
     emit("Wrote the merged acquisition record.")
 
 
-def _verify_raw(plan: MergePlan, dropped_members: dict[str, frozenset[str]]) -> None:
+def _verify_raw(plan: MergePlan, dropped_members: dict[str, frozenset[str]]) -> list[str]:
     """The raw merge's check, made on the archives it wrote.
 
     A raw dataset has no measurement rows to cross-check, so the evidence is
@@ -604,7 +612,14 @@ def _verify_raw(plan: MergePlan, dropped_members: dict[str, frozenset[str]]) -> 
     destination archive carrying the same stored checksum — so a member that
     went missing, kept its old name, or arrived as someone else's bytes is
     caught rather than reported as a merge.
+
+    Returns the dataset-2 *images* the filename schema could not shift (the name
+    carries no timepoint field): they land unchanged, which this check cannot
+    call wrong because the expected name is, by the same rule, the original. The
+    caller reports them, since an image with no timepoint in a time-lapse is the
+    kind of thing the user needs to be told about.
     """
+    unshifted: list[str] = []
     if dropped_members:
         well, names = next(iter(dropped_members.items()))
         raise ConcatError(
@@ -621,9 +636,11 @@ def _verify_raw(plan: MergePlan, dropped_members: dict[str, frozenset[str]]) -> 
         for name, crc in _ds2_members(source).items():
             if is_os_junk_member(name):
                 continue
-            expected, _rewrote = rewrite_member_name(
+            expected, rewrote = rewrite_member_name(
                 name, schema=plan.schema, channels=plan.channels,
                 offset_hours=plan.offset_hours, tp_format=plan.tp_format)
+            if not rewrote and is_run_input_member(name):
+                unshifted.append(f"{well}/{name}")
             if expected not in landed or (crc is not None and landed[expected] != crc):
                 raise ConcatError(
                     f"Verification failed: well {well}'s image {name!r} should be "
@@ -632,6 +649,7 @@ def _verify_raw(plan: MergePlan, dropped_members: dict[str, frozenset[str]]) -> 
             checked += 1
     if not checked and (plan.wells_ds2_only or plan.wells_both):
         raise ConcatError("Verification failed: no dataset 2 image reached the merged archives.")
+    return unshifted
 
 
 # ── top-level execution ──────────────────────────────────────────────────────
@@ -826,13 +844,20 @@ def execute_plan(
 
     emit("Verifying the merged output before finishing…")
     if plan.raw:
-        _verify_raw(plan, dropped_members)
+        unshifted = _verify_raw(plan, dropped_members)
         _merge_acquisition_records(plan, emit)
         marker_path.unlink(missing_ok=True)
         emit("Raw merge complete: images only, to be analysed once as one plate.")
+        warning = ""
+        if unshifted:
+            shown = ", ".join(unshifted[:5]) + (", …" if len(unshifted) > 5 else "")
+            emit(f"Note: {len(unshifted)} dataset 2 image(s) have no timepoint in their file name, so "
+                 f"they were carried over unshifted and will be read as part of the same timepoint "
+                 f"as dataset 1's images of that name: {shown}.")
+            warning = f" {len(unshifted)} image(s) had no timepoint to shift; see the log."
         return (
             f"Concatenated {len(all_wells)} well(s) of raw images into {plan.dest.root} "
-            f"(dataset 2 shifted +{plan.offset_hours:g}h)."
+            f"(dataset 2 shifted +{plan.offset_hours:g}h).{warning}"
         )
     _verify(plan, well_stats, dropped_members)
     if plan.ds2_raw:

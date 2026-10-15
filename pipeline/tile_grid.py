@@ -134,7 +134,8 @@ def _extent_um(tile_size_px, pixel_size_um):
     sizes = []
     for axis in ("x", "y"):
         size, scale = tile_size_px.get(axis), pixel_size_um.get(axis)
-        if not size or not scale or not math.isfinite(scale) or scale <= 0 or size <= 0:
+        if (not size or not scale or not math.isfinite(scale) or not math.isfinite(size)
+                or scale <= 0 or size <= 0):
             return None
         sizes.append(float(size) * float(scale))
     return tuple(sizes)
@@ -151,6 +152,8 @@ def place_from_pattern(tile_ids, rows: int, cols: int, pattern: ScanPattern, *,
     whose missing cells are the ones the scan had not reached.
     """
     ids = list(tile_ids)
+    if rows < 1 or cols < 1:
+        return GridPlan(BAD_GRID, f"A {rows} x {cols} grid has no cells")
     extent = _extent_um(tile_size_px, pixel_size_um)
     if extent is None:
         return GridPlan(BAD_GRID, "Tile size or pixel size is missing, so tiles cannot be placed")
@@ -276,12 +279,21 @@ def place_from_record(tiles, *, tile_size_px: dict, pixel_size_um: dict,
         cells[cell] = tile_id
     rows = max(row_index) + 1
     cols = max(col_index) + 1
+    outer = []
     if expected_shape is not None:
         if rows > expected_shape[0] or cols > expected_shape[1]:
             return GridPlan(BAD_GRID, f"The positions form a {rows} x {cols} grid, larger than the "
                                       f"expected {expected_shape[0]} x {expected_shape[1]}")
+        # Lines are indexed from the first one observed, so a line missing from an outer end
+        # cannot be placed: the record does not say which end it was. The cells inside the
+        # observed extent are still exact; the absent outer lines are named without a position.
+        for count, name in ((expected_shape[0] - rows, "row"), (expected_shape[1] - cols, "column")):
+            if count:
+                outer.append(f"{count} {name}(s) at an unknown outer end")
+    missing = tuple(_cell_name(r, c) for r in range(rows) for c in range(cols)
+                    if (r, c) not in cells) + tuple(outer)
+    if expected_shape is not None:
         rows, cols = expected_shape
-    missing = tuple(_cell_name(r, c) for r in range(rows) for c in range(cols) if (r, c) not in cells)
 
     placements = tuple(TilePlacement(i, positions[i][0], positions[i][1], extent[0], extent[1],
                                      sources[i], row_of[i], col_of[i]) for i in ids)
@@ -294,8 +306,10 @@ def place_from_record(tiles, *, tile_size_px: dict, pixel_size_um: dict,
                                        ) and not _only_multiples(np.diff(centres), step, extent[axis]):
             notes.append(f"The tile spacing along {'xy'[axis]} is irregular; the overlap there is the median")
         if overlap_um[axis] is not None and overlap_um[axis] < 0:
-            notes.append(f"Neighbouring tiles along {'xy'[axis]} do not touch "
-                         f"(a gap of {-overlap_um[axis]:.1f} um)")
+            return GridPlan(BAD_GRID, f"Neighbouring tiles along {'xy'[axis]} do not touch (a gap of "
+                                      f"{-overlap_um[axis]:.1f} um): a tile is missing from between "
+                                      f"them or the plan has no overlap, and either way the tiles "
+                                      f"cannot be registered or assembled")
     declared = declared_overlap_percent or {}
     declared_pair = (declared.get("x"), declared.get("y"))
     disagreement = []
@@ -373,6 +387,18 @@ def _moved(placement: TilePlacement, positions_um: dict | None) -> TileRectangle
     return TileRectangle(placement.tile_id, left, top, left + placement.width_um, top + placement.height_um)
 
 
+def _overlap_of(rectangles) -> tuple[float | None, float | None]:
+    """Per-axis overlap of rectangles at their current positions, as :func:`place_from_record` measures it."""
+    out = []
+    for axis in (0, 1):
+        starts = np.array([r.left if axis == 0 else r.top for r in rectangles])
+        extent = float(np.median([(r.right - r.left) if axis == 0 else (r.bottom - r.top) for r in rectangles]))
+        centres, _ = _lines(starts, extent)
+        _, step = _cell_indices(centres, extent)
+        out.append(None if step is None else extent - step)
+    return out[0], out[1]
+
+
 def ownership_report(plan: GridPlan, site_xy_um, nanowell_diameter_um: float,
                      margin_um: float, *, positions_um: dict | None = None) -> OwnershipReport:
     """How many sites each ownership class holds, and whether the overlap guarantees it.
@@ -390,7 +416,8 @@ def ownership_report(plan: GridPlan, site_xy_um, nanowell_diameter_um: float,
     rectangles = [_moved(p, positions_um) for p in plan.placements]
     result: OwnershipResult = assign_owners(site_xy_um, nanowell_diameter_um, rectangles, margin_um)
     required = nanowell_diameter_um + 2 * margin_um
-    holds = tuple(None if o is None else o >= required for o in plan.overlap_um)
+    overlap_um = plan.overlap_um if positions_um is None else _overlap_of(rectangles)
+    holds = tuple(None if o is None else o >= required for o in overlap_um)
     sites = np.asarray(site_xy_um, dtype=float)
     radius = nanowell_diameter_um / 2
     blend, edge = [], []

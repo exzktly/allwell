@@ -312,3 +312,157 @@ def test_a_crop_aligned_to_the_pixel_grid_is_the_image_itself():
     assert crop.crop.shape == (n, n)
     assert np.allclose(crop.crop, image[j0 - 10:j0 + 11, i0 - 10:i0 + 11], atol=1e-6)
     assert crop.origin_um == pytest.approx((left + (i0 - 10 + 0.5) * px, top + (j0 - 10 + 0.5) * px))
+
+
+# ── review findings: edge cases and the gates ────────────────────────────────
+def _field(seed, size=(400, 400), sigma=4.0):
+    """An aperiodic smooth random image: one unambiguous correlation peak."""
+    from scipy import ndimage
+    field = ndimage.gaussian_filter(np.random.default_rng(seed).normal(size=size), sigma)
+    return (field / field.std()).astype(np.float32)
+
+
+def test_an_overlap_no_wider_than_the_search_radius_is_handled_not_crashed_on():
+    # The largest shift in the window then leaves no overlap at all. At 0.325 um/px a 10 %
+    # overlap of a 2048 px tile (205 px) is narrower than the 264 px half-pitch radius, which is
+    # the real plan, and this used to raise IndexError for the whole well.
+    a, b = _field(1, (300, 300)), _field(2, (300, 300))
+    for expected in ((270, 0), (270, -20), (250, 0), (200, 0)):
+        result = correlate_overlap(a, b, expected, search_radius=40)
+        assert result.ok is False and result.reason       # unrelated images: refused, with a reason
+    big = correlate_overlap(_field(3, (600, 600)), _field(3, (600, 600)), (520, 0), search_radius=100)
+    assert big.reason or big.ok                            # reached a verdict instead of raising
+
+
+def test_a_flat_or_non_finite_tile_is_refused_for_the_right_reason():
+    flat = np.full((200, 200), 65000.0, dtype=np.float32)
+    assert correlate_overlap(flat, flat, (120, 0), search_radius=20).ok is False
+    noisy = _field(4, (200, 200))
+    shifted = noisy.copy()
+    shifted[100, 100] = np.nan
+    result = correlate_overlap(noisy, shifted, (120, 0), search_radius=20)
+    assert result.ok is False and "non-finite" in result.reason
+
+
+def test_unrelated_tiles_are_not_accepted_as_a_match():
+    # Pearson correlation over a window that shrinks with the shift is biased toward the thinnest
+    # overlaps, so a gate that is too low accepts unrelated images. 40 independent pairs.
+    accepted = [seed for seed in range(40)
+                if correlate_overlap(_field(seed, (300, 300)), _field(1000 + seed, (300, 300)),
+                                     (250, 0), search_radius=24).ok]
+    assert accepted == []
+
+
+def test_an_ambiguous_peak_is_refused_with_that_reason():
+    plan = TilePlan(1, 2, (400, 300), 0.5, PX)
+    rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=3500, rotation_deg=5,
+                            noise_sigma=0.15, vignette=0.5, seed=0, blur_px=1.5)
+    truth = np.subtract(rendered.true_left_top_um["F1"], rendered.true_left_top_um["F0"]) / PX
+    wide = correlate_overlap(rendered.images["F0"], rendered.images["F1"], truth + (12.0, 0.0),
+                             search_radius=int(1.3 * PITCH / PX))
+    assert wide.ok is False and "ambiguous" in wide.reason
+
+
+@pytest.mark.parametrize("true_shift", [(2.4, -1.3), (-3.7, 2.6)])
+def test_the_overlap_offset_is_refined_below_a_pixel_in_the_right_direction(true_shift):
+    from scipy import ndimage
+    whole = _field(5, (500, 500), sigma=3.0)
+    a = whole[:, :300]
+    # Tile j is the same field starting 240 px along, sampled at a fractional offset.
+    offset = (240.0 + true_shift[0], true_shift[1])
+    j = ndimage.shift(whole, (-offset[1], -offset[0]), order=3, mode="nearest")[:300, :300]
+    result = correlate_overlap(a, j, (240, 0), search_radius=10)
+    assert result.ok, result.reason
+    assert np.allclose(result.offset_px, offset, atol=0.15)
+    assert np.allclose(result.correction_px, true_shift, atol=0.15)
+
+
+def test_downsampling_never_widens_the_search_past_the_stated_radius():
+    from scipy import ndimage
+    whole = _field(6, (700, 1400), sigma=4.0)
+    a = whole[:, :1100]
+    radius, expected_x = 40, 1003                         # 1003 is not a multiple of 8
+    for step in (-50, 50):                                # the true shift is outside the window
+        j = ndimage.shift(whole, (0, -(expected_x + step)), order=1, mode="nearest")[:, :400]
+        result = correlate_overlap(a, j, (expected_x, 0), search_radius=radius, downsample=8)
+        if result.correction_px is not None:
+            assert abs(result.correction_px[0]) <= radius + 1e-9
+            assert abs(result.correction_px[1]) <= radius + 1e-9
+
+
+def test_a_mis_recorded_tile_does_not_show_as_a_correction_on_every_other_tile():
+    extent = (100.0, 100.0)
+    tiles = [TileObservation(f"T{i}", (i * 90.0 + (100.0 if i == 0 else 0.0), 0.0), extent) for i in range(5)]
+    constraints = [PairConstraint(f"T{i}", f"T{i + 1}", (90.0, 0.0), 0.1, LATTICE) for i in range(4)]
+    result = solve_placements(tiles, constraints)
+    by_id = result.by_id()
+    # Every measurement says the tiles are 90 um apart; only T0 was recorded wrongly.
+    assert by_id["T0"].correction_um == pytest.approx(100.0, abs=1.0)
+    for name in ("T1", "T2", "T3", "T4"):
+        assert by_id[name].correction_um == pytest.approx(0.0, abs=1.0)
+    assert result.common_shift_um[0] == pytest.approx(20.0, abs=1.0)
+
+
+def test_lattice_and_overlap_disagreeing_about_a_pair_is_warned_about():
+    extent = (100.0, 100.0)
+    tiles = [TileObservation("A", (0.0, 0.0), extent), TileObservation("B", (1000.0, 0.0), extent)]
+    agree = [PairConstraint("A", "B", (1000.0, 0.0), 0.01, LATTICE),
+             PairConstraint("A", "B", (1001.0, 0.0), 2.0, OVERLAP)]
+    assert solve_placements(tiles, agree).warnings == ()
+    disagree = [PairConstraint("A", "B", (1000.0, 0.0), 0.01, LATTICE),
+                PairConstraint("A", "B", (1008.0, 0.0), 2.0, OVERLAP)]
+    warnings = solve_placements(tiles, disagree).warnings
+    assert len(warnings) == 1 and "A-B" in warnings[0] and "8.0 um" in warnings[0]
+
+
+def test_a_lattice_uncertainty_shrinks_with_the_number_of_sites_fitted():
+    def fit(n):
+        return LatticeFit(True, "", (40.0, 0.0), (20.0, 34.64), 40.0, 0.0, "hex", (0.0, 0.0), 2.0, (True,) * n)
+    sigmas = {}
+    for n in (100, 25):
+        tiles = [TileObservation("A", (0.0, 0.0), (100.0, 100.0), fit(n)),
+                 TileObservation("B", (60.0, 0.0), (100.0, 100.0), fit(n))]
+        sigmas[n] = lattice_phase_constraints(tiles)[0][0].sigma_um
+    # 0.25 um systematic allowance in quadrature with 2 * (2.0 um rms)^2 / n.
+    assert sigmas[100] == pytest.approx(math.sqrt(0.25 ** 2 + 2 * 4.0 / 100))
+    assert sigmas[25] == pytest.approx(math.sqrt(0.25 ** 2 + 2 * 4.0 / 25))
+
+
+def test_an_overlap_uncertainty_falls_as_the_correlation_rises():
+    plan = TilePlan(1, 2, (400, 300), 0.5, PX)
+    rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=3500, rotation_deg=5,
+                            noise_sigma=0.05, cells=30, debris=10, seed=2, blur_px=1.5)
+    observations = [TileObservation(n, rendered.true_left_top_um[n], plan.extent_um) for n in ("F0", "F1")]
+    constraint = overlap_constraints(observations, rendered.images, PX, PITCH)[0][0]
+    peak = correlate_overlap(rendered.images["F0"], rendered.images["F1"],
+                             np.subtract(rendered.true_left_top_um["F1"], rendered.true_left_top_um["F0"]) / PX,
+                             search_radius=search_radius_px(PITCH, PX)).peak
+    assert constraint.sigma_um == pytest.approx(0.5 * PX / peak, rel=0.01)
+
+
+def test_the_montage_places_a_tile_at_the_nearest_pixel_not_the_one_below():
+    a = np.full((10, 10), 0.2, dtype=np.float32)
+    b = np.full((10, 10), 0.8, dtype=np.float32)
+    montage = build_montage({"a": a, "b": b}, {"a": (0.0, 0.0), "b": (20.6, 0.0)}, 1.0,
+                            percentiles=(0.0, 100.0))
+    assert montage.covered[5, 20] == False and montage.covered[5, 21] == True      # noqa: E712 (numpy bools)
+    assert montage.image.shape[1] == 31
+
+
+def test_a_crop_across_a_seam_blends_by_distance_from_each_tile_edge():
+    left = np.full((40, 60), 0.2, dtype=np.float32)
+    right = np.full((40, 60), 0.8, dtype=np.float32)
+    # Overlap is x in [40, 60] um at 1 um/px: the left tile fades out and the right fades in.
+    crop = fused_crop((50.0, 20.0), 20.0, {"L": (left, 0.0, 0.0), "R": (right, 40.0, 0.0)}, 1.0)
+    row = crop.crop[crop.crop.shape[0] // 2]
+    assert np.all(np.diff(row) > 0) and row[0] < 0.5 < row[-1]
+    # First sample (x = 40.5): the left tile's edge ramp is 20, the right tile's is 1.
+    assert row[0] == pytest.approx((0.2 * 20 + 0.8 * 1) / 21, abs=1e-6)
+    assert row[-1] == pytest.approx((0.2 * 1 + 0.8 * 20) / 21, abs=1e-6)
+
+
+def test_a_disk_both_tiles_hold_whole_is_attributed_to_the_first_id():
+    image = np.ones((100, 100), dtype=np.float32)
+    tiles = {"B": (image, 0.0, 0.0), "A": (image, 0.0, 0.0)}
+    crop = fused_crop((50.0, 50.0), 20.0, tiles, 1.0)
+    assert crop.disk_fraction == {"A": 1.0, "B": 1.0} and crop.attributed_tile == "A"

@@ -48,8 +48,12 @@ NEAR_AMBIGUITY_FRACTION = 0.4
 #: fraction of a pitch are not one lattice (molding distortion, a bad fit):
 #: no phase constraint is made between them.
 BASIS_MISMATCH_FRACTION = 0.05
-#: Floor on a lattice-phase uncertainty (um); stops one exact fit dominating.
+#: Floor on one tile's lattice-phase uncertainty (um); stops one exact fit dominating.
 _MIN_PHASE_SIGMA_UM = 0.05
+#: Allowance, in quadrature, for what the statistical sigma cannot see: a lattice that is not
+#: perfectly uniform across the array (molding, optics). It is a stated allowance, not a
+#: measurement: 0.25 um is a choice, to be replaced by one fitted on real data (tracker T10).
+_SYSTEMATIC_SIGMA_UM = 0.25
 #: The prior on a tile's recorded position (um). It fixes the solve's overall
 #: translation and anchors a tile that has no measurement; it is far weaker
 #: than any measurement.
@@ -57,7 +61,7 @@ PRIOR_SIGMA_UM = 50.0
 #: Smallest overlap, in px per side, that a correlation is trusted on.
 _MIN_TEMPLATE_PX = 24
 #: A correlation peak below this normalised value is not a match.
-MIN_PEAK = 0.25
+MIN_PEAK = 0.4
 #: The best peak must beat the best peak elsewhere by this factor.
 MIN_PEAK_RATIO = 1.05
 
@@ -151,12 +155,14 @@ def lattice_phase_constraints(tiles) -> tuple[list[PairConstraint], list[str]]:
         phase = np.subtract(fi.phase_origin, fj.phase_origin)
         step, error, runner_up = _nearest_lattice_vector(phase - recorded, basis)
         offset = recorded + (phase - recorded) - step           # == phase - step
-        sigma = math.sqrt(sum((max(f.rms_residual or 0.0, _MIN_PHASE_SIGMA_UM) ** 2) / max(sum(f.inlier_mask), 1)
-                              for f in (fi, fj)))
+        sigma = math.sqrt(_SYSTEMATIC_SIGMA_UM ** 2 + sum(
+            (max(f.rms_residual or 0.0, _MIN_PHASE_SIGMA_UM) ** 2) / max(sum(f.inlier_mask), 1)
+            for f in (fi, fj)))
         warning = ""
         if error > NEAR_AMBIGUITY_FRACTION * pitch:
             warning = (f"{i}-{j}: the recorded positions are {error:.1f} um from the lattice phase, "
-                       f"{error / pitch * 100:.0f} % of a pitch; at 50 % the whole-vector choice is wrong")
+                       f"{error / pitch * 100:.0f} % of a pitch; near 50 % the whole-vector choice "
+                       f"starts to be wrong")
         constraints.append(PairConstraint(i, j, (float(offset[0]), float(offset[1])), sigma, LATTICE,
                                           float(error), warning))
     return constraints, skipped
@@ -232,12 +238,18 @@ def _window_scores(f, g, ex: int, ey: int, radius: int):
     sf2 = _rect_sum(_padded_cumsum(fc * fc), fya, fyb, fxa, fxb)
     sg = _rect_sum(_padded_cumsum(gc), gya, gyb, gxa, gxb)
     sg2 = _rect_sum(_padded_cumsum(gc * gc), gya, gyb, gxa, gxb)
-    sfg = cross[np.ix_(ty + hgc - 1, tx + wgc - 1)]
+    # An offset with no overlap indexes past the correlation; it is masked below, so clip it.
+    sfg = cross[np.ix_(np.clip(ty + hgc - 1, 0, cross.shape[0] - 1), np.clip(tx + wgc - 1, 0, cross.shape[1] - 1))]
     with np.errstate(divide="ignore", invalid="ignore"):
         numerator = sfg - sf * sg / n
-        denominator = np.sqrt(np.maximum(sf2 - sf ** 2 / n, 0) * np.maximum(sg2 - sg ** 2 / n, 0))
-        score = numerator / denominator
-    score[~ok | ~(denominator > 1e-9 * np.maximum(n, 1))] = np.nan
+        var_f = np.maximum(sf2 - sf ** 2 / n, 0)
+        var_g = np.maximum(sg2 - sg ** 2 / n, 0)
+        score = numerator / np.sqrt(var_f * var_g)
+    # A flat region has variance that is only rounding noise, and dividing by it scores
+    # noise. Variance must be a real fraction of the squared mean level to count.
+    level = 1e-6 * (sf2 / np.maximum(n, 1) + sg2 / np.maximum(n, 1)) + 1e-12
+    informative = (var_f / np.maximum(n, 1) > level) & (var_g / np.maximum(n, 1) > level)
+    score[~ok | ~informative] = np.nan
     return score
 
 
@@ -261,6 +273,9 @@ def correlate_overlap(image_i, image_j, expected_offset_px, *, search_radius: in
     b = np.asarray(image_j, dtype=np.float32)
     if a.ndim != 2 or b.ndim != 2:
         return OverlapShift(False, "Tiles must be 2-D images")
+    if not (np.isfinite(a).all() and np.isfinite(b).all()):
+        return OverlapShift(False, "A tile holds non-finite pixels (NaN or inf)",
+                            search_radius_px=int(search_radius))
     ds = max(int(downsample), 1)
     if ds > 1:
         a = a[:a.shape[0] // ds * ds, :a.shape[1] // ds * ds]
@@ -268,7 +283,10 @@ def correlate_overlap(image_i, image_j, expected_offset_px, *, search_radius: in
         b = b[:b.shape[0] // ds * ds, :b.shape[1] // ds * ds]
         b = b.reshape(b.shape[0] // ds, ds, b.shape[1] // ds, ds).mean(axis=(1, 3))
     ex, ey = (int(round(v / ds)) for v in expected_offset_px)
-    r = int(math.ceil(search_radius / ds)) if search_radius else 0
+    # Rounding the expected offset to the coarse grid moves the window's centre by up to ds/2
+    # tile pixels, so the radius shrinks by that much to keep every offset tried inside
+    # +-search_radius of the recorded one (the confinement is the point of the window).
+    r = max(int(math.floor((search_radius - ds / 2) / ds)), 0) if ds > 1 else int(search_radius)
     score = _window_scores(a, b, ex, ey, r)
     if score is None or not np.isfinite(score).any():
         return OverlapShift(False, f"The overlap is too small to correlate within ±{search_radius} px",
@@ -286,8 +304,8 @@ def correlate_overlap(image_i, image_j, expected_offset_px, *, search_radius: in
         return 0.0 if not math.isfinite(denom) or denom >= 0 else 0.5 * (minus - plus) / denom
     sub_x = refine(score[py, px - 1], peak, score[py, px + 1]) if 0 < px < score.shape[1] - 1 else 0.0
     sub_y = refine(score[py - 1, px], peak, score[py + 1, px]) if 0 < py < score.shape[0] - 1 else 0.0
-    correction = ((px - r + sub_x) * ds, (py - r + sub_y) * ds)
-    offset = (ex * ds + correction[0], ey * ds + correction[1])
+    offset = (ex * ds + (px - r + sub_x) * ds, ey * ds + (py - r + sub_y) * ds)
+    correction = (offset[0] - expected_offset_px[0], offset[1] - expected_offset_px[1])
     kept = int(search_radius)
     if peak < MIN_PEAK:
         return OverlapShift(False, f"The best match is weak (correlation {peak:.2f})", offset, correction,
@@ -328,7 +346,11 @@ class TileSolution:
     top_um: float
     source: str                     # LATTICE, OVERLAP or RECORDED
     residual_um: float | None       # rms disagreement with this tile's own constraints
-    correction_um: float            # how far the solved position is from the recorded one
+    #: How far the solved position is from the recorded one, measured after removing
+    #: the group's common shift (:attr:`Registration.common_shift_um`). The solve's frame
+    #: is pinned by the mean of the recorded positions, so one badly recorded tile would
+    #: otherwise show as a correction on every other tile.
+    correction_um: float
     n_constraints: int
     note: str = ""
 
@@ -339,6 +361,9 @@ class Registration:
     constraints: tuple[PairConstraint, ...] = ()
     skipped: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    #: The median (x, y) displacement of the tiles that were measured, removed before
+    #: ``correction_um`` is reported. Positions themselves stay in the solve's frame.
+    common_shift_um: tuple[float, float] = (0.0, 0.0)
 
     def positions(self) -> dict[str, tuple[float, float]]:
         return {t.tile_id: (t.left_um, t.top_um) for t in self.tiles}
@@ -375,6 +400,10 @@ def solve_placements(tiles, constraints, *, prior_sigma_um: float = PRIOR_SIGMA_
         rhs[j] += w * np.asarray(c.offset_um)
         rhs[i] -= w * np.asarray(c.offset_um)
     solved = np.linalg.solve(matrix, rhs)
+    touched = {c.i for c in constraints} | {c.j for c in constraints}
+    moved = np.array([solved[index[t.tile_id]] - np.asarray(t.recorded_left_top_um)
+                      for t in tiles if t.tile_id in touched])
+    common = np.median(moved, axis=0) if len(moved) else np.zeros(2)
     solutions = []
     for t in tiles:
         k = index[t.tile_id]
@@ -388,11 +417,37 @@ def solve_placements(tiles, constraints, *, prior_sigma_um: float = PRIOR_SIGMA_
         else:
             residual, source = None, RECORDED
             note = "no lattice fit and no usable overlap: kept at the recorded position"
-        correction = float(np.linalg.norm(solved[k] - np.asarray(t.recorded_left_top_um)))
+        shift = common if t.tile_id in touched else np.zeros(2)
+        correction = float(np.linalg.norm(solved[k] - np.asarray(t.recorded_left_top_um) - shift))
         solutions.append(TileSolution(t.tile_id, float(solved[k, 0]), float(solved[k, 1]), source,
                                       residual, correction, len(mine), note))
-    warnings = tuple(c.warning for c in constraints if c.warning)
-    return Registration(tuple(solutions), tuple(constraints), tuple(skipped), warnings)
+    warnings = tuple(c.warning for c in constraints if c.warning) + _disagreements(constraints)
+    return Registration(tuple(solutions), tuple(constraints), tuple(skipped), warnings,
+                        (float(common[0]), float(common[1])))
+
+
+def _disagreements(constraints) -> tuple[str, ...]:
+    """Warnings for a pair measured by both lattice phase and overlap that disagree.
+
+    The lattice constraint is far tighter, so it wins the solve and the overlap
+    measurement never moves the tile; a disagreement is therefore invisible in the
+    residual of a tile with a single constraint. It means one of the two sources is
+    wrong about this pair (a bad fit, a wrong whole-vector choice, or an overlap
+    dominated by something that moved), which is worth saying.
+    """
+    by_pair: dict[tuple[str, str], dict[str, PairConstraint]] = {}
+    for c in constraints:
+        by_pair.setdefault((c.i, c.j), {})[c.source] = c
+    out = []
+    for (i, j), sources in sorted(by_pair.items()):
+        if LATTICE in sources and OVERLAP in sources:
+            lattice, overlap = sources[LATTICE], sources[OVERLAP]
+            gap = float(np.hypot(lattice.offset_um[0] - overlap.offset_um[0],
+                                 lattice.offset_um[1] - overlap.offset_um[1]))
+            if gap > 3 * overlap.sigma_um:
+                out.append(f"{i}-{j}: lattice phase and overlap correlation disagree by {gap:.1f} um "
+                           f"(overlap uncertainty {overlap.sigma_um:.1f} um); the lattice value is used")
+    return tuple(out)
 
 
 def register_tiles(tiles, *, images: dict | None = None, pixel_size_um: float | None = None,
@@ -499,8 +554,7 @@ def fused_crop(site_xy_um, diameter_um: float, tiles: dict, pixel_size_um: float
     position. The crop is square, ``diameter + 2 * margin`` on a side, sampled
     bilinearly at the crop's pixel centres from each covering tile and weighted
     by distance from that tile's edge. The site's cells belong to the tile
-    holding most of its disk (ties to the lexically first id, as
-    ``assign_owners`` breaks them), so a cell is counted once.
+    holding most of its disk (a tie goes to the lexically first id), so a cell is counted once.
     """
     from scipy import ndimage
 

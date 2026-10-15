@@ -58,9 +58,30 @@ def test_a_whole_absent_line_is_seen_only_with_the_expected_shape():
     tiles = _grid(5, 5, (2048, 2048), 0.10, drop=outer)
     # Nothing in the positions says a fifth column was planned ...
     assert _place(tiles, (2048, 2048)).status == OK
-    # ... so the plan the user states is what finds it.
+    # ... so the plan the user states is what finds it. The record does not say which end of
+    # the axis the absent line was at, so it is named without a position rather than labelled
+    # with a wrong one.
     stated = _place(tiles, (2048, 2048), expected_shape=(5, 5))
-    assert stated.status == INCOMPLETE_GRID and stated.missing == tuple(f"r{r}c4" for r in range(5))
+    assert stated.status == INCOMPLETE_GRID and not stated.usable
+    assert stated.missing == ("1 column(s) at an unknown outer end",)
+    assert "unknown outer end" in stated.reason
+
+
+def test_an_absent_first_row_is_not_reported_as_an_absent_last_row():
+    # Row 0 of 5 is missing. Rows are indexed from the first one seen, so the old reading named
+    # r4c0..r4c4 as missing and placed the second row at row 0.
+    tiles = _grid(5, 5, (2048, 2048), 0.10, drop={(0, c) for c in range(5)})
+    plan = _place(tiles, (2048, 2048), expected_shape=(5, 5))
+    assert plan.status == INCOMPLETE_GRID
+    assert plan.missing == ("1 row(s) at an unknown outer end",)
+    assert not any(name.startswith("r4") for name in plan.missing)
+
+
+def test_tiles_that_do_not_touch_are_refused_not_noted():
+    # Two columns with the one between them absent: a 532 um gap, not an overlap.
+    plan = _place(_grid(1, 3, (2048, 2048), 0.10, drop={(0, 1)}), (2048, 2048))
+    assert plan.status == BAD_GRID and not plan.usable
+    assert "do not touch" in plan.reason and "a gap of" in plan.reason
 
 
 def test_positions_that_are_not_a_grid_are_refused_not_placed():
@@ -113,10 +134,13 @@ def test_calibration_is_read_per_timepoint_from_the_record():
     plans = [place_from_record(t, tile_size_px=s, pixel_size_um=p, declared_overlap_percent=d)
              for t, s, p, d in (first, second)]
     # The same pixel positions are 90 um apart at 1 um/px and 180 um apart at 2 um/px.
+    assert plans[0].status == OK
     assert plans[0].placements[1].left_um == pytest.approx(90.0)
-    assert plans[1].placements[1].left_um == pytest.approx(180.0)
-    assert plans[0].overlap_um[0] == pytest.approx(10.0) and plans[1].overlap_um[0] == pytest.approx(-80.0)
-    assert plans[1].notes and "do not touch" in plans[1].notes[0]
+    assert plans[0].overlap_um[0] == pytest.approx(10.0)
+    # At 2 um/px the 50 px tiles are 100 um wide and 180 um apart: they do not touch, so the
+    # second timepoint is refused with the gap named. Read with the first one's calibration it
+    # would have looked fine, which is why the calibration is per timepoint.
+    assert plans[1].status == BAD_GRID and "a gap of 80.0 um" in plans[1].reason
 
 
 def test_sixteen_distinct_patterns_each_visit_every_cell_once():
@@ -251,3 +275,22 @@ def test_rendered_plans_cover_both_ownership_regimes(overlap, every_site_has_an_
     report = ownership_report(grid, rendered.sites_um, 100.0, 10.0)
     assert report.holds == (every_site_has_an_owner, every_site_has_an_owner)
     assert bool(report.blend_indices) != every_site_has_an_owner
+
+
+def test_ownership_guarantee_is_measured_at_the_registered_positions():
+    plan = _place([RecordedTile("A", (0.0, 0.0)), RecordedTile("B", (900.0, 0.0))], (1000, 1000), scale=1.0)
+    site = np.array([[500.0, 500.0]])
+    # Recorded 100 um apart in overlap; 100 + 2 * 10 needs 120, so the guarantee does not hold ...
+    assert ownership_report(plan, site, 100.0, 10.0).holds == (False, None)
+    # ... but registered 250 um in, it does: the report follows where the tiles really are.
+    closer = ownership_report(plan, site, 100.0, 10.0, positions_um={"A": (0.0, 0.0), "B": (750.0, 0.0)})
+    assert closer.holds == (True, None)
+
+
+def test_unusable_inputs_are_refused_not_crashed_on():
+    nan = place_from_record([RecordedTile("A", (0.0, 0.0))], tile_size_px={"x": float("nan"), "y": 10},
+                            pixel_size_um={"x": 1.0, "y": 1.0})
+    assert nan.status == BAD_GRID
+    empty = place_from_pattern(["a"], 0, 3, ScanPattern(), tile_size_px={"x": 10, "y": 10},
+                               pixel_size_um={"x": 1.0, "y": 1.0}, overlap_percent=10)
+    assert empty.status == BAD_GRID and "no cells" in empty.reason

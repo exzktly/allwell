@@ -226,11 +226,14 @@ def test_each_site_is_fitted_or_predicted_never_dropped_and_a_bubble_site_is_pre
 
 def test_a_site_clipped_by_the_image_edge_is_predicted_and_never_raises():
     rendered, image, pitch, diameter, px = _scene("100um", bubble_share=0.0)
-    corner = [(0.2 * pitch, 0.2 * pitch), (900 * px - 0.1 * pitch, 450 * px), (450 * px, 900 * px + 20.0)]
+    # The last two sit exactly on the image border, so half of their outline is outside it: the rays
+    # that stay inside find an edge, and a fit through half an outline is not a fit of the site.
+    corner = [(0.2 * pitch, 0.2 * pitch), (900 * px - 0.1 * pitch, 450 * px), (450 * px, 900 * px + 20.0),
+              (0.0, 450 * px), (450 * px, 0.0)]
     ordinary = (np.array(rendered.array.origin) + np.array(rendered.array.a1))[None, :]      # a circle, not the square
     sites = refine_sites(image, px, np.vstack([corner, ordinary]), diameter)
-    assert [s.geometry for s in sites[:3]] == [PREDICTED] * 3
-    assert sites[3].geometry == FITTED
+    assert [s.geometry for s in sites[:5]] == [PREDICTED] * 5
+    assert sites[5].geometry == FITTED
 
 
 def test_the_square_is_fitted_only_when_it_is_allowed_to_scatter_more_than_a_circle():
@@ -241,3 +244,34 @@ def test_the_square_is_fitted_only_when_it_is_allowed_to_scatter_more_than_a_cir
     assert relaxed.geometry == FITTED
     assert np.hypot(*(np.subtract(relaxed.centre_um, centre[0]) / px)) < 1.0
     assert strict.geometry in {FITTED, PREDICTED}
+
+
+def test_the_matched_filter_ignores_illumination_offsets_and_gradients():
+    # The dark annulus is what makes a broad bright region (a bubble's glare, uneven illumination)
+    # respond about zero, so it is not read as a site: the template sums to zero, and an image offset
+    # or a linear ramp added to a nanowell scene changes the candidates by nothing.
+    from pipeline.nanowell_detect import disk_template
+    template = disk_template(11.6)
+    assert abs(template.sum()) < 1e-9 and np.linalg.norm(template) == pytest.approx(1.0)
+    rendered, image, pitch, diameter, px = _scene("100um", bubble_share=0.0)
+    ramp = (np.linspace(0, 0.5, 900)[None, :] + np.linspace(0, 0.3, 900)[:, None] + 2.0).astype(np.float32)
+    plain = detect_sites(image, px, diameter, expected_pitch_um=pitch)
+    lit = detect_sites(image + ramp, px, diameter, expected_pitch_um=pitch)
+    assert plain.ok and lit.ok
+    assert len(lit.points_um) == len(plain.points_um)
+    assert np.abs(np.sort(lit.points_um, axis=0) - np.sort(plain.points_um, axis=0)).max() < 0.2 * px
+
+
+def test_a_site_with_much_of_its_rim_hidden_is_predicted_not_fitted_through_the_rest():
+    # Half of one site is painted over with the lattice's dark floor. The surviving arc is still a
+    # clean circle, so a scatter test alone accepts it; the rule that most rays must find an edge is
+    # what keeps a fit through half a rim from being reported as a measurement.
+    rendered, image, pitch, diameter, px = _scene("100um", bubble_share=0.0)
+    site = np.array(rendered.array.origin) + np.array(rendered.array.a1)
+    covered = image.copy()
+    cx, cy = site / px - 0.5
+    covered[:, int(round(cx)):int(round(cx)) + 40][int(round(cy)) - 40:int(round(cy)) + 40] = 0.15
+    whole = refine_sites(image, px, site[None, :], diameter)[0]
+    half = refine_sites(covered, px, site[None, :], diameter)[0]
+    assert whole.geometry == FITTED and half.geometry == PREDICTED
+    assert half.centre_um == (float(site[0]), float(site[1]))

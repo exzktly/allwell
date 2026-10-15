@@ -615,6 +615,43 @@ def _write_single_csv(records: list[dict], out_path: Path) -> None:
     retry_write(_write, what=Path(out_path).name, path=Path(out_path))
 
 
+def compress_well_csv(csv_path: Path | str) -> Path:
+    """Gzip a finished well's CSV in place and return the path now holding it.
+
+    Per-well CSVs get very large on a big plate, and they are written once, when
+    the well finishes. Failure to compress is logged and the plain file is left
+    as it is — a larger CSV, not a wrong one — and every reader accepts both
+    spellings (:mod:`util.csv_gz`). Returns the plain path unchanged when there
+    is nothing to compress or compression failed.
+    """
+    from util.csv_gz import gzip_csv
+
+    path = Path(csv_path)
+    if not path.is_file():
+        return path
+    try:
+        gz = gzip_csv(path)
+    except OSError as exc:
+        log.warning("Could not compress %s (%s); leaving it uncompressed.",
+                    path.name, exc)
+        return path
+    log.info("Compressed %s -> %s", path.name, gz.name)
+    return gz
+
+
+def write_well_csv(records: list[dict], csv_path: Path) -> Path:
+    """Write a finished well's CSV and gzip it; return the path that holds it."""
+    _write_single_csv(records, csv_path)
+    return compress_well_csv(csv_path)
+
+
+def merge_well_records(csv_path: Path | str, records: list[dict]) -> int:
+    """:func:`merge_records_into_csv`, then gzip the result. Returns rows added."""
+    added = merge_records_into_csv(csv_path, records)
+    compress_well_csv(csv_path)
+    return added
+
+
 def write_csvs_per_well(
     all_records: list[dict],
     output_dir: Path,
@@ -634,7 +671,7 @@ def write_csvs_per_well(
     for well, records in sorted(by_well.items()):
         safe_well = _safe_well(well)
         out_path  = output_dir / f"{csv_prefix}_{safe_well}.csv"
-        _write_single_csv(records, out_path)
+        write_well_csv(records, out_path)
         log.info("Well %-12s -> %s  (%d rows)", well, out_path.name, len(records))
 
 
@@ -823,7 +860,14 @@ def merge_records_into_csv(
     """
     import csv
 
-    path = Path(out_path)
+    from util.csv_gz import existing_csv, open_csv_text, plain_path
+
+    # The target is named by its plain spelling; the file holding it may be the
+    # gzipped one (a finished well's CSV is compressed). Rows are read from
+    # whichever exists and the merged file is written plain — the caller
+    # compresses it again once the well is done, replacing the old archive.
+    path = plain_path(out_path)
+    existing_path = existing_csv(path)
     if not new_records:
         return 0
 
@@ -832,7 +876,7 @@ def merge_records_into_csv(
 
     existing_rows: list[dict] = []
     fieldnames: list[str] = []
-    if path.exists():
+    if existing_path is not None:
         # A target that exists and cannot be read is **not** the same as no
         # target. Treating the two alike meant one transient OSError — an EIO
         # on an SMB or NFS output volume — silently rewrote the file with the
@@ -845,7 +889,7 @@ def merge_records_into_csv(
         # Note that a *corrupt* CSV already failed the well loudly here —
         # UnicodeDecodeError and csv.Error were never caught — so an unreadable
         # one truncating silently was also the two failures disagreeing.
-        with open(path, newline="") as fh:
+        with open_csv_text(existing_path) as fh:
             reader = csv.DictReader(fh)
             fieldnames = list(reader.fieldnames or [])
             existing_rows = list(reader)
@@ -859,7 +903,7 @@ def merge_records_into_csv(
         seen.add(k)
         to_add.append(rec)
 
-    if not to_add and path.exists():
+    if not to_add and existing_path is not None:
         return 0
 
     # Union the field order: existing header first, then any new columns.
@@ -910,13 +954,19 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
     """
     import csv as _csv
 
+    from util.csv_gz import GZ_READ_ERRORS, glob_csvs, gzip_csv, open_csv_text, plain_name
+
     tmp_csv_dir, target_dir = Path(tmp_csv_dir), Path(target_dir)
     total = 0
-    for partial in sorted(tmp_csv_dir.glob("*.csv")):
+    for partial in glob_csvs(tmp_csv_dir):
+        # The remote gzips each well's CSV before it is fetched, so a partial
+        # normally arrives as ``.csv.gz``; the target is named by its plain
+        # spelling and recompressed after the merge.
+        target = target_dir / plain_name(partial.name)
         try:
-            with open(partial, newline="") as fh:
+            with open_csv_text(partial) as fh:
                 rows = list(_csv.DictReader(fh))
-        except (OSError, UnicodeDecodeError, _csv.Error) as exc:
+        except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError, _csv.Error) as exc:
             if log_fn:
                 log_fn(f"[remote] warn: reading fetched CSV {partial.name} "
                        f"failed: {exc}\n")
@@ -924,14 +974,21 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
         if not rows:
             continue
         try:
-            added = merge_records_into_csv(target_dir / partial.name, rows)
-        except (OSError, UnicodeDecodeError, _csv.Error) as exc:
+            added = merge_records_into_csv(target, rows)
+        except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError, _csv.Error) as exc:
             if log_fn:
                 log_fn(f"[remote] warn: merging into {partial.name} failed "
                        f"({exc}); the existing CSV is unchanged and this "
                        f"well's new rows were not added\n")
             continue
         total += added
+        try:
+            if target.is_file():
+                gzip_csv(target)
+        except OSError as exc:
+            if log_fn:
+                log_fn(f"[remote] warn: could not compress {target.name}: "
+                       f"{exc}; it stays uncompressed\n")
         if log_fn:
             log_fn(f"[remote] merge: {partial.name} \u2192 +{added} new row(s) "
                    f"into {target_dir.name}/\n")

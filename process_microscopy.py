@@ -164,12 +164,12 @@ from pipeline.io import (
     _safe_atomic_text_write,
     _safe_imwrite,
     _safe_well,
-    _write_single_csv,
+    write_well_csv,
     incremental_done_fov_keys,
     OutputCapacityMonitor,
     preflight_scratch_for_run,
     merge_images_into_zip,
-    merge_records_into_csv,
+    merge_well_records,
     remove_directory,
     save_overlay,
     scratch_base_for,
@@ -2437,7 +2437,7 @@ def process_well_zip_task(
 
             if incremental:
                 if records:
-                    added = merge_records_into_csv(csv_path, records)
+                    added = merge_well_records(csv_path, records)
                     log.info("Well %-12s -> %s  (+%d row(s), merged)",
                              well_label, csv_path.name, added)
                 else:
@@ -2451,7 +2451,7 @@ def process_well_zip_task(
                          well_label, n_compressed, out_zip.name)
             else:
                 if records:
-                    _write_single_csv(records, csv_path)
+                    write_well_csv(records, csv_path)
                     log.info("Well %-12s -> %s  (%d rows)", well_label, csv_path.name, len(records))
                 else:
                     log.warning("Well %s: no records produced; CSV not written.", well_label)
@@ -2631,7 +2631,7 @@ def process_well_folder_task(
             if incremental:
                 # Merge new rows / images into the existing well outputs.
                 if records:
-                    added = merge_records_into_csv(csv_path, records)
+                    added = merge_well_records(csv_path, records)
                     log.info("Well %-12s -> %s  (+%d row(s), merged)",
                              well_label, csv_path.name, added)
                 else:
@@ -2648,7 +2648,7 @@ def process_well_folder_task(
                 remove_directory(tmp_images)
             else:
                 if records:
-                    _write_single_csv(records, csv_path)
+                    write_well_csv(records, csv_path)
                     log.info("Well %-12s -> %s  (%d rows)", well_label, csv_path.name, len(records))
                 else:
                     log.warning("Well %s: no records produced; CSV not written.", well_label)

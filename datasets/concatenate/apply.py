@@ -33,6 +33,7 @@ from util.aw_safe import swallow
 from domain.tp_match import tp_close
 from datasets.core.concurrency import pick_workers
 from datasets.core.provenance import record_derivation
+from util.csv_gz import open_csv_text
 from datasets.core.containers import (
     FILENAME_COLUMN as _FILENAME_COLUMN,
     OVERRIDES_FILENAME as _OVERRIDES_FILENAME,
@@ -247,7 +248,7 @@ def merge_qc_zip(
 
 # ── CSV row merge ─────────────────────────────────────────────────────────────
 def _read_csv(path: Path) -> tuple[list[dict], list[str]]:
-    with path.open(newline="") as handle:
+    with open_csv_text(path) as handle:
         reader = csv.DictReader(handle)
         rows = list(reader)
         fieldnames = list(reader.fieldnames or [])
@@ -313,7 +314,7 @@ def _remap_ds2_rows(plan: MergePlan, rows: list[dict]) -> int:
 
 def _write_rows(dest: Path, fieldnames: list[str], rows: list[dict]) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with dest.open("w", newline="") as handle:
+    with open_csv_text(dest, "w") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, restval="", extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)

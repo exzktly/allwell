@@ -39,6 +39,7 @@ from util.well_token import (
     blank_wells_for_run,
 )
 from util.aw_safe import swallow, swallowed
+from util.csv_gz import existing_csv
 from services.remote_run_state import (
     OutputFilter,
     _RemoteRun,
@@ -1033,8 +1034,7 @@ class _BatchedRemoteProcess:
                 kept: list[Path] = []
                 for p in all_zips:
                     well = p.stem.upper()
-                    csv_path = self._local_output_dir / f"{csv_prefix}_{well}.csv"
-                    if csv_path.exists() and csv_path.stat().st_size > 0:
+                    if (found := existing_csv(self._local_output_dir / f"{csv_prefix}_{well}.csv")) and found.stat().st_size > 0:
                         skipped.append(p)
                     else:
                         kept.append(p)

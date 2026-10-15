@@ -53,6 +53,19 @@ def csv_path_for_well(output_dir: Path, well_label: str, csv_prefix: str) -> Pat
     return Path(output_dir) / f"{csv_prefix}_{_safe_well(well_label)}.csv"
 
 
+def existing_csv_for_well(output_dir: Path, well_label: str, csv_prefix: str) -> Path:
+    """The file that holds a well's measurements: the ``.csv`` or the ``.csv.gz``.
+
+    A finished well's CSV is gzipped, so "does it exist" has to look for both
+    spellings. When neither exists the plain path is returned, so callers can
+    keep asking ``.exists()`` of the result.
+    """
+    from util.csv_gz import existing_csv
+
+    plain = csv_path_for_well(output_dir, well_label, csv_prefix)
+    return existing_csv(plain) or plain
+
+
 def _canonical_force_wells(force_wells) -> frozenset[str]:
     """Normalise a per-well force list to canonical well labels.
 
@@ -140,7 +153,7 @@ def output_exists_for_well(output_dir: Path, well_label: str, csv_prefix: str) -
     re-processed) or --force (redo the whole well).
     """
     out_zip  = out_zip_path(output_dir, well_label)
-    csv_path = csv_path_for_well(output_dir, well_label, csv_prefix)
+    csv_path = existing_csv_for_well(output_dir, well_label, csv_prefix)
     zip_ok = out_zip.exists()  and out_zip.stat().st_size  > 0
     csv_ok = csv_path.exists() and csv_path.stat().st_size > 0
     return zip_ok and csv_ok
@@ -162,7 +175,7 @@ def output_exists_for_well_folder(
     """
     out_folder = out_folder_path(output_dir, well_label)
     out_zip    = out_zip_path(output_dir, well_label)
-    csv_path   = csv_path_for_well(output_dir, well_label, csv_prefix)
+    csv_path   = existing_csv_for_well(output_dir, well_label, csv_prefix)
     folder_ok  = out_folder.is_dir() and any(out_folder.iterdir())
     zip_ok     = out_zip.exists() and out_zip.stat().st_size > 0
     csv_ok     = csv_path.exists() and csv_path.stat().st_size > 0

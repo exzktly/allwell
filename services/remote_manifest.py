@@ -53,6 +53,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # own staging, both of which run here — but the manifest must list every
     # ``util/`` file so the completeness guard (test_remote_manifest) passes.
     "util/dir_scan.py",
+    # Per-well CSVs are gzipped when a well finishes, and every CSV reader and
+    # writer in the pipeline goes through this to treat .csv / .csv.gz as one file.
+    "util/csv_gz.py",
     # The retry-with-backoff shield behind every pipeline write that lands on
     # the output volume (pipeline.io imports it at module scope).
     # Rebinds sys.stdout / sys.stderr when a frozen windowed build nulls them;

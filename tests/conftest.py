@@ -713,6 +713,11 @@ def offline_transport(monkeypatch):
     # the same thing a failed listing produces.
     monkeypatch.setattr(remote_fetch.Fetcher, "_list_remote_glob",
                         lambda self, src_glob: (src_glob.split(":", 1)[0], [], None))
+    # Compressing a well's plain CSVs before they move is its own ssh; an
+    # unreachable host leaves them as they are, which is what a failed script
+    # does in production too (the CSV is then fetched uncompressed).
+    monkeypatch.setattr(remote_fetch, "compress_remote_csvs",
+                        lambda host, remote_output_dir, well, log: None)
 
     # `pull_small_file` answers False for every failure by design — that is
     # already the documented shape of "the file did not come back".

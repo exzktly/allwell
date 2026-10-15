@@ -125,7 +125,9 @@ def build_template(crops, *, interior_radius_px: float, quarter: float = TEMPLAT
     """The empty-nanowell template: the median of the least-textured quarter of the visible crops.
 
     *crops* are from :func:`site_crops` for the sites that are visible and imaged (the caller
-    decides which; a site with NaN anywhere in the disk is skipped here). Texture is the residual
+    decides which; a site with NaN anywhere in the disk of *interior_radius_px* is skipped here,
+    so pass ``SUPPRESSION_RADIUS`` times the site radius: the template must cover what
+    :func:`rim_suppress` divides). Texture is the residual
     departure inside the disk from the crop's own radial mean (reference-free, so it picks the
     empty sites even when most are loaded), refined by a second pass against the template those
     sites make; a site holding cells stands out and is left out. With fewer than
@@ -166,7 +168,11 @@ def build_template(crops, *, interior_radius_px: float, quarter: float = TEMPLAT
 
 # ── C2: the rim-suppressed tile ──────────────────────────────────────────────
 def _template_floor(template: Template) -> float:
-    return 0.1 * float(np.median(template.array[_disk(template.half, template.half * 0.6)]))
+    level = float(np.median(template.array[_disk(template.half, template.half * 0.6)]))
+    if not math.isfinite(level) or level <= 0:
+        raise ValueError(f"The template's central level is {level}; dividing by it is meaningless "
+                         "(a background-subtracted image needs its offset restored first)")
+    return 0.1 * level
 
 
 def rim_suppress(image, pixel_size_um: float, template: Template, geometries,
@@ -185,6 +191,15 @@ def rim_suppress(image, pixel_size_um: float, template: Template, geometries,
     h, w = image.shape
     out = np.ones((h, w))
     floor = _template_floor(template)
+    for g in geometries:
+        reach = radius * g.radius_um / pixel_size_um
+        if reach > template.half:
+            raise ValueError(f"Site {g.index} reaches {reach:.1f} px but the template covers only {template.half}; "
+                             "leaving the rest flat would read as an empty site")
+    if not np.isfinite(template.array[_disk(template.half, max(
+            (radius * g.radius_um / pixel_size_um for g in geometries), default=0.0))]).all():
+        raise ValueError("The template has non-finite values inside the suppression reach; build it with "
+                         "interior_radius_px = SUPPRESSION_RADIUS x the site radius")
     for g in geometries:
         cx, cy = g.centre_um[0] / pixel_size_um - 0.5, g.centre_um[1] / pixel_size_um - 0.5
         reach = radius * g.radius_um / pixel_size_um
@@ -223,6 +238,15 @@ def _interior_pixels(shape, pixel_size_um, g, fraction):
     return yy[keep], xx[keep]
 
 
+#: A site whose interior is less than this share on the image is not measured (a quadrant is not a site).
+MIN_INTERIOR_COVERED = 0.5
+
+
+def _covered(n_pixels: int, pixel_size_um: float, g, fraction: float) -> bool:
+    nominal = math.pi * (fraction * g.radius_um / pixel_size_um) ** 2
+    return n_pixels >= MIN_INTERIOR_COVERED * nominal
+
+
 def texture_threshold(rim_image, pixel_size_um: float, empty_geometries, *, sigmas: float = TEXTURE_SIGMAS,
                       fraction: float = INTERIOR_FRACTION) -> float | None:
     """How much departure from the template is texture an empty nanowell shows by itself.
@@ -250,14 +274,14 @@ def site_confluence(rim_image, pixel_size_um: float, geometries, threshold: floa
                     fraction: float = INTERIOR_FRACTION) -> list[float | None]:
     """Per site, the share of its interior whose departure from the template exceeds *threshold*.
 
-    ``None`` for a site with no interior pixel on the image, and for every site when there is no
-    threshold. 0.0 is a measurement: an empty nanowell.
+    ``None`` for a site with under half its interior on the image, and for every site when there is
+    no threshold. 0.0 is a measurement: an empty nanowell.
     """
     departure = _departure(rim_image)
     out = []
     for g in geometries:
         ys, xs = _interior_pixels(departure.shape, pixel_size_um, g, fraction)
-        if threshold is None or not len(ys):
+        if threshold is None or not _covered(len(ys), pixel_size_um, g, fraction):
             out.append(None)
         else:
             out.append(float(np.mean(departure[ys, xs] > threshold)))
@@ -313,6 +337,11 @@ def count_cells(labels, pixel_size_um: float, geometries, *, owned=None,
     one tile. A site with no cell returns ``n_cells=0``. Cells straddling the rim, or lying
     between sites, belong to no site and are dropped.
     """
+    known = {g.index for g in geometries}
+    missing = sorted(set(owned or ()) - known)
+    if missing:
+        raise ValueError(f"Owned sites {missing} have no geometry in this tile; "
+                         "they cannot be counted, and omitting them would read as undefined")
     ids, centroids = _label_centroids(np.asarray(labels))
     counted = {g.index: [] for g in geometries if owned is None or g.index in owned}
     sites = [g for g in geometries if g.index in counted]
@@ -333,20 +362,33 @@ class AreaEstimate:
     count_disagreement: bool | None     # None when the area estimate is undefined
 
 
-def isolated_cell_area_um2(labels, pixel_size_um: float, geometries, counts: dict, *,
-                           fraction: float = INTERIOR_FRACTION) -> float | None:
-    """Median area of the cells that touch no other cell, over every counted site; ``None`` if none."""
+def isolated_cell_area_um2(labels, pixel_size_um: float, counts: dict) -> float | None:
+    """Median area of the counted cells that touch no other cell and no image edge; ``None`` if none.
+
+    A cell cut by the tile edge is too small to stand for a cell, and one touching another may be
+    half a clump. A clump that touches nothing still passes as one cell: contact cannot tell it
+    from a large cell, so where clumps predominate the area count inherits their undercount.
+    """
     from scipy import ndimage
 
     labels = np.asarray(labels)
-    touching = set()
-    for label in np.unique(labels[labels > 0]):
-        grown = ndimage.binary_dilation(labels == label, iterations=2)
-        others = np.unique(labels[grown])
-        if any(o not in (0, label) for o in others):
-            touching.add(int(label))
-    areas = [float(np.sum(labels == label)) * pixel_size_um ** 2
-             for count in counts.values() for label in count.labels if label not in touching]
+    h, w = labels.shape
+    boxes = ndimage.find_objects(labels)
+    areas = []
+    for count in counts.values():
+        for label in count.labels:
+            box = boxes[label - 1] if 0 < label <= len(boxes) else None
+            if box is None:
+                continue
+            y0, y1 = max(box[0].start - 3, 0), min(box[0].stop + 3, h)
+            x0, x1 = max(box[1].start - 3, 0), min(box[1].stop + 3, w)
+            if box[0].start == 0 or box[1].start == 0 or box[0].stop == h or box[1].stop == w:
+                continue
+            window = labels[y0:y1, x0:x1]
+            grown = ndimage.binary_dilation(window == label, iterations=2)
+            if any(o not in (0, label) for o in np.unique(window[grown])):
+                continue
+            areas.append(float(np.sum(window == label)) * pixel_size_um ** 2)
     return float(np.median(areas)) if areas else None
 
 
@@ -363,9 +405,12 @@ def area_estimate(labels, pixel_size_um: float, geometries, counts: dict, *,
     """
     labels = np.asarray(labels)
     median_area = isolated_area_um2 if isolated_area_um2 is not None else isolated_cell_area_um2(
-        labels, pixel_size_um, geometries, counts, fraction=fraction)
+        labels, pixel_size_um, counts)
     by_index = {g.index: g for g in geometries}
     out = {}
+    unknown = sorted(set(counts) - set(by_index))
+    if unknown:
+        raise ValueError(f"Counted sites {unknown} have no geometry")
     for index, count in counts.items():
         ys, xs = _interior_pixels(labels.shape, pixel_size_um, by_index[index], fraction)
         area = float(np.sum(labels[ys, xs] > 0)) * pixel_size_um ** 2 if len(ys) else 0.0
@@ -429,7 +474,8 @@ def site_fluorescence(image, pixel_size_um: float, geometries, empty_indices, *,
                       fraction: float = INTERIOR_FRACTION) -> list[SiteFluorescence]:
     """Per-site integrated and mean intensity over the interior, minus the empty sites' background.
 
-    Defined wherever the interior is on the image, with or without a segmentation. The
+    Defined wherever at least half the interior is on the image and every pixel of it is a number
+    (``None`` otherwise), with or without a segmentation. The
     background is the median interior mean of the sites in *empty_indices*. With no image (a
     timepoint without the channel) every number is ``None``, not zero; with no empty site the
     background and everything derived from it are ``None``.
@@ -441,7 +487,9 @@ def site_fluorescence(image, pixel_size_um: float, geometries, empty_indices, *,
     interior = {}
     for g in geometries:
         ys, xs = _interior_pixels(image.shape, pixel_size_um, g, fraction)
-        interior[g.index] = image[ys, xs] if len(ys) else None
+        values = image[ys, xs]
+        usable = _covered(len(ys), pixel_size_um, g, fraction) and np.isfinite(values).all()
+        interior[g.index] = values if usable else None
     backgrounds = [float(v.mean()) for i, v in interior.items() if i in empty and v is not None]
     background = float(np.median(backgrounds)) if backgrounds else None
     out = []
@@ -468,6 +516,10 @@ class SiteState:
     addressed: bool
 
 
+def _finite_or_none(value):
+    return None if value is None or not math.isfinite(value) else float(value)
+
+
 def site_state(*, visible_fraction: float | None, imaged_fraction: float | None, n_cells: int | None,
                confluence: float | None, addressed: bool = True, fused: bool = False,
                occluded_below: float = 0.5, clipped_below: float = 0.5) -> SiteState:
@@ -476,13 +528,17 @@ def site_state(*, visible_fraction: float | None, imaged_fraction: float | None,
     ``clipped`` (imaged fraction below *clipped_below*, or off the image) and ``occluded``
     (visible fraction below *occluded_below*) carry **no** contents metrics: ``n_cells`` and
     ``confluence`` are ``None``, whatever was passed, because a count from a site that was not
-    seen is not a count. A measured site with no cells is ``empty`` with ``n_cells == 0`` and
-    ``confluence == 0.0``: a measurement. The two can therefore never be confused. A site seen only in
+    seen is not a count. A measured site with no cells is ``empty`` with ``n_cells == 0`` and the confluence it was
+    given (0.0 when measured, ``None`` when no confluence was: it is never filled in). A
+    non-finite fraction counts as unknown, and an unknown imaged fraction is ``clipped``, an
+    unknown visible one ``occluded``. The two can therefore never be confused. A site seen only in
     part (above the thresholds, below 1) keeps its metrics with ``partially_visible`` set and
     both fractions on the row; ``fused`` and ``addressed`` are flags beside the state, not states:
     a fused site was measured from a blended crop, and an unaddressed timepoint's sites keep
     their metrics but cannot be joined over time.
     """
+    visible_fraction = _finite_or_none(visible_fraction)
+    imaged_fraction = _finite_or_none(imaged_fraction)
     if imaged_fraction is None or imaged_fraction < clipped_below:
         return SiteState(CLIPPED, None, None, visible_fraction, imaged_fraction, None, fused, addressed)
     if visible_fraction is None or visible_fraction < occluded_below:
@@ -492,6 +548,5 @@ def site_state(*, visible_fraction: float | None, imaged_fraction: float | None,
         # Seen, but no count was made: still undefined, not zero.
         return SiteState(MEASURED, None, confluence, visible_fraction, imaged_fraction, partial, fused, addressed)
     if n_cells == 0:
-        return SiteState(EMPTY, 0, 0.0 if confluence is None or confluence == 0 else confluence,
-                         visible_fraction, imaged_fraction, partial, fused, addressed)
+        return SiteState(EMPTY, 0, confluence, visible_fraction, imaged_fraction, partial, fused, addressed)
     return SiteState(MEASURED, int(n_cells), confluence, visible_fraction, imaged_fraction, partial, fused, addressed)

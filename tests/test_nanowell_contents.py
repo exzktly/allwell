@@ -300,3 +300,87 @@ def test_a_seen_site_without_a_count_is_undefined_not_empty():
 def test_unaddressed_sites_keep_their_metrics():
     s = nm.site_state(visible_fraction=1.0, imaged_fraction=1.0, n_cells=4, confluence=0.3, addressed=False)
     assert s.addressed is False and s.n_cells == 4
+
+
+# ── review findings ─────────────────────────────────────────────────────────
+def _template_of(array, half):
+    return nm.Template(np.asarray(array, dtype=float), half, nm.SOURCE_OWN, 4, 16, 0.0)
+
+
+@pytest.mark.parametrize("level", [0.0, -1.0, float("nan")])
+def test_a_template_that_cannot_be_divided_by_is_refused(level):
+    one = [SiteGeometry(0, (30.0, 30.0), 8.0, FITTED)]
+    with pytest.raises(ValueError, match="central level"):
+        nm.rim_suppress(np.ones((60, 60)), PX, _template_of(np.full((25, 25), level), 12), one)
+
+
+def test_a_template_smaller_than_the_site_is_refused_not_left_flat():
+    one = [SiteGeometry(0, (30.0, 30.0), 8.0, FITTED)]
+    with pytest.raises(ValueError, match="covers only 4"):
+        nm.rim_suppress(np.ones((60, 60)), PX, _template_of(np.full((9, 9), 0.5), 4), one)
+
+
+def test_a_template_with_nan_inside_the_reach_is_refused():
+    one = [SiteGeometry(0, (30.0, 30.0), 8.0, FITTED)]
+    array = np.full((25, 25), 0.5)
+    array[12, 20] = np.nan                                     # 8 px from the centre: inside the 8.4 reach, outside the level disk
+    with pytest.raises(ValueError, match="non-finite"):
+        nm.rim_suppress(np.ones((60, 60)), PX, _template_of(array, 12), one)
+
+
+def test_geometry_order_is_not_site_identity_and_an_owned_site_without_geometry_is_refused():
+    labels = np.zeros((190, 190), dtype=int)
+    x, y = CENTRES[7]
+    labels[int(y) - 1:int(y) + 2, int(x) - 1:int(x) + 2] = 1
+    shuffled = [GEOMS[9], GEOMS[7], GEOMS[2]]                   # index != position
+    counts = nm.count_cells(labels, PX, shuffled, owned={7, 2})
+    assert {i: c.n_cells for i, c in counts.items()} == {7: 1, 2: 0}      # a dropped cell would read 0 at 7
+    with pytest.raises(ValueError, match=r"\[5\]"):
+        nm.count_cells(labels, PX, shuffled, owned={7, 5})
+    with pytest.raises(ValueError, match=r"\[3\]"):
+        nm.area_estimate(labels, PX, shuffled, {3: nm.SiteCount(3, 0, ())})
+
+
+def test_an_empty_site_with_no_confluence_keeps_it_undefined():
+    s = nm.site_state(visible_fraction=1.0, imaged_fraction=1.0, n_cells=0, confluence=None)
+    assert s.state == nm.EMPTY and s.n_cells == 0 and s.confluence is None
+
+
+def test_nan_fractions_are_unknown_not_fully_seen():
+    nan = float("nan")
+    assert nm.site_state(visible_fraction=nan, imaged_fraction=1.0, n_cells=3, confluence=0.1).state == nm.OCCLUDED
+    assert nm.site_state(visible_fraction=1.0, imaged_fraction=nan, n_cells=3, confluence=0.1).state == nm.CLIPPED
+
+
+def test_a_nan_pixel_in_the_interior_leaves_fluorescence_undefined_for_that_site_only():
+    image = np.full((190, 190), 10.0)
+    x, y = CENTRES[3]
+    image[int(y), int(x)] = np.nan
+    by = {r.index: r for r in nm.site_fluorescence(image, PX, GEOMS, [0, 1, 2])}
+    assert by[3].integrated is None and by[3].mean_minus_background is None
+    assert by[4].integrated == pytest.approx(0.0) and by[4].background == 10.0
+
+
+def test_a_site_mostly_off_the_image_is_not_measured():
+    edge = [SiteGeometry(0, (0.5, 0.5), 10.0, FITTED), SiteGeometry(1, (95.0, 95.0), 10.0, FITTED)]
+    rim = np.ones((190, 190))
+    assert nm.site_confluence(rim, PX, edge, 0.1) == [None, 0.0]
+    fl = nm.site_fluorescence(np.full((190, 190), 5.0), PX, edge, [1])
+    assert fl[0].integrated is None and fl[1].integrated == pytest.approx(0.0)
+
+
+def test_cells_cut_by_the_tile_edge_do_not_set_the_isolated_cell_size():
+    labels = np.zeros((60, 60), dtype=int)
+    labels[0:4, 20:30] = 1                                       # cut by the top edge: 40 px
+    labels[30:40, 30:40] = 2                                     # whole: 100 px
+    counts = {0: nm.SiteCount(0, 2, (1, 2))}
+    assert nm.isolated_cell_area_um2(labels, PX, counts) == 100.0
+
+
+def test_touching_cells_do_not_set_the_isolated_cell_size():
+    labels = np.zeros((60, 60), dtype=int)
+    labels[10:20, 10:20] = 1
+    labels[10:20, 20:30] = 2                                     # touches 1: half a clump, 100 px each
+    labels[40:46, 40:46] = 3                                     # alone: 36 px
+    counts = {0: nm.SiteCount(0, 3, (1, 2, 3))}
+    assert nm.isolated_cell_area_um2(labels, PX, counts) == 36.0

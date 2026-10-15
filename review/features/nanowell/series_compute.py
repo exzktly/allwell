@@ -31,8 +31,9 @@ an empty nanowell and can be negative; a ratio over a baseline at or below zero 
 one undefined case this table adds to §3.10.1's ("no signal above background at baseline").
 
 **Baseline** (§3.10.1): ``"earliest"`` — the well's earliest timepoint, so a site unmeasurable there has no
-fold change — or ``"first_measurable"``, each site's first timepoint in a measurable state, the labelled
-alternative for a bubble that clears after t₀.
+fold change — or ``"first_measurable"``, the labelled alternative for a bubble that clears after t₀: for each
+measurement, the site's first timepoint in a measurable state at which that measurement exists, so a count's
+baseline and a confluence's can differ. ``baseline_timepoint`` / ``baseline_state`` are the count's.
 
 Qt-free; vectorised over the whole dataset (a 96-well plate of 1,000 nanowells over ten timepoints is a
 million rows).
@@ -52,6 +53,17 @@ EARLIEST, FIRST_MEASURABLE = "earliest", "first_measurable"
 BASELINES = (EARLIEST, FIRST_MEASURABLE)
 OCCUPANCY_CLASSES = ("0", "1", "2", "3+")
 SITE_KEY = ["well", "nw_q", "nw_r"]
+
+
+def _grid_reason(block) -> str:
+    """The grid record's reason for a timepoint, or what is known when it gives none."""
+    block = block or {}
+    if block.get("reason"):
+        return str(block["reason"])
+    status = block.get("status")
+    if status and status != "ok":
+        return f"status {status}"
+    return "the grid record lists this timepoint but the table has no rows for it"
 
 
 def _addressed_grid(data: NanowellData) -> pd.DataFrame:
@@ -82,21 +94,26 @@ def _addressed_grid(data: NanowellData) -> pd.DataFrame:
     merged.loc[missing & in_table & ~has_address, "state"] = UNADDRESSED
     merged.loc[missing & ~in_table, "state"] = NOT_LOCATED
     merged.loc[merged["state"].isna(), "state"] = ABSENT
-    reasons = {(w, tp): (block or {}).get("reason") or ""
-               for w, blocks in data.grids.items() for tp, block in blocks.items()}
+    reasons = {(w, tp): _grid_reason(block) for w, blocks in data.grids.items() for tp, block in blocks.items()}
     explained = merged["state"].isin((UNADDRESSED, NOT_LOCATED))
     merged["reason"] = ""
-    merged.loc[explained, "reason"] = [reasons.get(k, "") for k in here[explained.to_numpy()]]
+    merged.loc[explained, "reason"] = [reasons.get(k) or _grid_reason(None) for k in here[explained.to_numpy()]]
     merged["time_h"] = merged["timepoint"].map(data.times_h).astype(float)
     return merged.sort_values(SITE_KEY + ["tp_order"], kind="stable").reset_index(drop=True)
 
 
-def _baseline_rows(frame: pd.DataFrame, baseline: str) -> pd.Series:
-    """A boolean mask marking each site's baseline row."""
+def _baseline_rows(frame: pd.DataFrame, baseline: str, value: str) -> pd.Series:
+    """A boolean mask marking each site's baseline row for the measurement *value*.
+
+    Under ``first_measurable`` each measurement has its own baseline: the first timepoint at which the site
+    is in a measurable state *and* that value exists. A state alone is not enough — the pipeline records
+    ``measured`` with no count where no empty-nanowell template could be built, and a fused nanowell has a
+    confluence but no count — and a baseline chosen by state would leave the count undefined for ever.
+    """
     if baseline == EARLIEST:
         return frame["tp_order"] == 0
     if baseline == FIRST_MEASURABLE:
-        measurable = frame["state"].isin(MEASURABLE)
+        measurable = frame["state"].isin(MEASURABLE) & frame[value].notna()
         first = frame["tp_order"].where(measurable).groupby([frame[k] for k in SITE_KEY]).transform("min")
         return measurable & (frame["tp_order"] == first)
     raise ValueError(f"baseline must be one of {BASELINES}, not {baseline!r}")
@@ -147,11 +164,15 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST) -> pd.DataFrame:
     for ch in data.channels:
         frame[f"brightness_{ch}"] = frame[f"brightness_{ch}"].where(measurable)
         frame[f"signal_{ch}"] = frame[f"{ch}_integrated"].where(measurable)
-    mask = _baseline_rows(frame, baseline)
-    frame["baseline_timepoint"] = _at_baseline(frame, mask, "timepoint")
-    frame["baseline_state"] = _at_baseline(frame, mask, "state")
-    n0 = _at_baseline(frame, mask, "n")
-    c0 = _at_baseline(frame, mask, "c")
+    base = {}
+    for value in ["n", "c"] + [f"{kind}_{ch}" for ch in data.channels for kind in ("brightness", "signal")]:
+        mask = _baseline_rows(frame, baseline, value)
+        frame[f"_base_tp_{value}"] = _at_baseline(frame, mask, "timepoint")
+        frame[f"_base_state_{value}"] = _at_baseline(frame, mask, "state")
+        base[value] = _at_baseline(frame, mask, value)
+    frame["baseline_timepoint"] = frame["_base_tp_n"]           # the count's; see _baseline_rows for the others
+    frame["baseline_state"] = frame["_base_state_n"]
+    n0, c0 = base["n"], base["c"]
     frame["n0"] = n0
     frame["count_fc"] = _ratio(frame["n"], n0)
     frame["seeded_later"] = n0.eq(0) & frame["n"].gt(0)
@@ -159,8 +180,8 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST) -> pd.DataFrame:
     frame["log2_count_fc"] = np.log2((frame["n"] + 1) / (n0 + 1)).where(both)
     frame["confluence_fc"] = _ratio(frame["c"], c0)
     for ch in data.channels:
-        frame[f"brightness_fc_{ch}"] = _ratio(frame[f"brightness_{ch}"], _at_baseline(frame, mask, f"brightness_{ch}"))
-        frame[f"signal_fc_{ch}"] = _ratio(frame[f"signal_{ch}"], _at_baseline(frame, mask, f"signal_{ch}"))
+        frame[f"brightness_fc_{ch}"] = _ratio(frame[f"brightness_{ch}"], base[f"brightness_{ch}"])
+        frame[f"signal_fc_{ch}"] = _ratio(frame[f"signal_{ch}"], base[f"signal_{ch}"])
     occupancy = pd.Series(pd.NA, index=frame.index, dtype="object")
     occupancy[n0.notna()] = np.where(n0[n0.notna()] >= 3, "3+", n0[n0.notna()].astype(int).astype(str))
     frame["occupancy_class"] = occupancy
@@ -179,6 +200,9 @@ def site_series(metrics: pd.DataFrame, well: str, q: int, r: int) -> pd.DataFram
 
 
 # ── why a value is missing ───────────────────────────────────────────────────
+#: The baseline "state" of a site that has no baseline at all (first-measurable, never measured).
+_NEVER = "never measured"
+
 #: metric column -> (kind, base value column). Kinds: "value" (a measurement at t), "fc" (t over baseline),
 #: "site" (one number per nanowell).
 def metric_kinds(channels) -> dict:
@@ -220,7 +244,7 @@ def exclusion_reason(metrics: pd.DataFrame, metric: str, channels=()) -> pd.Seri
         return out
     if kind == "base":
         base_state_bad = ~metrics["baseline_state"].isin(MEASURABLE)
-        out[~defined & base_state_bad] = "baseline " + metrics["baseline_state"].fillna("missing").astype(str)
+        out[~defined & base_state_bad] = "baseline " + metrics["baseline_state"].fillna(_NEVER).astype(str)
         out[~defined & ~base_state_bad] = "no count at baseline"
         return out
     out[~defined & state_bad] = metrics["state"].astype(str)
@@ -228,11 +252,11 @@ def exclusion_reason(metrics: pd.DataFrame, metric: str, channels=()) -> pd.Seri
     out[rest] = _value_reason(metrics, value)[rest]
     if kind == "fc":
         pending = ~defined & (out == "")
-        base_state = metrics["baseline_state"]
+        base_state = metrics[f"_base_state_{value}"]
         base_bad = pending & ~base_state.isin(MEASURABLE)
-        out[base_bad] = "baseline " + base_state.fillna("missing").astype(str)[base_bad]
+        out[base_bad] = "baseline " + base_state.fillna(_NEVER).astype(str)[base_bad]
         pending &= ~base_bad
-        base_value = _at_baseline(metrics, metrics["timepoint"] == metrics["baseline_timepoint"], value)
+        base_value = _at_baseline(metrics, metrics["timepoint"] == metrics[f"_base_tp_{value}"], value)
         missing = pending & base_value.isna()
         out[missing] = "baseline: " + _value_reason(metrics, value)[missing]
         pending &= ~missing

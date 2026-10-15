@@ -36,7 +36,9 @@ def responding_threshold(metric: str) -> float | None:
     """The value above which a nanowell counts as responding: 1 for a fold change, 0 for a log₂ fold change.
 
     A measurement (a count, a confluence, an intensity) has no natural "responding" cut, so it has none and
-    the fraction responding is undefined rather than guessed.
+    the fraction responding is undefined rather than guessed. A nanowell seeded later (empty at baseline,
+    cells afterwards) has no count fold change, so it is not among those responding on ``count_fc`` — it is
+    counted under "seeded later" in the exclusions — while ``log2_count_fc`` (defined with the +1) counts it.
     """
     if metric in LOG_METRICS:
         return 0.0
@@ -54,12 +56,14 @@ def well_summary(metrics: pd.DataFrame, metric: str, channels=(), *,
     ``fraction_occupied`` is over nanowells with a count at that timepoint, whatever the metric.
     """
     threshold = responding_threshold(metric) if responding_above is None else responding_above
-    frame = metrics.assign(_value=pd.to_numeric(metrics[metric], errors="coerce") if metric != "occupancy_class"
-                           else metrics[metric], _reason=exclusion_reason(metrics, metric, channels))
+    # Occupancy classes are ordinal; "3+" stands at 3 for the median and quartiles, as the class it is.
+    values = (metrics[metric].map({"0": 0.0, "1": 1.0, "2": 2.0, "3+": 3.0}) if metric == "occupancy_class"
+              else pd.to_numeric(metrics[metric], errors="coerce"))
+    frame = metrics.assign(_value=values, _reason=exclusion_reason(metrics, metric, channels))
     rows = []
     for (well, tp), group in frame.groupby(["well", "timepoint"], sort=False):
         values = group["_value"].dropna()
-        numeric = pd.to_numeric(values, errors="coerce").dropna()
+        numeric = values
         counted = group["n"].dropna()
         reasons = group.loc[group["_value"].isna(), "_reason"].value_counts()
         rows.append({
@@ -93,9 +97,15 @@ def group_summary(wells: pd.DataFrame, groups: dict, *, metric: str = "", contro
     names the rest. ``vs_control`` compares to *control*'s centre (see the module docstring).
     """
     rows = []
+    timeline = wells.drop_duplicates("timepoint").sort_values(["time_h", "tp_order", "timepoint"], kind="stable",
+                                                              na_position="last")
     for name, members in groups.items():
         mine = wells[wells["well"].isin(list(members))]
-        for tp, part in mine.groupby("timepoint", sort=False):
+        for tp, time_h, tp_order in zip(timeline["timepoint"], timeline["time_h"], timeline["tp_order"]):
+            part = mine[mine["timepoint"] == tp]
+            # A member with no row here (no addressed nanowell, or not imaged at this timepoint) is a well
+            # without a value, named, not a well that was never in the group.
+            absent = sorted(set(members) - set(part["well"]))
             values = part["median"].dropna()
             k = len(values)
             centre = float(values.mean()) if k else math.nan
@@ -106,10 +116,9 @@ def group_summary(wells: pd.DataFrame, groups: dict, *, metric: str = "", contro
             for counts in part["excluded"]:
                 for reason, n in counts.items():
                     excluded[reason] = excluded.get(reason, 0) + n
-            rows.append({"group": name, "timepoint": tp, "time_h": part["time_h"].iloc[0],
-                         "tp_order": part["tp_order"].iloc[0], "n_wells": k,
+            rows.append({"group": name, "timepoint": tp, "time_h": time_h, "tp_order": tp_order, "n_wells": k,
                          "wells": sorted(part.loc[part["median"].notna(), "well"]),
-                         "wells_without_value": sorted(part.loc[part["median"].isna(), "well"]),
+                         "wells_without_value": sorted(set(part.loc[part["median"].isna(), "well"]) | set(absent)),
                          "centre": centre, "sd": sd, "sem": sem, "ci_low": centre - half, "ci_high": centre + half,
                          "n_sites_used": int(part["n_used"].sum()), "excluded": excluded})
     columns = ["group", "timepoint", "time_h", "tp_order", "n_wells", "wells", "wells_without_value", "centre",

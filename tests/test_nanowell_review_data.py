@@ -366,3 +366,75 @@ def test_a_saved_block_with_values_the_page_cannot_show_is_not_taken():
     st.apply_config({"view": "pie", "baseline": "latest", "axis": "diagonal", "metric": 3,
                      "selected_sites": [["A01", 1, 2], ["A01", "x", 2], ["A01", True, 0], "junk"]})
     assert st.to_config() == {**NanowellState().to_config(), "selected_sites": [["A01", 1, 2]]}
+
+
+# ── what the review of this section found ────────────────────────────────────
+def test_when_only_some_labels_are_times_no_timepoint_has_a_time_and_growth_is_undefined(tmp_path):
+    rows = [_row(tp, 0, 0, n=n, c=0.1) for tp, n in (("0h", 1), ("12h", 2), ("24h", 4), ("final", 8))]
+    data = load_nanowell_data(_dataset(tmp_path, {"A01": rows}, starts=None))
+    assert data.time_source is None and data.times_h == {}
+    metrics = site_metrics(data)
+    assert metrics["time_h"].isna().all() and metrics["growth_rate"].isna().all()
+
+
+def test_a_member_well_with_no_addressed_nanowell_is_named_not_dropped(tmp_path):
+    wells = {"A01": [_row("t_c", 0, 0, n=1, c=0.1), _row("t_a", 0, 0, n=2, c=0.1)],
+             "B01": [_row("t_c", None, None, n=1, c=0.1), _row("t_a", None, None, n=1, c=0.1)],
+             "C01": [_row("t_c", 0, 0, n=1, c=0.1), _row("t_a", 0, 0, n=4, c=0.1)]}
+    metrics = site_metrics(load_nanowell_data(_dataset(tmp_path, wells, starts={k: STARTS[k] for k in ("t_c", "t_a")})))
+    out = group_summary(well_summary(metrics, "count_fc"), {"g": ["A01", "B01", "C01"]}).set_index("timepoint")
+    assert out.loc["t_a", "wells"] == ["A01", "C01"] and out.loc["t_a", "wells_without_value"] == ["B01"]
+    assert out.loc["t_a", "n_wells"] == 2
+
+
+def test_first_measurable_takes_each_measurement_s_own_first_timepoint(tmp_path):
+    """The pipeline records ``measured`` with no count where no template could be built."""
+    rows = [{**_row("t_c", 0, 0, n=None, c=0.2), "n_cells": None}, _row("t_a", 0, 0, n=2, c=0.4),
+            _row("t_d", 0, 0, n=4, c=0.8)]
+    data = load_nanowell_data(_dataset(tmp_path, {"A01": rows}, starts={k: STARTS[k] for k in ORDER[:3]}))
+    s = site_metrics(data, "first_measurable").set_index("timepoint")
+    assert s.loc["t_a", "count_fc"] == 1.0 and s.loc["t_d", "count_fc"] == 2.0
+    assert s.loc["t_d", "confluence_fc"] == pytest.approx(4.0)                # confluence's baseline is t_c
+    assert set(s["baseline_timepoint"]) == {"t_a"} and set(s["occupancy_class"]) == {"2"}
+
+
+def test_the_consistency_flag_is_read_as_the_text_the_pipeline_writes(tmp_path):
+    rows = [{**_row("t_c", 0, 0, n=1, c=0.1), "consistency": "roster_mismatch"}]
+    data = load_nanowell_data(_dataset(tmp_path, {"A01": rows}, starts={"t_c": STARTS["t_c"]}))
+    assert data.sites["consistency"].tolist() == ["roster_mismatch"]
+
+
+def test_brightness_is_found_whichever_of_the_output_folder_and_its_parent_is_loaded(tmp_path):
+    cells = {"well": ["A01"], "timepoint": ["t_c"], "nw_q": [0], "nw_r": [0], "GFP_mean_intensity": [20.0]}
+    out = _dataset(tmp_path, {"A01": [_row("t_c", 0, 0, n=1, c=0.1, gfp=1.0)]}, starts={"t_c": STARTS["t_c"]},
+                   cells=cells)
+    for loaded in (out, out.parent):
+        assert load_nanowell_data(loaded).sites["brightness_GFP"].tolist() == [20.0]
+
+
+def test_a_well_that_repeats_an_address_at_one_timepoint_is_left_out_and_named(tmp_path):
+    rows = [_row("t_c", 0, 0, n=1, c=0.1), _row("t_c", 0, 0, n=9, c=0.9)]
+    data = load_nanowell_data(_dataset(tmp_path, {"A01": rows, "B01": [_row("t_c", 0, 0, n=1, c=0.1)]},
+                                       starts={"t_c": STARTS["t_c"]}))
+    assert data.wells == ["B01"] and data.problems[0].startswith("A01: 2 rows repeat an address")
+
+
+def test_a_timepoint_the_grid_lists_without_rows_says_so(tmp_path):
+    grids = {"A01": {"t_c": {"status": "ok"}, "t_a": {"status": "ok"}}}
+    data = load_nanowell_data(_dataset(tmp_path, {"A01": [_row("t_c", 0, 0, n=1, c=0.1)]}, grids=grids,
+                                       starts={k: STARTS[k] for k in ("t_c", "t_a")}))
+    late = site_series(site_metrics(data), "A01", 0, 0).iloc[1]
+    assert late["state"] == NOT_LOCATED and "no rows" in late["reason"]
+
+
+def test_occupancy_class_summaries_count_three_and_more_as_three(tmp_path):
+    rows = [_row("t_c", q, 0, n=n, c=0.1) for q, n in enumerate((1, 3, 7))]
+    metrics = site_metrics(load_nanowell_data(_dataset(tmp_path, {"A01": rows}, starts={"t_c": STARTS["t_c"]})))
+    summary = well_summary(metrics, "occupancy_class").iloc[0]
+    assert (summary["n_used"], summary["median"]) == (3, 3.0)
+
+
+def test_a_nanowell_seeded_later_responds_on_the_log_fold_change_and_is_excluded_by_name_on_the_ratio(metrics):
+    late = well_summary(metrics, "log2_count_fc").set_index("timepoint").loc["t_a"]
+    assert (late["n_used"], late["fraction_responding"]) == (1, 1.0)            # (1,0): 0 → 3 cells
+    assert well_summary(metrics, "count_fc").set_index("timepoint").loc["t_a", "excluded"]["seeded later"] == 1

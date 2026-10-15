@@ -8831,37 +8831,42 @@ the per-cell CSVs; the well loader (`review/core/load_controller.load_directory`
 `*.csv` files, and its header sniff rejects a nanowell table anyway (no `_mean_intensity` column). The
 reader states which scheme versions it understands (`collect.SUPPORTED_SCHEMES`; a test holds the
 pipeline's `SCHEME_VERSION` in it). A sidecar with another version refuses the whole dataset with
-`NanowellSchemeError`; a grid record with another version leaves that well out and names it in
-`NanowellData.problems`. The phase channel's site intensities, which the pipeline writes like any other
+`NanowellSchemeError`; a grid record with another version, or a table that repeats an address at one timepoint, leaves that well out
+and names it in `NanowellData.problems`. The phase channel's site intensities, which the pipeline writes like any other
 channel's, are not offered as fluorescence. Brightness is the mean `<token>_mean_intensity` of the cells the
-per-cell CSVs place at each `(well, timepoint, q, r)`.
+per-cell CSVs beside `nanowells/` place at each `(well, timepoint, q, r)`, whichever of the output folder and
+its parent was loaded.
 
 **Time** is each timepoint's recorded start from `in/acquisition.json` (looked for beside the data dir and
 one level up), in hours since the earliest. All timepoints must have a start on comparable clocks; otherwise
 every timepoint's label is parsed instead (`util.timepoint.parse_hours`), never a mixture, and
-`NanowellData.time_source` / `time_note` say which and why. With neither, time is unknown and the growth rate
-is undefined.
+`NanowellData.time_source` / `time_note` say which and why. With neither, no timepoint has a time — not even
+those whose labels happen to parse — and the growth rate is undefined.
 
 **Joining** (`series_compute.site_metrics`). Each addressed nanowell is followed by `(well, q, r)` across
 every timepoint of its well. A timepoint where it has no row still has one, with a state saying why:
 `unaddressed` (the timepoint was located but given no origin), `not_located` (the grid record names the
 timepoint and the table has no row for it) or `absent` (addressed, not in that roster), plus the grid's
-reason. Contents values are used only in a measurable state (`measured` / `empty`), whatever the table
+reason, or its status, or a sentence saying the grid lists the timepoint and the table has no rows. Contents values are used only in a measurable state (`measured` / `empty`), whatever the table
 holds. `site_series` is one nanowell's rows in time order; an address the well never had is an empty frame.
 
-**Metrics** are those of tracker §3.10.1, NaN where undefined, with `exclusion_reason` naming the cause per
+**Metrics** are the nanowell tracker's per-nanowell metrics table, NaN where undefined, with `exclusion_reason` naming the cause per
 row (the state at the timepoint, the value missing there, the baseline's state or value, a baseline at zero:
 `seeded later` when cells arrive later, `empty at baseline` when not). The site signal is
 background-subtracted, so a ratio over a baseline at or below zero is undefined. The baseline is the well's
-earliest timepoint, or each nanowell's first measurable one. The growth rate is the least-squares slope of
+earliest timepoint, or, per measurement, each nanowell's first timepoint in a measurable state at which that
+measurement exists (the pipeline records `measured` with no count where no template could be built, and a
+fused nanowell has a confluence but no count). The growth rate is the least-squares slope of
 ln n against hours over at least three timepoints with n > 0. A plate of 96 wells × 1,000 nanowells × 10
-timepoints takes about 4 s to compute.
+timepoints takes about 5 s to compute.
 
 **Summaries** (`summary_compute`). `well_summary` describes one well per timepoint: median, interquartile
 range, fraction responding (above 1 for a fold change, above 0 for a log₂ fold change, undefined for a
-measurement), fraction occupied over nanowells with a count, and the nanowells used and excluded by reason.
+measurement; a nanowell seeded later has no count fold change, so it is excluded by name on `count_fc` and
+counted on `log2_count_fc`), occupancy classes as ordinals with "3+" at 3, fraction occupied over nanowells with a count, and the nanowells used and excluded by reason.
 `group_summary` takes that table, one row per well, so a nanowell cannot be counted as a replicate: a
-group's centre is the mean of its wells' medians, its interval a 95% Student-t interval over wells, and
+group's centre is the mean of its wells' medians, its interval a 95% Student-t interval over wells, a member well with no row at a timepoint named in
+`wells_without_value`, and
 versus-control is the centre over the control group's centre computed the same way (the difference, on the
 log₂ metric). `controller.replicate_groups` takes the groups from `review.domain.plot_members.plot_replicate_sets`,
 as every plot tab does, with each well in no set standing alone.

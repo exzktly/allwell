@@ -50,7 +50,7 @@ MEASURABLE = frozenset({MEASURED, EMPTY})
 
 _BOOL_COLUMNS = ("detected", "fused", "partially_visible", "count_disagreement")
 _NUMERIC_COLUMNS = ("nw_q", "nw_r", "nw_ring", "well_x_um", "well_y_um", "radius_um", "imaged_fraction",
-                    "visible_fraction", "focus", "n_cells", "confluence", "area_est_cells", "consistency")
+                    "visible_fraction", "focus", "n_cells", "confluence", "area_est_cells")
 
 
 class NanowellSchemeError(ValueError):
@@ -206,14 +206,20 @@ def _times(data_dir: Path, timepoints) -> tuple[dict, str | None, str]:
     labels = label_hours(timepoints)
     if labels and len(labels) == len(set(timepoints)):
         return labels, "label", f"Times are read from the timepoint labels because {reason}."
-    return labels, None, (f"Times are unknown because {reason} and not every timepoint label is a time; "
-                          "nothing measured against time is defined.")
+    # Never a partial axis: a growth rate over the timepoints whose labels happen to parse is a rate over a
+    # different series from the one shown.
+    return {}, None, (f"Times are unknown because {reason} and not every timepoint label is a time; "
+                      "nothing measured against time is defined.")
 
 
-def _cell_brightness(data_dir: Path, channels) -> pd.DataFrame | None:
-    """Mean per-cell intensity per (well, timepoint, nanowell, channel), from the top-level per-cell CSVs."""
+def _cell_brightness(cell_dir: Path, channels) -> pd.DataFrame | None:
+    """Mean per-cell intensity per (well, timepoint, nanowell, channel), from the per-cell CSVs in *cell_dir*.
+
+    *cell_dir* is the folder holding ``nanowells/`` — the run's output folder — whichever of it and its
+    parent was loaded.
+    """
     frames = []
-    for path in sorted(Path(data_dir).glob("*.csv")):
+    for path in sorted(Path(cell_dir).glob("*.csv")):
         try:
             header = pd.read_csv(path, nrows=0).columns
         except (OSError, ValueError, pd.errors.EmptyDataError):
@@ -282,10 +288,18 @@ def load_nanowell_data(data_dir) -> NanowellData | None:
                             f"reads ({sorted(SUPPORTED_SCHEMES)}); the well is left out.")
             continue
         try:
-            frames.append(_read_well_table(path, well))
+            table = _read_well_table(path, well)
         except (OSError, ValueError, pd.errors.ParserError) as exc:
             problems.append(f"{well}: its nanowell table cannot be read ({exc}); the well is left out.")
             continue
+        repeated = table[table["nw_q"].notna()].duplicated(["timepoint", "nw_q", "nw_r"], keep=False)
+        if repeated.any():
+            first = table[table["nw_q"].notna()][repeated].iloc[0]
+            problems.append(f"{well}: {int(repeated.sum())} rows repeat an address at one timepoint (e.g. "
+                            f"({int(first['nw_q'])}, {int(first['nw_r'])}) at {first['timepoint']}), so its "
+                            "nanowells cannot be followed over time; the well is left out.")
+            continue
+        frames.append(table)
         grids[well] = grid.get("timepoints") or {}
     sites = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["well", "timepoint"])
     phase = _phase_token(sidecar)
@@ -293,7 +307,7 @@ def load_nanowell_data(data_dir) -> NanowellData | None:
                       - {c for c in (c[: -len("_integrated")] for c in sites.columns) if c.lower() == phase})
     timepoints = sorted(set(sites["timepoint"].dropna()) | {tp for g in grids.values() for tp in g})
     times_h, source, note = _times(data_dir, timepoints)
-    brightness = _cell_brightness(data_dir, channels)
+    brightness = _cell_brightness(folder.parent, channels)
     if brightness is not None and len(sites):
         sites = sites.merge(brightness, on=["well", "timepoint", "nw_q", "nw_r"], how="left")
     for channel in channels:

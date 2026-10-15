@@ -425,12 +425,12 @@ nanowell datasets rather than dropping them.
 - **Merge the acquisition record**, keeping each timepoint's own positions —
   after the plate was put back they differ.
 - **Optionally, merge several datasets in one run**, each with its own gap
-  field, which is one copy instead of one per added timepoint (M13).
+  field, which is one copy instead of one per added timepoint (M13, deferred; see its row).
 
 #### 3.0.4 The workflows this gives
 
 - **All timepoints already acquired:** convert each CZI → Concatenate the raw
-  datasets in order, entering each gap (or once, with M13) → run Analyze once.
+  datasets in order, entering each gap (M13, deferred, would allow it once) → run Analyze once.
 - **An experiment still running:** convert each new CZI and Concatenate it onto
   the accumulated raw dataset, then re-run Analyze incrementally; only the new
   timepoint is processed. If the copy cost is too high at scale (Q9), the
@@ -1003,7 +1003,7 @@ Answers are written into the row. Rows that depend on an answer say so.
 | M11 | A test that types into the real gap field and presses Concatenate, and asserts the plan the worker receives (CLAUDE.md §7.6) | `tests/` | `done` | tests/test_concatenate_gap_page.py drives the real controller and page: typing into the field, the Run button's state, the real worker's merged sidecar, and the queued spec. Five mutations (worker ignores text, controller never sends it, Run not blocked by a gap error, queue drops it, default not pre-filled) fail named tests |
 | M12 | Analysed + unanalysed (secondary): destination keeps dataset 1's outputs; a test runs an incremental Analyze on the result and checks that exactly dataset 2's timepoints are processed | `datasets/concatenate/` | `done` | An analysed dataset 1 and a raw dataset 2 merge (`KIND_ANALYSED_RAW`): dataset 1's measurements, QC images and sidecar are kept as they are (the sidecar is not unioned with the channels inferred from dataset 2's filenames), dataset 2's images are added shifted, and the log and summary say to run Analyze. No well is flagged for missing rows because of dataset 2. A raw dataset 1 beside an analysed dataset 2 is refused naming the order to use (M12a). tests/test_concatenate_raw.py asks the pipeline's own incremental rule what is left: `fov_keys_from_member_names` on the merged archive minus `read_done_fov_keys` on the merged CSV is exactly `{(F001, 48h)}`. A real incremental Analyze run is not performed (it needs a segmenter); the rule it applies is. Mutations that refuse a raw dataset 2, union the sidecar, flag every well, skip dataset 2's image check, or accept raw first each fail a named test |
 | M12a | Raw dataset 1 + analysed dataset 2 | `datasets/concatenate/concatenate_compute.py` | `declined` | It would leave earlier timepoints unanalysed beneath analysed later ones, and the other three combinations cover every real case better. Refused with a message naming the order to use instead. Reopen if the user asks for it |
-| M13 | Several datasets in one run, each with its own gap field (one copy instead of one per added timepoint) | `datasets/concatenate/` | `todo` | |
+| M13 | Several datasets in one run, each with its own gap field (one copy instead of one per added timepoint) | `datasets/concatenate/` | `deferred` | Not built in this PR. Measured against the code: the plan (`MergePlan` has `ds1`/`ds2`), the executor (`merge_input`, `_MemberRename`, `merge_measurements`), both verifiers and the record merge are two-way throughout, so a one-copy N-way merge is a redesign of those layers, not a field on the page. Its value is the copy cost of one Concatenate per added timepoint, which is Q9 (experiment size), still unanswered; M14 is blocked on the same question. Until then the workflow is one Concatenate per added timepoint |
 | M14 | The copy cost at the user's scale, and whether an append that avoids a full copy is needed — a layout question, because a zip archive cannot be extended atomically without being rewritten | — | `blocked` | Q9 |
 | M15 | Close-out: README Concatenate section rewritten for the gap field and raw datasets (including the refusals it no longer makes), ARCHITECTURE §6b, version | — | `todo` | |
 

@@ -6016,7 +6016,10 @@ round it, rather than failing part-way through a run.
 Use this when the *same plate* was imaged in two separate sessions and you want a
 single continuous timelapse instead of two datasets. It appends **dataset 2**
 onto **dataset 1**, shifting dataset 2's timepoints so they carry on after dataset
-1's last one.
+1's last one, by a **time gap you can see and edit**. The two datasets can be
+analysed datasets, or **raw datasets** (just an `in/` folder, straight from the
+CZI import or Import Loose, merged *before* analysis), or an analysed dataset 1
+followed by a raw dataset 2.
 
 How it works:
 
@@ -6024,10 +6027,24 @@ How it works:
    folder icon to pick a folder, and hover a filled-in field to see its full
    path (the box itself shows just the folder name). A field turns up its own
    hint below it if the folder isn't usable — **Dataset 1**/**Dataset 2** must
-   each contain both an `in/` and an `out/` folder; **Destination** must be a
+   each contain an `in/` folder and either an `out/` folder (an analysed
+   dataset) or no results at all (a raw dataset); **Destination** must be a
    new, empty folder, different from both datasets. Both originals are left
    untouched either way.
-2. Once both folders are picked, a status panel appears below showing a
+2. Check the **Gap** field. It is the time between dataset 1's *last*
+   timepoint and dataset 2's *first*, written like `24h`, `90m`, `1d 6h` or a
+   bare number of hours. It comes pre-filled with the best answer available —
+   the gap between the two acquisitions' recorded start times when both
+   datasets carry an acquisition record, otherwise dataset 1's usual interval
+   — and says which it used. Type over it with the real gap whenever you know
+   it (the plate may have been in the incubator for any length of time). If
+   neither source exists, as when dataset 1 has a single timepoint and no
+   record, the field starts empty and Concatenate stays disabled until you
+   enter one. If what you type differs from the recorded gap by more than 2 %
+   (or a minute), the page shows both numbers and goes with yours. Underneath,
+   the page lists dataset 2's resulting timepoint labels, updating as you type,
+   so you can see the result before anything is copied.
+3. Once both folders are picked, a status panel appears below showing a
    "Ready — N well(s)" plate preview of what the merge will actually touch —
    before you've pressed anything. Press **Concatenate** and that same plate
    starts colouring per well as the merge progresses (grey → amber "merging"
@@ -6036,7 +6053,7 @@ How it works:
    phase rail (Validate → Merge → Verify → Finalize) and an overall progress
    bar. The full text log is still there if you want it — tick **Show raw
    log** to reveal it below the plate.
-3. On success, click **Open merged dataset in Review** to load the result
+4. On success, click **Open merged dataset in Review** to load the result
    straight into Review (now the page's highlighted default action, in place
    of Concatenate, until you change one of the source folders again).
 
@@ -6048,8 +6065,8 @@ log is showing.
 What it does to the data:
 
 - **Timepoints.** Dataset 2's first timepoint is relabelled to *dataset 1's last
-  timepoint + dataset 1's imaging interval* (the typical gap between its
-  timepoints), and the rest of dataset 2 keeps its spacing. New labels are
+  timepoint + the gap you entered*, and the rest of dataset 2 keeps its
+  spacing. New labels are
   written in **dataset 1's own format** — so a compound-format dataset 1
   (`00d00h00m`, `00d08h00m`) gets compound-format continuations, not a mix of
   conventions in the same file. Every value a row's timepoint is stored in —
@@ -6059,6 +6076,27 @@ What it does to the data:
 - **Wells.** The union of both datasets' wells is written. A well in both is
   stitched (dataset 1's rows, then dataset 2's shifted rows); a well in only one
   is copied across.
+- **Raw datasets.** Two raw datasets merge into a raw dataset: the
+  destination holds the combined `in/` and no `out/` at all, ready for one
+  Analyze run over every timepoint. The filename pattern is worked out from the
+  image names themselves, and Concatenate **refuses unless that reading is
+  confident and finds a timepoint field** — a wrong guess would shift the
+  wrong part of every name. The two datasets may use different tile plans (a
+  different number of tiles per well) and different pixel sizes: each
+  timepoint keeps its own acquisition record, so Analyze places each
+  timepoint's tiles from its own geometry. A pixel size differing by more than
+  1 % is flagged in the log, because it is almost always a different objective.
+  The merge is verified on the images themselves: every shifted name, with the
+  size and checksum of the original, must be present in the destination
+  archive. When the datasets carry `in/acquisition.json`, the merged record is
+  written and checked against the archives; if only one of them has a record,
+  the log says so and the merged dataset has none rather than a half-true one.
+- **Analysed dataset 1, raw dataset 2.** Dataset 1's results are kept exactly
+  as they are and dataset 2's images are added to `in/`. Nothing of dataset 2
+  is analysed yet; run Analyze on the destination and only the new timepoints
+  are processed. A raw dataset 1 followed by an analysed dataset 2 is refused
+  (put the analysed one first), since the analysed data cannot be kept without
+  also being re-based.
 - **Everything else** — measurement CSVs, per-well QC-image zips, raw input
   images, saved cell-inclusion overrides, and `pipeline_info.json` — is merged
   accordingly, with dataset 2's timepoints rewritten throughout. Gating
@@ -6087,10 +6125,11 @@ What it does to the data:
 
 It refuses (with an explanation on the dashboard headline) when the two datasets
 weren't analysed the same way (different filename schema, channel positions, or
-segmentation method), when a timepoint can't be read as a time, when dataset 1
-has only a single timepoint (so there's no interval to continue), or when a
-dataset stores its QC images as per-well folders rather than zip archives (a
-layout Concatenate doesn't support). A column present in one dataset's
+segmentation method), when a timepoint can't be read as a time, when the gap is
+empty or can't be read (a single-timepoint dataset 1 no longer needs an
+interval: enter the gap), when a raw dataset's filename pattern can't be read
+with confidence, or when a dataset stores its QC images as per-well folders
+rather than zip archives (a layout Concatenate doesn't support). A column present in one dataset's
 measurements but not the other's — a channel one dataset didn't collect,
 say — gets called out too, since those rows will have a blank value for it.
 

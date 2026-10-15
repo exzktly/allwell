@@ -10344,7 +10344,8 @@ five tools' run rows.
 **Concatenate Datasets** (`datasets/concatenate/`) appends one dataset's
 timepoints after another's. Two datasets of the same plate, imaged in separate
 sessions, are stitched into one longer timelapse: dataset 2's timepoints are
-relabelled to continue after dataset 1's last timepoint, and the union of both
+relabelled to continue after dataset 1's last timepoint by a user-visible time
+gap (see *The time gap and raw datasets* below), and the union of both
 datasets' wells is written to a fresh destination folder (both originals
 untouched).
 
@@ -10354,12 +10355,44 @@ is unit-testable without the app (`tests/test_concatenate_compute.py`):
 
 | Module | Role |
 |--------|------|
-| `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method, and on dataset 1 and dataset 2 being the same folder), detects dataset 1's timepoint label format, computes the hour offset, enumerates wells, and returns a `MergePlan`. Also owns the structural filename-rewrite gate (`rewrite_member_name`) and the in-progress-marker restart check. |
+| `raw_compute.py` | Qt-free reading of a *raw* dataset (`in/` present, `out/` missing or empty): `is_raw_dataset`, `raw_paths`, and `raw_info`, which infers the filename schema from the archives' member names (`util/schema_infer`) and returns a sidecar-shaped dict **only when the inference is confident and has a timepoint slot** — a guessed schema would shift the wrong filename field. `check_raw_compatible` compares separator and schema fields (`RAW_COMPAT_KEYS`) where analysed datasets compare the full sidecar. |
+| `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method, and on dataset 1 and dataset 2 being the same folder), detects dataset 1's timepoint label format, computes the hour offset from the gap (`compute_offset(…, gap_hours=)`), enumerates wells, and returns a `MergePlan`. Also owns the gap model (`default_gap`, `choose_gap`, `gap_preview`, `parse_gap_hours`), `scale_warning`, and `open_pair`, which classifies the pair as analysed, raw, or analysed + raw. Also owns the structural filename-rewrite gate (`rewrite_member_name`) and the in-progress-marker restart check. |
 | `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with every timepoint-derived value shifted, stitches shared wells (CSV columns unioned like `pipeline/io.merge_records_into_csv`), carries over `cell_overrides.json`, verifies the result, and writes the merged sidecar. Copying goes through `core.containers.copy_container_members`, so a well that comes from one dataset only is a whole-file copy, and a merged well moves each member's compressed bytes straight from whichever side holds it — dataset 2's under a name whose timepoint field has been shifted, dataset 1's under its own. A timepoint offset changes the name in the member's header and nothing else, so there is nothing to decode on either side. It tracks which member names collided and were dropped rather than silently discarding them; a nonzero drop count marks that well `"warned"` and fails `_verify` outright, since a name that "looks fine" in the merged archive can be the wrong dataset's bytes under it (see Verification below). Progress via a `log` callback, a `progress(well, stage)` callback (`"merging"` → `"merged"`/`"warned"`) that drives the live dashboard, and a `sub_progress(well, done, total)` callback that drives that well's dial *within* the stage (fused across the well's two container passes by `core.containers.WellFraction`). `sub_progress` is the one callback deliberately left outside the callback lock: every call names its own well, so interleaving is harmless, and taking the lock once per member would serialise the parallel copy it reports on. Wells merge in parallel through a `ThreadPoolExecutor` (`pick_workers`) — each owns its own destination files, so `log`/`progress` calls before a well's work starts are the only thing serialised behind a lock; aggregating each future's result into `well_stats`/`dropped_members`/etc. and reporting the terminal `"merged"`/`"warned"` state both happen back on `execute_plan`'s own thread as futures complete, so that bookkeeping needs no lock at all. |
 | `worker.py` | Thin `ConcatenateWorker(QThread)`; runs planning + `execute_plan` off the UI thread, marshalling progress/result/errors through queued signals (`logLine`, `wellsPlanned`, `wellStage`, `wellFraction`, `succeeded`, `failed`), and forwards `isInterruptionRequested` as a cancellation check. `wellFraction(well, done, total)` is the per-well sub-progress signal every Datasets tool's worker that copies data carries beside `wellStage` (Validate has none — it inspects rather than copies, so a well has no sub-steps); it is what lets a well render as a progress dial rather than a flat in-progress colour. A controller connects it to its dashboard's `set_well_progress` when that dashboard owns a plate, and straight to its page's own plate otherwise — Subset's dashboard is built `show_plate=False`, so `SubsetController._on_well_fraction` drives the picker plate's `setWellFraction` instead. |
-| `view.py` | `ConcatenatePage(QWidget)` — a one-line equation row (dataset 1 + dataset 2 = destination; compact `_FolderField`s showing a basename with the full path on hover, each with its own inline validity hint) above a `ConcatDashboard`, with the raw text log demoted to a collapsible "Show raw log" checkbox (the same furniture as `analyze/log_pane.py`'s log panel, started closed rather than open — see §6.1). Emits `runRequested` / `openInReviewRequested`. |
+| `view.py` | `ConcatenatePage(QWidget)` — a one-line equation row (dataset 1 + dataset 2 = destination; compact `_FolderField`s showing a basename with the full path on hover, each with its own inline validity hint) above a `ConcatDashboard`, with the raw text log demoted to a collapsible "Show raw log" checkbox (the same furniture as `analyze/log_pane.py`'s log panel, started closed rather than open — see §6.1). Emits `runRequested` / `openInReviewRequested`. Between the equation row and the dashboard sits `ConcatGapField`, a line edit pre-filled from `default_gap` with a label naming the source and a preview of dataset 2's resulting timepoint labels; an unreadable gap blocks Run. |
 | `controller.py` | `ConcatenateController` — wires the page to the worker, drives the dashboard's per-well and per-run state at each signal, distinguishes a cancelled run from a failed one, and confirms before resuming into a destination with leftovers from an interrupted attempt. |
 | `dashboard.py` | `ConcatDashboard`, built on `widgets/plate_progress.py::PlateProgress` (shared with Analyze's `RunDashboard` — see §7). Two independent state axes: **per well** (`pending`/`merging`/`merged`/`warned` — image data survived on one side with no matching measurements CSV) and **per run**, a phase rail (Validate → Merge → Verify → Finalize) with a terminal Done/Failed/Cancelled outcome painted on the headline. The per-run axis exists because `apply._verify` and the cell-override carry-over run *after* every well already shows green — without it, a verification failure would leave the plate looking like a complete success. Every well's terminal states carry a marker glyph too, not just its colour — `merged` gets `✓`, `warned` gets `!` — so state is legible without relying on distinguishing success-green from accent-blue by colour alone. A well still `merging` carries no glyph: it is drawn as a progress dial, and a glyph would sit in the middle of exactly the area the dial fills. `set_done(summary, *, tooltip=None)` shows a caller-shortened headline (via `core.dataset_paths.shorten_headline`, stripping the destination path down to its basename) while the full original text — the one still written to the log — survives as the headline's own tooltip. |
+
+**The time gap and raw datasets.** Dataset 2's offset is `dataset 1's last
+timepoint + gap − dataset 2's first timepoint`, where the gap is the user's
+entry (`MergePlan.gap_hours`, `gap_source` of `entered`, `recorded` or
+`interval`). The page pre-fills it from the two acquisition records' shared
+starts when both exist on comparable clocks (`default_gap`), else dataset 1's
+median interval, else leaves it empty and required; `choose_gap` warns, and
+goes with the entry, when it differs from the recorded gap by more than
+max(2 %, 1 minute). The worker parses the text in-thread (`parse_gap_hours`) so
+the queue spec carries the text the user typed, and `show_job` restores it.
+`record_derivation` stores the gap and its source.
+
+A **raw** dataset has `in/` and no results (`raw_compute.is_raw_dataset`). Two
+raw datasets merge to a raw destination: `execute_plan` takes a branch that
+writes `in/` only, with no `out/` and no sidecar, and `_verify_raw` checks the
+destination archives against the *expected* shifted name and CRC of each
+dataset-2 member computed independently of what the copy reported as written
+(the copy's own `written` set includes dataset 1's members and is not evidence
+about dataset 2). An analysed dataset 1 followed by a raw dataset 2
+(`plan.ds2_raw`) keeps dataset 1's outputs untouched, adds dataset 2's images
+to `in/`, writes no "missing CSV" warning for dataset 2, and leaves its
+timepoints for an incremental Analyze run. A raw dataset 1 before an analysed
+dataset 2 is refused. The tile plan and pixel size may differ between the two
+datasets because `in/acquisition.json` is per timepoint: `_merge_acquisition_records`
+(via `util/acquisition_record.concatenate_records`) relabels dataset 2's
+timepoints, keeps each one's own calibration and positions, validates the
+merged record against the merged archives so Analyze's pre-run check accepts
+it, and notes when only one dataset had a record (the destination then has
+none). Merging several datasets in one run, to avoid one full copy per added
+timepoint, is not implemented: every layer here (plan, execute, verify) is
+two-way.
 
 **A measurement row's timepoint is carried by three values, not one**, and a
 zip member's timepoint lives in its filename — a fourth. The `timepoint` CSV

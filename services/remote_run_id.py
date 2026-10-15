@@ -238,7 +238,14 @@ def _compute_run_id(
     override, or with the Fetch filter changed, addresses its own directory
     instead of finding the other configuration's outputs already complete
     there."""
-    return f"{cache_key[:16]}-{pipeline_argv_digest(pipeline_argv, extras=extras)}"
+    return _run_id_body(cache_key, pipeline_argv_digest(pipeline_argv, extras=extras))
+
+
+def _run_id_body(cache_key: str, argv_digest: str) -> str:
+    """The one spelling of a run id from its two keys (``"run-"`` is prefixed by
+    the caller). ``services.remote_recover`` recomputes earlier runs' directories
+    from it, so the two cannot come to name different places."""
+    return f"{cache_key[:16]}-{argv_digest}"
 
 @dataclass(frozen=True)
 class RemoteRunPaths:

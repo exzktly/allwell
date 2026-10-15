@@ -1340,14 +1340,19 @@ and by `remote_fetch_report.txt` in the output folder.
 - **A remote run never re-uploads what the host already finished.** Every
   remote run that is not forced — Resume, or Run with **incremental** ticked or
   not, single-shot or batched, including after **Load previous run** — first
-  asks the host for the wells the last run of this plate finished there and
-  never downloaded, and downloads them. They are not uploaded or computed
+  asks the host for the wells any earlier run of this plate finished there and
+  never downloaded, and downloads them — including a run whose record was
+  overwritten by a later run you stopped during its upload. The log names every
+  place it looked when it finds nothing. They are not uploaded or computed
   again; only what is still missing is sent, and if nothing is, the run ends
-  with "Nothing to upload". This needs the same images, the same host, and the
+  with "Nothing to upload" — an empty-well blank whose own results are already
+  here is not uploaded on its own just to be recomputed. This needs the same images, the same host, and the
   same settings that change the numbers (segmentation, channels, corrections,
   QC gates and so on); worker counts, the low-disk override and the run check
   do not matter. Change one that alters the numbers and the old output is
-  correctly not reused. If the download fails, the run stops with an error
+  correctly not reused. One case it cannot find without a record: a run whose
+  upload was rewritten to drop unused channels, if a later run made before this
+  version overwrote where it went. If the download fails, the run stops with an error
   rather than re-uploading the wells: run it again to retry, or tick **Force
   reprocess all wells** to recompute the plate from scratch.
 - The offer is about **the folder in the input field**. If you have not chosen

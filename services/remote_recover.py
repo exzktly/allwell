@@ -43,6 +43,8 @@ from services.remote_fetch import (
 )
 from services.remote_run_id import (
     _forced_from_argv,
+    _run_id_body,
+    remote_run_paths,
     _local_input_dir_from_argv,
     legacy_argv_digests,
     pipeline_argv_digest,
@@ -104,20 +106,43 @@ def recover_finished_outputs(
     forced, forced_wells = _forced_from_argv(pipeline_argv)
     if forced or forced_wells:
         return Recovery()
-    # Nothing recorded, nothing to find — asked before the input is
-    # fingerprinted, which reads every archive's metadata on the plate.
-    journal = run_journal.read_journal(local_output_dir)
-    if journal is None or not (journal.remote or {}).get("remote_output_dir"):
+    # No app run has ever written into this folder, so no earlier run of it can
+    # be waiting on a host — asked before the input is fingerprinted, which
+    # reads every archive's metadata on the plate.
+    if run_journal.read_journal(local_output_dir) is None:
         return Recovery()
-    stored = _stored_address(runner, local_output_dir, pipeline_argv, output_filter)
-    remote_dir = str((stored or {}).get("remote_output_dir") or "")
-    if not remote_dir:
-        return Recovery()
+    stop = stop_event or threading.Event()
+    on_remote: set[str] = set()
+    pulled: set[str] = set()
+    candidates = _candidate_dirs(runner, local_output_dir, pipeline_argv,
+                                 output_filter)
+    for remote_dir in candidates:
+        found = _recover_from(runner, remote_dir, local_output_dir, pipeline_argv,
+                              output_filter, log=log, stop=stop)
+        on_remote |= found.on_remote
+        pulled |= found.missing_locally
+        if not found.ok:
+            return Recovery(ok=False, remote_dir=remote_dir,
+                            on_remote=frozenset(on_remote),
+                            missing_locally=frozenset(pulled),
+                            still_missing=found.still_missing)
+    if candidates and not on_remote:
+        # One line for the whole search, so a run that then uploads says why:
+        # it looked, and where, rather than appearing never to have looked.
+        log(f"[remote] resume: no finished wells from an earlier run of this "
+            f"plate on {runner.host.ssh_alias} (checked {len(candidates)} "
+            f"location(s): {', '.join(candidates)})\n")
+    return Recovery(on_remote=frozenset(on_remote), missing_locally=frozenset(pulled))
 
+
+def _recover_from(runner, remote_dir: str, local_output_dir: Path,
+                  pipeline_argv: list[str], output_filter: OutputFilter, *,
+                  log: Callable[[str], None], stop: threading.Event) -> Recovery:
+    """List one candidate directory and pull what it holds that is not local."""
     run = _RemoteRun(
-        run_id=str(stored.get("run_id") or ""),
-        cache_key=str(stored.get("cache_key") or ""),
-        remote_input_dir=str(stored.get("remote_input_dir") or ""),
+        run_id=Path(remote_dir).parent.name,
+        cache_key="",
+        remote_input_dir="",
         remote_output_dir=remote_dir,
         remote_pidfile="",
         local_output_dir=local_output_dir,
@@ -128,13 +153,11 @@ def recover_finished_outputs(
         output_filter=output_filter,
         pre_run_artifacts=_snapshot_local_artifacts(local_output_dir),
     )
-    verifier = FetchedOutputVerifier(runner.host, run, runner._cache,
-                                     stop_event or threading.Event())
+    verifier = FetchedOutputVerifier(runner.host, run, runner._cache, stop)
     host = runner.host.ssh_alias
-    log(f"[remote] resume: checking {host}:{remote_dir}, where the previous "
-        f"run of this plate wrote its output, for finished wells not yet "
-        f"downloaded\n")
     on_remote = frozenset(verifier._list_remote_completed_wells())
+    if not on_remote:
+        return Recovery(remote_dir=remote_dir)
     # Asked silently: these are not failures yet, only the question of whether
     # there is anything to pull, and the verify pass below reports per well.
     missing = verifier._verify_local_manifest(log=lambda _m: None)
@@ -143,43 +166,59 @@ def recover_finished_outputs(
     missing_wells = frozenset(
         m.group(1) for m in (_WELL_IN_MESSAGE.search(t) for t in missing) if m)
     if not missing_wells:
-        log(f"[remote] resume: {len(on_remote)} well(s) finished on the remote, "
-            f"none missing locally — nothing to download first\n")
+        log(f"[remote] resume: {host}:{remote_dir} holds {len(on_remote)} "
+            f"finished well(s), all already here\n")
         return Recovery(remote_dir=remote_dir, on_remote=on_remote)
-    log(f"[remote] resume: {len(missing_wells)} well(s) finished on the remote "
-        f"but never downloaded ({_sample(missing_wells)}) — downloading them "
-        f"instead of uploading and recomputing them\n")
+    log(f"[remote] resume: {host}:{remote_dir} holds {len(missing_wells)} "
+        f"finished well(s) never downloaded ({_sample(missing_wells)}) — "
+        f"downloading them instead of uploading and recomputing them\n")
     verdict = verifier.verify(True, log=log)
     return Recovery(ok=verdict.passed, remote_dir=remote_dir,
                     on_remote=on_remote, missing_locally=missing_wells,
                     still_missing=tuple(verdict.missing))
 
 
-def _stored_address(runner, local_output_dir: Path, pipeline_argv: list[str],
-                    output_filter: OutputFilter) -> dict | None:
-    """The address an earlier run of this configuration recorded, or ``None``.
+def _candidate_dirs(runner, local_output_dir: Path, pipeline_argv: list[str],
+                    output_filter: OutputFilter) -> list[str]:
+    """Every remote output directory an earlier run of this exact plate and
+    configuration may have left finished wells in, newest first.
 
-    Asked with the current digest first and then with the ones an earlier build
-    would have recorded (:func:`legacy_argv_digests`), so a plate left finished
-    on the server before the digest stopped hashing execution knobs is still
-    found. Each candidate is still matched on all three keys.
+    Two sources, and the second is not a fallback for the first but its
+    complement:
+
+    * **The journal's addresses** — the current one and every earlier one
+      :func:`run_journal.record_remote` kept — each matched on the argv digest
+      (current or legacy, :func:`legacy_argv_digests`), the input fingerprint
+      and the host.
+    * **The address the name itself implies.** A run's directory is
+      ``runs/run-<upload key>-<argv digest>``, and for a plate that is one zip
+      per well uploaded as it is, the upload key *is* the fingerprint of the
+      user's own archives (:func:`source_fingerprint`). So the directory of an
+      earlier whole-plate run — single-shot or batched — can be recomputed with
+      no record at all, and that matters, because before the history existed a
+      run stopped during its upload overwrote the only record of where the
+      previous run's output was. Identity is as strong as the journal's: the
+      name is derived from the same images and the same settings. It cannot
+      find a run whose upload was *rewritten* (a channel filter that dropped at
+      least ``REWRITE_MIN_SAVING`` of the bytes), whose key was a fresh copy's.
     """
     extras = runner._host_argv_extras(output_filter)
     source_key = source_fingerprint(_local_input_dir_from_argv(pipeline_argv))
-    candidates = dict.fromkeys((
+    digests = list(dict.fromkeys((
         pipeline_argv_digest(pipeline_argv, extras=extras),
-        *legacy_argv_digests(pipeline_argv, extras=extras)))
-    for digest in candidates:
-        try:
-            stored = run_journal.stored_remote_address(
-                local_output_dir, argv_digest=digest, source_key=source_key,
-                host_alias=runner.host.ssh_alias)
-        except OSError:
-            swallowed(f"could not read the run journal in {local_output_dir}")
-            return None
-        if stored:
-            return stored
-    return None
+        *legacy_argv_digests(pipeline_argv, extras=extras))))
+    dirs: list[str] = []
+    try:
+        for stored in run_journal.stored_remote_addresses(
+                local_output_dir, argv_digests=digests, source_key=source_key,
+                host_alias=runner.host.ssh_alias):
+            dirs.append(str(stored["remote_output_dir"]))
+    except OSError:
+        swallowed(f"could not read the run journal in {local_output_dir}")
+    if source_key:
+        dirs += [remote_run_paths(runner.host, "run-" + _run_id_body(source_key, d)).out
+                 for d in digests]
+    return list(dict.fromkeys(dirs))
 
 
 def _sample(wells: frozenset[str], n: int = 6) -> str:

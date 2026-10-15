@@ -60,7 +60,7 @@ def test_a_dataset_with_nanowell_tables_is_recognised(nanowell_ds, plain_ds):
 
 
 def test_the_concatenate_refusal_names_the_tool_and_the_way_out(nanowell_ds):
-    with pytest.raises(ValueError, match="Concatenate the raw input and run Analyze once") as raised:
+    with pytest.raises(ValueError, match="Concatenate the analysed dataset with dataset 2.s raw images") as raised:
         refuse_nanowell_tables(_paths(nanowell_ds), "Dataset 1", ValueError, "Concatenate")
     assert "Concatenate cannot carry them" in str(raised.value) and "Dataset 1" in str(raised.value)
 

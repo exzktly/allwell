@@ -19,14 +19,15 @@ SETTINGS = {"plate_format": "100um", "cell_diameter_um": 15.0}
 
 
 def _dataset(root: Path, wells=("A01",), timepoints=("0h", "24h"), *, nanowells=True, settings=SETTINGS,
-             spelling=None):
+             spelling=None, cells=1, info_blocks=None):
     """The repo's realistic dataset (two fields, OS debris and a stray file in every archive), plus, with
     *nanowells*, each well's tables naming every timepoint and the sidecar's nanowell block. *spelling* maps a
     well to the spelling its nanowell files use on disk (``A1`` for ``A01``)."""
     info_extra = None
     if nanowells:
         info_extra = {"nanowell": {"scheme_version": 1, "settings": dict(settings)},
-                      "acquisition": {tp: {"pixel_size_um": {"x": 4.3, "y": 4.3}} for tp in timepoints}}
+                      "acquisition": {tp: {"pixel_size_um": {"x": 4.3, "y": 4.3}} for tp in timepoints},
+                      **(info_blocks or {})}
     build_dataset(root, wells=list(wells), timepoints=list(timepoints), fovs=("F001", "F002"),
                   info_extra=info_extra, junk=True, stray=True)
     if nanowells:
@@ -36,7 +37,7 @@ def _dataset(root: Path, wells=("A01",), timepoints=("0h", "24h"), *, nanowells=
             name = (spelling or {}).get(well, well)
             (folder / f"{name}_grid.json").write_text(json.dumps({
                 "scheme_version": 1, "well": name, "timepoints": {tp: {"status": "ok"} for tp in timepoints}}))
-            body = "".join(f"{tp},{q},0,measured,{q + 1}\n" for tp in timepoints for q in range(3))
+            body = "".join(f"{tp},{q},0,measured,{cells * (q + 1)}\n" for tp in timepoints for q in range(3))
             (folder / f"{name}.csv").write_text("timepoint,nw_q,nw_r,state,n_cells\n" + body)
             _template(folder / f"{name}_template.npz", timepoints[0])
     return root
@@ -96,18 +97,22 @@ def test_a_timepoint_filter_that_keeps_none_of_a_well_s_table_writes_no_table(tm
 
 # ── P10c: Merge Plates ───────────────────────────────────────────────────────
 def test_merge_plates_carries_both_plates_tables_with_dataset_2_s_wells_remapped(tmp_path):
+    """Dataset 2's counts are ten times dataset 1's, so a carry that read the wrong plate shows."""
     one = _dataset(tmp_path / "one", wells=("A01",))
-    two = _dataset(tmp_path / "two", wells=("A01",))
+    two = _dataset(tmp_path / "two", wells=("A01",), cells=10)
     plan = build_plate_merge_plan(one, two, tmp_path / "dest", well_map={"A01": "C03"})
     merge_execute(plan)
     first, first_rows = _tables(tmp_path / "dest", "A01")
     moved, moved_rows = _tables(tmp_path / "dest", "C03")
     assert (first["well"], moved["well"]) == ("A01", "C03")
+    assert [r["n_cells"] for r in first_rows] == ["1", "2", "3"] * 2
+    assert [r["n_cells"] for r in moved_rows] == ["10", "20", "30"] * 2
+    # Each well remembers its plate, so the end-of-run re-anchoring fits each plate's motion on its own.
+    assert (first["plate"], moved["plate"]) == ("dataset 1: one", "dataset 2: two")
     from pipeline.nanowell_measure import load_template
 
     carried = load_template(tmp_path / "dest" / "out" / "nanowells" / "C03_template.npz")
     assert carried is not None and carried[1] == "0h"
-    assert len(first_rows) == len(moved_rows) == 6
     assert plan.blocks_warning is None
 
 
@@ -127,3 +132,67 @@ def test_merge_plates_says_when_only_one_plate_has_nanowell_results(tmp_path):
     assert plan.merged_info["nanowell"]["settings"] == SETTINGS     # dataset 2's block, though dataset 1 led
     merge_execute(plan)
     assert _tables(tmp_path / "dest", "B01")[0]["well"] == "B01"
+
+
+def test_a_merged_sidecar_drops_the_re_anchoring_record_and_refuses_two_calibrations(tmp_path):
+    one = _dataset(tmp_path / "one", wells=("A01",), nanowells=False)
+    two = _dataset(tmp_path / "two", wells=("A01",))
+    info = json.loads((two / "out" / "pipeline_info.json").read_text())
+    info["nanowell"]["reanchor"] = {"anchored": ["A01/24h"], "remaining": {}}
+    (two / "out" / "pipeline_info.json").write_text(json.dumps(info))
+    plan = build_plate_merge_plan(one, two, tmp_path / "dest", well_map={"A01": "C03"})
+    assert plan.merged_info["nanowell"] == {"scheme_version": 1, "settings": SETTINGS}   # it named A01, now plate 1's
+    three = _dataset(tmp_path / "three", wells=("B01",))
+    info = json.loads((three / "out" / "pipeline_info.json").read_text())
+    info["acquisition"]["0h"]["pixel_size_um"] = {"x": 0.65, "y": 0.65}
+    (three / "out" / "pipeline_info.json").write_text(json.dumps(info))
+    with pytest.raises(MergePlatesError, match="calibrations of timepoint '0h' differ"):
+        build_plate_merge_plan(two, three, tmp_path / "dest2")
+
+
+@pytest.mark.parametrize("damage, message", [
+    (lambda f: (f / "A01.csv").unlink(), "A01 has a nanowell grid record and no sites table"),
+    (lambda f: (f / "A01_grid.json").write_text("{not json"), "A01_grid.json is unreadable"),
+    (lambda f: ((f / "A1_grid.json").write_text((f / "A01_grid.json").read_text()),
+                (f / "A1.csv").write_text((f / "A01.csv").read_text())), "A01, A1 are one well spelled 2 ways"),
+])
+def test_tables_that_cannot_be_carried_are_refused_before_anything_is_written(tmp_path, damage, message):
+    from datasets.subset.subset_compute import SubsetError
+
+    src = _dataset(tmp_path / "src", wells=("A01", "B02"))
+    damage(src / "out" / "nanowells")
+    with pytest.raises(SubsetError, match=message):
+        build_subset_plan(src, tmp_path / "dest", SubsetFilter())
+    with pytest.raises(MergePlatesError, match=message):
+        build_plate_merge_plan(src, _dataset(tmp_path / "other", wells=("C01",)), tmp_path / "dest2")
+    assert not (tmp_path / "dest").exists() and not (tmp_path / "dest2").exists()
+
+
+def test_the_end_of_run_re_anchoring_fits_each_plate_of_a_merged_dataset_on_its_own(tmp_path, monkeypatch):
+    from pipeline import nanowell_task as nt
+
+    folder = tmp_path / "out" / "nanowells"
+    folder.mkdir(parents=True)
+    settings = {"k": 1}
+    for well, plate in (("A01", "dataset 1: one"), ("A02", "dataset 1: one"), ("C03", "dataset 2: two"),
+                        ("D04", None)):
+        grid = {"scheme_version": 1, "well": well, "settings": settings, "timepoints": {}}
+        if plate:
+            grid["plate"] = plate
+        (folder / f"{well}_grid.json").write_text(json.dumps(grid))
+    seen = []
+    monkeypatch.setattr(nt, "plan_reanchor", lambda grids: (seen.append(sorted(grids)), ({}, {}))[1])
+    monkeypatch.setattr(nt, "settings_from_kwargs", lambda _k: type("S", (), {"key": lambda self: settings})())
+    nt.reanchor_plate(tmp_path / "out", [], {}, "PHASE", [], "m", ["experiment"], "_", "key",
+                      grouper=None, parse=None)
+    assert sorted(seen) == [["A01", "A02"], ["C03"], ["D04"]]
+
+
+def test_a_re_run_of_a_merged_well_keeps_its_plate(tmp_path):
+    from pipeline import nanowell_run as nr
+    from pipeline import nanowell_task as nt
+
+    path = tmp_path / "C03_grid.json"
+    path.write_text(json.dumps({"scheme_version": 1, "well": "C03", "plate": "dataset 2: two", "timepoints": {}}))
+    nt.write_grid_json(path, "C03", nr.WellOutcome("C03"), nr.NanowellSettings("100um"))
+    assert json.loads(path.read_text())["plate"] == "dataset 2: two"

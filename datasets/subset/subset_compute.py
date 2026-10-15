@@ -41,7 +41,7 @@ from datasets.core.containers import (
     TIMEPOINT_HOURS_COLUMN,
 )
 from datasets.core.member_names import discover_parsed_member
-from datasets.core.nanowell_tables import has_nanowell_tables
+from datasets.core.nanowell_tables import carried_nanowell_block, has_nanowell_tables, refuse_unusable_tables
 from datasets.core.dataset_paths import known_channel_tokens
 
 IN_PROGRESS_MARKER = ".aw_subset_in_progress"
@@ -173,6 +173,7 @@ def build_subset_plan(
             "well's tiles together, so they cannot be cut to a set of fields: the destination would hold "
             "tables measured from tiles it does not have. Subset by wells and timepoints instead (the "
             "nanowell tables are carried for those), or choose a dataset without nanowell results.")
+    refuse_unusable_tables(src, "The source dataset", SubsetError)
 
     if has_folder_mode_output(src):
         raise SubsetError(
@@ -192,6 +193,8 @@ def build_subset_plan(
         raise SubsetError("No wells match the requested filter.")
 
     merged_info = dict(info)
+    if "nanowell" in merged_info:
+        merged_info["nanowell"] = carried_nanowell_block(merged_info["nanowell"])
     if filt.timepoint_labels is not None:
         kept_hours = filt.timepoint_hours or frozenset()
         merged_info["available_timepoints"] = [

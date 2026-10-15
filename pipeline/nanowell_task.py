@@ -139,10 +139,22 @@ def write_sites_csv(path: Path, rows: list[dict], fluor_tokens) -> None:
 def write_grid_json(path: Path, well: str, outcome: nr.WellOutcome, settings: nr.NanowellSettings) -> None:
     payload = {"scheme_version": SCHEME_VERSION, "well": well, "settings": settings.key(),
                "array_radius": outcome.radius, "timepoints": outcome.timepoints}
+    plate = _plate_of(path)
+    if plate:                       # a well Merge Plates brought from another plate stays that plate's
+        payload["plate"] = plate
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.part")
     tmp.write_text(json.dumps(payload, indent=2, default=_json_default), encoding="utf-8")
     tmp.replace(path)
+
+
+def _plate_of(grid_path: Path) -> str | None:
+    """The ``plate`` an existing grid record names (Merge Plates writes it), so a re-run keeps it."""
+    try:
+        plate = json.loads(Path(grid_path).read_text(encoding="utf-8")).get("plate")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return plate if isinstance(plate, str) and plate else None
 
 
 def _json_default(value):
@@ -500,6 +512,14 @@ def _origin(grids: dict, well: str, timepoint: str) -> tuple | None:
     return None
 
 
+def plates_of(grids: dict[str, dict]) -> dict:
+    """``plate -> {well: grid}``: the wells of each physical plate (one, unless Merge Plates combined two)."""
+    plates: dict = {}
+    for well, grid in grids.items():
+        plates.setdefault(grid.get("plate") or "", {})[well] = grid
+    return plates
+
+
 def plan_reanchor(grids: dict[str, dict]) -> tuple[dict, dict]:
     """``(predictions, reasons)`` for every unaddressed (well, timepoint) the rest of the plate can anchor.
 
@@ -556,7 +576,13 @@ def reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token,
     output_dir = Path(output_dir)
     here = settings_from_kwargs(shared_kwargs_template).key()
     grids = _read_grids(output_dir, here)
-    predictions, reasons = plan_reanchor(grids)
+    # One rigid motion per physical plate: a dataset Merge Plates made holds two, whose stage frames and motions
+    # are unrelated, so each well's grid record names its plate and the fit never mixes them.
+    predictions, reasons = {}, {}
+    for members in plates_of(grids).values():
+        found, why = plan_reanchor(members)
+        predictions.update(found)
+        reasons.update(why)
     zips = dict(well_zips)
     for well, by_tp in predictions.items():
         if well not in zips:

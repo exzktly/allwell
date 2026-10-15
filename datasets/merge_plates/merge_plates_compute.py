@@ -46,7 +46,9 @@ from datasets.core.dataset_paths import (
     out_zips,
 )
 from datasets.core.dataset_paths import check_compatible, known_channel_tokens
-from datasets.core.nanowell_tables import has_nanowell_tables, nanowell_block_conflict
+from datasets.core.nanowell_tables import (
+    carried_nanowell_block, has_nanowell_tables, nanowell_block_conflict, refuse_unusable_tables,
+)
 
 IN_PROGRESS_MARKER = ".aw_merge_in_progress"
 
@@ -331,16 +333,30 @@ class PlateMergePlan:
     blocks_warning: str | None = None
 
 
+def _calibration_conflict(info1: dict, info2: dict) -> str | None:
+    """A timepoint both sidecars' ``acquisition`` blocks calibrate differently: the merged block can state one,
+    and Review would draw the other plate's wells at the wrong scale. Checked here, not left to the acquisition
+    records' merge, because two datasets may have sidecars and no records."""
+    one, two = info1.get("acquisition") or {}, info2.get("acquisition") or {}
+    for tp in sorted(set(one) & set(two)):
+        if one[tp] != two[tp]:
+            return (f"the two datasets' calibrations of timepoint {tp!r} differ ({one[tp]} against {two[tp]}), and "
+                    "a merged plate states one per timepoint")
+    return None
+
+
 def _merge_nanowell_blocks(merged_info: dict, info1: dict, info2: dict, ds1, ds2) -> str | None:
     """Put the nanowell analysis's sidecar blocks on *merged_info*; a note when only one plate has the tables.
 
     ``nanowell`` (scheme, settings, conventions) is the same for both or absent from one, which
     :func:`~datasets.core.nanowell_tables.nanowell_block_conflict` has already established, so whichever
-    dataset has it supplies it. ``acquisition`` (pixel and tile size per timepoint) is the union: a timepoint
-    both hold has one calibration, or the acquisition records' merge refuses the run.
+    dataset has it supplies it, without its ``reanchor`` record (one run's, keyed on that plate's wells).
+    ``acquisition`` (pixel and tile size per timepoint) is the union: a timepoint both hold has one calibration,
+    which :func:`_calibration_conflict` has already checked.
     """
-    if not info1.get("nanowell") and info2.get("nanowell"):
-        merged_info["nanowell"] = info2["nanowell"]
+    block = info1.get("nanowell") or info2.get("nanowell")
+    if block:
+        merged_info["nanowell"] = carried_nanowell_block(block)
     if info1.get("acquisition") or info2.get("acquisition"):
         merged_info["acquisition"] = {**(info2.get("acquisition") or {}), **(info1.get("acquisition") or {})}
     one, two = has_nanowell_tables(ds1), has_nanowell_tables(ds2)
@@ -389,7 +405,9 @@ def build_plate_merge_plan(
 
     _refuse_well_collisions(ds1, "Dataset 1")
     _refuse_well_collisions(ds2, "Dataset 2")
-    conflict = nanowell_block_conflict(info1, info2)
+    refuse_unusable_tables(ds1, "Dataset 1", MergePlatesError)
+    refuse_unusable_tables(ds2, "Dataset 2", MergePlatesError)
+    conflict = nanowell_block_conflict(info1, info2) or _calibration_conflict(info1, info2)
     if conflict:
         raise MergePlatesError(
             f"Merge Plates can't combine these: {conflict}, so one plate would hold numbers from two analyses. "

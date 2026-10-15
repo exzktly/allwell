@@ -45,6 +45,36 @@ def test_a_refusal_is_remembered_as_the_same_message(tmp_path, monkeypatch):
     (analysed / "out" / "pipeline_info.json").write_text("{}")
     raw = _raw(tmp_path / "raw", "0h")
     monkeypatch.setattr(cc, "_preview_pairs", {})
+    reads = []
+    real = cc.open_pair
+    monkeypatch.setattr(cc, "open_pair", lambda a, b: reads.append(1) or real(a, b))
     first = cc.gap_preview(raw, analysed, "")
     assert first.error.startswith("Dataset 1 is a raw (not yet analysed) dataset")
     assert cc.gap_preview(raw, analysed, "5h").error == first.error
+    assert len(reads) == 1
+
+
+def test_an_archive_overwritten_in_place_or_a_well_folder_gaining_images_is_read_again(tmp_path, monkeypatch):
+    """Neither moves the in/ folder's own time: writing into an archive changes the archive, and an image added
+    to a well folder changes that folder. Each input container is in the key."""
+    one, two = _raw(tmp_path / "one", "0h"), _raw(tmp_path / "two", "24h")
+    monkeypatch.setattr(cc, "_preview_pairs", {})
+    reads = []
+    real = cc.open_pair
+    monkeypatch.setattr(cc, "open_pair", lambda a, b: reads.append(1) or real(a, b))
+    cc.gap_preview(one, two, "24h")
+    before = (two / "in").stat().st_mtime_ns
+    with zipfile.ZipFile(two / "in" / "B02.zip", "a") as zf:           # the archive gains a timepoint in place
+        zf.writestr("exp_PHASE_B02_r0c0_48h.tif", b"x")
+    os.utime(two / "in", ns=(before, before))                          # and the folder's own time has not moved
+    assert cc.gap_preview(one, two, "24h").labels == ("24h", "48h")
+    assert len(reads) == 2
+    folder = two / "in" / "B05"                                        # a well kept as a folder of images
+    folder.mkdir()
+    (folder / "exp_PHASE_B05_r0c0_24h.tif").write_bytes(b"x")
+    cc.gap_preview(one, two, "24h")
+    before = (two / "in").stat().st_mtime_ns
+    (folder / "exp_PHASE_B05_r0c0_72h.tif").write_bytes(b"x")
+    os.utime(two / "in", ns=(before, before))
+    cc.gap_preview(one, two, "24h")
+    assert len(reads) == 4

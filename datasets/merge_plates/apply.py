@@ -497,10 +497,13 @@ def execute_plan(
     _verify(plan, row_counts, mismatches)
 
     _merge_cell_overrides(plan, emit)
+    # Each plate's wells are tagged with their plate, so the end-of-run re-anchoring fits each plate on its own.
     nanowell_rows = carry_nanowell_tables(plan.ds1.out_dir, plan.dest.out_dir,
-                                          {well: well for well in dataset_wells(plan.ds1)})
+                                          {well: well for well in dataset_wells(plan.ds1)},
+                                          plate=f"dataset 1: {plan.ds1.root.name}")
     nanowell_rows.update(carry_nanowell_tables(
-        plan.ds2.out_dir, plan.dest.out_dir, {well: plan.well_map.get(well, well) for well in dataset_wells(plan.ds2)}))
+        plan.ds2.out_dir, plan.dest.out_dir, {well: plan.well_map.get(well, well) for well in dataset_wells(plan.ds2)},
+        plate=f"dataset 2: {plan.ds2.root.name}"))
     if nanowell_rows:
         emit(f"Carried the nanowell tables of {len(nanowell_rows)} well(s) "
              f"({sum(nanowell_rows.values()):,} site rows).")

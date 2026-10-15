@@ -39,13 +39,15 @@ def has_nanowell_tables(paths) -> bool:
 
 
 def refuse_nanowell_tables(paths, label: str, error_cls, action: str) -> None:
-    """Raise *error_cls* when *paths* carries nanowell tables this tool cannot yet carry through *action*."""
+    """Raise *error_cls* when *paths* carries nanowell tables *action* cannot carry: Concatenate of two analysed
+    datasets, whose two analyses each addressed their own nanowells."""
     if has_nanowell_tables(paths):
         raise error_cls(
-            f"{label} holds nanowell results ({nanowell_dir(paths.out_dir)}), and {action} cannot carry them: "
-            "each analysis addressed its own nanowells, and two analyses' addresses are not joined without "
-            "re-anchoring, so the destination would have cells with no nanowells behind them. Concatenate the "
-            "raw input and run Analyze once on the result, or choose a dataset without nanowell results.")
+            f"{label} holds nanowell results ({nanowell_dir(paths.out_dir)}), and {action} cannot carry them "
+            "when both datasets are analysed: each analysis addressed its own nanowells, and two analyses' "
+            "addresses are not joined. Concatenate the analysed dataset with dataset 2's raw images instead "
+            "(its results are kept, and an incremental Analyze adds the new timepoints onto the same nanowells), "
+            "or concatenate the raw input of both and analyse once.")
 
 
 def sites_table(folder: Path, well: str) -> Path | None:
@@ -63,7 +65,44 @@ def _open_text(path: Path, mode: str):
         path.open(mode, newline="", encoding="utf-8")
 
 
-def carry_nanowell_tables(src_out, dest_out, well_map: dict, *, keep_timepoint=None) -> dict[str, int]:
+def nanowell_table_problems(paths) -> list[str]:
+    """What stops a dataset's nanowell tables being carried, found before anything is written.
+
+    Each well needs both its grid record and its sites table, a grid record that reads, and one spelling: a
+    well whose files are written twice (``A01_grid.json`` beside ``A1_grid.json``) would have one copy silently
+    overwrite the other. Empty when the dataset has no tables.
+    """
+    from util.well_token import canonical_well_label
+
+    folder = nanowell_dir(paths.out_dir)
+    if not folder.is_dir():
+        return []
+    problems = []
+    grids = {p.name[: -len("_grid.json")]: p for p in folder.glob("*_grid.json")}
+    tables = {p.name.split(".csv")[0] for p in folder.glob("*.csv*") if p.name.endswith((".csv", ".csv.gz"))}
+    for well in sorted(set(grids) ^ tables):
+        have, lack = ("grid record", "sites table") if well in grids else ("sites table", "grid record")
+        problems.append(f"{well} has a nanowell {have} and no {lack}")
+    for well, path in sorted(grids.items()):
+        _grid, problem = _read_json(path)
+        if problem:
+            problems.append(problem)
+    spellings: dict[str, list] = {}
+    for well in grids:
+        spellings.setdefault(canonical_well_label(well) or well, []).append(well)
+    problems += [f"{', '.join(sorted(v))} are one well spelled {len(v)} ways" for v in spellings.values() if len(v) > 1]
+    return problems
+
+
+def refuse_unusable_tables(paths, label: str, error_cls) -> None:
+    """Raise *error_cls* naming every :func:`nanowell_table_problems` of *paths*, before anything is written."""
+    problems = nanowell_table_problems(paths)
+    if problems:
+        raise error_cls(f"{label}'s nanowell results cannot be carried: " + "; ".join(problems) + ".")
+
+
+def carry_nanowell_tables(src_out, dest_out, well_map: dict, *, keep_timepoint=None,
+                          plate: str | None = None) -> dict[str, int]:
     """Copy each source well's nanowell tables to its destination well; ``{dest well: rows written}``.
 
     *well_map* maps a source well to its destination well, both canonical (``A01``, as the tools' well maps
@@ -72,7 +111,10 @@ def carry_nanowell_tables(src_out, dest_out, well_map: dict, *, keep_timepoint=N
     keeps survive, in the sites table and in the grid record alike, so the two always name the same
     timepoints. A source well with no grid record has no tables and is skipped; one whose kept timepoints are
     none writes nothing rather than an empty table that would read as an analysis that found nothing. Each
-    file is written beside its destination and renamed into place.
+    file is written beside its destination and renamed into place. *plate* names the physical plate the wells
+    came from (Merge Plates), written as the grid record's ``plate`` unless it already names one, so the end-of-run
+    re-anchoring never fits one rigid motion across two plates. Callers refuse unusable tables first
+    (:func:`refuse_unusable_tables`): a pair missing its other half here is a bug, and raises.
     """
     import os
 
@@ -83,9 +125,11 @@ def carry_nanowell_tables(src_out, dest_out, well_map: dict, *, keep_timepoint=N
     for grid_path in sorted(src.glob("*_grid.json")) if src.is_dir() else []:
         src_well = grid_path.name[: -len("_grid.json")]
         dest_well = well_map.get(canonical_well_label(src_well) or src_well)
-        table = sites_table(src, src_well)
-        if dest_well is None or table is None:
+        if dest_well is None:
             continue
+        table = sites_table(src, src_well)
+        if table is None:
+            raise ValueError(f"{src_well} has a nanowell grid record and no sites table")
         grid, problem = _read_json(grid_path)
         if problem:
             raise ValueError(f"The nanowell grid record of {src_well} cannot be carried: {problem}")
@@ -99,6 +143,8 @@ def carry_nanowell_tables(src_out, dest_out, well_map: dict, *, keep_timepoint=N
             continue
         dest.mkdir(parents=True, exist_ok=True)
         grid = dict(grid, well=dest_well, timepoints={tp: b for tp, b in blocks.items() if tp in kept})
+        if plate and not grid.get("plate"):
+            grid["plate"] = plate
         out_table = dest / (dest_well + table.name[len(src_well):])
         tmp = out_table.with_name(out_table.name + ".tmp")
         with _open_text(tmp, "w") as fh:
@@ -125,6 +171,16 @@ def _carry_template(src: Path, dest: Path, kept_timepoints: set) -> None:
     loaded = load_template(src) if src.is_file() else None
     if loaded is not None and loaded[1] in kept_timepoints:
         shutil.copyfile(src, dest)
+
+
+def carried_nanowell_block(block):
+    """The sidecar's ``nanowell`` block for a destination a tool wrote: the analysis's scheme, settings and
+    conventions, without ``reanchor`` — the record of what one run's end-of-run pass did to that run's plate,
+    keyed on its wells, which a subset, a merge or a concatenation would leave naming wells it no longer
+    describes. The next Analyze run writes its own."""
+    if not isinstance(block, dict):
+        return block
+    return {k: v for k, v in block.items() if k != "reanchor"}
 
 
 def nanowell_block_conflict(info1: dict, info2: dict) -> str | None:

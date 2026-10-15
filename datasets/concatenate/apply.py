@@ -22,6 +22,8 @@ import json
 import math
 import threading
 import zipfile
+from datasets.core.dataset_paths import dataset_wells
+from datasets.core.nanowell_tables import carry_nanowell_tables
 from datasets.core.containers import container_dest, publish_container
 from util.json_write import write_json_atomic
 from collections.abc import Callable
@@ -653,6 +655,16 @@ def _verify_raw(plan: MergePlan, dropped_members: dict[str, frozenset[str]]) -> 
 
 
 # ── top-level execution ──────────────────────────────────────────────────────
+def _keep_nanowell_tables(plan: MergePlan, emit) -> None:
+    """Analysed + raw: dataset 1's nanowell results stay with its kept outputs; dataset 2's timepoints get theirs
+    from the incremental Analyze run that follows, onto the same roster and earliest template (tracker P10d)."""
+    carried = carry_nanowell_tables(plan.ds1.out_dir, plan.dest.out_dir,
+                                    {well: well for well in dataset_wells(plan.ds1)})
+    if carried:
+        emit(f"Kept dataset 1's nanowell tables for {len(carried)} well(s); Analyze adds dataset 2's "
+             "timepoints to them incrementally.")
+
+
 def execute_plan(
     plan: MergePlan,
     log: Callable[[str], None] | None = None,
@@ -865,6 +877,8 @@ def execute_plan(
     _merge_acquisition_records(plan, emit)
 
     _merge_cell_overrides(plan, emit)
+    if plan.ds2_raw:
+        _keep_nanowell_tables(plan, emit)
 
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)

@@ -56,7 +56,7 @@ from datasets.core.dataset_paths import (
     known_channel_tokens as _known_channel_tokens,
 )
 from datasets.core.member_names import rewrite_member_field
-from datasets.core.nanowell_tables import refuse_nanowell_tables
+from datasets.core.nanowell_tables import carried_nanowell_block, refuse_nanowell_tables, refuse_unusable_tables
 from datasets.concatenate.raw_compute import (
     check_raw_compatible, is_raw_dataset, raw_info, raw_paths,
 )
@@ -597,17 +597,27 @@ _preview_pairs: dict = {}
 
 
 def _disk_signature(root: Path | str) -> tuple:
-    """What changes when a dataset's readable state does: the folders' and sidecars' modification times. A
-    member added, removed or an archive replaced renames into ``in/`` or ``out/`` and moves its time."""
+    """What changes when a dataset's readable state does: the sidecars' and each input container's size and
+    modification time. Each entry of ``in/`` is stated, not only the folder: an archive overwritten in place
+    (``cp`` over it) moves its own time and not the folder's, and so does an image added to a well folder."""
+    import os
+
     root = Path(root)
-    stamps = []
-    for path in (root, root / "in", root / "out", root / "out" / "pipeline_info.json",
-                 root / "in" / "acquisition.json", root / "acquisition.json"):
+    stamps: list = [str(root), str(root.resolve())]
+    for path in (root / "out" / "pipeline_info.json", root / "in" / "acquisition.json", root / "acquisition.json"):
         try:
-            stamps.append(path.stat().st_mtime_ns)
+            info = path.stat()
+            stamps.append((path.name, info.st_size, info.st_mtime_ns))
         except OSError:
-            stamps.append(None)
-    return (str(root.resolve()), *stamps)
+            stamps.append((path.name, None))
+    try:
+        with os.scandir(root / "in") as entries:
+            for entry in sorted(entries, key=lambda e: e.name):
+                info = entry.stat()
+                stamps.append((entry.name, info.st_size, info.st_mtime_ns))
+    except OSError:
+        stamps.append(("in", None))
+    return tuple(stamps)
 
 
 def _open_pair_for_preview(ds1_root, ds2_root):
@@ -615,8 +625,10 @@ def _open_pair_for_preview(ds1_root, ds2_root):
 
     A raw dataset's schema is inferred by opening every archive in ``in/``; on the user's 60-well plate that
     measured about 75 ms a call, and the page asks on every keystroke of the gap field, twice. The datasets do
-    not change between keystrokes, so the reading is kept and only the typed gap is recomputed. A refusal is
-    remembered too, as the same message. The run itself never reads through this.
+    not change between keystrokes, so the reading is kept and only the typed gap is recomputed; the key is the
+    path as given and resolved, the sidecars and every input container, so a reading is never served for
+    another spelling or after an archive changed. A refusal is remembered too, as the same message. Called
+    from the GUI thread only; the run itself never reads through this.
     """
     key = (_disk_signature(ds1_root), _disk_signature(ds2_root))
     if key not in _preview_pairs:
@@ -872,8 +884,13 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
     _refuse_well_collisions(ds1, "Dataset 1")
     _refuse_well_collisions(ds2, "Dataset 2")
     _refuse_mixed_spelling(ds1, ds2)
-    refuse_nanowell_tables(ds1, "Dataset 1", ConcatError, "Concatenate")
-    refuse_nanowell_tables(ds2, "Dataset 2", ConcatError, "Concatenate")
+    if kind == KIND_ANALYSED:
+        refuse_nanowell_tables(ds1, "Dataset 1", ConcatError, "Concatenate")
+        refuse_nanowell_tables(ds2, "Dataset 2", ConcatError, "Concatenate")
+    elif ds2_raw:
+        # Dataset 1's results are kept as they are, nanowell tables included, and an incremental Analyze adds
+        # dataset 2's timepoints onto the same nanowells: the successive-imaging workflow (tracker P10d).
+        refuse_unusable_tables(ds1, "Dataset 1", ConcatError)
 
     if not raw and (has_folder_mode_output(ds1) or (not ds2_raw and has_folder_mode_output(ds2))):
         which = "dataset 1" if has_folder_mode_output(ds1) else "dataset 2"
@@ -893,6 +910,8 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
     # nothing of it (channel tokens, say) belongs in dataset 1's sidecar.
     merged_info = (dict(info1) if ds2_raw
                    else merge_info(info1, info2, offset_hours=offset, tp_format=tp_format))
+    if "nanowell" in merged_info:
+        merged_info["nanowell"] = carried_nanowell_block(merged_info["nanowell"])
     ds2_blocks_dropped = () if (raw or ds2_raw) else tuple(
         name for name in ("sample_definitions", "notes", "ratios", "cell_gating")
         if (info2 or {}).get(name)

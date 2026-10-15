@@ -256,9 +256,12 @@ record recomputes the timepoint.
 keeps; it refuses a selection of fields, because a well's nanowell results are measured over all of its tiles
 together. *Merge Plates* carries both plates' tables, with dataset 2's wells renamed by the remap; it refuses two
 plates analysed under different nanowell settings, and says when only one plate has nanowell results (the
-other's wells then show on the Nanowells page as wells without a table). *Concatenate* refuses a dataset with
-nanowell results: concatenate the raw input and analyse the result once, so every timepoint is addressed
-against one set of nanowells. *Validate* checks the tables against the grid record and the archives.
+other's wells then show on the Nanowells page as wells without a table). *Concatenate* supports the
+successive-imaging workflow: concatenate the analysed dataset with the new timepoint's raw images, then run
+Analyze with *Incremental* — the earlier timepoints are kept, and the new one is added onto the same nanowells.
+Two datasets that both hold nanowell results are refused. Each tool checks the tables before it writes anything,
+and refuses tables it cannot carry whole (a well with a grid record and no sites table, an unreadable record, one
+well under two spellings). *Validate* checks the tables against the grid record and the archives.
 
 ### Windows (from source)
 

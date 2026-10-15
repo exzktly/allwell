@@ -64,6 +64,9 @@ from pipeline.sidecar import (
 from util.well_token import canonical_well_label as _canonical_well_label
 from services import run_journal
 from util.aw_safe import swallow, swallowed
+from services.remote_csv import (
+    compress_remote_csvs, list_remote_csvs, remote_csv_globs, retire_superseded_csvs)
+from util.csv_gz import glob_csvs as _glob_csvs
 # The shared "retry an OSError with a backoff, then fail with an actionable
 # message" shield. A remote run does as much I/O on the user's own volumes as a
 # local one — it reads the whole plate off the input volume to stage the upload
@@ -856,7 +859,7 @@ class Fetcher:
             local_zip = run.local_output_dir / f"{well}_out.zip"
             if not (local_zip.exists() and _zip_is_complete(local_zip)):
                 return None
-        if not list(run.local_output_dir.glob(f"*_{well}.csv")):
+        if not _glob_csvs(run.local_output_dir, f"*_{well}"):
             return None
         return "already complete locally and untouched by this run"
 
@@ -889,7 +892,9 @@ class Fetcher:
         tmp_zip = (_transit_dir(self.run.local_output_dir, log_fn=self._log)
                    / f"allwell-{self.run.run_id}-{well}_out.zip")
         zip_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/{well}_out.zip"
-        csv_glob_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/*_{well}.csv"
+        csv_glob_src = f"{self.host.ssh_alias}:{remote_csv_globs(self.run.remote_output_dir, well)}"
+        if well not in self.run.fetched_wells:     # not transferred yet: shrink it first
+            compress_remote_csvs(self.host, self.run.remote_output_dir, well, self._log)
 
         total = self.run.well_count_total or 0
         position = len(self.run.fetched_wells) + 1
@@ -990,7 +995,7 @@ class Fetcher:
             the same accounting the zip half uses, over several files."""
             total = 0
             try:
-                paths = [*dest_dir.glob(f"*_{well}.csv"),
+                paths = [*dest_dir.glob(f"*_{well}.csv*"),
                          *dest_dir.glob(f".*_{well}.csv.*")]
             except OSError:
                 return 0
@@ -1041,6 +1046,7 @@ class Fetcher:
             csv_dest = self.run.local_output_dir
             with _csv_dir_heartbeat(csv_dest):
                 csv_count = self._pull_listed(csv_host, csv_files, csv_dest)
+            retire_superseded_csvs(csv_files, csv_dest)
         csv_elapsed = time.monotonic() - t1
         # Held back until the zip is in place: this line is the half that
         # paints the well fetched on the plate (ProgressTracker._mark_fetch_part).
@@ -1124,7 +1130,7 @@ class Fetcher:
         rin, rout = self.run.remote_input_dir, self.run.remote_output_dir
         delete_remote_paths(
             self.host, [f"{rin}/{well}.zip", f"{rout}/{well}_out.zip",
-                        f"{rout}/*_{well}.csv"],
+                        f"{rout}/*_{well}.csv", f"{rout}/*_{well}.csv.gz"],
             what=f"per-well files of {well}", log_fn=self._log)
 
     def _merge_fetched_csvs(self, tmp_csv_dir: Path) -> None:
@@ -1741,7 +1747,7 @@ class FetchedOutputVerifier:
                 f"(end-of-run retry)\n")
 
         def _report_csvs(well: str, elapsed: float) -> None:
-            found = list(run.local_output_dir.glob(f"*_{well}.csv"))
+            found = _glob_csvs(run.local_output_dir, f"*_{well}")
             if found:
                 log(f"[remote] ↓ {well}: {len(found)} CSV file(s) in "
                     f"{_fmt_secs(elapsed)} (end-of-run retry)\n")
@@ -1753,28 +1759,16 @@ class FetchedOutputVerifier:
                 return wells
             # Re-pull the per-well CSV(s) only if they're actually missing or
             # empty locally — a present CSV needs no refetch.
-            local_csvs = list(run.local_output_dir.glob(f"*_{well}.csv"))
+            local_csvs = _glob_csvs(run.local_output_dir, f"*_{well}")
             csv_ok = bool(local_csvs) and all(p.stat().st_size > 0 for p in local_csvs)
             if not csv_ok:
-                try:
-                    listing = subprocess.run(
-                        host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
-                        # v5.x.x: bytes input — see _ssh_script for the
-                        # Windows CRLF rationale.
-                        input=f"ls -1 {run.remote_output_dir}/*_{well}.csv 2>/dev/null || true".encode("utf-8"),
-                        capture_output=True, timeout=30,
-                    )
-                except (subprocess.TimeoutExpired, OSError) as exc:
-                    log(f"[remote] retry: listing {well} failed: {exc}\n")
+                files = list_remote_csvs(host, run.remote_output_dir, well, log,
+                                         compress=well not in run.fetched_wells)
+                if files is None:
                     continue
-                files = [
-                    ln for ln in (
-                        listing.stdout.decode("utf-8", errors="replace")
-                        if listing.stdout else ""
-                    ).splitlines() if ln.strip()
-                ]
                 for f in files:
                     _pull(f)
+                retire_superseded_csvs(files, run.local_output_dir)
             _report_csvs(well, time.monotonic() - well_t0)
             # Re-pull {well}_out.zip ONLY when the user's output mode wants it
             # AND it isn't already present locally. Pulling a multi-hundred-MB
@@ -1962,7 +1956,7 @@ class FetchedOutputVerifier:
             else (set(run.force_wells) | set(run.expected_wells))
         )
         for well in sorted(all_wells):
-            csvs = list(run.local_output_dir.glob(f"*_{well}.csv"))
+            csvs = _glob_csvs(run.local_output_dir, f"*_{well}")
             if not csvs:
                 missing.append(f"missing CSV for {well}")
                 continue

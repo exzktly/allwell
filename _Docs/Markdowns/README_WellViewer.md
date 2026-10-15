@@ -907,6 +907,9 @@ Collapsed by default.
 - **CSV prefix.** The stem of the per-well measurements files the run writes;
   `measurements` by default, giving `measurements_<WELL>.csv`. Change it to keep
   two differently-configured runs distinguishable inside one output folder.
+  A finished well's CSV is stored gzipped (`measurements_<WELL>.csv.gz`) to keep
+  large plates small; for a remote run the CSV is compressed on the remote before
+  it is downloaded, including for a run that was already under way.
 
 - **Check completeness when the run finishes.** On by default. After the last
   well, the run compares what each well's input archive held against what its
@@ -1425,7 +1428,10 @@ with the **Open** button (or `Ctrl+O`, or launch with
 `python allwell.py --data_dir <path>`); a finished Analyze run hands off here
 automatically. The viewer accepts:
 
-- A folder of per-well CSVs (flat).
+- A folder of per-well CSVs (flat). Each CSV may be plain (`.csv`) or gzipped
+  (`.csv.gz`), and one folder can hold both: the pipeline gzips a well's CSV when
+  the well finishes, and datasets analysed with older versions keep their plain
+  CSVs. Nothing needs converting.
 - A folder containing an `out/` subfolder of CSVs.
 - A folder with both `in/` (source ZIPs) and `out/` (results).
 

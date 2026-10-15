@@ -31,19 +31,21 @@ def read_done_fov_keys(csv_path: Path | str) -> set[tuple[str, str]]:
     """
     import csv
 
-    path = Path(csv_path)
-    if not path.exists():
+    from util.csv_gz import existing_csv, open_csv_text
+
+    path = existing_csv(csv_path)
+    if path is None:
         return set()
     keys: set[tuple[str, str]] = set()
     try:
-        with open(path, newline="") as fh:
+        with open_csv_text(path) as fh:
             reader = csv.DictReader(fh)
             if not reader.fieldnames or "fov" not in reader.fieldnames \
                     or "timepoint" not in reader.fieldnames:
                 return set()
             for row in reader:
                 keys.add((str(row.get("fov", "")), str(row.get("timepoint", ""))))
-    except OSError:
+    except (OSError, EOFError):     # EOFError: a truncated .csv.gz
         return set()
     return keys
 

@@ -243,4 +243,4 @@ def test_the_per_well_remote_delete_pipes_its_script_to_bash(monkeypatch, tmp_pa
 
     assert seen["argv"][-2:] == ["bash", "-s"]
     assert seen["input"] == (b"rm -f -- /r/in/A01.zip /r/out/A01_out.zip "
-                             b"/r/out/*_A01.csv\n")
+                             b"/r/out/*_A01.csv /r/out/*_A01.csv.gz\n")

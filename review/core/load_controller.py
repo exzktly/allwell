@@ -25,6 +25,7 @@ from review.core.ui_helpers import (
     step_progress as _step_progress,
 )
 from core.safe import swallow, swallowed
+from util.csv_gz import csv_stem, glob_csvs, open_csv_text
 from review.data.curation import apply_curation_to_cache
 from review.data.field_exclusions import apply_field_exclusions_to_cache
 from review.domain.dataset_name import dataset_display_name
@@ -399,7 +400,9 @@ def _report_unusable_fov_labels(ctx) -> None:
 def load_directory(ctx, d: Path, label=None) -> None:
     app = ctx.window  # transitional bridge (A3)
     _opening_set_phase(ctx, "Scanning folder…")
-    csvs_all = [p for p in sorted(d.glob("*.csv")) if not p.name.startswith(".")]
+    # ``.csv`` and ``.csv.gz`` side by side: a finished well's CSV is gzipped, an
+    # older or still-running dataset's is not, and one folder can hold both.
+    csvs_all = [p for p in glob_csvs(d) if not p.name.startswith(".")]
     # Sniffing opens every CSV header (a network read each) — drive it as a
     # progress loop that pumps the event loop so the window stays responsive
     # instead of silently hanging before the load even starts.
@@ -427,7 +430,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
                 "Please select the analysis output folder containing per-well CSVs.",
             )
         else:
-            QMessageBox.warning(app, "No CSVs", f"No .csv files found in:\n{d}")
+            QMessageBox.warning(app, "No CSVs", f"No .csv or .csv.gz files found in:\n{d}")
         return
     # Leave Split View before swapping datasets: the load restores view-state
     # (which navigates the notebook) and runs a full redraw, both of which assume
@@ -542,8 +545,8 @@ def load_directory(ctx, d: Path, label=None) -> None:
     _show_progress(ctx, n, f"Loading {n} CSV file(s)…", allow_user_input=False)
     _opening_set_phase(ctx, f"Loading {n} well CSV(s)…", value=0, maximum=n)
     for i, p in enumerate(csvs, 1):
-        tok = app._extract_well_token(p.stem)
-        key = tok if tok else p.stem
+        tok = app._extract_well_token(csv_stem(p.name))
+        key = tok if tok else csv_stem(p.name)
         # The repository's load is the same one a lazy read reaches on a cache
         # miss: it registers the path, reads the CSV, runs every registered
         # projector and records the FOV verdict. This pass used to do those four
@@ -793,10 +796,10 @@ def _kick_off_gating_after_load(ctx) -> None:
 def _looks_like_well_measurement_csv(path: Path) -> bool:
     """Guard loader input: accept only per-well measurement CSV schemas."""
     try:
-        with path.open(newline="") as fh:
+        with open_csv_text(path) as fh:
             reader = csv.reader(fh)
             header = next(reader, [])
-    except (OSError, StopIteration):
+    except (OSError, EOFError, StopIteration):
         return False
     if not header:
         return False
@@ -811,7 +814,7 @@ def _looks_like_well_measurement_csv(path: Path) -> bool:
 
 def build_tok_to_label(ctx) -> None:
     app = ctx.window  # transitional bridge (A3)
-    app._app_state.dataset.tok_to_label = {tok: p.stem for tok, p in app._app_state.dataset.well_paths.items()}
+    app._app_state.dataset.tok_to_label = {tok: csv_stem(p.name) for tok, p in app._app_state.dataset.well_paths.items()}
 
 
 def load_path_shim(ctx, path):

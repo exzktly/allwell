@@ -134,7 +134,10 @@ def test_only_the_named_well_is_processed_and_the_rest_is_left_alone(
         tmp_path, monkeypatch, stubbed_segmenter):
     plate = _plate(tmp_path)
     _first_run(monkeypatch, plate)
-    b02_csv = plate / "out" / "measurements_B02.csv"
+    # A finished well's CSV is stored gzipped; "left alone" is asserted on the
+    # file that is actually there, and on it being the gzipped one.
+    b02_csv = plate / "out" / "measurements_B02.csv.gz"
+    assert b02_csv.is_file()
     before = (b02_csv.read_bytes(), b02_csv.stat().st_mtime_ns)
 
     ran: list[str] = []

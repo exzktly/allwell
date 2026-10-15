@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from util.aw_safe import swallow
+from util.csv_gz import open_csv_text
 from util.timepoint import parse_hours, sort_key
 from domain.image_identity import PipelineSchema, load_schema
 from datasets.core.dataset_paths import (
@@ -320,7 +321,7 @@ def _csv_header(path: Path) -> list[str]:
     import csv
 
     with swallow(f"read CSV header {path}"):
-        with path.open(newline="") as handle:
+        with open_csv_text(path) as handle:
             return next(csv.reader(handle), [])
     return []
 

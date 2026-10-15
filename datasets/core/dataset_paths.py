@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from util.aw_safe import swallow
+from util.csv_gz import csv_stem, glob_csvs
 from util.well_token import canonical_well_label
 from types import SimpleNamespace
 
@@ -277,8 +278,8 @@ def well_spelling_collisions(paths: DatasetPaths) -> dict[str, list[Path]]:
             )
     # Keyed on (prefix, well) so only the same-prefix duplicate counts.
     prefixed: dict[tuple[str, str], list[Path]] = {}
-    for csv_path in paths.out_dir.glob("*.csv"):
-        split = split_stem_well(csv_path.stem)
+    for csv_path in glob_csvs(paths.out_dir):
+        split = split_stem_well(csv_stem(csv_path.name))
         if split is not None:
             prefixed.setdefault(split, []).append(csv_path)
     _collect(
@@ -323,8 +324,8 @@ def out_csvs(paths: DatasetPaths) -> dict[str, Path]:
     ``out/*.csv`` themselves rather than trust this map for that purpose.
     """
     csvs: dict[str, Path] = {}
-    for csv_path in paths.out_dir.glob("*.csv"):
-        well = well_from_stem(csv_path.stem)
+    for csv_path in glob_csvs(paths.out_dir):
+        well = well_from_stem(csv_stem(csv_path.name))
         if well:
             csvs[well] = csv_path
     return csvs

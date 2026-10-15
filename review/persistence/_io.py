@@ -17,6 +17,7 @@ transient handle conflicts so the smFISH writer doesn't surface
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import os
@@ -29,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from core.safe import swallowed
+from util.csv_gz import is_gz_csv_name, plain_name
 from review.persistence import provenance as _provenance
 
 _logger = logging.getLogger("review")
@@ -308,6 +310,19 @@ def atomic_write_text(path: Path, text: str) -> None:
     tmp = _unique_tmp_path(path)
 
     def _write_tmp() -> None:
+        # A ``.csv.gz`` target must hold gzip bytes: writing the plain text under
+        # that name would leave a file every reader rejects as a corrupt archive.
+        if is_gz_csv_name(path.name):
+            with open(tmp, "wb") as raw:
+                with gzip.GzipFile(filename=plain_name(path.name), mode="wb",
+                                   fileobj=raw, compresslevel=6) as gz:
+                    gz.write(text.encode("utf-8"))
+                raw.flush()
+                try:
+                    os.fsync(raw.fileno())
+                except OSError:
+                    swallowed("atomic_write_text: fsync unsupported on this fs")
+            return
         with open(tmp, "w", encoding="utf-8", newline="") as fh:
             fh.write(text)
             fh.flush()

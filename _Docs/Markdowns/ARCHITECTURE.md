@@ -363,6 +363,13 @@ allwell/
 │                                  + a well's own archive, read and written
 │                                 + the scratch base & staging-dir lifecycle (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
+│   ├── csv_gz.py               ← a per-well CSV in either spelling, `name.csv` or `name.csv.gz`:
+│   │                              existing_csv / glob_csvs (one entry per logical file, plain
+│   │                              wins over gzip), open_csv_text (gz-aware by name, for read
+│   │                              and write), csv_stem (Path.stem leaves ".csv" on a gz name),
+│   │                              gzip_csv (crash-safe: hidden .part, fsync, rename, then
+│   │                              remove the original). Every CSV reader in the pipeline,
+│   │                              Review and the Datasets tools goes through it
 │   ├── dir_scan.py             ← "what is directly inside this directory?", answered out
 │   │                              of one os.scandir rather than a stat per entry — the
 │   │                              difference between instant and twenty minutes when the
@@ -9779,6 +9786,52 @@ configured staging area.
 The run logs its resolved scratch base on the `Scratch  :` line; if that ever
 reads back as the output dir on a network mount, that is the failure
 configuration.
+
+### 6.5b Per-well CSVs are gzipped, and every reader takes either spelling
+
+A plate's per-well CSVs get very large, so a finished well's
+`<prefix>_<well>.csv` is stored as `<prefix>_<well>.csv.gz`. A dataset folder can
+hold either spelling, or a mix: wells analysed before compression existed, a run
+resumed across the change, an incremental run on top of an old dataset. The one
+module that says how the two relate is `util/csv_gz.py`, and the rules are:
+
+- **One logical file, two possible spellings.** `existing_csv` and `glob_csvs`
+  return one entry per logical CSV. When both spellings exist the plain file wins:
+  the archive is only ever produced from a plain file, so the two coexist only
+  when a merge wrote a newer plain file beside an older archive, or when removing
+  the plain file after compressing failed (the two are then identical).
+- **Names are stripped with `csv_stem`, never `Path.stem`**, which leaves `.csv`
+  on a gzipped name. The Review well key, the Parquet cache name and the Datasets
+  well maps all use it.
+- **Writers are gzip-aware by name.** `open_csv_text(path, "w")` and
+  `review.persistence._io.atomic_write_text` write gzip bytes for a `.csv.gz` path;
+  writing plain text under that name would leave a file no reader accepts.
+  The Datasets tools (Subset, Merge Plates, Concatenate) keep the spelling of their
+  source CSV.
+
+**When the pipeline compresses.** Not while a well is being built: the incremental
+and resume logic reads a well's rows back (`read_done_fov_keys`,
+`merge_records_into_csv`), so the CSV is a plain file until its well is written
+for the last time. `pipeline.io.write_well_csv` (a fresh well) and
+`merge_well_records` (an incremental merge, which reads the existing file in
+either spelling and writes plain) both end by calling `compress_well_csv`, and
+`process_microscopy` reaches the per-well CSV only through them
+(`tests/test_csv_gz.py` pins that). A compression failure is logged and leaves the
+plain CSV: a larger file, not a wrong one.
+
+**Remote runs compress before the transfer.** The remote runs the same
+`process_microscopy`, so a well's CSV is already `.csv.gz` on the remote when it
+finishes. For a run that was started before compression existed, the remote still
+holds plain CSVs; `Fetcher._fetch_one` therefore runs `compress_remote_csvs` (a
+small `gzip`-to-`.part`-then-rename script over ssh, in `services/remote_csv.py`) for a well that is not yet in
+`run.fetched_wells`, before listing and pulling it. A well already transferred is
+never touched again. The listing names both spellings (`*_<well>.csv` and
+`*_<well>.csv.gz`), so a host where `gzip` failed still delivers its plain CSV.
+After a non-incremental pull `retire_superseded_csvs` removes the other spelling of
+every CSV that arrived, because a stale plain `x.csv` from an earlier run would
+otherwise shadow the freshly fetched `x.csv.gz`. An incremental fetch merges the
+partial into the local CSV (`pipeline.io.merge_fetched_csvs`) and recompresses the
+result. The end-of-run retry and the verification step use the same helpers.
 
 ### 6.6 The remote conda environment, and one definition of "it exists"
 

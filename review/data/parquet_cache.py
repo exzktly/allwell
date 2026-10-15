@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 from core.safe import swallow
+from util.csv_gz import csv_stem, existing_csv
 
 _logger = logging.getLogger("review.parquet_cache")
 
@@ -138,7 +139,7 @@ def _pyarrow() -> ModuleType | None:
 def cache_path(csv_path: Path) -> Path:
     """The cached frame's path for *csv_path*."""
     csv_path = Path(csv_path)
-    return csv_path.parent / CACHE_DIRNAME / f"{csv_path.stem}.parquet"
+    return csv_path.parent / CACHE_DIRNAME / f"{csv_stem(csv_path.name)}.parquet"
 
 
 def source_fingerprint(csv_path: Path) -> str | None:
@@ -333,7 +334,7 @@ def prune(csv_dir) -> int:
                 continue
             orphan = (entry.name.startswith("__aw_tmp_")
                       or (entry.suffix == ".parquet"
-                          and not (Path(csv_dir) / f"{entry.stem}.csv").exists()))
+                          and existing_csv(Path(csv_dir) / f"{entry.stem}.csv") is None))
             if not orphan:
                 continue
             with swallow(f"remove the orphaned cache file {entry.name}"):

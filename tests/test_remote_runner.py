@@ -2004,6 +2004,9 @@ def test_required_files_list_is_what_we_promised():
         # One os.scandir in place of a stat per directory entry; client-side
         # only, listed because the manifest mirrors every util/ file.
         "util/dir_scan.py",
+        # Per-well CSVs are gzipped when a well finishes; every CSV reader and
+        # writer in the pipeline treats .csv / .csv.gz as one file through this.
+        "util/csv_gz.py",
         # Rebinds sys.stdout / sys.stderr when a frozen windowed build nulls them;
         # imported by process_microscopy at module load (and by well_plate_zipper).
         # Reduces a metadata label to a filename token; both packed-file

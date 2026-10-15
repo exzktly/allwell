@@ -60,6 +60,7 @@ from pipeline.completeness import (
 from pipeline.incremental_keys import fov_keys_from_member_names
 from util.timepoint import parse_hours, sort_key as tp_sort_key
 from util.aw_safe import swallow
+from util.csv_gz import csv_stem, glob_csvs, open_csv_text
 from util.well_token import canonical_well_label
 from domain.image_identity import load_schema
 from domain.tp_match import tp_close
@@ -256,7 +257,7 @@ class DatasetReport:
 def _prefix_and_well(csv_path: Path) -> tuple[str, str] | None:
     """Split a measurements-CSV stem into ``(prefix, canonical_well)``, or
     ``None`` if the stem doesn't end in a well-like token at all."""
-    return split_stem_well(csv_path.stem)
+    return split_stem_well(csv_stem(csv_path.name))
 
 
 def _csv_header(path: Path) -> list[str] | None:
@@ -266,9 +267,9 @@ def _csv_header(path: Path) -> list[str] | None:
     which must not mistake "genuinely corrupt measurements CSV" for "an
     unrelated file that happens to end in a well token")."""
     try:
-        with path.open(newline="") as handle:
+        with open_csv_text(path) as handle:
             return next(csv.reader(handle), [])
-    except (OSError, UnicodeDecodeError, csv.Error):
+    except (OSError, EOFError, UnicodeDecodeError, csv.Error):
         return None
 
 
@@ -279,13 +280,13 @@ def _read_csv_rows(path: Path) -> tuple[list[dict], list[str], str]:
     can't tell those apart, and the distinction is the point of this feature.
     """
     try:
-        with path.open(newline="") as handle:
+        with open_csv_text(path) as handle:
             reader = csv.DictReader(handle)
             fieldnames = list(reader.fieldnames or [])
             if not fieldnames:
                 return [], [], "unreadable"
             rows = list(reader)
-    except (OSError, UnicodeDecodeError, csv.Error):
+    except (OSError, EOFError, UnicodeDecodeError, csv.Error):
         return [], [], "unreadable"
     if not rows:
         return [], fieldnames, "empty"
@@ -483,7 +484,7 @@ def _classify_csvs(paths) -> tuple[dict[str, list[Path]], set[str], list[Finding
     findings: list[Finding] = []
     candidates: dict[str, list[Path]] = {}
     prefixes: set[str] = set()
-    for csv_path in sorted(paths.out_dir.glob("*.csv")):
+    for csv_path in glob_csvs(paths.out_dir):
         parsed = _prefix_and_well(csv_path)
         if parsed is None:
             continue

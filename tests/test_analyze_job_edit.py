@@ -75,8 +75,8 @@ _OPTS = {
     "measure_focus": False,
     "focus_min": "0.083",
     "phase_token": "BF",
-    "segmentation_method": "stardist_seeded_watershed_cell",
-    "cytoplasm_token": "GFP",
+    "segmentation_method": "cellpose_labelfree",   # nanowell mode pins the label-free method, so a saved spec states it
+    "cytoplasm_token": "",
     "min_nucleus_area_px": "75",
     "cellpose_model": "nuclei",
     "cellpose_diameter": "30.0",
@@ -170,7 +170,10 @@ def test_the_fixture_is_all_non_default(tab):
     exempt — they have no widget to restore them into and cannot vary.
     """
     constants = {"compress_input_well_folders", "compress_output_well_folders",
-                 "move_source_tifs"}
+                 "move_source_tifs",
+                 # nanowell mode pins label-free segmentation, which has no cytoplasm channel, so a saved
+                 # nanowell spec always carries it blank.
+                 "cytoplasm_token"}
     default = tab.collect_spec()["opts"]
     same = [k for k, v in _OPTS.items() if k not in constants and default.get(k) == v]
     assert not same, f"these fixture values match the form default, so they test nothing: {same}"

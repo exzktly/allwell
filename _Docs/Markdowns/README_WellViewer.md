@@ -203,13 +203,19 @@ channel the tiles are imaged in as **Phase** (Channel Tokens). The section asks 
 50 µm nanowells) and, optionally, the cell diameter, the margin around a nanowell that must lie inside one tile
 for that tile to own it, the angle of the central square's edges to a lattice row, and the occlusion and
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
-Run refuses to start, naming the fix, when there is no acquisition record, the wells are not zips, a tile the
-record names is missing from an archive, or the tiles of a well cannot be placed; an overlap shorter than a
-nanowell needs is logged as a warning with the expected number of nanowells on a seam, and the run goes on.
+While the mode is on, the segmentation method is set to label-free and locked (your choice returns when the mode
+is switched off). Run refuses to start, naming the fix, when a number is out of range or the Phase channel is
+unmarked (unless channel auto-detection will name it), and, for a single run with auto-detection off, when
+there is no acquisition record, the wells are not zips, a tile the record names is missing from an archive, or
+the tiles of a well cannot be placed. The record, archive and grid checks are not made when **Detect schema &
+channels at run time** is on, or for a queued job whose input folder does not exist yet; the pipeline itself
+still refuses such a well, naming the reason. An overlap shorter
+than a nanowell needs is logged once as a warning with the expected number of nanowells on a seam, and the
+run goes on.
 
 **Test detection…** runs registration and detection on one well at one timepoint, in the background, and opens a
-window with the montage: every nanowell outlined (green empty, blue holding cells, orange occluded, red
-clipped, grey without an address, dashed magenta on a seam), addresses written once you zoom in far enough to
+window with the montage: every nanowell outlined (green empty, blue holding cells, amber occluded, red
+clipped, grey without an address, dashed purple on a seam), addresses written once you zoom in far enough to
 read them, the origin method, the measured overlap against the one a nanowell needs, and a few
 rim-suppressed nanowells beside their segmentation. Use it before a plate-wide run: if the addresses do not
 land on the right nanowells, the run would not either.

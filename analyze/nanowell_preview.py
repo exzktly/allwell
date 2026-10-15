@@ -13,20 +13,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtCore import QCoreApplication, QThread, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
-from core.safe import swallow
+from ui.theme import Colors
 
 #: A site's outline colour by what the run would record for it. Fused is drawn dashed over whichever applies.
-STATE_COLOURS = {"empty": "#2e9e5b", "measured": "#2f6fd0", "occluded": "#e08a1e", "clipped": "#d04545",
-                 "unaddressed": "#8a8a8a"}
+STATE_COLOURS = {"empty": Colors.success, "measured": Colors.accent, "occluded": Colors.warn,
+                 "clipped": Colors.danger, "unaddressed": Colors.text_muted}
+#: The dashed outline of a fused site (on a seam, measured from a blended crop).
+FUSED_COLOUR = Colors.accent2
 #: Zoom steps offered; addresses are written only where a nanowell is drawn at least this many screen pixels across.
 ZOOMS = (("Fit", 0.0), ("50 %", 0.5), ("100 %", 1.0), ("200 %", 2.0), ("400 %", 4.0))
 MIN_LABEL_DIAMETER_PX = 34
+#: The longest side the montage is drawn at; a larger zoom of a large montage would ask Qt for a pixmap it cannot make.
+MAX_PIXMAP_SIDE = 12000
 
 
 @dataclass(frozen=True)
@@ -41,15 +45,19 @@ class SiteMark:
 
 
 def site_marks(result) -> list[SiteMark]:
-    """The marks for a preview result's sites, in montage pixels. Empty when there is no montage."""
+    """The marks for a preview result's sites, in montage pixels. Empty when there is no montage.
+
+    Positions are continuous coordinates (micrometres over the pixel size): pixel i covers [i, i+1), so a site at
+    the montage origin sits at 0.0, the pixmap's top-left corner, with no half-pixel offset.
+    """
     if result.montage is None or not result.um_per_px:
         return []
     scale = result.um_per_px
     marks = []
     for site in result.sites:
         colour = site["state"] if site["address"] is not None else "unaddressed"
-        marks.append(SiteMark((site["well_x_um"] - result.origin_um[0]) / scale - 0.5,
-                              (site["well_y_um"] - result.origin_um[1]) / scale - 0.5,
+        marks.append(SiteMark((site["well_x_um"] - result.origin_um[0]) / scale,
+                              (site["well_y_um"] - result.origin_um[1]) / scale,
                               site["radius_um"] / scale, colour, site["address"] or "", bool(site["fused"]),
                               site["n_cells"]))
     return marks
@@ -65,7 +73,7 @@ def summary_text(result) -> str:
         lines.append(f"Origin found from the {str(result.origin_method).replace('_', ' ')} "
                      f"({result.origin_agreement or 'single source'}).")
     else:
-        lines.append(f"Not addressed: {result.reason} The sites found are drawn without addresses.")
+        lines.append(f"Not addressed: {str(result.reason).rstrip('.')}. The sites found are drawn without addresses.")
     overlap = [f"{o:.0f}" if o is not None else "-" for o in result.overlap_um]
     short = any(o is not None and o < result.overlap_needed_um for o in result.overlap_um)
     lines.append(f"Overlap between tiles {overlap[0]} × {overlap[1]} µm against the {result.overlap_needed_um:.0f} µm a "
@@ -98,12 +106,12 @@ def render_montage(result, zoom: float, *, show_addresses: bool = True) -> QPixm
         pen.setWidthF(1.5)
         if mark.fused:
             pen.setStyle(Qt.DashLine)
-            pen.setColor(QColor("#c040c0"))
+            pen.setColor(QColor(FUSED_COLOUR))
         painter.setPen(pen)
         cx, cy, r = mark.x * zoom, mark.y * zoom, mark.radius * zoom
         painter.drawEllipse(int(cx - r), int(cy - r), int(2 * r), int(2 * r))
         if show_addresses and mark.text and 2 * r >= MIN_LABEL_DIAMETER_PX:
-            painter.setPen(QColor("#ffffff"))
+            painter.setPen(QColor(Colors.brand_fg))
             painter.drawText(int(cx - r), int(cy - r), int(2 * r), int(2 * r), Qt.AlignCenter, mark.text)
     painter.end()
     return pixmap
@@ -126,14 +134,33 @@ def render_crop(crop: dict, size: int = 160) -> QPixmap:
     return QPixmap.fromImage(image.scaled(size, size, Qt.KeepAspectRatio, Qt.FastTransformation))
 
 
+#: Running workers. A QThread destroyed while running aborts the process, and the window (or the whole tab) can be
+#: closed mid-run, so a worker is owned here until it finishes rather than by the widget that started it.
+_RUNNING: set = set()
+
+
+def _hold(worker: QThread) -> None:
+    if not _RUNNING:
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(_wait_for_workers)    # the interpreter must not exit under a running thread
+    _RUNNING.add(worker)
+    worker.finished.connect(lambda: _RUNNING.discard(worker))
+
+
+def _wait_for_workers() -> None:
+    for worker in list(_RUNNING):
+        worker.wait(5000)
+
+
 class _PreviewWorker(QThread):
     """Runs the analysis off the GUI thread. A QThread subclass, not a Python thread: the result comes back by signal."""
 
     done = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, job: dict, parent=None):
-        super().__init__(parent)
+    def __init__(self, job: dict):
+        super().__init__()                  # no parent: its lifetime is _RUNNING's, not a widget's
         self._job = job
 
     def run(self) -> None:
@@ -204,12 +231,24 @@ class NanowellPreviewWindow(QWidget):
         self._zoom_cb.currentIndexChanged.connect(lambda _i: self._draw())
         self._fill_timepoints(self._well_cb.currentText())
 
+    def reload(self, wells: dict[str, Path], timepoints: dict[str, list[str]]) -> None:
+        """Take the current input folder's wells and timepoints (the form may have changed since the window opened)."""
+        self._wells, self._timepoints = wells, timepoints
+        current = self._well_cb.currentText()
+        self._well_cb.blockSignals(True)
+        self._well_cb.clear()
+        self._well_cb.addItems(sorted(wells))
+        if current in wells:
+            self._well_cb.setCurrentText(current)
+        self._well_cb.blockSignals(False)
+        self._fill_timepoints(self._well_cb.currentText())
+
     @staticmethod
     def _legend_html() -> str:
         keys = {"empty": "empty", "measured": "cells", "occluded": "occluded", "clipped": "clipped",
                 "unaddressed": "no address"}
         chips = "  ".join(f'<span style="color:{STATE_COLOURS[k]}">●</span> {v}' for k, v in keys.items())
-        return chips + '  <span style="color:#c040c0">┄</span> fused (on a seam)'
+        return chips + f'  <span style="color:{FUSED_COLOUR}">┄</span> fused (on a seam)'
 
     def _fill_timepoints(self, well: str) -> None:
         self._tp_cb.clear()
@@ -227,13 +266,27 @@ class NanowellPreviewWindow(QWidget):
     def run(self) -> None:
         if self._worker is not None and self._worker.isRunning():
             return
+        try:
+            job = self._job()
+        except ValueError as exc:
+            self._summary.setText(f"The preview could not start: {exc}")
+            return
+        problem = self._tab._nanowell_validation_error(check_input=False)
+        if problem:
+            self._summary.setText(f"The preview could not start: {problem}")
+            return
         self._run_btn.setEnabled(False)
         self._summary.setText("Running registration and detection…")
-        self._worker = _PreviewWorker(self._job(), self)
-        self._worker.done.connect(self._on_done)
-        self._worker.failed.connect(self._on_failed)
-        self._worker.finished.connect(lambda: self._run_btn.setEnabled(True))
-        self._worker.start()
+        worker = _PreviewWorker(job)
+        self._worker = worker
+        worker.done.connect(self._on_done)
+        worker.failed.connect(self._on_failed)
+        worker.finished.connect(self._on_finished)      # a bound slot: dropped with the window, unlike a lambda
+        _hold(worker)
+        worker.start()
+
+    def _on_finished(self) -> None:
+        self._run_btn.setEnabled(True)
 
     def _on_failed(self, message: str) -> None:
         self._result = None
@@ -254,6 +307,17 @@ class NanowellPreviewWindow(QWidget):
         area = self._scroll.viewport()
         return min(area.width() / width, area.height() / height, 1.0) or 1.0
 
+    def _capped_zoom(self) -> float:
+        if self._result is None or self._result.montage is None:
+            return self._zoom()
+        height, width = self._result.montage.shape
+        return min(self._zoom(), MAX_PIXMAP_SIDE / max(height, width))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if not self._zoom_cb.currentData() and self._result is not None:
+            self._draw()                  # "Fit" follows the window
+
     def _draw(self) -> None:
         for i in reversed(range(self._crops.count())):
             item = self._crops.takeAt(i)
@@ -263,7 +327,7 @@ class NanowellPreviewWindow(QWidget):
         if result is None or result.montage is None:
             self._montage_label.clear()
             return
-        pixmap = render_montage(result, self._zoom())
+        pixmap = render_montage(result, self._capped_zoom())
         self._montage_label.setPixmap(pixmap)
         self._montage_label.resize(pixmap.size())
         for crop in result.crops:
@@ -317,15 +381,8 @@ def open_preview(tab) -> NanowellPreviewWindow | None:
     if window is None:
         window = NanowellPreviewWindow(tab, wells, timepoints)
         tab._nanowell_preview_window = window
+    else:
+        window.reload(wells, timepoints)
     window.show()
     window.raise_()
     return window
-
-
-def stop_preview(tab) -> None:
-    """Wait for a running preview worker on the way out (the tab closing must not destroy a running QThread)."""
-    window = getattr(tab, "_nanowell_preview_window", None)
-    worker = getattr(window, "_worker", None)
-    if worker is not None and worker.isRunning():
-        with swallow("waiting for the Test detection worker"):
-            worker.wait(5000)

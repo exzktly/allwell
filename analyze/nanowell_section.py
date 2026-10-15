@@ -100,6 +100,14 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_status.setWordWrap(True)
         sec.layout().addWidget(self._nanowell_status)
         self._nanowell_field_rows.append(row.parentWidget())
+        self._nanowell_previous_method: int | None = None
+        self._nanowell_logged: set[str] = set()
+        if self._nanowell_label_free_index() < 0:
+            # A build without Cellpose (a profile that leaves it out) cannot segment label-free, which is the
+            # only segmentation nanowell mode has: say so instead of offering a mode that cannot run.
+            self._nanowell_cb.setEnabled(False)
+            self._nanowell_status.setText("Nanowell mode needs label-free (Cellpose) segmentation, which this build "
+                                          "does not include.")
         self._nanowell_cb.toggled.connect(self._refresh_nanowell_enabled)
         self._refresh_nanowell_enabled()
 
@@ -110,6 +118,28 @@ class AnalyzeNanowellSectionMixin:
         for _key, _label, attr, _tip in _FIELDS:
             getattr(self, attr).setEnabled(on)
         self._nanowell_preview_btn.setEnabled(on)
+        self._nanowell_pin_segmentation(on)
+
+    def _nanowell_label_free_index(self) -> int:
+        return self._seg_method_cb.findData("cellpose_labelfree")
+
+    def _nanowell_pin_segmentation(self, on: bool) -> None:
+        """Nanowell mode segments label-free whatever the selector says, so the selector says so and is locked.
+
+        The pipeline sets the method itself; the form's own checks (a StarDist tile size, a watershed
+        cytoplasm channel) would otherwise refuse a run over a setting the run ignores. The user's choice is
+        put back when the mode is switched off.
+        """
+        index = self._nanowell_label_free_index()
+        if on and index >= 0:
+            if self._nanowell_previous_method is None:
+                self._nanowell_previous_method = self._seg_method_cb.currentIndex()
+            self._seg_method_cb.setCurrentIndex(index)
+            self._seg_method_cb.setEnabled(False)
+        elif not on and self._nanowell_previous_method is not None:
+            self._seg_method_cb.setCurrentIndex(self._nanowell_previous_method)
+            self._seg_method_cb.setEnabled(True)
+            self._nanowell_previous_method = None
 
     def _nanowell_option_values(self) -> dict:
         """The section's run options: every key present, the format empty while the mode is off."""
@@ -129,14 +159,19 @@ class AnalyzeNanowellSectionMixin:
         if "nanowell_format" not in d or not hasattr(self, "_nanowell_cb"):
             return
         plate_format = str(d.get("nanowell_format") or "").strip()
-        self._nanowell_cb.setChecked(bool(plate_format))
         index = self._nanowell_format_cb.findData(plate_format)
-        if index >= 0:
+        known = index >= 0 and self._nanowell_cb.isEnabled()
+        self._nanowell_cb.setChecked(known)
+        self._nanowell_status.setText(
+            "" if known or not plate_format else
+            f"This dataset was analysed with plate format {plate_format!r}, which this version does not know: "
+            "nanowell mode is off.")
+        if known:
             self._nanowell_format_cb.setCurrentIndex(index)
         for key, _label, attr, _tip in _FIELDS:
-            if key in d:
-                value = d.get(key)
-                getattr(self, attr).setText("" if value is None else f"{value:g}" if isinstance(value, float) else str(value))
+            # A key the dataset does not state is blank, not whatever the previous dataset left in the box.
+            value = d.get(key)
+            getattr(self, attr).setText("" if value is None else f"{value:.12g}" if isinstance(value, float) else str(value))
 
     def _nanowell_validation_error(self, *, check_input: bool) -> str | None:
         """What stops a nanowell run before it starts, or ``None``: bad fields, no Phase channel, no record, no tiles.
@@ -148,13 +183,15 @@ class AnalyzeNanowellSectionMixin:
         opts = self._collect_run_options()
         if not nanowell_enabled(opts):
             return None
-        problems = nanowell_option_errors(opts)
+        problems = nanowell_option_errors(opts, need_phase=not self._auto_detect_on())
         if not problems and check_input:
             from analyze.nanowell_preflight import nanowell_input_report
 
             problems, warnings = nanowell_input_report(self._input_edit.text().strip(), opts)
             for warning in warnings:                # said, not refused: the run goes on, so say it where the run logs
-                self._log_line(f"Nanowells: {warning}", "WARNING")
+                if warning not in self._nanowell_logged:      # once per distinct finding, not once per validation
+                    self._nanowell_logged.add(warning)
+                    self._log_line(f"Nanowells: {warning}", "WARNING")
         return "\n".join(problems) if problems else None
 
     def _on_nanowell_preview(self) -> None:

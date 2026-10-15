@@ -113,12 +113,16 @@ def refused(monkeypatch):
 
 
 def test_run_is_refused_for_a_bad_number_and_for_a_missing_phase_channel(tab, refused, tmp_path):
+    _use_nanowell_schema(tab)
     tab._input_edit.setText(str(tmp_path))
     tab._nanowell_cb.setChecked(True)
     tab._nanowell_margin_edit.setText("-3")
     assert tab._validate_run_request() is None
     assert refused[-1][0] == "Input Error" and "Margin must be 0 or more" in refused[-1][1]
-    assert "Phase channel" in refused[-1][1]
+    tab._nanowell_margin_edit.setText("")
+    tab._set_fluor_rows(["GFP"], smfish=[], phase="")                          # label-free needs a phase channel
+    assert tab._validate_run_request() is None
+    assert refused[-1][0] == "Segmentation Error" and "'Phase'" in refused[-1][1]
 
 
 def _plate(tmp_path, *, overlap=0.1, record=True, drop_tile=None):
@@ -268,7 +272,7 @@ def test_marks_carry_the_state_the_address_the_fused_flag_and_the_count():
     assert [(m.text, m.colour, m.fused, m.count) for m in marks] == [
         ("0,1", "measured", False, 2), ("1,1", "empty", True, None), ("0,0", "occluded", False, None),
         ("", "unaddressed", False, None)]
-    assert marks[0].x == pytest.approx((500 - 100) / 4 - 0.5) and marks[0].radius == pytest.approx(12.5)
+    assert marks[0].x == pytest.approx((500 - 100) / 4) and marks[0].radius == pytest.approx(12.5)
     assert site_marks(PreviewResult("no_lattice", "x")) == []
 
 
@@ -337,7 +341,8 @@ def test_each_numeric_field_is_refused_exactly_at_its_bounds(key, value, bad):
 
 def test_a_format_the_pipeline_does_not_know_and_a_missing_phase_channel_are_refused():
     assert any("is not one of" in e for e in nanowell_option_errors({**_ON, "nanowell_format": "75um"}))
-    assert any("Phase channel" in e for e in nanowell_option_errors({"nanowell_format": "100um", "phase_token": " "}))
+    assert any("Phase channel" in e for e in nanowell_option_errors({"nanowell_format": "100um", "phase_token": " "}, need_phase=True))
+    assert nanowell_option_errors({"nanowell_format": "100um", "phase_token": " "}) == []   # auto-detect names it at run time
     assert nanowell_option_errors(_ON) == []
 
 

@@ -39,10 +39,12 @@ def nanowell_enabled(opts: dict) -> bool:
     return bool(str(opts.get("nanowell_format") or "").strip())
 
 
-def nanowell_option_errors(opts: dict) -> list[str]:
+def nanowell_option_errors(opts: dict, *, need_phase: bool = False) -> list[str]:
     """Human-readable errors for the nanowell options; nothing when the section is off.
 
-    A field behind an off section is not validated, because it is not sent.
+    A field behind an off section is not validated, because it is not sent. *need_phase* asks for the Phase
+    channel to be marked on the form: not asked while run-time detection is about to replace the form's
+    channels (the run's own argument check still refuses a missing one, by name).
     """
     if not nanowell_enabled(opts):
         return []
@@ -50,7 +52,7 @@ def nanowell_option_errors(opts: dict) -> list[str]:
     known = {value for value, _label in PLATE_FORMAT_CHOICES}
     if str(opts["nanowell_format"]).strip() not in known:
         errors.append(f"Nanowell plate format {opts['nanowell_format']!r} is not one of {sorted(known)}.")
-    if not str(opts.get("phase_token") or "").strip():
+    if need_phase and not str(opts.get("phase_token") or "").strip():
         errors.append("Nanowell mode needs a Phase channel: tick Phase on the channel the tiles are imaged in.")
     for key, (label, low, high, low_ok) in _NUMERIC.items():
         raw = opts.get(key)

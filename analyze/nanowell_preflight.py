@@ -104,13 +104,12 @@ def _listed(lead: str, items) -> list[str]:
 
 
 def _plans(record: dict, place_from_record, tiles_from_record):
-    seen = set()
+    """Each (well, timepoint)'s placed grid, found with one pass over the record's tiles (not one per pair)."""
+    by_key: dict[tuple, list] = {}
     for tile in record.get("tiles", []):
-        key = (tile["well"], tile["timepoint"])
-        if key in seen:
-            continue
-        seen.add(key)
-        found = tiles_from_record(record, *key)
+        by_key.setdefault((tile["well"], tile["timepoint"]), []).append(tile)
+    for key, tiles_of_key in by_key.items():
+        found = tiles_from_record({"timepoints": record.get("timepoints", {}), "tiles": tiles_of_key}, *key)
         if found is not None:
             tiles, tile_size, pixel_size, overlap = found
             yield key, place_from_record(tiles, tile_size_px=tile_size, pixel_size_um=pixel_size,
@@ -135,12 +134,17 @@ def _overlap_warnings(record, opts, place_from_record, tiles_from_record, ok) ->
     _pitch, diameter = _pitch_and_diameter(plate_format)
     needed = diameter + 2 * (diameter / 10 if margin is None else margin)
     out = []
+    estimates = 0
     for (well, tp), plan in _plans(record, place_from_record, tiles_from_record):
         if plan.status != ok:
             continue
         short = [o for o in plan.overlap_um if o is not None and o < needed]
         if not short:
             continue
+        if estimates >= MAX_LISTED:
+            out.append(f"{well} at {tp}: the tiles overlap by {min(short):.0f} µm, less than the {needed:.0f} µm needed.")
+            continue
+        estimates += 1                      # the estimate costs ~20 ms; only the ones that will be listed are made
         seams, total = seam_site_estimate(plan, plate_format, margin)
         out.append(f"{well} at {tp}: the tiles overlap by {min(short):.0f} µm, less than the {needed:.0f} µm a "
                    f"{diameter:.0f} µm nanowell needs to lie inside one tile with its margin: an array filling the tiles "

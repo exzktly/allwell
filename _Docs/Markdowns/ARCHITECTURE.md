@@ -8794,16 +8794,20 @@ clipping thresholds; a blank number sends no flag and the pipeline's default app
 the pipeline's destinations (`nanowell_format` and so on), so a job's `opts`, the argv, and a sidecar's
 `execution_options` all name the same things and the edit-a-queued-job round trip and the sidecar restore
 need no translation; a sidecar that states `nanowell_format: null` switches the mode off, and one that
-predates the keys leaves it alone. Run validation adds `nanowell_option_errors` (bounds, a Phase channel)
-to the numeric checks, then, with an input folder, `nanowell_input_report`: **problems** stop the run (no
+predates the keys leaves it alone. Switching the mode on sets the segmentation selector to label-free and locks it (the
+choice returns when the mode goes off); a build with no label-free method disables the mode. Run validation adds
+`nanowell_option_errors` (bounds; a Phase channel only when channel auto-detection is off, since detection names it
+at run time) to the numeric checks, then, with an input folder, `nanowell_input_report`: **problems** stop the run (no
 well zips, no acquisition record, a tile the record names that an archive lacks, a grid that cannot be
 placed) and **warnings** are logged and the run goes on (an overlap shorter than a nanowell needs, with the
 expected seam-site count from `ownership_report` laid over an ideal lattice at several phases; an upper
 bound, since the array may be smaller than the tiles). **Test detection** opens a non-modal window that
-runs `pipeline.nanowell_preview.preview_timepoint` on a `QThread`: the same locate-and-measure the run does for
+runs `pipeline.nanowell_preview.preview_timepoint` on a parentless `QThread` held in a module-level set until it
+finishes (a window or tab closed mid-run cannot destroy a running thread; `aboutToQuit` waits for it): the same locate-and-measure the run does for
 one (well, timepoint), returning the montage, every site with its address, state and fused flag, the origin
 method, the measured overlap against the needed one, and a few rim-suppressed crops beside their
-segmentation. What is drawn is `site_marks` of the result, a pure function; addresses are written only
+segmentation. What is drawn is `site_marks` of the result, a pure function in continuous micrometre/pixel-size coordinates, coloured
+from `ui.theme.Colors`; the pixmap side is capped and "Fit" follows the window; addresses are written only
 where a nanowell is drawn at least 34 pixels across. The square's edge angle and the two thresholds are
 read by the analysis (`check_orientation`'s `square_to_axis_deg`, `site_state`'s cut-offs), not only
 validated and keyed.

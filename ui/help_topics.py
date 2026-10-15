@@ -108,6 +108,7 @@ ANALYZE_SECTION_HELP: dict[str, str] = {
     "Output Options": "8. Output options",
     "Compute Options": "9. Compute options",
     "Scratch Disk": "10. Scratch disk",
+    "Nanowells": "Nanowell arrays (Analyze ▸ Nanowells, or the command line)",
 }
 
 #: Datasets rail label (the ``_Feature.name`` values in ``datasets/tab.py``,

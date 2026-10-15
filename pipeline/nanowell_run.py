@@ -465,6 +465,23 @@ class WellOutcome:
     notes: list = field(default_factory=list)
 
 
+def record_digest(record: dict, well: str, timepoint: str) -> str:
+    """A short digest of everything the record says about this (well, timepoint): tile positions and calibration.
+
+    A reused timepoint is only still right if this has not changed (the images themselves are not hashed,
+    exactly as the per-field path does not hash them: replacing them is what ``--force`` is for).
+    """
+    import hashlib
+    import json
+
+    tiles = sorted((t["field"], t["mosaic_xy_px"], t["stage_xy_um"]) for t in record["tiles"]
+                   if t["well"] == well and t["timepoint"] == timepoint)
+    meta = record.get("timepoints", {}).get(timepoint, {})
+    payload = json.dumps([tiles, meta.get("tile_size_px"), meta.get("pixel_size_um"),
+                          meta.get("declared_overlap_percent")], sort_keys=True)
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
 def _images_for(record: dict, well: str, timepoint: str, load_phase) -> dict:
     """Phase image per tile of this (well, timepoint) in the record; a tile that cannot be read is left out."""
     images = {}
@@ -486,13 +503,15 @@ def _bounds(located: Located):
 
 def run_well(well: str, record: dict, timepoints, load_phase, settings: NanowellSettings, *,
              segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
-             expected_shape=None) -> WellOutcome:
+             expected_shape=None, fixed_radius_um: float | None = None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
     ``f(timepoint, tile_id) -> image | None``. *plate_rigid* maps a timepoint to an ``OriginPrediction``
     in that well's montage frame (from the end-of-run pass; absent on a first run). A timepoint whose
-    first stage refuses keeps its status and no rows; the others go on.
+    first stage refuses keeps its status and no rows; the others go on. *fixed_radius_um* is the array
+    radius an earlier run of this well already shared across its timepoints: an incremental run adds a
+    timepoint to the same roster instead of choosing a new one.
     """
     from pipeline.nanowell_sites import TimepointLattice, check_consistency, shared_array_radius
 
@@ -504,11 +523,19 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
                                    plate_rigid=(plate_rigid or {}).get(tp))
         outcome.located[tp] = located
         outcome.timepoints[tp] = dict(located.grid) or {"status": located.status, "reason": located.reason}
+        outcome.timepoints[tp]["record_digest"] = record_digest(record, well, tp)
         del images
     anchored = [tp for tp in timepoints if outcome.located[tp].status == OK]
     unaddressed = [tp for tp in timepoints if outcome.located[tp].status == UNADDRESSED]
     shared = shared_array_radius({tp: _bounds(outcome.located[tp]) for tp in anchored + unaddressed},
                                  settings.pitch_um)
+    if fixed_radius_um is not None:
+        own = {tp: outcome.located[tp].boundary["radius_um"] for tp in anchored + unaddressed
+               if outcome.located[tp].boundary is not None}
+        shared = replace(shared, radius_um=fixed_radius_um, status="shared",
+                         deviations_um={tp: r - fixed_radius_um for tp, r in own.items()},
+                         flags={tp: ("radius_disagrees" if abs(r - fixed_radius_um) > settings.pitch_um / 2 else None)
+                                for tp, r in own.items()})
     outcome.radius = {"radius_um": shared.radius_um, "status": shared.status,
                       "deviations_um": shared.deviations_um, "flags": shared.flags}
     if shared.radius_um is None:

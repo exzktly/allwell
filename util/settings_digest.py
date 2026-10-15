@@ -105,6 +105,14 @@ KEYED_ON: dict[str, str] = {
     "no_auto_threshold":           "turns off the on/off gate the CSV columns use",
     "pos_control_well":            "the positive control the gate is fitted to",
     "neg_control_well":            "the negative control the gate is fitted to",
+    # ── nanowell mode ───────────────────────────────────────────────────────
+    "nanowell_format":             "turns the mode on and fixes the lattice pitch and nanowell "
+                                   "diameter every site is found, addressed and measured with",
+    "nanowell_cell_diameter_um":   "the scale the label-free segmenter looks for cells at",
+    "nanowell_margin_um":          "how far inside a tile a nanowell must lie for that tile to "
+                                   "own it, hence which pixels its cells are counted from",
+    "nanowell_square_edge_deg":    "the orientation check that refuses a lattice fitted a sixth "
+                                   "of a turn off, so which timepoints are addressed at all",
     # ── how a filename is read ──────────────────────────────────────────────
     "filename_schema":             "decides which token is the well, fov, timepoint",
     "filename_sep":                "the same, and a wrong one groups nothing",

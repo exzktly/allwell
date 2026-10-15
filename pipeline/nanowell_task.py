@@ -125,13 +125,62 @@ def _json_default(value):
     raise TypeError(f"{type(value).__name__} is not JSON serialisable")
 
 
+def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, record):
+    """What an earlier run of this well left, if it is still valid for this one: ``(grid, site rows, cell rows)``.
+
+    Valid means: the settings that produced it are this run's (the same check the per-field path makes),
+    the scheme version is understood, and each timepoint kept is ``ok`` with the record digest unchanged
+    since. Anything else is recomputed, never reused. ``None`` when nothing can be reused.
+    """
+    from pipeline.settings_record import well_settings_allow_reuse
+
+    grid_path = Path(prior_dir) / NANOWELL_DIR / f"{well_label}_grid.json"
+    if not grid_path.is_file() or not well_settings_allow_reuse(prior_dir, well_label, settings_key):
+        return None
+    try:
+        grid = json.loads(grid_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if grid.get("scheme_version") != SCHEME_VERSION:
+        return None
+    kept = {tp for tp in timepoints
+            if grid.get("timepoints", {}).get(tp, {}).get("status") == nr.OK
+            and grid["timepoints"][tp].get("record_digest") == nr.record_digest(record, well_label, tp)}
+    if not kept:
+        return None
+    sites_path = Path(prior_dir) / NANOWELL_DIR / f"{well_label}.csv"
+    cells_path = Path(prior_dir) / f"{csv_prefix}_{well_label}.csv"
+    sites = [r for r in _read_rows(sites_path) if r["timepoint"] in kept]
+    cells = [r for r in _read_rows(cells_path) if r["timepoint"] in kept]
+    return {"grid": grid, "kept": kept, "sites": sites, "cells": cells}
+
+
+def _read_rows(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    with path.open(newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
+
+
+def _write_montages(outcome: nr.WellOutcome, well_label: str, staging: Path) -> None:
+    """One PNG per located timepoint (role ``montage``) so the well has an archive to look at."""
+    from skimage.io import imsave
+
+    staging.mkdir(parents=True, exist_ok=True)
+    for tp, located in outcome.located.items():
+        if located.montage is not None:
+            imsave(str(staging / f"{well_label}_{tp}_montage.png"), located.montage.image, check_contrast=False)
+
+
 def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
-                     csv_prefix, schema, sep, *, grouper, parse, extract, scratch_dir, write_csv, segmenter=None):
+                     csv_prefix, schema, sep, *, grouper, parse, extract, scratch_dir, write_csv, segmenter=None,
+                     incremental=False, prior_dir=None, settings_key="", staging_dir=None):
     """Run one zipped well in nanowell mode; returns ``(records, failed_timepoints)`` like its counterpart.
 
     *grouper*, *parse*, *extract*, *write_csv* are ``process_microscopy``'s ``find_image_groups_in_zip``,
     ``parse_filename``, ``extract_zip`` and ``_write_single_csv``; *scratch_dir* is where this well's
-    members are extracted (the caller removes it).
+    members are extracted (the caller removes it). With *incremental*, timepoints an earlier run finished
+    under the same settings and record are kept and only the rest are computed, onto the same roster.
     """
     from util.acquisition_record import read_record_file
 
@@ -144,9 +193,17 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     groups, needed = grouper(zip_path, nuclear_token, fluor_tokens, scratch_dir, schema=schema, sep=sep)
     if not groups:
         raise NanowellInputError(f"No image groups found in {Path(zip_path).name}")
-    extract(zip_path, scratch_dir, members_to_extract=needed)
     index = _tile_index(groups, parse, schema, sep)
     timepoints = timepoint_order(record, well_label)
+    output_dir = Path(output_dir)
+    prior = (_prior_state(prior_dir or output_dir, well_label, csv_prefix, settings_key, timepoints, record)
+             if incremental else None)
+    todo = [tp for tp in timepoints if prior is None or tp not in prior["kept"]]
+    if not todo:
+        log.info("Well %s — up to date (no new timepoints).", well_label)
+        return [], []
+    wanted = {Path(p).name for (tp, _), (nuclear, fluors) in index.items() if tp in todo for p in [nuclear, *fluors]}
+    extract(zip_path, scratch_dir, members_to_extract=wanted & set(needed))
 
     def load_phase(tp, tile) -> np.ndarray | None:
         found = index.get((tp, tile))
@@ -164,18 +221,25 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         return load
 
     channels = {t: channel_loader(t) for t in fluor_tokens}
-    outcome = nr.run_well(well_label, record, timepoints, load_phase, settings, segmenter=segmenter,
-                          channels=channels)
-    px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in timepoints
+    fixed = None if prior is None else prior["grid"].get("array_radius", {}).get("radius_um")
+    outcome = nr.run_well(well_label, record, todo, load_phase, settings, segmenter=segmenter, channels=channels,
+                          fixed_radius_um=fixed)
+    px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)
-    output_dir = Path(output_dir)
-    safe = well_label
-    if records:
-        write_csv(records, output_dir / f"{csv_prefix}_{safe}.csv")
-    write_sites_csv(output_dir / NANOWELL_DIR / f"{safe}.csv", outcome.sites, fluor_tokens)
-    write_grid_json(output_dir / NANOWELL_DIR / f"{safe}_grid.json", well_label, outcome, settings)
-    failed = [tp for tp in timepoints if outcome.timepoints.get(tp, {}).get("status") != nr.OK]
+    if prior is not None:
+        outcome.timepoints = {**{tp: prior["grid"]["timepoints"][tp] for tp in prior["kept"]}, **outcome.timepoints}
+        outcome.radius = prior["grid"].get("array_radius", outcome.radius) if fixed is not None else outcome.radius
+    rank = {tp: k for k, tp in enumerate(timepoints)}
+    all_sites = sorted((prior["sites"] if prior else []) + outcome.sites, key=lambda r: rank[r["timepoint"]])
+    all_cells = sorted((prior["cells"] if prior else []) + records, key=lambda r: rank[r["timepoint"]])
+    if all_cells:
+        write_csv(all_cells, output_dir / f"{csv_prefix}_{well_label}.csv")
+    write_sites_csv(output_dir / NANOWELL_DIR / f"{well_label}.csv", all_sites, fluor_tokens)
+    write_grid_json(output_dir / NANOWELL_DIR / f"{well_label}_grid.json", well_label, outcome, settings)
+    if staging_dir is not None:
+        _write_montages(outcome, well_label, staging_dir)
+    failed = [tp for tp in todo if outcome.timepoints.get(tp, {}).get("status") != nr.OK]
     for tp in failed:
         block = outcome.timepoints.get(tp, {})
         log.warning("Well %s timepoint %s: %s (%s)", well_label, tp, block.get("status"), block.get("reason", ""))
@@ -183,36 +247,54 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
 
 
 def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
-                 csv_prefix, schema, sep, settings_key, *, grouper, parse, segmenter=None):
+                 csv_prefix, schema, sep, settings_key, *, grouper, parse, segmenter=None, incremental=False,
+                 incremental_prior_dir=None):
     """The whole lifecycle of one zipped well in nanowell mode (what ``process_well_zip_task`` does otherwise).
 
-    Extract to scratch, run, write the three tables, record completeness (in timepoints, the unit of
-    work here) and the settings that produced it, remove the scratch. A failure writes the usual
-    worker trace and re-raises, so the well is reported failed exactly as in the per-field path.
+    Extract to scratch, run, write the three tables and the montage archive, record completeness (in
+    timepoints, the unit of work here) and the settings that produced it, remove the scratch. A failure
+    writes the usual worker trace and re-raises, so the well is reported failed exactly as in the
+    per-field path.
     """
-    from pipeline.io import _write_single_csv, extract_zip, remove_directory, scratch_base_for
+    from pipeline.io import (
+        _write_single_csv, compress_images_to_zip, extract_zip, merge_images_into_zip, remove_directory,
+        scratch_base_for,
+    )
     from pipeline.run_report import write_well_report
     from pipeline.settings_record import record_well_settings
 
     output_dir = Path(output_dir)
     scratch = scratch_base_for(output_dir) / f"_tmp_extract_{well_label}"
-    if scratch.exists():
-        remove_directory(scratch)
+    staging = scratch_base_for(output_dir) / f"_tmp_montage_{well_label}"
+    for stale in (scratch, staging):
+        if stale.exists():
+            remove_directory(stale)
     scratch.mkdir(parents=True, exist_ok=True)
     try:
         records, failed = process_well_zip(
             well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
             schema, sep, grouper=grouper, parse=parse, extract=extract_zip, scratch_dir=scratch,
-            write_csv=_write_single_csv, segmenter=segmenter)
+            write_csv=_write_single_csv, segmenter=segmenter, incremental=incremental,
+            prior_dir=incremental_prior_dir, settings_key=settings_key, staging_dir=staging)
+        if not (output_dir / NANOWELL_DIR / f"{well_label}_grid.json").is_file():
+            return records, failed
         grid = json.loads((output_dir / NANOWELL_DIR / f"{well_label}_grid.json").read_text(encoding="utf-8"))
+        out_zip = output_dir / f"{well_label}_out.zip"
+        if staging.is_dir():
+            if out_zip.exists():
+                merge_images_into_zip(out_zip, staging)
+            else:
+                compress_images_to_zip(staging, out_zip)
         total = len(grid["timepoints"])
-        write_well_report(output_dir, well_label, groups_total=total, groups_covered=total - len(failed),
+        write_well_report(output_dir, well_label, groups_total=total,
+                          groups_covered=sum(1 for b in grid["timepoints"].values() if b.get("status") == nr.OK),
                           failed=failed)
         record_well_settings(output_dir, well_label, settings_key)
         log.info("Well %s — done (%d timepoint(s), %d not ok).", well_label, total, len(failed))
         return records, failed
     finally:
         remove_directory(scratch)
+        remove_directory(staging)
 
 
 def record_nanowell_info(info_path, options: dict, input_dir) -> None:

@@ -131,3 +131,83 @@ def test_nanowell_mode_needs_a_phase_channel(tmp_path, monkeypatch, rendered_wel
     with pytest.raises(SystemExit):
         pm.main()
     assert "--phase_token" in capsys.readouterr().err
+
+
+# ── incremental ──────────────────────────────────────────────────────────────
+def _two_timepoint_plate(tmp_path, *, with_second=True):
+    first, record = build_well(timepoint="0h")
+    items = [("0h", first)]
+    if with_second:
+        second, second_record = build_well(rotation=9.0, array_shift_um=(120.0, -80.0), seed=2, timepoint="24h")
+        record["timepoints"].update(second_record["timepoints"])
+        record["tiles"] += second_record["tiles"]
+        items.append(("24h", second))
+    plate = tmp_path / "plate"
+    (plate / "in").mkdir(parents=True)
+    tif = tmp_path / "frame.tif"
+    with zipfile.ZipFile(plate / "in" / f"{WELL}.zip", "w") as zf:
+        for token, rendered in items:
+            for fov, image in rendered.images.items():
+                for channel, frame in (("PHASE", image), ("GFP", image * 0 + 10.0)):
+                    imwrite(str(tif), frame.astype("float32"))
+                    zf.write(tif, f"exp_{channel}_{WELL}_{fov}_{token}.tif")
+    write_record_file(plate / "in" / "acquisition.json", record)
+    return plate, record, dict(items)
+
+
+@pytest.fixture
+def located_calls(monkeypatch):
+    """Which timepoints each stage was asked for, recorded without changing what runs."""
+    from pipeline import nanowell_run as nr
+
+    calls = {"locate": [], "measure": []}
+    real_locate, real_measure = nr.locate_timepoint, nr.measure_timepoint
+    monkeypatch.setattr(nr, "locate_timepoint", lambda tp, *a, **k: (calls["locate"].append(tp), real_locate(tp, *a, **k))[1])
+    monkeypatch.setattr(nr, "measure_timepoint", lambda located, *a, **k: (calls["measure"].append(located.timepoint), real_measure(located, *a, **k))[1])
+    return calls
+
+
+def _rows(out, name):
+    return list(csv.DictReader((out / "nanowells" / name).open()))
+
+
+def test_an_incremental_run_adds_only_the_new_timepoint_onto_the_same_roster(tmp_path, monkeypatch, located_calls):
+    plate, record, rendered = _two_timepoint_plate(tmp_path, with_second=False)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--fluor_tokens", "GFP")
+    first_rows = _rows(out, f"{WELL}.csv")
+    assert located_calls["measure"] == ["0h"]
+
+    # The plate is imaged again: a second timepoint joins the zip and the record.
+    plate2, record2, _ = _two_timepoint_plate(tmp_path / "second")
+    (plate / "in" / f"{WELL}.zip").write_bytes((plate2 / "in" / f"{WELL}.zip").read_bytes())
+    write_record_file(plate / "in" / "acquisition.json", record2)
+    located_calls["locate"].clear(), located_calls["measure"].clear()
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    assert located_calls["locate"] == ["24h"] and located_calls["measure"] == ["24h"]      # 0h was not touched
+    rows = _rows(out, f"{WELL}.csv")
+    assert [r for r in rows if r["timepoint"] == "0h"] == first_rows                    # kept verbatim
+    by_tp = {tp: {(r["nw_q"], r["nw_r"]) for r in rows if r["timepoint"] == tp} for tp in ("0h", "24h")}
+    assert by_tp["0h"] == by_tp["24h"] and len(by_tp["0h"]) > 600                         # one roster
+    grid = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())
+    assert set(grid["timepoints"]) == {"0h", "24h"} and grid["timepoints"]["0h"]["status"] == "ok"
+
+    located_calls["locate"].clear(), located_calls["measure"].clear()
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    assert located_calls["locate"] == [] and located_calls["measure"] == []                 # up to date
+
+
+def test_a_changed_setting_or_a_changed_record_recomputes_the_timepoint(tmp_path, monkeypatch, located_calls):
+    plate, record, _ = _two_timepoint_plate(tmp_path)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--fluor_tokens", "GFP")
+    assert sorted(located_calls["measure"]) == ["0h", "24h"]
+    located_calls["locate"].clear(), located_calls["measure"].clear()
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental", "--nanowell_margin_um", "5")
+    assert sorted(located_calls["measure"]) == ["0h", "24h"]                    # the setting is in the reuse key
+    located_calls["locate"].clear(), located_calls["measure"].clear()
+    for tile in record["tiles"]:                                                # a tile's recorded position moves
+        if tile["timepoint"] == "0h" and tile["field"] == "F1":
+            tile["mosaic_xy_px"] = [tile["mosaic_xy_px"][0] + 0.5, tile["mosaic_xy_px"][1]]
+    write_record_file(plate / "in" / "acquisition.json", record)
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental", "--nanowell_margin_um", "5")
+    assert located_calls["measure"] == ["0h"]                                    # only the timepoint whose record changed
+    assert (out / f"{WELL}_out.zip").stat().st_size > 0

@@ -2329,7 +2329,8 @@ def process_well_zip_task(
         from pipeline.nanowell_task import run_zip_task
         return run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token,
                             fluor_tokens, csv_prefix, schema, sep, settings_key,
-                            grouper=find_image_groups_in_zip, parse=parse_filename)
+                            grouper=find_image_groups_in_zip, parse=parse_filename, incremental=incremental,
+                            incremental_prior_dir=incremental_prior_dir)
     tmp_extract = scratch_base_for(output_dir) / f"_tmp_extract_{well_label}"
     tmp_images  = _staging_dir_for(output_dir, well_label, settings_key)
     if force:

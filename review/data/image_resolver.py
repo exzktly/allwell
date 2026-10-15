@@ -61,6 +61,7 @@ OUTPUT_SUFFIXES: dict[str, tuple[str, ...]] = {
     "fluor_raw": _suffixes_for_role(Role.FLUOR_RAW),
     "smfish": _suffixes_for_role(Role.SMFISH),
     "phase": _suffixes_for_role(Role.PHASE),
+    "montage": _suffixes_for_role(Role.MONTAGE),
 }
 
 
@@ -141,6 +142,7 @@ _ROLE_TO_KIND: dict[Role, str] = {
     Role.OVERLAY: "overlay",
     Role.SMFISH: "smfish",
     Role.PHASE: "phase",
+    Role.MONTAGE: "montage",
     Role.FLUOR_TOPHAT: "tophat",
     Role.FLUOR_RAW: "fluor_raw",
 }

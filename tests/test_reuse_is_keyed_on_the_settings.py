@@ -98,6 +98,10 @@ OTHER = {
     "neg_control_well": "H12",
     "filename_schema": "experiment:well:fov:timepoint:channel",
     "filename_sep": "-",
+    "nanowell_format": "50um",
+    "nanowell_cell_diameter_um": 20.0,
+    "nanowell_margin_um": 5.0,
+    "nanowell_square_edge_deg": 3.0,
 }
 
 

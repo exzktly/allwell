@@ -30,6 +30,7 @@ from skimage.filters import threshold_otsu
 
 from pipeline.threshold_optimize import round_stored_threshold
 from util.image_exts import is_group_image
+from util.well_token import canonical_well_label
 from util.timepoint import parse_hours as _parse_hours, sort_key as tp_sort_key
 
 
@@ -294,6 +295,11 @@ def _sample_one_well(zf, labels, tophats, *, channels, picked_tps, per_channel,
             try:
                 labels_arr = imread(io.BytesIO(zf.read(label_name)))
                 fluor_arr = imread(io.BytesIO(fluor_zf.read(fluor_name)))
+                # An input frame may be a multi-page stack; the pipeline measures
+                # its first plane (pipeline.io.load_2d_gray_with_ceiling), so the
+                # sample must be that plane, not the (Z, H) slice below would cut.
+                while fluor_zf is not zf and fluor_arr.ndim > 2:
+                    fluor_arr = fluor_arr[0]
             except Exception as exc:
                 decode_failed[ch] += 1
                 log.debug("Auto-threshold: skipping %s / %s: %s",
@@ -358,6 +364,25 @@ def _otsu_per_channel(channels, per_channel, attempted, decode_failed, log
     return thresholds
 
 
+def _input_archive_for(input_dir: Path, well: str) -> Path | None:
+    """The input archive for *well*, however the user's filename spells it.
+
+    ``find_well_zips`` accepts ``A1.zip`` / ``a1.zip`` and canonicalises the
+    label, so the output is ``A01_out.zip`` beside an input that is not
+    ``A01.zip``; both sides go through :func:`util.well_token.canonical_well_label`.
+    """
+    exact = input_dir / f"{well}.zip"
+    if exact.is_file():
+        return exact
+    want = canonical_well_label(well)
+    if not want or not input_dir.is_dir():
+        return None
+    for p in sorted(input_dir.glob("*.zip")):
+        if not p.name.startswith(".") and canonical_well_label(p.stem) == want:
+            return p
+    return None
+
+
 @contextlib.contextmanager
 def _open_input_archive(input_dir, out_zip: Path, referenced: set[str], log):
     """Yield the ``<WELL>.zip`` input archive beside *out_zip*'s well, or ``None``.
@@ -371,11 +396,12 @@ def _open_input_archive(input_dir, out_zip: Path, referenced: set[str], log):
         yield None
         return
     well = out_zip.name[: -len("_out.zip")] if out_zip.name.endswith("_out.zip") else out_zip.stem
-    in_zip = Path(input_dir) / f"{well}.zip"
-    if not in_zip.is_file():
-        log.info("Auto-threshold: %s — no input archive %s, so %s (read from the "
-                 "input, not archived) contributes no samples from this well.",
-                 out_zip.name, in_zip.name, ", ".join(sorted(c.upper() for c in referenced)))
+    in_zip = _input_archive_for(Path(input_dir), well)
+    if in_zip is None:
+        log.info("Auto-threshold: %s — no input archive for well %s in %s, so %s "
+                 "contributes no samples from this well unless it was archived.",
+                 out_zip.name, well, input_dir,
+                 ", ".join(sorted(c.upper() for c in referenced)))
         yield None
         return
     try:
@@ -431,12 +457,13 @@ def estimate_thresholds_from_outputs(
     run's own *filename_schema* — see :meth:`_SchemaReader.group_key` for what
     happens when that schema does not name every slot.
 
-    *referenced_channels* are channels whose corrected frame the run chose not
-    to archive because it is identical to the input frame (the phase channel
-    under ``--phase_output reference``). Their frames are read from
-    ``<input_dir>/<WELL>.zip`` instead, so referencing the phase image does not
-    cost that channel its threshold. A well whose input archive is not there
-    says so and contributes no samples for those channels.
+    *referenced_channels* are channels whose corrected frame is identical to
+    the input frame (the phase channel), so that wherever no ``_tophat`` was
+    archived for one — ``--phase_output reference``, the default — its frame is
+    read from the well's input archive in *input_dir* instead, and referencing
+    the phase image does not cost that channel its threshold. An archived
+    ``_tophat`` still wins. A well whose input archive is not there says so and
+    contributes no input samples for those channels.
     """
     channels = [str(c).strip().lower() for c in fluor_channels if str(c).strip()]
     if not channels:

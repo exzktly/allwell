@@ -25,7 +25,6 @@ import logging
 from pathlib import Path
 
 from pipeline.auto_threshold import estimate_thresholds_from_outputs, no_threshold_reason
-from pipeline.output_policy import DEFAULT_PHASE_OUTPUT, PHASE_OUTPUT_REFERENCE
 from pipeline.threshold_optimize import estimate_thresholds_from_controls
 from util.json_write import write_json_atomic
 
@@ -89,17 +88,19 @@ def _segmentation_tokens(args) -> set[str]:
 
 
 def _referenced_channels(args) -> list[str]:
-    """Channels whose frames this run left in the input archive, lower-cased.
+    """Channels the Otsu estimate may read from the input archive, lower-cased.
 
-    The phase channel under ``--phase_output reference``
-    (``pipeline.output_images``): its ``_tophat`` was not archived, so the Otsu
-    estimate must read it from ``<input_dir>/<WELL>.zip``. An *args* that does
-    not state ``phase_output`` — a namespace rebuilt from an older argv — is
-    read at the pipeline's default, because that is what the run applied.
+    The phase channel: under ``--phase_output reference`` (the default;
+    ``pipeline.output_images``) its ``_tophat`` is not archived, so the estimate
+    reads it from ``<input_dir>/<WELL>.zip``. Deliberately not conditional on
+    this run's ``--phase_output``: a well the run found up to date keeps the
+    archive an earlier run wrote, so a copy-mode run can sit over wells that
+    hold no phase ``_tophat`` at all. The phase frame is never corrected, so the
+    input frame is the right sample wherever no ``_tophat`` was archived, and an
+    archived one still wins (:func:`pipeline.auto_threshold._sample_one_well`).
     """
     phase = str(getattr(args, "phase_token", "") or "").strip().lower()
-    mode = getattr(args, "phase_output", None) or DEFAULT_PHASE_OUTPUT
-    return [phase] if phase and mode == PHASE_OUTPUT_REFERENCE else []
+    return [phase] if phase else []
 
 
 def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list[str],

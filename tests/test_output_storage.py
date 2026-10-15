@@ -443,9 +443,12 @@ def test_the_remote_threshold_rerun_reads_the_input_dir_and_the_phase_choice():
         _argv({}) + ["--phase_token", "BF"])
     assert at_default.input_dir == "in"
     assert _referenced_channels(at_default) == ["bf"]
+    # Not conditional on this run's choice: a copy-mode run over up-to-date
+    # wells leaves archives with no phase tophat, so the input is still read
+    # wherever none was archived (an archived one wins).
     copied = _auto_threshold_args_from_argv(
         _argv({"phase_output": "copy"}) + ["--phase_token", "BF"])
-    assert _referenced_channels(copied) == []
+    assert _referenced_channels(copied) == ["bf"]
 
 
 def test_no_phase_token_references_nothing():
@@ -487,6 +490,8 @@ def _run_main(monkeypatch, plate, *extra):
     import process_microscopy as pm
     import pipeline.suspend as _suspend
     from pipeline import well_skip
+    from pipeline.settings_record import well_settings_allow_reuse
+    from pipeline.well_skip import output_exists_for_well
 
     lab = np.zeros((48, 48), np.int32)
     yy, xx = np.mgrid[0:48, 0:48]
@@ -497,6 +502,12 @@ def _run_main(monkeypatch, plate, *extra):
                 fluor_tokens, csv_prefix, schema, sep, incremental,
                 incremental_prior_dir, settings_key, force, force_wells=None, **_):
         for label, zip_path in well_zips:
+            # The pool's own "already done" predicate (process_well_zips), so a
+            # re-run reuses a well exactly when the real run would.
+            if not force and not incremental and (
+                    output_exists_for_well(output_dir, label, csv_prefix)
+                    and well_settings_allow_reuse(output_dir, label, settings_key)):
+                continue
             pm.process_well_zip_task(
                 label, zip_path, output_dir, shared_kwargs_template, nuclear_token,
                 fluor_tokens, csv_prefix, schema, sep,
@@ -561,3 +572,24 @@ def test_the_csv_is_identical_either_way(monkeypatch, tmp_path):
         raw = path.read_bytes()
         return gzip.decompress(raw) if path.suffix == ".gz" else raw
     assert _csv(a) and _csv(a) == _csv(b)
+
+
+def test_a_rerun_that_reuses_every_well_keeps_the_phase_readable(monkeypatch, tmp_path):
+    """The reviewer's reproduction: run 1 at the defaults, run 2 unticks both
+    boxes without Force. Every well is up to date, so the archive keeps run 1's
+    storage while the sidecar records run 2's request — and no reader may
+    trust that record over the archive."""
+    from review.data.auto_threshold import compute_auto_thresholds
+
+    plate = _plate(tmp_path)
+    first = _run_main(monkeypatch, plate)
+    before = _archive(plate)
+    second = _run_main(monkeypatch, plate, "--phase_output", "copy", "--tophat_dtype", "float32")
+    assert _archive(plate) == before, "the fixture no longer reuses the well"
+    assert (second["phase_output"], second["tophat_dtype"]) == ("copy", "float32")
+    assert "bf" in second["cell_gating"]["thresh_frac_on"]
+    assert second["cell_gating"]["thresh_frac_on"]["bf"] == \
+        first["cell_gating"]["thresh_frac_on"]["bf"]
+    review = compute_auto_thresholds(plate / "out", fluor_channels=["gfp", "bf"],
+                                     rng_seed=0, in_dir=plate / "in")
+    assert "bf" in review

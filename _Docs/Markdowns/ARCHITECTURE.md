@@ -8386,19 +8386,23 @@ three steps around it.
 
 A channel the run referenced rather than archived — the phase channel under
 `--phase_output reference` — has no `_tophat` member to pair, so
-`run_auto_threshold_pass` names it (`_referenced_channels`, reading an args
-object that does not state `phase_output` at the pipeline's default, which is
-what ran) and `estimate_thresholds_from_outputs` opens `<input_dir>/<WELL>.zip`
+`run_auto_threshold_pass` names it (`_referenced_channels` — the phase token,
+whatever this run's `--phase_output`, since a copy-mode run over up-to-date wells
+leaves archives with no phase `_tophat`) and `estimate_thresholds_from_outputs` opens `<input_dir>/<WELL>.zip`
 beside each output archive (`_open_input_archive`) and indexes its raw frames
 for those channels only (`_index_input_frames`, which judges members by
-basename because an input archive may nest them, and skips `__MACOSX/` and
-dotfiles). An archived `_tophat` still wins, so a well a copy-mode run wrote is
+basename because an input archive may nest them, skips `__MACOSX/`, dotfiles
+and role-suffixed members, and leaves a multi-page frame to be sampled at its
+first plane, as the pipeline measures it). The input archive is found by
+canonical well label (`_input_archive_for`), because the pipeline accepts
+`A1.zip` and writes `A01_out.zip`. An archived `_tophat` still wins, so a well a copy-mode run wrote is
 read from its own archive; a well with no input archive says so and contributes
 no samples for that channel. The batched-remote re-run carries `--input_dir`
 (the local folder) and `--phase_output` into its rebuilt args for the same
 reason. Review's Cell Gating button applies the same rule in
-`review/data/auto_threshold` (`_with_raw_frames`, over both of its walks), so
-the two estimates agree.
+`review/data/auto_threshold` (`_with_raw_frames`, over both of its walks, with
+the input archive found through `image_discovery.find_plain_well_zips_in_dir`),
+so the two estimates agree.
 
 A schema need not name every slot, and an unnamed slot is not a parse failure.
 `well:channel:timepoint` (files like `A01_w2Turq_T04.tif`) has no fov token to
@@ -8690,10 +8694,12 @@ of `fluor_tokens`, and that membership is what gives Analyze a channel row on
 which to carry the Phase checkbox.
 
 **How the archived images are stored.** Two run options decide how much of
-`<well>_out.zip` there is, and neither changes a measured number: quantification
+`<well>_out.zip` there is, and neither changes a CSV value: quantification
 reads the in-memory float arrays, never the files, so the per-well CSV is
 byte-identical under every combination
-(`tests/test_output_storage.py::test_the_csv_is_identical_either_way`). Both are
+(`tests/test_output_storage.py::test_the_csv_is_identical_either_way`). The
+end-of-run auto-threshold defaults are the one number sampled *from* the files,
+so under source bit depth they can move by a fraction of a count. Both are
 applied by `pipeline/output_images.write_processed_images`, the per-FOV writer
 `process_image_group` calls; their names and defaults live in the import-free
 `pipeline/output_policy.py` so `pipeline.cli_args` and the Analyze form can name
@@ -8705,28 +8711,42 @@ them without importing the imaging stack.
   nuclear slot for label-free (where `main()` has remapped the nuclear token
   onto the phase token) and in the fluor slot otherwise, matched with the same
   case-insensitive comparison the passthrough uses (`is_phase_token`). Every
-  reader then finds the frame in `in/<well>.zip`: Review's frame loader through
+  reader then finds the frame in `in/<well>.zip`, and every one of them keys on
+  the dataset's `phase_token` (`frame_load.phase_channel`), **never** on the
+  recorded `phase_output`: that records what the *last* run asked for, and a
+  re-run that found its wells up to date, a run over `--only_wells`, and a
+  Merge Plates or Concatenate result (which carry dataset 1's sidecar) all
+  leave archives it does not describe. Because the phase frame is never
+  corrected, reading it from the input wherever no `_tophat` was archived is
+  right for every dataset, and an archived one still wins. The readers are
+  Review's frame loader, through
   its existing per-cell `tophat` → `fluor_raw` fallback
   (`review/data/frame_load.load_frame_array`), which does **not** record a
   phase cell in `raw_fallbacks` — the raw frame *is* the corrected one, so
   badging it uncorrected would be false on every cell — and the two Otsu
   estimators as described in §6.2 *The Otsu mode reads its samples out of the
   output archives*. The Image Table names the one case this cannot serve: a
-  phase cell with no frame on a referenced dataset reads
-  `(phase input not found — needs in/)` (`frame_load.missing_frame_note`),
-  because the frame was never meant to be in `out/` and "(no image)" would send
-  the user looking there. The Datasets tools (Subset, Concatenate, Merge
+  phase cell with no frame reads `(phase input not found — needs in/)`
+  (`frame_load.missing_frame_note`), on the live grid and in an exported
+  figure, because the frame was never meant to be in `out/` and "(no image)"
+  would send the user looking there. A *composite* cell (an overlay blend, a
+  Cell Browser multi-channel crop) still drops a member it cannot load without
+  marking it, as it always has for any channel. The Datasets tools (Subset, Concatenate, Merge
   Plates) already carry `in/` with `out/`, so a referenced dataset survives
   them.
 * `--tophat_dtype source` (default) / `float32`. A corrected frame is computed in
-  float32, and a float32 file of camera counts is twice the bytes and compresses
-  far worse, the fractional digits background subtraction leaves being close to
-  incompressible. `storage_array` rounds a `_tophat` back to its input's integer
+  float32, and a float32 file of camera counts is twice the bytes before
+  compression; after it the saving depends on whether the correction left
+  fractional values — a flat-field division does on nearly every pixel, a
+  background subtraction alone on integer input often does not (measured on a
+  synthetic 12-bit frame: about 60% of the zipped `_tophat` saved with a
+  Gaussian flat-field, about 18% with `sliding_disk` alone). `storage_array` rounds a `_tophat` back to its input's integer
   type when, and only when, the input was `uint8` or `uint16` (the ceiling
   `load_2d_gray_with_ceiling` reports, now read for every channel by
   `_load_image_group`, not only the nuclear one) and every value is finite,
   non-negative and fits once rounded. Anything else stays float32 for that
-  frame and the run log says why: a float input may be a 0–1 normalised channel
+  frame, and the run log says why at INFO for a frame that overflowed (DEBUG for
+  a float or signed input, which is so on every frame): a float input may be a 0–1 normalised channel
   that rounding would erase, and a flat-field division can lift a corrected
   pixel above the camera's ceiling, where clipping would invent a saturation
   the data does not contain. `_smfish` and `_cytoplasm_tophat` are always
@@ -8740,11 +8760,15 @@ Both values are recorded in `pipeline_info.json` as `phase_output` /
 `float32`, which is what that run did (`LEGACY_*` in `output_policy`). Neither is
 in the reuse key (`util/settings_digest.NOT_KEYED_ON` says why: the CSVs do not
 change, and keying on options the parser always sets would invalidate every
-recorded digest at once). `build_pipeline_args` emits each flag only when the
-form turns its default off, so a run at the defaults sends the argv it always
-did and the remote run id does not move. An incremental run into an archive an
-earlier run wrote keeps that run's members, so a plate's older wells shrink only
-on a forced re-run.
+recorded digest at once), and the remote run id leaves both flags out
+(`services/remote_run_id._DIGEST_SKIP_VALUE`) so the same change is treated
+alike on both sides. `build_pipeline_args` emits each flag only when the form
+turns its default off, so a run at the defaults sends the argv it always did.
+The consequence of not keying them is that a changed storage option applies
+only to wells a run actually processes: an up-to-date well keeps the archive an
+earlier run wrote, and an incremental run keeps that run's members, so a plate's
+existing wells change storage only on a forced re-run — which is why the
+readers above never trust the sidecar's record of it.
 
 **Phase and segmentation are mutually exclusive outside label-free.** Because
 the Phase channel skips correction entirely, naming it as the segmentation (or

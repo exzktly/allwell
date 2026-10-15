@@ -53,7 +53,7 @@ from pipeline.auto_threshold import (
 )
 from pipeline.threshold_optimize import round_stored_threshold
 from core.safe import swallowed
-from review.data.frame_load import referenced_phase_channel
+from review.data.frame_load import phase_channel
 
 
 logger = logging.getLogger("review.data.auto_threshold")
@@ -109,8 +109,7 @@ def _iter_well_zips(out_dir: Path) -> list[Path]:
 def _with_raw_frames(tophat: dict | None, raw: dict | None) -> dict:
     """*tophat*, completed from *raw* for every ``(fov, tp)`` it lacks.
 
-    Only ever applied to the referenced phase channel, where the two are the
-    same pixels. An archived ``_tophat`` still wins, so a well an earlier
+    Only ever applied to the phase channel, where the two are the same pixels. An archived ``_tophat`` still wins, so a well an earlier
     copy-mode run wrote is read from its own archive."""
     return {**(raw or {}), **(tophat or {})}
 
@@ -132,22 +131,31 @@ def _scan_well_images(
 
 
 def _input_zip_for(zip_path: Path, in_dir: Path | None) -> Path | None:
-    """The ``<WELL>.zip`` input archive beside *zip_path*'s ``<WELL>_out.zip``."""
-    if in_dir is None or not zip_path.name.endswith("_out.zip"):
+    """The input archive of *zip_path*'s well, however its name spells the well.
+
+    The pipeline accepts ``A1.zip`` / ``a1.zip`` and canonicalises the label,
+    so the output is ``A01_out.zip`` beside an input that is not ``A01.zip``.
+    Matched through the same well-token rule the frame loader uses
+    (``image_discovery.find_plain_well_zips_in_dir``)."""
+    if in_dir is None or not Path(in_dir).is_dir() or not zip_path.name.endswith("_out.zip"):
         return None
-    candidate = Path(in_dir) / f"{zip_path.name[: -len('_out.zip')]}.zip"
-    return candidate if candidate.is_file() else None
+    from review.data.data_loading import extract_well_token
+    from review.data.image_discovery import find_plain_well_zips_in_dir
+    token = extract_well_token(zip_path.name[: -len("_out.zip")])
+    found = find_plain_well_zips_in_dir(Path(in_dir), token) if token else []
+    return found[0] if found else None
 
 
 def _gather_via_zip(zip_path: Path, channels: list[str], pipeline_info,
                     in_dir: Path | None = None):
     """Return ``{channel: (mask_refs, fluor_refs)}`` for one well zip.
 
-    The referenced phase channel (:func:`referenced_phase_channel`) is
-    completed from the well's input archive in *in_dir*, when there is one.
+    The phase channel (``frame_load.phase_channel``) is completed from the
+    well's input archive in *in_dir*, when there is one: a run under
+    ``--phase_output reference`` archives no ``_tophat`` for it.
     """
     from review.data.image_discovery import scan_zip_members
-    phase = referenced_phase_channel(pipeline_info)
+    phase = phase_channel(pipeline_info)
     out: dict[str, tuple[dict, dict]] = {}
     for ch in channels:
         try:
@@ -173,7 +181,7 @@ def _gather_via_find(target, channels: list[str], pipeline_info):
     """
     well_label, data_dir, in_dir_path = target
     from review.data.image_discovery import find_well_images_and_masks
-    phase = referenced_phase_channel(pipeline_info)
+    phase = phase_channel(pipeline_info)
     out: dict[str, tuple[dict, dict]] = {}
     for ch in channels:
         try:
@@ -444,6 +452,7 @@ def apply_auto_thresholds_to_pipeline_info(
     fluor_channels: Iterable[str],
     progress: Callable[[str], None] | None = None,
     overwrite_existing: bool = False,
+    in_dir: Path | None = None,
 ) -> dict[str, float]:
     """Compute the auto-thresholds for *out_dir* and merge them into the
     ``pipeline_info.json`` cell-gating block.
@@ -466,6 +475,7 @@ def apply_auto_thresholds_to_pipeline_info(
         out_dir,
         fluor_channels=fluor_channels,
         progress=progress,
+        in_dir=in_dir,
     )
     if not computed:
         return {}

@@ -15,20 +15,30 @@ already holds the frame, and Review's frame resolver falls back from a missing
 ``_tophat`` to the raw member of that archive (``tophat`` precedes
 ``fluor_raw`` in ``review.data.image_resolver.CHANNEL_FRAME_PRECEDENCE``).
 ``copy`` writes it as before. The choice is recorded in ``pipeline_info.json``
-as ``phase_output`` so a reader can tell "absent on purpose" from "missing".
+as ``phase_output``, but no reader decides anything from that record: a run that
+found its wells up to date, a run over ``--only_wells`` and a merged dataset all
+leave archives the record does not describe, so readers complete the phase
+channel from ``in/`` wherever no ``_tophat`` was archived, whatever it says.
 
 **Tophat storage** (``--tophat_dtype``). The corrected frames are computed in
 float32, but a camera writes integers, and a float32 file holding counts is
-twice the bytes and compresses far worse: the fractional digits background
-subtraction leaves behind are close to incompressible. ``source`` (the
+twice the bytes before compression. After it the saving depends on whether the
+correction left fractional values: a flat-field division does on nearly every
+pixel, and those digits compress badly, while a background subtraction alone on
+integer input often leaves integers. Measured on a synthetic 1024² 12-bit frame
+deflated in a zip, uint16 storage saved about 60% of the archived ``_tophat``
+with a Gaussian flat-field and about 18% with ``sliding_disk`` alone. ``source`` (the
 default) rounds a corrected frame to the integer type its input was stored in
 when, and only when, that is lossless up to rounding — see
 :func:`storage_array`. ``float32`` keeps every file float32.
 
-Neither option changes a measured number. Quantification reads the in-memory
-float arrays (``process_microscopy._quantify_image_group``), never these files.
-What a reader of the files sees is at most a half-count rounding of a
-corrected pixel, and a phase frame read from ``in/`` instead of ``out/``.
+Neither option changes a CSV value. Quantification reads the in-memory float
+arrays (``process_microscopy._quantify_image_group``), never these files. What a
+reader of the files sees is at most a half-count rounding of a corrected pixel,
+and a phase frame read from ``in/`` instead of ``out/``. The one number derived
+*from* the files is the end-of-run auto-threshold default written into the
+sidecar's ``cell_gating`` block, which samples the rounded frames and can move
+by a fraction of a count (measured: 0.06–0.16 counts on synthetic plates).
 
 Qt-free and pipeline-only, like the rest of ``pipeline/``.
 """
@@ -62,6 +72,9 @@ _INTEGER_TYPES_BY_CEILING: dict[float, type] = {
 }
 
 
+_NOT_INTEGER_INPUT = "input is not uint8/uint16"
+
+
 def storage_array(arr: np.ndarray, ceiling: float | None, *, mode: str) -> tuple[np.ndarray, str]:
     """The array to write for one corrected frame, and why it has that type.
 
@@ -91,7 +104,7 @@ def storage_array(arr: np.ndarray, ceiling: float | None, *, mode: str) -> tuple
         return as_float, "float32 requested"
     target = _INTEGER_TYPES_BY_CEILING.get(float(ceiling)) if ceiling is not None else None
     if target is None:
-        return as_float, "input is not uint8/uint16"
+        return as_float, _NOT_INTEGER_INPUT
     if as_float.size == 0:
         return as_float.astype(target), ""
     if not np.isfinite(as_float).all():
@@ -147,7 +160,10 @@ def _write_corrected(path: Path, arr: np.ndarray, ceiling: float | None,
     """Write one ``_tophat`` frame under the storage policy, logging a fallback."""
     out, reason = storage_array(np.clip(arr, 0, None), ceiling, mode=mode)
     if reason and mode == TOPHAT_DTYPE_SOURCE:
-        log.info("  tophat %s: stored float32 (%s)", label, reason)
+        # A float or signed input is float32 on every frame of the plate, so it
+        # is not news per frame; a frame that overflowed its ceiling is.
+        level = logging.DEBUG if reason == _NOT_INTEGER_INPUT else logging.INFO
+        log.log(level, "  tophat %s: stored float32 (%s)", label, reason)
     _safe_imwrite(path, out)
 
 

@@ -151,7 +151,11 @@ NOT_KEYED_ON: dict[str, str] = {
     # float arrays before anything is saved, so the CSVs are byte-identical
     # under either value of either option; a phase frame is readable either
     # way (from out/ when copied, from in/ when referenced); and a _tophat
-    # differs by at most half a count of rounding. Keying on them would also
+    # differs by at most half a count of rounding — which can move the
+    # end-of-run auto-threshold *default* by a fraction of a count, a suggested
+    # gate the user can edit, not a measurement. Every reader completes the
+    # phase channel from in/ whatever the sidecar records, so a well that
+    # keeps an earlier run's storage is still read correctly. Keying on them would also
     # cost every existing plate a full re-segmentation the first time it is
     # run after these options appeared, because the parser always sets them
     # and no digest recorded before them carries them.

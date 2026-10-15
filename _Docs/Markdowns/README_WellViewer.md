@@ -934,22 +934,27 @@ Collapsed by default.
   `in/` folder with the dataset**: opened without it, Review's Image Table marks
   each phase cell `(phase input not found — needs in/)` rather than showing it.
   Untick it to resave the phase image into the output archive, as earlier
-  versions did — for instance before handing someone only the `out/` folder.
-  Measurements are identical either way.
+  versions did — for instance before handing someone only the `out/` folder;
+  wells that are already finished keep their archive unless you also tick
+  **Force reprocess**. Measurements are identical either way.
 
 - **Store corrected images at the input's bit depth.** On by default. The
   background-corrected images (`_tophat`) are computed as 32-bit decimals; with
   this ticked each is saved back in the bit depth its input was recorded at
   (8- or 16-bit), rounded to the nearest count. That halves each file before
-  compression and shrinks it much further after it, because the fractional
-  digits are what compress worst. A frame whose corrected values do not fit —
+  compression. How much it saves inside the zip depends on the correction:
+  a flat-field correction leaves fractional values on nearly every pixel, which
+  compress badly, so the saving is large (around 60% on a synthetic test
+  plate); background subtraction alone often leaves whole numbers already,
+  and the saving is smaller (around 18%). A frame whose corrected values do not fit —
   a flat-field correction can lift a pixel above the camera's maximum — or whose
   input was already floating point is kept 32-bit, and the run log says which.
   smFISH and cytoplasm intermediates always stay 32-bit. **Measurements do not
   change**: every number in the CSV is computed before the images are saved.
   What changes is what you see in Review's corrected views and what the Cell
-  Gating auto-threshold samples, by at most half a count per pixel. Untick it
-  to keep the 32-bit decimals.
+  Gating auto-threshold samples, by at most half a count per pixel — so the
+  suggested gating threshold written at the end of a run can differ from a
+  32-bit run's by a fraction of a count. Untick it to keep the 32-bit decimals.
 
   Both choices are recorded in `pipeline_info.json` (`phase_output`,
   `tophat_dtype`) and restored when you load a dataset's settings. Neither marks

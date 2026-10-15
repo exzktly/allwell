@@ -136,8 +136,11 @@ def test_the_phase_frame_is_gone_when_in_is_missing(tmp_path):
     ("BF", _info(), "(phase input not found — needs in/)"),
     ("bf (raw)", _info(), "(phase input not found — needs in/)"),
     ("GFP", _info(), "(no image)"),
-    ("BF", _info("copy"), "(no image)"),
-    ("BF", _info(None), "(no image)"),          # a sidecar older than the option
+    # Keyed on the phase channel, not on the sidecar's phase_output: a sidecar
+    # saying "copy" can sit over wells an earlier reference run wrote.
+    ("BF", _info("copy"), "(phase input not found — needs in/)"),
+    ("BF", _info(None), "(phase input not found — needs in/)"),
+    ("BF", {**_info(), "phase_token": ""}, "(no image)"),
 ])
 def test_missing_frame_note(chan, info, expected):
     ctx = SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(pipeline_info=info)))
@@ -255,9 +258,11 @@ def test_the_end_of_run_pass_reads_the_phase_from_input_at_the_default(tmp_path)
         neg_control_well="", phase_token="BF", input_dir=str(root / "in"))
     written = run_auto_threshold_pass(args, root / "out", ["DAPI", "GFP", "BF"], LOG)
     assert "bf" in written and "gfp" in written
+    # A copy-mode run whose wells were all up to date archived nothing new: the
+    # archives still hold no BF tophat, and the phase must still be found.
     args.phase_output = "copy"
     (root / "out" / "pipeline_info.json").write_text(json.dumps({"schema_version": 2}))
-    assert "bf" not in run_auto_threshold_pass(args, root / "out", ["DAPI", "GFP", "BF"], LOG)
+    assert "bf" in run_auto_threshold_pass(args, root / "out", ["DAPI", "GFP", "BF"], LOG)
 
 
 # ── Review's Cell Gating auto-threshold ─────────────────────────────────────
@@ -276,8 +281,12 @@ def test_review_auto_threshold_reads_a_referenced_phase_from_the_input(tmp_path,
     root = _otsu_dataset(tmp_path)
     got = _review_otsu(root, _info(), well_labels=well_labels)
     assert "bf" in got and "gfp" in got
-    old = _otsu_dataset(tmp_path / "old")
-    assert "bf" not in _review_otsu(old, _info(None), well_labels=well_labels)
+    # The sidecar's phase_output is not what decides it: a later copy-mode run
+    # over up-to-date wells, or a merge with a copy-mode plate, records "copy"
+    # (or nothing) over archives that hold no BF tophat.
+    for recorded in ("copy", None):
+        other = _otsu_dataset(tmp_path / f"rec_{recorded}")
+        assert _review_otsu(other, _info(recorded), well_labels=well_labels)["bf"] == got["bf"]
 
 
 def test_review_and_pipeline_estimates_agree_for_the_phase_channel(tmp_path):
@@ -285,3 +294,71 @@ def test_review_and_pipeline_estimates_agree_for_the_phase_channel(tmp_path):
     review = _review_otsu(root, _info(), well_labels=None)
     pipeline = _estimate(root, input_dir=root / "in", referenced_channels=["bf"])
     assert review["bf"] == pipeline["bf"]
+
+
+# ── the reviewer's reproduced cases ─────────────────────────────────────────
+
+def _respell_inputs(root: Path, spelling: dict[str, str]) -> None:
+    for canonical, typed in spelling.items():
+        (root / "in" / f"{canonical}.zip").rename(root / "in" / f"{typed}.zip")
+
+
+def test_an_input_archive_spelled_without_the_leading_zero_is_found(tmp_path):
+    """The pipeline accepts ``A1.zip`` and writes ``A01_out.zip``; the phase
+    frames must still be found beside it, by both estimators."""
+    ref = _otsu_dataset(tmp_path / "ref")
+    expected = _estimate(ref, input_dir=ref / "in", referenced_channels=["bf"])["bf"]
+    root = _otsu_dataset(tmp_path / "typed")
+    _respell_inputs(root, {"A01": "A1", "A02": "a2"})
+    assert _estimate(root, input_dir=root / "in", referenced_channels=["bf"])["bf"] == expected
+    for well_labels in (None, ["A01", "A02"]):
+        assert _review_otsu(root, _info(), well_labels=well_labels)["bf"] == expected
+
+
+def test_a_multi_page_input_frame_is_sampled_at_its_first_plane(tmp_path):
+    """The pipeline measures page 0 of a stack; the estimator must sample the
+    same plane, not a (Z, H) slice that matches no label image."""
+    flat = _otsu_dataset(tmp_path / "flat")
+    expected = _estimate(flat, input_dir=flat / "in", referenced_channels=["bf"])["bf"]
+    stack = _otsu_dataset(tmp_path / "stack")
+    lab = _labels()
+    for well in ("A01", "A02"):
+        z = stack / "in" / f"{well}.zip"
+        z.unlink()
+        with zipfile.ZipFile(z, "w") as zf:
+            planes = np.stack([_graded(lab, 400), _graded(lab, 9000), _graded(lab, 9000)])
+            zf.writestr(f"exp_BF_{well}_f01_T01.tif", _tif(planes))
+    assert _estimate(stack, input_dir=stack / "in", referenced_channels=["bf"])["bf"] == expected
+
+
+def test_a_role_suffixed_member_in_an_input_archive_is_not_a_raw_frame(tmp_path):
+    """An input archive that carries a stray ``_tophat`` (a re-imported output)
+    must not be read as the phase frame: only the raw member is."""
+    clean = _otsu_dataset(tmp_path / "clean")
+    expected = _estimate(clean, input_dir=clean / "in", referenced_channels=["bf"])["bf"]
+    dirty = _otsu_dataset(tmp_path / "dirty")
+    lab = _labels()
+    for well in ("A01", "A02"):
+        z = dirty / "in" / f"{well}.zip"
+        members = {}
+        with zipfile.ZipFile(z) as zf:
+            members = {n: zf.read(n) for n in zf.namelist()}
+        z.unlink()
+        with zipfile.ZipFile(z, "w") as zf:
+            # Sorted first, so a reader taking the first match would take it.
+            zf.writestr(f"aaa/exp_BF_{well}_f01_T01_tophat.tif", _tif(_graded(lab, 9000)))
+            for n, b in members.items():
+                zf.writestr(n, b)
+    assert _estimate(dirty, input_dir=dirty / "in", referenced_channels=["bf"])["bf"] == expected
+
+
+def test_the_remote_run_id_ignores_the_storage_options_as_the_local_key_does():
+    from services.remote_run_id import pipeline_argv_digest
+    from util.settings_digest import settings_digest
+
+    base = ["pm.py", "--nuclear_token", "DAPI", "--phase_token", "BF"]
+    changed = base + ["--phase_output", "copy", "--tophat_dtype", "float32"]
+    assert pipeline_argv_digest(base) == pipeline_argv_digest(changed)
+    common = {"nuclear_token": "DAPI", "phase_token": "BF"}
+    assert settings_digest({**common, "phase_output": "reference", "tophat_dtype": "source"}) \
+        == settings_digest({**common, "phase_output": "copy", "tophat_dtype": "float32"})

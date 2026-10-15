@@ -124,38 +124,30 @@ def phase_channel(pipeline_info: dict | None) -> str:
     its raw frame through), so its raw frame and its "corrected" frame are the
     same pixels — which is what lets a missing ``_tophat`` for it be served the
     raw frame without that being a fallback.
+
+    Every reader that completes a phase channel from its input frames keys on
+    this, never on the sidecar's ``phase_output``. That value records what the
+    *last* run asked for, and a run that found its wells up to date, a run over
+    ``--only_wells``, or a merged dataset all leave archives that do not match
+    it — so a reader trusting it would drop the phase frames of exactly those
+    wells. Since the raw frame is the corrected frame for every dataset, reading
+    it wherever no ``_tophat`` was archived is right whatever any run asked for.
     """
     return str((pipeline_info or {}).get("phase_token") or "").strip().lower()
-
-
-def referenced_phase_channel(pipeline_info: dict | None) -> str:
-    """The phase channel whose frames this dataset left in its input archives.
-
-    Lower-cased, or ``""`` when there is none. A run under
-    ``--phase_output reference`` (``pipeline/output_images.py``) archives no
-    ``_tophat`` for its phase channel, because that channel is never corrected
-    and its input frame already *is* its corrected frame — so a sampler that
-    reads only ``_tophat`` members would find no images for it. A sidecar that
-    predates the option has every ``_tophat`` archived and names none.
-    """
-    info = pipeline_info or {}
-    if str(info.get("phase_output") or "").strip().lower() != "reference":
-        return ""
-    return phase_channel(info)
 
 
 def missing_frame_note(ctx, chan: str) -> str:
     """The placeholder for a cell of *chan* that resolved to no image.
 
-    ``"(no image)"``, except for the phase channel of a dataset that referenced
-    its phase frames (:func:`referenced_phase_channel`): those frames exist only
-    in the input archives, so a cell with none is almost always a dataset whose
-    ``in/`` folder did not come with it — and "(no image)" would send the user
-    looking for a frame that was never meant to be in ``out/``.
+    ``"(no image)"``, except for the phase channel (:func:`phase_channel`): a
+    run under ``--phase_output reference`` (the default) archives no phase
+    frame, so a phase cell with none is almost always a dataset whose ``in/``
+    folder did not come with it — and "(no image)" would send the user looking
+    in ``out/`` for a frame that was never meant to be there.
     """
     info = getattr(getattr(getattr(ctx, "state", None), "dataset", None),
                    "pipeline_info", None)
-    phase = referenced_phase_channel(info)
+    phase = phase_channel(info)
     if phase and base_channel(chan).strip().lower() == phase:
         return "(phase input not found — needs in/)"
     return "(no image)"

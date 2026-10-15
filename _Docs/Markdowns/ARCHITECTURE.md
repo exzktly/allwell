@@ -8542,6 +8542,86 @@ bubble and a square central nanowell, at more than one tile plan. Detection is a
 later section, so the lattice-phase tests fit sites taken from the ground truth
 plus noise. Nothing has run on real phase-contrast images or stage coordinates.
 
+### 6.2g Finding nanowells in the phase channel
+
+`pipeline/nanowell_detect.py` (numpy and scipy) finds the lattice and its sites in one
+phase image; `pipeline/nanowell_sites.py` (numpy and scipy) describes the state of
+each site. Both are Qt-free, in the remote manifest, and have only test callers: they
+do not change what Analyze runs or writes. Positions in micrometres are in the frame
+where pixel `i` covers `[i, i + 1) * pixel_size`, the frame the tile placements use,
+so the centre of pixel `i` is `(i + 0.5) * pixel_size` and an array index is
+`position / pixel_size - 0.5`; the first version of the detector was half a pixel off
+in it, and the tests now measure that.
+
+**Lattice first.** `estimate_lattice_fft` reads the pitch, angle and kind of the
+lattice from the peaks of the image's spectrum: a Hann-windowed `rfft2`, the strongest
+peaks in the ring a pitch range allows, each refined with a local DFT on a grid a tenth
+of a bin wide (the FFT's own bin is a one-in-a-hundred step in pitch at 40 px per
+pitch), and the first-order peaks identified as hexagonal (partners at 60 degrees) or
+square (partners at 90). It uses the whole array at once, so a bubble over a tenth of
+it moves nothing, and it needs no expected pitch, which is why it can run before any
+matched filter is chosen. `detect_sites` then runs a matched filter (a light disk at the
+plate format's radius inside a dark annulus; the template sums to zero, so an
+illumination offset or ramp changes no candidate), takes local maxima a half-pitch
+apart that clear half the strong ones' response, refines the lattice with `fit_lattice`
+on them and fits the array boundary. A site under a bubble responds weakly, is not a
+candidate, and is predicted from the lattice later.
+
+**The central square.** `square_score` is the four-fold coherence of the outline's
+gradient directions around a site: each outline pixel adds `exp(4ia)` weighted by its
+gradient magnitude, so a circle (all directions) cancels toward zero and a square (two
+directions 90 degrees apart) adds toward one, and the argument of the sum is four times
+the edge direction, so the same number is the orientation. `score_fiducial` scores the
+sites near the array centre and returns a `FiducialCandidate` carrying the best score
+and the runner-up's for `resolve_origin`'s margin test; the margin is the caller's. With
+the square under a bubble the margin vanishes, the fiducial is rejected, and the array
+centre anchors the well, giving the same addresses. `check_orientation` (tracker N3a)
+compares the square's edge direction with the lattice axis the fit chose: a hexagonal
+array rotated 40 degrees is fitted at -20, inside the limit and wrong by a sixth of a
+turn, and the square still reads 40, so the well is refused with the reason. The angle
+from the lattice axis to the square's edge on the mask is a parameter and its default
+of zero (edges parallel to a lattice row) is an assumption real data has to confirm
+(tracker Q11).
+
+**Per-site geometry.** `refine_sites` casts rays from each site's lattice position,
+finds the outward intensity fall along each, fits a circle by least squares to the edge
+points with outlier rejection, and accepts the fit as `fitted` only when at least 60 %
+of the rays found an edge, the scatter is under 6 % of the radius (20 % for the square,
+named in `relaxed`), the radius is within 30 % of nominal and the centre within a radius
+of where the lattice put it. Any other site keeps its lattice position, takes the well's
+median fitted radius and is `predicted`; no site is dropped. The ray-fraction rule is a
+conservatism, not a necessity: a fit through half of a clean rim is accurate, and the rule
+exists so that it is never reported as a measurement.
+
+**Site state (`nanowell_sites`).** Nothing here drops a site and an unmeasurable number is
+`None`, never zero. `bubble_mask` demodulates the image at the lattice's first-order
+frequencies and flags where that amplitude is under 30 % of the array's typical, inside the
+array only (the flat floor outside is not a bubble). `site_visibility` gives each site the
+share of its disk that is bright against the lattice (above the midpoint of the well's
+typical site and typical floor, both taken from the fitted sites) and outside any bubble,
+and a contrast relative to the typical site, so a black disk on the black lattice reads 0.
+`site_coverage` gives the shares of a site's disk inside the union of the tiles, inside the
+fitted array boundary and inside the well wall; the last two are `None` without a boundary.
+`rim_focus` calls `pipeline.field_quality.edge_focus` on the fitted disk and is `None` for a
+predicted site or one off the image. `check_consistency` compares a timepoint's pitch (0.5 %),
+angle after the plate's measured rotation (0.5 degrees, folded into the lattice's 60-degree
+period) and roster with a reference, and names the first violated check as the status.
+`shared_array_radius` takes the median of the timepoints whose boundary fitted as one
+radius per well, records each timepoint's deviation, and flags a timepoint more than half a
+pitch away `radius_disagrees` and one with no boundary `no_boundary`. `check_format` refuses
+a plate-format setting two ways: a nanowell nearly as wide as the measured pitch cannot be
+right, which is decidable from the Fourier estimate alone before any filter is chosen, and
+fitted nanowells more than 25 % off the setting's diameter are a mismatch.
+
+**What is and is not established.** All of this is checked on tiles rendered by
+`tests/_nanowell_synth.render_tiles` at both plate formats (100 um, pitch 172 um; 50 um,
+pitch 86 um, both imaged at 40 px per pitch), including a bubble over a tenth of the array
+and over the square, and the chain from image to addresses assigns every detected
+nanowell the address it was drawn with. The renderer's bubble is a flat grey disk; what a
+real bubble does to a phase image is not established, and neither is whether a real square
+is aligned with a lattice row. Nothing has run on real phase-contrast images (tracker N10,
+blocked on Q7).
+
 ### 6.2 `process_microscopy.py`
 
 The pipeline. **Self-sufficient by design** — no import from `review/`,

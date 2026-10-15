@@ -8665,10 +8665,13 @@ only the 50 um array with the 100 um setting is reported as a mismatch.
 pitch 86 um, both imaged at 40 px per pitch, and each also at another pixel scale so that
 nothing assumes 40 px per pitch), including a bubble over a tenth of the array
 and over the square, and the chain from image to addresses assigns every detected
-nanowell the address it was drawn with. The renderer's bubble is a flat grey disk; what a
-real bubble does to a phase image is not established, and neither is whether a real square
-is aligned with a lattice row. Nothing has run on real phase-contrast images (tracker N10,
-blocked on Q7).
+nanowell the address it was drawn with. The 50 um format's nominal pitch in
+`nanowell_run.PLATE_FORMATS` is 143 um — what the ~1,600 nanowells per well the user reports
+imply in a 3.0 mm array — and a 50 um array is found from it at a true pitch of 143 um or
+86 um. The renderer's bubble is a flat grey disk; what a real bubble does to a phase image is
+not established. The user reports the square's edges parallel to the plate's, which matches
+a lattice row (modulo the square's 90°) for either regular placement of a hex lattice on the
+plate. Nothing has run on real phase-contrast images (tracker N10, blocked on Q7).
 
 ### 6.2h What is inside each nanowell
 
@@ -8689,9 +8692,15 @@ exactly at the centre (radially symmetric, so the first ranking cannot see it). 
 fewer than `MIN_TEMPLATE_SITES` sites in the quarter it returns the earliest template
 of the well unchanged (`source="earliest"`), or the quarter marked `own_sparse` when
 there is none; `Template.used` says which crops formed it. Above about three quarters
-of the sites loaded the quarter reaches into loaded sites and the template darkens;
-nothing flags that, because from the crops alone it cannot be told from a well of
-unusually bright cells (tracker C12).
+of the sites loaded the quarter reaches into loaded sites and the template turns
+cell-coloured while still `own`; from one timepoint's crops alone that cannot be told from a
+well of unusually bright cells, so the run compares it with the well's earliest template:
+`template_drift` is the mean absolute difference over their central disk after each is
+divided by its own central level (so an exposure change does not count). Above
+`TEMPLATE_DRIFT_LIMIT` (0.15; measured on rendered 40-site wells at 0.01 or less up to 34
+loaded and 0.83 or more from 35) the timepoint's `template` block records
+`drift_vs_earliest` and `suspect`, a note says the counts may be biased, and Array QC shows it.
+The measurement itself is not changed.
 
 **Rim suppression.** `rim_suppress` divides every site's pixels (out to 1.05 times its
 radius, which takes in the rim) by the template at the same offset from the site centre,
@@ -8746,7 +8755,11 @@ under half) carry no count and no confluence whatever was passed; a seen site wi
 cells is `empty` with `n_cells == 0` and the confluence it was given (never filled in); a
 non-finite fraction is unknown; a partly seen site keeps its
 metrics with `partially_visible` set. An empty site and an occluded one therefore cannot
-be confused.
+be confused. The imaged fraction is measured on the tiles' rectangles in um while the
+contents are read from image pixels, so the run also passes `interior_imaged` — the share of
+the interior on the owner tile's image, the pixels the count and confluence read — and a
+site under `MIN_INTERIOR_COVERED` there is `clipped` whatever the rectangles say: a count of
+zero from a half-seen interior is not an empty nanowell.
 
 
 ### 6.2i The nanowell run

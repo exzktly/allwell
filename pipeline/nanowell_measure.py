@@ -57,6 +57,11 @@ COUNT_DISAGREEMENT = 0.3
 TEMPLATE_HEADROOM = 1.3
 #: Below this a departure from the template is division noise, not texture (a flat noise-free tile has a spread of 0).
 MIN_TEXTURE_THRESHOLD = 0.02
+#: A timepoint's template departing from the earliest one's by more than this share of its level, after both are
+#: scaled to their own central level (so an exposure change does not count), is flagged: measured on rendered
+#: 40-site wells, the departure is at most 0.01 up to 34 loaded sites, with or without a 1.6x exposure change,
+#: and 0.83 or more from 35 on, where the least-textured quarter is no longer empty (tracker C12).
+TEMPLATE_DRIFT_LIMIT = 0.15
 
 EMPTY = "empty"
 MEASURED = "measured"
@@ -204,6 +209,25 @@ def build_template(crops, *, interior_radius_px: float, quarter: float = TEMPLAT
                     tuple(int(positions[k]) for k in sorted(order)))
 
 
+def template_drift(template: Template, earliest: Template) -> float | None:
+    """How far *template* departs from *earliest*: the mean absolute difference over their central disk, each
+    first divided by its own central level. ``None`` when the two do not cover the same crop or a level is unusable.
+
+    A template built where most nanowells hold cells is cell-coloured, and every site divided by it reads
+    emptier than it is; from one timepoint's crops alone that cannot be told from a well of unusually bright
+    cells, but against the same well's earliest template it stands out (tracker C12). Scaling each by its own
+    level keeps an exposure change between timepoints from reading as drift.
+    """
+    if template.half != earliest.half:
+        return None
+    disk = _disk(template.half, template.half * 0.6)
+    a, b = np.asarray(template.array, dtype=np.float64)[disk], np.asarray(earliest.array, dtype=np.float64)[disk]
+    level_a, level_b = float(np.median(a)), float(np.median(b))
+    if not (math.isfinite(level_a) and math.isfinite(level_b)) or level_a <= 0 or level_b <= 0:
+        return None
+    return float(np.mean(np.abs(a / level_a - b / level_b)))
+
+
 # ── C2: the rim-suppressed tile ──────────────────────────────────────────────
 def _template_floor(template: Template) -> float:
     level = float(np.median(template.array[_disk(template.half, template.half * 0.6)]))
@@ -292,6 +316,14 @@ MIN_INTERIOR_COVERED = 0.5
 def _covered(n_pixels: int, pixel_size_um: float, g, fraction: float) -> bool:
     nominal = math.pi * (fraction * g.radius_um / pixel_size_um) ** 2
     return n_pixels >= MIN_INTERIOR_COVERED * nominal
+
+
+def interior_imaged(shape, pixel_size_um: float, g, fraction: float = INTERIOR_FRACTION) -> float:
+    """The share of a site's interior that lies on an image of *shape* — the pixels the count and the confluence
+    read, which is what :func:`site_state` must judge the site by (tracker C15), rather than the disk's share of
+    the tiles' rectangles."""
+    nominal = math.pi * (fraction * g.radius_um / pixel_size_um) ** 2
+    return min(len(_interior_pixels(shape, pixel_size_um, g, fraction)[0]) / nominal, 1.0) if nominal > 0 else 0.0
 
 
 def texture_threshold(rim_image, pixel_size_um: float, empty_geometries, *, sigmas: float = TEXTURE_SIGMAS,
@@ -573,7 +605,8 @@ def _finite_or_none(value):
 
 def site_state(*, visible_fraction: float | None, imaged_fraction: float | None, n_cells: int | None,
                confluence: float | None, addressed: bool = True, fused: bool = False,
-               occluded_below: float = 0.5, clipped_below: float = 0.5) -> SiteState:
+               occluded_below: float = 0.5, clipped_below: float = 0.5,
+               interior_imaged: float | None = None) -> SiteState:
     """The per-site state of tracker §3.5, and the contents metrics it may carry.
 
     ``clipped`` (imaged fraction below *clipped_below*, or off the image) and ``occluded``
@@ -587,10 +620,17 @@ def site_state(*, visible_fraction: float | None, imaged_fraction: float | None,
     both fractions on the row; ``fused`` and ``addressed`` are flags beside the state, not states:
     a fused site was measured from a blended crop, and an unaddressed timepoint's sites keep
     their metrics but cannot be joined over time.
+
+    *interior_imaged* is the share of the interior on the image the contents were read from
+    (:func:`interior_imaged`). ``imaged_fraction`` is measured on the tiles' rectangles in um and the
+    contents on image pixels, so near an image edge the two can disagree; when the contents could not
+    see ``MIN_INTERIOR_COVERED`` of the interior the site is ``clipped`` whatever the rectangles say —
+    otherwise a count of zero from a half-seen interior would read as an empty nanowell (tracker C15).
     """
     visible_fraction = _finite_or_none(visible_fraction)
     imaged_fraction = _finite_or_none(imaged_fraction)
-    if imaged_fraction is None or imaged_fraction < clipped_below:
+    if (imaged_fraction is None or imaged_fraction < clipped_below
+            or (interior_imaged is not None and interior_imaged < MIN_INTERIOR_COVERED)):
         return SiteState(CLIPPED, None, None, visible_fraction, imaged_fraction, None, fused, addressed)
     if visible_fraction is None or visible_fraction < occluded_below:
         return SiteState(OCCLUDED, None, None, visible_fraction, imaged_fraction, None, fused, addressed)

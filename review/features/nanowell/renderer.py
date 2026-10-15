@@ -642,14 +642,33 @@ def render_array_qc(fig, montage, boxes, sites, grid_blocks: dict, *, timepoint:
              f"pitch {_num(block.get('pitch_um'), 1)} µm · angle {_num(block.get('angle_deg'), 2)}° · "
              f"overlap {_overlap(block.get('overlap_um'))} · {block.get('n_detected', '?')} detected of "
              f"{block.get('roster_size', '?')}"]
+    template = _template_line(block.get("template"))
+    if template:
+        lines.append(template)
     lines += [f"{tp}: {b.get('status', '?')}" + (f" — {b.get('reason')}" if b.get("reason") else "")
+              + (" — template suspect" if (b.get("template") or {}).get("suspect") else "")
               for tp, b in grid_blocks.items() if tp != timepoint]
     for i, text in enumerate(lines[:24]):
-        _ink(fig.text(0.72, 0.92 - i * 0.032, text, fontsize=7, color=ink if i < 2 else muted, wrap=True,
-                      gid="nw-qc-status"), muted=i >= 2)
+        flagged = "template suspect" in text or "departs from the earliest" in text
+        item = fig.text(0.72, 0.92 - i * 0.032, text, fontsize=7, wrap=True, gid="nw-qc-status",
+                        color=Colors.warn if flagged else ink if i < 2 else muted)
+        if not flagged:                                  # a warning keeps its colour; plain lines follow the theme
+            _ink(item, muted=i >= 2)
     _ink(fig.text(0.72, 0.10, "Tiles: green placed on the lattice, blue by overlap correlation, amber where the "
                   "acquisition record put them. Nanowells at their measured positions: amber occluded, red clipped, "
                   "+ fused.", fontsize=6.5, color=muted, wrap=True, gid="nw-qc-key"), muted=True)
+
+
+def _template_line(template) -> str:
+    """The grid record's empty-nanowell template, for a status line; a template flagged by the run says so."""
+    if not isinstance(template, dict) or not template.get("source"):
+        return ""
+    line = f"template: {template['source']}, {template.get('n_sites', '?')} of {template.get('candidates', '?')} sites"
+    drift = template.get("drift_vs_earliest")
+    if template.get("suspect") and isinstance(drift, (int, float)):
+        line += (f" — departs from the earliest by {drift:.0%}: most nanowells may hold cells, so counts and "
+                 "confluence here may be biased")
+    return line
 
 
 def _overlap(value) -> str:

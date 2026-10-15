@@ -455,3 +455,42 @@ def test_ownership_report_feeds_count_cells_through_owned_indices():
     counts = nm.count_cells(labels, PX, GEOMS, owned=left)
     assert counts[i].n_cells == 1 and set(counts) == left
     assert nm.count_cells(labels, PX, GEOMS, owned=right).keys() == right    # the other tile does not count it
+
+
+# ── C15: the state judges the interior the contents read ─────────────────────
+def test_interior_imaged_is_the_share_of_the_interior_on_the_image():
+    whole = nm.interior_imaged((190, 190), PX, GEOMS[5])
+    assert whole == pytest.approx(1.0, abs=0.03)
+    half_off = SiteGeometry(0, (190.0, 100.0), RADIUS, FITTED, 0.2, 64)        # centre on the right edge
+    assert nm.interior_imaged((190, 190), PX, half_off) == pytest.approx(0.5, abs=0.06)
+    off = SiteGeometry(0, (194.0, 100.0), RADIUS, FITTED, 0.2, 64)
+    assert nm.interior_imaged((190, 190), PX, off) < nm.MIN_INTERIOR_COVERED
+
+
+def test_a_site_whose_interior_was_not_seen_is_clipped_whatever_the_rectangles_say():
+    state = nm.site_state(visible_fraction=1.0, imaged_fraction=0.9, n_cells=0, confluence=None,
+                          interior_imaged=0.4)
+    assert (state.state, state.n_cells, state.confluence) == (nm.CLIPPED, None, None)
+    seen = nm.site_state(visible_fraction=1.0, imaged_fraction=0.9, n_cells=0, confluence=0.0, interior_imaged=0.8)
+    assert (seen.state, seen.n_cells) == (nm.EMPTY, 0)
+
+
+# ── C12: a timepoint's template against the earliest ─────────────────────────
+def _template_for(loaded, *, seed, gain=1.0):
+    centres = _centres(n=7)[:40]
+    rng = np.random.default_rng(seed)
+    cells = {i: [(rng.uniform(-6, 6), rng.uniform(-6, 6), 5) for _ in range(5)] for i in range(loaded)}
+    image = _paint(centres, cells, size=300, seed=seed) * gain
+    return nm.build_template(nm.site_crops(image, PX, centres, 16), interior_radius_px=1.05 * RADIUS)
+
+
+def test_template_drift_flags_a_mostly_loaded_well_and_not_an_exposure_change():
+    """The reviewer's case: 36 of 40 sites loaded leaves no empty quarter, and the template is cell-coloured
+    while still reported ``own``. Against the earliest template it departs far past the limit; 30 loaded, or
+    the same well at 1.6x the exposure, stays near zero."""
+    earliest = _template_for(4, seed=3)
+    loaded = _template_for(36, seed=43)
+    assert loaded.source == nm.SOURCE_OWN                         # nothing in the template itself says so
+    assert nm.template_drift(loaded, earliest) > 0.5
+    assert nm.template_drift(_template_for(30, seed=37), earliest) < 0.02
+    assert nm.template_drift(_template_for(30, seed=37, gain=1.6), earliest) < 0.02

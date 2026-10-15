@@ -47,6 +47,9 @@ def _with_grids(out):
         record = json.loads(path.read_text())
         for tp, block in record["timepoints"].items():
             block.update(pitch_um=PITCH, angle_deg=0.5, overlap_um=[40.0, 40.0], n_detected=4, roster_size=4)
+            block["template"] = ({"source": "own", "n_sites": 2, "candidates": 4} if tp == "t_c" else
+                                 {"source": "own", "n_sites": 1, "candidates": 4, "drift_vs_earliest": 0.83,
+                                  "suspect": True})
             if record["well"] == "A01":
                 block.update(montage_origin_um=list(ORIGIN), montage_um_per_px=SCALE,
                              tiles=[{"tile": "F0", "left_um": -100.0, "top_um": -100.0, "source": "lattice",
@@ -253,7 +256,12 @@ def test_array_qc_draws_the_montage_the_tiles_by_how_they_were_placed_and_the_st
         "2 tile(s) without a size in the acquisition record: their placed corner is marked (+), not an outline."]
     status = _fig_texts(page, "nw-qc-status")
     assert status[:2] == ["t_c: ok", "pitch 143.0 µm · angle 0.50° · overlap 40.0 µm · 4 detected of 4"]
-    assert status[2:] == ["t_a: ok"]
+    assert status[2:] == ["template: own, 2 of 4 sites", "t_a: ok — template suspect"]
+    page.widgets.get("_nw_tp_slider").setValue(1)
+    qtbot.waitUntil(lambda: ("A01", "t_a") in page.state.feature_slice("nanowell").montages, timeout=20000)
+    assert _fig_texts(page, "nw-qc-status")[2] == (
+        "template: own, 1 of 4 sites — departs from the earliest by 83%: most nanowells may hold cells, so counts "
+        "and confluence here may be biased")
 
 
 def test_array_qc_on_a_well_without_a_montage_says_why(page, qtbot):

@@ -99,3 +99,21 @@ def test_fitted_geometry_agrees_with_the_drawn_nanowells_across_the_chain(fmt):
     assert len(fitted) > 0.9 * len(geometries)
     assert np.median([g.radius_um for g in fitted]) == pytest.approx(diameter / 2, rel=0.01)
     assert check_format(detection.fit.pitch, diameter, [g.radius_um for g in fitted]).ok
+
+
+@pytest.mark.parametrize("true_pitch", [143.0, 86.0])
+def test_a_50um_array_is_found_from_the_format_s_nominal_pitch_at_either_spacing(true_pitch):
+    """The 50 um format's nominal pitch is 143 um, what ~1,600 nanowells per well imply (tracker Q12, N25); the
+    search it seeds must find that lattice, and still find the diameter-scaled 86 um one the tests were drawn at."""
+    from pipeline.nanowell_run import PLATE_FORMATS
+
+    nominal, diameter = PLATE_FORMATS["50um"]
+    assert nominal == 143.0
+    px = true_pitch / 40.0
+    extent = 900 * px
+    rendered = render_tiles(TilePlan(1, 1, (900, 900), 0.0, px), pitch_um=true_pitch, diameter_um=diameter,
+                            radius_um=0.42 * extent, rotation_deg=7.0, noise_sigma=0.05, seed=1, blur_px=1.0)
+    estimate = estimate_lattice_fft(rendered.images["F0"], px, expected_pitch_um=nominal)
+    assert estimate.ok and estimate.pitch_um == pytest.approx(true_pitch, rel=0.005)
+    detection = detect_sites(rendered.images["F0"], px, diameter, expected_pitch_um=estimate.pitch_um)
+    assert detection.ok and len(detection.points_um) > 0.95 * len(rendered.sites_um)

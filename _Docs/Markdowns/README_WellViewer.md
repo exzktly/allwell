@@ -4247,7 +4247,9 @@ use them.
   it was placed (green on the lattice, blue by overlap, amber where the acquisition record put it), with its
   registration residual. Occluded and clipped nanowells are outlined at their measured positions. Beside the
   image are the grid record of this timepoint (status, how the origin was found, pitch, angle, overlap,
-  nanowells detected of the roster) and the status of every other timepoint. A tile whose size the acquisition
+  nanowells detected of the roster), the empty-nanowell template the counts were divided by, and the status of
+  every other timepoint. A template the run found far from the well's earliest one is shown in amber: most
+  nanowells there may hold cells, and that timepoint's counts and confluence may be biased. A tile whose size the acquisition
   record does not give is marked at its corner, and the figure says so. The montage is read in the
   background; the figure says *Reading the montage…* meanwhile.
 

@@ -163,3 +163,63 @@ def test_a_fixed_radius_decides_the_roster_not_the_timepoints_own_boundary():
     assert fixed.radius["radius_um"] == pytest.approx(0.6 * radius) and fixed.radius["status"] == "shared"
     assert len(fixed.sites) < 0.6 * len(own.sites)                  # ~0.36 of the area
     assert fixed.timepoints["T0"]["radius_deviation_um"] == pytest.approx(radius - 0.6 * radius, rel=0.05)
+
+
+def _template_case(change):
+    """Measure T0 against an 'earliest' template made from T0's own by *change*: what the run records."""
+    from dataclasses import replace
+
+    rendered, record = build_well()
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    first = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
+                                 segmenter=threshold_segmenter())
+    own = first.template["_object"]
+    earliest = replace(own, array=change(own.array.copy(), own.half))
+    return nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
+                                segmenter=threshold_segmenter(), earliest_template=earliest)
+
+
+def _cell_coloured(array, half):
+    yy, xx = np.mgrid[-half:half + 1, -half:half + 1]
+    array[np.hypot(xx, yy) <= 0.5 * half] *= 4.0                   # a bright blob over the centre
+    return array
+
+
+def test_a_template_that_departs_from_the_earliest_is_flagged_on_the_record_and_in_the_notes():
+    measured = _template_case(_cell_coloured)
+    assert measured.template["source"] == "own" and measured.template["suspect"] is True
+    assert measured.template["drift_vs_earliest"] > 0.15
+    assert any(n.startswith("The empty-nanowell template departs from the earliest timepoint's by ")
+               for n in measured.notes)
+
+
+@pytest.mark.parametrize("change", [lambda a, h: a, lambda a, h: a * 1.6], ids=["same", "exposure x1.6"])
+def test_a_template_that_matches_the_earliest_up_to_exposure_is_not_flagged(change):
+    measured = _template_case(change)
+    assert measured.template["drift_vs_earliest"] < 0.02 and "suspect" not in measured.template
+    assert not any("template departs" in n for n in measured.notes)
+
+
+def test_a_site_whose_interior_is_off_its_owner_tile_s_image_is_clipped_not_empty():
+    """Ownership is decided on the tiles' rectangles in um; the contents are read from image pixels. When the
+    image holds less than its rectangle (here F0 cut short by 50 px, 215 um, within the 301 um overlap), the
+    sites F0 owns along that edge have under half their interior on the image: a count from what is left is not a count (tracker C15)."""
+    rendered, record = build_well()
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    images = dict(rendered.images)
+    images["F0"] = images["F0"][:, :-50]
+    measured = nr.measure_timepoint(located, images, SETTINGS, located.boundary["radius_um"],
+                                    segmenter=threshold_segmenter())
+    width_um = images["F0"].shape[1] * located.pixel_size_um
+    left = located.positions["F0"][0]
+    whole = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
+                                 segmenter=threshold_segmenter())
+    before = {(r["nw_q"], r["nw_r"]): r["state"] for r in whole.sites}
+    # Sites F0 owns whose centre is now off its image, and which were seen whole before the cut.
+    cut = [r for r in measured.sites if r["owner"] == "F0" and r["well_x_um"] - left > width_um
+           and before[(r["nw_q"], r["nw_r"])] in ("empty", "measured")]
+    assert cut, "no seen F0 site has its centre off the shortened image"
+    assert all(r["state"] == "clipped" and r["n_cells"] is None and r["confluence"] is None for r in cut)
+    kept = {(r["nw_q"], r["nw_r"]): r["state"] for r in measured.sites
+            if r["owner"] == "F0" and r["well_x_um"] - left < width_um - 60}
+    assert kept and all(state == before[a] for a, state in kept.items())                # nothing else moved

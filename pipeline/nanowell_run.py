@@ -23,8 +23,11 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-#: The plate formats the pipeline knows: (lattice pitch, nanowell diameter), micrometres.
-PLATE_FORMATS = {"100um": (172.0, 100.0), "50um": (86.0, 50.0)}
+#: The plate formats the pipeline knows: (lattice pitch, nanowell diameter), micrometres. The pitch is nominal:
+#: it centres the lattice search (``estimate_lattice_fft`` looks from half to twice it) and is then replaced by
+#: the measured one. 172 um is what ~1,100 nanowells in a 3.0 mm array imply for the 100 um format, and 143 um
+#: what ~1,600 imply for the 50 um format — not the diameter-scaled 86 um, which would be ~4,400 nanowells.
+PLATE_FORMATS = {"100um": (172.0, 100.0), "50um": (143.0, 50.0)}
 
 OK = "ok"
 INCOMPLETE_GRID = "incomplete_grid"
@@ -415,6 +418,7 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
     fluorescence = {c: {f.index: f for f in nm.site_fluorescence(img, px, fit_sites, {g.index for g in mine})}
                     for c, img in channel_images.items()}
     contents = {g.index: {"n_cells": counts[g.index].n_cells, "confluence": confluence[g.index],
+                          "interior_imaged": nm.interior_imaged(images[owner].shape, px, g),
                           "area": area[g.index], "fluor": {c: f[g.index] for c, f in fluorescence.items()},
                           "focus": rim_focus(images[owner], px, g)} for g in fit_sites}
     return contents, table, notes
@@ -472,6 +476,15 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     else:
         out.template = {"source": template.source, "n_sites": template.n_sites, "candidates": template.candidates,
                         "_object": template}
+        if earliest_template is not None and template is not earliest_template:
+            drift = nm.template_drift(template, earliest_template)
+            out.template["drift_vs_earliest"] = drift
+            if drift is not None and drift > nm.TEMPLATE_DRIFT_LIMIT:
+                out.template["suspect"] = True
+                out.notes.append(
+                    f"The empty-nanowell template departs from the earliest timepoint's by {drift:.0%} of its level "
+                    f"(more than {nm.TEMPLATE_DRIFT_LIMIT:.0%}): most nanowells here may hold cells, so the "
+                    f"template may be cell-coloured and this timepoint's counts and confluence biased")
     segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)
     contents: dict[int, dict] = {}
     for owner, indices in by_tile.items():
@@ -488,7 +501,8 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
         state = nm.site_state(visible_fraction=visibility[i].visible_fraction,
                               imaged_fraction=coverage[i].imaged_fraction,
                               n_cells=None if got is None else got["n_cells"],
-                              confluence=None if got is None else got["confluence"], fused=i in fused,
+                              confluence=None if got is None else got["confluence"],
+                              interior_imaged=None if got is None else got["interior_imaged"], fused=i in fused,
                               addressed=addressed, occluded_below=settings.occluded_below,
                               clipped_below=settings.clipped_below)
         out.sites.append(_site_row(located.timepoint, i, address, geoms[i], visibility[i], coverage[i], got, state,

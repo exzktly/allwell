@@ -10383,7 +10383,13 @@ entry (`MergePlan.gap_hours`, `gap_source` of `entered`, `recorded` or
 starts when both exist on comparable clocks (`default_gap`), else dataset 1's
 median interval, else leaves it empty and required; `choose_gap` warns, and
 goes with the entry, when it differs from the recorded gap by more than
-max(2 %, 1 minute). The worker parses the text in-thread (`parse_gap_hours`) so
+max(2 %, 1 minute). `parse_gap_hours` has its own strict grammar (a bare number of
+hours, or `<number><unit>` parts in descending order, a comma as the decimal
+point, nothing else) and is deliberately not the timepoint-label parser, whose
+trailing-digit fallback read `1,5` as 5 hours and `6h30` as 30. The gap is shown,
+stored and used at minute resolution (`format_gap`; the interval default is
+rounded to the minute) so the page shows exactly what the merge uses. The worker
+parses the text in-thread so
 the queue spec carries the text the user typed, and `show_job` restores it.
 `record_derivation` stores the gap and its source.
 
@@ -10393,7 +10399,14 @@ writes `in/` only, with no `out/` and no sidecar, and `_verify_raw` checks the
 destination archives against the *expected* shifted name and CRC of each
 dataset-2 member computed independently of what the copy reported as written
 (the copy's own `written` set includes dataset 1's members and is not evidence
-about dataset 2). An analysed dataset 1 followed by a raw dataset 2
+about dataset 2). It also returns the dataset-2 images the schema could not shift
+(no timepoint field), which `execute_plan` names in the log and counts in the
+summary, since they land unchanged and verification cannot call that wrong. Two
+datasets that name one well differently (`A01.zip`, `A1.zip`) are refused at
+planning (`_refuse_mixed_spelling`), because the merged archive's members would
+carry both spellings. A raw merge writes no `derived_from` (there is no sidecar);
+with no acquisition records either, the log says the gap is recorded nowhere else.
+An analysed dataset 1 followed by a raw dataset 2
 (`plan.ds2_raw`) keeps dataset 1's outputs untouched, adds dataset 2's images
 to `in/`, writes no "missing CSV" warning for dataset 2, and leaves its
 timepoints for an incremental Analyze run. A raw dataset 1 before an analysed

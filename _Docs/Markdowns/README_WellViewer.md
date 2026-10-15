@@ -6032,8 +6032,11 @@ How it works:
    new, empty folder, different from both datasets. Both originals are left
    untouched either way.
 2. Check the **Gap** field. It is the time between dataset 1's *last*
-   timepoint and dataset 2's *first*, written like `24h`, `90m`, `1d 6h` or a
-   bare number of hours. It comes pre-filled with the best answer available —
+   timepoint and dataset 2's *first*, written like `24h`, `90m`, `1.5d`, `1d 6h 30m` or a
+   bare number of hours (a comma works as the decimal point, `1,5`). Anything
+   that could be read two ways, such as `6h30`, `12:30`, `1d6` or `1,500`, is
+   refused with a message and never guessed, and the field works to the whole
+   minute. It comes pre-filled with the best answer available —
    the gap between the two acquisitions' recorded start times when both
    datasets carry an acquisition record, otherwise dataset 1's usual interval
    — and says which it used. Type over it with the real gap whenever you know
@@ -6091,6 +6094,12 @@ What it does to the data:
   archive. When the datasets carry `in/acquisition.json`, the merged record is
   written and checked against the archives; if only one of them has a record,
   the log says so and the merged dataset has none rather than a half-true one.
+  A raw merge has no sidecar to record the gap in, so when neither dataset has a
+  record the gap you entered exists only in the run log, and the log says that.
+  An image of dataset 2 whose name carries no timepoint cannot be shifted: it is
+  copied unchanged, named in the log and counted in the summary. Datasets that
+  spell one well differently (`A01.zip` against `A1.zip`) are refused, because
+  the merged file names would carry two spellings of it.
 - **Analysed dataset 1, raw dataset 2.** Dataset 1's results are kept exactly
   as they are and dataset 2's images are added to `in/`. Nothing of dataset 2
   is analysed yet; run Analyze on the destination and only the new timepoints

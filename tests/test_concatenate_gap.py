@@ -117,3 +117,49 @@ def test_a_bad_gap_is_refused_with_the_reason(text, message):
 def test_the_gap_text_the_field_shows_reads_back_to_the_same_gap():
     for hours in (6.0, 24.0, 30.0, 26.5, 0.5):
         assert cc.parse_gap_hours(cc.format_gap(hours)) == hours
+
+
+@pytest.mark.parametrize("text, hours", [
+    ("6", 6.0), ("24h", 24.0), ("90m", 1.5), ("1.5d", 36.0), ("1d 6h", 30.0), ("1d6h30m", 30.5),
+    ("2 days 3 hours", 51.0), ("1,5", 1.5), ("0,5h", 0.5), ("  36 H ", 36.0), ("45 min", 0.75),
+    ("1h 30m", 1.5), (".5", 0.5)])
+def test_typed_gaps_are_read_as_stated(text, hours):
+    assert cc.parse_gap_hours(text) == pytest.approx(hours)
+
+
+@pytest.mark.parametrize("text", [
+    "6h30", "12:30", "1d6", "2d 6", "abc7", "T5", "1_0", "1,500", "1,5.5", "6h 1d", "1h 1h", "6x", "h", "1d,6h", ",5",
+    "nan", "inf", "-3", "0", "0h", "24h 30", "1e3", "5 5"])
+def test_gaps_that_could_be_misread_are_refused_not_guessed(text):
+    # Each of these used to be read as a number by the timepoint-label grammar's trailing-digit
+    # fallback ('6h30' as 30 hours, '12:30' as 30, '1d6' as 6) and shifted every dataset 2 timepoint.
+    with pytest.raises(cc.ConcatError):
+        cc.parse_gap_hours(text)
+
+
+def test_an_implausibly_long_gap_is_refused_as_a_unit_typo():
+    with pytest.raises(cc.ConcatError, match="ten years"):
+        cc.parse_gap_hours("240000")
+    assert cc.parse_gap_hours("87600") == 87600.0
+
+
+@pytest.mark.parametrize("hours, text", [
+    (24.0, "24h"), (1.5, "1h 30m"), (0.75, "45m"), (100 + 1 / 60, "100h 1m"), (9999.99, "9999h 59m"),
+    (10000.5, "10000h 30m"), (25.016666, "25h 1m"), (0.0, "0h")])
+def test_a_formatted_gap_reads_back_to_the_same_minute(hours, text):
+    assert cc.format_gap(hours) == text
+    if hours:                                    # a zero gap is formatted but never accepted back
+        assert cc.parse_gap_hours(text) == pytest.approx(round(hours * 60) / 60)
+
+
+def test_the_prefilled_gap_is_exactly_what_the_merge_uses(tmp_path):
+    # Dataset 1's timepoints are 24.0067 h apart (a stage that takes a few seconds longer than
+    # its schedule). The field shows minutes, so the default used must be the minute-rounded one;
+    # otherwise the page says 24h and the merge shifts by 24.0067 h.
+    _dataset(tmp_path / "d1", ["0h", "24.0067h"])
+    _dataset(tmp_path / "d2", ["0h"])
+    ds1, ds2, info1, info2, _ = cc.open_pair(tmp_path / "d1", tmp_path / "d2")
+    default = cc.default_gap(ds1, ds2, info1, info2)
+    assert default.hours == 24.0 and cc.format_gap(default.hours) == "24h"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest")
+    assert plan.gap_hours == 24.0

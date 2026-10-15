@@ -8688,10 +8688,14 @@ a tenth of the template's central level. It refuses (`ValueError`) a template wh
 central level is not positive and finite, one covering less than the largest site's
 reach, or one with a non-finite value inside that reach, because each would leave part
 of a site at 1.0, which reads as "empty". Build the template with
-`interior_radius_px = SUPPRESSION_RADIUS` times the site radius.
+`template_half(nominal_radius)` as the crop half-width (it leaves 30 % headroom, the most the site
+fit lets a radius differ from nominal) and `interior_radius_px = SUPPRESSION_RADIUS` times the
+nominal radius; `fits_template` splits off the sites a template cannot cover, so one oversize
+site is reported unmeasured instead of failing the tile.
 
 **Confluence without segmentation.** `texture_threshold` is the median plus five robust
-standard deviations of the smoothed departure from 1 over the interiors (0.9 of the
+standard deviations of the smoothed departure from 1 (never under 0.02, so a noise-free flat tile does not call a
+whisper a cell; a site with a non-finite pixel is neither calibration nor measured) over the interiors (0.9 of the
 radius) of the sites known to be empty; `site_confluence` is the share of a site's
 interior above it. It is `None`, not zero, with no empty site to calibrate against or with under half
 the interior on the image (a quadrant is not a site); 0.0 is a measurement. Because "departs from an empty nanowell"
@@ -8702,7 +8706,9 @@ makes it a monotone measure of loading rather than an area.
 **Counts.** `segment_tile` makes one segmenter call on the whole rim-suppressed tile
 (`cellpose_segmenter` is the production segmenter and imports `pipeline.cellpose` only
 when called). `count_cells` keeps a label only when its centroid lies in the interior of
-a site the tile **owns** (`ownership_report` of 6.2f); a cell in the overlap of two tiles
+a site the tile **owns** (`owned_indices(report.owners, tile)` from the `ownership_report` of
+6.2f; fused sites have no owner and are counted by no tile until they are segmented on a blended
+crop, tracker C14, so `site_state` sees an undefined count for them); a cell in the overlap of two tiles
 is therefore counted by the one tile that owns the site, and a cell on a rim or between
 sites belongs to none. A site with no cell is a zero, not an absence; an owned site with no geometry in the
 tile is an error, not a missing key.

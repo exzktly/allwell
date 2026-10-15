@@ -384,3 +384,74 @@ def test_touching_cells_do_not_set_the_isolated_cell_size():
     labels[40:46, 40:46] = 3                                     # alone: 36 px
     counts = {0: nm.SiteCount(0, 3, (1, 2, 3))}
     assert nm.isolated_cell_area_um2(labels, PX, counts) == 36.0
+
+
+# ── second review ───────────────────────────────────────────────────────────
+def test_a_nan_hole_in_the_rim_image_is_undefined_not_empty():
+    rim = np.ones((190, 190))
+    x, y = CENTRES[5]
+    rim[int(y) - 3:int(y) + 3, int(x) - 3:int(x) + 3] = np.nan               # a stitching gap in site 5
+    cut = nm.texture_threshold(rim, PX, GEOMS)
+    assert cut is not None and np.isfinite(cut)                              # the other 15 sites still calibrate
+    conf = nm.site_confluence(rim, PX, GEOMS, cut)
+    assert conf[5] is None and conf[4] == 0.0 and conf[6] == 0.0             # the hole does not spread to neighbours
+    assert nm.texture_threshold(rim, PX, [GEOMS[5]]) is None                 # a site with a hole is no calibration
+    # A hole just outside site 4's interior: smoothing would carry it in if it were not made flat first.
+    x4, y4 = CENTRES[4]
+    near = np.ones((190, 190))
+    near[int(y4) - 1:int(y4) + 1, int(x4) + 12:int(x4) + 14] = np.nan
+    assert np.isfinite(nm._departure(near)).all()
+    assert np.isfinite(nm.texture_threshold(near, PX, [GEOMS[4]]))
+
+
+def test_a_noise_free_flat_tile_does_not_call_a_whisper_a_cell():
+    rim = np.ones((190, 190))
+    rim[int(CENTRES[2][1]), int(CENTRES[2][0])] += 1e-9
+    cut = nm.texture_threshold(rim, PX, GEOMS)
+    assert cut == nm.MIN_TEXTURE_THRESHOLD
+    assert nm.site_confluence(rim, PX, GEOMS, cut)[2] == 0.0
+
+
+@pytest.mark.parametrize("fitted_radius", [10.0, 10.5, 12.5, 13.0])
+def test_a_template_built_with_headroom_covers_every_radius_the_fit_accepts(fitted_radius):
+    # Nominal 10 px; the site fit accepts up to +30 %. Crops are cut the documented way.
+    centres = _centres()
+    nominal = 10.0
+    image = _paint(centres)
+    crops = nm.site_crops(image, PX, centres, nm.template_half(nominal))
+    template = nm.build_template(crops, interior_radius_px=nm.SUPPRESSION_RADIUS * nominal, min_sites=2)
+    geoms = [SiteGeometry(i, c, fitted_radius if i == 0 else nominal, FITTED) for i, c in enumerate(centres)]
+    rim = nm.rim_suppress(image, PX, template, geoms)
+    assert rim.shape == image.shape
+
+
+def test_a_site_the_template_cannot_cover_is_split_off_not_left_to_fail_the_tile():
+    template = _template_of(np.full((25, 25), 0.5), 12)
+    geoms = [SiteGeometry(0, (30.0, 30.0), 8.0, FITTED), SiteGeometry(1, (90.0, 30.0), 13.0, FITTED)]
+    fit, big = nm.fits_template(template, geoms, pixel_size_um=PX)
+    assert [g.index for g in fit] == [0] and [g.index for g in big] == [1]
+    nm.rim_suppress(np.ones((120, 60)), PX, template, fit)
+    with pytest.raises(ValueError):
+        nm.rim_suppress(np.ones((120, 60)), PX, template, geoms)
+
+
+def test_ownership_report_feeds_count_cells_through_owned_indices():
+    from pipeline.tile_grid import RecordedTile, ownership_report, place_from_record
+
+    width = 190.0
+    plan = place_from_record([RecordedTile("L", (0.0, 0.0)), RecordedTile("R", (175.0, 0.0))],
+                             tile_size_px={"x": width, "y": width}, pixel_size_um={"x": 1.0, "y": 1.0})
+    sites = np.array(list(CENTRES) + [(182.0, 70.0)])           # the last one straddles the seam
+    report = ownership_report(plan, sites, 24.0, 2.0)
+    left = nm.owned_indices(report.owners, "L")
+    right = nm.owned_indices(report.owners, "R")
+    assert left and not (left & right)                                       # nobody is owned twice
+    fused = {i for i, o in enumerate(report.owners) if o is None}
+    assert 16 in fused and not (left | right) & fused                     # a fused site is in nobody's set
+    labels = np.zeros((190, 190), dtype=int)
+    i = min(left)
+    x, y = CENTRES[i]
+    labels[int(y) - 1:int(y) + 2, int(x) - 1:int(x) + 2] = 1
+    counts = nm.count_cells(labels, PX, GEOMS, owned=left)
+    assert counts[i].n_cells == 1 and set(counts) == left
+    assert nm.count_cells(labels, PX, GEOMS, owned=right).keys() == right    # the other tile does not count it

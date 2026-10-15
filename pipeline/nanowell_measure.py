@@ -53,6 +53,11 @@ TEXTURE_SIGMAS = 5.0
 #: The two counts disagree when they differ by more than this share of the larger, and by at least one cell.
 COUNT_DISAGREEMENT = 0.3
 
+#: A template is built to cover a site this much larger than nominal: the site fit accepts a radius up to 30 % off.
+TEMPLATE_HEADROOM = 1.3
+#: Below this a departure from the template is division noise, not texture (a flat noise-free tile has a spread of 0).
+MIN_TEXTURE_THRESHOLD = 0.02
+
 EMPTY = "empty"
 MEASURED = "measured"
 OCCLUDED = "occluded"
@@ -82,6 +87,39 @@ def site_crops(image, pixel_size_um: float, centres_um, half: int) -> np.ndarray
         xs = np.broadcast_to((cx + offsets)[None, :], out.shape[1:])
         out[k] = ndimage.map_coordinates(image, [ys, xs], order=1, mode="constant", cval=np.nan)
     return out
+
+
+def template_half(site_radius_px: float) -> int:
+    """The crop half-width to build a template with: it must reach every site :func:`rim_suppress` will see.
+
+    The reach is ``SUPPRESSION_RADIUS`` times the radius, and fitted radii run up to ``TEMPLATE_HEADROOM``
+    times nominal, so a template built at exactly the nominal reach rejects the first slightly large site.
+    """
+    return int(math.ceil(SUPPRESSION_RADIUS * TEMPLATE_HEADROOM * site_radius_px)) + 1
+
+
+def owned_indices(owners, tile: str) -> set[int]:
+    """The site indices *tile* owns, from ``OwnershipReport.owners`` (one tile name, or None for fused/unimaged, per site).
+
+    Sites with owner None are in nobody's set: nothing counts them here (fused sites are segmented on
+    a blended crop, tracker C14), so their count is absent, which :func:`site_state` reads as undefined.
+    The indices are positions in the list the report was made from, so the geometries passed to
+    :func:`count_cells` must carry the same indices (all sites of the well, not a per-tile renumbering).
+    """
+    return {i for i, owner in enumerate(owners) if owner == tile}
+
+
+def fits_template(template: Template, geometries, *, radius: float = SUPPRESSION_RADIUS, pixel_size_um: float):
+    """Split *geometries* into (those the template covers, those it does not).
+
+    :func:`rim_suppress` refuses a site larger than the template, because leaving it flat would read
+    as empty; a caller with a mixed list uses this to suppress what fits and to report the rest as
+    unmeasured.
+    """
+    fit, too_large = [], []
+    for g in geometries:
+        (fit if radius * g.radius_um / pixel_size_um <= template.half else too_large).append(g)
+    return fit, too_large
 
 
 def _disk(half: int, radius: float) -> np.ndarray:
@@ -221,8 +259,17 @@ def rim_suppress(image, pixel_size_um: float, template: Template, geometries,
 
 # ── C3: confluence without segmentation ──────────────────────────────────────
 def _departure(rim_image, smoothing: float = 1.0) -> np.ndarray:
+    """Smoothed |rim - 1|; non-finite input pixels are flat (1.0) here so they cannot spread. Callers check
+    :func:`_finite_interior` separately, because a flat stand-in must never read as a measurement."""
     from scipy import ndimage
-    return np.abs(ndimage.gaussian_filter(np.asarray(rim_image, dtype=np.float64) - 1.0, smoothing))
+    rim = np.asarray(rim_image, dtype=np.float64)
+    rim = np.where(np.isfinite(rim), rim, 1.0)
+    return np.abs(ndimage.gaussian_filter(rim - 1.0, smoothing))
+
+
+def _all_finite(rim_image, pixel_size_um, g, fraction) -> bool:
+    ys, xs = _interior_pixels(np.shape(rim_image), pixel_size_um, g, fraction)
+    return bool(len(ys)) and bool(np.isfinite(np.asarray(rim_image)[ys, xs]).all())
 
 
 def _interior_pixels(shape, pixel_size_um, g, fraction):
@@ -253,12 +300,15 @@ def texture_threshold(rim_image, pixel_size_um: float, empty_geometries, *, sigm
 
     The departure (the smoothed absolute difference of the rim-suppressed image from 1) is
     collected over the interiors of the sites known to be empty; the threshold is its median plus
-    *sigmas* robust standard deviations (1.4826 times the median absolute deviation). ``None``
-    without any empty site: there is then nothing to call texture against.
+    *sigmas* robust standard deviations (1.4826 times the median absolute deviation), never under
+    ``MIN_TEXTURE_THRESHOLD``. Empty sites with a non-finite pixel in the interior are not used. ``None``
+    without any usable empty site: there is then nothing to call texture against.
     """
     departure = _departure(rim_image)
     values = []
     for g in empty_geometries:
+        if not _all_finite(rim_image, pixel_size_um, g, fraction):
+            continue                                            # a site with a hole is not a calibration
         ys, xs = _interior_pixels(departure.shape, pixel_size_um, g, fraction)
         values.append(departure[ys, xs])
     if not values:
@@ -267,21 +317,22 @@ def texture_threshold(rim_image, pixel_size_um: float, empty_geometries, *, sigm
     if not len(pooled):
         return None
     median = float(np.median(pooled))
-    return median + sigmas * 1.4826 * float(np.median(np.abs(pooled - median)))
+    return max(median + sigmas * 1.4826 * float(np.median(np.abs(pooled - median))), MIN_TEXTURE_THRESHOLD)
 
 
 def site_confluence(rim_image, pixel_size_um: float, geometries, threshold: float | None, *,
                     fraction: float = INTERIOR_FRACTION) -> list[float | None]:
     """Per site, the share of its interior whose departure from the template exceeds *threshold*.
 
-    ``None`` for a site with under half its interior on the image, and for every site when there is
-    no threshold. 0.0 is a measurement: an empty nanowell.
+    ``None`` for a site with under half its interior on the image or any non-finite pixel in it, and
+    for every site when there is no threshold. 0.0 is a measurement: an empty nanowell.
     """
     departure = _departure(rim_image)
     out = []
     for g in geometries:
         ys, xs = _interior_pixels(departure.shape, pixel_size_um, g, fraction)
-        if threshold is None or not _covered(len(ys), pixel_size_um, g, fraction):
+        if (threshold is None or not _covered(len(ys), pixel_size_um, g, fraction)
+                or not _all_finite(rim_image, pixel_size_um, g, fraction)):
             out.append(None)
         else:
             out.append(float(np.mean(departure[ys, xs] > threshold)))
@@ -331,7 +382,7 @@ def count_cells(labels, pixel_size_um: float, geometries, *, owned=None,
     """Cells per site: those whose centroid lies in the interior of an owned site.
 
     *geometries* is the tile's list of sites (their ``index`` is the site's identity across
-    tiles). *owned* is the set of site indices this tile owns (``ownership_report``): a site
+    tiles). *owned* is the set of site indices this tile owns (:func:`owned_indices` of ``ownership_report``): a site
     another tile owns is not counted here at all, so a cell in the overlap of two tiles is
     counted by exactly one of them. ``None`` counts every site given, which is right only for
     one tile. A site with no cell returns ``n_cells=0``. Cells straddling the rim, or lying

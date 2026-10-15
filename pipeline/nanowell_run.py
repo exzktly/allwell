@@ -371,8 +371,9 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
         threshold = nm.texture_threshold(rim, px, mine) if mine else None
         confluence = dict(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, threshold)))
         area = nm.area_estimate(labels, px, fit_sites, counts)
+        channel_images = {c: img for c, f in (channels or {}).items() if (img := f(owner)) is not None}
         table = nm.cell_table(labels, px, fit_sites, counts, {g.index: addresses[g.index] for g in fit_sites},
-                              tile_origin_um=(left, top))
+                              tile_origin_um=(left, top), intensity=channel_images or None)
         n = len(table["label"])
         table["fov"] = [owner] * n
         for old, new in (("address_q", "nw_q"), ("address_r", "nw_r"), ("x_um", "well_x_um"), ("y_um", "well_y_um")):
@@ -383,9 +384,9 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
         for name, values in table.items():
             cell_columns.setdefault(name, []).extend(values)
         fluorescence = {}
-        for channel, loader in (channels or {}).items():
+        for channel, image in channel_images.items():
             fluorescence[channel] = {f.index: f for f in nm.site_fluorescence(
-                loader(owner), px, fit_sites, {g.index for g in mine})}
+                image, px, fit_sites, {g.index for g in mine})}
         for g in fit_sites:
             contents[g.index] = {"n_cells": counts[g.index].n_cells, "confluence": confluence[g.index],
                                  "area": area[g.index], "fluor": {c: f[g.index] for c, f in fluorescence.items()},

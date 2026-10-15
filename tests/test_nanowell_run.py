@@ -5,7 +5,7 @@ import pytest
 
 from pipeline import nanowell_run as nr
 from tests._nanowell_run_fixture import (
-    DIAMETER, PITCH, PX, build_well, paint_cell, record_for, threshold_segmenter,
+    build_well, paint_cell, record_for, threshold_segmenter,
 )
 
 SETTINGS = nr.NanowellSettings("100um")
@@ -14,7 +14,7 @@ SETTINGS = nr.NanowellSettings("100um")
 @pytest.fixture(scope="module")
 def well():
     rendered, record = build_well()
-    located = nr.locate_timepoint("T0", record, "A1", rendered.images, SETTINGS)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
     return rendered, record, located
 
 
@@ -38,7 +38,7 @@ def test_a_missing_tile_is_an_incomplete_grid_and_nothing_is_processed():
     rendered, _ = build_well()
     record = record_for(rendered, drop=("F3",))
     images = {k: v for k, v in rendered.images.items() if k != "F3"}
-    located = nr.locate_timepoint("T0", record, "A1", images, SETTINGS)
+    located = nr.locate_timepoint("T0", record, "A01", images, SETTINGS)
     assert located.status == nr.INCOMPLETE_GRID and "F3" not in located.positions or located.status == nr.BAD_GRID
     assert located.fit is None and located.indexed == ()
 
@@ -46,19 +46,19 @@ def test_a_missing_tile_is_an_incomplete_grid_and_nothing_is_processed():
 def test_a_tile_in_the_record_without_an_image_is_named():
     rendered, record = build_well()
     images = {k: v for k, v in rendered.images.items() if k != "F2"}
-    located = nr.locate_timepoint("T0", record, "A1", images, SETTINGS)
+    located = nr.locate_timepoint("T0", record, "A01", images, SETTINGS)
     assert located.status == nr.NO_IMAGES and "F2" in located.reason
 
 
 def test_a_timepoint_the_record_does_not_hold_has_a_status_not_an_exception(well):
     rendered, record, _ = well
-    located = nr.locate_timepoint("T9", record, "A1", rendered.images, SETTINGS)
+    located = nr.locate_timepoint("T9", record, "A01", rendered.images, SETTINGS)
     assert located.status == nr.NO_RECORD
 
 
 def test_the_wrong_plate_format_is_refused_by_name(well):
     rendered, record, _ = well
-    located = nr.locate_timepoint("T0", record, "A1", rendered.images, nr.NanowellSettings("50um"))
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, nr.NanowellSettings("50um"))
     assert located.status in (nr.FORMAT_MISMATCH, nr.NO_LATTICE) and located.indexed == ()
 
 
@@ -67,7 +67,7 @@ def test_every_roster_site_has_a_row_with_its_address_and_the_cell_painted_into_
     truth = dict(zip(rendered.array.addresses, rendered.sites_um))
     target = (1, 2)
     paint_cell(rendered, truth[target], dx_um=3.0, dy_um=-2.0)
-    located = nr.locate_timepoint("T0", record, "A1", rendered.images, SETTINGS)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
     measured = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
                                     segmenter=threshold_segmenter())
     rows = {(r["nw_q"], r["nw_r"]): r for r in measured.sites}
@@ -89,7 +89,7 @@ def test_a_cell_in_the_overlap_of_two_tiles_is_counted_by_one_row_only():
     sites = np.asarray(rendered.sites_um)
     pick = int(np.argmin(np.abs(sites[:, 0] - seam_x) + 0.2 * np.abs(sites[:, 1] - rendered.plan.extent_um[1] / 2)))
     paint_cell(rendered, sites[pick])
-    located = nr.locate_timepoint("T0", record, "A1", rendered.images, SETTINGS)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
     measured = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
                                     segmenter=threshold_segmenter())
     total = sum(r["n_cells"] for r in measured.sites if r["n_cells"])
@@ -99,7 +99,7 @@ def test_a_cell_in_the_overlap_of_two_tiles_is_counted_by_one_row_only():
 def test_a_fused_site_has_an_undefined_count_not_zero():
     # 3 % overlap (90 um) is less than a nanowell (100 um) + margin: sites on the seam cannot be owned.
     rendered, record = build_well(overlap=0.03)
-    located = nr.locate_timepoint("T0", record, "A1", rendered.images, SETTINGS)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
     measured = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
                                     segmenter=threshold_segmenter())
     fused = [r for r in measured.sites if r["fused"]]
@@ -118,7 +118,7 @@ def test_a_well_runs_every_timepoint_against_one_shared_roster_and_joins_them_by
     record["timepoints"].update(again_record["timepoints"])
     record["tiles"] += again_record["tiles"]
     images = {("T0", t): v for t, v in rendered.images.items()} | {("T1", t): v for t, v in again.images.items()}
-    outcome = nr.run_well("A1", record, ["T0", "T1"], lambda tp, tile: images.get((tp, tile)), SETTINGS,
+    outcome = nr.run_well("A01", record, ["T0", "T1"], lambda tp, tile: images.get((tp, tile)), SETTINGS,
                           segmenter=threshold_segmenter())
     assert [outcome.timepoints[t]["status"] for t in ("T0", "T1")] == ["ok", "ok"]
     rows = {tp: {(r["nw_q"], r["nw_r"]) for r in outcome.sites if r["timepoint"] == tp} for tp in ("T0", "T1")}
@@ -137,7 +137,7 @@ def test_an_incomplete_timepoint_keeps_its_status_and_the_others_still_run():
     record["timepoints"].update(broken_record["timepoints"])
     record["tiles"] += broken_record["tiles"]
     images = {("T0", t): v for t, v in rendered.images.items()} | {("T1", t): v for t, v in broken.images.items()}
-    outcome = nr.run_well("A1", record, ["T0", "T1"], lambda tp, tile: images.get((tp, tile)), SETTINGS,
+    outcome = nr.run_well("A01", record, ["T0", "T1"], lambda tp, tile: images.get((tp, tile)), SETTINGS,
                           segmenter=threshold_segmenter())
     assert outcome.timepoints["T0"]["status"] == "ok"
     assert outcome.timepoints["T1"]["status"] in (nr.INCOMPLETE_GRID, nr.BAD_GRID)
@@ -146,7 +146,7 @@ def test_an_incomplete_timepoint_keeps_its_status_and_the_others_still_run():
 
 def test_an_unaddressed_timepoint_keeps_its_detected_sites_with_no_address():
     rendered, record = build_well()
-    located = nr.locate_timepoint("T0", record, "A1", rendered.images, SETTINGS)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
     located.status = nr.UNADDRESSED                                       # as if no origin evidence had held
     measured = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
                                     segmenter=threshold_segmenter())

@@ -70,7 +70,7 @@ from util.channel_roles import phase_role_conflicts, quantified_channel_tokens
 from util.fov import sort_key as _fov_sort_key
 from pipeline.cli_args import (
     DEFAULT_SEGMENTATION_METHOD,
-    build_parser, qc_options_from_args,
+    build_parser, nanowell_options_from_args, qc_options_from_args,
 )
 from pipeline.input_layout import (
     find_well_folders,
@@ -198,6 +198,7 @@ from pipeline.run_report import (
 )
 from pipeline.completeness import record_run_check
 from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
+from pipeline.nanowell_task import record_nanowell_info
 
 
 def _report_worker_failure(well_label: str, output_dir: Path | None, exc: BaseException) -> None:
@@ -2310,6 +2311,11 @@ def process_well_zip_task(
     if _well_not_started_for_suspend(well_label):
         return [], []
     log.info("Well %s — starting (pid %d)", well_label, os.getpid())
+    if shared_kwargs_template.get("_nanowell"):
+        from pipeline.nanowell_task import run_zip_task
+        return run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token,
+                            fluor_tokens, csv_prefix, schema, sep, settings_key,
+                            grouper=find_image_groups_in_zip, parse=parse_filename)
     tmp_extract = scratch_base_for(output_dir) / f"_tmp_extract_{well_label}"
     tmp_images  = _staging_dir_for(output_dir, well_label, settings_key)
     if force:
@@ -3285,6 +3291,7 @@ def main() -> None:
                 f"{args.segmentation_method}. Name a different {slot} channel, "
                 f"or use --segmentation_method=cellpose_labelfree."
             )
+    nanowell = nanowell_options_from_args(args, parser.error)
     log.info("Schema   : %s  (sep=%r)", args.filename_schema, sep)
     check_acquisition_inputs(input_dir, args.filename_schema, sep)
 
@@ -3318,6 +3325,8 @@ def main() -> None:
             execution_options=vars(args),
         )
         log.info("Wrote sidecar : %s", info_path)
+        if nanowell:
+            record_nanowell_info(info_path, nanowell, input_dir)
     except Exception as exc:  # log but don't abort the run
         log.warning("Could not write %s: %s", PIPELINE_INFO_FILENAME, exc)
 
@@ -3410,6 +3419,7 @@ def main() -> None:
         cellpose_flow_threshold=args.cellpose_flow_threshold,
         cellpose_cellprob_threshold=args.cellpose_cellprob_threshold,
         cellpose_nuclei_channel=args.cellpose_nuclei_channel,
+        _nanowell=nanowell,
         # Private (leading _) so it's filtered out of the process_image_group
         # kwargs but still read by _run_well_worker_pool to seed each worker's
         # StarDist settings via _worker_init/set_params. Mirrors _fov_threads.
@@ -3439,6 +3449,8 @@ def main() -> None:
     consolidate_mixed_to_zips(input_dir, log_fn=lambda m: log.info("%s", m.rstrip()))
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
+    if nanowell and not well_zips:
+        parser.error("--nanowell_format needs the wells as zips (in/<well>.zip); no well zips were found.")
     if well_zips:
         refuse_images_only_in_ignored_folders(input_dir, well_zips)
     refuse_uncovered_wells(blank_groups, well_zips, well_folders)

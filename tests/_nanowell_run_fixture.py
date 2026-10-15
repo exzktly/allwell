@@ -9,7 +9,7 @@ PX = 4.3
 PITCH, DIAMETER = 172.0, 100.0
 
 
-def build_well(rows=2, cols=2, overlap=0.1, tile=(700, 700), *, well="A1", timepoint="T0", seed=1,
+def build_well(rows=2, cols=2, overlap=0.1, tile=(700, 700), *, well="A01", timepoint="T0", seed=1,
                rotation=7.0, cells=0, array_shift_um=(0.0, 0.0), radius_fraction=0.42):
     """``(rendered, record)``; the record holds the mosaic positions the stage reported."""
     plan = TilePlan(rows, cols, tile, overlap, PX)
@@ -20,14 +20,20 @@ def build_well(rows=2, cols=2, overlap=0.1, tile=(700, 700), *, well="A1", timep
     return rendered, record_for(rendered, well=well, timepoint=timepoint)
 
 
-def record_for(rendered, *, well="A1", timepoint="T0", drop=()):
+def record_for(rendered, *, well="A01", timepoint="T0", drop=(), started_at=None):
+    """A valid acquisition record (``util.acquisition_record``) for one rendered well at one timepoint."""
+    from util.acquisition_record import new_record, new_timepoint
+
     plan = rendered.plan
-    tiles = [{"well": well, "timepoint": timepoint, "field": name,
-              "mosaic_xy_px": [left / PX, top / PX], "stage_xy_um": None}
-             for name, (left, top) in rendered.recorded_left_top_um.items() if name not in drop]
-    meta = {"tile_size_px": {"x": plan.tile_px[0], "y": plan.tile_px[1]}, "pixel_size_um": {"x": PX, "y": PX},
-            "declared_overlap_percent": {"x": plan.overlap * 100, "y": plan.overlap * 100}}
-    return {"timepoints": {timepoint: meta}, "tiles": tiles}
+    record = new_record()
+    meta = new_timepoint(started_at=started_at)
+    meta.update(pixel_size_um={"x": PX, "y": PX}, tile_size_px={"x": plan.tile_px[0], "y": plan.tile_px[1]},
+                declared_overlap_percent={"x": plan.overlap * 100, "y": plan.overlap * 100})
+    record["timepoints"][timepoint] = meta
+    record["tiles"] = [{"well": well, "timepoint": timepoint, "field": name,
+                        "mosaic_xy_px": [left / PX, top / PX], "stage_xy_um": None}
+                       for name, (left, top) in rendered.recorded_left_top_um.items() if name not in drop]
+    return record
 
 
 def threshold_segmenter(level=1.2, smooth=1.5, min_px=12):

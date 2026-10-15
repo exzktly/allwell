@@ -162,7 +162,6 @@ from pipeline.io import (
     compress_images_to_zip,
     extract_zip,
     _safe_atomic_text_write,
-    _safe_imwrite,
     _safe_well,
     write_well_csv,
     incremental_done_fov_keys,
@@ -171,7 +170,6 @@ from pipeline.io import (
     merge_images_into_zip,
     merge_well_records,
     remove_directory,
-    save_overlay,
     scratch_base_for,
 )
 from pipeline.fov_checkpoint import (
@@ -639,7 +637,7 @@ def parse_filename(
 # The one image reader lives beside the writers in ``pipeline.io``; the
 # Playground imports it from there too, so a preview reads a frame as a run does.
 from pipeline.io import (  # noqa: E402
-    load_2d_gray, load_2d_gray_with_ceiling,
+    load_2d_gray_with_ceiling,
 )
 
 # Empty-well (blank) sampling, the two model builders, the per-image lookup and
@@ -906,31 +904,12 @@ from pipeline.auto_threshold_pass import (
     run_auto_threshold_pass,
 )
 from util.aw_safe import swallowed
+from pipeline.output_images import write_processed_images as _write_processed_images
+from pipeline.output_policy import (
+    DEFAULT_PHASE_OUTPUT, DEFAULT_TOPHAT_DTYPE, LEGACY_PHASE_OUTPUT,
+    LEGACY_TOPHAT_DTYPE,
+)
 
-
-def build_processed_output_path(
-    src_path: Path,
-    *,
-    output_dir: Path,
-    suffix: str = "",
-    ext_override: str | None = None,
-) -> Path:
-    """Build output path as input stem + suffix + extension.
-
-    Pass ``suffix="_tophat"`` / ``"_labels"`` etc. directly. The default
-    extension is copied from *src_path* so processed outputs preserve the
-    source file type (``.tif`` / ``.tiff`` etc.) unless explicitly overridden.
-
-    (The reader-side ``image_identity.ROLE_CATALOG`` is the canonical suffix
-    table. A previous "preferred" catalog-driven branch here imported it from
-    ``review`` — a violation of the §6.2 pipeline-self-sufficiency contract,
-    and dead anyway since no caller passed ``role=``. If catalog-driven *writing*
-    is ever revived, move the catalog to a Qt-free ``*_core`` module first.)
-    """
-    ext = str(ext_override) if ext_override is not None else str(src_path.suffix)
-    if not ext:
-        ext = ".tif"
-    return output_dir / f"{src_path.stem}{suffix}{ext}"
 
 # ---------------------------------------------------------------------------
 # Per-image worker (runs in a subprocess)
@@ -948,7 +927,11 @@ def build_processed_output_path(
 def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
     """Load the nuclear frame + every fluor channel; verify shape consistency.
 
-    Returns ``(nir_raw, fluor_raws, acquisition)``. *acquisition* holds the
+    Returns ``(nir_raw, fluor_raws, acquisition, ceilings)``. *ceilings* is
+    the integer maximum of each input file's stored type — the nuclear frame's
+    first, then one per fluor channel, ``None`` for a float input — which the
+    writer needs to store a corrected frame back in its input's type
+    (:func:`pipeline.output_images.storage_array`). *acquisition* holds the
     two metrics that can only be read **here**, and the two reasons are
     different:
 
@@ -1001,9 +984,11 @@ def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
 
     # Load every fluorescent channel and verify shape consistency.
     fluor_raws: list[np.ndarray] = []
+    ceilings: list[float | None] = [_ceiling]
     for fp in fluor_paths:
         _t = time.perf_counter()
-        img = load_2d_gray(fp)
+        img, fluor_ceiling = load_2d_gray_with_ceiling(fp)
+        ceilings.append(fluor_ceiling)
         if img.shape != nir_raw.shape:
             raise ValueError(
                 f"Shape mismatch: nuclear {nir_raw.shape} vs "
@@ -1011,7 +996,7 @@ def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
             )
         fluor_raws.append(img)
         log.info("  load fluor:  %.1f s  %s", time.perf_counter() - _t, fp.name)
-    return nir_raw, fluor_raws, acquisition
+    return nir_raw, fluor_raws, acquisition, ceilings
 
 
 def _correct_image_group(
@@ -1211,97 +1196,6 @@ def _segment_image_group(
     return labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask
 
 
-def _write_processed_images(
-    *, save_tophat_images, nuclear_path, fluor_paths, fluor_tokens, output_dir,
-    nir_raw, nir_corr, fluor_tophat, fluor_corr, smfish_set, segmentation_method,
-    nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask, labels,
-    background_method,
-):
-    """Write the background-corrected tifs, label image, and overlay."""
-    # Save QC images.
-    # Keep schema tokens in output stems so output names stay harmonized with
-    # input naming conventions and schema-driven resolvers.
-    #
-    # NB: the ``_tophat`` suffix is **legacy naming** — these are the
-    # *background-corrected* images (nir_corr / fluor_tophat), i.e. the output of
-    # whatever --background method ran (top_hat / sliding_disk / empty_well /
-    # none, after any flat-field), not specifically a top-hat. The suffix is kept
-    # because the Review side reads ``_tophat`` files; only the label is stale.
-    _t = time.perf_counter()
-    if save_tophat_images:
-        th_nir_path = build_processed_output_path(
-            nuclear_path,
-            output_dir=output_dir,
-            suffix="_tophat",
-        )
-        _safe_imwrite(th_nir_path, np.clip(nir_corr, 0, None).astype(np.float32))
-        for fc, tok, fp in zip(fluor_tophat, fluor_tokens, fluor_paths):
-            th_path = build_processed_output_path(
-                fp,
-                output_dir=output_dir,
-                suffix="_tophat",
-            )
-            _safe_imwrite(th_path, np.clip(fc, 0, None).astype(np.float32))
-        for i, (tok, fp) in enumerate(zip(fluor_tokens, fluor_paths)):
-            if tok in smfish_set:
-                smfish_path = build_processed_output_path(
-                    fp,
-                    output_dir=output_dir,
-                    suffix="_smfish",
-                )
-                _safe_imwrite(smfish_path, np.clip(fluor_corr[i], 0, None).astype(np.float32))
-        if segmentation_method == "stardist_seeded_watershed_cell":
-            assert nuclear_points is not None
-            assert cytoplasm_tophat is not None
-            assert cytoplasm_binary_mask is not None
-            _safe_imwrite(
-                build_processed_output_path(
-                    nuclear_path,
-                    output_dir=output_dir,
-                    suffix="_nuclear_points",
-                ),
-                nuclear_points.astype(np.int32),
-            )
-            _safe_imwrite(
-                build_processed_output_path(
-                    nuclear_path,
-                    output_dir=output_dir,
-                    suffix="_cytoplasm_tophat",
-                ),
-                np.clip(cytoplasm_tophat, 0, None).astype(np.float32),
-            )
-            _safe_imwrite(
-                build_processed_output_path(
-                    nuclear_path,
-                    output_dir=output_dir,
-                    suffix="_cytoplasm_otsu_mask",
-                ),
-                cytoplasm_binary_mask.astype(np.uint8),
-            )
-        log.info("  bg-corrected tifs written  (method=%s, suffix=_tophat [legacy])",
-                 background_method)
-    _safe_imwrite(
-        build_processed_output_path(
-            nuclear_path,
-            output_dir=output_dir,
-            suffix="_labels",
-        ),
-        labels,
-    )
-    save_overlay(
-        nir_raw,
-        labels,
-        build_processed_output_path(
-            nuclear_path,
-            output_dir=output_dir,
-            suffix="_overlay",
-            ext_override=".png",
-        ),
-    )
-    log.info("  save:        %.1f s", time.perf_counter() - _t)
-
-
-
 def _quantify_image_group(
     *, labels, fluor_tophat, fluor_tokens, nir_corr, nuclear_path, schema, sep,
     shape_features, measure_focus: bool = True,
@@ -1437,6 +1331,8 @@ def process_image_group(
     cellpose_cellprob_threshold: float = 0.0,
     cellpose_nuclei_channel: str = "",
     phase_token: str = "",
+    phase_output: str = DEFAULT_PHASE_OUTPUT,
+    tophat_dtype: str = DEFAULT_TOPHAT_DTYPE,
 ) -> tuple[list[dict], dict]:
     """
     Process one nuclear image together with an arbitrary number of fluorescent
@@ -1455,13 +1351,16 @@ def process_image_group(
     *tophat_fluor*       : per-channel top-hat enable flags.
     *tophat_radius_fluor*: per-channel top-hat radii.
     *phase_token*        : if set, the channel with this token (nuclear or one
-                           of the fluor channels) skips ALL background correction
-                           and is resaved from the original image.
+                           of the fluor channels) skips ALL background correction;
+                           under *phase_output* ``reference`` no ``_tophat`` is
+                           written for it, ``copy`` resaves the original.
+    *tophat_dtype*       : ``source`` stores each ``_tophat`` in its input's
+                           integer type where that is lossless up to rounding.
 
     Output CSV columns for each fluor channel are prefixed with the lower-cased
     token, e.g. "gfp_total_intensity", "mcherry_mean_intensity".
     """
-    nir_raw, fluor_raws, acquisition = _load_image_group(
+    nir_raw, fluor_raws, acquisition, ceilings = _load_image_group(
         nuclear_path, fluor_paths, fluor_tokens)
 
     nir_raw, fluor_raws, nir_corr, fluor_tophat, fluor_corr = _correct_image_group(
@@ -1509,7 +1408,10 @@ def process_image_group(
         segmentation_method=segmentation_method, nuclear_points=nuclear_points,
         cytoplasm_tophat=cytoplasm_tophat,
         cytoplasm_binary_mask=cytoplasm_binary_mask, labels=labels,
-        background_method=background_method,
+        background_method=background_method, nuclear_token=nuclear_token,
+        phase_token=phase_token, phase_output=phase_output,
+        tophat_dtype=tophat_dtype, nuclear_ceiling=ceilings[0],
+        fluor_ceilings=ceilings[1:],
     )
 
     records = _quantify_image_group(
@@ -3026,7 +2928,8 @@ def process_well_folders(
 
 PIPELINE_INFO_FILENAME = "pipeline_info.json"
 # Sidecar schema version. v1 = pre-feature (label-free seg / QC / shape features);
-# v2 = may carry shape_features / qc_options / phase_token. Readers default a
+# v2 = may carry shape_features / qc_options / phase_token / phase_output /
+# tophat_dtype (a missing phase_output reads as "copy"). Readers default a
 # missing value to 1 (see review/domain/viewer_state.read_pipeline_info).
 PIPELINE_INFO_SCHEMA_VERSION = 2
 
@@ -3160,6 +3063,8 @@ def write_pipeline_info(
     qc_options: dict | None = None,
     phase_token: str = "",
     execution_options: dict | None = None,
+    phase_output: str = LEGACY_PHASE_OUTPUT,
+    tophat_dtype: str = LEGACY_TOPHAT_DTYPE,
 ) -> Path:
     """Serialize the run metadata sidecar to ``<output_dir>/pipeline_info.json``."""
     if segmentation_method != "stardist_seeded_watershed_cell":
@@ -3185,6 +3090,11 @@ def write_pipeline_info(
         "shape_features": [str(s).strip().lower() for s in (shape_features or []) if str(s).strip()],
         "qc_options": dict(qc_options or {}),
         "phase_token": str(phase_token or "").strip().lower(),
+        # How the run stored its images (pipeline.output_images): whether the
+        # phase channel's _tophat was written or left to the input archive,
+        # and whether corrected frames went back to their input's integer type.
+        "phase_output": str(phase_output),
+        "tophat_dtype": str(tophat_dtype),
         "segmentation_method": segmentation_method,
         "cytoplasm_token": cytoplasm_token,
         "min_nucleus_area_px": int(min_nucleus_area_px),
@@ -3337,6 +3247,8 @@ def main() -> None:
             shape_features=list(args.shape_features or []),
             qc_options=qc_options_from_args(args),
             phase_token=args.phase_token or "",
+            phase_output=args.phase_output,
+            tophat_dtype=args.tophat_dtype,
             execution_options=vars(args),
         )
         log.info("Wrote sidecar : %s", info_path)
@@ -3393,18 +3305,22 @@ def main() -> None:
     log.info("Fluor channels : %s", ", ".join(fluor_tokens_for_quant))
     log.info("Tophat fluor   : radius=%d, enabled=%s",
              args.tophat_radius_fluor, not args.no_tophat_fluor)
-    log.info("Save tophat    : %s", not args.no_save_tophat)
+    log.info("Save tophat    : %s  (storage=%s, phase=%s)", not args.no_save_tophat,
+             args.tophat_dtype, args.phase_output)
 
     # kwargs forwarded to every process_image_group call.
     shared_kwargs = dict(
         output_dir=output_dir,
         nuclear_token=args.nuclear_token,
         fluor_tokens=fluor_tokens_for_quant,
-        # The phase/brightfield channel (if any) skips background correction and
-        # is resaved from the original. For label-free, nuclear_token was already
+        # The phase/brightfield channel (if any) skips background correction;
+        # --phase_output decides whether its _tophat is written or referenced
+        # from the input archive. For label-free, nuclear_token was already
         # remapped onto this token above, so the same value flags the nuclear
         # slot; for other methods it flags one of the fluor channels.
         phase_token=phase_token.lower(),
+        phase_output=args.phase_output,
+        tophat_dtype=args.tophat_dtype,
         tophat_nir=not args.no_tophat_nir,
         tophat_radius_nir=args.tophat_radius_nir,
         tophat_fluor=tophat_fluor,

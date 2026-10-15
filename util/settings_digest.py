@@ -146,6 +146,19 @@ NOT_KEYED_ON: dict[str, str] = {
     # of the reason it is recorded rather than applied. ``no_focus_metric``,
     # which decides whether the column exists at all, IS keyed.
     "focus_min":             "recorded in the sidecar; the run never acts on it",
+    # How the archived images are stored, never what is computed or which
+    # images a reader can open. Every CSV value is measured from the in-memory
+    # float arrays before anything is saved, so the CSVs are byte-identical
+    # under either value of either option; a phase frame is readable either
+    # way (from out/ when copied, from in/ when referenced); and a _tophat
+    # differs by at most half a count of rounding. Keying on them would also
+    # cost every existing plate a full re-segmentation the first time it is
+    # run after these options appeared, because the parser always sets them
+    # and no digest recorded before them carries them.
+    "phase_output":          "whether the uncorrected phase frame is archived "
+                             "again or read back from the input archive",
+    "tophat_dtype":          "the storage type of the corrected frames, not "
+                             "their values beyond half-count rounding",
 }
 
 

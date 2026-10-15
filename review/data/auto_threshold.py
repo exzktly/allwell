@@ -53,6 +53,7 @@ from pipeline.auto_threshold import (
 )
 from pipeline.threshold_optimize import round_stored_threshold
 from core.safe import swallowed
+from review.data.frame_load import referenced_phase_channel
 
 
 logger = logging.getLogger("review.data.auto_threshold")
@@ -105,6 +106,15 @@ def _iter_well_zips(out_dir: Path) -> list[Path]:
     return out
 
 
+def _with_raw_frames(tophat: dict | None, raw: dict | None) -> dict:
+    """*tophat*, completed from *raw* for every ``(fov, tp)`` it lacks.
+
+    Only ever applied to the referenced phase channel, where the two are the
+    same pixels. An archived ``_tophat`` still wins, so a well an earlier
+    copy-mode run wrote is read from its own archive."""
+    return {**(raw or {}), **(tophat or {})}
+
+
 def _scan_well_images(
     zip_path: Path,
     fluor_token: str,
@@ -121,12 +131,31 @@ def _scan_well_images(
     return mask, tophat
 
 
-def _gather_via_zip(zip_path: Path, channels: list[str], pipeline_info):
-    """Return ``{channel: (mask_refs, fluor_refs)}`` for one well zip."""
+def _input_zip_for(zip_path: Path, in_dir: Path | None) -> Path | None:
+    """The ``<WELL>.zip`` input archive beside *zip_path*'s ``<WELL>_out.zip``."""
+    if in_dir is None or not zip_path.name.endswith("_out.zip"):
+        return None
+    candidate = Path(in_dir) / f"{zip_path.name[: -len('_out.zip')]}.zip"
+    return candidate if candidate.is_file() else None
+
+
+def _gather_via_zip(zip_path: Path, channels: list[str], pipeline_info,
+                    in_dir: Path | None = None):
+    """Return ``{channel: (mask_refs, fluor_refs)}`` for one well zip.
+
+    The referenced phase channel (:func:`referenced_phase_channel`) is
+    completed from the well's input archive in *in_dir*, when there is one.
+    """
+    from review.data.image_discovery import scan_zip_members
+    phase = referenced_phase_channel(pipeline_info)
     out: dict[str, tuple[dict, dict]] = {}
     for ch in channels:
         try:
             m, f = _scan_well_images(zip_path, ch, pipeline_info)
+            in_zip = _input_zip_for(zip_path, in_dir) if ch.lower() == phase else None
+            if in_zip is not None:
+                raw = scan_zip_members(in_zip, ch.lower(), _pipeline_info=pipeline_info)[0]
+                f = _with_raw_frames(f, raw)
         except Exception as exc:
             logger.warning("auto_threshold: %s ch=%s scan failed: %s",
                            zip_path.name, ch, exc)
@@ -144,6 +173,7 @@ def _gather_via_find(target, channels: list[str], pipeline_info):
     """
     well_label, data_dir, in_dir_path = target
     from review.data.image_discovery import find_well_images_and_masks
+    phase = referenced_phase_channel(pipeline_info)
     out: dict[str, tuple[dict, dict]] = {}
     for ch in channels:
         try:
@@ -155,6 +185,8 @@ def _gather_via_find(target, channels: list[str], pipeline_info):
             logger.warning("auto_threshold: well=%s ch=%s discovery failed: %s",
                            well_label, ch, exc)
             continue
+        if ch.lower() == phase:
+            tophat = _with_raw_frames(tophat, _g)
         out[ch] = (mask or {}, tophat or {})
     return out
 
@@ -280,7 +312,8 @@ def compute_auto_thresholds(
             return {}
         _emit(f"Auto-threshold: scanning {len(well_zips)} well(s) for "
               f"channels: {', '.join(channels)}")
-        _scan_one_well = _gather_via_zip
+        def _scan_one_well(z, chans, info):
+            return _gather_via_zip(z, chans, info, in_dir=in_dir_path)
         targets = list(well_zips)
         label_of = lambda t: Path(t).name
 

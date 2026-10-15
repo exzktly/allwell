@@ -25,6 +25,7 @@ import logging
 from pathlib import Path
 
 from pipeline.auto_threshold import estimate_thresholds_from_outputs, no_threshold_reason
+from pipeline.output_policy import DEFAULT_PHASE_OUTPUT, PHASE_OUTPUT_REFERENCE
 from pipeline.threshold_optimize import estimate_thresholds_from_controls
 from util.json_write import write_json_atomic
 
@@ -87,6 +88,20 @@ def _segmentation_tokens(args) -> set[str]:
     return {t for t in toks if t}
 
 
+def _referenced_channels(args) -> list[str]:
+    """Channels whose frames this run left in the input archive, lower-cased.
+
+    The phase channel under ``--phase_output reference``
+    (``pipeline.output_images``): its ``_tophat`` was not archived, so the Otsu
+    estimate must read it from ``<input_dir>/<WELL>.zip``. An *args* that does
+    not state ``phase_output`` — a namespace rebuilt from an older argv — is
+    read at the pipeline's default, because that is what the run applied.
+    """
+    phase = str(getattr(args, "phase_token", "") or "").strip().lower()
+    mode = getattr(args, "phase_output", None) or DEFAULT_PHASE_OUTPUT
+    return [phase] if phase and mode == PHASE_OUTPUT_REFERENCE else []
+
+
 def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list[str],
                             log: logging.Logger) -> dict[str, float]:
     """Write the post-run per-channel ThreshFracOn defaults. Three modes:
@@ -133,6 +148,8 @@ def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list
                 filename_schema=args.filename_schema,
                 filename_sep=args.filename_sep,
                 log=log,
+                input_dir=getattr(args, "input_dir", None),
+                referenced_channels=_referenced_channels(args),
             )
         # Which readout channels the estimate actually produced, before the
         # segmentation channel's unconditional zero joins them — the two say

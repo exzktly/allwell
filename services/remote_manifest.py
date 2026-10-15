@@ -162,6 +162,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/incremental_keys.py",
     "pipeline/well_skip.py",
     "pipeline/io.py",
+    # The per-FOV image writer and the two storage options it applies
+    # (--phase_output / --tophat_dtype); process_microscopy and cli_args
+    # import them at module scope.
+    "pipeline/output_images.py",
+    "pipeline/output_policy.py",
     # Packed OME-TIFF de-interleave. Runs client-side before remote sync (the
     # remote receives ordinary loose TIFs), but listed so the manifest stays a
     # complete mirror of ``pipeline/`` per test_remote_manifest.

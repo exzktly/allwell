@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from analyze.form_chrome import AnalyzeFormChromeMixin
+from analyze.storage_options import build_storage_rows, storage_options
 from analyze.well_scope import build_well_scope_rows, well_scope_options
 from analyze.domain.fields import (  # noqa: F401 — re-exported for analyze.tab
     _INT_FIELDS,
@@ -273,6 +274,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
             "leaves the dataset with no completeness record; Review then says "
             "the check was turned off rather than guessing.")
         sec.layout().addWidget(self._run_check_cb)
+        build_storage_rows(self, sec)
 
     def _build_compute_options_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Compute Options", collapsible=True, collapsed=True)
@@ -680,6 +682,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
             # nothing appended it returns before touching the key.
             incremental=self._incremental_cb.isChecked(),
             **well_scope_options(self),
+            **storage_options(self),
             cpu_only=self._cpu_only_cb.isChecked(),
             allow_low_disk=self._allow_low_disk_cb.isChecked(),
             tf_threads=self._tf_threads_edit.text(),

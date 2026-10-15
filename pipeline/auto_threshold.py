@@ -16,6 +16,7 @@ pipeline-must-be-standalone contract.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import random
@@ -237,20 +238,62 @@ def _index_members(zf, reader: _SchemaReader, channels: set[str]):
     return labels, tophats, unplaceable
 
 
+def _index_input_frames(zf, reader: _SchemaReader, channels: set[str]):
+    """Index an *input* archive's raw frames for *channels*: ``(ch, fov, tp)`` → name.
+
+    The counterpart of :func:`_index_members` for a channel whose corrected
+    image the run deliberately did not archive — the phase channel under
+    ``--phase_output reference`` (``pipeline.output_images``), whose
+    "corrected" frame *is* its raw input frame. Unlike an output archive, an
+    input archive is assembled by the user, so members may sit in
+    subdirectories and are judged by basename; the OS-junk members a file
+    manager leaves behind (``__MACOSX/``, dotfiles) are skipped by the same two
+    rules the output indexer spells out, and a member carrying a pipeline role
+    suffix is not a raw frame.
+    """
+    frames: dict[tuple[str, str, str], str] = {}
+    for name in zf.namelist():
+        if name.endswith("/") or name.startswith("__MACOSX/"):
+            continue
+        base_name = name.rsplit("/", 1)[-1]
+        if not base_name or base_name.startswith(".") or not is_group_image(base_name):
+            continue
+        base = base_name.rpartition(".")[0]
+        if any(base.endswith(s) for s in _ROLE_SUFFIXES):
+            continue
+        key = reader.group_key(base)
+        ch = reader.channel(base)
+        if key != ("", "") and ch in channels:
+            frames.setdefault((ch, *key), name)
+    return frames
+
+
 def _sample_one_well(zf, labels, tophats, *, channels, picked_tps, per_channel,
-                     attempted, decode_failed, cap, rng, log) -> None:
-    """Accumulate per-cell + background samples for one archive, in place."""
+                     attempted, decode_failed, cap, rng, log,
+                     input_zf=None, input_frames=None) -> None:
+    """Accumulate per-cell + background samples for one archive, in place.
+
+    A ``(ch, fov, tp)`` with no archived ``_tophat`` is read from *input_zf*
+    when *input_frames* names one there — see :func:`_index_input_frames` for
+    which channels may be. An archived member always wins, so a well an
+    earlier copy-mode run wrote keeps being read from its own archive.
+    """
+    input_frames = input_frames or {}
     for (fov, tp), label_name in labels.items():
         if tp not in picked_tps:
             continue
         for ch in channels:
             fluor_name = tophats.get((ch, fov, tp))
+            fluor_zf = zf
+            if fluor_name is None and input_zf is not None:
+                fluor_name = input_frames.get((ch, fov, tp))
+                fluor_zf = input_zf
             if fluor_name is None:
                 continue
             attempted[ch] += 1
             try:
                 labels_arr = imread(io.BytesIO(zf.read(label_name)))
-                fluor_arr = imread(io.BytesIO(zf.read(fluor_name)))
+                fluor_arr = imread(io.BytesIO(fluor_zf.read(fluor_name)))
             except Exception as exc:
                 decode_failed[ch] += 1
                 log.debug("Auto-threshold: skipping %s / %s: %s",
@@ -315,6 +358,36 @@ def _otsu_per_channel(channels, per_channel, attempted, decode_failed, log
     return thresholds
 
 
+@contextlib.contextmanager
+def _open_input_archive(input_dir, out_zip: Path, referenced: set[str], log):
+    """Yield the ``<WELL>.zip`` input archive beside *out_zip*'s well, or ``None``.
+
+    ``None`` when no channel is referenced, no *input_dir* was given, or the
+    archive is absent or unreadable — the last two logged, because a phase
+    channel that silently contributed nothing would read as a channel with no
+    signal.
+    """
+    if not referenced or input_dir is None:
+        yield None
+        return
+    well = out_zip.name[: -len("_out.zip")] if out_zip.name.endswith("_out.zip") else out_zip.stem
+    in_zip = Path(input_dir) / f"{well}.zip"
+    if not in_zip.is_file():
+        log.info("Auto-threshold: %s — no input archive %s, so %s (read from the "
+                 "input, not archived) contributes no samples from this well.",
+                 out_zip.name, in_zip.name, ", ".join(sorted(c.upper() for c in referenced)))
+        yield None
+        return
+    try:
+        in_zf = zipfile.ZipFile(in_zip, "r")
+    except (OSError, zipfile.BadZipFile) as exc:
+        log.warning("Auto-threshold: cannot open input archive %s: %s", in_zip.name, exc)
+        yield None
+        return
+    with in_zf:
+        yield in_zf
+
+
 def no_threshold_reason(*, has_control_wells: bool) -> str:
     """Why the end-of-run pass produced nothing, in the mode it actually ran.
 
@@ -344,6 +417,8 @@ def estimate_thresholds_from_outputs(
     log: logging.Logger,
     cells_per_image_cap: int = DEFAULT_CELLS_PER_IMAGE_CAP,
     rng_seed: int | None = None,
+    input_dir: Path | None = None,
+    referenced_channels: Iterable[str] = (),
 ) -> dict[str, float]:
     """Otsu per-channel thresholds sampled from a run's ``*_out.zip`` archives.
 
@@ -355,6 +430,13 @@ def estimate_thresholds_from_outputs(
     Pairing means reading ``(fov, timepoint)`` out of member names using the
     run's own *filename_schema* — see :meth:`_SchemaReader.group_key` for what
     happens when that schema does not name every slot.
+
+    *referenced_channels* are channels whose corrected frame the run chose not
+    to archive because it is identical to the input frame (the phase channel
+    under ``--phase_output reference``). Their frames are read from
+    ``<input_dir>/<WELL>.zip`` instead, so referencing the phase image does not
+    cost that channel its threshold. A well whose input archive is not there
+    says so and contributes no samples for those channels.
     """
     channels = [str(c).strip().lower() for c in fluor_channels if str(c).strip()]
     if not channels:
@@ -365,6 +447,8 @@ def estimate_thresholds_from_outputs(
         return {}
 
     reader = _SchemaReader(filename_schema, filename_sep)
+    referenced = {str(c).strip().lower() for c in referenced_channels
+                  if str(c).strip()} & set(channels)
     rng = random.Random(rng_seed)
     per_channel: dict[str, list[float]] = {c: [] for c in channels}
     # Decode-failure accounting per channel (audit E9): a failure is DEBUG-only,
@@ -422,11 +506,14 @@ def estimate_thresholds_from_outputs(
                 continue
             log.info("Auto-threshold: %s → timepoints %s",
                      zpath.name, ", ".join(sorted(picked_tps)))
-            _sample_one_well(
-                zf, labels, tophats, channels=channels, picked_tps=picked_tps,
-                per_channel=per_channel, attempted=attempted,
-                decode_failed=decode_failed, cap=cells_per_image_cap,
-                rng=rng, log=log)
+            with _open_input_archive(input_dir, zpath, referenced, log) as in_zf:
+                _sample_one_well(
+                    zf, labels, tophats, channels=channels, picked_tps=picked_tps,
+                    per_channel=per_channel, attempted=attempted,
+                    decode_failed=decode_failed, cap=cells_per_image_cap,
+                    rng=rng, log=log, input_zf=in_zf,
+                    input_frames=(_index_input_frames(in_zf, reader, referenced)
+                                  if in_zf is not None else None))
         log.info("Auto-threshold: completed well %d/%d (%s)",
                  w_idx, len(well_zips), zpath.name)
 

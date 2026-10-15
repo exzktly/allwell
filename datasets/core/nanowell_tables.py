@@ -24,6 +24,8 @@ from pipeline.incremental_keys import fov_keys_from_member_names
 
 NANOWELL_DIRNAME = "nanowells"
 SCHEME_VERSION = 1
+#: The well's earliest empty-nanowell template (``pipeline.nanowell_task.TEMPLATE_SUFFIX``).
+TEMPLATE_SUFFIX = "_template.npz"
 
 
 def nanowell_dir(out_dir) -> Path:
@@ -108,8 +110,21 @@ def carry_nanowell_tables(src_out, dest_out, well_map: dict, *, keep_timepoint=N
         tmp = out_grid.with_name(out_grid.name + ".tmp")
         tmp.write_text(json.dumps(grid, indent=1), encoding="utf-8")
         os.replace(tmp, out_grid)
+        _carry_template(src / f"{src_well}{TEMPLATE_SUFFIX}", dest / f"{dest_well}{TEMPLATE_SUFFIX}", kept)
         written[dest_well] = len(rows)
     return written
+
+
+def _carry_template(src: Path, dest: Path, kept_timepoints: set) -> None:
+    """Carry the well's kept earliest template (what a later incremental run falls back to) when the timepoint it
+    was built at is still in the destination; without it, the next run builds one from the earliest kept."""
+    import shutil
+
+    from pipeline.nanowell_measure import load_template
+
+    loaded = load_template(src) if src.is_file() else None
+    if loaded is not None and loaded[1] in kept_timepoints:
+        shutil.copyfile(src, dest)
 
 
 def nanowell_block_conflict(info1: dict, info2: dict) -> str | None:

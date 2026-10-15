@@ -38,7 +38,16 @@ def _dataset(root: Path, wells=("A01",), timepoints=("0h", "24h"), *, nanowells=
                 "scheme_version": 1, "well": name, "timepoints": {tp: {"status": "ok"} for tp in timepoints}}))
             body = "".join(f"{tp},{q},0,measured,{q + 1}\n" for tp in timepoints for q in range(3))
             (folder / f"{name}.csv").write_text("timepoint,nw_q,nw_r,state,n_cells\n" + body)
+            _template(folder / f"{name}_template.npz", timepoints[0])
     return root
+
+
+def _template(path: Path, timepoint: str) -> None:
+    import numpy as np
+
+    from pipeline.nanowell_measure import Template, save_template
+
+    save_template(path, Template(np.ones((5, 5)), 2, "own", 3, 9, 0.1, (0, 1, 2)), timepoint)
 
 
 def _tables(root: Path, well: str):
@@ -60,6 +69,8 @@ def test_subset_carries_the_tables_of_the_wells_and_timepoints_it_keeps(tmp_path
     assert list(grid["timepoints"]) == ["24h"] and grid["well"] == "B02"
     assert [(r["timepoint"], r["nw_q"], r["n_cells"]) for r in rows] == [("24h", "0", "1"), ("24h", "1", "2"),
                                                                          ("24h", "2", "3")]
+    # The template was built at 0h, which this subset leaves out: it is not carried, never left naming a
+    # timepoint the destination does not have.
     assert sorted(p.name for p in (tmp_path / "dest" / "out" / "nanowells").iterdir()) == ["B02.csv", "B02_grid.json"]
     info = json.loads((tmp_path / "dest" / "out" / "pipeline_info.json").read_text())
     assert info["nanowell"]["settings"] == SETTINGS                     # Review reads the scheme from here
@@ -92,6 +103,10 @@ def test_merge_plates_carries_both_plates_tables_with_dataset_2_s_wells_remapped
     first, first_rows = _tables(tmp_path / "dest", "A01")
     moved, moved_rows = _tables(tmp_path / "dest", "C03")
     assert (first["well"], moved["well"]) == ("A01", "C03")
+    from pipeline.nanowell_measure import load_template
+
+    carried = load_template(tmp_path / "dest" / "out" / "nanowells" / "C03_template.npz")
+    assert carried is not None and carried[1] == "0h"
     assert len(first_rows) == len(moved_rows) == 6
     assert plan.blocks_warning is None
 

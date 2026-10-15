@@ -8856,7 +8856,8 @@ validated and keyed.
 `datasets/core/nanowell_tables`, `carry_nanowell_tables` copies a dataset's tables through a well map (canonical
 wells, so an unpadded `A1_grid.json` is found) and an optional timepoint predicate, rewriting the grid
 record's `well` and keeping the sites table and the grid record to the same timepoints; a well left with no
-timepoint writes nothing rather than an empty table. **Subset** carries the tables of the wells it keeps, cut
+timepoint writes nothing rather than an empty table. The well's kept earliest template
+(`<well>_template.npz`) goes with them when the timepoint it was built at is still in the destination. **Subset** carries the tables of the wells it keeps, cut
 by `subset_compute.timepoint_kept` — the same test its images are cut by — and refuses a field selection,
 because the tables are per well and measured over all of its tiles together. **Merge Plates** carries both
 plates' tables, dataset 2's through the well remap; it refuses two plates whose sidecar `nanowell` blocks name

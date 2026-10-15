@@ -8835,7 +8835,8 @@ pipeline's `SCHEME_VERSION` in it). A sidecar with another version refuses the w
 and names it in `NanowellData.problems`. The phase channel's site intensities, which the pipeline writes like any other
 channel's, are not offered as fluorescence. Brightness is the mean `<token>_mean_intensity` of the cells the
 per-cell CSVs beside `nanowells/` place at each `(well, timepoint, q, r)`, whichever of the output folder and
-its parent was loaded.
+its parent was loaded; a CSV is read in either spelling, `x.csv` or `x.csv.gz`, the plain one winning when both
+exist.
 
 **Time** is each timepoint's recorded start from `in/acquisition.json` (looked for beside the data dir and
 one level up), in hours since the earliest. All timepoints must have a start on comparable clocks; otherwise

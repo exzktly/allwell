@@ -438,3 +438,13 @@ def test_a_nanowell_seeded_later_responds_on_the_log_fold_change_and_is_excluded
     late = well_summary(metrics, "log2_count_fc").set_index("timepoint").loc["t_a"]
     assert (late["n_used"], late["fraction_responding"]) == (1, 1.0)            # (1,0): 0 → 3 cells
     assert well_summary(metrics, "count_fc").set_index("timepoint").loc["t_a", "excluded"]["seeded later"] == 1
+
+
+def test_brightness_reads_a_gzipped_cell_csv_and_prefers_a_plain_twin(tmp_path):
+    """A finished well's per-cell CSV may be ``.csv.gz``; when both spellings exist the plain one is the newer."""
+    out = _dataset(tmp_path, {"A01": [_row("t_c", 0, 0, n=1, c=0.1, gfp=1.0)]}, starts={"t_c": STARTS["t_c"]})
+    cells = {"well": ["A01"], "timepoint": ["t_c"], "nw_q": [0], "nw_r": [0], "GFP_mean_intensity": [20.0]}
+    pd.DataFrame(cells).to_csv(out / "measurements_A01.csv.gz", index=False)
+    assert load_nanowell_data(out).sites["brightness_GFP"].tolist() == [20.0]
+    pd.DataFrame({**cells, "GFP_mean_intensity": [30.0]}).to_csv(out / "measurements_A01.csv", index=False)
+    assert load_nanowell_data(out).sites["brightness_GFP"].tolist() == [30.0]

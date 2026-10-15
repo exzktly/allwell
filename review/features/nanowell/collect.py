@@ -212,6 +212,18 @@ def _times(data_dir: Path, timepoints) -> tuple[dict, str | None, str]:
                       "nothing measured against time is defined.")
 
 
+def _cell_csvs(folder: Path) -> list[Path]:
+    """The folder's per-cell CSVs in either spelling, ``x.csv`` or ``x.csv.gz``, one path per logical file.
+
+    A finished well's CSV may be gzipped; when both spellings of one file exist the plain one wins, the rule
+    ``util/csv_gz`` states for every reader (a gzip is only ever made from a plain file, so a plain file
+    beside one is the newer or the same).
+    """
+    plain = {p.name: p for p in folder.glob("*.csv")}
+    gzipped = {p.name[: -len(".gz")]: p for p in folder.glob("*.csv.gz")}
+    return [plain.get(name) or gzipped[name] for name in sorted(set(plain) | set(gzipped))]
+
+
 def _cell_brightness(cell_dir: Path, channels) -> pd.DataFrame | None:
     """Mean per-cell intensity per (well, timepoint, nanowell, channel), from the per-cell CSVs in *cell_dir*.
 
@@ -219,7 +231,7 @@ def _cell_brightness(cell_dir: Path, channels) -> pd.DataFrame | None:
     parent was loaded.
     """
     frames = []
-    for path in sorted(Path(cell_dir).glob("*.csv")):
+    for path in _cell_csvs(Path(cell_dir)):
         try:
             header = pd.read_csv(path, nrows=0).columns
         except (OSError, ValueError, pd.errors.EmptyDataError):

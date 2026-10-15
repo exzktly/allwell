@@ -492,10 +492,16 @@ class AnalyzeProgressMixin:
         if kind == "sched":
             state, job_id, launcher = payload  # type: ignore[misc]
             self._on_scheduler(str(state), str(job_id), str(launcher))
-            self._slurm_indicator.on_sched(str(state), str(job_id))
+            # The form builds the indicator; a host assembled without the form
+            # (the progress tests' stub) simply has none to update.
+            indicator = getattr(self, "_slurm_indicator", None)
+            if indicator is not None:
+                indicator.on_sched(str(state), str(job_id))
         elif kind == "slurm_job":
             what, specs = payload  # type: ignore[misc]
-            self._slurm_indicator.on_slurm_job(str(what), dict(specs))
+            indicator = getattr(self, "_slurm_indicator", None)
+            if indicator is not None:
+                indicator.on_slurm_job(str(what), dict(specs))
         elif kind == "well_total":
             # Announced once at the start of the run, and again if more wells
             # finish than were announced (the tracker treats its total as a

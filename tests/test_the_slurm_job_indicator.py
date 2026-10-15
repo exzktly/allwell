@@ -2,10 +2,9 @@
 
 The chain has four links, and each is driven here through the real code:
 
-1. the launch command a scheduler-backed host runs prints, from inside the
-   allocation, what the node is (``services.slurm_node_specs``) — run in
-   ``bash`` with ``env`` standing in for ``srun``, so the line asserted is the
-   one the real composed command produces;
+1. the pipeline, starting inside a Slurm job, logs what the node is
+   (``pipeline.slurm_node``, from ``plan_parallelism``) — with real
+   ``nvidia-smi`` / ``squeue`` stand-ins on ``PATH``, so the probes run;
 2. ``PipelineRunner`` prints the job-closed line once the remote process that
    held the job has exited, and only on a host that has a launcher;
 3. ``ProgressTracker`` turns those lines into ``slurm_job`` events;
@@ -16,8 +15,8 @@ The chain has four links, and each is driven here through the real code:
 
 from __future__ import annotations
 
+import logging
 import os
-import subprocess
 import types
 from pathlib import Path
 
@@ -27,17 +26,14 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from analyze.domain import slurm_job as sj
-from services.pipeline_runner import ProgressTracker
-from services.slurm_node_specs import (
-    JOB_CLOSED_LINE,
-    NODE_SPECS_PREFIX,
-    node_specs_snippet,
-    parse_node_specs,
-)
+from pipeline.slurm_node import NODE_SPECS_PREFIX, node_specs_line, parse_node_specs
+from services.pipeline_runner import JOB_CLOSED_LINE, ProgressTracker
 
+# As the remote pipeline's log line reaches the app: its own time and level
+# first, then the message.
 _SPECS_LINE = (
-    f"{NODE_SPECS_PREFIX}node=gpu07 | partition=gpu | cpus_allocated=8 | "
-    "cpus_node=64 | cpu_model=AMD EPYC 7763 64-Core Processor | "
+    f"2026-10-15 10:00:00  INFO      {NODE_SPECS_PREFIX}node=gpu07 | partition=gpu | "
+    "cpus_allocated=8 | cpus_node=64 | cpu_model=AMD EPYC 7763 64-Core Processor | "
     "mem_allocated_mb=32768 | mem_per_cpu_mb=? | mem_node_mb=515703 | "
     "gpus=NVIDIA A100-SXM4-80GB (81920 MiB) | time_limit=4:00:00\n"
 )
@@ -48,7 +44,7 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-# ── 1. the line, from inside the allocation ──────────────────────────────────
+# ── 1. the pipeline says what the node is ────────────────────────────────────
 
 def _fake_tools(tmp_path: Path) -> Path:
     """An ``nvidia-smi`` and a ``squeue`` that answer the way a GPU node does."""
@@ -63,29 +59,26 @@ def _fake_tools(tmp_path: Path) -> Path:
     return bin_dir
 
 
-def test_the_real_launch_command_prints_the_node_s_specs(tmp_path):
-    from services.remote_commands import _compose_remote_cmd
+_SLURM_ENV = {"SLURM_JOB_ID": "42", "SLURMD_NODENAME": "gpu07",
+              "SLURM_JOB_PARTITION": "gpu", "SLURM_CPUS_ON_NODE": "8",
+              "SLURM_MEM_PER_NODE": "32768"}
 
-    home = tmp_path / "home"
-    (home / "miniforge3/etc/profile.d").mkdir(parents=True)
-    (home / "miniforge3/etc/profile.d/conda.sh").write_text("")
-    env_dir = tmp_path / "env"
-    (env_dir / "conda-meta").mkdir(parents=True)
-    (env_dir / "conda-meta/history").write_text("")
-    # `env` stands in for `srun`: it runs the inner command with the variables
-    # Slurm would export inside the allocation.
-    launcher = ("env SLURM_JOB_ID=42 SLURMD_NODENAME=gpu07 SLURM_JOB_PARTITION=gpu "
-                "SLURM_CPUS_ON_NODE=8 SLURM_MEM_PER_NODE=32768")
-    cmd = _compose_remote_cmd(launcher, str(tmp_path / "pid"), ["echo", "PIPELINE"],
-                              cache_hit=False, env_selector=("prefix", str(env_dir)))
-    env = {**os.environ, "HOME": str(home),
-           "PATH": f"{_fake_tools(tmp_path)}:{os.environ['PATH']}"}
-    out = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True,
-                         timeout=30, env=env)
-    assert out.returncode == 0, out.stderr
-    lines = out.stdout.splitlines()
-    assert lines[0] == "[remote] scheduler: allocation granted — job 42 on gpu07 (partition gpu)"
-    specs = parse_node_specs(lines[1])
+
+def test_a_pipeline_started_inside_a_job_logs_the_node(monkeypatch, tmp_path, caplog):
+    from pipeline.parallelism import plan_parallelism
+
+    for k, v in _SLURM_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("SLURM_MEM_PER_CPU", raising=False)
+    monkeypatch.setenv("PATH", f"{_fake_tools(tmp_path)}:{os.environ['PATH']}")
+    args = types.SimpleNamespace(tf_threads=0, workers=0, cpu_only=True,
+                                 segmentation_method="stardist")
+    caplog.set_level(logging.INFO, logger="test.pipeline")
+    plan_parallelism(args, logging.getLogger("test.pipeline"))
+    lines = [r.getMessage() for r in caplog.records
+             if r.getMessage().startswith(NODE_SPECS_PREFIX)]
+    assert len(lines) == 1
+    specs = parse_node_specs(lines[0])
     # The node's own CPU count, model and memory come from this machine, so
     # they are checked for presence; everything Slurm exports, exactly.
     assert {k: specs[k] for k in ("node", "partition", "cpus_allocated",
@@ -95,28 +88,27 @@ def test_the_real_launch_command_prints_the_node_s_specs(tmp_path):
         "gpus": "NVIDIA A100-SXM4-80GB (81920 MiB) + NVIDIA A100-SXM4-80GB (81920 MiB)",
         "time_limit": "4:00:00",
     }
-    assert specs["cpus_node"].isdigit() and int(specs["mem_node_mb"]) > 0
+    assert specs["cpus_node"] == str(os.cpu_count())
     assert "mem_per_cpu_mb" not in specs, "unset in the job, so not shown"
-    assert lines[2] == "PIPELINE"
 
 
-def test_the_batched_driver_launch_prints_it_too():
-    from services.remote_commands import _compose_driver_cmd
-
-    cmd = _compose_driver_cmd("srun -p gpu", "/r/pid", "true")
-    # The inner command is shell-quoted, so look for the prefix, which has no
-    # quote characters to be escaped.
-    assert NODE_SPECS_PREFIX in cmd
+def test_outside_a_job_there_is_no_line(monkeypatch):
+    monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+    assert node_specs_line() == ""
 
 
-def test_a_node_with_none_of_the_tools_still_prints_the_line(tmp_path):
-    out = subprocess.run(["bash", "-c", node_specs_snippet()], capture_output=True,
-                         text=True, timeout=10,
-                         env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
-    specs = parse_node_specs(out.stdout)
-    assert specs is not None
+def test_a_node_with_none_of_the_tools_still_gets_a_line(monkeypatch, tmp_path):
+    monkeypatch.setenv("PATH", str(tmp_path))      # no nvidia-smi, no squeue
+    specs = parse_node_specs(node_specs_line({"SLURM_JOB_ID": "7"}))
     assert specs["gpus"] == "none"
-    assert "cpus_allocated" not in specs and "partition" not in specs
+    assert "time_limit" not in specs and "cpus_allocated" not in specs
+
+
+def test_a_separator_inside_a_value_cannot_forge_a_field():
+    specs = parse_node_specs(node_specs_line(
+        {"SLURM_JOB_ID": "7", "SLURM_JOB_PARTITION": "gpu | cpus_allocated=999"}))
+    assert specs["partition"] == "gpu / cpus_allocated=999"
+    assert "cpus_allocated" not in specs
 
 
 def test_any_other_line_is_not_a_specs_line():

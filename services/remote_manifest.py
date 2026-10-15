@@ -127,6 +127,8 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # Worker count, threads per worker and the Cellpose GPU plan. Imported by
     # process_microscopy at module scope, so the remote needs it to start.
     "pipeline/parallelism.py",
+    # The Slurm node-specs line plan_parallelism logs inside a job.
+    "pipeline/slurm_node.py",
     # The one definition of "is this well complete", shared by the end-of-run
     # check and the Datasets Validate tool.
     "pipeline/completeness.py",

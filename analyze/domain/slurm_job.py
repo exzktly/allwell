@@ -6,9 +6,9 @@ against one still **queued** for a node, or none at all (never requested, or
 closed). The indicator is lit only while open; queued shows it dimmed, so a
 queue wait is not mistaken for a running job; with no job it is hidden.
 
-Every transition comes from a line the run already prints
+Every transition comes from a line the run prints
 (``services.pipeline_runner.ProgressTracker`` turns them into ``sched`` and
-``slurm_job`` events), so this module is a pure fold over those events and the
+``slurm_job`` events; the node's specs are ``pipeline.slurm_node``'s line), so this module is a pure fold over those events and the
 tooltip they add up to. Qt-free so both are testable without a window.
 """
 
@@ -46,7 +46,8 @@ def on_sched(job: SlurmJob, state: str, job_id: str) -> SlurmJob:
 
 
 def on_specs(job: SlurmJob, specs: dict[str, str]) -> SlurmJob:
-    """The node-specs line is printed from inside the job, so it is open."""
+    """The node-specs line is printed by the pipeline inside the job, so the
+    job is open."""
     return replace(job, state=OPEN, specs=dict(specs))
 
 

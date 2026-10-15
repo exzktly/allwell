@@ -26,7 +26,6 @@ from services.remote_srun_retry import (
     wrap_srun_launch,
 )
 from services.remote_transport import _remote_join, _remote_quote
-from services.slurm_node_specs import node_specs_snippet
 from services.remote_wait_snippets import (
     _UPLOAD_WAIT_EXIT,
     UPLOAD_WAIT_POLL_S,
@@ -261,7 +260,6 @@ def _compose_driver_cmd(
         f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
         f'on ${{SLURMD_NODENAME:-$(hostname)}} '
         f'(partition ${{SLURM_JOB_PARTITION:-?}}) — held for every batch"; '
-        f"{node_specs_snippet()}"
         f"{driver_script}"
     )
     return _launch(launcher, inner, remote_pidfile)
@@ -335,8 +333,7 @@ def _compose_remote_cmd(
     # The ``[remote] scheduler: …`` echo runs *inside* the allocation, so it
     # only prints once the scheduler has granted a node — it streams back over
     # the same ssh stdout and is the user's "queue wait over, now running on
-    # <node>" signal, naming the job id and partition for diagnosis. The
-    # node-specs line after it says what that node is (services/slurm_node_specs).
+    # <node>" signal, naming the job id and partition for diagnosis.
     # The wait goes first, before conda and before the pipeline: the job may
     # have been granted its node while the plate was still uploading, which is
     # the point of requesting it early.
@@ -350,7 +347,6 @@ def _compose_remote_cmd(
         f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
         f'on ${{SLURMD_NODENAME:-$(hostname)}} '
         f'(partition ${{SLURM_JOB_PARTITION:-?}})"; '
-        f"{node_specs_snippet()}"
         f"{wait_snippet}"
         f"exec {_remote_join(remote_argv)}"
     )

@@ -90,13 +90,17 @@ class Located:
     stage_offset_um: tuple[float, float] | None = None    # the common frame's place in stage coordinates
 
 
-def stage_offset(record: dict, well: str, timepoint: str, positions: dict) -> tuple[float, float] | None:
+def stage_offset(record: dict, well: str, timepoint: str, positions: dict,
+                 tolerance_um: float = float("inf")) -> tuple[float, float] | None:
     """Where the registration's common frame sits in stage coordinates: the median of stage minus registered position.
 
     ``None`` unless every tile of the (well, timepoint) has a stage position. The stage and image axes
     are taken to be parallel (a stage axis running against the image's would need a sign the record does
     not carry: tracker R8), so this is a translation only; a rotation of the plate is not in it, it is in
-    the origins that are compared across timepoints.
+    the origins that are compared across timepoints. ``None`` as well when the tiles disagree about the
+    offset by more than *tolerance_um* (a pitch, from the caller): registration moves a tile by up to half a
+    pitch, but a stage axis running against the image's disagrees by the size of the grid, and re-anchoring
+    on such an offset would be confidently wrong.
     """
     offsets = []
     for tile in record["tiles"]:
@@ -108,7 +112,10 @@ def stage_offset(record: dict, well: str, timepoint: str, positions: dict) -> tu
         offsets.append((tile["stage_xy_um"][0] - left, tile["stage_xy_um"][1] - top))
     if not offsets:
         return None
-    return float(np.median([o[0] for o in offsets])), float(np.median([o[1] for o in offsets]))
+    median = np.median(np.array(offsets), axis=0)
+    if float(np.abs(np.array(offsets) - median).max()) > tolerance_um:
+        return None
+    return float(median[0]), float(median[1])
 
 
 def _tile_fit(image, pixel_size_um: float, settings: NanowellSettings):
@@ -176,7 +183,7 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     positions = registration.positions()
     montage = build_montage(images, positions, px)
     located = Located(timepoint, OK, "", plan=plan, positions=positions, pixel_size_um=px, montage=montage)
-    located.stage_offset_um = stage_offset(record, well, timepoint, positions)
+    located.stage_offset_um = stage_offset(record, well, timepoint, positions, tolerance_um=settings.pitch_um)
 
     def refuse(status, reason, **extra):
         located.status, located.reason = status, reason
@@ -394,6 +401,8 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
                           tile_origin_um=(left, top), intensity=channel_images or None)
     n = len(table["label"])
     table["fov"] = [owner] * n
+    for channel in (channels or {}):
+        table.setdefault(f"mean_{channel}", [None] * n)       # no image for this tile: no value, not a short column
     for old, new in (("address_q", "nw_q"), ("address_r", "nw_r"), ("x_um", "well_x_um"), ("y_um", "well_y_um")):
         table[new] = table.pop(old)
     located_at = [addresses[i] or (None, None) for i in table["site_index"]]
@@ -532,7 +541,8 @@ def _bounds(located: Located):
 
 def run_well(well: str, record: dict, timepoints, load_phase, settings: NanowellSettings, *,
              segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
-             expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None) -> WellOutcome:
+             expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None,
+             reference: dict | None = None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -544,6 +554,9 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     (a :class:`Measured` or ``None``) and ``save(timepoint, key, measured)``: a timepoint measured before
     the process was killed is taken back instead of measured again, but only under the same *key* (the
     shared radius and the record's digest), because a different roster or tile placement makes it wrong.
+    *reference* is a timepoint an earlier run kept (``timepoint``, ``pitch_um``, ``angle_deg``,
+    ``roster_size`` from its grid block): the new timepoints are checked for consistency against it, as they
+    would have been had they run together.
     """
     from pipeline.nanowell_sites import TimepointLattice, check_consistency, shared_array_radius
 
@@ -581,6 +594,9 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         located = outcome.located[tp]
         addresses, _ = _roster_positions(located, shared.radius_um)
         lattices.append(TimepointLattice(tp, located.fit.pitch, located.fit.angle_deg, 0.0, frozenset(addresses)))
+    if reference is not None:
+        lattices.insert(0, TimepointLattice(reference["timepoint"], reference["pitch_um"], reference["angle_deg"],
+                                            0.0, None))
     reference_angle = lattices[0].angle_deg if lattices else 0.0
     # The plate's rotation between timepoints is only measurable across wells; within one well the angle
     # is not checked (and the grid block says so), so a plate put back rotated is not called inconsistent.
@@ -590,7 +606,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     earliest = None
     for tp in anchored + unaddressed:
         located = outcome.located[tp]
-        key = {"radius_um": shared.radius_um, "record_digest": outcome.timepoints[tp]["record_digest"]}
+        key = {"radius_um": shared.radius_um, "record_digest": outcome.timepoints[tp]["record_digest"],
+               "located": [located.status, located.origin_method]}
         measured = checkpoint.load(tp, key) if checkpoint is not None else None
         if measured is None:
             images = _images_for(record, well, tp, load_phase)
@@ -611,8 +628,15 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
                      roster_size=len(measured.sites),
                      template={k: v for k, v in measured.template.items() if k != "_object"},
                      notes=list(measured.notes))
+        status = None if agree is None else agree.status
+        if (reference is not None and status == "consistent" and tp in anchored
+                and len(measured.sites) != reference["roster_size"]):
+            status = "roster_mismatch"
+            block["consistency_detail"] = (f"{len(measured.sites)} addresses against {reference['roster_size']} "
+                                           f"at {reference['timepoint']}")
+        block["consistency"] = status
         for row in measured.sites:
-            row["consistency"] = None if agree is None else agree.status
+            row["consistency"] = status
         outcome.sites.extend(measured.sites)
         for name, values in measured.cells.items():
             outcome.cells.setdefault(name, []).extend(values)

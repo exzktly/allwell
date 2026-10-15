@@ -2325,12 +2325,6 @@ def process_well_zip_task(
     if _well_not_started_for_suspend(well_label):
         return [], []
     log.info("Well %s — starting (pid %d)", well_label, os.getpid())
-    if shared_kwargs_template.get("_nanowell"):
-        from pipeline.nanowell_task import run_zip_task
-        return run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token,
-                            fluor_tokens, csv_prefix, schema, sep, settings_key,
-                            grouper=find_image_groups_in_zip, parse=parse_filename, incremental=incremental,
-                            incremental_prior_dir=incremental_prior_dir)
     tmp_extract = scratch_base_for(output_dir) / f"_tmp_extract_{well_label}"
     tmp_images  = _staging_dir_for(output_dir, well_label, settings_key)
     if force:
@@ -2350,6 +2344,13 @@ def process_well_zip_task(
 
     try:
         try:
+            if shared_kwargs_template.get("_nanowell"):
+                from pipeline.nanowell_task import run_zip_task
+                return run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token,
+                                    fluor_tokens, csv_prefix, schema, sep, settings_key,
+                                    grouper=find_image_groups_in_zip, parse=parse_filename,
+                                    incremental=incremental, incremental_prior_dir=incremental_prior_dir,
+                                    scratch=tmp_extract, staging=tmp_images)
             tmp_extract.mkdir(parents=True, exist_ok=True)
             tmp_images.mkdir(parents=True,  exist_ok=True)
 
@@ -3324,7 +3325,6 @@ def main() -> None:
             execution_options=vars(args),
         )
         log.info("Wrote sidecar : %s", info_path)
-        record_nanowell_info(info_path, nanowell, input_dir)
     except Exception as exc:  # log but don't abort the run
         log.warning("Could not write %s: %s", PIPELINE_INFO_FILENAME, exc)
 
@@ -3448,6 +3448,7 @@ def main() -> None:
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
     refuse_nanowell_without_zips(nanowell, well_zips, parser.error)
+    record_nanowell_info(output_dir / PIPELINE_INFO_FILENAME, nanowell, input_dir)
     if well_zips:
         refuse_images_only_in_ignored_folders(input_dir, well_zips)
     refuse_uncovered_wells(blank_groups, well_zips, well_folders)

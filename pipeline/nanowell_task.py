@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -65,7 +66,12 @@ def _read_tif(path: Path):
 
 
 def _tile_index(groups, parse, schema, sep) -> dict:
-    """``(timepoint, fov) -> (nuclear path, {fluor token: path})`` from the zip's image groups."""
+    """``(timepoint, fov) -> (nuclear path, [fluor paths])`` from the zip's image groups.
+
+    The fluor paths are in the order of the fluorescence tokens the grouper was given, which is how the
+    per-field path pairs a token with a file; a token is never matched by looking for it in a filename (an
+    experiment called ``Cy5run`` would answer to ``Cy5``).
+    """
     index = {}
     for nuclear, fluors in groups:
         meta = parse(nuclear, schema=schema, sep=sep)
@@ -172,7 +178,8 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
     cells_path = Path(prior_dir) / f"{csv_prefix}_{well_label}.csv"
     sites = [r for r in _read_rows(sites_path) if r["timepoint"] in kept]
     cells = [r for r in _read_rows(cells_path) if r["timepoint"] in kept]
-    return {"grid": grid, "kept": kept, "sites": sites, "cells": cells}
+    return {"grid": grid, "kept": kept, "sites": sites, "cells": cells,
+            "order": {tp: k for k, tp in enumerate(timepoints)}}
 
 
 class TimepointCheckpoints:
@@ -209,6 +216,19 @@ class TimepointCheckpoints:
         return nr.Measured(timepoint, payload["sites"], payload["cells"], payload["template"], payload["notes"])
 
 
+def _reference_of(prior: dict | None) -> dict | None:
+    """The first kept timepoint's lattice, for the consistency check of the ones added to it."""
+    if prior is None:
+        return None
+    blocks = prior["grid"]["timepoints"]
+    for tp in sorted(prior["kept"], key=lambda t: prior["order"].get(t, 0)):
+        block = blocks[tp]
+        if all(block.get(k) is not None for k in ("pitch_um", "angle_deg", "roster_size")):
+            return {"timepoint": tp, "pitch_um": block["pitch_um"], "angle_deg": block["angle_deg"],
+                    "roster_size": block["roster_size"]}
+    return None
+
+
 def _read_rows(path: Path) -> list[dict]:
     if not path.is_file():
         return []
@@ -224,6 +244,31 @@ def _write_montages(outcome: nr.WellOutcome, well_label: str, staging: Path) -> 
     for tp, located in outcome.located.items():
         if located.montage is not None:
             imsave(str(staging / f"{well_label}_{tp}_montage.png"), located.montage.image, check_contrast=False)
+
+
+def update_montage_archive(out_zip: Path, staging: Path, well_label: str, recomputed) -> None:
+    """Put this run's montages in ``<well>_out.zip``, replacing the ones of the timepoints it recomputed.
+
+    A recomputed timepoint's old montage is dropped first, even when the timepoint now produces none (its
+    images went missing): ``merge_images_into_zip`` keeps an existing member over a new one of the same
+    name, which would leave the picture of a placement the rows no longer describe.
+    """
+    from pipeline.io import compress_images_to_zip, merge_images_into_zip
+
+    stale = {f"{well_label}_{tp}_montage.png" for tp in recomputed}
+    if out_zip.exists():
+        with zipfile.ZipFile(out_zip) as zf:
+            keep = [(i, zf.read(i.filename)) for i in zf.infolist() if i.filename not in stale]
+        tmp = out_zip.with_suffix(".zip.part")
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+            for info, data in keep:
+                zf.writestr(info, data)
+        tmp.replace(out_zip)
+    if any(staging.glob("*_montage.png")):
+        if out_zip.exists():
+            merge_images_into_zip(out_zip, staging)
+        else:
+            compress_images_to_zip(staging, out_zip)
 
 
 def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
@@ -263,21 +308,18 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         found = index.get((tp, tile))
         return None if found is None else _read_tif(found[0])
 
-    def channel_loader(token):
+    def channel_loader(position):
         def load(tp, tile) -> np.ndarray | None:
             found = index.get((tp, tile))
-            if found is None:
+            if found is None or position >= len(found[1]):
                 return None
-            for path in found[1]:
-                if token.lower() in Path(path).stem.lower():
-                    return _read_tif(path)
-            return None
+            return _read_tif(found[1][position])
         return load
 
-    channels = {t: channel_loader(t) for t in fluor_tokens}
+    channels = {t: channel_loader(k) for k, t in enumerate(fluor_tokens)}
     fixed = None if prior is None else prior["grid"].get("array_radius", {}).get("radius_um")
     outcome = nr.run_well(well_label, record, todo, load_phase, settings, segmenter=segmenter, channels=channels,
-                          fixed_radius_um=fixed, plate_rigid=plate_rigid,
+                          fixed_radius_um=fixed, plate_rigid=plate_rigid, reference=_reference_of(prior),
                           checkpoint=None if staging_dir is None else TimepointCheckpoints(staging_dir, settings_key))
     px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
@@ -296,38 +338,42 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     write_grid_json(output_dir / NANOWELL_DIR / f"{well_label}_grid.json", well_label, outcome, settings)
     if staging_dir is not None:
         _write_montages(outcome, well_label, staging_dir)
-    failed = [tp for tp in todo if outcome.timepoints.get(tp, {}).get("status") != nr.OK]
-    for tp in failed:
+        update_montage_archive(output_dir / f"{well_label}_out.zip", staging_dir, well_label, todo)
+    # Failed means no rows were written for it. An unaddressed timepoint has rows (detected sites, no address) and
+    # is not a failure of the run; it is a finding in the grid record, the completeness check and the end-of-run
+    # summary, and the end-of-run pass may yet anchor it.
+    failed = [tp for tp in todo if outcome.timepoints.get(tp, {}).get("status") in nr.TERMINAL_WITHOUT_ROWS]
+    for tp in todo:
         block = outcome.timepoints.get(tp, {})
-        log.warning("Well %s timepoint %s: %s (%s)", well_label, tp, block.get("status"), block.get("reason", ""))
+        if block.get("status") != nr.OK:
+            log.warning("Well %s timepoint %s: %s (%s)", well_label, tp, block.get("status"), block.get("reason", ""))
     return records, failed
 
 
 def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
                  csv_prefix, schema, sep, settings_key, *, grouper, parse, segmenter=None, incremental=False,
-                 incremental_prior_dir=None, plate_rigid=None):
+                 incremental_prior_dir=None, plate_rigid=None, scratch=None, staging=None):
     """The whole lifecycle of one zipped well in nanowell mode (what ``process_well_zip_task`` does otherwise).
 
-    Extract to scratch, run, write the three tables and the montage archive, record completeness (in
-    timepoints, the unit of work here) and the settings that produced it, remove the scratch. A failure
-    writes the usual worker trace and re-raises, so the well is reported failed exactly as in the
-    per-field path.
+    Extract to *scratch*, run, write the three tables and the montage archive, record completeness (in
+    timepoints, the unit of work here) and the settings that produced it. ``process_well_zip_task`` calls
+    this from inside its own ``try``, so the failure trace, ``--force`` (which clears the staging directory
+    and with it the resume checkpoints) and the removal of both directories are its own, exactly as for a
+    per-field well; a caller without them (the end-of-run pass) gets directories of its own, removed after.
     """
     from pipeline.fov_checkpoint import _staging_dir_for
-    from pipeline.io import (
-        _write_single_csv, compress_images_to_zip, extract_zip, merge_images_into_zip, remove_directory,
-        scratch_base_for,
-    )
+    from pipeline.io import _write_single_csv, extract_zip, remove_directory, scratch_base_for
     from pipeline.run_report import write_well_report
     from pipeline.settings_record import record_well_settings
 
     output_dir = Path(output_dir)
-    scratch = scratch_base_for(output_dir) / f"_tmp_extract_{well_label}"
-    staging = _staging_dir_for(output_dir, well_label, settings_key)
-    if scratch.exists():
-        remove_directory(scratch)
-    if staging.exists() and not any(staging.glob(".fov_*.done")):
-        remove_directory(staging)               # no checkpoint to resume from: start clean
+    owned = scratch is None
+    if owned:
+        scratch = scratch_base_for(output_dir) / f"_tmp_extract_{well_label}"
+        staging = _staging_dir_for(output_dir, well_label, settings_key)
+        for stale in (scratch,) + ((staging,) if not any(staging.glob(".fov_*.done")) else ()):
+            if stale.exists():
+                remove_directory(stale)
     scratch.mkdir(parents=True, exist_ok=True)
     try:
         records, failed = process_well_zip(
@@ -335,25 +381,21 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
             schema, sep, grouper=grouper, parse=parse, extract=extract_zip, scratch_dir=scratch,
             write_csv=_write_single_csv, segmenter=segmenter, incremental=incremental,
             prior_dir=incremental_prior_dir, settings_key=settings_key, staging_dir=staging, plate_rigid=plate_rigid)
-        if not (output_dir / NANOWELL_DIR / f"{well_label}_grid.json").is_file():
+        grid_path = output_dir / NANOWELL_DIR / f"{well_label}_grid.json"
+        if not grid_path.is_file():
             return records, failed
-        grid = json.loads((output_dir / NANOWELL_DIR / f"{well_label}_grid.json").read_text(encoding="utf-8"))
-        out_zip = output_dir / f"{well_label}_out.zip"
-        if staging.is_dir():
-            if out_zip.exists():
-                merge_images_into_zip(out_zip, staging)
-            else:
-                compress_images_to_zip(staging, out_zip)
+        grid = json.loads(grid_path.read_text(encoding="utf-8"))
         total = len(grid["timepoints"])
         write_well_report(output_dir, well_label, groups_total=total,
                           groups_covered=sum(1 for b in grid["timepoints"].values() if b.get("status") == nr.OK),
                           failed=failed)
         record_well_settings(output_dir, well_label, settings_key)
-        log.info("Well %s — done (%d timepoint(s), %d not ok).", well_label, total, len(failed))
+        log.info("Well %s — done (%d timepoint(s), %d without rows).", well_label, total, len(failed))
         return records, failed
     finally:
-        remove_directory(scratch)
-        remove_directory(staging)
+        if owned:
+            remove_directory(scratch)
+            remove_directory(staging)
 
 
 def record_nanowell_info(info_path, options: dict, input_dir) -> None:
@@ -400,15 +442,30 @@ def refuse_nanowell_without_zips(options, well_zips, error) -> None:
 _INDEPENDENT = ("fiducial", "array_centre")
 
 
-def _read_grids(output_dir: Path) -> dict[str, dict]:
+def _tp_rank(token: str):
+    from util.timepoint import parse_hours
+
+    hours = parse_hours(token)
+    return (0, hours, token) if hours is not None else (1, 0.0, token)
+
+
+def _read_grids(output_dir: Path, settings: dict | None = None) -> dict[str, dict]:
+    """Every readable grid record under ``nanowells/``, only those made under *settings* when they are given.
+
+    The plate's motion is fitted from the wells' origins, so a well analysed under other settings (another
+    plate format, say) must not take part in it.
+    """
     grids = {}
     for path in sorted((Path(output_dir) / NANOWELL_DIR).glob("*_grid.json")):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if payload.get("scheme_version") == SCHEME_VERSION:
-            grids[payload["well"]] = payload
+        if payload.get("scheme_version") != SCHEME_VERSION:
+            continue
+        if settings is not None and payload.get("settings") != settings:
+            continue
+        grids[payload["well"]] = payload
     return grids
 
 
@@ -441,7 +498,8 @@ def plan_reanchor(grids: dict[str, dict]) -> tuple[dict, dict]:
             if block.get("stage_offset_um") is None:
                 reasons[key] = "the record has no stage position for every tile, so wells cannot be compared"
                 continue
-            reference = next((r for r in grid["timepoints"] if r != tp and _origin(grids, well, r)), None)
+            reference = next((r for r in sorted(grid["timepoints"], key=_tp_rank)
+                              if r != tp and _origin(grids, well, r)), None)
             if reference is None:
                 reasons[key] = "this well was never anchored on its own at another timepoint"
                 continue
@@ -472,17 +530,24 @@ def reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token,
     ``anchored`` (now addressed), ``remaining`` (still unaddressed) and why for each.
     """
     output_dir = Path(output_dir)
-    grids = _read_grids(output_dir)
+    here = settings_from_kwargs(shared_kwargs_template).key()
+    grids = _read_grids(output_dir, here)
     predictions, reasons = plan_reanchor(grids)
     zips = dict(well_zips)
     for well, by_tp in predictions.items():
         if well not in zips:
+            reasons.update({(well, tp): "this well is not part of this run, so it was not re-run" for tp in by_tp})
             continue
         log.info("Well %s — re-anchoring %s from the plate's other wells.", well, ", ".join(sorted(by_tp)))
-        run_zip_task(well, zips[well], output_dir, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
-                     schema, sep, settings_key, grouper=grouper, parse=parse, segmenter=segmenter, incremental=True,
-                     incremental_prior_dir=output_dir, plate_rigid=by_tp)
-    after = _read_grids(output_dir)
+        try:
+            run_zip_task(well, zips[well], output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
+                         csv_prefix, schema, sep, settings_key, grouper=grouper, parse=parse, segmenter=segmenter,
+                         incremental=True, incremental_prior_dir=output_dir, plate_rigid=by_tp)
+        except Exception as exc:          # one well's re-run must not cost the rest, or the finished run's records
+            log.error("Well %s — re-anchoring failed (%s: %s); its timepoints stay unaddressed.", well,
+                      type(exc).__name__, exc, exc_info=True)
+            reasons.update({(well, tp): f"the re-run failed: {type(exc).__name__}: {exc}" for tp in by_tp})
+    after = _read_grids(output_dir, here)
     anchored, remaining = [], {}
     for well, grid in after.items():
         for tp, block in grid["timepoints"].items():
@@ -501,8 +566,12 @@ def nanowell_endgame(options, output_dir, well_zips, shared_kwargs_template, nuc
     """What nanowell mode does after every well has run; a no-op when the mode is off (the caller does not branch)."""
     if not options:
         return
-    summary = reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
-                             schema, sep, settings_key, grouper=grouper, parse=parse)
+    try:
+        summary = reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token, fluor_tokens,
+                                 csv_prefix, schema, sep, settings_key, grouper=grouper, parse=parse)
+    except Exception as exc:               # the run is finished; a pass that cannot describe the plate says so
+        log.error("Re-anchoring could not run (%s: %s).", type(exc).__name__, exc, exc_info=True)
+        summary = {"anchored": [], "remaining": {}, "error": f"{type(exc).__name__}: {exc}"}
     if summary["anchored"] or summary["remaining"]:
         log.info("Re-anchoring: %d (well, timepoint) anchored from the plate, %d still unaddressed.",
                  len(summary["anchored"]), len(summary["remaining"]))

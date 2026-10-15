@@ -8917,11 +8917,59 @@ Every text and line is in the plot's ink and tagged `follows_theme`; the dots ta
 `widgets.plot_card.theme_paired_colours`, the hook `PlotCard.setPlotTheme` uses to repaint a paired data
 palette — so a capture, which flips the theme without a redraw, puts the publication shades on white. `render_site_detail` draws the selected nanowells' series
 against recorded time, a timepoint without a number as a gap and a hatched band, with each timepoint's state
-written above.
+written above, and a strip of crops of the first selected nanowell, one per timepoint.
 
-**The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (listing
-only the views this build draws, U3), Metric, Along x, Baseline, Timepoint and *vs* (both shown on *Along x:
-Wells*), Save and Properties. Wells are the plate selection or, in replicate mode, the visible sets' wells and
+**The other views.** `views_compute` holds what they draw as data. `lattice_xy` places an axial address on
+an ideal lattice of the well's measured pitch (`well_pitch`, the median of its timepoints' grid records): `q`
+east, `r` 60° counter-clockwise from east on screen with y down, the central square at the origin — the
+pipeline's convention, which `tests/test_nanowell_page_views.py` checks against a real run by fitting a
+rotation from the lattice positions to the measured ones (no reflection, the grid record's angle, residuals of
+localisation size). The **Array map** (`map_model`, `render_array_map`) draws lattice positions rather than
+measured ones (U4), so a nanowell keeps its place as the timepoint moves even when the plate was put back
+rotated; measured positions belong to Array QC. A nanowell without a value is a grey outline styled by its
+state (`_STATE_STYLE`), never a colour of the scale; the map's `HitMap` makes it clickable like the beeswarm,
+and a well whose grid record has no pitch is a `render_message` figure saying so. **Trajectories**
+(`trajectory_panels`) are a line per nanowell over time and a median per occupancy class at baseline; a metric
+with one value per nanowell is greyed in the Metric list there, and a saved one is drawn as cell count with a
+footer line saying so. **Position** (`position_series`) is the metric's median and interquartile range by ring,
+with the share of each ring's nanowells without a value; it makes no test. The ring comes from the address
+(`hex_ring`, the pipeline's `(|q| + |r| + |q + r|) / 2`), not from a row's `nw_ring`, because the rows Review adds
+for a roster nanowell not seen at a timepoint carry the address and no ring — reading the column dropped them,
+so a ring nobody saw vanished instead of reading as wholly excluded. A drawn well with no addressed nanowell at
+the timepoint is named in the footer. `numeric_values` reads the
+occupancy class as its lower bound (3+ as 3) for all three. **Array QC** (`render_array_qc`) draws
+`image_compute.read_montage` — the run's downsampled phase montage, `<well>_<timepoint>_montage.png` in
+`<well>_out.zip`, placed by the grid record's `montage_origin_um` and `montage_um_per_px` — with
+`tile_boxes`, each tile's placement coloured by its `source` (lattice, overlap, recorded) and labelled with
+its residual. A tile size comes from the acquisition record's `tile_size_px` and `pixel_size_um`; without them
+the tile's corner is marked and the figure says the outline is unknown, never a guessed rectangle. The grid
+record of every timepoint is listed beside the image. The montage (a PNG of up to 4096 px) is read on a
+worker; the figure says *Reading the montage…* until it arrives, and the last `MONTAGES_KEPT` are kept.
+
+**Crops.** `image_compute.site_crops` cuts a nanowell at each timepoint from its **owner tile**, read from
+the input archive the run segmented (`in/<well>.zip`; the member found by the run's filename schema, separator
+and phase token, which `collect` puts on `NanowellData`, judging only TIFF members so directory entries,
+sidecars and AppleDouble files cannot match), at full resolution: the tile-local centre is the well-frame
+position less the tile's placement, over the x pixel size on both axes as the pipeline places them. A crop is
+a copy, so a cached crop does not keep its whole tile in memory. Without the archive (an output folder copied
+alone), with an archive that cannot be opened, for a nanowell with no owner tile (fused or shared), or when the
+owner tile's image cannot be found, it cuts from the montage and the crop's note says which; the strip's
+caption carries the note and where the crops came from. A timepoint with no position or off the montage is a
+`Crop` with no image and the reason.
+
+**Reads on a worker.** `controller._fetch` reads crops and montages off the UI thread, once per key: the
+result goes on the state and the figure is redrawn; a failure stores a value saying why, so the figure states it
+and the read is not relaunched on every redraw; a result for a dataset loaded since is dropped without touching
+the new dataset's bookkeeping; each worker bridge is kept on the state until it delivers, then released.
+
+**The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (the five
+views, U3), Metric, Along x, Baseline, Timepoint and *vs* (both shown on *Along x: Wells*), Well and a
+timepoint slider (on the one-well views, `ONE_WELL_VIEWS`), Save and Properties; `refresh_controls` shows each
+view only the controls it uses. One `timepoint` on the state serves every view: `shown_timepoint` gives the
+timepoints a view offers and the one it draws — the one-well views offer their well's timepoints and start at
+the first, Position and *Along x: Wells* offer every timepoint and start at the latest (U13) — so the combo,
+the slider and the figure always agree. `page_well` is the chosen well when it is drawn, else the first drawn
+well. Wells are the plate selection or, in replicate mode, the visible sets' wells and
 the active solo wells — never every loaded well as a fallback — grouped by `replicate_groups` over those wells
 only. Brightness and site signal follow the app's shared channel (U6); the Metric entries are greyed, with the
 reason, when that channel has no site intensities. `ensure_loaded` reads the tables and computes the metrics

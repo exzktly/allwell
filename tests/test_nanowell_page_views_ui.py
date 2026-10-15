@@ -46,7 +46,7 @@ def _with_grids(out):
     for path in (out / "nanowells").glob("*_grid.json"):
         record = json.loads(path.read_text())
         for tp, block in record["timepoints"].items():
-            block.update(pitch_um=PITCH, angle_deg=0.5, overlap_um=40.0, n_detected=4, roster_size=4)
+            block.update(pitch_um=PITCH, angle_deg=0.5, overlap_um=[40.0, 40.0], n_detected=4, roster_size=4)
             if record["well"] == "A01":
                 block.update(montage_origin_um=list(ORIGIN), montage_um_per_px=SCALE,
                              tiles=[{"tile": "F0", "left_um": -100.0, "top_um": -100.0, "source": "lattice",
@@ -166,6 +166,33 @@ def test_clicking_a_nanowell_on_the_map_selects_it_and_cuts_its_crop_from_the_mo
     detail = page.widgets.get("_nw_detail_fig")
     images = [im for ax in detail.axes for im in ax.images]
     assert len(images) == 2
+    # What the crops are is stated on the figure, not only on the state.
+    caption = [t.get_text() for t in detail.texts if t.get_gid() == "nw-crop-caption"]
+    assert caption == ["Crops: A01 · q 1, r 0, from the montage, at its lower resolution; from the montage: the "
+                       "input archive is not beside this dataset"]
+    assert st.fetch_bridges == [] and st.fetching == set()           # nothing kept once delivered
+
+
+def test_a_crop_job_that_fails_says_so_on_the_figure_and_is_not_relaunched(page, qtbot, monkeypatch):
+    calls = []
+
+    def broken(*args):
+        calls.append(args)
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(nwc, "site_crops", broken)
+    _loaded(qtbot, page)
+    _choose_view(page, "array_map")
+    _click_site(qtbot, page, ("A01", 1, 0))
+    st = page.state.feature_slice("nanowell")
+    qtbot.waitUntil(lambda: ("A01", 1, 0) in st.crops, timeout=20000)
+    detail = page.widgets.get("_nw_detail_fig")
+    missing = [t.get_text() for ax in detail.axes for t in ax.texts if t.get_gid() == "nw-crop-missing"]
+    assert len(missing) == 1 and missing[0].startswith("The crops could not be cut: ")
+    assert "disk went away" in missing[0]
+    nwc.set_metric(page, "c")                                        # any redraw
+    nwc.redraw(page)
+    assert len(calls) == 1
 
 
 # ── V4 / V6 ──────────────────────────────────────────────────────────────────
@@ -189,6 +216,13 @@ def test_a_per_nanowell_metric_on_trajectories_is_greyed_and_says_what_is_drawn(
             in _fig_texts(page, "nw-traj-footer"))
 
 
+def test_position_keeps_its_timepoint_control_for_a_per_nanowell_metric(page, qtbot):
+    _loaded(qtbot, page)
+    nwc.set_metric(page, "occupancy_class")
+    _choose_view(page, "position")
+    assert "Timepoint" in _visible_scopes(page)          # the excluded share depends on the timepoint
+
+
 def test_position_defaults_to_the_latest_timepoint_and_follows_the_combo(page, qtbot):
     _loaded(qtbot, page)
     _choose_view(page, "position")
@@ -208,7 +242,11 @@ def test_array_qc_draws_the_montage_the_tiles_by_how_they_were_placed_and_the_st
     _loaded(qtbot, page)
     _choose_view(page, "array_qc")
     fig = page.widgets.get("_nw_fig")
-    assert len(fig.axes[0].images) == 1
+    # The montage is read on a worker; until it arrives the figure says so.
+    st = page.state.feature_slice("nanowell")
+    if ("A01", "t_c") not in st.montages:
+        assert _fig_texts(page, "nw-qc-missing") == ["Reading the montage…"]
+    qtbot.waitUntil(lambda: len(page.widgets.get("_nw_fig").axes[0].images) == 1, timeout=20000)
     assert sorted(_fig_texts(page, "nw-qc-tile")) == ["F0 · lattice · 0.4 µm", "F1 · recorded"]
     # This record states no tile size, so the corners are marked and the figure says so.
     assert _fig_texts(page, "nw-qc-unsized") == [
@@ -222,6 +260,8 @@ def test_array_qc_on_a_well_without_a_montage_says_why(page, qtbot):
     _loaded(qtbot, page)
     nwc.set_well(page, "B01")
     _choose_view(page, "array_qc")
+    st = page.state.feature_slice("nanowell")
+    qtbot.waitUntil(lambda: ("B01", "t_c") in st.montages, timeout=20000)
     assert _fig_texts(page, "nw-qc-missing") == ["The grid record has no montage for B01 at t_c (ok)."]
 
 
@@ -238,6 +278,7 @@ def test_on_a_real_run_the_map_click_selects_the_lit_nanowell_and_its_crop_is_fu
     crop = st.crops[(RUN_WELL, 1, 2)]["0h"]
     assert (crop.source, crop.note.endswith("full resolution")) == ("tile", True)
     _choose_view(ctx, "array_qc")
+    qtbot.waitUntil(lambda: len(ctx.widgets.get("_nw_fig").axes[0].images) == 1, timeout=20000)
     fig = ctx.widgets.get("_nw_fig")
     assert len(fig.axes[0].images) == 1 and len(fig.axes[0].patches) == 4       # four sized tile outlines
     assert _texts(ctx, "nw-qc-unsized") == []

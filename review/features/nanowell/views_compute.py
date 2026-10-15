@@ -138,6 +138,17 @@ def trajectory_panels(metrics: pd.DataFrame, wells, column: str) -> list[Traject
     return out
 
 
+def hex_ring(q, r) -> np.ndarray:
+    """Lattice steps from the central nanowell, from the axial address — the pipeline's ``hex_ring``.
+
+    Computed from ``(q, r)`` rather than read from a row's ``nw_ring``, because the rows Review adds for a
+    roster nanowell not seen at a timepoint (absent, not located) carry the address and no ring.
+    """
+    q = np.asarray(q, dtype=float)
+    r = np.asarray(r, dtype=float)
+    return (np.abs(q) + np.abs(r) + np.abs(q + r)) / 2.0
+
+
 @dataclass
 class PositionSeries:
     well: str
@@ -149,22 +160,29 @@ class PositionSeries:
     excluded_share: np.ndarray            # fraction of the ring's nanowells with no value
 
 
-def position_series(metrics: pd.DataFrame, wells, timepoint: str, column: str) -> list[PositionSeries]:
-    """Per well, the metric's median and quartiles by ring at *timepoint*, and each ring's excluded share."""
-    out = []
+def position_series(metrics: pd.DataFrame, wells, timepoint: str,
+                    column: str) -> tuple[list[PositionSeries], list[str]]:
+    """Per well, the metric's median and quartiles by ring at *timepoint*, and each ring's excluded share —
+    every addressed roster nanowell counts towards its ring, seen or not. Also the wells with no addressed
+    nanowell at *timepoint*, which have no series and are named rather than dropped."""
+    out, missing = [], []
     for well in wells:
         rows = metrics[(metrics["well"] == well) & (metrics["timepoint"] == timepoint)]
-        if not len(rows):
+        frame = pd.DataFrame({"ring": hex_ring(rows["nw_q"], rows["nw_r"]),
+                              "v": numeric_values(rows, column).to_numpy(dtype=float)}).dropna(subset=["ring"])
+        if not len(frame):
+            missing.append(well)
             continue
-        values = numeric_values(rows, column)
-        frame = pd.DataFrame({"ring": pd.to_numeric(rows["nw_ring"], errors="coerce"), "v": values}).dropna(
-            subset=["ring"])
-        grouped = frame.groupby("ring")["v"]
         rings = np.array(sorted(frame["ring"].unique()), dtype=float)
-        stat = grouped.agg(["median", "count", "size"]).reindex(rings)
-        q = grouped.quantile([0.25, 0.75]).unstack().reindex(rings)
-        out.append(PositionSeries(well, rings, stat["median"].to_numpy(dtype=float),
-                                  q[0.25].to_numpy(dtype=float), q[0.75].to_numpy(dtype=float),
-                                  stat["count"].to_numpy(dtype=int),
-                                  1.0 - stat["count"].to_numpy(dtype=float) / stat["size"].to_numpy(dtype=float)))
-    return out
+        median, q1, q3, used, share = [], [], [], [], []
+        for ring in rings:
+            v = frame.loc[frame["ring"] == ring, "v"].to_numpy(dtype=float)
+            have = v[np.isfinite(v)]
+            median.append(float(np.median(have)) if len(have) else np.nan)
+            q1.append(float(np.quantile(have, 0.25)) if len(have) else np.nan)
+            q3.append(float(np.quantile(have, 0.75)) if len(have) else np.nan)
+            used.append(len(have))
+            share.append(1.0 - len(have) / len(v))
+        out.append(PositionSeries(well, rings, np.array(median), np.array(q1), np.array(q3),
+                                  np.array(used, dtype=int), np.array(share)))
+    return out, missing

@@ -86,8 +86,9 @@ def tile_boxes(data, well: str, timepoint: str) -> list[TileBox]:
     block = (data.grids.get(well) or {}).get(timepoint) or {}
     acquisition = (data.acquisition or {}).get(timepoint) or {}
     px, size = acquisition.get("pixel_size_um") or {}, acquisition.get("tile_size_px") or {}
+    # Both from the x pixel size, as the pipeline places tiles (``nanowell_run.locate_timepoint``).
     width = (size.get("x") or 0) * (px.get("x") or 0) or None
-    height = (size.get("y") or 0) * (px.get("y") or 0) or None
+    height = (size.get("y") or 0) * (px.get("x") or 0) or None
     out = []
     for tile in block.get("tiles") or []:
         if not isinstance(tile, dict) or tile.get("left_um") is None or tile.get("top_um") is None:
@@ -104,19 +105,31 @@ class Crop:
     note: str                              # why there is no image, or what the image is
 
 
-def _member_for(names, data, timepoint: str, tile: str) -> str | None:
-    """The input archive member holding the phase image of *tile* at *timepoint*, by the run's schema."""
+_IMAGE_SUFFIXES = (".tif", ".tiff")
+
+
+def _member_for(names, data, well: str, timepoint: str, tile: str) -> str | None:
+    """The input archive member holding the phase image of *tile* at *timepoint*, by the run's schema.
+
+    Only TIFF members are judged — an archive also carries ``.DS_Store``, ``__MACOSX/`` AppleDouble sidecars
+    (``._<name>``, the same stem as the image) and directory entries, none of which is an image (CLAUDE.md
+    §7.1). A name with more tokens than the schema matches on its leading ones, as the pipeline's
+    ``parse_filename`` reads it.
+    """
     fields = [f for f in data.schema.split(":") if f]
     sep = data.separator or "_"
-    phase = data.phase_token.lower()
-    want = {"channel": phase, "fov": tile.lower(), "timepoint": timepoint.lower()}
+    want = {"channel": data.phase_token.lower(), "fov": tile.lower(), "timepoint": timepoint.lower(),
+            "well": well.lower()}
     for name in names:
-        stem = Path(name).name.rsplit(".", 1)[0]
-        parts = stem.split(sep)
-        if len(parts) != len(fields):
+        base = Path(name).name
+        if ("__MACOSX/" in name or base.startswith("._") or name.endswith("/")
+                or not base.lower().endswith(_IMAGE_SUFFIXES)):
+            continue
+        parts = base.rsplit(".", 1)[0].split(sep)
+        if len(parts) < len(fields):
             continue
         tokens = {f: p.lower() for f, p in zip(fields, parts)}
-        if all(tokens.get(k) == v for k, v in want.items()):
+        if all(tokens[k] == v for k, v in want.items() if k in tokens):
             return name
     return None
 
@@ -127,7 +140,8 @@ def _cut(image: np.ndarray, cx: float, cy: float, half: float) -> np.ndarray | N
     y0, y1 = int(math.floor(cy - half)), int(math.ceil(cy + half))
     if x1 <= 0 or y1 <= 0 or x0 >= w or y0 >= h:
         return None
-    return np.asarray(image[max(y0, 0):min(y1, h), max(x0, 0):min(x1, w)])
+    # A copy, not a view: a view keeps the whole tile alive for as long as the crop is cached.
+    return np.array(image[max(y0, 0):min(y1, h), max(x0, 0):min(x1, w)], copy=True)
 
 
 def site_crops(data, metrics, site, *, pad: float = 1.4) -> dict:
@@ -137,11 +151,15 @@ def site_crops(data, metrics, site, *, pad: float = 1.4) -> dict:
     well, q, r = site
     rows = metrics[(metrics["well"] == well) & (metrics["nw_q"] == q) & (metrics["nw_r"] == r)]
     rows = rows.sort_values("tp_order")
-    archive = None
-    if data.in_dir is not None and (Path(data.in_dir) / f"{well}.zip").is_file():
-        archive = Path(data.in_dir) / f"{well}.zip"
+    zf, why_not = None, "the input archive is not beside this dataset"
+    archive = Path(data.in_dir) / f"{well}.zip" if data.in_dir is not None else None
+    if archive is not None and archive.is_file():
+        try:
+            zf = zipfile.ZipFile(archive)
+        except (OSError, zipfile.BadZipFile) as exc:
+            log.warning("Nanowells: %s could not be opened for crops: %s", archive, exc)
+            why_not = f"{archive.name} could not be read ({exc})"
     out = {}
-    zf = zipfile.ZipFile(archive) if archive is not None else None
     try:
         names = zf.namelist() if zf is not None else []
         for row in rows.to_dict("records"):
@@ -150,9 +168,10 @@ def site_crops(data, metrics, site, *, pad: float = 1.4) -> dict:
                 out[tp] = Crop(None, "", f"No position at {tp} ({row.get('state')}).")
                 continue
             half_um = pad * float(row.get("radius_um") or 50.0)
-            crop = None
-            if zf is not None and row.get("owner"):
-                crop = _tile_crop(zf, names, data, tp, str(row["owner"]), row, half_um, tifffile)
+            crop, owner = None, row.get("owner")
+            owned = isinstance(owner, str) and owner != ""
+            if zf is not None and owned:
+                crop = _tile_crop(zf, names, data, tp, owner, row, half_um, tifffile)
             if crop is None:
                 montage, why = read_montage(data, well, tp)
                 if montage is None:
@@ -161,8 +180,9 @@ def site_crops(data, metrics, site, *, pad: float = 1.4) -> dict:
                 cx = (row["well_x_um"] - montage.origin_um[0]) / montage.um_per_px
                 cy = (row["well_y_um"] - montage.origin_um[1]) / montage.um_per_px
                 image = _cut(montage.image, cx, cy, half_um / montage.um_per_px)
-                note = ("from the montage: the input archive is not beside this dataset" if zf is None
-                        else "from the montage: the owner tile's image could not be found")
+                note = ("from the montage: " + (why_not if zf is None else
+                                                "the nanowell has no owner tile (it is fused or shared)"
+                                                if not owned else "the owner tile's image could not be found"))
                 crop = Crop(image, "montage", note) if image is not None else Crop(None, "", "Off the montage.")
             out[tp] = crop
     finally:
@@ -175,16 +195,18 @@ def _tile_crop(zf, names, data, tp, owner, row, half_um, tifffile) -> Crop | Non
     block = (data.grids.get(row["well"]) or {}).get(tp) or {}
     tile = next((t for t in block.get("tiles") or [] if str(t.get("tile")) == owner), None)
     px = ((data.acquisition or {}).get(tp) or {}).get("pixel_size_um") or {}
-    member = _member_for(names, data, tp, owner)
+    member = _member_for(names, data, row["well"], tp, owner)
     if tile is None or not px.get("x") or member is None:
         return None
     try:
         image = np.asarray(tifffile.imread(io.BytesIO(zf.read(member))))
-    except (OSError, ValueError, KeyError) as exc:
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile, tifffile.TiffFileError) as exc:
         log.warning("Nanowells: could not read %s for a crop: %s", member, exc)
         return None
-    sx, sy = float(px["x"]), float(px.get("y") or px["x"])
-    cx = (row["well_x_um"] - float(tile["left_um"])) / sx
-    cy = (row["well_y_um"] - float(tile["top_um"])) / sy
-    cut = _cut(image, cx, cy, half_um / sx)
+    # The pipeline places tiles and sites with the x pixel size on both axes (``nanowell_run.locate_timepoint``),
+    # so the crop does too: a y size that differed would put the crop off the nanowell the run measured.
+    scale = float(px["x"])
+    cx = (row["well_x_um"] - float(tile["left_um"])) / scale
+    cy = (row["well_y_um"] - float(tile["top_um"])) / scale
+    cut = _cut(image, cx, cy, half_um / scale)
     return Crop(cut, "tile", f"{owner}, full resolution") if cut is not None else None

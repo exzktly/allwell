@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 import shutil
+import zipfile
 
 import numpy as np
 import pytest
@@ -110,7 +111,109 @@ def test_position_effects_are_the_median_by_ring_with_each_ring_s_excluded_share
     rows = [_row("t_c", 0, 0, n=1, c=0.1), _row("t_c", 1, 0, n=3, c=0.1), _row("t_c", 0, 1, n=5, c=0.1),
             _row("t_c", 2, 0, state="clipped"), _row("t_c", 0, 2, n=7, c=0.1)]
     data = load_nanowell_data(_dataset(tmp_path, {"A01": rows}, starts={"t_c": STARTS["t_c"]}))
-    series = vc.position_series(site_metrics(data), ["A01"], "t_c", "n")[0]
+    found, missing = vc.position_series(site_metrics(data), ["A01"], "t_c", "n")
+    series = found[0]
+    assert missing == []
     assert list(series.rings) == [0.0, 1.0, 2.0]
     assert list(series.median) == [1.0, 4.0, 7.0]
     assert list(series.excluded_share) == [0.0, 0.0, 0.5] and list(series.n_used) == [1, 2, 1]
+
+
+def test_a_roster_nanowell_not_seen_at_a_timepoint_counts_as_excluded_in_its_ring(tmp_path):
+    """(1, 0) is in the roster but missing from t_a's table, so Review adds it as absent, with its address and
+    no ring: the ring is computed from the address, and ring 1 is wholly excluded rather than vanishing. B01
+    has no t_a at all, and is named rather than dropped."""
+    rows = [_row("t_c", 0, 0, n=1, c=0.1), _row("t_c", 1, 0, n=3, c=0.1), _row("t_c", 1, 1, n=5, c=0.1),
+            _row("t_a", 0, 0, n=2, c=0.1), _row("t_a", 1, 1, n=6, c=0.1)]
+    data = load_nanowell_data(_dataset(tmp_path, {"A01": rows, "B01": [_row("t_c", 0, 0, n=1, c=0.1)]},
+                                       starts={k: STARTS[k] for k in ("t_c", "t_a")}))
+    metrics = site_metrics(data)
+    absent = metrics[(metrics["well"] == "A01") & (metrics["timepoint"] == "t_a") & (metrics["nw_q"] == 1)
+                     & (metrics["nw_r"] == 0)]
+    assert absent["state"].tolist() == ["absent"]
+    found, missing = vc.position_series(metrics, ["A01", "B01"], "t_a", "n")
+    assert [s.well for s in found] == ["A01"] and missing == ["B01"]
+    # (1, 1) is two steps from the centre on a hex lattice ((|q| + |r| + |q + r|) / 2), not one.
+    assert list(found[0].rings) == [0.0, 1.0, 2.0]
+    assert list(found[0].excluded_share) == [0.0, 1.0, 0.0]
+    assert np.isnan(found[0].median[1]) and list(found[0].n_used) == [1, 0, 1]
+
+
+def _crop_data(tmp_path, *, archive_bytes=None, members=()):
+    """A one-nanowell dataset whose montage has one bright pixel block at a point with x ≠ y, so a crop cut
+    with its axes swapped lands on dark pixels."""
+    from PIL import Image
+    from types import SimpleNamespace
+    import io
+    import pandas as pd
+
+    image = np.zeros((60, 80), dtype=np.uint8)
+    image[17:24, 47:54] = 255      # around well-frame (100, 40) µm = pixel (50, 20) at 2 µm/px from (0, 0)
+    out = tmp_path / "out"
+    out.mkdir()
+    buf = io.BytesIO()
+    Image.fromarray(image).save(buf, format="PNG")
+    with zipfile.ZipFile(out / "A01_out.zip", "w") as zf:
+        zf.writestr("A01_t0_montage.png", buf.getvalue())
+    in_dir = tmp_path / "in"
+    in_dir.mkdir()
+    if archive_bytes is not None:
+        (in_dir / "A01.zip").write_bytes(archive_bytes)
+    elif members:
+        with zipfile.ZipFile(in_dir / "A01.zip", "w") as zf:
+            for name, payload in members:
+                zf.writestr(name, payload)
+    data = SimpleNamespace(
+        out_dir=out, in_dir=in_dir, schema="experiment:channel:well:fov:timepoint", separator="_",
+        phase_token="phase", acquisition={"t0": {"pixel_size_um": {"x": 0.5, "y": 0.4}}},   # y unused, as the pipeline
+        grids={"A01": {"t0": {"status": "ok", "montage_origin_um": [0.0, 0.0], "montage_um_per_px": 2.0,
+                              "tiles": [{"tile": "F0", "left_um": 0.0, "top_um": 0.0, "source": "lattice"}]}}})
+    metrics = pd.DataFrame([{"well": "A01", "nw_q": 0, "nw_r": 0, "timepoint": "t0", "tp_order": 0,
+                             "well_x_um": 100.0, "well_y_um": 40.0, "radius_um": 3.0, "owner": "F0",
+                             "state": "measured"}])
+    return data, metrics
+
+
+def _tif(image) -> bytes:
+    import io
+    import tifffile
+
+    buf = io.BytesIO()
+    tifffile.imwrite(buf, image)
+    return buf.getvalue()
+
+
+def test_a_montage_crop_is_cut_at_x_then_y_not_the_other_way_round(tmp_path):
+    data, metrics = _crop_data(tmp_path)
+    crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
+    assert crop.source == "montage" and crop.image.min() == 255          # every pixel on the bright block
+
+
+def test_a_tile_crop_is_cut_at_the_site_and_holds_no_reference_to_the_whole_tile(tmp_path):
+    tile = np.zeros((120, 260), dtype=np.uint16)
+    tile[78:82, 198:202] = 1000                  # (100, 40) µm at 0.5 µm/px from the tile's corner (0, 0)
+    data, metrics = _crop_data(tmp_path, members=[
+        ("exp_phase_A01_F0_t0/", b""),                               # a directory entry with the image's tokens
+        ("exp_phase_A01_F0_t0.txt", b"a sidecar"),                    # the image's stem, not an image
+        ("__MACOSX/._exp_phase_A01_F0_t0.tif", b"\x00\x05\x16\x07 AppleDouble"),
+        (".DS_Store", b"junk"),
+        ("exp_phase_A01_F0_t0_extra.tif", _tif(tile))])              # one token beyond the schema
+    crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
+    assert (crop.source, crop.note) == ("tile", "F0, full resolution")
+    # ±1.4 radii = ±8.4 px around pixel (200, 80): columns 191–208, rows 71–88.
+    assert crop.image.base is None and crop.image.shape == (18, 18)
+    assert crop.image[7:11, 7:11].min() == 1000 and crop.image[0].max() == 0
+
+
+def test_an_unreadable_input_archive_falls_back_to_the_montage_and_names_the_archive(tmp_path):
+    data, metrics = _crop_data(tmp_path, archive_bytes=b"PK\x03\x04 truncated")
+    crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
+    assert crop.source == "montage"
+    assert crop.note.startswith("from the montage: A01.zip could not be read (")
+
+
+def test_a_nanowell_with_no_owner_tile_says_so_rather_than_blaming_the_archive(tmp_path):
+    data, metrics = _crop_data(tmp_path, members=[("exp_phase_A01_F0_t0.tif", _tif(np.zeros((8, 8), np.uint16)))])
+    metrics["owner"] = np.nan                                       # a fused site: the pipeline gives no owner
+    crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
+    assert crop.note == "from the montage: the nanowell has no owner tile (it is fused or shared)"

@@ -42,12 +42,13 @@ class NanowellState:
     bridge: object = None                   # core.worker_bridge.WorkerBridge of the running request
     config_for: object = None               # the data dir whose saved choices are on the state
     crops: dict = field(default_factory=dict)            # (well, q, r) -> {timepoint: image_compute.Crop}
-    crops_pending: set = field(default_factory=set)
-    crop_bridges: list = field(default_factory=list)     # keep each worker bridge alive until it delivers
+    montages: dict = field(default_factory=dict)         # (well, timepoint) -> (image_compute.Montage | None, why)
+    fetching: set = field(default_factory=set)           # ("crops" | "montages", key) being read on a worker
+    fetch_bridges: list = field(default_factory=list)    # each worker bridge, kept alive until it delivers
 
     def reset_data(self) -> None:
         self.data, self.metrics, self.load_error, self.loaded_for = None, None, "", None
-        self.crops, self.crops_pending, self.crop_bridges = {}, set(), []
+        self.crops, self.montages, self.fetching, self.fetch_bridges = {}, {}, set(), []
 
     def to_config(self) -> dict:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,

@@ -4185,8 +4185,8 @@ use them.
 
 **Controls**
 
-- **View** — *Distribution*, the beeswarm. (The array map, trajectories, position effects and Array QC views
-  are coming.)
+- **View** — *Distribution* (the beeswarm, described below), *Array map*, *Trajectories*, *Position* and
+  *Array QC*. Each view shows only the controls it uses.
 - **Metric** — what each dot is: cell count, confluence, brightness (mean per-cell intensity), site signal
   (integrated intensity above the empty nanowells' background), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
@@ -4200,6 +4200,9 @@ use them.
 - **Baseline** — what a fold change is measured from: the well's *earliest* timepoint, or each nanowell's
   *first measurable* one (for a bubble that clears after the first timepoint).
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
+- **Well** and the **Timepoint** slider (on *Array map* and *Array QC*) — the one well drawn, from the wells
+  selected, and its timepoint; these views start at the well's first timepoint. One timepoint is shared by
+  every view, so a timepoint chosen on one carries to the next wherever it exists.
 
 **Reading the figure**
 
@@ -4225,11 +4228,38 @@ use them.
 - Times are each timepoint's recorded start from the acquisition record. When the record cannot give every
   timepoint a time, the timepoint labels are used and the footer says so.
 
+**The other views**
+
+- **Array map** — one well at one timepoint, every nanowell of the array in its place on the lattice, coloured
+  by the metric (the colour bar names it). Nanowells keep their place as you move the slider, even if the
+  plate went back on the stage rotated. A nanowell without a value is a grey outline, never a colour: hatched
+  where it was occluded, dashed where clipped, dotted where it was not seen; a cross marks a fused nanowell and
+  the square marks the central one. The footer counts the nanowells by state. Click a nanowell to open its
+  site detail, as on the beeswarm. A well whose grid record has no pitch says so instead of drawing a map.
+- **Trajectories** — one panel per well: a thin line per nanowell through its values over time, coloured by
+  its occupancy at baseline, and a thick line for each occupancy class's median. A gap is a timepoint without
+  a value. Growth rate and occupancy have one value per nanowell, so they are greyed here.
+- **Position** — the metric by ring (lattice steps from the central nanowell), per well: the median and the
+  interquartile band, and below it the share of each ring's nanowells without a value — including those not
+  seen at that timepoint. It checks for an edge effect, and makes no test. A selected well with no addressed
+  nanowells at the timepoint is named in the footer.
+- **Array QC** — the well's stitched phase montage at the chosen timepoint, each tile's outline coloured by how
+  it was placed (green on the lattice, blue by overlap, amber where the acquisition record put it), with its
+  registration residual. Occluded and clipped nanowells are outlined at their measured positions. Beside the
+  image are the grid record of this timepoint (status, how the origin was found, pitch, angle, overlap,
+  nanowells detected of the roster) and the status of every other timepoint. A tile whose size the acquisition
+  record does not give is marked at its corner, and the figure says so. The montage is read in the
+  background; the figure says *Reading the montage…* meanwhile.
+
 **Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
 brightness and site signal against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
 six nanowells to compare; clicking empty space clears them, as does *Clear selection*. A timepoint where the
 nanowell has no number is a gap and a hatched band, with its state written above the plot — never a zero.
-Selecting nanowells does not change the plate selection.
+Under the plots, a strip of crops shows the first selected nanowell at each timepoint, cut at full resolution
+from the image the run segmented (the well's archive in `in/`). When that archive is not beside the dataset
+(an output folder copied on its own), cannot be read, or the nanowell has no single owner tile (a fused one),
+the crop is cut from the lower-resolution montage instead, and the caption under the strip says so and why; a
+timepoint with no crop says why. Selecting nanowells does not change the plate selection.
 
 **Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the dataset as one
 long CSV, with the baseline and where the times came from. *Save cell data…* writes the per-cell rows of the

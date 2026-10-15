@@ -372,6 +372,7 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
 
 def _crop_strip(fig, cell, crops: dict, site, ink, faint) -> None:
     items = list(crops.items())
+    notes: set = set()
     sub = cell.subgridspec(1, len(items), wspace=0.08)
     for k, (tp, crop) in enumerate(items):
         ax = fig.add_subplot(sub[0, k])
@@ -379,13 +380,20 @@ def _crop_strip(fig, cell, crops: dict, site, ink, faint) -> None:
         ax.set_yticks([])
         if crop.image is not None:
             ax.imshow(crop.image, cmap="gray", interpolation="nearest")
+            if crop.source == "montage":
+                notes.add(crop.note)
         else:
             _ink(ax.text(0.5, 0.5, crop.note, ha="center", va="center", wrap=True, fontsize=5.5,
                          transform=ax.transAxes, color=faint, gid="nw-crop-missing"), muted=True)
         _ink(ax.set_title(tp + ("" if crop.source != "montage" else " (montage)"), fontsize=6.5, color=ink,
                           gid="nw-crop-title"))
-    _ink(fig.text(0.16, 0.012, f"Crops: {site[0]} · q {site[1]}, r {site[2]}, from its owner tile at each timepoint",
-                  fontsize=6.5, color=faint, gid="nw-crop-caption"), muted=True)
+    sources = {crop.source for _tp, crop in items if crop.image is not None}
+    origin = ("from its owner tile at full resolution" if sources == {"tile"} else
+              "from the montage, at its lower resolution" if sources == {"montage"} else
+              "from its owner tile, or the montage where marked" if sources else "none could be cut")
+    caption = f"Crops: {site[0]} · q {site[1]}, r {site[2]}, {origin}" + "".join(
+        f"; {note}" for note in sorted(notes))
+    _ink(fig.text(0.16, 0.012, caption, fontsize=6.5, color=faint, gid="nw-crop-caption", wrap=True), muted=True)
 
 
 def _band(x) -> float:
@@ -632,7 +640,7 @@ def render_array_qc(fig, montage, boxes, sites, grid_blocks: dict, *, timepoint:
              + (f" — origin from the {str(block.get('origin_method', '')).replace('_', ' ')}"
                 f" ({block.get('origin_agreement') or 'single source'})" if block.get("origin_method") else ""),
              f"pitch {_num(block.get('pitch_um'), 1)} µm · angle {_num(block.get('angle_deg'), 2)}° · "
-             f"overlap {block.get('overlap_um')} µm · {block.get('n_detected', '?')} detected of "
+             f"overlap {_overlap(block.get('overlap_um'))} · {block.get('n_detected', '?')} detected of "
              f"{block.get('roster_size', '?')}"]
     lines += [f"{tp}: {b.get('status', '?')}" + (f" — {b.get('reason')}" if b.get("reason") else "")
               for tp, b in grid_blocks.items() if tp != timepoint]
@@ -642,6 +650,15 @@ def render_array_qc(fig, montage, boxes, sites, grid_blocks: dict, *, timepoint:
     _ink(fig.text(0.72, 0.10, "Tiles: green placed on the lattice, blue by overlap correlation, amber where the "
                   "acquisition record put them. Nanowells at their measured positions: amber occluded, red clipped, "
                   "+ fused.", fontsize=6.5, color=muted, wrap=True, gid="nw-qc-key"), muted=True)
+
+
+def _overlap(value) -> str:
+    """The grid record's tile overlap — ``[x, y]`` µm as the pipeline writes it, or one number — for a status line."""
+    parts = value if isinstance(value, (list, tuple)) else [value]
+    shown = [_num(v, 1) for v in parts]
+    if all(v == "?" for v in shown):
+        return "?"
+    return (shown[0] if len(set(shown)) == 1 else " × ".join(shown)) + " µm"
 
 
 def _num(value, places: int) -> str:

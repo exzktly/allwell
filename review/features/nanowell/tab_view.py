@@ -250,7 +250,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_baseline.setVisible(view != "array_qc")
             grp_axis.setVisible(distribution)
             grp_control.setVisible(wells_axis)
-            grp_tp.setVisible((wells_axis or view == "position") and not per_nanowell)
+            grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position")
             grp_well.setVisible(view in ONE_WELL_VIEWS)
             grp_slider.setVisible(view in ONE_WELL_VIEWS)
         finally:

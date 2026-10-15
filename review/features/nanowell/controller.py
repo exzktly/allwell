@@ -18,7 +18,7 @@ from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
     METRICS, PER_NANOWELL, distribution_model, match_channel, metric_column,
 )
-from review.features.nanowell.image_compute import read_montage, site_crops, tile_boxes
+from review.features.nanowell.image_compute import Crop, read_montage, site_crops, tile_boxes
 from review.features.nanowell.renderer import (
     render_array_map, render_array_qc, render_distribution, render_message, render_position, render_site_detail,
     render_trajectories,
@@ -264,8 +264,11 @@ def redraw(ctx) -> None:
         st.hits = None
     elif view == "position":
         tp = shown_timepoint(ctx)[1]
-        render_position(fig, vc.position_series(st.metrics, page_wells(ctx), tp, metric_column(metric, channel)),
-                        label=_label(metric, channel), timepoint=tp, note=note)
+        series, missing = vc.position_series(st.metrics, page_wells(ctx), tp, metric_column(metric, channel))
+        if missing:
+            note = " ".join(filter(None, [note, f"No addressed nanowells at {tp}, so not drawn: "
+                                                f"{', '.join(missing)}."]))
+        render_position(fig, series, label=_label(metric, channel), timepoint=tp, note=note)
         st.hits = None
     elif view == "array_qc":
         _draw_qc(ctx, st, fig, page_well(ctx))
@@ -366,7 +369,14 @@ def _draw_map(ctx, st, fig, metric, channel, note) -> None:
 
 def _draw_qc(ctx, st, fig, well: str) -> None:
     tp = page_timepoint(ctx, well)
-    montage, why = read_montage(st.data, well, tp)
+    if (well, tp) in st.montages:
+        montage, why = st.montages[(well, tp)]
+    else:
+        # The montage is a PNG of up to 4096 px in a zip: read it on a worker, and draw it when it arrives.
+        data = st.data
+        _fetch(ctx, "montages", (well, tp), lambda: read_montage(data, well, tp),
+               failed=lambda message: (None, f"The montage could not be read: {message}"))
+        montage, why = None, "Reading the montage…"
     sites = st.metrics[(st.metrics["well"] == well) & (st.metrics["timepoint"] == tp)]
     render_array_qc(fig, montage, tile_boxes(st.data, well, tp), sites, st.data.grids.get(well) or {},
                     timepoint=tp, why=why)
@@ -393,32 +403,52 @@ def redraw_detail(ctx) -> None:
     first = tuple(series[0][0])
     crops = st.crops.get(first)
     if crops is None:
-        _load_crops(ctx, first)
+        data, metrics = st.data, st.metrics
+        _fetch(ctx, "crops", first, lambda: site_crops(data, metrics, first),
+               failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
     render_site_detail(fig, series, channel=channel, time_source=st.data.time_source, crops=crops)
     canvas.draw_idle()
 
 
-def _load_crops(ctx, site) -> None:
-    """Cut *site*'s crops on a worker (they read the input archive), then redraw the detail with them."""
+#: Montages kept read: a montage is up to 4096 px square, so the slider's recent steps only.
+MONTAGES_KEPT = 6
+
+
+def _fetch(ctx, kind: str, key, job, *, failed) -> None:
+    """Read ``st.<kind>[key]`` on a worker, once, and redraw when it arrives.
+
+    A failed read stores ``failed(message)`` — a value that says why — so the figure states the failure and
+    the read is not relaunched on every redraw. A result for a dataset loaded since is dropped without
+    touching the new dataset's bookkeeping.
+    """
     from core.worker_bridge import run_off_thread
 
     st = _state(ctx)
-    if site in st.crops_pending:
+    tag = (kind, key)
+    if tag in st.fetching:
         return
-    st.crops_pending.add(site)
-    data, metrics = st.data, st.metrics
+    st.fetching.add(tag)
+    data, holder = st.data, []
 
-    def done(crops):
-        st.crops_pending.discard(site)
-        if st.data is data:                               # not for a dataset loaded since
-            st.crops[site] = crops
-            redraw_detail(ctx)
+    def finish(value) -> None:
+        if st.data is not data:
+            return
+        st.fetching.discard(tag)
+        if holder and holder[0] in st.fetch_bridges:
+            st.fetch_bridges.remove(holder[0])
+        store = getattr(st, kind)
+        store[key] = value
+        while kind == "montages" and len(store) > MONTAGES_KEPT:
+            store.pop(next(iter(store)))
+        (redraw_detail if kind == "crops" else redraw)(ctx)
 
-    def failed(message):
-        st.crops_pending.discard(site)
-        log.warning("Nanowells: crops for %s could not be cut: %s", site, message)
+    def on_failed(message) -> None:
+        log.warning("Nanowells: %s for %s could not be read: %s", kind, key, message)
+        finish(failed(message))
 
-    st.crop_bridges.append(run_off_thread(lambda: site_crops(data, metrics, site), on_done=done, on_failed=failed))
+    bridge = run_off_thread(job, on_done=finish, on_failed=on_failed)
+    holder.append(bridge)
+    st.fetch_bridges.append(bridge)
 
 
 def on_click(ctx, event) -> None:

@@ -1107,4 +1107,5 @@ def test_completed_conversion_exposes_actual_acquisition_coverage(controller, tm
     assert "Recorded pixel size" in page._readout.text()
     assert "Positions: 1/1 mosaic" in page._readout.text()
     assert "Shared starts: 0/1 timepoints" in page._readout.text()
-    assert "Some shared acquisition starts are unknown" in page._readout.text()
+    # The start itself is reported as unknown above; the single frame's name (0h) is not degraded.
+    assert "Some shared acquisition starts are unknown" not in page._readout.text()

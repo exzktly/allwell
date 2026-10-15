@@ -196,6 +196,40 @@ batch processing on headless workers:
 python process_microscopy.py --help
 ```
 
+#### Nanowell arrays (command line)
+
+A plate imaged as overlapping tiles of a nanowell array can be analysed one well at one timepoint at a time,
+with every tile of the well together. The input is the usual `in/<WELL>.zip` per well, one phase image per
+tile per timepoint, plus `in/acquisition.json`, the record that says where each tile sits in its well (the
+converters write it). Add the nanowell flags:
+
+```sh
+python process_microscopy.py --input_dir plate/in --output_dir plate/out \
+    --phase_token PHASE --fluor_tokens GFP --nanowell_format 100um
+```
+
+`--nanowell_format` (`100um` or `50um`) turns the mode on and fixes the lattice pitch and nanowell diameter;
+`--phase_token` names the channel the tiles are imaged in. `--nanowell_cell_diameter_um` (default 15) is the
+cell size the label-free segmenter is given, `--nanowell_margin_um` the margin around a nanowell that must lie
+inside one tile for that tile to own it (default a tenth of the diameter), and `--nanowell_square_edge_deg` the
+angle of the central square's edges to a lattice row (default 0). Wells must be zips.
+
+Besides the usual per-cell CSV (one row per cell, with the owner tile as `fov` and the nanowell's address
+`nw_q`, `nw_r`, `nw_ring`, `nw_label` and its position `well_x_um`, `well_y_um`), the run writes
+`nanowells/<well>.csv`, one row per nanowell and timepoint (its address, position, state, imaged and visible
+fractions, cell count, confluence, and fluorescence over the empty nanowells' background), and
+`nanowells/<well>_grid.json`, the registration, lattice and status of every timepoint. A nanowell no tile could
+see, or that was hidden, has a row with its state and **no number**, never a zero. A timepoint that could not
+be placed, found or addressed is named in the grid record with the reason, and the other timepoints still run.
+When a well's own evidence cannot say which nanowell is which (no visible central square, no readable array
+edge), the end of the run addresses it from the plate's other wells, which move together between timepoints,
+and says how many it anchored and how many remain unaddressed.
+
+`--incremental` adds only new timepoints (onto the same set of nanowells); a changed setting or a changed tile
+record recomputes the timepoint. Subset, Merge Plates and Concatenate refuse a dataset holding nanowell results
+for now, and say so; Validate checks the tables against the grid record and the archives. The Analyze form and
+the Review pages for nanowells are not built yet.
+
 ### Windows (from source)
 
 Native Windows runs CPU-only — TensorFlow dropped native Windows GPU

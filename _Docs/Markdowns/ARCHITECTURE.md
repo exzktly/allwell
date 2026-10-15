@@ -8736,6 +8736,57 @@ metrics with `partially_visible` set. An empty site and an occluded one therefor
 be confused.
 
 
+### 6.2i The nanowell run
+
+`--nanowell_format` switches a run into nanowell mode. `process_microscopy.process_well_zip_task` hands the
+well to `pipeline/nanowell_task.run_zip_task` (a four-line hook), and the unit of work becomes one well at one
+timepoint with every tile of its grid together, not one field. `pipeline/nanowell_run.py` is the chain the
+earlier sections built, with every refusal a named status (`incomplete_grid`, `bad_grid`, `no_record`,
+`no_images`, `no_lattice`, `format_mismatch`, `orientation_refused`, `unaddressed`) and never an exception, so a
+bad timepoint costs its rows and not the well.
+
+**Locate, then measure.** `locate_timepoint` places the tiles from the acquisition record (`tile_grid`),
+registers them (`tile_register`, with each tile's own lattice fit as the lattice-phase constraint), builds the
+montage, estimates the lattice from its spectrum, detects the sites, scores the central square, checks the
+square's orientation and the plate format, resolves the origin (fiducial, array centre, or a plate-rigid
+prediction handed in) and indexes the sites. `run_well` locates every timepoint first, takes **one shared array
+radius per well** (`shared_array_radius`) so every timepoint has the same roster, and only then
+`measure_timepoint`s each: owner-tile geometry at full resolution (fused sites on the montage),
+visibility on the montage, coverage from the registered rectangles, one template per timepoint pooled over
+the owner tiles, then `nanowell_measure` per tile. A timepoint with no origin is still measured on the sites
+detected, with no address. Consistency of pitch and roster across timepoints is a named status on each
+timepoint; the lattice angle is not checked within one well, because the plate's rotation between timepoints
+is only measurable across wells.
+
+**Outputs** (`pipeline/nanowell_task.py`). The per-cell CSV keeps the existing columns (`fov` is the owner
+tile) and adds `nw_q`, `nw_r`, `nw_ring`, `nw_label`, `well_x_um`, `well_y_um`; it is written with its header and
+no rows for a well none of whose nanowells holds a cell, because a missing CSV reads as an unfinished well
+everywhere else. `nanowells/<well>.csv` and `nanowells/<well>_grid.json` hold the site rows and the per-timepoint
+record (they live in a subdirectory because Review loads every top-level `*.csv` as a cell table).
+`<well>_out.zip` holds one montage PNG per located timepoint (role `montage` in `ROLE_CATALOG`).
+`pipeline_info.json` gains a `nanowell` block (settings, conventions, scheme version, and the end-of-run
+re-anchoring summary) and an `acquisition` block (pixel and tile size per timepoint).
+
+**Incremental, resume, completeness.** The done unit is a timepoint whose grid status is `ok` under the same
+settings (the four `nanowell_*` options are in `util.settings_digest.KEYED_ON`) and the same digest of the
+record's tiles and calibration for it; others are recomputed, onto the roster radius the earlier run shared.
+Resume checkpoints are written per timepoint through the per-field path's atomic record-then-marker files
+(`.fov_nw_<timepoint>.done`), and taken back only under the same radius and record digest. Completeness counts
+timepoints, not (fov, timepoint) pairs (`completeness.nanowell_coverage`): a well of empty nanowells has no
+cell rows and is whole.
+
+**End of run.** `nanowell_endgame` re-runs each unaddressed (well, timepoint) the rest of the plate can anchor:
+the wells anchored on their own evidence at a reference timepoint and at this one fix the plate's rigid
+motion (`fit_plate_rigid`), and the well's origin at the reference carried through it is handed to
+`resolve_origin` as a prediction, accepted only when its error is under a third of half a pitch. It needs a
+stage position for every tile (otherwise the reason is recorded) and treats the stage and image axes as
+parallel. Only those wells' rows for those timepoints are rewritten.
+
+**Remote and Datasets tools.** The acquisition record already travels with the upload; the fetch brings
+`nanowells/<well>.csv` and `_grid.json` back (`services/remote_fetch_nanowells`). Subset, Merge Plates and
+Concatenate refuse a dataset with nanowell tables until each can carry them (`datasets/core/nanowell_tables`);
+Validate checks the tables against the grid record and the input archives.
+
 ### 6.2 `process_microscopy.py`
 
 The pipeline. **Self-sufficient by design** — no import from `review/`,

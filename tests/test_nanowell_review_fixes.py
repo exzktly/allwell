@@ -23,9 +23,9 @@ SETTINGS = nr.NanowellSettings("100um")
 
 @pytest.fixture(scope="module")
 def two_timepoints():
-    first, record = build_well(rows=1, cols=1, tile=(900, 900), timepoint="0h")
+    first, record = build_well(rows=1, cols=1, tile=(900, 900), timepoint="0h", radius_fraction=0.26)
     second, second_record = build_well(rows=1, cols=1, tile=(900, 900), timepoint="24h", rotation=9.0,
-                                       array_shift_um=(100.0, -60.0), seed=2)
+                                       array_shift_um=(100.0, -60.0), seed=2, radius_fraction=0.26)
     for rendered in (first, second):
         paint_cell(rendered, dict(zip(rendered.array.addresses, rendered.sites_um))[(1, 2)], dx_um=3.0)
     record["timepoints"].update(second_record["timepoints"])
@@ -82,7 +82,7 @@ def _call_task(zip_path, out, *, force=False, incremental=False):
 
 
 def test_force_clears_the_resume_checkpoints_and_a_plain_run_keeps_them(tmp_path, monkeypatch):
-    rendered, record = build_well(timepoint="0h")
+    rendered, record = build_well(rows=1, cols=1, tile=(900, 900), timepoint="0h")
     _, zip_path, out = _plate_for_task(tmp_path, record, rendered)
     from pipeline.fov_checkpoint import _staging_dir_for
     staging = _staging_dir_for(out, WELL, "key")
@@ -105,7 +105,7 @@ def test_force_clears_the_resume_checkpoints_and_a_plain_run_keeps_them(tmp_path
 
 
 def test_a_nanowell_well_that_fails_leaves_a_worker_trace_in_errors(tmp_path, monkeypatch):
-    rendered, record = build_well(timepoint="0h")
+    rendered, record = build_well(rows=1, cols=1, tile=(900, 900), timepoint="0h")
     _, zip_path, out = _plate_for_task(tmp_path, record, rendered)
 
     def boom(*a, **k):
@@ -185,7 +185,7 @@ def test_a_stage_axis_running_against_the_images_is_not_trusted():
 
 # 8 ── fluorescence files are paired with tokens by position ─────────────────
 def test_a_token_is_not_found_by_looking_for_it_in_the_filename(tmp_path, monkeypatch):
-    rendered, record = build_well(timepoint="0h")
+    rendered, record = build_well(rows=1, cols=1, tile=(900, 900), timepoint="0h")
     truth = dict(zip(rendered.array.addresses, rendered.sites_um))
     paint_cell(rendered, truth[(1, 2)], dx_um=3.0)
     glow = type("G", (), {"images": {f: i * 0 + 10.0 for f, i in rendered.images.items()},

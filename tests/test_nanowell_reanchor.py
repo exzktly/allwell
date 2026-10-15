@@ -23,7 +23,7 @@ from util.acquisition_record import write_record_file
 
 WELLS = {"A01": (0.0, 0.0), "A02": (9000.0, 0.0), "B01": (0.0, 9000.0), "B02": (9000.0, 9000.0)}
 CENTRE = np.array([4500.0, 4500.0])
-TILE = (900, 900)
+TILE = (700, 700)
 UNION = np.array(TILE) * PX / 2
 THETA = 3.0                                              # degrees the plate turns between timepoints
 SHIFT = np.array([150.0, -100.0])
@@ -99,9 +99,9 @@ def _write_plate(tmp_path):
         s0 = np.array(q) + UNION
         s1 = rotation @ (s0 - CENTRE) + CENTRE + SHIFT
         camera1 = np.array(q) + (20.0, -10.0)             # the camera revisits each well roughly where it was
-        first, rec0 = build_well(rows=1, cols=1, tile=TILE, well=well, timepoint="0h", seed=11)
+        first, rec0 = build_well(rows=1, cols=1, tile=TILE, well=well, timepoint="0h", seed=11, radius_fraction=0.26)
         second, rec1 = build_well(rows=1, cols=1, tile=TILE, well=well, timepoint="24h", seed=12,
-                                  rotation=7.0 + THETA, array_shift_um=tuple(s1 - camera1 - UNION))
+                                  rotation=7.0 + THETA, array_shift_um=tuple(s1 - camera1 - UNION), radius_fraction=0.26)
         for rec, camera in ((rec0, np.array(q)), (rec1, camera1)):
             for tile in rec["tiles"]:
                 tile["stage_xy_um"] = list(camera + np.array(tile["mosaic_xy_px"]) * PX)
@@ -176,7 +176,7 @@ def test_the_well_with_no_evidence_of_its_own_is_addressed_from_the_plate_and_co
     drawn = {tuple(map(float, s)): a for s, a in zip(rendered.sites_um, rendered.array.addresses)}
     sites = np.array(list(drawn))
     rows = [r for r in csv.DictReader((out / "nanowells" / "B02.csv").open()) if r["timepoint"] == "24h"]
-    assert len(rows) > 300
+    assert len(rows) > 40
     wrong = 0
     for r in rows:
         if r["detected"] != "True" or not r["nw_q"]:

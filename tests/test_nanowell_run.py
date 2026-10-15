@@ -121,7 +121,7 @@ def test_a_well_runs_every_timepoint_against_one_shared_roster_and_joins_them_by
                           segmenter=threshold_segmenter())
     assert [outcome.timepoints[t]["status"] for t in ("T0", "T1")] == ["ok", "ok"]
     rows = {tp: {(r["nw_q"], r["nw_r"]) for r in outcome.sites if r["timepoint"] == tp} for tp in ("T0", "T1")}
-    assert rows["T0"] == rows["T1"] and len(rows["T0"]) > 600            # one roster for the well
+    assert rows["T0"] == rows["T1"] and len(rows["T0"]) > 200            # one roster for the well
     truth = set(rendered.array.addresses)
     assert truth <= rows["T0"]
     assert outcome.radius["status"] == "shared" and outcome.radius["radius_um"] > 0

@@ -420,7 +420,7 @@ def record_nanowell_info(info_path, options: dict, input_dir) -> None:
     try:
         record = read_record_file(Path(input_dir) / "acquisition.json")
     except Exception as exc:                        # an unreadable record fails the wells, not the sidecar
-        block["nanowell"]["acquisition_error"] = f"{type(exc).__name__}: {exc}"
+        block["nanowell"]["acquisition_unreadable"] = f"{type(exc).__name__}: {exc}"
         record = None
     if record is not None:
         block["acquisition"] = {tp: {"pixel_size_um": meta["pixel_size_um"], "tile_size_px": meta["tile_size_px"]}

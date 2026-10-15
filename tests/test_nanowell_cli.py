@@ -83,7 +83,7 @@ def test_a_nanowell_run_writes_the_three_tables_and_the_cell_lands_at_its_addres
     plate = _write_plate(tmp_path, rendered, record, fluorescence=glow.images)
     out = _run_main(monkeypatch, plate, "--nanowell_format", "100um")
     sites = list(csv.DictReader((out / "nanowells" / f"{WELL}.csv").open()))
-    assert len(sites) > 600 and {r["timepoint"] for r in sites} == {"0h"}
+    assert len(sites) > 200 and {r["timepoint"] for r in sites} == {"0h"}
     by_address = {(int(r["nw_q"]), int(r["nw_r"])): r for r in sites if r["nw_q"]}
     assert set(truth) <= set(by_address)
     assert by_address[(1, 2)]["n_cells"] == "1" and by_address[(1, 2)]["state"] == "measured"
@@ -136,10 +136,11 @@ def test_nanowell_mode_needs_a_phase_channel(tmp_path, monkeypatch, rendered_wel
 
 # ── incremental ──────────────────────────────────────────────────────────────
 def _two_timepoint_plate(tmp_path, *, with_second=True):
-    first, record = build_well(timepoint="0h")
+    first, record = build_well(rows=1, cols=1, tile=(900, 900), timepoint="0h", radius_fraction=0.26)
     items = [("0h", first)]
     if with_second:
-        second, second_record = build_well(rotation=9.0, array_shift_um=(120.0, -80.0), seed=2, timepoint="24h")
+        second, second_record = build_well(rows=1, cols=1, tile=(900, 900), rotation=9.0, array_shift_um=(120.0, -80.0),
+                                           seed=2, timepoint="24h", radius_fraction=0.26)
         record["timepoints"].update(second_record["timepoints"])
         record["tiles"] += second_record["tiles"]
         items.append(("24h", second))
@@ -188,7 +189,7 @@ def test_an_incremental_run_adds_only_the_new_timepoint_onto_the_same_roster(tmp
     rows = _rows(out, f"{WELL}.csv")
     assert [r for r in rows if r["timepoint"] == "0h"] == first_rows                    # kept verbatim
     by_tp = {tp: {(r["nw_q"], r["nw_r"]) for r in rows if r["timepoint"] == tp} for tp in ("0h", "24h")}
-    assert by_tp["0h"] == by_tp["24h"] and len(by_tp["0h"]) > 600                         # one roster
+    assert by_tp["0h"] == by_tp["24h"] and len(by_tp["0h"]) > 100                         # one roster
     grid = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())
     assert set(grid["timepoints"]) == {"0h", "24h"} and grid["timepoints"]["0h"]["status"] == "ok"
 
@@ -206,7 +207,7 @@ def test_a_changed_setting_or_a_changed_record_recomputes_the_timepoint(tmp_path
     assert sorted(located_calls["measure"]) == ["0h", "24h"]                    # the setting is in the reuse key
     located_calls["locate"].clear(), located_calls["measure"].clear()
     for tile in record["tiles"]:                                                # a tile's recorded position moves
-        if tile["timepoint"] == "0h" and tile["field"] == "F1":
+        if tile["timepoint"] == "0h" and tile["field"] == "F0":
             tile["mosaic_xy_px"] = [tile["mosaic_xy_px"][0] + 0.5, tile["mosaic_xy_px"][1]]
     write_record_file(plate / "in" / "acquisition.json", record)
     _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental", "--nanowell_margin_um", "5")

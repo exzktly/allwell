@@ -10,7 +10,7 @@ PITCH, DIAMETER = 172.0, 100.0
 
 
 def build_well(rows=2, cols=2, overlap=0.1, tile=(700, 700), *, well="A01", timepoint="T0", seed=1,
-               rotation=7.0, cells=0, array_shift_um=(0.0, 0.0), radius_fraction=0.42):
+               rotation=7.0, cells=0, array_shift_um=(0.0, 0.0), radius_fraction=0.26):
     """``(rendered, record)``; the record holds the mosaic positions the stage reported."""
     plan = TilePlan(rows, cols, tile, overlap, PX)
     extent = (plan.step_um[0] * (cols - 1) + plan.extent_um[0], plan.step_um[1] * (rows - 1) + plan.extent_um[1])

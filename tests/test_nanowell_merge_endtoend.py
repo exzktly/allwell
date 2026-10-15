@@ -36,10 +36,10 @@ def _raw_dataset(root, rendered, record, token):
 @pytest.fixture(scope="module")
 def merged(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("merge")
-    first, record1 = build_well(rows=2, cols=2, tile=(700, 700), timepoint="0h", seed=21)
-    # The same physical array (radius 0.42 * 5719 um) under a different tile plan: smaller tiles, more overlap.
+    first, record1 = build_well(rows=2, cols=2, tile=(700, 700), timepoint="0h", seed=21, radius_fraction=0.2)
+    # The same physical array (radius 0.2 * 5719 um) under a different tile plan: smaller tiles, more overlap.
     second, record2 = build_well(rows=2, cols=2, tile=(640, 640), overlap=0.15, timepoint="0h", rotation=10.0,
-                                 seed=22, array_shift_um=(90.0, -70.0), radius_fraction=0.472)
+                                 seed=22, array_shift_um=(90.0, -70.0), radius_fraction=0.2247)
     _raw_dataset(tmp / "d1", first, record1, "0h")
     _raw_dataset(tmp / "d2", second, record2, "0h")
     plan = cc.build_merge_plan(tmp / "d1", tmp / "d2", tmp / "dest", gap_hours=24.0)

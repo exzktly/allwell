@@ -488,7 +488,10 @@ else, or once a run has written there again.
 - **Phase channel** (optional). Tick **Phase** on the fluorescent-channel row
   holding your brightfield / DIC image. That channel skips flat-field and
   background correction entirely — those corrections have nothing to remove from
-  a brightfield frame and only add artefacts — and is saved from the original.
+  a brightfield frame and only add artefacts. Its corrected image is therefore
+  the input image unchanged, so by default the run does not save it a second
+  time: Review shows the phase frame from the input archive `in/<WELL>.zip` (see
+  **Reference the phase input image** under [Output options](#8-output-options)).
   It is still quantified like any other channel. At most one channel can be
   Phase, and it cannot also be smFISH.
 
@@ -922,6 +925,39 @@ Collapsed by default.
   compare them against. Turning it off leaves the dataset with no completeness
   record, and Review then says the check was turned off rather than guessing.
 
+- **Reference the phase input image instead of resaving it.** On by default.
+  The Phase channel is never background-corrected, so its "corrected" image is
+  the input image itself. With this ticked the run does not copy it into
+  `<WELL>_out.zip`; Review, the Cell Gating auto-threshold and the end-of-run
+  threshold estimate all read the phase frame from `in/<WELL>.zip` instead. That
+  removes one full-size image per field from every output archive. **Keep the
+  `in/` folder with the dataset**: opened without it, Review's Image Table marks
+  each phase cell `(phase input not found — needs in/)` rather than showing it.
+  Untick it to resave the phase image into the output archive, as earlier
+  versions did — for instance before handing someone only the `out/` folder.
+  Measurements are identical either way.
+
+- **Store corrected images at the input's bit depth.** On by default. The
+  background-corrected images (`_tophat`) are computed as 32-bit decimals; with
+  this ticked each is saved back in the bit depth its input was recorded at
+  (8- or 16-bit), rounded to the nearest count. That halves each file before
+  compression and shrinks it much further after it, because the fractional
+  digits are what compress worst. A frame whose corrected values do not fit —
+  a flat-field correction can lift a pixel above the camera's maximum — or whose
+  input was already floating point is kept 32-bit, and the run log says which.
+  smFISH and cytoplasm intermediates always stay 32-bit. **Measurements do not
+  change**: every number in the CSV is computed before the images are saved.
+  What changes is what you see in Review's corrected views and what the Cell
+  Gating auto-threshold samples, by at most half a count per pixel. Untick it
+  to keep the 32-bit decimals.
+
+  Both choices are recorded in `pipeline_info.json` (`phase_output`,
+  `tophat_dtype`) and restored when you load a dataset's settings. Neither marks
+  an existing well out of date, and an incremental run keeps the images earlier
+  runs archived, so a plate's existing wells shrink only when you re-run them
+  with **Force reprocess**. From the command line they are
+  `--phase_output reference|copy` and `--tophat_dtype source|float32`.
+
 Packaging is not configurable: inputs are always read from per-well `.zip`
 archives and outputs are always written as per-well `.zip` archives. See
 [What the pipeline writes](#what-the-pipeline-writes) for the full layout.
@@ -1337,6 +1373,8 @@ and by `remote_fetch_report.txt` in the output folder.
 ```
 <output_dir>/
 ├── <well>_out.zip          ← masks + tophat-corrected fluorescence + overlays
+│                              (the phase channel's frame stays in in/<well>.zip
+│                              unless "Reference the phase input" is unticked)
 ├── <prefix>_<well>.csv     ← per-well measurement CSV (one row per nucleus)
 ├── pipeline_info.json      ← schema + channel tokens + FOVs + timepoints +
 │                              gating thresholds + saved selections +

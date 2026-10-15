@@ -22,6 +22,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from core.safe import swallowed
+from analyze.storage_options import restore_storage_options
 
 
 
@@ -339,6 +340,7 @@ class AnalyzePipelineInfoMixin:
         s("_workers_edit", d.get("workers"))
         s("_stardist_tile_px_edit", d.get("stardist_tile_px"))
         chk("_cpu_only_cb", d.get("cpu_only"))
+        restore_storage_options(self, d)
         # ``allow_low_disk`` is deliberately NOT restored, though the sidecar
         # records it. Every other option here describes how a plate was
         # analysed and is worth reproducing; that one disarms a check that

@@ -27,6 +27,10 @@ from pathlib import Path
 
 from pipeline.background import BACKGROUND_METHODS
 from pipeline.capacity import ALLOW_LOW_DISK_HELP
+from pipeline.output_policy import (
+    DEFAULT_PHASE_OUTPUT, DEFAULT_TOPHAT_DTYPE,
+    PHASE_OUTPUT_CHOICES, TOPHAT_DTYPE_CHOICES,
+)
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP, SCHEMA_FIELDS
 
 #: Declaration-level defaults, here rather than in ``process_microscopy``
@@ -296,6 +300,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--no_save_tophat",   action="store_true",
                    help="Do not save top-hat/smFISH intermediate TIFFs")
+    # How the saved images are stored (pipeline.output_images). Both defaults
+    # shrink <well>_out.zip without changing a measured number.
+    p.add_argument("--phase_output", choices=PHASE_OUTPUT_CHOICES,
+                   default=DEFAULT_PHASE_OUTPUT,
+                   help="How the --phase_token channel's image is archived. "
+                        "'reference' (default) writes no _tophat for it: the "
+                        "phase frame is uncorrected, so Review reads it from the "
+                        "input archive in/<well>.zip, which must stay with the "
+                        "dataset. 'copy' resaves it into <well>_out.zip.")
+    p.add_argument("--tophat_dtype", choices=TOPHAT_DTYPE_CHOICES,
+                   default=DEFAULT_TOPHAT_DTYPE,
+                   help="Storage type of the background-corrected _tophat TIFFs. "
+                        "'source' (default) rounds each to its input's uint8/"
+                        "uint16 type when every value fits (otherwise that frame "
+                        "stays float32); 'float32' keeps the fractional values. "
+                        "Measurements are computed before saving and do not "
+                        "change. _smfish and _cytoplasm_tophat are always float32.")
     # Input/output well compression is mandatory: folder-mode runs always
     # compress <input_dir>/<well>/ → <input_dir>/<well>.zip and each output well
     # folder → <output_dir>/<well>_out.zip. The pipeline only ever emits per-well

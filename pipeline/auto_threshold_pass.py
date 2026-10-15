@@ -87,6 +87,22 @@ def _segmentation_tokens(args) -> set[str]:
     return {t for t in toks if t}
 
 
+def _referenced_channels(args) -> list[str]:
+    """Channels the Otsu estimate may read from the input archive, lower-cased.
+
+    The phase channel: under ``--phase_output reference`` (the default;
+    ``pipeline.output_images``) its ``_tophat`` is not archived, so the estimate
+    reads it from ``<input_dir>/<WELL>.zip``. Deliberately not conditional on
+    this run's ``--phase_output``: a well the run found up to date keeps the
+    archive an earlier run wrote, so a copy-mode run can sit over wells that
+    hold no phase ``_tophat`` at all. The phase frame is never corrected, so the
+    input frame is the right sample wherever no ``_tophat`` was archived, and an
+    archived one still wins (:func:`pipeline.auto_threshold._sample_one_well`).
+    """
+    phase = str(getattr(args, "phase_token", "") or "").strip().lower()
+    return [phase] if phase else []
+
+
 def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list[str],
                             log: logging.Logger) -> dict[str, float]:
     """Write the post-run per-channel ThreshFracOn defaults. Three modes:
@@ -133,6 +149,8 @@ def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list
                 filename_schema=args.filename_schema,
                 filename_sep=args.filename_sep,
                 log=log,
+                input_dir=getattr(args, "input_dir", None),
+                referenced_channels=_referenced_channels(args),
             )
         # Which readout channels the estimate actually produced, before the
         # segmentation channel's unconditional zero joins them — the two say

@@ -5,6 +5,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from pipeline.output_policy import (
+    DEFAULT_PHASE_OUTPUT, DEFAULT_TOPHAT_DTYPE, PHASE_OUTPUT_CHOICES, TOPHAT_DTYPE_CHOICES,
+)
 from pipeline.well_skip import _canonical_force_wells
 from services.subprocess_text import TEXT_UTF8
 
@@ -159,6 +162,23 @@ def _emit_auto_threshold_flags(args: list[str], opts: dict) -> None:
         args += ["--pos_control_well", pos_well, "--neg_control_well", neg_well]
 
 
+def _emit_storage_flags(args: list[str], opts: dict) -> None:
+    """Append ``--phase_output`` / ``--tophat_dtype`` (pipeline.output_images).
+
+    Each is emitted only when the form turns its default off, so a run at the
+    defaults sends the same argv it always did — the remote run id and argv
+    digest are computed from these bytes, and an upgrade should not re-address
+    every plate. A missing or unrecognised value reads as the default.
+    """
+    for key, flag, default, choices in (
+        ("phase_output", "--phase_output", DEFAULT_PHASE_OUTPUT, PHASE_OUTPUT_CHOICES),
+        ("tophat_dtype", "--tophat_dtype", DEFAULT_TOPHAT_DTYPE, TOPHAT_DTYPE_CHOICES),
+    ):
+        value = str(opts.get(key) or default)
+        if value in choices and value != default:
+            args += [flag, value]
+
+
 def build_pipeline_args(
     pipeline: Path,
     input_dir: Path,
@@ -204,11 +224,13 @@ def build_pipeline_args(
     # The phase token has two uses, so it is sent for ANY method when set:
     #   * cellpose_labelfree — main() remaps it onto the nuclear slot (cyto3
     #     brightfield preset) as the segmentation input;
-    #   * every method — the phase channel skips background correction and is
-    #     resaved from the original (see _correct_image_group phase passthrough).
+    #   * every method — the phase channel skips background correction (see
+    #     _correct_image_group phase passthrough), and --phase_output decides
+    #     whether its unchanged frame is archived again.
     phase_token = (opts.get("phase_token") or "").strip()
     if phase_token:
         args += ["--phase_token", phase_token]
+    _emit_storage_flags(args, opts)
     # The cell diameter belongs to both Cellpose methods: the label-free preset
     # runs the same model, and the diameter sets the scale both segment at (0 =
     # the model's own 30 px, no resize). Only a value above 0 is sent.

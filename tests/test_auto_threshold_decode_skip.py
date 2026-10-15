@@ -76,7 +76,7 @@ def test_viewer_side_decode_failures_warn(tmp_path, monkeypatch, caplog):
 
     (tmp_path / "a1_out.zip").write_bytes(b"placeholder")  # so _iter_well_zips finds it
 
-    def _fake_gather(target, channels, pipeline_info):
+    def _fake_gather(target, channels, pipeline_info, in_dir=None):
         refs = {("f0", "0"): "ref"}
         return {ch: (dict(refs), dict(refs)) for ch in channels}
 

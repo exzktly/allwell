@@ -109,11 +109,14 @@ def pipeline_argv_digest(
 
 
 #: Flags followed by a value that :func:`pipeline_argv_digest` leaves out. Paths
-#: (identity, implied by the cache key) and execution knobs that change only how
-#: long a run takes.
+#: (identity, implied by the cache key), execution knobs that change only how
+#: long a run takes, and the two image-storage options, which the local reuse
+#: key leaves out for the reason ``util.settings_digest.NOT_KEYED_ON`` gives —
+#: so the same option change is treated alike on both sides.
 _DIGEST_SKIP_VALUE = frozenset({
     "--input_dir", "--output_dir", "--incremental_prior_dir",
     "--workers", "--tf_threads", "--focus_min",
+    "--phase_output", "--tophat_dtype",
 })
 #: Bare flags :func:`pipeline_argv_digest` leaves out: re-processing knobs and
 #: pre-flight / audit switches that compute nothing.

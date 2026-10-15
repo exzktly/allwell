@@ -483,3 +483,65 @@ def test_an_unrelated_subprocess_is_not_mistaken_for_a_pipeline_launch(
     assert remote.launched == [], (
         f"an unrelated binary was recorded as a pipeline launch: "
         f"{remote.launched}")
+
+
+# ── a job that finished on the server but was stopped before download ───────
+
+def _seed_finished_remote_wells(remote, run, *, gzipped: bool):
+    """Outputs as a finished remote run leaves them: a QC zip and the well's
+    CSV per well, in the (re-attached or own) remote output directory."""
+    import gzip
+    out = remote.path(run.remote_output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    for well in ("A01", "B02"):
+        with zipfile.ZipFile(out / f"{well}_out.zip", "w") as zf:
+            zf.writestr(f"Exp_{well}_F001_T01_DAPI_overlay.png", b"\0" * 64)
+        body = f"well,fov,timepoint,nucleus_id\n{well},1,0,1\n".encode()
+        if gzipped:
+            (out / f"measurements_{well}.csv.gz").write_bytes(gzip.compress(body))
+        else:
+            (out / f"measurements_{well}.csv").write_bytes(body)
+    return out
+
+
+@pytest.mark.parametrize("gzipped", [False, True], ids=["plain-csvs-on-remote", "gz-csvs-on-remote"])
+def test_a_job_finished_on_the_server_but_never_downloaded_is_recovered(
+        host, plate, remote, monkeypatch, spawn, gzipped):
+    """Resume of a run whose analysis completed remotely and stopped before the
+    download. The pipeline skips every finished well (so no ``done`` marker is
+    announced and the in-stream fetcher has nothing to pull); the verifier then
+    finds the wells on the remote, sees them missing locally and re-pulls them.
+    For a run begun before CSVs were compressed the remote holds plain CSVs,
+    which must be gzipped *on the remote* and arrive as ``.csv.gz`` — without
+    re-running anything.
+    """
+    import gzip
+    runner, _log = spawn(host, plate, remote, monkeypatch,
+                         completed=("A01", "B02"))
+    run = runner._run
+    seeded = _seed_finished_remote_wells(remote, run, gzipped=gzipped)
+    launches_before = len(remote.launched)
+    local_out = plate / "out"
+    assert not list(local_out.iterdir())
+
+    monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
+                        lambda self, *a, **k: None)
+    logs: list[str] = []
+    ok = runner.verify_and_cleanup(True, cleanup_mode="none", log_fn=logs.append)
+    text = "".join(logs)
+
+    assert ok is True, text
+    assert len(remote.launched) == launches_before, "the pipeline was re-run"
+    names = sorted(p.name for p in local_out.iterdir()
+                   if p.is_file() and p.name != "remote_fetch_report.txt")
+    assert names == ["A01_out.zip", "B02_out.zip",
+                     "measurements_A01.csv.gz", "measurements_B02.csv.gz"], names
+    for well in ("A01", "B02"):
+        got = gzip.decompress(
+            (local_out / f"measurements_{well}.csv.gz").read_bytes()).decode()
+        assert got == f"well,fov,timepoint,nucleus_id\n{well},1,0,1\n"
+    # Compressed on the remote *before* the transfer, not locally after it.
+    assert not list(seeded.glob("measurements_*.csv")), sorted(
+        p.name for p in seeded.iterdir())
+    pulled = [s for srcs, _d in remote.transfers for s in srcs]
+    assert not any(s.endswith(".csv") for s in pulled), pulled

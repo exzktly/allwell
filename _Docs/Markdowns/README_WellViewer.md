@@ -214,7 +214,8 @@ the tiles of a well cannot be placed.
 **Tile grid** (rows x columns, e.g. `5x5`), **Scan order** (the corner the stage started from and whether it ran
 along rows or columns, back and forth or not), **Tile overlap** and **Pixel size**. Each well's fields are taken
 in the order of their names, numerically (`F2` before `F10`), as the stage visited them; the run logs how it
-placed them, and refuses a well with more fields than the grid holds. Nothing is written into your input folder.
+placed them, and refuses a well with more fields than the grid holds, or fewer (a scan that stopped short).
+Nothing is written into your input folder.
 A record, when there is one, is always used instead. Use **Test detection** first: a wrong scan order puts tiles
 in the wrong places, and the montage shows it. The record, archive and grid checks are not made when **Detect schema &
 channels at run time** is on, or for a queued job whose input folder does not exist yet; the pipeline itself

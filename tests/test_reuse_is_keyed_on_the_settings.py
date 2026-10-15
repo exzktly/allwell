@@ -104,6 +104,12 @@ OTHER = {
     "nanowell_square_edge_deg": 3.0,
     "nanowell_occluded_below": 0.7,
     "nanowell_clipped_below": 0.7,
+    "nanowell_diameter_um": 60.0,
+    "nanowell_pitch_um": 90.0,
+    "nanowell_grid": "3x7",
+    "nanowell_scan": "bottom-right-column-serpentine",
+    "nanowell_overlap_percent": 25.0,
+    "nanowell_pixel_size_um": 1.3,
 }
 
 

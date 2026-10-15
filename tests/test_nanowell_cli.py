@@ -325,7 +325,22 @@ def test_a_dataset_without_a_record_runs_from_the_grid_it_is_given(tmp_path, mon
     assert data.time_source in ("label", None)
 
 
+@pytest.mark.parametrize("grid, status", [("3x2", "incomplete_grid"), ("1x2", "bad_grid")])
+def test_a_described_grid_the_well_s_fields_do_not_fill_is_refused_not_measured(tmp_path, monkeypatch,
+                                                                                rendered_well, grid, status):
+    """The fixture's four tiles under a 3 x 2 grid are a row short; under a 1 x 2 grid, two too many. Placed
+    from their positions alone both look like a complete 2 x 2 grid and would be measured as one."""
+    rendered, record, _ = rendered_well
+    plate = _write_plate(tmp_path, rendered, record)
+    (plate / "in" / "acquisition.json").unlink()
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--nanowell_grid", grid, *_GRID[2:])
+    block = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())["timepoints"]["0h"]
+    assert block["status"] == status
+
+
 @pytest.mark.parametrize("flags, message", [
+    (["--nanowell_grid", "2x2", "--nanowell_overlap_percent", "10", "--nanowell_pixel_size_um", "inf"],
+     "needs --nanowell_pixel_size_um"),
     (["--nanowell_grid", "2x2", "--nanowell_pixel_size_um", "4.3"], "needs --nanowell_overlap_percent"),
     (["--nanowell_grid", "2x2", "--nanowell_overlap_percent", "10"], "needs --nanowell_pixel_size_um"),
     (["--nanowell_grid", "two by two", "--nanowell_overlap_percent", "10", "--nanowell_pixel_size_um", "4.3"],
@@ -357,6 +372,8 @@ def test_a_custom_format_with_the_100um_geometry_reads_the_array_as_the_100um_fo
 
 @pytest.mark.parametrize("flags, message", [
     (["--nanowell_format", "custom", "--nanowell_diameter_um", "100"], "needs --nanowell_diameter_um and"),
+    (["--nanowell_format", "custom", "--nanowell_diameter_um", "100", "--nanowell_pitch_um", "inf"],
+     "needs --nanowell_diameter_um and"),
     (["--nanowell_format", "custom", "--nanowell_diameter_um", "100", "--nanowell_pitch_um", "100"], "would touch"),
     (["--nanowell_format", "100um", "--nanowell_pitch_um", "150"], "go with --nanowell_format custom"),
 ])

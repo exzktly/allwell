@@ -353,7 +353,8 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     if not groups:
         raise NanowellInputError(f"No image groups found in {Path(zip_path).name}")
     index = _tile_index(groups, parse, schema, sep)
-    if record is None:
+    described = record is None
+    if described:
         record = _pattern_record(well_label, zip_path, index, pattern)
     timepoints = timepoint_order(record, well_label)
     output_dir = Path(output_dir)
@@ -385,7 +386,10 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     outcome = nr.run_well(well_label, record, todo, load_phase, settings, segmenter=segmenter, channels=channels,
                           fixed_radius_um=fixed, plate_rigid=plate_rigid, reference=_reference_of(prior),
                           checkpoint=None if staging_dir is None else TimepointCheckpoints(staging_dir, settings_key),
-                          earliest_template=None if saved is None else saved[0])
+                          earliest_template=None if saved is None else saved[0],
+                          # A described grid states its shape, so a well short of a whole row or column is
+                          # incomplete; a record's positions alone could not show the line that is missing.
+                          expected_shape=tuple(pattern["grid"]) if described else None)
     px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)

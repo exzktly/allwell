@@ -87,6 +87,30 @@ def test_a_grid_too_small_for_the_wells_fields_is_refused_by_name(tab, refused, 
     assert "A well has more fields than the tile grid holds: A01 at 0h: 4 fields for a 1 x 2 grid" in refused[-1][1]
 
 
+def test_the_too_many_fields_check_reads_a_channel_last_in_the_name(tmp_path):
+    """The last token carries the extension (``PH.tif``); the check must still find the phase channel's fields."""
+    import zipfile
+
+    from analyze.nanowell_preflight import _pattern_report
+
+    (tmp_path / "A01.zip").parent.mkdir(exist_ok=True)
+    with zipfile.ZipFile(tmp_path / "A01.zip", "w") as zf:
+        for k in range(1, 7):
+            zf.writestr(f"A01_F{k}_T0_PH.tif", b"")
+    problems, _ = _pattern_report([tmp_path / "A01.zip"], {
+        "nanowell_grid": "2x2", "filename_schema": "well:fov:timepoint:channel", "filename_sep": "_",
+        "phase_token": "PH"})
+    assert problems and "A01 at T0: 6 fields for a 2 x 2 grid" in problems[0]
+
+
+def test_a_hidden_custom_number_does_not_refuse_a_known_format():
+    from analyze.domain.nanowell_fields import nanowell_option_errors
+
+    errors = nanowell_option_errors({"nanowell_format": "100um", "nanowell_diameter_um": "abc",
+                                        "nanowell_pitch_um": "-5"})
+    assert not any("diameter" in e or "pitch" in e for e in errors)
+
+
 def test_a_partial_grid_is_refused_with_what_it_lacks(tab, refused, tmp_path):  # noqa: F811
     _use_nanowell_schema(tab)
     tab._input_edit.setText(str(tmp_path))

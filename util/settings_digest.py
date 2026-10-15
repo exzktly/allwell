@@ -117,6 +117,15 @@ KEYED_ON: dict[str, str] = {
                                    "which sites have a number at all",
     "nanowell_clipped_below":      "the same for a nanowell cut by the edge of the tiles, the "
                                    "array or the well",
+    "nanowell_diameter_um":        "a custom format's nanowell diameter, which every site is found "
+                                   "and measured with",
+    "nanowell_pitch_um":           "a custom format's lattice pitch, which every site is addressed with",
+    "nanowell_grid":               "the described grid a dataset without an acquisition record is "
+                                   "placed from, so where every tile and nanowell sits",
+    "nanowell_scan":               "the order the described grid's fields were taken in, the same",
+    "nanowell_overlap_percent":    "the described grid's tile spacing, the same",
+    "nanowell_pixel_size_um":      "the described grid's pixel size, which scales every distance "
+                                   "and area measured",
     # ── how a filename is read ──────────────────────────────────────────────
     "filename_schema":             "decides which token is the well, fov, timepoint",
     "filename_sep":                "the same, and a wrong one groups nothing",

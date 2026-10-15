@@ -131,7 +131,7 @@ def _pattern_report(zips, opts: dict) -> tuple[list[str], list[str]]:
             over.append(f"{path.name} cannot be read ({exc})")
             continue
         if phase:
-            names = [n for n in names if phase in n.lower().split(sep)]
+            names = [n for n in names if _channel_of(n, schema, sep) == phase]
         fields: dict[str, set] = {}
         for fov, tp in fov_keys_from_member_names(names, schema=schema, sep=sep, skip_hidden=True,
                                                    images_only=True):
@@ -139,6 +139,16 @@ def _pattern_report(zips, opts: dict) -> tuple[list[str], list[str]]:
         over += [f"{path.stem} at {tp}: {len(f)} fields for a {rows} x {cols} grid" for tp, f in sorted(fields.items())
                  if len(f) > rows * cols]
     return _listed("A well has more fields than the tile grid holds", over), warnings
+
+
+def _channel_of(name: str, schema: str, sep: str) -> str | None:
+    """The channel token of member *name* by the schema, lower-cased, read from the name without its extension
+    (a channel last in the name would otherwise carry ``.tif``); ``None`` when the name is too short for it."""
+    fields = [f for f in schema.split(":") if f]
+    parts = name.rsplit(".", 1)[0].split(sep)
+    if "channel" not in fields or len(parts) < len(fields):
+        return None
+    return parts[fields.index("channel")].lower()
 
 
 def _listed(lead: str, items) -> list[str]:

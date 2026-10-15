@@ -57,8 +57,13 @@ def record_from_pattern(well: str, fields_by_timepoint: dict, tile_size_px: dict
 
     *fields_by_timepoint* maps a timepoint to its field tokens and *tile_size_px* a timepoint to its tiles'
     ``(width, height)``. *pattern* is ``{"grid": [rows, cols], "scan": "...", "overlap_percent": p,
-    "pixel_size_um": s}``. A timepoint with more fields than the grid has cells keeps them all: placement then
-    refuses it by name (``bad_grid``), as it would refuse a record that disagreed with its images.
+    "pixel_size_um": s}``. A timepoint with more fields than the grid has cells keeps them all, the extra ones
+    below the grid: placement against the grid's shape then refuses it (``bad_grid``, the grid "exceeds the
+    expected" shape), as it would refuse a record that disagreed with its images. A timepoint with fewer is
+    placed as far as its fields go and refused as ``incomplete_grid`` for the same reason.
+
+    Fields are dealt onto the scan in the order of their names, numerically, so a name that encodes a cell
+    (``r0c1``) is not read as one: it is dealt like any other.
     """
     from util.acquisition_record import new_record, new_timepoint
 
@@ -75,7 +80,7 @@ def record_from_pattern(well: str, fields_by_timepoint: dict, tile_size_px: dict
                     start_reason="No acquisition record: placed from the scan pattern given for the run")
         record["timepoints"][tp] = meta
         step = (width * (1 - overlap / 100), height * (1 - overlap / 100))
-        ordered = sorted(fields, key=_natural)
+        ordered = sorted(fields, key=lambda f: (_natural(f), str(f)))     # F1 and F001: name decides
         for k, field in enumerate(ordered):
             row, col = cells[k] if k < len(cells) else (rows + k, 0)      # beyond the grid: refused by placement
             record["tiles"].append({"well": well, "field": field, "timepoint": tp,

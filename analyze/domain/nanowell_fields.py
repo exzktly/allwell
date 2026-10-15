@@ -57,6 +57,10 @@ _NUMERIC = {
 }
 
 
+#: The custom format's own numbers: shown, checked and sent only when the format is Custom.
+_CUSTOM_KEYS = frozenset({"nanowell_diameter_um", "nanowell_pitch_um"})
+
+
 def parse_grid(text: str) -> tuple[int, int] | None:
     """``"5x5"`` -> ``(5, 5)``; ``None`` when it is not ROWSxCOLUMNS (``pipeline.nanowell_pattern_record``'s rule)."""
     found = re.fullmatch(r"\s*(\d+)\s*[xX×]\s*(\d+)\s*", str(text or ""))
@@ -132,10 +136,13 @@ def nanowell_option_errors(opts: dict, *, need_phase: bool = False) -> list[str]
     errors += _format_errors(opts) + _grid_errors(opts)
     if need_phase and not str(opts.get("phase_token") or "").strip():
         errors.append("Nanowell mode needs a Phase channel: tick Phase on the channel the tiles are imaged in.")
+    custom = str(opts.get("nanowell_format") or "").strip() == CUSTOM_FORMAT
     for key, (label, low, high, low_ok) in _NUMERIC.items():
         raw = opts.get(key)
         if raw is None or not str(raw).strip():
             continue
+        if key in _CUSTOM_KEYS and not custom:
+            continue                # hidden and never sent for a known format, so nothing to refuse
         try:
             value = float(str(raw).strip())
         except ValueError:

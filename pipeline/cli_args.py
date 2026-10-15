@@ -23,6 +23,7 @@ from __future__ import annotations
 from pipeline.field_quality_record import FOCUS_COLUMN as _FOCUS_COLUMN
 
 import argparse
+import math
 from pathlib import Path
 
 from pipeline.background import BACKGROUND_METHODS
@@ -567,7 +568,7 @@ def _custom_format(args, error) -> dict:
                   "50um formats have their own.")
         return {}
     diameter, pitch = args.nanowell_diameter_um, args.nanowell_pitch_um
-    if diameter is None or pitch is None or not (diameter > 0) or not (pitch > 0):
+    if diameter is None or pitch is None or not all(math.isfinite(v) and v > 0 for v in (diameter, pitch)):
         error("--nanowell_format custom needs --nanowell_diameter_um and --nanowell_pitch_um, both positive.")
     if diameter >= 0.95 * pitch:
         error(f"A {diameter:g} um nanowell on a {pitch:g} um pitch would touch its neighbours: the pitch is the "
@@ -594,7 +595,7 @@ def _grid_pattern(args, error) -> dict | None:
     overlap, pixel = args.nanowell_overlap_percent, args.nanowell_pixel_size_um
     if overlap is None or not (0 <= overlap < 100):
         error("--nanowell_grid needs --nanowell_overlap_percent, from 0 to under 100.")
-    if pixel is None or not (pixel > 0):
+    if pixel is None or not (math.isfinite(pixel) and pixel > 0):
         error("--nanowell_grid needs --nanowell_pixel_size_um, a positive number of micrometres.")
     return {"grid": [rows, cols], "scan": scan, "overlap_percent": float(overlap), "pixel_size_um": float(pixel)}
 

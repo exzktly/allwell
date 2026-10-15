@@ -29,14 +29,29 @@ def test_fields_are_placed_in_the_order_of_their_names_numerically_along_the_sca
     assert plan.status == "ok" and (plan.rows, plan.cols) == (2, 3)
 
 
-def test_more_fields_than_the_grid_holds_is_refused_by_placement_not_dropped():
-    record = record_from_pattern("A01", {"0h": ["F1", "F2", "F3"]}, {"0h": (100, 100)},
+@pytest.mark.parametrize("fields, status", [
+    (["F1", "F2", "F3"], "bad_grid"),                  # one more than a 1 x 2 grid holds
+    (["F1"], "incomplete_grid"),                       # a whole column short: positions alone cannot show it
+])
+def test_a_well_whose_fields_do_not_fill_the_grid_is_refused_against_the_grid_s_shape(fields, status):
+    """Placed as the run places a described grid, against its shape (``nanowell_task``'s ``expected_shape``)."""
+    record = record_from_pattern("A01", {"0h": fields}, {"0h": (100, 100)},
                                  {"grid": [1, 2], "scan": "top-left-row", "overlap_percent": 0.0,
                                   "pixel_size_um": 1.0})
     tiles, size, pixel, overlap = tiles_from_record(record, "A01", "0h")
-    assert len(tiles) == 3
-    assert place_from_record(tiles, tile_size_px=size, pixel_size_um=pixel,
-                             declared_overlap_percent=overlap).status != "ok"
+    assert len(tiles) == len(fields)
+    assert place_from_record(tiles, tile_size_px=size, pixel_size_um=pixel, declared_overlap_percent=overlap,
+                             expected_shape=(1, 2)).status == status
+
+
+def test_two_spellings_of_one_field_number_are_ordered_by_name_whatever_order_they_arrive_in():
+    def order(fields):
+        record = record_from_pattern("A01", {"0h": fields}, {"0h": (100, 100)},
+                                     {"grid": [1, 2], "scan": "top-left-row", "overlap_percent": 0.0,
+                                      "pixel_size_um": 1.0})
+        return [t["field"] for t in sorted(record["tiles"], key=lambda t: t["mosaic_xy_px"][0])]
+
+    assert order(["F001", "F1"]) == order(["F1", "F001"]) == ["F001", "F1"]
 
 
 def test_the_spellings_parse_and_a_wrong_one_is_named():

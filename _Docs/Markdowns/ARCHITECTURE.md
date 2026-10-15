@@ -8794,13 +8794,19 @@ bad timepoint costs its rows and not the well.
 (`--nanowell_grid`, `--nanowell_scan`, `--nanowell_overlap_percent`, `--nanowell_pixel_size_um`; validated in
 `cli_args._grid_pattern`, all or none) makes `pipeline/nanowell_pattern_record.record_from_pattern` build the
 record in memory: each field's mosaic position from where `tile_grid.scan_cells` puts it, fields in the order of
-their names numerically, each timepoint's tile size read from one image header (`nanowell_task._pattern_record`).
-Nothing is written into the input folder; registration corrects the nominal positions as it does recorded ones;
+their names numerically (the name itself breaking a tie such as `F1`/`F001`, so the order never depends on
+the archive's; a name that encodes a cell, `r0c1`, is dealt like any other), each timepoint's tile size read from
+one image header (`nanowell_task._pattern_record`). The run places such a record against the grid's own shape
+(`run_well(expected_shape=…)`): positions alone cannot show a missing outer row or column, so without it a well a
+line short — or one whose surplus fields fell below the grid — would be measured as a smaller complete grid. A
+well short of the grid is `incomplete_grid`, one with more fields than it holds `bad_grid`. Nothing is written into the input folder; registration corrects the nominal positions as it does recorded ones;
 there are no acquisition times, so Review times timepoints from their labels, and `collect` gives each timepoint
 the pattern's pixel size (no tile size, so Array QC marks corners). `--nanowell_format custom` takes
 `--nanowell_diameter_um` and `--nanowell_pitch_um` (`NanowellSettings.custom`); only a custom format adds them to
-the settings key, so a known format's reuse key is unchanged. The `pattern` option is added only when given, for
-the same reason.
+`NanowellSettings.key()`, so a known format's grid-record key is unchanged. The `pattern` option is added only
+when given, for the same reason. All six options are in `util.settings_digest.KEYED_ON`, so a re-run with a
+different geometry or grid recomputes rather than keeping the old numbers under a sidecar that names the new
+settings; the CLI refuses a non-finite number for any of them.
 
 **Locate, then measure.** `locate_timepoint` places the tiles from the acquisition record (`tile_grid`),
 registers them (`tile_register`, with each tile's own lattice fit as the lattice-phase constraint), builds the
@@ -8825,7 +8831,7 @@ record (they live in a subdirectory because Review loads every top-level `*.csv`
 re-anchoring summary) and an `acquisition` block (pixel and tile size per timepoint).
 
 **Incremental, resume, completeness.** The done unit is a timepoint whose grid status is `ok` under the same
-settings (the four `nanowell_*` options are in `util.settings_digest.KEYED_ON`) and the same digest of the
+settings (every `nanowell_*` option is in `util.settings_digest.KEYED_ON`) and the same digest of the
 record's tiles and calibration for it; others are recomputed, onto the roster radius the earlier run shared.
 Resume checkpoints are written per timepoint through the per-field path's atomic record-then-marker files
 (`.fov_nw_<timepoint>.done`), and taken back only under the same radius and record digest. Completeness counts

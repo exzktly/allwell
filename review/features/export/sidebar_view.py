@@ -72,6 +72,7 @@ _logger = logging.getLogger("review")
 #: figures this panel can be opened on in the first place.
 _FIGURE_OWNING_FEATURES = (
     ("_sp_fig", "Spatial"),
+    ("_nw_fig", "Nanowells"),
     ("_mv_fig", "Multivariate"),
     ("_response_fig", "Response Curves"),
 )

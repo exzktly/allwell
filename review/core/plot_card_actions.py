@@ -87,6 +87,8 @@ _CARDS = (
     ("_distribution_card", "distribution.png"),
     ("_heatmap_card", "heatmap.png"),
     ("_sp_card", "spatial.png"),
+    ("_nw_card", "nanowells.png"),
+    ("_nw_detail_card", "nanowell_detail.png"),
     ("_mv_card", "multivariate.png"),
     ("_response_card", "response.png"),
 )

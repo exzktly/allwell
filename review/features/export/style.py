@@ -91,6 +91,7 @@ def _resolve_export_dock(win, fig) -> QWidget | None:
         ("_heatmap_fig", "_heatmap_export_dock"),
         ("_distribution_fig", "_distribution_export_dock"),
         ("_sp_fig", "_spatial_export_dock"),
+        ("_nw_fig", "_nanowell_export_dock"),
         ("_mv_fig", "_mv_export_dock"),
         ("_response_fig", "_response_export_dock"),
     )
@@ -243,6 +244,7 @@ def open_export_style_panel(win, plot_key: str) -> None:
         "distribution":  ("_distribution_fig", "_distribution_canvas", "distribution_figure"),
         "heatmap":       ("_heatmap_fig",      "_heatmap_canvas",      "heatmap_figure"),
         "spatial":       ("_sp_fig",           "_sp_canvas",           "spatial_figure"),
+        "nanowell":      ("_nw_fig",           "_nw_canvas",           "nanowell_figure"),
         "multivariate":  ("_mv_fig",           "_mv_canvas",           "multivariate_figure"),
         "response":      ("_response_fig",     "_response_canvas",     "response_figure"),
     }

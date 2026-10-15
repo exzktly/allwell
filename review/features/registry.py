@@ -282,6 +282,13 @@ _sel_nanowell = _lazy_hook(_NANOWELL, "nw_on_selection_changed")
 _channel_nanowell = _lazy_hook(_NANOWELL, "nw_on_channel_changed")
 
 
+def _nanowell_view_state_io():
+    """The Nanowells page's (snapshot, apply) view-state pair (lazy): its whole configuration, so a Saved
+    Plot restores the same metric, axis, baseline and selected nanowells."""
+    from review.features.nanowell.view_state_io import apply_nanowell, snapshot_nanowell
+    return snapshot_nanowell, apply_nanowell
+
+
 def _redraw_nanowell():
     from review.features.nanowell.controller import redraw
     return redraw
@@ -1028,6 +1035,7 @@ def _features() -> list[FeatureDescriptor]:
             on_selection_changed=_sel_nanowell,
             on_channel_changed=_channel_nanowell,
             redraw=_redraw_nanowell,
+            view_state_io=_nanowell_view_state_io,
             per_well_selection=True,
         ),
         # ── Images ────────────────────────────────────────────────────────

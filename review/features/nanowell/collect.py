@@ -148,6 +148,20 @@ def _read_well_table(path: Path, well: str) -> pd.DataFrame:
     return frame
 
 
+def _with_pattern_calibration(acquisition: dict, sidecar: dict, timepoints) -> dict:
+    """A run placed from a scan pattern (no acquisition record, tracker P15) states its pixel size in its settings
+    and has no acquisition block: give each timepoint that pixel size, and no tile size, which the run read from
+    each image and did not record — Array QC then marks each tile's corner rather than guessing its outline."""
+    settings = (sidecar.get("nanowell") or {}).get("settings") or {}
+    pattern = settings.get("pattern") if isinstance(settings, dict) else None
+    pixel = pattern.get("pixel_size_um") if isinstance(pattern, dict) else None
+    if not isinstance(pixel, (int, float)) or isinstance(pixel, bool) or pixel <= 0:
+        return acquisition
+    for tp in timepoints:
+        acquisition.setdefault(tp, {"pixel_size_um": {"x": float(pixel), "y": float(pixel)}, "tile_size_px": {}})
+    return acquisition
+
+
 def _record_candidates(data_dir: Path) -> list[Path]:
     from util.acquisition_record import RECORD_FILENAME
 
@@ -336,7 +350,8 @@ def load_nanowell_data(data_dir) -> NanowellData | None:
         if f"brightness_{channel}" not in sites:
             sites[f"brightness_{channel}"] = np.nan
     sites["time_h"] = sites["timepoint"].map(times_h).astype(float)
-    acquisition = sidecar.get("acquisition") if isinstance(sidecar.get("acquisition"), dict) else {}
+    acquisition = dict(sidecar.get("acquisition")) if isinstance(sidecar.get("acquisition"), dict) else {}
+    acquisition = _with_pattern_calibration(acquisition, sidecar, timepoints)
     in_dir = next((p.parent for p in _record_candidates(data_dir) if p.parent.is_dir()), None)
     options = sidecar.get("execution_options") if isinstance(sidecar.get("execution_options"), dict) else {}
     return NanowellData(sites=sites, grids=grids, times_h=times_h, time_source=source, time_note=note,

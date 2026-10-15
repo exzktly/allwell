@@ -85,9 +85,11 @@ def test_a_blank_field_sends_no_flag_so_the_pipeline_default_applies(tab):
 
 def test_the_form_s_formats_are_the_pipeline_s():
     from analyze.domain.nanowell_fields import PLATE_FORMAT_CHOICES
-    from pipeline.nanowell_run import PLATE_FORMATS
+    from analyze.domain.nanowell_fields import CUSTOM_FORMAT as FORM_CUSTOM
+    from pipeline.nanowell_run import CUSTOM_FORMAT, PLATE_FORMATS
 
-    assert {value for value, _ in PLATE_FORMAT_CHOICES} == set(PLATE_FORMATS)
+    assert {value for value, _ in PLATE_FORMAT_CHOICES} == set(PLATE_FORMATS) | {CUSTOM_FORMAT}
+    assert FORM_CUSTOM == CUSTOM_FORMAT
 
 
 def test_a_sidecar_of_a_nanowell_run_turns_the_mode_on_and_a_plain_one_turns_it_off(tab):

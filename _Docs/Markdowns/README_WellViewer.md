@@ -200,14 +200,23 @@ python process_microscopy.py --help
 
 In the Analyze pane, open the **Nanowells** section (folded by default), tick **Nanowell arrays**, and mark the
 channel the tiles are imaged in as **Phase** (Channel Tokens). The section asks for the plate format (100 µm or
-50 µm nanowells) and, optionally, the cell diameter, the margin around a nanowell that must lie inside one tile
+50 µm nanowells, or **Custom size**, which shows two more fields: the nanowell diameter and the lattice pitch,
+centre to centre — the run measures the pitch on the tiles, so it is a starting value) and, optionally, the cell diameter, the margin around a nanowell that must lie inside one tile
 for that tile to own it, the angle of the central square's edges to a lattice row, and the occlusion and
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
 While the mode is on, the segmentation method is set to label-free and locked (your choice returns when the mode
 is switched off). Run refuses to start, naming the fix, when a number is out of range or the Phase channel is
 unmarked (unless channel auto-detection will name it), and, for a single run with auto-detection off, when
 there is no acquisition record, the wells are not zips, a tile the record names is missing from an archive, or
-the tiles of a well cannot be placed. The record, archive and grid checks are not made when **Detect schema &
+the tiles of a well cannot be placed.
+
+**A dataset without an acquisition record** (converted before the converters wrote one) can still be run: fill in
+**Tile grid** (rows x columns, e.g. `5x5`), **Scan order** (the corner the stage started from and whether it ran
+along rows or columns, back and forth or not), **Tile overlap** and **Pixel size**. Each well's fields are taken
+in the order of their names, numerically (`F2` before `F10`), as the stage visited them; the run logs how it
+placed them, and refuses a well with more fields than the grid holds. Nothing is written into your input folder.
+A record, when there is one, is always used instead. Use **Test detection** first: a wrong scan order puts tiles
+in the wrong places, and the montage shows it. The record, archive and grid checks are not made when **Detect schema &
 channels at run time** is on, or for a queued job whose input folder does not exist yet; the pipeline itself
 still refuses such a well, naming the reason. An overlap shorter
 than a nanowell needs is logged once as a warning with the expected number of nanowells on a seam, and the
@@ -232,7 +241,11 @@ python process_microscopy.py --input_dir plate/in --output_dir plate/out \
     --phase_token PHASE --fluor_tokens GFP --nanowell_format 100um
 ```
 
-`--nanowell_format` (`100um` or `50um`) turns the mode on and fixes the lattice pitch and nanowell diameter;
+`--nanowell_format` (`100um`, `50um`, or `custom` with `--nanowell_diameter_um` and `--nanowell_pitch_um`) turns
+the mode on and sets the nanowell diameter and the starting lattice pitch (the run measures the pitch on the
+tiles); without `in/acquisition.json`, `--nanowell_grid 5x5`, `--nanowell_scan top-left-row` (a corner, `row` or
+`column`, optionally `-serpentine`), `--nanowell_overlap_percent` and `--nanowell_pixel_size_um` describe the
+tiles instead;
 `--phase_token` names the channel the tiles are imaged in. `--nanowell_cell_diameter_um` (default 15) is the
 cell size the label-free segmenter is given, `--nanowell_margin_um` the margin around a nanowell that must lie
 inside one tile for that tile to own it (default a tenth of the diameter), and `--nanowell_square_edge_deg` the

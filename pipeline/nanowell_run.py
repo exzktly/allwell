@@ -47,22 +47,33 @@ TERMINAL_WITHOUT_ROWS = (INCOMPLETE_GRID, BAD_GRID, NO_RECORD, NO_LATTICE, FORMA
 FIDUCIAL_MARGIN = 0.3
 
 
+#: The plate format whose pitch and diameter the run is given rather than knowing (tracker A7).
+CUSTOM_FORMAT = "custom"
+
+
 @dataclass(frozen=True)
 class NanowellSettings:
-    plate_format: str                   # a key of PLATE_FORMATS
+    plate_format: str                   # a key of PLATE_FORMATS, or CUSTOM_FORMAT
     margin_um: float | None = None      # ownership margin around a disk; None = a tenth of the diameter
     cell_diameter_um: float = 15.0      # for the segmenter's scale
     square_edge_deg: float = 0.0        # the central square's edge angle to a lattice row (Q11, assumed)
     occluded_below: float = 0.5         # a site seen less than this is occluded and carries no count
     clipped_below: float = 0.5          # a site imaged less than this is clipped and carries no count
+    custom: tuple[float, float] | None = None   # (nominal pitch, diameter) um for CUSTOM_FORMAT
+
+    def __post_init__(self):
+        if (self.plate_format == CUSTOM_FORMAT) != (self.custom is not None):
+            raise ValueError("A custom plate format needs its pitch and diameter, and only a custom one takes them")
+        if self.plate_format != CUSTOM_FORMAT and self.plate_format not in PLATE_FORMATS:
+            raise ValueError(f"Unknown plate format {self.plate_format!r}")
 
     @property
     def pitch_um(self) -> float:
-        return PLATE_FORMATS[self.plate_format][0]
+        return self.custom[0] if self.custom else PLATE_FORMATS[self.plate_format][0]
 
     @property
     def diameter_um(self) -> float:
-        return PLATE_FORMATS[self.plate_format][1]
+        return self.custom[1] if self.custom else PLATE_FORMATS[self.plate_format][1]
 
     @property
     def margin(self) -> float:
@@ -70,9 +81,12 @@ class NanowellSettings:
 
     def key(self) -> dict:
         """Everything here changes the output, so all of it joins the reuse key."""
-        return {"plate_format": self.plate_format, "margin_um": self.margin,
-                "cell_diameter_um": self.cell_diameter_um, "square_edge_deg": self.square_edge_deg,
-                "occluded_below": self.occluded_below, "clipped_below": self.clipped_below}
+        key = {"plate_format": self.plate_format, "margin_um": self.margin,
+               "cell_diameter_um": self.cell_diameter_um, "square_edge_deg": self.square_edge_deg,
+               "occluded_below": self.occluded_below, "clipped_below": self.clipped_below}
+        if self.custom:                     # only then: a known format's key is unchanged, so its runs still reuse
+            key.update(pitch_um=self.custom[0], diameter_um=self.custom[1])
+        return key
 
 
 @dataclass

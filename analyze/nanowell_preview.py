@@ -176,7 +176,7 @@ class _PreviewWorker(QThread):
                 result = preview_timepoint(
                     job["zip"], job["well"], job["timepoint"], job["settings"], grouper=pm.find_image_groups_in_zip,
                     parse=pm.parse_filename, schema=parse_schema(job["schema"]), sep=job["sep"],
-                    phase_token=job["phase_token"], scratch=Path(scratch))
+                    phase_token=job["phase_token"], scratch=Path(scratch), pattern=job.get("pattern"))
         except Exception as exc:          # a worker has no event loop to raise into; the window says what happened
             self.failed.emit(f"{type(exc).__name__}: {exc}")
         else:
@@ -256,12 +256,14 @@ class NanowellPreviewWindow(QWidget):
         self._tp_cb.addItems(self._timepoints.get(well, []))
 
     def _job(self) -> dict:
+        from analyze.domain.nanowell_fields import pattern_from_opts
         from analyze.nanowell_section import settings_from_opts
 
         opts = self._tab._collect_run_options()
         well = self._well_cb.currentText()
         return {"zip": self._wells[well], "well": well, "timepoint": self._tp_cb.currentText(),
-                "settings": settings_from_opts(opts), "schema": self._tab._build_schema_arg(),
+                "settings": settings_from_opts(opts), "pattern": pattern_from_opts(opts),
+                "schema": self._tab._build_schema_arg(),
                 "sep": self._tab._schema_picker.separator(), "phase_token": self._tab._phase_token()}
 
     def run(self) -> None:
@@ -362,9 +364,33 @@ def _wells_and_timepoints(tab) -> tuple[dict[str, Path], dict[str, list[str]], s
     except AcquisitionRecordError as exc:
         return {}, {}, f"The acquisition record cannot be used: {exc}"
     if record is None:
-        return {}, {}, f"There is no acquisition record ({folder / 'acquisition.json'}); nanowell mode needs it."
+        from analyze.domain.nanowell_fields import pattern_from_opts
+
+        if pattern_from_opts(tab._collect_run_options()) is None:
+            return {}, {}, (f"There is no acquisition record ({folder / 'acquisition.json'}); describe the tile grid "
+                            "to place the tiles without one.")
+        timepoints = {well: _archive_timepoints(path, tab) for well, path in zips.items()}
+        return {w: p for w, p in zips.items() if timepoints[w]}, timepoints, ""
     timepoints = {well: timepoint_order(record, well) for well in zips}
     return {w: p for w, p in zips.items() if timepoints[w]}, timepoints, ""
+
+
+def _archive_timepoints(path: Path, tab) -> list[str]:
+    """A well's timepoints read from its archive's member names, in time, for a dataset with no record."""
+    import zipfile
+
+    from pipeline.incremental_keys import fov_keys_from_member_names
+    from util.timepoint import parse_hours
+
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = [Path(n).name for n in zf.namelist()]
+    except (OSError, zipfile.BadZipFile):
+        return []
+    found = {tp for _fov, tp in fov_keys_from_member_names(names, schema=tab._build_schema_arg(),
+                                                            sep=tab._schema_picker.separator(), skip_hidden=True,
+                                                            images_only=True)}
+    return sorted(found, key=lambda tp: (parse_hours(tp) is None, parse_hours(tp) or 0.0, tp))
 
 
 def open_preview(tab) -> NanowellPreviewWindow | None:

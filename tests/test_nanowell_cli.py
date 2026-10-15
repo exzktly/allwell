@@ -295,3 +295,74 @@ def test_an_incremental_timepoint_too_crowded_for_its_own_template_falls_back_to
     _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
     later = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())["timepoints"]["24h"]["template"]
     assert later["source"] == "earliest"
+
+
+# ── no acquisition record: the grid on the command line (tracker P15) ────────
+_GRID = ["--nanowell_grid", "2x2", "--nanowell_scan", "top-left-row", "--nanowell_overlap_percent", "10",
+         "--nanowell_pixel_size_um", "4.3"]
+
+
+def test_a_dataset_without_a_record_runs_from_the_grid_it_is_given(tmp_path, monkeypatch, rendered_well):
+    """The fixture's tiles F0..F3 were imaged row by row from the top left at 10 % overlap; with the record
+    removed and that described on the command line, the run places, addresses and counts as it does with it."""
+    from review.features.nanowell.collect import load_nanowell_data
+
+    rendered, record, truth = rendered_well
+    plate = _write_plate(tmp_path, rendered, record)
+    (plate / "in" / "acquisition.json").unlink()
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", *_GRID)
+    assert not (plate / "in" / "acquisition.json").exists()                    # nothing written into the input
+    grid = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())
+    assert grid["timepoints"]["0h"]["status"] == "ok"
+    sites = {(int(r["nw_q"]), int(r["nw_r"])): r for r in csv.DictReader((out / "nanowells" / f"{WELL}.csv").open())
+             if r["nw_q"]}
+    assert set(truth) <= set(sites) and sites[(1, 2)]["n_cells"] == "1"
+    info = json.loads((out / "pipeline_info.json").read_text())
+    assert info["nanowell"]["settings"]["pattern"] == {"grid": [2, 2], "scan": "top-left-row",
+                                                       "overlap_percent": 10.0, "pixel_size_um": 4.3}
+    data = load_nanowell_data(out)
+    assert data.acquisition["0h"]["pixel_size_um"] == {"x": 4.3, "y": 4.3}       # Review reads the pattern's
+    assert data.time_source in ("label", None)
+
+
+@pytest.mark.parametrize("flags, message", [
+    (["--nanowell_grid", "2x2", "--nanowell_pixel_size_um", "4.3"], "needs --nanowell_overlap_percent"),
+    (["--nanowell_grid", "2x2", "--nanowell_overlap_percent", "10"], "needs --nanowell_pixel_size_um"),
+    (["--nanowell_grid", "two by two", "--nanowell_overlap_percent", "10", "--nanowell_pixel_size_um", "4.3"],
+     "is not a grid"),
+    ([*_GRID[:2], "--nanowell_scan", "diagonal", *_GRID[4:]], "is not a scan pattern"),
+    (["--nanowell_overlap_percent", "10"], "go with --nanowell_grid"),
+])
+def test_the_grid_options_are_validated_with_a_message(tmp_path, monkeypatch, rendered_well, capsys, flags, message):
+    rendered, record, _ = rendered_well
+    plate = _write_plate(tmp_path, rendered, record)
+    with pytest.raises(SystemExit):
+        _run_main(monkeypatch, plate, "--nanowell_format", "100um", *flags)
+    assert message in capsys.readouterr().err
+
+
+# ── a custom plate format (tracker A7) ───────────────────────────────────────
+def test_a_custom_format_with_the_100um_geometry_reads_the_array_as_the_100um_format_does(
+        tmp_path, monkeypatch, rendered_well):
+    rendered, record, truth = rendered_well
+    plate = _write_plate(tmp_path, rendered, record)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "custom", "--nanowell_diameter_um", "100",
+                    "--nanowell_pitch_um", "172")
+    sites = {(int(r["nw_q"]), int(r["nw_r"])): r for r in csv.DictReader((out / "nanowells" / f"{WELL}.csv").open())
+             if r["nw_q"]}
+    assert set(truth) <= set(sites) and sites[(1, 2)]["n_cells"] == "1"
+    settings = json.loads((out / "pipeline_info.json").read_text())["nanowell"]["settings"]
+    assert (settings["plate_format"], settings["diameter_um"], settings["pitch_um"]) == ("custom", 100.0, 172.0)
+
+
+@pytest.mark.parametrize("flags, message", [
+    (["--nanowell_format", "custom", "--nanowell_diameter_um", "100"], "needs --nanowell_diameter_um and"),
+    (["--nanowell_format", "custom", "--nanowell_diameter_um", "100", "--nanowell_pitch_um", "100"], "would touch"),
+    (["--nanowell_format", "100um", "--nanowell_pitch_um", "150"], "go with --nanowell_format custom"),
+])
+def test_a_custom_format_is_validated_with_a_message(tmp_path, monkeypatch, rendered_well, capsys, flags, message):
+    rendered, record, _ = rendered_well
+    plate = _write_plate(tmp_path, rendered, record)
+    with pytest.raises(SystemExit):
+        _run_main(monkeypatch, plate, *flags)
+    assert message in capsys.readouterr().err

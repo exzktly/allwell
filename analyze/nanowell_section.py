@@ -18,7 +18,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QWidget
 
 from analyze.domain.nanowell_fields import (
-    DEFAULTS, PLATE_FORMAT_CHOICES, nanowell_enabled, nanowell_option_errors,
+    CUSTOM_FORMAT, DEFAULTS, PLATE_FORMAT_CHOICES, SCAN_CHOICES, nanowell_enabled, nanowell_option_errors,
 )
 
 #: field key -> (row label, edit attribute, tooltip). The edits' placeholders are the pipeline's defaults.
@@ -39,6 +39,27 @@ _FIELDS = (
 )
 
 
+#: A custom format's geometry (tracker A7), shown only while the format is Custom.
+_CUSTOM_FIELDS = (
+    ("nanowell_diameter_um", "Nanowell diameter (µm)", "_nanowell_diameter_edit",
+     "The nanowells' diameter on this plate."),
+    ("nanowell_pitch_um", "Lattice pitch (µm)", "_nanowell_pitch_edit",
+     "Centre-to-centre distance between neighbouring nanowells. A starting value: the run measures the pitch on "
+     "the tiles, from half to twice this."),
+)
+
+#: The tile grid for a dataset with no acquisition record (tracker P15, A8). The scan order is a combo, apart.
+_GRID_FIELDS = (
+    ("nanowell_grid", "Tile grid", "_nanowell_grid_edit",
+     "Only for a dataset with no acquisition record: the tiles of a well as ROWSxCOLUMNS (e.g. 5x5). Fields are "
+     "taken in the order of their names, numerically, along the scan order. A record, when there is one, wins."),
+    ("nanowell_overlap_percent", "Tile overlap (%)", "_nanowell_overlap_edit",
+     "Only with a tile grid: the overlap set in the acquisition software."),
+    ("nanowell_pixel_size_um", "Pixel size (µm)", "_nanowell_pixel_edit",
+     "Only with a tile grid: the images' pixel size."),
+)
+
+
 def settings_from_opts(opts: dict):
     """The pipeline's ``NanowellSettings`` for the form's run options (blank numeric fields take the defaults)."""
     from pipeline.nanowell_run import NanowellSettings
@@ -47,10 +68,13 @@ def settings_from_opts(opts: dict):
         text = str(opts.get(key) or "").strip()
         return float(text) if text else default
 
+    plate_format = str(opts["nanowell_format"])
+    custom = ((number("nanowell_pitch_um", None), number("nanowell_diameter_um", None))
+              if plate_format == CUSTOM_FORMAT else None)
     return NanowellSettings(
-        str(opts["nanowell_format"]), number("nanowell_margin_um", None), number("nanowell_cell_diameter_um", 15.0),
+        plate_format, number("nanowell_margin_um", None), number("nanowell_cell_diameter_um", 15.0),
         number("nanowell_square_edge_deg", 0.0), number("nanowell_occluded_below", 0.5),
-        number("nanowell_clipped_below", 0.5))
+        number("nanowell_clipped_below", 0.5), custom)
 
 
 class AnalyzeNanowellSectionMixin:
@@ -78,13 +102,22 @@ class AnalyzeNanowellSectionMixin:
         row.layout().addStretch(1)
 
         self._nanowell_field_rows = [row.parentWidget()]
+        self._nanowell_custom_rows = []
+        for key, label, attr, tip in _CUSTOM_FIELDS:
+            self._nanowell_custom_rows.append(self._nanowell_edit_row(sec, key, label, attr, tip))
         for key, label, attr, tip in _FIELDS:
-            r = self._row(sec, label, tooltip=tip)
-            edit = self._entry(r, "", width=70)
-            edit.setPlaceholderText(DEFAULTS[key] or "default")
-            setattr(self, attr, edit)
-            r.layout().addStretch(1)
-            self._nanowell_field_rows.append(r.parentWidget())
+            self._nanowell_field_rows.append(self._nanowell_edit_row(sec, key, label, attr, tip))
+        row = self._row(sec, "Scan order", tooltip="Only with a tile grid: where the stage started and how it ran.")
+        self._nanowell_scan_cb = QComboBox(row)
+        for value in SCAN_CHOICES:
+            self._nanowell_scan_cb.addItem(value.replace("-", " "), userData=value)
+        row.layout().addWidget(self._nanowell_scan_cb)
+        row.layout().addStretch(1)
+        grid_rows = [self._nanowell_edit_row(sec, *spec) for spec in _GRID_FIELDS[:1]]
+        grid_rows.append(row.parentWidget())
+        grid_rows += [self._nanowell_edit_row(sec, *spec) for spec in _GRID_FIELDS[1:]]
+        self._nanowell_field_rows += grid_rows
+        self._nanowell_format_cb.currentIndexChanged.connect(lambda _i: self._refresh_nanowell_custom())
 
         row = self._row(sec, "Check")
         self._nanowell_preview_btn = QPushButton("Test detection…", row)
@@ -111,14 +144,30 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_cb.toggled.connect(self._refresh_nanowell_enabled)
         self._refresh_nanowell_enabled()
 
+    def _nanowell_edit_row(self, sec, key, label, attr, tip):
+        r = self._row(sec, label, tooltip=tip)
+        edit = self._entry(r, "", width=70)
+        edit.setPlaceholderText(DEFAULTS[key] or "default")
+        setattr(self, attr, edit)
+        r.layout().addStretch(1)
+        return r.parentWidget()
+
+    def _refresh_nanowell_custom(self) -> None:
+        """The diameter and pitch rows belong to a custom format only: shown for it, hidden otherwise."""
+        custom = self._nanowell_format_cb.currentData() == CUSTOM_FORMAT
+        for row in self._nanowell_custom_rows:
+            row.setVisible(custom)
+
     def _refresh_nanowell_enabled(self, *_: object) -> None:
         """The controls below the mode checkbox mean nothing while it is off, so they are disabled, not hidden."""
         on = self._nanowell_cb.isChecked()
         self._nanowell_format_cb.setEnabled(on)
-        for _key, _label, attr, _tip in _FIELDS:
+        for _key, _label, attr, _tip in _FIELDS + _CUSTOM_FIELDS + _GRID_FIELDS:
             getattr(self, attr).setEnabled(on)
+        self._nanowell_scan_cb.setEnabled(on)
         self._nanowell_preview_btn.setEnabled(on)
         self._nanowell_pin_segmentation(on)
+        self._refresh_nanowell_custom()
 
     def _nanowell_label_free_index(self) -> int:
         return self._seg_method_cb.findData("cellpose_labelfree")
@@ -145,8 +194,9 @@ class AnalyzeNanowellSectionMixin:
         """The section's run options: every key present, the format empty while the mode is off."""
         on = self._nanowell_cb.isChecked()
         out = {"nanowell_format": self._nanowell_format_cb.currentData() if on else ""}
-        for key, _label, attr, _tip in _FIELDS:
+        for key, _label, attr, _tip in _FIELDS + _CUSTOM_FIELDS + _GRID_FIELDS:
             out[key] = getattr(self, attr).text().strip()
+        out["nanowell_scan"] = self._nanowell_scan_cb.currentData() or SCAN_CHOICES[0]
         return out
 
     def _apply_nanowell_settings(self, d: dict) -> None:
@@ -168,10 +218,13 @@ class AnalyzeNanowellSectionMixin:
             "nanowell mode is off.")
         if known:
             self._nanowell_format_cb.setCurrentIndex(index)
-        for key, _label, attr, _tip in _FIELDS:
+        for key, _label, attr, _tip in _FIELDS + _CUSTOM_FIELDS + _GRID_FIELDS:
             # A key the dataset does not state is blank, not whatever the previous dataset left in the box.
             value = d.get(key)
             getattr(self, attr).setText("" if value is None else f"{value:.12g}" if isinstance(value, float) else str(value))
+        scan = self._nanowell_scan_cb.findData(str(d.get("nanowell_scan") or SCAN_CHOICES[0]))
+        self._nanowell_scan_cb.setCurrentIndex(max(scan, 0))
+        self._refresh_nanowell_custom()
 
     def _nanowell_validation_error(self, *, check_input: bool) -> str | None:
         """What stops a nanowell run before it starts, or ``None``: bad fields, no Phase channel, no record, no tiles.

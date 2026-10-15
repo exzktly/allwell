@@ -45,9 +45,11 @@ class NanowellInputError(RuntimeError):
 
 def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:
     spec = kwargs["_nanowell"]
+    custom = (float(spec["pitch_um"]), float(spec["diameter_um"])) if spec["plate_format"] == nr.CUSTOM_FORMAT \
+        else None
     return nr.NanowellSettings(spec["plate_format"], spec.get("margin_um"), spec.get("cell_diameter_um", 15.0),
                                spec.get("square_edge_deg", 0.0), spec.get("occluded_below", 0.5),
-                               spec.get("clipped_below", 0.5))
+                               spec.get("clipped_below", 0.5), custom)
 
 
 def timepoint_order(record: dict, well: str) -> list[str]:
@@ -67,6 +69,36 @@ def _read_tif(path: Path):
     import tifffile
 
     return np.asarray(tifffile.imread(str(path)), dtype=np.float32)
+
+
+def _pattern_record(well: str, zip_path, index: dict, pattern: dict) -> dict:
+    """The in-memory record for a dataset with none, from the grid the run was given (tracker P15).
+
+    Each timepoint's tile size is read from the header of one of its phase images in the archive, so a
+    timepoint imaged at another size is placed with its own.
+    """
+    import io
+
+    import tifffile
+
+    from pipeline.nanowell_pattern_record import record_from_pattern
+
+    fields: dict[str, list] = {}
+    first: dict[str, str] = {}
+    for (tp, fov), (nuclear, _fluors) in sorted(index.items()):
+        fields.setdefault(tp, []).append(fov)
+        first.setdefault(tp, Path(nuclear).name)
+    sizes = {}
+    with zipfile.ZipFile(zip_path) as zf:
+        members = {Path(name).name: name for name in zf.namelist()}
+        for tp, name in first.items():
+            with tifffile.TiffFile(io.BytesIO(zf.read(members[name]))) as tif:
+                height, width = tif.pages[0].shape[:2]
+            sizes[tp] = (width, height)
+    log.info("Well %s has no acquisition record: tiles placed from a %s grid, scan %s, %s%% overlap, %s um per "
+             "pixel, fields in the order of their names", well, "x".join(map(str, pattern["grid"])),
+             pattern["scan"], pattern["overlap_percent"], pattern["pixel_size_um"])
+    return record_from_pattern(well, fields, sizes, pattern)
 
 
 def _tile_index(groups, parse, schema, sep) -> dict:
@@ -310,14 +342,19 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
 
     settings = settings_from_kwargs(shared_kwargs_template)
     record = read_record_file(Path(zip_path).parent / "acquisition.json")
-    if record is None:
+    pattern = shared_kwargs_template["_nanowell"].get("pattern")
+    if record is None and not pattern:
         raise NanowellInputError(
             f"Nanowell mode needs the acquisition record ({Path(zip_path).parent / 'acquisition.json'}), which "
-            "tells the run where each tile sits in the well; it is written when a CZI/ND2/OME dataset is converted")
+            "tells the run where each tile sits in the well; it is written when a CZI/ND2/OME dataset is converted. "
+            "For a dataset converted without one, give the grid instead: --nanowell_grid, --nanowell_scan, "
+            "--nanowell_overlap_percent and --nanowell_pixel_size_um")
     groups, needed = grouper(zip_path, nuclear_token, fluor_tokens, scratch_dir, schema=schema, sep=sep)
     if not groups:
         raise NanowellInputError(f"No image groups found in {Path(zip_path).name}")
     index = _tile_index(groups, parse, schema, sep)
+    if record is None:
+        record = _pattern_record(well_label, zip_path, index, pattern)
     timepoints = timepoint_order(record, well_label)
     output_dir = Path(output_dir)
     prior = (_prior_state(prior_dir or output_dir, well_label, csv_prefix, settings_key, timepoints, record)

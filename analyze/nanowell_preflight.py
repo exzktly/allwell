@@ -23,13 +23,17 @@ def wells_directory(raw: str) -> Path:
     return root / "in" if (root / "in").is_dir() else root
 
 
-def _pitch_and_diameter(plate_format: str) -> tuple[float, float]:
-    from pipeline.nanowell_run import PLATE_FORMATS
+def _pitch_and_diameter(plate_format: str, opts: dict | None = None) -> tuple[float, float]:
+    """The format's nominal (pitch, diameter); a custom format's from the form's fields (*opts*)."""
+    from pipeline.nanowell_run import CUSTOM_FORMAT, PLATE_FORMATS
 
+    if plate_format == CUSTOM_FORMAT:
+        return float(str(opts["nanowell_pitch_um"])), float(str(opts["nanowell_diameter_um"]))
     return PLATE_FORMATS[plate_format]
 
 
-def seam_site_estimate(plan, plate_format: str, margin_um: float | None, *, phases: int = 8) -> tuple[int, int]:
+def seam_site_estimate(plan, plate_format: str, margin_um: float | None, *, phases: int = 8,
+                       opts: dict | None = None) -> tuple[int, int]:
     """``(sites on the seams, sites in all)``, expected, for a hexagonal lattice laid over the tiles of *plan*.
 
     Which sites a run fuses depends on where the array sits, which only detection knows, and one placement
@@ -41,7 +45,7 @@ def seam_site_estimate(plan, plate_format: str, margin_um: float | None, *, phas
 
     from pipeline.tile_grid import ownership_report
 
-    pitch, diameter = _pitch_and_diameter(plate_format)
+    pitch, diameter = _pitch_and_diameter(plate_format, opts)
     margin = diameter / 10 if margin_um is None else margin_um
     rects = [p.rectangle() for p in plan.placements]
     left, top = min(r.left for r in rects), min(r.top for r in rects)
@@ -82,9 +86,11 @@ def nanowell_input_report(raw: str, opts: dict) -> tuple[list[str], list[str]]:
     except AcquisitionRecordError as exc:
         return [f"The acquisition record cannot be used: {exc}"], warnings
     if record is None:
-        return [f"There is no acquisition record ({record_path}). Nanowell mode needs it to place the tiles in each "
-                "well; the CZI, ND2 and OME converters write it. A dataset converted before they did must be "
-                "converted again."], warnings
+        if not str(opts.get("nanowell_grid") or "").strip():
+            return [f"There is no acquisition record ({record_path}). Nanowell mode needs it to place the tiles in "
+                    "each well; the CZI, ND2 and OME converters write it. For a dataset converted before they did, "
+                    "describe the tile grid instead (Tile grid, Scan order, Tile overlap, Pixel size)."], warnings
+        return _pattern_report(zips, opts)
     schema = str(opts.get("filename_schema") or "")
     sep = str(opts.get("filename_sep") or "_")
     if schema:
@@ -93,6 +99,46 @@ def nanowell_input_report(raw: str, opts: dict) -> tuple[list[str], list[str]]:
     problems += _grid_problems(record, place_from_record, tiles_from_record, OK)
     warnings += _overlap_warnings(record, opts, place_from_record, tiles_from_record, OK)
     return problems, warnings
+
+
+def _pattern_report(zips, opts: dict) -> tuple[list[str], list[str]]:
+    """No record, a tile grid given (tracker P15): every timepoint of every well must fit the grid's cells.
+
+    Read from the archives' member names, the way the run groups them; the images are not opened, so the tile
+    size and the overlap's sufficiency are the run's to find. Said once, as a warning: the placement is the
+    user's description, not a record, and a wrong scan order puts tiles in the wrong cells.
+    """
+    import zipfile
+
+    from analyze.domain.nanowell_fields import parse_grid
+    from pipeline.incremental_keys import fov_keys_from_member_names
+
+    rows, cols = parse_grid(str(opts.get("nanowell_grid"))) or (0, 0)
+    schema = str(opts.get("filename_schema") or "")
+    sep = str(opts.get("filename_sep") or "_")
+    phase = str(opts.get("phase_token") or "").strip().lower()
+    warnings = [f"There is no acquisition record: the tiles will be placed from the {rows} x {cols} grid in "
+                f"{opts.get('nanowell_scan') or 'top-left-row'} order, fields in the order of their names. Use Test "
+                "detection to check the addresses land before a plate-wide run."]
+    if not schema:
+        return [], warnings
+    over = []
+    for path in zips:
+        try:
+            with zipfile.ZipFile(path) as zf:
+                names = [Path(n).name for n in zf.namelist()]
+        except (OSError, zipfile.BadZipFile) as exc:
+            over.append(f"{path.name} cannot be read ({exc})")
+            continue
+        if phase:
+            names = [n for n in names if phase in n.lower().split(sep)]
+        fields: dict[str, set] = {}
+        for fov, tp in fov_keys_from_member_names(names, schema=schema, sep=sep, skip_hidden=True,
+                                                   images_only=True):
+            fields.setdefault(tp, set()).add(fov)
+        over += [f"{path.stem} at {tp}: {len(f)} fields for a {rows} x {cols} grid" for tp, f in sorted(fields.items())
+                 if len(f) > rows * cols]
+    return _listed("A well has more fields than the tile grid holds", over), warnings
 
 
 def _listed(lead: str, items) -> list[str]:
@@ -131,7 +177,7 @@ def _overlap_warnings(record, opts, place_from_record, tiles_from_record, ok) ->
         margin = float(margin_text) if margin_text else None
     except ValueError:
         return []
-    _pitch, diameter = _pitch_and_diameter(plate_format)
+    _pitch, diameter = _pitch_and_diameter(plate_format, opts)
     needed = diameter + 2 * (diameter / 10 if margin is None else margin)
     out = []
     estimates = 0
@@ -145,7 +191,7 @@ def _overlap_warnings(record, opts, place_from_record, tiles_from_record, ok) ->
             out.append(f"{well} at {tp}: the tiles overlap by {min(short):.0f} µm, less than the {needed:.0f} µm needed.")
             continue
         estimates += 1                      # the estimate costs ~20 ms; only the ones that will be listed are made
-        seams, total = seam_site_estimate(plan, plate_format, margin)
+        seams, total = seam_site_estimate(plan, plate_format, margin, opts=opts)
         out.append(f"{well} at {tp}: the tiles overlap by {min(short):.0f} µm, less than the {needed:.0f} µm a "
                    f"{diameter:.0f} µm nanowell needs to lie inside one tile with its margin: an array filling the tiles "
                    f"would have about {seams} of its {total} nanowells on a seam, each measured from a blended crop "

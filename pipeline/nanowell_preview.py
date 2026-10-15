@@ -72,7 +72,8 @@ def _crop_for(site: dict, images: dict, located, template, segment, px: float, h
 
 
 def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.NanowellSettings, *, grouper, parse, schema,
-                      sep: str, phase_token: str, scratch: Path, segmenter=None, n_crops: int = 4) -> PreviewResult:
+                      sep: str, phase_token: str, scratch: Path, segmenter=None, n_crops: int = 4,
+                      pattern: dict | None = None) -> PreviewResult:
     """Locate, measure and describe one (well, timepoint). Never raises on bad data: a refusal is the result's status."""
     from pipeline import nanowell_measure as nm
     from pipeline.io import extract_zip
@@ -81,11 +82,13 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
     zip_path = Path(zip_path)
     result = PreviewResult("error", well=well, timepoint=timepoint)
     record = read_record_file(zip_path.parent / "acquisition.json")
-    if record is None:
-        result.reason = f"There is no acquisition record next to {zip_path.name}."
+    if record is None and not pattern:
+        result.reason = f"There is no acquisition record next to {zip_path.name}, and no tile grid was given."
         return result
     groups, needed = grouper(zip_path, phase_token, [], scratch, schema=schema, sep=sep)
     index = nt._tile_index(groups, parse, schema, sep)
+    if record is None:                                  # placed from the described grid, as the run would be
+        record = nt._pattern_record(well, zip_path, index, pattern)
     wanted = {Path(nuclear).name for (tp, _fov), (nuclear, _fl) in index.items() if tp == timepoint}
     if not wanted:
         result.reason = f"{zip_path.name} holds no {phase_token} image at timepoint {timepoint!r}."

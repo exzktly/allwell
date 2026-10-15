@@ -8790,6 +8790,18 @@ earlier sections built, with every refusal a named status (`incomplete_grid`, `b
 `no_images`, `no_lattice`, `format_mismatch`, `orientation_refused`, `unaddressed`) and never an exception, so a
 bad timepoint costs its rows and not the well.
 
+**A dataset without a record, and a custom format.** With no `in/acquisition.json`, the run's `pattern` option
+(`--nanowell_grid`, `--nanowell_scan`, `--nanowell_overlap_percent`, `--nanowell_pixel_size_um`; validated in
+`cli_args._grid_pattern`, all or none) makes `pipeline/nanowell_pattern_record.record_from_pattern` build the
+record in memory: each field's mosaic position from where `tile_grid.scan_cells` puts it, fields in the order of
+their names numerically, each timepoint's tile size read from one image header (`nanowell_task._pattern_record`).
+Nothing is written into the input folder; registration corrects the nominal positions as it does recorded ones;
+there are no acquisition times, so Review times timepoints from their labels, and `collect` gives each timepoint
+the pattern's pixel size (no tile size, so Array QC marks corners). `--nanowell_format custom` takes
+`--nanowell_diameter_um` and `--nanowell_pitch_um` (`NanowellSettings.custom`); only a custom format adds them to
+the settings key, so a known format's reuse key is unchanged. The `pattern` option is added only when given, for
+the same reason.
+
 **Locate, then measure.** `locate_timepoint` places the tiles from the acquisition record (`tile_grid`),
 registers them (`tile_register`, with each tile's own lattice fit as the lattice-phase constraint), builds the
 montage, estimates the lattice from its spectrum, detects the sites, scores the central square, checks the
@@ -8837,8 +8849,11 @@ predates the keys leaves it alone. Switching the mode on sets the segmentation s
 choice returns when the mode goes off); a build with no label-free method disables the mode. Run validation adds
 `nanowell_option_errors` (bounds; a Phase channel only when channel auto-detection is off, since detection names it
 at run time) to the numeric checks, then, with an input folder, `nanowell_input_report`: **problems** stop the run (no
-well zips, no acquisition record, a tile the record names that an archive lacks, a grid that cannot be
-placed) and **warnings** are logged and the run goes on (an overlap shorter than a nanowell needs, with the
+well zips, no acquisition record and no tile grid, a tile the record names that an archive lacks, a grid that
+cannot be placed, and — without a record — a well with more fields at a timepoint than the tile grid holds,
+read from the archives' member names (`_pattern_report`, which also logs how the tiles will be placed); a
+custom format's diameter and pitch, and the tile grid's fields, are checked in `nanowell_option_errors`, and the
+form shows the diameter and pitch rows only for Custom) and **warnings** are logged and the run goes on (an overlap shorter than a nanowell needs, with the
 expected seam-site count from `ownership_report` laid over an ideal lattice at several phases; an upper
 bound, since the array may be smaller than the tiles). **Test detection** opens a non-modal window that
 runs `pipeline.nanowell_preview.preview_timepoint` on a parentless `QThread` held in a module-level set until it

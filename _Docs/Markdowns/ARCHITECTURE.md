@@ -8676,19 +8676,25 @@ exactly at the centre (radially symmetric, so the first ranking cannot see it). 
 fewer than `MIN_TEMPLATE_SITES` sites in the quarter it returns the earliest template
 of the well unchanged (`source="earliest"`), or the quarter marked `own_sparse` when
 there is none; `Template.used` says which crops formed it. Above about three quarters
-of the sites loaded the quarter reaches into loaded sites and the template darkens.
+of the sites loaded the quarter reaches into loaded sites and the template darkens;
+nothing flags that, because from the crops alone it cannot be told from a well of
+unusually bright cells (tracker C12).
 
 **Rim suppression.** `rim_suppress` divides every site's pixels (out to 1.05 times its
 radius, which takes in the rim) by the template at the same offset from the site centre,
 and sets everything else to exactly 1.0. An empty site comes out within about 0.2 of 1
 including its rim and a cell stands out as a departure from it. The divisor is floored at
-a tenth of the template's central level.
+a tenth of the template's central level. It refuses (`ValueError`) a template whose
+central level is not positive and finite, one covering less than the largest site's
+reach, or one with a non-finite value inside that reach, because each would leave part
+of a site at 1.0, which reads as "empty". Build the template with
+`interior_radius_px = SUPPRESSION_RADIUS` times the site radius.
 
 **Confluence without segmentation.** `texture_threshold` is the median plus five robust
 standard deviations of the smoothed departure from 1 over the interiors (0.9 of the
 radius) of the sites known to be empty; `site_confluence` is the share of a site's
-interior above it. It is `None`, not zero, with no empty site to calibrate against or no
-interior on the image; 0.0 is a measurement. Because "departs from an empty nanowell"
+interior above it. It is `None`, not zero, with no empty site to calibrate against or with under half
+the interior on the image (a quadrant is not a site); 0.0 is a measurement. Because "departs from an empty nanowell"
 includes the optical halo of a cell, it reads high: on the synthetic scene it lies
 between the painted coverage and the coverage of a disk 3 px larger in radius, which
 makes it a monotone measure of loading rather than an area.
@@ -8698,10 +8704,13 @@ makes it a monotone measure of loading rather than an area.
 when called). `count_cells` keeps a label only when its centroid lies in the interior of
 a site the tile **owns** (`ownership_report` of 6.2f); a cell in the overlap of two tiles
 is therefore counted by the one tile that owns the site, and a cell on a rim or between
-sites belongs to none. A site with no cell is a zero, not an absence.
+sites belongs to none. A site with no cell is a zero, not an absence; an owned site with no geometry in the
+tile is an error, not a missing key.
 
 **The second count.** `area_estimate` divides each site's labelled interior area by the
-median area of isolated cells and flags `count_disagreement` when it differs from the
+median area of isolated cells (touching no other cell and no image edge; a clump that
+touches nothing still passes as one cell, so where clumps predominate the area count
+inherits their undercount) and flags `count_disagreement` when it differs from the
 segmented count by at least one cell and by more than 30 % of the larger, because a clump
 segmented as one cell undercounts without any error. With no isolated cell anywhere the
 estimate and the flag are `None`.
@@ -8710,11 +8719,13 @@ estimate and the flag are `None`.
 (`None` for an unaddressed timepoint, so the row exists but cannot be joined over time),
 the well-frame position, the area, and the mean of any intensity images passed.
 `site_fluorescence` gives the integrated and mean interior intensity minus the median
-interior mean of the empty sites; with no image every field is `None`, and with no empty
+interior mean of the empty sites; with no image, under half the interior on the image,
+or any non-finite pixel in it, the site's fields are `None`, and with no empty
 site the background and everything derived from it are `None`. `site_state` is the §3.5
 state of a site: `clipped` (imaged fraction under half) and `occluded` (visible fraction
 under half) carry no count and no confluence whatever was passed; a seen site with zero
-cells is `empty` with `n_cells == 0` and confluence 0.0; a partly seen site keeps its
+cells is `empty` with `n_cells == 0` and the confluence it was given (never filled in); a
+non-finite fraction is unknown; a partly seen site keeps its
 metrics with `partially_visible` set. An empty site and an occluded one therefore cannot
 be confused.
 

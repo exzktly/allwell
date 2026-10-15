@@ -995,8 +995,8 @@ class Fetcher:
             the same accounting the zip half uses, over several files."""
             total = 0
             try:
-                paths = [*dest_dir.glob(f"*_{well}.csv*"),
-                         *dest_dir.glob(f".*_{well}.csv.*")]
+                paths = {*dest_dir.glob(f"*_{well}.csv*"),
+                         *dest_dir.glob(f".*_{well}.csv.*")}
             except OSError:
                 return 0
             for p in paths:

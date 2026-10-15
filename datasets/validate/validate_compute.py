@@ -60,7 +60,7 @@ from pipeline.completeness import (
 from pipeline.incremental_keys import fov_keys_from_member_names
 from util.timepoint import parse_hours, sort_key as tp_sort_key
 from util.aw_safe import swallow
-from util.csv_gz import csv_stem, glob_csvs, open_csv_text
+from util.csv_gz import GZ_READ_ERRORS, csv_stem, glob_csvs, open_csv_text
 from util.well_token import canonical_well_label
 from domain.image_identity import load_schema
 from domain.tp_match import tp_close
@@ -269,7 +269,7 @@ def _csv_header(path: Path) -> list[str] | None:
     try:
         with open_csv_text(path) as handle:
             return next(csv.reader(handle), [])
-    except (OSError, EOFError, UnicodeDecodeError, csv.Error):
+    except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError, csv.Error):
         return None
 
 
@@ -286,7 +286,7 @@ def _read_csv_rows(path: Path) -> tuple[list[dict], list[str], str]:
             if not fieldnames:
                 return [], [], "unreadable"
             rows = list(reader)
-    except (OSError, EOFError, UnicodeDecodeError, csv.Error):
+    except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError, csv.Error):
         return [], [], "unreadable"
     if not rows:
         return [], fieldnames, "empty"

@@ -782,7 +782,7 @@ def read_channel_values(csv_path, channel: str) -> np.ndarray:
     """
     import csv
 
-    from util.csv_gz import open_csv_text
+    from util.csv_gz import GZ_READ_ERRORS, open_csv_text
 
     # The pipeline writes the column as ``tok.lower()`` but the token arrives in
     # whatever case was typed on the command line, so match case-insensitively.
@@ -806,7 +806,7 @@ def read_channel_values(csv_path, channel: str) -> np.ndarray:
                     continue
                 if np.isfinite(val):
                     out.append(val)
-    except (OSError, EOFError):     # EOFError: a truncated .csv.gz
+    except (OSError, *GZ_READ_ERRORS):     # a truncated or corrupt .csv.gz
         return np.array([], dtype=float)
     return np.asarray(out, dtype=float)
 

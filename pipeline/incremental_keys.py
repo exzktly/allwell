@@ -31,7 +31,7 @@ def read_done_fov_keys(csv_path: Path | str) -> set[tuple[str, str]]:
     """
     import csv
 
-    from util.csv_gz import existing_csv, open_csv_text
+    from util.csv_gz import GZ_READ_ERRORS, existing_csv, open_csv_text
 
     path = existing_csv(csv_path)
     if path is None:
@@ -45,7 +45,7 @@ def read_done_fov_keys(csv_path: Path | str) -> set[tuple[str, str]]:
                 return set()
             for row in reader:
                 keys.add((str(row.get("fov", "")), str(row.get("timepoint", ""))))
-    except (OSError, EOFError):     # EOFError: a truncated .csv.gz
+    except (OSError, *GZ_READ_ERRORS):     # a truncated or corrupt .csv.gz
         return set()
     return keys
 

@@ -377,7 +377,7 @@ def csv_keys_and_state(path: Path) -> tuple[set[tuple[str, str]], str]:
     """
     import csv
 
-    from util.csv_gz import existing_csv, open_csv_text
+    from util.csv_gz import GZ_READ_ERRORS, existing_csv, open_csv_text
 
     found = existing_csv(path)
     if found is None:
@@ -389,7 +389,7 @@ def csv_keys_and_state(path: Path) -> tuple[set[tuple[str, str]], str]:
             if not fieldnames:
                 return set(), "unreadable"
             keys = csv_keys_from_rows(reader, fieldnames)
-    except (OSError, EOFError, UnicodeDecodeError, csv.Error):   # EOFError: truncated .gz
+    except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError, csv.Error):   # + a damaged .gz
         return set(), "unreadable"
     if not keys:
         # No keys can mean no rows, or rows without the two columns. Both are

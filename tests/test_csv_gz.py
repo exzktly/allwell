@@ -284,3 +284,53 @@ def test_the_pipeline_writes_well_csvs_only_through_the_compressing_helpers():
               if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
     assert {"write_well_csv", "merge_well_records"} <= called
     assert not called & {"_write_single_csv", "merge_records_into_csv"}
+
+
+# ── a corrupt (not merely truncated) archive ────────────────────────────────
+
+def _corrupt_gz(tmp_path: Path, name: str = "m_A1.csv") -> Path:
+    """A ``.csv.gz`` whose deflate stream is damaged mid-file: reading it raises
+    ``zlib.error``, which is neither an ``OSError`` nor an ``EOFError``."""
+    gz = gzip_csv(_write_plain(tmp_path / name, _rows("1", 20000)))
+    raw = bytearray(gz.read_bytes())
+    for i in range(300, 340):
+        raw[i] ^= 0xFF
+    gz.write_bytes(bytes(raw))
+    with pytest.raises(Exception) as exc:
+        gzip.open(gz, "rb").read()
+    assert type(exc.value).__name__ == "error", type(exc.value)    # zlib.error, not OSError/EOFError
+    return gz
+
+
+def test_a_corrupt_gz_reads_as_unreadable_everywhere_it_is_read(tmp_path):
+    from pipeline.completeness import csv_keys_and_state
+    from pipeline.incremental_keys import read_done_fov_keys
+    from pipeline.threshold_optimize import read_channel_values
+    from review.core.load_controller import _looks_like_well_measurement_csv
+    from datasets.validate.validate_compute import _csv_header, _read_csv_rows
+
+    gz = _corrupt_gz(tmp_path)
+    assert read_done_fov_keys(gz) == set()
+    assert csv_keys_and_state(gz) == (set(), "unreadable")
+    assert read_channel_values(gz, "dapi").size == 0
+    assert _csv_header(gz) is None
+    assert _read_csv_rows(gz)[2] == "unreadable"
+    _looks_like_well_measurement_csv(gz)            # must not raise
+
+
+def test_one_corrupt_fetched_partial_does_not_stop_the_wells_after_it(tmp_path):
+    from pipeline.io import merge_fetched_csvs
+    src, out = tmp_path / "transit", tmp_path / "out"
+    src.mkdir(), out.mkdir()
+    _corrupt_gz(src, "measurements_A01.csv")
+    gzip_csv(_write_plain(src / "measurements_B02.csv", _rows("2")))
+    log: list[str] = []
+    assert merge_fetched_csvs(src, out, log_fn=log.append) == 2
+    assert (out / "measurements_B02.csv.gz").is_file()
+    assert "measurements_A01.csv.gz" in "".join(log)
+
+
+def test_gzip_csv_of_an_already_gzipped_path_keeps_the_file(tmp_path):
+    gz = gzip_csv(_write_plain(tmp_path / "m_A1.csv", _rows("1")))
+    assert gzip_csv(gz) == gz and gz.is_file()
+    assert _read_any(gz) == _rows("1")

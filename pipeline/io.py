@@ -954,7 +954,7 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
     """
     import csv as _csv
 
-    from util.csv_gz import glob_csvs, gzip_csv, open_csv_text, plain_name
+    from util.csv_gz import GZ_READ_ERRORS, glob_csvs, gzip_csv, open_csv_text, plain_name
 
     tmp_csv_dir, target_dir = Path(tmp_csv_dir), Path(target_dir)
     total = 0
@@ -966,7 +966,7 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
         try:
             with open_csv_text(partial) as fh:
                 rows = list(_csv.DictReader(fh))
-        except (OSError, EOFError, UnicodeDecodeError, _csv.Error) as exc:
+        except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError, _csv.Error) as exc:
             if log_fn:
                 log_fn(f"[remote] warn: reading fetched CSV {partial.name} "
                        f"failed: {exc}\n")
@@ -975,7 +975,7 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
             continue
         try:
             added = merge_records_into_csv(target, rows)
-        except (OSError, EOFError, UnicodeDecodeError, _csv.Error) as exc:
+        except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError, _csv.Error) as exc:
             if log_fn:
                 log_fn(f"[remote] warn: merging into {partial.name} failed "
                        f"({exc}); the existing CSV is unchanged and this "

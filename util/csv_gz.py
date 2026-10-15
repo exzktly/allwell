@@ -23,12 +23,20 @@ from __future__ import annotations
 import gzip
 import os
 import shutil
+import zlib
 from pathlib import Path
 from typing import IO, Callable
 
 CSV_SUFFIX = ".csv"
 GZ_SUFFIX = ".gz"
 CSV_GZ_SUFFIX = CSV_SUFFIX + GZ_SUFFIX
+
+
+#: What reading a damaged ``.csv.gz`` can raise besides ``OSError``: ``EOFError``
+#: for a truncated stream, ``zlib.error`` for a corrupt deflate stream (which is
+#: neither). Readers that tolerate an unreadable CSV list these with their own
+#: ``UnicodeDecodeError`` / ``csv.Error``.
+GZ_READ_ERRORS: tuple[type[BaseException], ...] = (EOFError, zlib.error)
 
 
 def is_csv_name(name: str) -> bool:
@@ -126,6 +134,8 @@ def gzip_csv(path: Path | str) -> Path:
     a larger file, not a wrong one.
     """
     src = Path(path)
+    if is_gz_csv_name(src.name):        # already compressed: nothing to do, and
+        return src                      # the unlink below would delete it
     dest = gz_path(src)
     tmp = dest.with_name(f".{dest.name}.part{os.getpid()}")
     try:

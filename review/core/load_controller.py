@@ -25,7 +25,7 @@ from review.core.ui_helpers import (
     step_progress as _step_progress,
 )
 from core.safe import swallow, swallowed
-from util.csv_gz import csv_stem, glob_csvs, open_csv_text
+from util.csv_gz import GZ_READ_ERRORS, csv_stem, glob_csvs, open_csv_text
 from review.data.curation import apply_curation_to_cache
 from review.data.field_exclusions import apply_field_exclusions_to_cache
 from review.domain.dataset_name import dataset_display_name
@@ -799,7 +799,7 @@ def _looks_like_well_measurement_csv(path: Path) -> bool:
         with open_csv_text(path) as fh:
             reader = csv.reader(fh)
             header = next(reader, [])
-    except (OSError, EOFError, StopIteration):
+    except (OSError, *GZ_READ_ERRORS, StopIteration):
         return False
     if not header:
         return False

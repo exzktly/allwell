@@ -130,7 +130,7 @@ def _cell_name(row: int, col: int) -> str:
     return f"r{row}c{col}"
 
 
-def _extent_um(tile_size_px, pixel_size_um):
+def _extent_um(tile_size_px, pixel_size_um) -> tuple[float, float] | None:
     sizes = []
     for axis in ("x", "y"):
         size, scale = tile_size_px.get(axis), pixel_size_um.get(axis)
@@ -208,6 +208,117 @@ def _cell_indices(centres, extent):
     return indices, step
 
 
+def _record_positions(tiles, pixel_size_um, stage_to_image) -> tuple[dict, dict] | GridPlan:
+    """Each tile's position in um and where it came from, or the plan that refuses them."""
+    positions, sources, unplaced = {}, {}, []
+    for tile in tiles:
+        if tile.mosaic_xy_px is not None:
+            positions[tile.tile_id] = (tile.mosaic_xy_px[0] * pixel_size_um["x"],
+                                       tile.mosaic_xy_px[1] * pixel_size_um["y"])
+            sources[tile.tile_id] = "mosaic"
+        elif tile.stage_xy_um is not None and stage_to_image is not None:
+            positions[tile.tile_id] = (tile.stage_xy_um[0] * stage_to_image[0],
+                                       tile.stage_xy_um[1] * stage_to_image[1])
+            sources[tile.tile_id] = "stage"
+        else:
+            unplaced.append(tile.tile_id)
+    if unplaced:
+        why = ("have only a stage position and the stage axes' direction is not stated"
+               if any(t.stage_xy_um is not None for t in tiles if t.tile_id in unplaced)
+               else "have no recorded position")
+        return GridPlan(BAD_GRID, f"Tile(s) {', '.join(sorted(unplaced))} {why}; place them from a scan pattern instead")
+    if not positions:
+        return GridPlan(BAD_GRID, "The timepoint has no tiles")
+    if len(set(sources.values())) > 1:
+        return GridPlan(BAD_GRID, "Some tiles are placed from mosaic positions and others from stage "
+                                  "positions; the two are in different frames, so they cannot share a grid")
+    return positions, sources
+
+
+@dataclass(frozen=True)
+class _Cells:
+    """Which grid cell each tile fell in, and the line structure it was read from."""
+    row_of: dict
+    col_of: dict
+    cells: dict
+    rows: int
+    cols: int
+    centres: tuple              # (x line centres, y line centres)
+    steps: tuple                # (x step, y step); None for a single line
+
+
+def _grid_cells(positions, extent) -> _Cells | GridPlan:
+    ids = list(positions)
+    lines = []
+    for axis in (0, 1):
+        values = np.array([positions[i][axis] for i in ids])
+        centres, members = _lines(values, extent[axis])
+        index, step = _cell_indices(centres, extent[axis])
+        of = {ids[m]: i for i, group in zip(index, members) for m in group}
+        lines.append((centres, step, index, of))
+    (x_centres, x_step, col_index, col_of), (y_centres, y_step, row_index, row_of) = lines
+    cells = {}
+    for tile_id in ids:
+        cell = (row_of[tile_id], col_of[tile_id])
+        if cell in cells:
+            return GridPlan(BAD_GRID, f"Tiles {cells[cell]} and {tile_id} fall in one grid cell "
+                                      f"{_cell_name(*cell)}; the recorded positions do not form a grid")
+        cells[cell] = tile_id
+    return _Cells(row_of, col_of, cells, max(row_index) + 1, max(col_index) + 1,
+                  (x_centres, y_centres), (x_step, y_step))
+
+
+def _missing_cells(found: _Cells, expected_shape) -> tuple[tuple[str, ...], tuple[int, int]] | GridPlan:
+    """Names of the cells with no tile, and the grid shape to report."""
+    outer = []
+    if expected_shape is not None:
+        if found.rows > expected_shape[0] or found.cols > expected_shape[1]:
+            return GridPlan(BAD_GRID, f"The positions form a {found.rows} x {found.cols} grid, larger than "
+                                      f"the expected {expected_shape[0]} x {expected_shape[1]}")
+        # Lines are indexed from the first one observed, so a line missing from an outer end
+        # cannot be placed: the record does not say which end it was. The cells inside the
+        # observed extent are still exact; the absent outer lines are named without a position.
+        for count, name in ((expected_shape[0] - found.rows, "row"),
+                            (expected_shape[1] - found.cols, "column")):
+            if count:
+                outer.append(f"{count} {name}(s) at an unknown outer end")
+    missing = tuple(_cell_name(r, c) for r in range(found.rows) for c in range(found.cols)
+                    if (r, c) not in found.cells) + tuple(outer)
+    return missing, (expected_shape if expected_shape is not None else (found.rows, found.cols))
+
+
+def _overlap_findings(found: _Cells, extent, declared_overlap_percent):
+    """Per-axis overlap from the spacing, the notes about it, and any disagreement with the file.
+
+    Returns ``(overlap_um, overlap_fraction, declared_pair, disagreement, notes)``, or a
+    refusing :class:`GridPlan` when neighbouring tiles do not touch.
+    """
+    overlap_um = tuple(None if s is None else extent[a] - s for a, s in enumerate(found.steps))
+    overlap_fraction = tuple(None if o is None else o / extent[a] for a, o in enumerate(overlap_um))
+    notes = []
+    for axis in (0, 1):
+        centres, step = found.centres[axis], found.steps[axis]
+        if (step is not None and np.any(np.abs(np.diff(centres) - step) > _IRREGULAR_FRACTION * extent[axis])
+                and not _only_multiples(np.diff(centres), step, extent[axis])):
+            notes.append(f"The tile spacing along {'xy'[axis]} is irregular; the overlap there is the median")
+        if overlap_um[axis] is not None and overlap_um[axis] < 0:
+            return GridPlan(BAD_GRID, f"Neighbouring tiles along {'xy'[axis]} do not touch (a gap of "
+                                      f"{-overlap_um[axis]:.1f} um): a tile is missing from between "
+                                      f"them or the plan has no overlap, and either way the tiles "
+                                      f"cannot be registered or assembled")
+    declared = declared_overlap_percent or {}
+    declared_pair = (declared.get("x"), declared.get("y"))
+    disagreement = [
+        f"along {'xy'[axis]} the positions give {measured * 100:.1f} % overlap but the file declares "
+        f"{declared_pair[axis]:g} %"
+        for axis, measured in enumerate(overlap_fraction)
+        if measured is not None and declared_pair[axis] is not None
+        and abs(measured * 100 - declared_pair[axis]) > OVERLAP_TOLERANCE_POINTS]
+    return (overlap_um, overlap_fraction, declared_pair,
+            ("; ".join(disagreement) + ": one of them is wrong about the acquisition" if disagreement else ""),
+            tuple(notes))
+
+
 def place_from_record(tiles, *, tile_size_px: dict, pixel_size_um: dict,
                       declared_overlap_percent: dict | None = None,
                       expected_shape: tuple[int, int] | None = None,
@@ -232,97 +343,26 @@ def place_from_record(tiles, *, tile_size_px: dict, pixel_size_um: dict,
                                   "so tiles cannot be placed")
     if len({t.tile_id for t in tiles}) != len(tiles):
         return GridPlan(BAD_GRID, "Tile ids are not unique")
-    positions, sources, unplaced = {}, {}, []
-    for tile in tiles:
-        if tile.mosaic_xy_px is not None:
-            positions[tile.tile_id] = (tile.mosaic_xy_px[0] * pixel_size_um["x"],
-                                       tile.mosaic_xy_px[1] * pixel_size_um["y"])
-            sources[tile.tile_id] = "mosaic"
-        elif tile.stage_xy_um is not None and stage_to_image is not None:
-            positions[tile.tile_id] = (tile.stage_xy_um[0] * stage_to_image[0],
-                                       tile.stage_xy_um[1] * stage_to_image[1])
-            sources[tile.tile_id] = "stage"
-        else:
-            unplaced.append(tile.tile_id)
-    if unplaced:
-        why = ("have only a stage position and the stage axes' direction is not stated"
-               if any(t.stage_xy_um is not None for t in tiles if t.tile_id in unplaced)
-               else "have no recorded position")
-        return GridPlan(BAD_GRID, f"Tile(s) {', '.join(sorted(unplaced))} {why}; place them from a scan pattern instead")
-    if not positions:
-        return GridPlan(BAD_GRID, "The timepoint has no tiles")
-    if len(set(sources.values())) > 1:
-        return GridPlan(BAD_GRID, "Some tiles are placed from mosaic positions and others from stage "
-                                  "positions; the two are in different frames, so they cannot share a grid")
-
-    ids = list(positions)
-    xs = np.array([positions[i][0] for i in ids])
-    ys = np.array([positions[i][1] for i in ids])
-    x_centres, x_members = _lines(xs, extent[0])
-    y_centres, y_members = _lines(ys, extent[1])
-    col_index, x_step = _cell_indices(x_centres, extent[0])
-    row_index, y_step = _cell_indices(y_centres, extent[1])
-    col_of, row_of = {}, {}
-    for index, group in zip(col_index, x_members):
-        for member in group:
-            col_of[ids[member]] = index
-    for index, group in zip(row_index, y_members):
-        for member in group:
-            row_of[ids[member]] = index
-
-    cells = {}
-    for tile_id in ids:
-        cell = (row_of[tile_id], col_of[tile_id])
-        if cell in cells:
-            return GridPlan(BAD_GRID, f"Tiles {cells[cell]} and {tile_id} fall in one grid cell "
-                                      f"{_cell_name(*cell)}; the recorded positions do not form a grid")
-        cells[cell] = tile_id
-    rows = max(row_index) + 1
-    cols = max(col_index) + 1
-    outer = []
-    if expected_shape is not None:
-        if rows > expected_shape[0] or cols > expected_shape[1]:
-            return GridPlan(BAD_GRID, f"The positions form a {rows} x {cols} grid, larger than the "
-                                      f"expected {expected_shape[0]} x {expected_shape[1]}")
-        # Lines are indexed from the first one observed, so a line missing from an outer end
-        # cannot be placed: the record does not say which end it was. The cells inside the
-        # observed extent are still exact; the absent outer lines are named without a position.
-        for count, name in ((expected_shape[0] - rows, "row"), (expected_shape[1] - cols, "column")):
-            if count:
-                outer.append(f"{count} {name}(s) at an unknown outer end")
-    missing = tuple(_cell_name(r, c) for r in range(rows) for c in range(cols)
-                    if (r, c) not in cells) + tuple(outer)
-    if expected_shape is not None:
-        rows, cols = expected_shape
-
+    placed = _record_positions(tiles, pixel_size_um, stage_to_image)
+    if isinstance(placed, GridPlan):
+        return placed
+    positions, sources = placed
+    found = _grid_cells(positions, extent)
+    if isinstance(found, GridPlan):
+        return found
+    shaped = _missing_cells(found, expected_shape)
+    if isinstance(shaped, GridPlan):
+        return shaped
+    missing, (rows, cols) = shaped
+    overlap = _overlap_findings(found, extent, declared_overlap_percent)
+    if isinstance(overlap, GridPlan):
+        return overlap
+    overlap_um, overlap_fraction, declared_pair, disagreement, notes = overlap
     placements = tuple(TilePlacement(i, positions[i][0], positions[i][1], extent[0], extent[1],
-                                     sources[i], row_of[i], col_of[i]) for i in ids)
-    steps = (x_step, y_step)
-    overlap_um = tuple(None if s is None else extent[a] - s for a, s in enumerate(steps))
-    overlap_fraction = tuple(None if o is None else o / extent[a] for a, o in enumerate(overlap_um))
-    notes = []
-    for axis, (centres, step) in enumerate(((x_centres, x_step), (y_centres, y_step))):
-        if step is not None and np.any(np.abs(np.diff(centres) - step) > _IRREGULAR_FRACTION * extent[axis]
-                                       ) and not _only_multiples(np.diff(centres), step, extent[axis]):
-            notes.append(f"The tile spacing along {'xy'[axis]} is irregular; the overlap there is the median")
-        if overlap_um[axis] is not None and overlap_um[axis] < 0:
-            return GridPlan(BAD_GRID, f"Neighbouring tiles along {'xy'[axis]} do not touch (a gap of "
-                                      f"{-overlap_um[axis]:.1f} um): a tile is missing from between "
-                                      f"them or the plan has no overlap, and either way the tiles "
-                                      f"cannot be registered or assembled")
-    declared = declared_overlap_percent or {}
-    declared_pair = (declared.get("x"), declared.get("y"))
-    disagreement = []
-    for axis, measured in enumerate(overlap_fraction):
-        stated = declared_pair[axis]
-        if measured is not None and stated is not None and abs(measured * 100 - stated) > OVERLAP_TOLERANCE_POINTS:
-            disagreement.append(f"along {'xy'[axis]} the positions give {measured * 100:.1f} % overlap but "
-                                f"the file declares {stated:g} %")
+                                     sources[i], found.row_of[i], found.col_of[i]) for i in positions)
     plan = dict(placements=placements, rows=rows, cols=cols, missing=missing, overlap_um=overlap_um,
                 overlap_fraction=overlap_fraction, declared_overlap_percent=declared_pair,
-                overlap_disagreement=("; ".join(disagreement) + ": one of them is wrong about the acquisition"
-                                      if disagreement else ""),
-                notes=tuple(notes))
+                overlap_disagreement=disagreement, notes=notes)
     if missing:
         return GridPlan(INCOMPLETE_GRID,
                         f"{len(missing)} of {rows * cols} tiles are missing: " + ", ".join(missing), **plan)
@@ -336,7 +376,7 @@ def _only_multiples(gaps, step, extent):
 
 
 # ── the record -> tiles ──────────────────────────────────────────────────────
-def tiles_from_record(record: dict, well: str, timepoint: str):
+def tiles_from_record(record: dict, well: str, timepoint: str) -> tuple | None:
     """``(tiles, tile_size_px, pixel_size_um, declared_overlap_percent)`` for one
     (well, timepoint) of an acquisition record, or ``None`` if it has none.
 

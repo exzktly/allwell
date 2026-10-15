@@ -41,7 +41,8 @@ import threading
 from pathlib import Path
 from collections.abc import Callable
 
-from util.well_token import blank_wells_for_run
+from util.well_token import blank_wells_for_run, canonical_well_label
+from util.csv_gz import existing_csv
 from pipeline.well_skip import _canonical_force_wells
 from services.input_resolution_service import has_well_zip
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
@@ -1668,7 +1669,7 @@ class PipelineRunner:
                            ("upload", len(zipped.well_zips))):
             self._enqueue(("stage_total", (_stage, _n)))
 
-    def _nothing_left_to_upload(self, zipped) -> bool:
+    def _nothing_left_to_upload(self, zipped, opts: dict, output_dir: Path) -> bool:
         """End an incremental run whose staging left nothing to send.
 
         Every well is already complete locally — typically because
@@ -1676,13 +1677,41 @@ class PipelineRunner:
         had finished on the server. Launching the host with an empty input
         would be refused there, after a node had been asked for; there is
         nothing left for it to do. ``True`` means the run has been ended.
+
+        **An empty-well blank alone is nothing left, too.** Staging uploads a
+        blank whole on every run and never diffs it (``_plan_staging``): it is
+        the *input* the correction is built from, so no filter may drop it while
+        a well that needs correcting is being sent. When nothing else is being
+        sent and the blank's own output is already here, it is the only thing
+        in the upload — and the run then uploaded it and asked the scheduler for
+        a node to recompute a well that needed nothing.
         """
-        if not zipped.incremental or zipped.well_zips:
+        if not zipped.incremental:
             return False
-        for tok in zipped.up_to_date_wells:
+        if zipped.well_zips and not self._only_measured_blanks(zipped, opts, output_dir):
+            return False
+        for tok in (*zipped.up_to_date_wells, *(Path(w).stem for w in zipped.well_zips)):
             self._enqueue(("line", f"[remote] ✓ {tok}: up to date (local)\n"))
         self._enqueue(("done", "Nothing to upload: every well is already "
                                "complete locally.\n"))
+        return True
+
+    @staticmethod
+    def _only_measured_blanks(zipped, opts: dict, output_dir: Path) -> bool:
+        """Whether every staged archive is an empty-well blank already measured
+        here (its per-well CSV and, for a full fetch, its output archive)."""
+        if "empty_well" not in (opts.get("background"), opts.get("flatfield")):
+            return False
+        blanks = set(blank_wells_for_run(opts.get("background_well", ""),
+                                         opts.get("background_well_map", "")))
+        prefix = opts.get("csv_prefix", "measurements")
+        for wz in zipped.well_zips:
+            label = canonical_well_label(Path(wz).stem)
+            csv_path = existing_csv(output_dir / f"{prefix}_{label}.csv")
+            if (label not in blanks or csv_path is None
+                    or csv_path.stat().st_size == 0
+                    or not (output_dir / f"{label}_out.zip").is_file()):
+                return False
         return True
 
     def _recover_remote_outputs(self, output_dir: Path, args: list[str],
@@ -1785,7 +1814,7 @@ class PipelineRunner:
             if scope is None:
                 return
             zipped, args, grouped, download_n = scope
-            if self._nothing_left_to_upload(zipped):
+            if self._nothing_left_to_upload(zipped, opts, output_dir):
                 return
             self._announce_staged_plate(zipped, grouped, download_n)
 

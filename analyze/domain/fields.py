@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import math
 
+from analyze.domain.nanowell_fields import nanowell_option_errors
 from pipeline.field_quality_record import FOCUS_SCORE_CEILING
 
 
@@ -313,4 +314,5 @@ def _numeric_option_errors(opts: dict) -> list[str]:
     return (_int_field_errors(opts)
             + _mesh_errors(opts)
             + _float_field_errors(opts)
-            + _threshold_errors(opts))
+            + _threshold_errors(opts)
+            + nanowell_option_errors(opts))

@@ -294,6 +294,10 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         if at_err:
             QMessageBox.critical(self, "Control Well Error", at_err)
             return None
+        nanowell_err = self._nanowell_validation_error(check_input=check_input)
+        if nanowell_err:
+            QMessageBox.critical(self, "Nanowell Error", nanowell_err)
+            return None
         pipeline = find_pipeline_script()
         if pipeline is None:
             QMessageBox.critical(self, "Configuration Error",

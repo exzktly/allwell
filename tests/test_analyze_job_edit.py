@@ -83,6 +83,13 @@ _OPTS = {
     "cellpose_flow_threshold": "0.6",
     "cellpose_cellprob_threshold": "0.1",
     "cellpose_nuclei_channel": "1",
+    # Nanowell mode on, with every field away from the form's blank, so the round trip proves each is restored.
+    "nanowell_format": "50um",
+    "nanowell_cell_diameter_um": "22",
+    "nanowell_margin_um": "6",
+    "nanowell_square_edge_deg": "5",
+    "nanowell_occluded_below": "0.6",
+    "nanowell_clipped_below": "0.7",
 }
 
 # ``cleanup_remote`` / ``dry_run_cleanup`` are remote-only settings: nothing

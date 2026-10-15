@@ -105,3 +105,50 @@ def test_a_fused_site_has_an_undefined_count_not_zero():
     fused = [r for r in measured.sites if r["fused"]]
     assert fused and all(r["n_cells"] is None and r["state"] == "measured" for r in fused)
     assert all(r["owner"] is None for r in fused)
+
+
+def _loader(rendered):
+    return lambda tp, tile: rendered.images.get(tile)
+
+
+def test_a_well_runs_every_timepoint_against_one_shared_roster_and_joins_them_by_address():
+    rendered, record = build_well()
+    # The same plate imaged again after being taken out and put back: shifted and rotated a little.
+    again, again_record = build_well(rotation=9.0, array_shift_um=(120.0, -80.0), seed=2, timepoint="T1")
+    record["timepoints"].update(again_record["timepoints"])
+    record["tiles"] += again_record["tiles"]
+    images = {("T0", t): v for t, v in rendered.images.items()} | {("T1", t): v for t, v in again.images.items()}
+    outcome = nr.run_well("A1", record, ["T0", "T1"], lambda tp, tile: images.get((tp, tile)), SETTINGS,
+                          segmenter=threshold_segmenter())
+    assert [outcome.timepoints[t]["status"] for t in ("T0", "T1")] == ["ok", "ok"]
+    rows = {tp: {(r["nw_q"], r["nw_r"]) for r in outcome.sites if r["timepoint"] == tp} for tp in ("T0", "T1")}
+    assert rows["T0"] == rows["T1"] and len(rows["T0"]) > 600            # one roster for the well
+    truth = set(rendered.array.addresses)
+    assert truth <= rows["T0"]
+    assert outcome.radius["status"] == "shared" and outcome.radius["radius_um"] > 0
+    assert outcome.timepoints["T1"]["consistency"] == "consistent"
+    assert all(r["state"] in {"empty", "measured", "occluded", "clipped"} for r in outcome.sites)
+
+
+def test_an_incomplete_timepoint_keeps_its_status_and_the_others_still_run():
+    rendered, record = build_well()
+    broken, broken_record = build_well(timepoint="T1")
+    broken_record = record_for(broken, timepoint="T1", drop=("F3",))
+    record["timepoints"].update(broken_record["timepoints"])
+    record["tiles"] += broken_record["tiles"]
+    images = {("T0", t): v for t, v in rendered.images.items()} | {("T1", t): v for t, v in broken.images.items()}
+    outcome = nr.run_well("A1", record, ["T0", "T1"], lambda tp, tile: images.get((tp, tile)), SETTINGS,
+                          segmenter=threshold_segmenter())
+    assert outcome.timepoints["T0"]["status"] == "ok"
+    assert outcome.timepoints["T1"]["status"] in (nr.INCOMPLETE_GRID, nr.BAD_GRID)
+    assert {r["timepoint"] for r in outcome.sites} == {"T0"}
+
+
+def test_an_unaddressed_timepoint_keeps_its_detected_sites_with_no_address():
+    rendered, record = build_well()
+    located = nr.locate_timepoint("T0", record, "A1", rendered.images, SETTINGS)
+    located.status = nr.UNADDRESSED                                       # as if no origin evidence had held
+    measured = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
+                                    segmenter=threshold_segmenter())
+    assert measured.sites and all(r["nw_q"] is None and r["nw_r"] is None for r in measured.sites)
+    assert any(r["n_cells"] == 0 for r in measured.sites)                   # still measured, just not joinable

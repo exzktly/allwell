@@ -208,8 +208,10 @@ def _lattice_block(located: Located, estimate, status: str, reason: str) -> dict
             "n_detected": 0 if located.detected_common is None else len(located.detected_common)}
 
 
-def hex_ring(q: int, r: int) -> int:
-    """Hex distance from the centre in axial coordinates."""
+def hex_ring(q: int | None, r: int | None) -> int | None:
+    """Hex distance from the centre in axial coordinates; ``None`` for an unaddressed site."""
+    if q is None or r is None:
+        return None
     return (abs(q) + abs(r) + abs(q + r)) // 2
 
 
@@ -278,7 +280,13 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     from pipeline.tile_grid import ownership_report
 
     px, montage, plan = located.pixel_size_um, located.montage, located.plan
-    addresses, points_m = _roster_positions(located, array_radius_um)
+    addressed = located.status == OK
+    if addressed:
+        addresses, points_m = _roster_positions(located, array_radius_um)
+    else:
+        # No origin: only the sites actually detected, with no address (they cannot be joined over time).
+        points_m = located.detected_common - np.asarray(montage.origin_um)
+        addresses = [None] * len(points_m)
     centres, detected = _initial_sites(located, points_m, settings.pitch_um)
     report = ownership_report(plan, centres, settings.diameter_um, settings.margin, positions_um=located.positions)
     fused = set(report.fused_indices)
@@ -367,7 +375,11 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
                               tile_origin_um=(left, top))
         n = len(table["label"])
         table["fov"] = [owner] * n
-        table["nw_ring"] = [hex_ring(*addresses[i]) for i in table["site_index"]]
+        for old, new in (("address_q", "nw_q"), ("address_r", "nw_r"), ("x_um", "well_x_um"), ("y_um", "well_y_um")):
+            table[new] = table.pop(old)
+        located_at = [addresses[i] or (None, None) for i in table["site_index"]]
+        table["nw_ring"] = [hex_ring(q, r) for q, r in located_at]
+        table["nw_label"] = [None if q is None else f"{q}_{r}" for q, r in located_at]
         for name, values in table.items():
             cell_columns.setdefault(name, []).extend(values)
         fluorescence = {}
@@ -380,11 +392,13 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
                                  "focus": rim_focus(images[owner], px, replace(g))}
     out.cells = cell_columns
 
-    for i, (q, r) in enumerate(addresses):
+    for i, address in enumerate(addresses):
+        q, r = address if address is not None else (None, None)
         g, v, c, got = geoms[i], visibility[i], coverage[i], contents.get(i)
         state = nm.site_state(visible_fraction=v.visible_fraction, imaged_fraction=c.imaged_fraction,
                               n_cells=None if got is None else got["n_cells"],
-                              confluence=None if got is None else got["confluence"], fused=i in fused)
+                              confluence=None if got is None else got["confluence"], fused=i in fused,
+                              addressed=addressed)
         row = {"timepoint": located.timepoint, "nw_q": q, "nw_r": r, "nw_ring": hex_ring(q, r),
                "well_x_um": g.centre_um[0], "well_y_um": g.centre_um[1], "owner": report.owners[i],
                "radius_um": g.radius_um, "geometry": g.geometry, "detected": bool(detected[i]),
@@ -400,3 +414,105 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
             row[f"{channel}_mean_bg"] = None if f is None else f.mean_minus_background
         out.sites.append(row)
     return out
+
+
+# ── a whole well: every timepoint ────────────────────────────────────────────
+@dataclass
+class WellOutcome:
+    well: str
+    timepoints: dict = field(default_factory=dict)       # timepoint -> the _grid.json block
+    sites: list = field(default_factory=list)            # rows for nanowells/<well>.csv, every timepoint
+    cells: dict = field(default_factory=dict)            # per-cell columns, every timepoint
+    radius: dict = field(default_factory=dict)           # the shared array radius and each timepoint's deviation
+    located: dict = field(default_factory=dict)          # timepoint -> Located (not written; the end-of-run pass reads it)
+    notes: list = field(default_factory=list)
+
+
+def _images_for(record: dict, well: str, timepoint: str, load_phase) -> dict:
+    """Phase image per tile of this (well, timepoint) in the record; a tile that cannot be read is left out."""
+    images = {}
+    for tile in record["tiles"]:
+        if tile["well"] == well and tile["timepoint"] == timepoint:
+            image = load_phase(timepoint, tile["field"])
+            if image is not None:
+                images[tile["field"]] = np.asarray(image, dtype=np.float32)
+    return images
+
+
+def _bounds(located: Located):
+    from pipeline.nanowell_lattice import ArrayBoundary
+
+    if located.boundary is None:
+        return ArrayBoundary("unresolved", "no boundary")
+    return ArrayBoundary("fitted", "", tuple(located.boundary["centre_um"]), located.boundary["radius_um"])
+
+
+def run_well(well: str, record: dict, timepoints, load_phase, settings: NanowellSettings, *,
+             segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
+             expected_shape=None) -> WellOutcome:
+    """Locate every timepoint, agree on one array radius, then measure each against it.
+
+    *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
+    ``f(timepoint, tile_id) -> image | None``. *plate_rigid* maps a timepoint to an ``OriginPrediction``
+    in that well's montage frame (from the end-of-run pass; absent on a first run). A timepoint whose
+    first stage refuses keeps its status and no rows; the others go on.
+    """
+    from pipeline.nanowell_sites import TimepointLattice, check_consistency, shared_array_radius
+
+    outcome = WellOutcome(well)
+    timepoints = list(timepoints)
+    for tp in timepoints:
+        images = _images_for(record, well, tp, load_phase)
+        located = locate_timepoint(tp, record, well, images, settings, expected_shape=expected_shape,
+                                   plate_rigid=(plate_rigid or {}).get(tp))
+        outcome.located[tp] = located
+        outcome.timepoints[tp] = dict(located.grid) or {"status": located.status, "reason": located.reason}
+        del images
+    anchored = [tp for tp in timepoints if outcome.located[tp].status == OK]
+    unaddressed = [tp for tp in timepoints if outcome.located[tp].status == UNADDRESSED]
+    shared = shared_array_radius({tp: _bounds(outcome.located[tp]) for tp in anchored + unaddressed},
+                                 settings.pitch_um)
+    outcome.radius = {"radius_um": shared.radius_um, "status": shared.status,
+                      "deviations_um": shared.deviations_um, "flags": shared.flags}
+    if shared.radius_um is None:
+        for tp in anchored:
+            outcome.timepoints[tp].update(status=NO_LATTICE, reason="No timepoint fitted an array boundary, so "
+                                                                   "no roster radius could be shared")
+        return outcome
+
+    lattices = []
+    for tp in anchored:
+        located = outcome.located[tp]
+        addresses, _ = _roster_positions(located, shared.radius_um)
+        lattices.append(TimepointLattice(tp, located.fit.pitch, located.fit.angle_deg, 0.0, frozenset(addresses)))
+    reference_angle = lattices[0].angle_deg if lattices else 0.0
+    # The plate's rotation between timepoints is only measurable across wells; within one well the angle
+    # is not checked (and the grid block says so), so a plate put back rotated is not called inconsistent.
+    lattices = [replace(t, plate_rotation_deg=t.angle_deg - reference_angle) for t in lattices]
+    consistency = {c.timepoint: c for c in check_consistency(lattices)}
+
+    earliest = None
+    for tp in anchored + unaddressed:
+        located = outcome.located[tp]
+        images = _images_for(record, well, tp, load_phase)
+        loaders = {name: (lambda tile, _f=f, _tp=tp: _f(_tp, tile)) for name, f in (channels or {}).items()}
+        measured = measure_timepoint(located, images, settings, shared.radius_um, segmenter=segmenter,
+                                     channels=loaders, earliest_template=earliest)
+        del images
+        if earliest is None and measured.template.get("_object") is not None \
+                and measured.template["source"] != "earliest":
+            earliest = measured.template["_object"]
+        block = outcome.timepoints[tp]
+        agree = consistency.get(tp)
+        block.update(consistency=None if agree is None else agree.status,
+                     consistency_detail="" if agree is None else agree.detail, angle_checked=False, radius_flag=shared.flags.get(tp),
+                     radius_deviation_um=shared.deviations_um.get(tp), roster_size=len(measured.sites),
+                     template={k: v for k, v in measured.template.items() if k != "_object"},
+                     notes=list(measured.notes))
+        for row in measured.sites:
+            row["consistency"] = None if agree is None else agree.status
+        outcome.sites.extend(measured.sites)
+        for name, values in measured.cells.items():
+            outcome.cells.setdefault(name, []).extend(values)
+        outcome.cells.setdefault("timepoint", []).extend([tp] * len(measured.cells.get("label", ())))
+    return outcome

@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
 import pandas as pd
 from matplotlib.figure import Figure
 from review.domain.batch_models import BarGroup, ReplicateSet
+from review.core.section_icons import SECTION_ICONS
 from review.core.app_state import AppState
 from review.core.app_runtime import AppRuntime
 from review.features.registry import attach_feature_state, build_feature_registry
@@ -422,18 +423,7 @@ class ReviewApp(QWidget):
     def _build_centre(self, parent) -> None: return build_centre_shim(self._ctx, parent)
 
     # ── Phase 10 (A1) section-nav <-> notebook bridge ─────────────────────
-    _SECTION_ICONS = {
-        "Home": "home",
-        "Plotting":           "line-chart",
-        "Statistics":         "sigma",
-        "Multivariate":       "scatter-chart",
-        "Spatial":            "waypoints",
-        "Image Browser":      "layout-grid",
-        "smFISH":             "dna",
-        "Review CSV":         "file-spreadsheet",
-        "Saved Plots":        "image",
-        "Batch Export":       "boxes",
-    }
+    _SECTION_ICONS = SECTION_ICONS
 
     def _sync_section_nav_from_notebook(self) -> None: return sync_section_nav_from_notebook(self._ctx)
 

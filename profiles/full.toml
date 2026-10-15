@@ -38,6 +38,11 @@ paths = ["review/features/spatial", "review/domain/spatial_compute.py"]
 tests = ["tests/test_spatial_*.py"]
 
 [[feature]]
+name = "Nanowells"
+paths = ["review/features/nanowell", "review/persistence/nanowell.py"]
+tests = ["tests/test_nanowell_review_*.py", "tests/test_nanowell_page*.py"]
+
+[[feature]]
 name = "smFISH"
 paths = ["review/features/smfish", "review/persistence/smfish.py"]
 tests = ["tests/test_smfish_*.py"]

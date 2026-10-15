@@ -62,6 +62,7 @@ SECTION_BY_PAGE: dict[str, str] = {
     "Statistics": "Statistics",
     "Multivariate": "Multivariate analysis",
     "Spatial": "Spatial analysis",
+    "Nanowells": "Nanowells",
     "Spatial Map": "Spatial analysis",
     "Image Table": "Image Table",
     "Segmentation": "Segmentation",

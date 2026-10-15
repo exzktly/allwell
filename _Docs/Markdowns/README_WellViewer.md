@@ -4174,6 +4174,63 @@ in pandas or Excel isn't restricted to whichever summary is currently
 plotted. The single-timepoint picker in row 1 is disabled at Summary
 level — timepoints are already the X-axis.
 
+### Nanowells
+
+The **Nanowells** page (Analysis rail, after Spatial) draws a dataset analysed in nanowell mode (Analyze ▸
+Nanowells): one dot per nanowell, so you see how the nanowells of a well spread, how that spread changes over
+time, and how wells and replicate groups compare. A dataset without nanowell tables shows a page saying so.
+
+Pick wells on the plate at the left. Replicate sets from Sample Definitions are used exactly as the plot tabs
+use them.
+
+**Controls**
+
+- **View** — *Distribution*, the beeswarm. (The array map, trajectories, position effects and Array QC views
+  are coming.)
+- **Metric** — what each dot is: cell count, confluence, brightness (mean per-cell intensity), site signal
+  (integrated intensity above the empty nanowells' background), their fold changes against the baseline,
+  log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
+  ln count against time, per hour, over at least three timepoints with cells) and occupancy at baseline.
+  Brightness and site signal use the channel chosen in the app's channel selector, and are greyed when that
+  channel has no site intensities.
+- **Along x** — *Time*: one panel per well, or per replicate set with each member well side by side,
+  timepoints along the axis and each well's median joined over time. *Wells*: one timepoint (the latest by
+  default), wells and replicate sets along the axis. Growth rate and occupancy have one value per nanowell,
+  so they are drawn across wells only.
+- **Baseline** — what a fold change is measured from: the well's *earliest* timepoint, or each nanowell's
+  *first measurable* one (for a bubble that clears after the first timepoint).
+- **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
+
+**Reading the figure**
+
+- Dots are coloured by the number of cells in the nanowell at baseline: an open ring for 0, then 1, 2 and 3+
+  from darker to brighter (on a white publication figure, lighter to darker). Grey is a nanowell whose count
+  at baseline is unknown.
+- Counts and occupancy are whole numbers, so hundreds of nanowells share a value; their dots are packed into
+  a band within ±0.4 of the value, and the footer says so. A tie too large for its slot is labelled "+N more
+  at v" — every nanowell with a value is either a dot or counted in such a label.
+- **Nothing without a number is drawn, and nothing is dropped silently.** Under each swarm, "excl. N" counts
+  the nanowells that have no value there, and the footer lists them by reason: occluded, clipped, no address,
+  not located, fused (no count), empty at baseline, seeded later (empty at baseline, cells later), and so on.
+  "Nanowells used U of R" adds them up.
+- **Wells are the replicate unit, not nanowells.** On *Along x: Wells* each group's diamond and bar are the
+  mean of its wells' medians and a 95% t interval over wells; with two or three wells that interval is wide,
+  and the footer prints its degrees of freedom. "×1.5" beside a group is its centre over the control group's,
+  computed the same way (on log₂ fold change, the difference).
+- Times are each timepoint's recorded start from the acquisition record. When the record cannot give every
+  timepoint a time, the timepoint labels are used and the footer says so.
+
+**Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
+brightness and site signal against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
+six nanowells to compare; clicking empty space clears them, as does *Clear selection*. A timepoint where the
+nanowell has no number is a gap and a hatched band, with its state written above the plot — never a zero.
+Selecting nanowells does not change the plate selection.
+
+**Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the dataset as one
+long CSV, with the baseline and where the times came from. *Save cell data…* writes the per-cell rows of the
+drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
+is opened again.
+
 ### Image Browser
 
 The **Image Browser** rail entry (Images group) hosts four image-review

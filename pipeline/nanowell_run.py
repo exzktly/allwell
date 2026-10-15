@@ -266,37 +266,13 @@ def _fit_geometry(image, px: float, centres_local: np.ndarray, indices, diameter
             for g, index in zip(fitted, indices)]
 
 
-def measure_timepoint(located: Located, images: dict, settings: NanowellSettings, array_radius_um: float, *,
-                      segmenter=None, channels: dict | None = None, earliest_template=None) -> Measured:
-    """Rows for every roster site of a located timepoint, and the cells inside them.
-
-    *array_radius_um* is the well's one shared array-model radius (so every timepoint has the same
-    roster). *segmenter* maps a rim-suppressed tile to a label image (default: Cellpose's label-free
-    path). *channels* maps a fluorescence channel name to ``f(tile_id) -> image | None``.
-    """
-    from pipeline import nanowell_measure as nm
-    from pipeline.nanowell_detect import FITTED
-    from pipeline.nanowell_sites import bubble_mask, rim_focus, site_coverage, site_visibility
-    from pipeline.tile_grid import ownership_report
-
-    px, montage, plan = located.pixel_size_um, located.montage, located.plan
-    addressed = located.status == OK
-    if addressed:
-        addresses, points_m = _roster_positions(located, array_radius_um)
-    else:
-        # No origin: only the sites actually detected, with no address (they cannot be joined over time).
-        points_m = located.detected_common - np.asarray(montage.origin_um)
-        addresses = [None] * len(points_m)
-    centres, detected = _initial_sites(located, points_m, settings.pitch_um)
-    report = ownership_report(plan, centres, settings.diameter_um, settings.margin, positions_um=located.positions)
-    fused = set(report.fused_indices)
-    out = Measured(located.timepoint)
-
-    # Geometry: owner tile at full resolution; fused and unimaged sites on the montage.
-    geoms: dict[int, object] = {}
-    by_tile: dict[str, list[int]] = {}
+def _owned_geometries(located: Located, images: dict, settings: NanowellSettings, centres, report):
+    """``(geoms by global index, indices by owner)``: owner tile at full resolution, fused/unimaged on the montage."""
+    montage, px = located.montage, located.pixel_size_um
+    by_tile: dict[str | None, list[int]] = {}
     for i, owner in enumerate(report.owners):
         by_tile.setdefault(owner, []).append(i)
+    geoms: dict[int, object] = {}
     for owner, indices in by_tile.items():
         if owner is None:
             local = centres[indices] - np.asarray(montage.origin_um)
@@ -307,25 +283,41 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
             fitted = _fit_geometry(images[owner], px, centres[indices] - (left, top), indices,
                                    settings.diameter_um, (left, top))
         geoms.update({g.index: g for g in fitted})
-    ordered = [geoms[i] for i in range(len(addresses))]
+    return geoms, by_tile
 
-    # Visibility on the montage (where a bubble is visible as a whole), coverage from the tile rectangles.
+
+def _visibility_and_coverage(located: Located, geoms: dict, array_radius_um: float):
+    """Visibility on the montage (where a bubble is visible as a whole); coverage from the registered tiles."""
+    from pipeline.nanowell_sites import bubble_mask, site_coverage, site_visibility
+
+    montage, boundary = located.montage, located.boundary
+    ordered = [geoms[i] for i in range(len(geoms))]
     on_montage = [replace(g, centre_um=(g.centre_um[0] - montage.origin_um[0], g.centre_um[1] - montage.origin_um[1]))
                   for g in ordered]
-    boundary = located.boundary
     mask = None
     if boundary is not None and located.fit is not None:
         mask = bubble_mask(montage.image, montage.um_per_px, located.fit,
                            np.asarray(boundary["centre_um"]) - montage.origin_um, boundary["radius_um"])
     visibility = {v.index: v for v in site_visibility(montage.image, montage.um_per_px, on_montage, mask=mask)}
-    rects = [(p.left_um, p.top_um, p.left_um + p.width_um, p.top_um + p.height_um)
-             for p in (replace(pl, left_um=located.positions[pl.tile_id][0], top_um=located.positions[pl.tile_id][1])
-                       for pl in plan.placements)]
+    rects = [(located.positions[p.tile_id][0], located.positions[p.tile_id][1],
+              located.positions[p.tile_id][0] + p.width_um, located.positions[p.tile_id][1] + p.height_um)
+             for p in located.plan.placements]
     coverage = {c.index: c for c in site_coverage(
         ordered, rects, array_centre_um=None if boundary is None else boundary["centre_um"],
         array_radius_um=array_radius_um)}
+    return visibility, coverage
 
-    # Template: pooled over every owner tile's visible, fully imaged sites.
+
+def _pooled_template(located: Located, images: dict, settings: NanowellSettings, geoms, by_tile, visibility,
+                     coverage, earliest):
+    """One template for the timepoint from every owner tile's visible, fully imaged, fitted sites.
+
+    Returns ``(template or None, the site indices whose crops were the least textured: the empty ones)``.
+    """
+    from pipeline import nanowell_measure as nm
+    from pipeline.nanowell_detect import FITTED
+
+    px = located.pixel_size_um
     half = nm.template_half(settings.diameter_um / 2 / px)
     crops, crop_sites = [], []
     for owner, indices in by_tile.items():
@@ -340,80 +332,124 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
             crop_sites += usable
     template = None
     if crops:
-        template = nm.build_template(np.concatenate(crops), interior_radius_px=nm.SUPPRESSION_RADIUS * settings.diameter_um / 2 / px,
-                                     earliest=earliest_template)
-    if template is None:
-        template = earliest_template
+        template = nm.build_template(np.concatenate(crops),
+                                     interior_radius_px=nm.SUPPRESSION_RADIUS * settings.diameter_um / 2 / px,
+                                     earliest=earliest)
+    template = template or earliest
+    if template is None or template.source == nm.SOURCE_EARLIEST:
+        return template, set()
+    return template, {crop_sites[k] for k in template.used}
+
+
+def _tile_contents(owner, indices, located, images, settings, geoms, addresses, template, empties, segment, channels):
+    """Counts, confluence, area estimate, fluorescence and focus for the sites one tile owns, and its cell rows."""
+    from pipeline import nanowell_measure as nm
+    from pipeline.nanowell_sites import rim_focus
+
+    px = located.pixel_size_um
+    left, top = located.positions[owner]
+    local = [replace(geoms[i], centre_um=(geoms[i].centre_um[0] - left, geoms[i].centre_um[1] - top)) for i in indices]
+    fit_sites, too_large = nm.fits_template(template, local, pixel_size_um=px)
+    notes = [f"{len(too_large)} site(s) on tile {owner} exceed the template and are unmeasured"] if too_large else []
+    if not fit_sites:
+        return {}, {}, notes
+    rim = nm.rim_suppress(images[owner], px, template, fit_sites)
+    labels = nm.segment_tile(rim, segment)
+    counts = nm.count_cells(labels, px, fit_sites, owned={g.index for g in fit_sites})
+    mine = [g for g in fit_sites if g.index in empties]
+    threshold = nm.texture_threshold(rim, px, mine) if mine else None
+    confluence = dict(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, threshold)))
+    area = nm.area_estimate(labels, px, fit_sites, counts)
+    channel_images = {c: img for c, f in (channels or {}).items() if (img := f(owner)) is not None}
+    table = nm.cell_table(labels, px, fit_sites, counts, {g.index: addresses[g.index] for g in fit_sites},
+                          tile_origin_um=(left, top), intensity=channel_images or None)
+    n = len(table["label"])
+    table["fov"] = [owner] * n
+    for old, new in (("address_q", "nw_q"), ("address_r", "nw_r"), ("x_um", "well_x_um"), ("y_um", "well_y_um")):
+        table[new] = table.pop(old)
+    located_at = [addresses[i] or (None, None) for i in table["site_index"]]
+    table["nw_ring"] = [hex_ring(q, r) for q, r in located_at]
+    table["nw_label"] = [None if q is None else f"{q}_{r}" for q, r in located_at]
+    fluorescence = {c: {f.index: f for f in nm.site_fluorescence(img, px, fit_sites, {g.index for g in mine})}
+                    for c, img in channel_images.items()}
+    contents = {g.index: {"n_cells": counts[g.index].n_cells, "confluence": confluence[g.index],
+                          "area": area[g.index], "fluor": {c: f[g.index] for c, f in fluorescence.items()},
+                          "focus": rim_focus(images[owner], px, g)} for g in fit_sites}
+    return contents, table, notes
+
+
+def _site_row(timepoint, i, address, g, v, c, got, state, owner, detected, fused, channels) -> dict:
+    q, r = address if address is not None else (None, None)
+    row = {"timepoint": timepoint, "nw_q": q, "nw_r": r, "nw_ring": hex_ring(q, r),
+           "well_x_um": g.centre_um[0], "well_y_um": g.centre_um[1], "owner": owner,
+           "radius_um": g.radius_um, "geometry": g.geometry, "detected": bool(detected),
+           "fused": fused, "imaged_fraction": c.imaged_fraction, "visible_fraction": v.visible_fraction,
+           "state": state.state, "partially_visible": state.partially_visible,
+           "focus": None if got is None else got["focus"], "n_cells": state.n_cells,
+           "confluence": state.confluence,
+           "area_est_cells": None if got is None else got["area"].area_count,
+           "count_disagreement": None if got is None else got["area"].count_disagreement}
+    for channel in (channels or {}):
+        f = None if got is None else got["fluor"].get(channel)
+        row[f"{channel}_integrated"] = None if f is None else f.integrated
+        row[f"{channel}_mean_bg"] = None if f is None else f.mean_minus_background
+    return row
+
+
+def measure_timepoint(located: Located, images: dict, settings: NanowellSettings, array_radius_um: float, *,
+                      segmenter=None, channels: dict | None = None, earliest_template=None) -> Measured:
+    """Rows for every roster site of a located timepoint, and the cells inside them.
+
+    *array_radius_um* is the well's one shared array-model radius (so every timepoint has the same
+    roster). *segmenter* maps a rim-suppressed tile to a label image (default: Cellpose's label-free
+    path). *channels* maps a fluorescence channel name to ``f(tile_id) -> image | None``. A timepoint
+    that is not ``ok`` (no origin) is measured on the sites actually detected, with no address.
+    """
+    from pipeline import nanowell_measure as nm
+    from pipeline.tile_grid import ownership_report
+
+    px, montage = located.pixel_size_um, located.montage
+    addressed = located.status == OK
+    if addressed:
+        addresses, points_m = _roster_positions(located, array_radius_um)
+    else:
+        # No origin: only the sites actually detected, with no address (they cannot be joined over time).
+        points_m = located.detected_common - np.asarray(montage.origin_um)
+        addresses = [None] * len(points_m)
+    centres, detected = _initial_sites(located, points_m, settings.pitch_um)
+    report = ownership_report(located.plan, centres, settings.diameter_um, settings.margin,
+                              positions_um=located.positions)
+    fused = set(report.fused_indices)
+    out = Measured(located.timepoint)
+    geoms, by_tile = _owned_geometries(located, images, settings, centres, report)
+    visibility, coverage = _visibility_and_coverage(located, geoms, array_radius_um)
+    template, empties = _pooled_template(located, images, settings, geoms, by_tile, visibility, coverage,
+                                         earliest_template)
     if template is None:
         out.notes.append("No template could be built (no fully imaged, visible site): contents are undefined")
     else:
-        out.template = {"source": template.source, "n_sites": template.n_sites, "candidates": template.candidates}
-        out.template["_object"] = template
-    empties = {crop_sites[k] for k in template.used} if template is not None and template.source != nm.SOURCE_EARLIEST else set()
-
-    # Contents per owner tile.
+        out.template = {"source": template.source, "n_sites": template.n_sites, "candidates": template.candidates,
+                        "_object": template}
     segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)
     contents: dict[int, dict] = {}
-    cell_columns: dict[str, list] = {}
     for owner, indices in by_tile.items():
         if owner is None or template is None:
             continue
-        left, top = located.positions[owner]
-        fit_sites, too_large = nm.fits_template(template, [replace(geoms[i], centre_um=(geoms[i].centre_um[0] - left, geoms[i].centre_um[1] - top)) for i in indices], pixel_size_um=px)
-        if too_large:
-            out.notes.append(f"{len(too_large)} site(s) on tile {owner} exceed the template and are unmeasured")
-        if not fit_sites:
-            continue
-        rim = nm.rim_suppress(images[owner], px, template, fit_sites)
-        labels = nm.segment_tile(rim, segment)
-        counts = nm.count_cells(labels, px, fit_sites, owned={g.index for g in fit_sites})
-        mine = [g for g in fit_sites if g.index in empties]
-        threshold = nm.texture_threshold(rim, px, mine) if mine else None
-        confluence = dict(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, threshold)))
-        area = nm.area_estimate(labels, px, fit_sites, counts)
-        channel_images = {c: img for c, f in (channels or {}).items() if (img := f(owner)) is not None}
-        table = nm.cell_table(labels, px, fit_sites, counts, {g.index: addresses[g.index] for g in fit_sites},
-                              tile_origin_um=(left, top), intensity=channel_images or None)
-        n = len(table["label"])
-        table["fov"] = [owner] * n
-        for old, new in (("address_q", "nw_q"), ("address_r", "nw_r"), ("x_um", "well_x_um"), ("y_um", "well_y_um")):
-            table[new] = table.pop(old)
-        located_at = [addresses[i] or (None, None) for i in table["site_index"]]
-        table["nw_ring"] = [hex_ring(q, r) for q, r in located_at]
-        table["nw_label"] = [None if q is None else f"{q}_{r}" for q, r in located_at]
+        got, table, notes = _tile_contents(owner, indices, located, images, settings, geoms, addresses, template,
+                                           empties, segment, channels)
+        contents.update(got)
+        out.notes += notes
         for name, values in table.items():
-            cell_columns.setdefault(name, []).extend(values)
-        fluorescence = {}
-        for channel, image in channel_images.items():
-            fluorescence[channel] = {f.index: f for f in nm.site_fluorescence(
-                image, px, fit_sites, {g.index for g in mine})}
-        for g in fit_sites:
-            contents[g.index] = {"n_cells": counts[g.index].n_cells, "confluence": confluence[g.index],
-                                 "area": area[g.index], "fluor": {c: f[g.index] for c, f in fluorescence.items()},
-                                 "focus": rim_focus(images[owner], px, replace(g))}
-    out.cells = cell_columns
-
+            out.cells.setdefault(name, []).extend(values)
     for i, address in enumerate(addresses):
-        q, r = address if address is not None else (None, None)
-        g, v, c, got = geoms[i], visibility[i], coverage[i], contents.get(i)
-        state = nm.site_state(visible_fraction=v.visible_fraction, imaged_fraction=c.imaged_fraction,
+        got = contents.get(i)
+        state = nm.site_state(visible_fraction=visibility[i].visible_fraction,
+                              imaged_fraction=coverage[i].imaged_fraction,
                               n_cells=None if got is None else got["n_cells"],
                               confluence=None if got is None else got["confluence"], fused=i in fused,
                               addressed=addressed)
-        row = {"timepoint": located.timepoint, "nw_q": q, "nw_r": r, "nw_ring": hex_ring(q, r),
-               "well_x_um": g.centre_um[0], "well_y_um": g.centre_um[1], "owner": report.owners[i],
-               "radius_um": g.radius_um, "geometry": g.geometry, "detected": bool(detected[i]),
-               "fused": i in fused, "imaged_fraction": c.imaged_fraction, "visible_fraction": v.visible_fraction,
-               "state": state.state, "partially_visible": state.partially_visible,
-               "focus": None if got is None else got["focus"], "n_cells": state.n_cells,
-               "confluence": state.confluence,
-               "area_est_cells": None if got is None else got["area"].area_count,
-               "count_disagreement": None if got is None else got["area"].count_disagreement}
-        for channel in (channels or {}):
-            f = None if got is None else got["fluor"].get(channel)
-            row[f"{channel}_integrated"] = None if f is None else f.integrated
-            row[f"{channel}_mean_bg"] = None if f is None else f.mean_minus_background
-        out.sites.append(row)
+        out.sites.append(_site_row(located.timepoint, i, address, geoms[i], visibility[i], coverage[i], got, state,
+                                   report.owners[i], detected[i], i in fused, channels))
     return out
 
 

@@ -148,12 +148,12 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     index = _tile_index(groups, parse, schema, sep)
     timepoints = timepoint_order(record, well_label)
 
-    def load_phase(tp, tile):
+    def load_phase(tp, tile) -> np.ndarray | None:
         found = index.get((tp, tile))
         return None if found is None else _read_tif(found[0])
 
     def channel_loader(token):
-        def load(tp, tile):
+        def load(tp, tile) -> np.ndarray | None:
             found = index.get((tp, tile))
             if found is None:
                 return None
@@ -227,6 +227,8 @@ def record_nanowell_info(info_path, options: dict, input_dir) -> None:
     from pipeline.run_report import merge_into_pipeline_info
     from util.acquisition_record import read_record_file
 
+    if not options:
+        return
     block = {"nanowell": {"scheme_version": SCHEME_VERSION, "settings": dict(options),
                           "conventions": {"origin": "top-left of the well frame, y down",
                                           "angle": "counter-clockwise on screen, degrees, from image east",
@@ -244,3 +246,9 @@ def record_nanowell_info(info_path, options: dict, input_dir) -> None:
         merge_into_pipeline_info(info_path, block, atomic_writer=_safe_atomic_text_write)
     except OSError as exc:
         log.warning("Could not record the nanowell blocks in %s: %s", info_path, exc)
+
+
+def refuse_nanowell_without_zips(options, well_zips, error) -> None:
+    """Nanowell mode reads each well from ``in/<well>.zip``; a folder-mode plate is refused by name (*error* exits)."""
+    if options and not well_zips:
+        error("--nanowell_format needs the wells as zips (in/<well>.zip); no well zips were found.")

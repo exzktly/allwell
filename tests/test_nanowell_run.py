@@ -75,11 +75,10 @@ def test_every_roster_site_has_a_row_with_its_address_and_the_cell_painted_into_
     assert rows[target]["n_cells"] == 1 and rows[target]["state"] == "measured"
     others = [r for a, r in rows.items() if a != target and r["state"] == "empty"]
     assert len(others) > 0.9 * len(truth) and all(r["n_cells"] == 0 for r in others)
-    xs = [x for x, a in zip(measured.cells["x_um"], measured.cells["site_index"])]
     assert len(measured.cells["label"]) == 1
     assert (measured.cells["nw_ring"][0]) == nr.hex_ring(*target)
-    assert np.hypot(measured.cells["x_um"][0] - truth[target][0], measured.cells["y_um"][0] - truth[target][1]) < 10
-    assert xs and measured.cells["fov"][0] in {"F0", "F1", "F2", "F3"}
+    assert np.hypot(measured.cells["well_x_um"][0] - truth[target][0], measured.cells["well_y_um"][0] - truth[target][1]) < 10
+    assert measured.cells["fov"][0] in {"F0", "F1", "F2", "F3"}
 
 
 def test_a_cell_in_the_overlap_of_two_tiles_is_counted_by_one_row_only():

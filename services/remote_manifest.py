@@ -122,6 +122,8 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/nanowell_detect.py",
     "pipeline/nanowell_sites.py",
     "pipeline/nanowell_measure.py",
+    "pipeline/nanowell_run.py",
+    "pipeline/nanowell_task.py",
     "pipeline/auto_threshold.py",
     # The post-run pass over that sampler: which estimator this run's
     # arguments call for, and the merge into pipeline_info.json.

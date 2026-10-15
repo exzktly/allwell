@@ -198,7 +198,7 @@ from pipeline.run_report import (
 )
 from pipeline.completeness import record_run_check
 from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
-from pipeline.nanowell_task import record_nanowell_info
+from pipeline.nanowell_task import record_nanowell_info, refuse_nanowell_without_zips
 
 
 def _report_worker_failure(well_label: str, output_dir: Path | None, exc: BaseException) -> None:
@@ -2271,6 +2271,20 @@ def _suspended_before_any_group(well_label: str, records, failed) -> bool:
     return True
 
 
+def _prepare_staging_dir(tmp_images: Path, well_label: str) -> None:
+    """Keep a staging dir that holds per-FOV checkpoints (resume where the last attempt stopped); wipe any other."""
+    if not tmp_images.exists():
+        return
+    if any(tmp_images.glob(".fov_*.done")):
+        log.info(
+            "Well %s: resuming from %d FOV checkpoint(s) in %s",
+            well_label, sum(1 for _ in tmp_images.glob(".fov_*.done")), tmp_images.name,
+        )
+    else:
+        log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_images.name)
+        remove_directory(tmp_images)
+
+
 def process_well_zip_task(
     well_label: str,
     zip_path: Path,
@@ -2331,23 +2345,7 @@ def process_well_zip_task(
         log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_extract.name)
         remove_directory(tmp_extract)
 
-    # tmp_images carries per-FOV checkpoints (v5.2.0). If it holds at
-    # least one ``.fov_*.done`` marker, treat it as a partial-progress
-    # dir for this well and keep its contents — _process_groups_in_worker
-    # will pick up where the previous attempt stopped. Otherwise wipe
-    # it (matches pre-v5.2.0 behavior on a clean restart).
-    if tmp_images.exists():
-        has_checkpoint = any(tmp_images.glob(".fov_*.done"))
-        if has_checkpoint:
-            log.info(
-                "Well %s: resuming from %d FOV checkpoint(s) in %s",
-                well_label,
-                sum(1 for _ in tmp_images.glob(".fov_*.done")),
-                tmp_images.name,
-            )
-        else:
-            log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_images.name)
-            remove_directory(tmp_images)
+    _prepare_staging_dir(tmp_images, well_label)
 
     try:
         try:
@@ -3325,8 +3323,7 @@ def main() -> None:
             execution_options=vars(args),
         )
         log.info("Wrote sidecar : %s", info_path)
-        if nanowell:
-            record_nanowell_info(info_path, nanowell, input_dir)
+        record_nanowell_info(info_path, nanowell, input_dir)
     except Exception as exc:  # log but don't abort the run
         log.warning("Could not write %s: %s", PIPELINE_INFO_FILENAME, exc)
 
@@ -3449,8 +3446,7 @@ def main() -> None:
     consolidate_mixed_to_zips(input_dir, log_fn=lambda m: log.info("%s", m.rstrip()))
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
-    if nanowell and not well_zips:
-        parser.error("--nanowell_format needs the wells as zips (in/<well>.zip); no well zips were found.")
+    refuse_nanowell_without_zips(nanowell, well_zips, parser.error)
     if well_zips:
         refuse_images_only_in_ignored_folders(input_dir, well_zips)
     refuse_uncovered_wells(blank_groups, well_zips, well_folders)

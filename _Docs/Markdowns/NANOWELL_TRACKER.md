@@ -830,6 +830,34 @@ It joins the shared machinery every page joins: the Properties panel, Saved
 Plots, its own persistence block reset on dataset switch, build profiles, help
 topics, and the one-line-removable feature test.
 
+**Interface plan and decisions.** The page was planned before any code, in
+`_Docs/design/nanowell_page/PLAN.md` with five wireframes beside it. The owner
+accepted every recommendation in that plan's §6.1. The plan is detailed design;
+where it and this file disagree, this file wins. Decided:
+
+| # | Decision |
+|---|---|
+| U1 | **Integer metrics in the beeswarm are packed bands.** A count, an occupancy class, and the zero row of any metric are spread within ±0.4 of their value, and the figure says so; *Exact rows* is an option. Continuous metrics stay exact, with a labelled pile at 0 and at saturation. "A dot's y is its value" means exactly, or within the stated band for an integer metric |
+| U2 | **Over time with replicate sets: one panel per set,** each well its own sub-swarm inside it; a density display beyond four wells per set. Sets are never pooled into one swarm |
+| U3 | **Well comparison is not a sixth view.** It is Distribution with *Along x: Wells*. Site detail is a pane beside the figure, not a view. The view switch lists Distribution, Array map, Trajectories, Position, Array QC — and only those that exist in the build |
+| U4 | **Array map draws lattice positions,** so nanowells stay put while scrubbing time and absent ones have a place. Measured positions are Array QC's, the misregistration view |
+| U5 | **Occupancy colour follows the count's baseline;** the legend is titled with the baseline in use. A nanowell with no count at baseline is drawn neutral, as "occupancy unknown" |
+| U6 | **Channel comes from the app's shared channel selector,** not a list on the page. Brightness and site signal are one Metric entry each, greyed with the reason when the shared channel has no site intensities |
+| U7 | **Occupancy ramp (0 / 1 / 2 / 3+) becomes theme tokens with a screen and a publication variant,** a stated exception to "data colours do not flip". Selected nanowells 2–6 take the well-rank colours, not status colours |
+| U8 | **Brush selection is deferred** (row I7) |
+| U9 | **Views are a segmented control** on the page, not band sub-tabs |
+| U10 | **The rail entry shows in every build that includes the feature,** with an explanatory empty state on a dataset with no nanowell tables |
+| U11 | **Group intervals are drawn as computed,** however wide with two or three wells, and the footer prints the degrees of freedom; no switch to SEM |
+| U12 | **Fraction responding is shown read-only** at its fixed threshold; a threshold control is a later row (I9) |
+| U13 | **Along x: Wells defaults to the latest timepoint** |
+
+Also settled by the plan (its §6.2): the figure names exclusions by
+`exclusion_reason`, mapped to short labels, not as "unmeasured"; `fused` and
+`partially visible` are flags shown beside a state, not states; a metric with one
+value per nanowell (growth rate, occupancy) is drawn across wells only; the line over
+time joins `well_summary` medians, whose nanowells may differ between timepoints
+(a fixed-cohort option is row I8); Export is a *Save* action, not a view.
+
 ---
 
 ## 4. The pull-request stack
@@ -850,9 +878,10 @@ are their tests; nothing nanowell-specific is user-visible until PR 7.
 | 6 | `claude/nanowell-6-contents` | PR 5 | C | template; rim suppression; confluence; label-free count; fluorescence | patch |
 | 7 | `claude/nanowell-7-run` | PR 6 | P | the (well, timepoint) task; end-of-run re-anchoring; CLI; outputs; incremental; resume; completeness; remote; Datasets tools carry `nanowells/` | patch |
 | 8 | `claude/nanowell-8-analyze` | PR 7 | A | Analyze section; Test detection preview; preflight | patch |
-| 9 | `claude/nanowell-9-review-data` | PR 8 | D | loader; per-site and per-well metrics; export; persistence | patch |
-| 10 | `claude/nanowell-10-review-page` | PR 9 | V | the Nanowells page and its views | minor (new page) |
-| 11 | `claude/nanowell-11-integration` | PR 10 | I | optional: Image Browser, Spatial, Plotting, Batch Export hooks; OME / ND2 records | patch |
+| 9 | `claude/nanowell-9-review` | PR 8 | D | loader; per-site and per-well metrics; export; persistence | patch |
+| 10a | `claude/nanowell-10-review-page` | PR 9 | V (PR 10a rows) | the Nanowells page: Distribution, site detail, states | minor (new page) |
+| 10b | `claude/nanowell-10b-views` | PR 10a | V (PR 10b rows) | Array map, Trajectories, Position, Array QC | patch |
+| 11 | `claude/nanowell-11-integration` | PR 10b | I | optional: Image Browser, Spatial, Plotting, Batch Export hooks; OME / ND2 records | patch |
 
 PRs 2–3 do not depend on PR 1's code, and PRs 8 and 9 depend only on PR 7; all
 are stacked linearly anyway so there is one retargeting chain to manage. If PR 1
@@ -1177,19 +1206,31 @@ Answers are written into the row. Rows that depend on an answer say so.
 
 | # | Item | Place | State | Evidence |
 |---|---|---|---|---|
+| **PR 10a — Distribution and site detail (minor version)** | | | | |
 | V1 | Package registered; build profile; help topic; feature-removal and profile tests | `review/features/nanowell/`, `features/registry.py`, `ui/help_topics.py` | `todo` | |
 | V1a | Register the `nanowell` feature slice and persistence domain: `_FEATURE_STATE_OWNERS`, `persistence/registry.py` (gated on the profile like Multivariate), the view tier of `persistence/reset_scopes.py`, calling `review/persistence/nanowell.py` with the slice | `review/core/app_state.py`, `review/persistence/registry.py`, `review/persistence/reset_scopes.py` | `todo` | Moved from D9: a slice lookup needs a registered feature (`test_feature_slice_names`) |
-| V2 | Array map | `review/features/nanowell/renderer.py` | `todo` | |
-| V3 | Site detail: the clicked nanowell's statistics over time (count, confluence, brightness, site signal against recorded time, state marked per timepoint, undefined drawn as a gap) and its crop at every timepoint from the owner tile | `review/features/nanowell/` | `todo` | Feature requested by the user. Data comes from D2's per-site series, never recomputed in the view |
-| V3a | Click-to-select, tested through the real widget (CLAUDE.md §7.6): a synthetic mouse press on the array map's canvas at a site's pixel position selects that `(well, q, r)` and the detail plot receives that series; a press between sites clears; a second press adds; `_selected_wells` is unchanged. Name the wrong implementation: a hit-test that picks the nearest site regardless of distance, or one that is off by half a site in the axes' y-down transform | `tests/` | `todo` | Slow lane (needs the built page); the hit-test itself is a pure function in `renderer.py` and is tested in the fast lane |
+| V1b | Page shell and states: the controls row (view switch, Metric, Along x, Baseline, Timepoint, Well), the context strip, and every state of the plan's §4 — no nanowell data, refused scheme (`NanowellSchemeError` carrying the found and supported versions), no wells selected, wells left out, time from labels, one timepoint. `site_metrics` runs on a worker; the previous figure stays dimmed under a *Computing…* card; a stale result never replaces a newer request. Real-widget test that a baseline change does not block the event loop | `review/features/nanowell/tab_view.py`, `controller.py`, `worker.py` | `todo` |  |
 | V3b | Distribution view: the beeswarm over nanowells, the page's default view and the first thing it shows. Per well or per replicate group, over time or across wells (the axes are a control), metric selectable; states without a number are not drawn and are counted in the footer; click a dot opens V3. Replicate wells from Sample Definitions as in the regular plot tabs (D6); group statistics are on wells, never on nanowells (D7); wells used, nanowells used and excluded-by-reason on the figure. The swarm layout is a pure function in `renderer.py` (dots never overlap, are deterministic, and a dot's y is its value exactly), tested in the fast lane; a real-widget test selects it as the default and presses a dot. Name the wrong implementation: pooling every nanowell of a group into one swarm and computing its interval over nanowells (a thousand false replicates), and plotting an unmeasured site at zero | `review/features/nanowell/renderer.py`, `tab_view.py` | `todo` | Feature requested by the user: beeswarm over nanowells is the primary/default view. Renders on the Screen/Publication toggle like the other plot tabs |
+| V3d | Distribution *Along x: Wells*: replicate sets nested (U2), the per-well statistic overlay from `group_summary` (centre, 95% interval, df in the footer, U11), vs control, density mode, defaults to the latest timepoint (U13). Folds in V5. Groups are only the selected wells (test: an unselected well never appears). `well_summary` timed on a full plate, vectorised if over about 300 ms | `review/features/nanowell/renderer.py`, `controller.py` | `todo` |  |
+| V3e | Exclusions on the figure: the gutter under each swarm, the footer, the label map for every `exclusion_reason` string (with a test that each string the function can return has a label), the seeded-later row, off-scale counts. A test reads the figure's text artists, not the summary, and finds `used + excluded = roster` (CLAUDE.md §7.4 #1). Wrong implementation to rule out: a footer computed from the summary while the gutter counts drawn dots | `review/features/nanowell/renderer.py` | `todo` |  |
+| V3 | Site detail, curves half: the clicked nanowell's count, confluence, brightness and site signal against recorded time, state marked per timepoint, undefined drawn as a gap, flags beside the state; up to six nanowells compared. Crops are V3c | `review/features/nanowell/renderer.py`, `tab_view.py` | `todo` |  |
+| V3a | Click-to-select on the beeswarm through the real widget (§7.6): click selects, shift/⌘-click adds, empty space clears; `_selected_wells` untouched. The array-map half is V3a2 | `tests/` | `todo` |  |
+| V8 | Properties panel, Saved Plots, Copy / Save; redraw ends with `apply_export_style_to_current` | `review/features/nanowell/controller.py` | `todo` | |
+| V8a | Saved Plots and restore of `selected_sites`, `view`, `metric`, `axis`, `baseline`, `timepoint`, `well` through the real restore router; wrong implementation to rule out: a restore that silently drops `selected_sites` | `review/features/nanowell/controller.py` | `todo` |  |
+| V7b | Occupancy ramp and selection colours as theme tokens with screen and publication variants (U7), and the theme test that pins tokens updated with the stated exception | `ui/theme.py` | `todo` |  |
+| V9 | Real-constructor test in the slow lane; `test_no_tab_builder_raised_while_draining` stays green with the page | `tests/` | `todo` | |
+| V10a | Close-out of PR 10a: README *Nanowells* section (each view shipped, exclusion conventions, occupancy key, wells as the replicate unit), ARCHITECTURE section, minor version | — | `todo` |  |
+| **PR 10b — Array map, Trajectories, Position, Array QC (patch version)** | | | | |
+| V2 | Array map | `review/features/nanowell/renderer.py` | `todo` | |
+| V2a | Lattice-to-display geometry (axial (q, r) to x, y from pitch and the conventions in `pipeline_info.json`; U4) and the time scrubber (face colours only) | `review/features/nanowell/renderer.py` | `todo` |  |
+| V3a2 | Click-to-select on the array map through the real widget, in a y-down transform | `tests/` | `todo` |  |
+| V3c | Site crops: a Qt-free reader of a nanowell's crop from its owner tile at each timepoint (the site table has no tile pixel coordinates; derive them from the grid record's tile positions and pixel size), `None` with a reason when it cannot, and the crop strip in site detail | `review/features/nanowell/crop_compute.py` | `todo` |  |
 | V4 | Trajectories | `review/features/nanowell/renderer.py` | `todo` | |
-| V5 | Well comparison: the Distribution view (V3b) with wells on the axis at one timepoint, plus the median and spread of each well over time as a secondary layout | `review/features/nanowell/renderer.py` | `todo` | Shares V3b's renderer; not a second implementation |
+| V5 | Well comparison | — | `declined` | Folded into V3d (decision U3): well comparison is Distribution with *Along x: Wells*, not a view of its own |
 | V6 | Position effects | `review/features/nanowell/renderer.py` | `todo` | |
 | V7 | Array QC | `review/features/nanowell/renderer.py` | `todo` | |
-| V8 | Properties panel, Saved Plots, Copy / Save; redraw ends with `apply_export_style_to_current` | `review/features/nanowell/controller.py` | `todo` | |
-| V9 | Real-constructor test in the slow lane; `test_no_tab_builder_raised_while_draining` stays green with the page | `tests/` | `todo` | |
-| V10 | Close-out: ARCHITECTURE §5 section, README section, minor version | — | `todo` | |
+| V7a | Montage reader (the `montage` role of `<well>_out.zip`) and tile rectangles, sources and residuals from the grid records, for Array QC | `review/features/nanowell/collect.py` | `todo` |  |
+| V10 | Close-out of PR 10b: ARCHITECTURE and README for the views it adds, patch version | — | `todo` | |
 
 ### Section I — Integration with existing surfaces (PR 11, optional)
 
@@ -1200,6 +1241,9 @@ Answers are written into the row. Rows that depend on an answer say so.
 | I3 | Nanowell as a replicate unit in Bar / Line plots — scoped separately first, because it touches `fold_change`'s tuples | `review/domain/` | `todo` | |
 | I4 | Batch Export nanowell mode | `review/features/batch_export/` | `todo` | |
 | I5 | The OME and ND2 converters write the same acquisition record. The OME reader already holds stage coordinates (`pipeline/ome_explode.py` `stage_positions`); the ND2 reader names stage positions, and whether it reads their coordinates is unchecked | `pipeline/ome_explode.py`, `pipeline/nd2_explode.py` | `todo` | |
+| I7 | Brush selection: drag to highlight many nanowells as a set, ringed in every view, counted and exportable (U8) | `review/features/nanowell/` | `todo` | Deferred by decision U8 |
+| I8 | Fixed-cohort option: summaries over the nanowells measurable at every timepoint, so the line over time follows one set of nanowells | `review/features/nanowell/summary_compute.py` | `todo` | From the interface plan's §6.2 |
+| I9 | A threshold control for *fraction responding* (U12) | `review/features/nanowell/` | `todo` | Deferred by decision U12 |
 | I6 | Close-out; delete this tracker if every row is `done` or `declined`, and say so in the PR body | — | `todo` | |
 
 ---

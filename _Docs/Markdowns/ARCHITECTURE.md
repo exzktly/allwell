@@ -8428,7 +8428,12 @@ mosaic and stage placed tiles is refused, because they are in different frames.
 The grid's shape is inferred from the positions (tiles within a quarter of an
 extent of each other share a row or column), with one grid index per line that
 tolerates a whole absent line in the middle. A whole absent outer row or column
-cannot be seen from the positions, so `expected_shape` states the plan.
+cannot be seen from the positions, so `expected_shape` states the plan; the
+record does not say which end of the axis such a line was at, so it is named
+("1 column(s) at an unknown outer end") and not labelled with a position. Tiles
+that do not touch (a negative overlap) are refused with the gap named: a tile is
+missing from between them, or the plan has none, and either way they cannot be
+registered or assembled.
 Data with no record is placed by `place_from_pattern` from one of sixteen
 `ScanPattern`s (four starting corners, row- or column-major, plain or
 serpentine) and a nominal overlap; nothing there is checked against the images.
@@ -8447,8 +8452,9 @@ at least `diameter + 2m`, which is the number reported, and not `diameter + m`.
 them: `blend_indices` straddle a seam and need a crop blended from several tiles,
 `edge_indices` lie wholly inside one tile but within the margin of the union's
 outer edge and are measured from that one tile with a thinner margin. Ownership
-takes the registered positions (`Registration.positions()`) when given; the
-recorded ones are right for a preview and wrong for a run.
+takes the registered positions (`Registration.positions()`) when given, and the
+overlap guarantee is then measured from them too; the recorded ones are right
+for a preview and wrong for a run.
 
 **Three sources of position (`tile_register`).** Recorded, lattice phase and
 overlap correlation, combined in one weighted least-squares solve
@@ -8457,7 +8463,17 @@ rectangles overlap is a constraint with a standard deviation, and a weak prior o
 each tile's recorded position (50 um) fixes the overall translation and anchors a
 tile with no measurement. The two axes share one matrix. Each tile reports the
 source that placed it (`lattice`, `overlap`, or `recorded`), the rms disagreement
-with its own constraints, and how far it moved from the recorded position. A tile
+with its own constraints, and how far it moved from the recorded position. That
+distance is measured after removing the median shift of the measured tiles
+(`Registration.common_shift_um`), because the solve's frame is pinned by the mean
+of the recorded positions and one badly recorded tile would otherwise show as a
+correction on every other. The residual says little about a tile with a single
+constraint, which it can always satisfy; a pair measured by both lattice phase
+and overlap correlation that disagree beyond three overlap uncertainties is
+warned about instead, since the lattice value is far tighter and wins the solve.
+The lattice uncertainty is statistical (fit rms over the square root of the
+sites fitted) plus a stated 0.25 um allowance for a lattice that is not perfectly
+uniform; the allowance is a choice and awaits real data (tracker T10). A tile
 that no constraint reaches, such as a corner tile over a circular array, keeps its
 recorded position and says so; it never fails the solve.
 
@@ -8485,9 +8501,14 @@ scores nothing. A fixed template cut from inside the overlap cannot be used: the
 usual 10 % overlap is narrower than one pitch, and a template that must stay
 inside it at every shift of up to half a pitch does not fit. The sums over the
 shared pixels come from summed-area tables and only the cross term needs an FFT;
-`downsample` block-averages both tiles first. A match with correlation under 0.25,
-or whose best peak does not beat the best peak elsewhere by 5 %, is not used and
-its reason is listed in `Registration.skipped`.
+`downsample` block-averages both tiles first and shrinks the window by the
+half-cell that rounding the expected offset can add, so the stated radius still
+bounds every offset tried. A flat overlap (variance a negligible fraction of the
+level) and one holding NaN or inf are refused for those reasons. A match with
+correlation under 0.4, or whose best peak does not beat the best peak elsewhere
+by 5 %, is not used and its reason is listed in `Registration.skipped`. The
+correlation over a shrinking window is biased toward the thinnest overlaps, which
+is why the gate is not lower: unrelated smooth images reached 0.18 at a lower one.
 
 **Pictures built from the registered tiles.** `build_montage` blends tiles by
 distance from each tile's edge into an 8-bit image whose long side is at most
@@ -8496,7 +8517,7 @@ montage pixel); it returns the percentile stretch it applied and a coverage mask
 so uncovered pixels are marked and not painted as data. `fused_crop` samples every
 tile covering a seam site bilinearly at the crop's pixel centres and blends them
 by distance from each tile's edge; the site's cells belong to the tile holding the
-most of its disk (ties to the lexically first id, as `assign_owners` breaks them),
+most of its disk (a tie goes to the lexically first id),
 and the crop reports the share of the disk no tile covers. Neither does any
 photometric matching between tiles: a gain or vignetting difference between
 neighbours shows as a seam in a blend.

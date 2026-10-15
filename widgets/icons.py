@@ -38,6 +38,11 @@ _GLYPHS: dict[str, str] = {
                       '<path d="M9 14h2"/>'
                       '<path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z"/>'
                       '<path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/>'),
+    # Lucide "server" — the Analyze pane's Slurm-job indicator.
+    "server":        ('<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>'
+                      '<rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>'
+                      '<line x1="6" y1="6" x2="6.01" y2="6"/>'
+                      '<line x1="6" y1="18" x2="6.01" y2="18"/>'),
     "chevron-down":  '<polyline points="6 9 12 15 18 9"/>',
     "chevron-right": '<polyline points="9 18 15 12 9 6"/>',
     "chevron-left":  '<polyline points="15 18 9 12 15 6"/>',

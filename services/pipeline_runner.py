@@ -20,6 +20,10 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
                              remote scheduler, or has just been granted its
                              node. ``state`` is "waiting" | "queued" | "granted";
                              ``job_id`` is "" until the scheduler names it.
+    slurm_job     tuple      ("specs", {field: value}) — what the node a job was
+                             granted is (``pipeline.slurm_node``); or
+                             ("closed", {}) — the job is no longer open. Both
+                             parsed out of the log stream by ProgressTracker.
     done          str        Pipeline finished successfully.
     error         str        Pipeline failed; payload is a message.
     finished      None       Final event, always emitted in a finally.
@@ -51,6 +55,7 @@ from services.remote_runner import (
 )
 from services import run_journal, run_provenance
 from services.subprocess_kill import signal_subprocess
+from pipeline.slurm_node import parse_node_specs
 from util.aw_safe import swallow, swallowed
 from pipeline.suspend import LOG_MARKER as _SUSPEND_LOG_MARKER
 
@@ -240,6 +245,13 @@ _RE_SCHED_QUEUED = re.compile(
     r"srun: job (\d+) queued and waiting for resources", re.IGNORECASE)
 _RE_SCHED_ALLOCATED = re.compile(
     r"srun: job (\d+) has been allocated resources", re.IGNORECASE)
+#: What the runner prints when the remote process that held a scheduler job
+#: has exited — the moment the job is no longer open. Printed locally, after
+#: the ssh session ends, because nothing inside the allocation runs after the
+#: pipeline: the single-run launch ``exec``s it.
+JOB_CLOSED_LINE = "[remote] scheduler: job closed — the remote process has exited\n"
+_RE_JOB_CLOSED = re.compile(
+    re.escape(JOB_CLOSED_LINE.strip()) + r"|\[remote\] releasing the allocation")
 # Remote per-well lifecycle: input zip uploaded, then the output is fetched as
 # TWO separate transfers — the well's output zip AND its per-well CSV(s). A well
 # is only "downloaded" once BOTH have landed; the ``✓ materialised`` line fires
@@ -488,6 +500,16 @@ class ProgressTracker:
             if msg:
                 events.append(("sched", ("granted", msg.group(1), "")))
                 break
+        # What the granted node is, and the end of the job — for the Analyze
+        # pane's job indicator. "Closed" has two sources: the batched driver
+        # handing its allocation back, and the runner noting that the remote
+        # process which held the job has exited (the single-run launch execs
+        # the pipeline, so nothing inside the job can say it is over).
+        specs = parse_node_specs(line)
+        if specs is not None:
+            events.append(("slurm_job", ("specs", specs)))
+        if _RE_JOB_CLOSED.search(line):
+            events.append(("slurm_job", ("closed", {})))
         # Finalize-phase status — replace the generic "Finalizing…" with what
         # the run is actually doing so it doesn't read as a hang.
         if _RE_TF_SCAN.search(line):
@@ -1094,6 +1116,17 @@ class PipelineRunner:
         """Remember that the remote pipeline reported seeing a suspend request."""
         if not self._suspend_seen and _SUSPEND_LOG_MARKER in line:
             self._suspend_seen = True
+
+    def _note_scheduler_job_closed(self) -> None:
+        """Say that the remote process holding the run's scheduler job exited.
+
+        The job has exited with it, and the Analyze pane's job indicator goes
+        out on this line (``JOB_CLOSED_LINE``). A host with no
+        ``compute_launcher`` holds no job, so it says nothing.
+        """
+        host = getattr(self._remote_runner, "host", None)
+        if str(getattr(host, "compute_launcher", "") or "").strip():
+            self._enqueue(("line", JOB_CLOSED_LINE))
 
     def _settle_remote_suspend(self) -> str:
         """Decide, once the remote pipeline has exited, whether it was suspended.
@@ -1746,6 +1779,7 @@ class PipelineRunner:
             finally:
                 with swallow("waiting for the pipeline subprocess"):
                     proc.wait()
+                self._note_scheduler_job_closed()
             rc = proc.returncode
             cleanup_mode = self._settle_remote_suspend()
 

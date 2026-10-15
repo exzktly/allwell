@@ -2066,6 +2066,7 @@ def test_required_files_list_is_what_we_promised():
         # Worker / thread planning and the Cellpose GPU plan, imported by
         # process_microscopy at module scope.
         "pipeline/parallelism.py",
+        "pipeline/slurm_node.py",
         "pipeline/completeness.py",
         # The blank-well sampler + model builders behind empty_well correction.
         "pipeline/empty_well.py",

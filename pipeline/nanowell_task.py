@@ -684,7 +684,9 @@ def reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token,
                 anchored.append(f"{well}/{tp}")
             else:
                 remaining[f"{well}/{tp}"] = reasons.get((well, tp)) or block.get("reason", "")
-    return {"anchored": sorted(anchored), "remaining": remaining}
+    # The wells the plate fit could see. A batched remote run re-anchors each batch over that batch's wells
+    # alone, so the record says how much of the plate the fit had (roll-up review X19).
+    return {"anchored": sorted(anchored), "remaining": remaining, "wells_considered": sorted(grids)}
 
 
 def nanowell_endgame(options, output_dir, well_zips, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
@@ -699,8 +701,9 @@ def nanowell_endgame(options, output_dir, well_zips, shared_kwargs_template, nuc
         log.error("Re-anchoring could not run (%s: %s).", type(exc).__name__, exc, exc_info=True)
         summary = {"anchored": [], "remaining": {}, "error": f"{type(exc).__name__}: {exc}"}
     if summary["anchored"] or summary["remaining"]:
-        log.info("Re-anchoring: %d (well, timepoint) anchored from the plate, %d still unaddressed.",
-                 len(summary["anchored"]), len(summary["remaining"]))
+        log.info("Re-anchoring: %d (well, timepoint) anchored from the plate, %d still unaddressed; the plate fit "
+                 "used the %d well(s) of this run.", len(summary["anchored"]), len(summary["remaining"]),
+                 len(summary.get("wells_considered", ())))
         for key, why in summary["remaining"].items():
             log.warning("Unaddressed %s: %s", key, why)
     _record_reanchor(Path(output_dir) / "pipeline_info.json", summary)

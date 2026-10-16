@@ -8934,7 +8934,9 @@ plain. `nanowells/<well>.csv` and `nanowells/<well>_grid.json` hold the site row
 record (they live in a subdirectory because Review loads every top-level `*.csv` as a cell table).
 `<well>_out.zip` holds one montage PNG per located timepoint (role `montage` in `ROLE_CATALOG`).
 `pipeline_info.json` gains a `nanowell` block (settings, conventions, scheme version, and the end-of-run
-re-anchoring summary) and an `acquisition` block (pixel and tile size per timepoint).
+re-anchoring summary: `anchored`, `remaining` with each reason, and `wells_considered`, the wells the plate
+fit could see — a batched remote run re-anchors each batch over its own wells, and nothing yet fits the whole
+plate after the last batch) and an `acquisition` block (pixel and tile size per timepoint).
 
 **Incremental, resume, completeness.** The done unit is a timepoint whose grid status is `ok` under the same
 settings (every `nanowell_*` option is in `util.settings_digest.KEYED_ON`, and is digested only on a run with

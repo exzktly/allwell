@@ -191,6 +191,9 @@ def test_the_well_with_no_evidence_of_its_own_is_addressed_from_the_plate_and_co
 def test_the_summary_says_how_many_were_anchored_and_how_many_remain(reanchored):
     out, _ = reanchored
     info = json.loads((out / "pipeline_info.json").read_text())
-    assert info["nanowell"]["reanchor"] == {"anchored": ["B02/24h"], "remaining": {}}
+    wells = sorted(p.name[: -len("_grid.json")] for p in (out / "nanowells").glob("*_grid.json"))
+    assert len(wells) > 1
+    # ... and which wells the plate fit could see: a batched remote run fits each batch alone (roll-up review X19).
+    assert info["nanowell"]["reanchor"] == {"anchored": ["B02/24h"], "remaining": {}, "wells_considered": wells}
     other = json.loads((out / "nanowells" / "A01_grid.json").read_text())
     assert other["timepoints"]["24h"]["origin_method"] == "fiducial"        # untouched wells keep their own anchor

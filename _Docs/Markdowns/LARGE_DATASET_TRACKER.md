@@ -4,7 +4,7 @@ A remediation tracker (CLAUDE.md §6.1): the plan for the follow-up PR that stac
 (`claude/nanowell-rollup`, #982), written before any code. One row per item, updated in the same commit as the
 work, closed only with evidence, and deleted by the PR that closes its last row.
 
-**Status, derived from the rows below:** 35 rows — 26 `done`, 4 `answered` (questions), 4 `declined` (decisions and a measured refusal), 1 `todo` (M10, a follow-up PR).
+**Status, derived from the rows below:** 39 rows — 26 `done`, 4 `answered` (questions), 4 `declined` (decisions and a measured refusal), 5 `todo` (M10, and the follow-up rows F1–F3 and Q5).
 Recount with `grep -c '| \`done\` |'` and so on; never edit this line by hand alone.
 
 ## The report
@@ -89,6 +89,20 @@ reproduced before it is fixed, and closed with a test watched failing without th
 | R10 | **Suspected.** The distribution export's `float_format` does not apply to an integer column, so a count column would be written `12` where the strings were `12.000000` | `review/features/export/service.py` | `done` | Confirmed for an integer array: values are cast to float before writing. Test: `[12, 3]` writes `12.000000` and `3.000000` |
 | R11 | **Suspected.** `_make_room_for_cdf` iterates the statistics cache on the GUI thread while the gating worker's cancel path may clear it on its own thread | `review/domain/stats_compute.py` | `done` | `_make_room_for_cdf` iterates a snapshot and removes with `pop(key, None)`. A threaded version of the test never hit the window in 3,000 iterations, so the test is deterministic: a cache that empties itself on the first removal; with `del` it raises `KeyError` |
 | R12 | **Docs.** ARCHITECTURE's summary row claims `well_summaries()` re-summarises a frame replaced after a write-back (a stored summary wins); the "every number is the same" claims rest on R2 and R3; the reader roster's reasons for the smFISH refresh and `_clear_gating` are false as written | `_Docs/Markdowns/`, `tests/test_row_cache_readers.py` | `done` | ARCHITECTURE's summary row no longer claims a replaced frame is re-summarised, and now states which columns a summary reads and why; the row-cache row names the smFISH refresh; both roster reasons are rewritten. With R2 and R3 fixed, "every number is the same" holds as written |
+
+## Follow-up — a faster parse, cheaper plate-wide reads, and a query engine for per-cell views
+
+The second PR, stacked on the first (`claude/large-dataset-engine` on `claude/large-dataset-memory`). The first PR bounded
+memory; what it left measured is cost: a 407 s first open for 24 wells (the CSV parse), a re-read of every evicted
+well (about 0.3 s each) whenever a verdict changes, and per-cell views that still hold every selected well's cells
+(M10). These rows are the plan for those, written before the code.
+
+| # | Item | Place | State | Evidence |
+|---|---|---|---|---|
+| F1 | **Parse the CSV with `pyarrow.csv`, typed.** M8 was declined on `pd.read_csv(engine="pyarrow")`, which ignored the text dtype and read FOV labels `01`/`-1`/`2` as numbers. `pyarrow.csv.read_csv` with the text columns given an explicit `string` type and `""` as the only null may not have that defect. Adopted only if it yields the same frame as the pandas parse — columns, dtypes, text values, and numbers equal bit for bit, or with every difference measured and stated — on a corpus carrying the mess real CSVs carry (blank fields, `NA` text, a stray string in a numeric column, quoted commas, leading-zero labels, a header-only file, an empty file); any file it cannot read falls back to the pandas parse. `PARSER_VERSION` bumps, since the Parquet cache stores the parse | `review/data/data_loading.py` (`load_well_csv`), `review/data/parquet_cache.py` | `todo` | |
+| F2 | **Plate-wide numbers from narrow reads.** Each verdict layer declares the columns its verdict reads; a plate-wide aggregate (the line and bar per-well aggregates first) reads only those columns plus the value and timepoint columns from each well's Parquet, without the row cache, and runs the same Python verdict and statistics code on them. Guarded by a test that, for every layer active at once, the narrow frame's inclusion mask equals the full frame's cell for cell — the defence against D2's fail-open hazard, which is what made column subsets unsafe in the row cache | `review/data/` (a narrow-read module), the projectors, `review/domain/stats_compute.py` | `todo` | |
+| F3 | **DuckDB for per-cell views over large selections (M10).** A query layer over the per-well Parquet files: a stated uniform sample of included cells for Scatter, Multivariate, Distribution, the beeswarm and the Cell Browser (the n drawn written on the figure); 2D density bins and pooled percentiles across wells in bounded memory. Inclusion comes from F2's narrow verdicts, not from SQL. DuckDB is optional at runtime, as pyarrow is: without it the views keep their current per-well path. A dependency in `requirements.txt`, the PyInstaller spec and the test requirements | `review/data/` (a query module), the per-cell collectors, `requirements*.txt`, `_Docs/_Installation/` | `todo` | |
+| Q5 | **Which way should the inclusion filters reach a query engine?** (a) F2 as written — the Python verdict code runs on narrow reads, nothing re-expressed, so nothing can diverge; or (b) the seven verdict layers re-expressed in SQL, so DuckDB filters and aggregates without Python per well — faster still on very large plates, at the cost of a second implementation of every verdict, each held to the Python one cell for cell | — | `todo` | Asked of the user after F1 |
 
 ## Docs owed by the PR
 

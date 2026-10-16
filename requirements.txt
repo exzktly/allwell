@@ -108,6 +108,55 @@
 #   # Expected: []
 #   python -c "import tensorflow as tf; print(tf.config.list_physical_devices('CPU'))"
 #   # Expected: [PhysicalDevice(name='/physical_device:CPU:0', device_type='CPU')]
+#
+# ── RSYNC FOR REMOTE RUNS (Windows only) ─────────────────────────────────────
+#
+# Only needed to run the pipeline on a remote host. Git for Windows ships
+# ssh.exe but NOT rsync.exe, so rsync has to be added by hand. The rule that
+# matters: rsync.exe and the ssh.exe it launches must come from the SAME
+# MSYS/Cygwin runtime (the same msys-2.0.dll). A mismatched pair dies before
+# ssh starts with "dup() in/out/err failed" / "error in IPC code (code 14)",
+# or with exit 12 "connection unexpectedly closed". AllWell always picks the
+# ssh.exe sitting beside the rsync.exe it found
+# (services/remote_config.py::resolve_ssh_for_rsync), so putting the two in
+# one folder is the whole fix.
+#
+# Option A — copy rsync into Git for Windows (no extra install):
+#
+#   1. From https://repo.msys2.org/msys/x86_64/ download the latest
+#      .pkg.tar.zst of each package below.
+#   2. Extract each one (7-Zip with zstd support, or in Git Bash:
+#      `tar -I zstd -xf <file>.pkg.tar.zst`) and copy the listed file from
+#      its usr/bin/ into  C:\Program Files\Git\usr\bin\
+#
+#        rsync-*.pkg.tar.zst       ->  rsync.exe
+#        libxxhash-*.pkg.tar.zst   ->  msys-xxhash-0.dll
+#        libzstd-*.pkg.tar.zst     ->  msys-zstd-1.dll
+#        liblz4-*.pkg.tar.zst      ->  msys-lz4-1.dll
+#        libopenssl-*.pkg.tar.zst  ->  msys-crypto-3.dll  (only if missing)
+#
+#      Skip any DLL Git already has. NEVER copy msys-2.0.dll: Git's own copy
+#      is the runtime its ssh.exe uses, and replacing it breaks the pairing
+#      this whole step exists for.
+#   3. In Git Bash, list anything still missing (no output = done):
+#
+#        ldd /usr/bin/rsync.exe | grep "not found"
+#
+# Option B — install MSYS2 instead (https://www.msys2.org/, default
+# C:\msys64), then in an MSYS2 shell:
+#
+#   pacman -S rsync openssh
+#
+#   Both packages: without MSYS2's openssh, AllWell falls back to Git's
+#   ssh.exe — the mismatched pair above. Delete any rsync.exe from Git's
+#   usr\bin first, because AllWell checks Git's folder before C:\msys64.
+#
+# AllWell's search order for rsync.exe: Git for Windows usr\bin, cwRsync,
+# C:\msys64, C:\tools\msys64, C:\cygwin64, then PATH.
+#
+# Verify (Miniforge Prompt, repo root) — both lines must name the same folder:
+#
+#   python -c "from services.remote_config import resolve_rsync_binary as r, resolve_ssh_for_rsync as s; print(r()); print(s())"
 
 # ── Pipeline + scientific stack (shared with the headless remote) ────────────
 # v5.2.1: split off so the bootstrap can install just the pipeline deps

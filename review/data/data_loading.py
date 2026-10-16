@@ -122,9 +122,9 @@ def _read_well_table(path: Path) -> pd.DataFrame:
       that coercion turns to NaN — what pandas, which reads none, gives.
 
     A row with the wrong number of fields, a file pyarrow cannot decode, an
-    empty file, and a float column holding an infinity (``inf`` text, or a
-    literal like ``1e400`` that pyarrow reads as inf and pandas as NaN) all fall
-    back to pandas, which reads or rejects them as it always has. Running out of
+    empty file, and a float column holding a literal too large for a double
+    (``1e400``, which pyarrow reads as inf and pandas as text that becomes NaN)
+    all fall back to pandas, which reads or rejects them as it always has. Running out of
     memory is raised as ``MemoryError``, not fallen back from. pyarrow is measured 13x faster on a 1,104,480-row, 513 MB well (5.0 s
     against 64.8 s) at about the same peak (1,417 MiB against 1,334 MiB).
     """
@@ -170,14 +170,37 @@ def _arrow_read(path: Path, names: list[str], text_dtypes: dict) -> pd.DataFrame
     for i, field in enumerate(table.schema):
         if pa.types.is_temporal(field.type):
             table = table.set_column(i, field.name, pc.cast(table.column(i), pa.string()))
-        elif pa.types.is_floating(field.type) and pc.any(pc.is_inf(table.column(i))).as_py():
-            # An infinity is either the text "inf" or a literal too large for a
-            # double ("1e400"), which pyarrow reads as inf and pandas as text
-            # that coerces to NaN. The two cannot be told apart from here, and a
-            # file carrying either is rare, so it is parsed by pandas instead.
-            _logger.info("%s holds an infinite value in %s; parsing it with pandas", Path(path).name, field.name)
+        elif (pa.types.is_floating(field.type) and pc.any(pc.is_inf(table.column(i))).as_py()
+              and not _infinities_are_spelled(path, names, field.name, pc.is_inf(table.column(i)))):
+            # A literal too large for a double ("1e400") reads as inf in pyarrow
+            # and as text that coerces to NaN in pandas. The text "inf" reads as
+            # inf in both, so only a file carrying the former falls back.
+            _logger.info("%s holds an out-of-range number in %s; parsing it with pandas", Path(path).name, field.name)
             return None
     return table.to_pandas()
+
+
+#: The spellings pandas reads as an infinity, after a sign and case are dropped.
+_INFINITY_SPELLINGS = frozenset({"inf", "infinity"})
+
+
+def _infinities_are_spelled(path: Path, names: list[str], column: str, is_inf) -> bool:
+    """Whether every infinity pyarrow read in ``column`` was written as one.
+
+    Re-reads that one column as text and checks the infinite rows' spellings.
+    Only a file whose float column holds an infinity pays for this.
+    """
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.csv as pcsv
+
+    raw = pcsv.read_csv(
+        path,
+        read_options=pcsv.ReadOptions(column_names=names, skip_rows=1),
+        convert_options=pcsv.ConvertOptions(include_columns=[column], column_types={column: pa.string()}),
+    ).column(0)
+    texts = pc.utf8_lower(pc.utf8_ltrim(pc.filter(raw, is_inf), characters="+-"))
+    return set(texts.to_pylist()) <= _INFINITY_SPELLINGS
 
 
 #: pandas' boolean spellings (its C parser's defaults), given to pyarrow.

@@ -106,3 +106,21 @@ def test_all_hidden_and_no_selection_yields_empty():
     # Everything hidden, no solo, no raw selection → empty → caller shows the hint.
     ctx = _ctx(selections=[{"name": "G1", "hidden": True, "wells": ["A01"]}])
     assert _wells_for_new_plot_group(ctx) == []
+
+
+def test_grouped_by_a_variable_the_visible_values_are_captured():
+    """Under *Group by* the plots draw values, so a saved selection captures
+    the wells of the values on screen — not the user's groups, whose
+    ``hidden`` flags no plot reads in that mode."""
+    from review.domain import sample_variables as sv
+
+    ctx = _ctx(selections=[{"name": "G1", "hidden": False, "wells": ["A01", "B01"]}])
+    dose = sv.Variable(id="dose", name="Dose", kind=sv.NUMBER, unit="",
+                       values=(sv.VariableValue("d1", "1", 1.0),
+                               sv.VariableValue("d10", "10", 10.0)))
+    ctx.state.selection.variables = sv.VariableSet(
+        variables=(dose,),
+        assignments={"dose": {"A01": "d1", "A02": "d1", "B02": "d10"}})
+    ctx.state.plot = SimpleNamespace(group_by_variable="dose",
+                                     group_by_hidden_values={"d10"})
+    assert _wells_for_new_plot_group(ctx) == ["A01", "A02"]

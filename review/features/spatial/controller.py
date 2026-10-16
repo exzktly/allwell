@@ -223,17 +223,20 @@ def _rep_active_wells(ctx) -> list:
     plus active solo wells, plate-order sorted.
 
     In rep-mode the plate is passive and the per-well ``selected_wells`` set is
-    not maintained — the active set lives in the group ``hidden`` flags. This is
-    the same source the plotting tabs use (``rep_sets_active``) and the plate
-    highlights, so the Spatial tab tracks group selection in lock-step."""
-    sel = ctx.state.selection
+    not maintained. The active set is read from ``plot_replicate_sets`` — the
+    source the plotting tabs draw from and the plate highlights — so it also
+    follows a variable grouping's visible values rather than the groups'
+    ``hidden`` flags, which no plot reads in that mode."""
+    from review.domain.plot_members import plot_replicate_sets
     well_paths = ctx.state.dataset.well_paths
-    wells = {
-        w for s in (sel.selections or []) if not s.get("hidden")
-        for w in (s.get("wells") or []) if w in well_paths
-    }
-    wells |= {w for w in (sel.active_solo_wells or set()) if w in well_paths}
-    return sorted(wells)
+    return sorted({w for r in plot_replicate_sets(ctx) for w in r.wells
+                   if w in well_paths})
+
+
+def _in_rep_mode(ctx) -> bool:
+    """Whether the plate is in group mode — groups exist, or a variable groups."""
+    from review.domain.plot_members import variable_grouping_in_force
+    return bool(ctx.state.selection.selections) or variable_grouping_in_force(ctx)
 
 
 def spatial_empty_reason(ctx) -> EmptyReason | None:
@@ -269,7 +272,7 @@ def _frame_wells(ctx, st) -> list:
     active set (non-hidden groups + solo wells), matching the plate highlight and
     the plotting tabs; otherwise the current per-well plate selection, falling
     back to the first loaded well. Bounded by the caller's panel cap."""
-    if ctx.state.selection.selections:
+    if _in_rep_mode(ctx):
         return _rep_active_wells(ctx)
     selected = list(ctx.state.selection.selected_wells or [])
     if selected:
@@ -395,7 +398,7 @@ def _summary_wells(ctx) -> list:
     """Wells to include in the Summary walk. In replicate (group) mode this is
     the active set (non-hidden groups + solo wells); otherwise the current plate
     selection, falling back to every loaded well when nothing is selected."""
-    if ctx.state.selection.selections:
+    if _in_rep_mode(ctx):
         return _rep_active_wells(ctx)
     selected = list(ctx.state.selection.selected_wells or [])
     if selected:

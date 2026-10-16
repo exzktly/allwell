@@ -268,7 +268,8 @@ def _group_visibility_mode(ctx) -> bool:
     Falls back to "replicate sets exist" when the shell isn't reachable — the
     lightweight ``ctx`` used by headless callers and unit tests has no window.
     """
-    if not ctx.state.selection.selections:
+    from review.domain.plot_members import variable_grouping_in_force
+    if not ctx.state.selection.selections and not variable_grouping_in_force(ctx):
         return False
     try:
         from review.core.selection_controller import _plate_passive_in_group_mode
@@ -288,11 +289,11 @@ def _wells_for_new_plot_group(ctx) -> list[str]:
     plate is in, so the capture has to branch on the same condition the plate
     does:
 
-    * **group-visibility mode** (replicate sets defined, no well-editing pane on
-      screen) — the plate paints set visibility and clicks toggle a set's
-      ``hidden`` flag. What is on screen is exactly the union of every visible
-      (non-hidden) set's wells plus any active solo wells: the same "active set"
-      the plotting tabs draw from (see ``selection_controller``).
+    * **group-visibility mode** (replicate sets defined or the plots grouped by
+      a variable, no well-editing pane on screen) — the plate paints what the
+      plots draw and clicks toggle it. What is on screen is exactly the wells of
+      ``plot_replicate_sets``: every visible set plus any active solo wells, or
+      every visible value of the Group-by variable.
       ``selected_wells`` is not consulted at all here, because nothing in this
       mode keeps it current — it holds whatever a per-well tab, or an earlier
       saved-selection load, last wrote. Reading it first meant that once any well
@@ -304,13 +305,13 @@ def _wells_for_new_plot_group(ctx) -> list[str]:
     """
     sel = ctx.state.selection
     if _group_visibility_mode(ctx):
+        # What the plots draw, from the seam they draw it from: the visible
+        # groups and solo wells, or the visible values under a variable
+        # grouping. Re-deriving it from the groups' ``hidden`` flags captured
+        # the user's groups while the plots showed doses.
+        from review.domain.plot_members import plot_replicate_sets
         loaded = ctx.state.dataset.well_paths
-        raw = {
-            w
-            for s in sel.selections if isinstance(s, dict) and not s.get("hidden")
-            for w in (s.get("wells") or []) if w in loaded
-        }
-        raw |= {w for w in (sel.active_solo_wells or set()) if w in loaded}
+        raw = {w for r in plot_replicate_sets(ctx) for w in r.wells if w in loaded}
     else:
         raw = set(sel.selected_wells or set())
     return sorted(raw, key=parse_rc)

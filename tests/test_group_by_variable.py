@@ -456,3 +456,20 @@ def test_solo_wells_do_not_join_a_variable_grouping():
                selections=[{"name": "G", "wells": ["A01"]}], group_by="dose")
     ctx.state.selection.active_solo_wells = {"B01"}
     assert [r.name for r in plot_replicate_sets(ctx)] == ["1 µM"]
+
+
+def test_the_per_well_mirrors_follow_the_visible_values():
+    """Spatial and the Cell Browser mirror the plate's active set. Under a
+    variable grouping with no groups defined they used to fall back to the
+    stale per-well selection, which the passive plate no longer maintains."""
+    from review.features.image_browser.cell_browser.collect import cell_browser_source_wells
+    from review.features.spatial.controller import _rep_active_wells, _in_rep_mode
+
+    ctx = _ctx(wells=["A01", "A02", "B01"], variables=[_dose("1", "10")],
+               assignments={"dose": {"A01": "d0", "A02": "d1", "B01": "d0"}},
+               group_by="dose")
+    ctx.state.selection.selected_wells = {"A02"}          # stale
+    ctx.state.plot.group_by_hidden_values = {"d1"}
+    assert _in_rep_mode(ctx)
+    assert _rep_active_wells(ctx) == ["A01", "B01"]
+    assert sorted(cell_browser_source_wells(ctx)) == ["A01", "B01"]

@@ -338,3 +338,19 @@ def test_the_page_reloads_after_a_dataset_switch_even_from_its_empty_state(qtbot
     nwc.nw_on_dataset_loaded(ctx)
     qtbot.waitUntil(lambda: st.loaded_for is not None and not st.computing, timeout=20000)
     assert st.loaded_for[0] == str(ctx.state.dataset.data_dir)
+
+
+@pytest.mark.parametrize("hidden, solo, expected", [
+    (True, set(), ["A01", "B01"]),      # every set hidden: the plate selection, as on every other tab
+    (False, {"B01"}, ["A02", "B01"]),   # a visible set plus a toggled solo well; the selection is ignored
+])
+def test_the_page_draws_the_wells_every_plotting_tab_draws(page, hidden, solo, expected):
+    """The page's wells come from ``plot_group_well_lists``, not a rule of its own (roll-up review X4): a rule of
+    its own drew nothing with every set hidden while the other tabs drew the plate selection."""
+    from review.data.data_loading import plot_group_well_lists
+
+    sel = page.state.selection
+    sel.selections = [{"name": "G", "wells": ["A02"], "hidden": hidden}]
+    sel.active_solo_wells = solo
+    assert nwc.active_wells(page) == expected
+    assert sorted(w for _n, ws, _r in plot_group_well_lists(page, fallback_to_all=False) for w in ws) == expected

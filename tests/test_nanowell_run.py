@@ -306,3 +306,20 @@ def test_the_earliest_template_is_the_earliest_timepoint_s_even_when_it_was_not_
     assert outcome.earliest_template[0] == "T0"
     assert outcome.timepoints["T1"]["template"]["earliest_timepoint"] == "T0"
     assert "earliest_timepoint" not in outcome.timepoints["T0"]["template"]
+
+
+@pytest.mark.parametrize("rotation_deg, seed", [(7.0, 1), (-11.0, 3), (15.0, 4)])
+def test_a_bubble_over_the_central_square_does_not_refuse_the_timepoint_on_orientation(rotation_deg, seed):
+    """With the square hidden, the best-scoring site is an ordinary circle whose orientation is noise. The check
+    must not run against it: the timepoint is anchored from the array centre instead (roll-up review X21)."""
+    from tests import _nanowell_run_fixture as F
+    from tests._nanowell_synth import TilePlan, render_tiles
+
+    plan = TilePlan(2, 2, (700, 700), 0.1, F.PX)
+    uw, uh = plan.step_um[0] + plan.extent_um[0], plan.step_um[1] + plan.extent_um[1]
+    rendered = render_tiles(plan, pitch_um=F.PITCH, diameter_um=F.DIAMETER, radius_um=0.3 * min(uw, uh),
+                            rotation_deg=rotation_deg, noise_sigma=0.05, blur_px=1.0, seed=seed,
+                            bubble=(uw / 2, uh / 2, 0.6 * F.PITCH))
+    located = nr.locate_timepoint("T0", record_for(rendered), "A01", rendered.images, SETTINGS)
+    assert (located.status, located.reason if located.status != nr.OK else "") == (nr.OK, "")
+    assert located.origin_method != "fiducial"

@@ -349,6 +349,7 @@ class NanowellPreviewWindow(QWidget):
 def _wells_and_timepoints(tab) -> tuple[dict[str, Path], dict[str, list[str]], str]:
     """The wells with an archive in the form's input folder, each well's timepoints from the record, and a problem if any."""
     from analyze.nanowell_preflight import wells_directory
+    from pipeline.input_layout import find_well_zips
     from pipeline.nanowell_task import timepoint_order
     from util.acquisition_record import AcquisitionRecordError, read_record_file
 
@@ -356,7 +357,8 @@ def _wells_and_timepoints(tab) -> tuple[dict[str, Path], dict[str, list[str]], s
     if not raw:
         return {}, {}, "No input folder selected."
     folder = wells_directory(raw)
-    zips = {p.stem: p for p in sorted(folder.glob("*.zip"))} if folder.is_dir() else {}
+    # Keyed by the well the run calls it, from the run's own enumeration (roll-up review X8).
+    zips = dict(find_well_zips(folder)) if folder.is_dir() else {}
     if not zips:
         return {}, {}, f"No well archives were found in {folder}."
     try:

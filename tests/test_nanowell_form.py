@@ -376,3 +376,34 @@ def test_addresses_are_written_on_the_montage_only_where_a_nanowell_is_drawn_lar
     result.sites = [_site(3, 4, "empty", x=400.0, y=200.0)]
     assert render_montage(result, 1.0).toImage() == render_montage(result, 1.0, show_addresses=False).toImage()
     assert render_montage(result, 4.0).toImage() != render_montage(result, 4.0, show_addresses=False).toImage()
+
+
+@pytest.mark.parametrize("mess", ["appledouble", "upper_case"])
+def test_the_pre_flight_lists_the_wells_the_run_will_read(tmp_path, mess):
+    """Roll-up review X8: the pre-flight enumerated `*.zip` where the run uses `find_well_zips`, so a `._A01.zip`
+    sidecar refused a run the pipeline carries out and `A01.ZIP` read as no archives at all."""
+    root, _ = _plate(tmp_path)
+    archive = next((root / "in").glob("*.zip"))
+    if mess == "appledouble":
+        (root / "in" / f"._{archive.name}").write_bytes(b"\x00\x05\x16\x07 not a zip")
+    else:
+        archive.rename(archive.with_suffix(".ZIP"))
+    opts = {"filename_schema": ":".join(SCHEMA), "filename_sep": "_", "nanowell_format": "100um",
+            "nanowell_margin_um": ""}
+    assert nanowell_input_report(str(root), opts) == ([], [])
+
+
+def test_test_detection_offers_the_wells_the_run_will_read(tab, tmp_path):
+    """Roll-up review X8: Test detection keyed its wells by archive stem, so `a1.zip` — well A01 to the run and to
+    the record — had no timepoints and was not offered at all."""
+    from analyze.nanowell_preview import _wells_and_timepoints
+
+    root, _ = _plate(tmp_path)
+    archive = next((root / "in").glob("*.zip"))
+    lower = archive.with_name("a1.zip")
+    archive.rename(lower)
+    (root / "in" / "._a1.zip").write_bytes(b"\x00\x05\x16\x07 not a zip")
+    _use_nanowell_schema(tab)
+    tab._input_edit.setText(str(root))
+    wells, timepoints, problem = _wells_and_timepoints(tab)
+    assert (wells, timepoints, problem) == ({"A01": lower}, {"A01": ["0h"]}, "")

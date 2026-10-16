@@ -110,17 +110,12 @@ def _state(ctx):
 
 
 def active_wells(ctx) -> list[str]:
-    """The wells the page draws: the plate selection, or in replicate mode every visible set's wells and the
-    active solo wells — the same answer the plotting tabs and the plate highlight give. Never every loaded
-    well as a fallback: an empty selection is a stated empty state, not an arbitrary well."""
-    sel = ctx.state.selection
-    well_paths = ctx.state.dataset.well_paths or {}
-    if sel.selections:
-        wells = {w for s in sel.selections if not s.get("hidden") for w in (s.get("wells") or [])}
-        wells |= set(sel.active_solo_wells or ())
-    else:
-        wells = set(sel.selected_wells or ())
-    return sorted(w for w in wells if w in well_paths)
+    """The wells the page draws, decided by ``plot_group_well_lists`` — the one rule every plotting tab uses, so a
+    group-by variable, hidden sets and the solo-well toggles give this page the same wells as the others. Never
+    every loaded well as a fallback: an empty selection is a stated empty state, not an arbitrary well."""
+    from review.data.data_loading import plot_group_well_lists
+
+    return sorted({w for _name, wells, _rset in plot_group_well_lists(ctx, fallback_to_all=False) for w in wells})
 
 
 def page_groups(ctx) -> dict:

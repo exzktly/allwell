@@ -187,6 +187,10 @@ NOT_KEYED_ON: dict[str, str] = {
 }
 
 
+#: The keys that describe a nanowell run, and only a nanowell run (:func:`settings_digest`).
+_NANOWELL_PREFIX = "nanowell_"
+
+
 def settings_digest(opts) -> str:
     """A stable short hash of the options in :data:`KEYED_ON` that *opts* sets.
 
@@ -200,7 +204,16 @@ def settings_digest(opts) -> str:
     "unknown", never as "matches".
     """
     payload = {}
+    try:
+        nanowell = bool(opts["nanowell_format"])
+    except (KeyError, TypeError):
+        nanowell = False
     for key in sorted(KEYED_ON):
+        if key.startswith(_NANOWELL_PREFIX) and not nanowell:
+            # The nanowell options carry parser defaults on every run, nanowell or not. Keyed on them
+            # outside the mode, every plate recorded before they existed would read as recorded under
+            # other settings and be re-run (roll-up review X5); they describe nothing such a run did.
+            continue
         try:
             value = opts[key]
         except (KeyError, TypeError):

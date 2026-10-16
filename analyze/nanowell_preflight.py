@@ -68,6 +68,7 @@ def seam_site_estimate(plan, plate_format: str, margin_um: float | None, *, phas
 
 def nanowell_input_report(raw: str, opts: dict) -> tuple[list[str], list[str]]:
     """``(problems, warnings)`` for the dataset at *raw* under the form's nanowell *opts*."""
+    from pipeline.input_layout import find_well_zips
     from pipeline.tile_grid import OK, place_from_record, tiles_from_record
     from util.acquisition_record import AcquisitionRecordError, read_record_file, validate_record_paths
 
@@ -76,7 +77,11 @@ def nanowell_input_report(raw: str, opts: dict) -> tuple[list[str], list[str]]:
     if not raw:
         return ["No input folder selected."], warnings
     folder = wells_directory(raw)
-    zips = sorted(folder.glob("*.zip")) if folder.is_dir() else []
+    # The run's own enumeration (roll-up review X8): a `._A01.zip` sidecar is not a well, `A01.ZIP` is one, and
+    # `a1.zip` is well A01 — which the record names it as.
+    found = find_well_zips(folder) if folder.is_dir() else []
+    zips = [path for _well, path in found]
+    well_of = {path: well for well, path in found}
     if not zips:
         return [f"Nanowell mode reads each well from a zip ({folder}{'' if folder.is_dir() else ' does not exist'}): "
                 "no well archives were found."], warnings
@@ -99,11 +104,11 @@ def nanowell_input_report(raw: str, opts: dict) -> tuple[list[str], list[str]]:
                        "overlap, Pixel size)", unplaced), warnings
     if unplaced:
         problems, warnings = _pattern_report(
-            [z for z in zips if z.stem in unplaced], opts,
+            [z for z in zips if well_of[z] in unplaced], opts,
             lead=f"The acquisition record cannot place {len(unplaced)} well(s) (no mosaic position, or no pixel "
                  "size)")
         record = {**record, "tiles": [t for t in record["tiles"] if t["well"] not in unplaced]}
-        zips = [z for z in zips if z.stem not in unplaced]
+        zips = [z for z in zips if well_of[z] not in unplaced]
         if not record["tiles"]:
             return problems, warnings
     schema = str(opts.get("filename_schema") or "")

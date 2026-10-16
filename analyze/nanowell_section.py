@@ -216,7 +216,15 @@ class AnalyzeNanowellSectionMixin:
         plate_format = str(d.get("nanowell_format") or "").strip()
         index = self._nanowell_format_cb.findData(plate_format)
         known = index >= 0 and self._nanowell_cb.isEnabled()
+        # The method the dataset states is the one to put back when the mode goes off, not the one the user
+        # had before switching it on: the restore already set the selector, and switching the mode off below
+        # would otherwise overwrite it (roll-up review X7).
+        stated = self._seg_method_cb.findData(d.get("segmentation_method"))
+        if self._nanowell_previous_method is not None and stated >= 0 and stated != self._nanowell_label_free_index():
+            self._nanowell_previous_method = stated
         self._nanowell_cb.setChecked(known)
+        if known:
+            self._nanowell_pin_segmentation(True)   # already on: the restore moved the locked selector
         self._nanowell_status.setText(
             "" if known or not plate_format else
             f"This dataset was analysed with plate format {plate_format!r}, which this version does not know: "

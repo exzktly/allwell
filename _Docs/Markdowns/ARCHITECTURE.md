@@ -8931,7 +8931,9 @@ record (they live in a subdirectory because Review loads every top-level `*.csv`
 re-anchoring summary) and an `acquisition` block (pixel and tile size per timepoint).
 
 **Incremental, resume, completeness.** The done unit is a timepoint whose grid status is `ok` under the same
-settings (every `nanowell_*` option is in `util.settings_digest.KEYED_ON`) and the same digest of the
+settings (every `nanowell_*` option is in `util.settings_digest.KEYED_ON`, and is digested only on a run with
+`nanowell_format` set: the options carry parser defaults on every run, and keyed outside the mode they would
+make every plate recorded before they existed read as recorded under other settings) and the same digest of the
 record's tiles and calibration for it; others are recomputed, onto the roster radius the earlier run shared.
 Resume checkpoints are written per timepoint through the per-field path's atomic record-then-marker files
 (`.fov_nw_<timepoint>.done`), and taken back only under the same radius and record digest. Completeness counts
@@ -9163,9 +9165,9 @@ view only the controls it uses. One `timepoint` on the state serves every view: 
 timepoints a view offers and the one it draws — the one-well views offer their well's timepoints and start at
 the first, Position and *Along x: Wells* offer every timepoint and start at the latest (U13) — so the combo,
 the slider and the figure always agree. `page_well` is the chosen well when it is drawn, else the first drawn
-well. Wells are the plate selection or, in replicate mode, the visible sets' wells and
-the active solo wells — never every loaded well as a fallback — grouped by `replicate_groups` over those wells
-only. Brightness and site signal follow the app's shared channel (U6); the Metric entries are greyed, with the
+well. Wells are what `data_loading.plot_group_well_lists(ctx, fallback_to_all=False)` says every plotting tab
+draws — so a group-by variable, hidden sets and the solo-well toggles mean the same here as elsewhere — never
+every loaded well as a fallback, grouped by `replicate_groups` over those wells only. Brightness and site signal follow the app's shared channel (U6); the Metric entries are greyed, with the
 reason, when that channel has no site intensities. `ensure_loaded` reads the tables and computes the metrics
 on `core.worker_bridge.run_off_thread`; each request is numbered and a result for an older one is discarded,
 so a slow load can never replace a newer baseline's figure — including when the baseline goes back to the one

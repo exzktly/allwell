@@ -261,7 +261,10 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     candidate, scores = score_fiducial(montage.image, montage.um_per_px, settings.diameter_um,
                                        detection.points_um, centre_um=detection.boundary_centre_um,
                                        search_radius_um=2.2 * estimate.pitch_um)
-    if scores:
+    # Only a square that scored as one: with the central square hidden (a bubble over it) the best-scoring site
+    # is an ordinary circle, whose "orientation" is noise, and checking against it refused a timepoint the array
+    # centre could anchor (roll-up review X21).
+    if candidate is not None and scores:
         square = max(scores, key=lambda s: s.coherence)
         orientation = check_orientation(detection.fit, square.orientation_deg,
                                         square_to_axis_deg=settings.square_edge_deg)

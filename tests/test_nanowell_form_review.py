@@ -50,6 +50,21 @@ def test_a_build_with_no_label_free_method_cannot_switch_the_mode_on(qtbot, monk
 
 
 # ── restoring a dataset's settings ───────────────────────────────────────────
+def test_restoring_a_dataset_while_the_mode_is_on_keeps_the_method_the_dataset_states(tab):
+    """Roll-up review X7: the sidecar's method is restored before the nanowell section, whose switch-off put back
+    the method from before the mode was turned on."""
+    stardist = tab._seg_method_cb.findData("stardist_seeded_watershed_cell")
+    tab._seg_method_cb.setCurrentIndex(stardist)
+    tab._nanowell_cb.setChecked(True)
+    tab._apply_pipeline_info({"execution_options": {"nanowell_format": None, "segmentation_method": "cellpose"}})
+    assert (tab._seg_method_cb.currentData(), tab._nanowell_cb.isChecked()) == ("cellpose", False)
+    tab._nanowell_cb.setChecked(True)
+    tab._apply_pipeline_info({"execution_options": {"nanowell_format": "100um", "segmentation_method": "cellpose"}})
+    assert (tab._seg_method_cb.currentData(), tab._seg_method_cb.isEnabled()) == ("cellpose_labelfree", False)
+    tab._nanowell_cb.setChecked(False)
+    assert tab._seg_method_cb.currentData() == "cellpose"
+
+
 def test_a_dataset_that_states_a_format_replaces_the_previous_datasets_numbers(tab):
     tab._apply_pipeline_info({"execution_options": {"nanowell_format": "100um", "nanowell_margin_um": 7.5,
                                                     "nanowell_cell_diameter_um": 20}})

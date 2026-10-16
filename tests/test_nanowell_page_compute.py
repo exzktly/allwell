@@ -225,6 +225,32 @@ def test_past_the_panel_cap_the_footer_counts_only_what_is_drawn():
     assert any(t.startswith("2 more panel(s) not drawn (20 values") for t in texts)
 
 
+def test_with_many_notes_the_footer_still_says_which_panels_were_not_drawn():
+    """Roll-up review X11: the footer kept its first five lines, so the notes pushed the owed sentence about
+    panels not drawn off the figure. Every line is drawn, below the panels."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.renderer import MAX_PANELS, render_distribution
+
+    swarms = [dc.Swarm("t", f"W{i:02d}", 0.0, np.ones(10), [(f"W{i:02d}", j, 0) for j in range(10)], ["1"] * 10, 10)
+              for i in range(MAX_PANELS + 2)]
+    notes = [f"Note {k}." for k in range(10)]
+    model = dc.DistributionModel("n", "n", "Cell count", dc.TIME, True,
+                                 [dc.Panel(s.well, [s], [(0.0, "t")]) for s in swarms], notes=notes)
+    fig = Figure(figsize=(8, 6.4))
+    render_distribution(fig, model)
+    footer = [t for t in fig.texts if t.get_gid() in ("nw-footer", "nw-footer-used")]
+    texts = [t.get_text() for t in footer]
+    assert texts[0].startswith("2 more panel(s) not drawn") and texts[1:11] == notes[::-1]
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    renderer = FigureCanvasAgg(fig).get_renderer()
+    lowest_panel = min(ax.get_tightbbox(renderer).y0 for ax in fig.axes if ax.has_data())
+    assert max(t.get_window_extent(renderer).y1 for t in footer) < lowest_panel
+
+
 def test_a_set_of_more_than_four_wells_is_drawn_as_densities_and_says_so(tmp_path):
     import matplotlib
     matplotlib.use("Agg")

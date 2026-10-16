@@ -125,7 +125,7 @@ def _y_limits(model: DistributionModel, panel) -> tuple[float, float]:
     return lo - pad, hi + pad
 
 
-#: Lines of footer text the figure reserves room for at the bottom.
+#: Lines of footer text the figure reserves room for at the bottom; more push the panels up.
 _FOOTER_LINES = 5
 #: Where the footer starts, above the Group-by notice ``plot_style`` writes at the figure's foot.
 _FOOTER_BASE = 0.035
@@ -296,7 +296,11 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     if densities:
         lines.append("Sets of more than four wells are drawn as densities with each well's median; select fewer "
                      "wells to see and click single nanowells.")
-    for i, text in enumerate(reversed(lines[:_FOOTER_LINES])):
+    if len(lines) > _FOOTER_LINES:
+        # Every line here is owed to the reader — a panel not drawn, values not drawn as dots — so the footer
+        # grows to hold them rather than cutting the last (roll-up review X11).
+        fig.subplots_adjust(bottom=0.10 + _FOOTER_BASE + _LINE * len(lines))
+    for i, text in enumerate(reversed(lines)):
         _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=7.5, color=ink if text is line1 else muted,
                       gid="nw-footer-used" if text is line1 else "nw-footer"), muted=text is not line1)
     # The occupancy key (U5): the colours decode only with it, and its title names the baseline in use.

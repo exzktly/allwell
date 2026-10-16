@@ -38,6 +38,9 @@ class CellBrowserState:
     # Caption each crop with the active channel's smFISH spot count (N9). The
     # count is read into CellDescriptor.spot_count at collect time.
     label_spot_count: bool = False
+    #: How many cells matched before the ``MAX_TOTAL`` cap — what the count label
+    #: names as the total, so a capped gallery does not read as the whole match.
+    n_matched: int = 0
     # Source cells from the active scatter gate(s) instead of the criteria (N1).
     # When True, collect_cells uses the scatter gate inclusion mask and the
     # criteria editor is disabled (the gate is the numeric filter).

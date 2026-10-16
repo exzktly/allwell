@@ -1649,9 +1649,14 @@ What this means in use:
   column with more cells draws a sample of 5,000, and the figure says which
   columns did; the fraction, the mean line and the median line still use every
   cell.
-- **The other views that draw individual cells** (Multivariate, the Cell
-  Browser) still hold the cells of every well you select. Selecting most of a
-  very large plate in one of them asks for that many points.
+- **Cell Gating's distribution curves** are drawn through 2,000 of their points
+  when a curve has more cells than that; every point drawn is on the full curve,
+  and the figure says so.
+- **The Cell Browser names how many cells matched.** It shows at most 5,000 cells
+  — the first 5,000 in sort order — and its count now reads, for example,
+  "Showing 50 / 5000 cells (the first 5,000 of 81,200 matching, in sort order)".
+- **Multivariate** still holds the cells of every well you select. Selecting most
+  of a very large plate there asks for that many cells.
 - **If one well alone does not fit**, Review first gives back every well it is
   holding and tries again; if that fails too, the error names the well, its size
   on disk and what was held, instead of a bare out-of-memory message.

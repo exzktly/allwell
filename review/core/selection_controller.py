@@ -290,7 +290,7 @@ def _grouping_variable(ctx) -> str:
     group and no plot changed.
     """
     from review.domain.plot_members import variable_grouping_in_force
-    if not variable_grouping_in_force(ctx):
+    if getattr(ctx, "state", None) is None or not variable_grouping_in_force(ctx):
         return ""
     return str(ctx.state.plot.group_by_variable or "")
 
@@ -785,47 +785,15 @@ def update_active_group_label(ctx) -> None:
 
 
 
-def refresh_sidebar_map_now(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    """Push current selection / rep-set state onto the sidebar plate widget.
+def _plate_colors(ctx, rep_mode: bool, grouping: str) -> dict[str, object]:
+    """``well -> colour`` for the sidebar plate in its current mode.
 
-    Rep-set mode: each set's wells take that set's colour (muted when the
-    set is hidden); the plate runs in "passive" mode so clicks toggle a
-    set's visibility. Per-well mode: selected wells take the accent colour
-    and the plate runs in "select" mode (drag-to-select). Wells with no
-    loaded data are disabled. The count / group-hint labels are updated
-    exactly as before.
+    Under a variable grouping, one colour per value; with groups, one per group;
+    otherwise each selected well's rank colour. Muted where the member is
+    hidden, so the plate is the legend of what a click will toggle.
     """
-    plate = getattr(app, "_sidebar_plate", None)
-    if plate is None:
-        app._sidebar_map_refresh_pending = False
-        return
-
-    # Some tabs need per-well selection even when groups exist:
-    # Home's definition tabs (Cell Gating / Add Prefix / Add Suffix all
-    # need user-chosen wells), and Review CSV (the user has to pick
-    # which wells' rows to load). For those tabs the plate stays in
-    # ``select`` mode and ``_selected_wells`` is honoured.
-    try:
-        tab_name = app._current_centre_tab()
-    except Exception:
-        tab_name = ""
-    # Passive (group-visibility) only when no per-well pane is on screen — must
-    # stay in lock-step with the plate handlers, or the next refresh tick would
-    # repaint passive and wipe the per-well selection the handler just committed.
-    from review.domain.plot_members import plot_replicate_sets
     from review.domain.selections_model import color_for_replicate_set
-
-    rep_mode = _plate_passive_in_group_mode(ctx)
-    grouping = _grouping_variable(ctx) if rep_mode else ""
-    # What the plots draw, from the seam they draw it from. The plate's
-    # highlight and its counts are read off this rather than re-derived from
-    # the groups' ``hidden`` flags, which is how the plate and the plots came to
-    # disagree under a variable grouping: one read the flags, the other values.
-    plotted = list(plot_replicate_sets(ctx)) if rep_mode else []
-    plotted_wells = {w for r in plotted for w in r.wells
-                     if w in app._app_state.dataset.well_paths}
-
+    app = ctx.window  # transitional bridge (A3)
     colors: dict[str, object] = {}
     if grouping:
         # One colour per value, muted when hidden, so the plate is the legend
@@ -855,6 +823,50 @@ def refresh_sidebar_map_now(ctx) -> None:
         for tok in app._app_state.selection.selected_wells:
             if tok in app._app_state.dataset.well_paths:
                 colors[tok] = app._rank_color_well(tok)
+    return colors
+
+
+def refresh_sidebar_map_now(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
+    """Push current selection / rep-set state onto the sidebar plate widget.
+
+    Rep-set mode: each set's wells take that set's colour (muted when the
+    set is hidden); the plate runs in "passive" mode so clicks toggle a
+    set's visibility. Per-well mode: selected wells take the accent colour
+    and the plate runs in "select" mode (drag-to-select). Wells with no
+    loaded data are disabled. The count / group-hint labels are updated
+    exactly as before.
+    """
+    plate = getattr(app, "_sidebar_plate", None)
+    if plate is None:
+        app._sidebar_map_refresh_pending = False
+        return
+
+    # Some tabs need per-well selection even when groups exist:
+    # Home's definition tabs (Cell Gating / Add Prefix / Add Suffix all
+    # need user-chosen wells), and Review CSV (the user has to pick
+    # which wells' rows to load). For those tabs the plate stays in
+    # ``select`` mode and ``_selected_wells`` is honoured.
+    try:
+        tab_name = app._current_centre_tab()
+    except Exception:
+        tab_name = ""
+    # Passive (group-visibility) only when no per-well pane is on screen — must
+    # stay in lock-step with the plate handlers, or the next refresh tick would
+    # repaint passive and wipe the per-well selection the handler just committed.
+    from review.domain.plot_members import plot_replicate_sets
+
+    rep_mode = _plate_passive_in_group_mode(ctx)
+    grouping = _grouping_variable(ctx) if rep_mode else ""
+    # What the plots draw, from the seam they draw it from. The plate's
+    # highlight and its counts are read off this rather than re-derived from
+    # the groups' ``hidden`` flags, which is how the plate and the plots came to
+    # disagree under a variable grouping: one read the flags, the other values.
+    plotted = list(plot_replicate_sets(ctx)) if rep_mode else []
+    plotted_wells = {w for r in plotted for w in r.wells
+                     if w in app._app_state.dataset.well_paths}
+
+    colors = _plate_colors(ctx, rep_mode, grouping)
 
     # smFISH suppresses row/col header selection and forces single-well.
     #

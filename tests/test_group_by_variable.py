@@ -32,6 +32,7 @@ from tests._repo_scan import parse_source, python_sources
 from review.domain import sample_variables as sv
 from review.domain.plot_members import (
     plot_replicate_sets,
+    plot_replicate_sets_loaded,
     variable_replicate_sets,
     wells_without_variable,
 )
@@ -420,3 +421,38 @@ def test_a_users_own_group_still_gets_the_auto_name_substitution(qtbot):
     ctx.state.dataset.well_labels = {}
     assert replicate_display_label(
         ctx, ReplicateSet("1", ["A01", "A03"])) == "A01,A03"
+
+
+# ── visibility at the seam: hidden values and solo wells ────────────────────
+
+def test_a_hidden_value_leaves_the_plots_and_hiding_all_does_not_fall_back():
+    """Hiding every value must empty the plots. Falling back to the user's
+    groups is for a variable that groups nothing, and taking it here would
+    redraw the very groups the user grouped away from."""
+    ctx = _ctx(wells=["A01", "A02", "B01"], variables=[_dose("1", "10")],
+               assignments={"dose": {"A01": "d0", "A02": "d0", "B01": "d1"}},
+               selections=[{"name": "G", "wells": ["A01", "B01"]}], group_by="dose")
+    ctx.state.plot.group_by_hidden_values = {"d0"}
+    assert [(r.name, r.wells) for r in plot_replicate_sets(ctx)] == [("10 µM", ["B01"])]
+    ctx.state.plot.group_by_hidden_values = {"d0", "d1"}
+    assert plot_replicate_sets(ctx) == []
+    # The hidden-inclusive twin still lists every value — it is the roster.
+    assert [r.name for r in plot_replicate_sets_loaded(ctx)] == ["1 µM", "10 µM"]
+
+
+def test_a_solo_well_is_a_set_of_one_after_the_groups():
+    ctx = _ctx(wells=["A01", "A02", "B01", "B02"],
+               selections=[{"name": "G", "wells": ["A01", "A02"]}])
+    ctx.state.selection.active_solo_wells = {"B02", "A01", "B01"}
+    sets = plot_replicate_sets(ctx)
+    # A01 is already drawn inside G, so it is not repeated as a solo member.
+    assert [(r.name, r.wells, r.solo) for r in sets] == [
+        ("G", ["A01", "A02"], False), ("B01", ["B01"], True), ("B02", ["B02"], True)]
+
+
+def test_solo_wells_do_not_join_a_variable_grouping():
+    ctx = _ctx(wells=["A01", "B01"], variables=[_dose("1")],
+               assignments={"dose": {"A01": "d0"}},
+               selections=[{"name": "G", "wells": ["A01"]}], group_by="dose")
+    ctx.state.selection.active_solo_wells = {"B01"}
+    assert [r.name for r in plot_replicate_sets(ctx)] == ["1 µM"]

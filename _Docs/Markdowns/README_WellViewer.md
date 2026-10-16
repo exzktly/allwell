@@ -6604,8 +6604,21 @@ rewritten.
   running is undone.
 - **It never undoes over a changed archive.** If something else has rewritten
   a well's archive since the addition stopped, the undo refuses rather than
-  damage it, keeps its notes beside the archive, and says which archive to
-  check.
+  damage it and says which archive changed. Copying the dataset to another disk
+  or a sync folder does not count as a change. Concatenate's **Undo the
+  unfinished addition…** then offers to **keep the archives as they are**: nothing is
+  restored, the notes are discarded, and the log lists every archive — exactly
+  as it was before, or with the files added since the addition began, by name —
+  and whether `in/acquisition.json` changed. Analyze checks that record against
+  the archives before it runs.
+- **The notes are hidden files in `in/`**: one `.<WELL>.zip.aw-append-journal`
+  per archive the addition touched (a few kilobytes) and `.aw-append-run.json`.
+  Leave them alone; the app removes them. To check an archive by hand, list it
+  (`unzip -l in/A01.zip`, or open it in Finder or Explorer) and look for the new
+  timepoint's file names.
+- **Folder wells take longer to start.** If dataset 2 keeps a well's images in a
+  folder rather than a zip, every file is read once to checksum it before
+  anything is written; the log says so per well, and Stop ends it there.
 - **The saving is on your own disk.** Remote Analyze runs still upload a
   well's whole archive again after it grows, because the remote copy is
   recognised by the archive's size and date (tracker row M24).

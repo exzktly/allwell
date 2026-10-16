@@ -11442,7 +11442,7 @@ is unit-testable without the app (`tests/test_concatenate_compute.py`):
 | `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method, and on dataset 1 and dataset 2 being the same folder), detects dataset 1's timepoint label format, computes the hour offset from the gap (`compute_offset(…, gap_hours=)`), enumerates wells, and returns a `MergePlan`. Also owns the gap model (`default_gap`, `choose_gap`, `gap_preview`, `parse_gap_hours`), `scale_warning`, and `open_pair`, which classifies the pair as analysed, raw, or analysed + raw. The page calls `gap_preview` on every keystroke of the gap field, so it reads the pair through `_open_pair_for_preview`, which keeps the last few pairs' readings (a refusal included) keyed on the path as given and resolved, the sidecars, and each input container's size and modification time (an archive written in place, or an image added to a well folder, moves its own time and not the folder's): a raw pair's schema is inferred by opening every archive, which measured about 75 ms on two 60-well plates, and only the typed gap changes between keystrokes. The run never reads through it. Also owns the structural filename-rewrite gate (`rewrite_member_name`) and the in-progress-marker restart check. |
 | `in_place.py` | Qt-free planner and executor for *Adding in place*: `in_place_refusal` / `structural_refusal` (which pairs qualify), `build_append_plan` (the shared `plan_pair` with dataset 1 as the destination and `MergePlan.in_place` set), `plan_wells` (each well's members and shifted names, refusing collisions before anything is written), `append_in_place` (the journalled, all-or-nothing run, ending with the source-file list) and `recover_dataset` (the undo a crash left, for the worker). |
 | `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with every timepoint-derived value shifted, stitches shared wells (CSV columns unioned like `pipeline/io.merge_records_into_csv`), carries over `cell_overrides.json`, verifies the result, and writes the merged sidecar. Copying goes through `core.containers.copy_container_members`, so a well that comes from one dataset only is a whole-file copy, and a merged well moves each member's compressed bytes straight from whichever side holds it — dataset 2's under a name whose timepoint field has been shifted, dataset 1's under its own. A timepoint offset changes the name in the member's header and nothing else, so there is nothing to decode on either side. It tracks which member names collided and were dropped rather than silently discarding them; a nonzero drop count marks that well `"warned"` and fails `_verify` outright, since a name that "looks fine" in the merged archive can be the wrong dataset's bytes under it (see Verification below). Progress via a `log` callback, a `progress(well, stage)` callback (`"merging"` → `"merged"`/`"warned"`) that drives the live dashboard, and a `sub_progress(well, done, total)` callback that drives that well's dial *within* the stage (fused across the well's two container passes by `core.containers.WellFraction`). `sub_progress` is the one callback deliberately left outside the callback lock: every call names its own well, so interleaving is harmless, and taking the lock once per member would serialise the parallel copy it reports on. Wells merge in parallel through a `ThreadPoolExecutor` (`pick_workers`) — each owns its own destination files, so `log`/`progress` calls before a well's work starts are the only thing serialised behind a lock; aggregating each future's result into `well_stats`/`dropped_members`/etc. and reporting the terminal `"merged"`/`"warned"` state both happen back on `execute_plan`'s own thread as futures complete, so that bookkeeping needs no lock at all. |
-| `worker.py` | Thin `ConcatenateWorker(QThread)`; first undoes any in-place append a crash left in either dataset (`in_place.recover_dataset`), then runs planning + `execute_plan` — or `build_append_plan` + `append_in_place` when constructed with `in_place=True` — off the UI thread, and refuses an empty destination for a new dataset (`Path("")` is the working directory); marshalling progress/result/errors through queued signals (`logLine`, `wellsPlanned`, `wellStage`, `wellFraction`, `succeeded`, `failed`), and forwards `isInterruptionRequested` as a cancellation check. `wellFraction(well, done, total)` is the per-well sub-progress signal every Datasets tool's worker that copies data carries beside `wellStage` (Validate has none — it inspects rather than copies, so a well has no sub-steps); it is what lets a well render as a progress dial rather than a flat in-progress colour. A controller connects it to its dashboard's `set_well_progress` when that dashboard owns a plate, and straight to its page's own plate otherwise — Subset's dashboard is built `show_plate=False`, so `SubsetController._on_well_fraction` drives the picker plate's `setWellFraction` instead. |
+| `worker.py` | Thin `ConcatenateWorker(QThread)`; first undoes any in-place append a crash left in either dataset (`in_place.recover_dataset`), then runs planning + `execute_plan` — or `build_append_plan` + `append_in_place` when constructed with `in_place=True` — off the UI thread, and refuses an empty destination for a new dataset (`Path("")` is the working directory); `UndoAppendWorker` runs the page's confirmed undo (`recover` in `undo`, `force` or `keep` mode) off the UI thread; marshalling progress/result/errors through queued signals (`logLine`, `wellsPlanned`, `wellStage`, `wellFraction`, `succeeded`, `failed`), and forwards `isInterruptionRequested` as a cancellation check. `wellFraction(well, done, total)` is the per-well sub-progress signal every Datasets tool's worker that copies data carries beside `wellStage` (Validate has none — it inspects rather than copies, so a well has no sub-steps); it is what lets a well render as a progress dial rather than a flat in-progress colour. A controller connects it to its dashboard's `set_well_progress` when that dashboard owns a plate, and straight to its page's own plate otherwise — Subset's dashboard is built `show_plate=False`, so `SubsetController._on_well_fraction` drives the picker plate's `setWellFraction` instead. |
 | `view.py` | `ConcatenatePage(QWidget)` — a one-line equation row (dataset 1 + dataset 2 = destination; compact `_FolderField`s showing a basename with the full path on hover, each with its own inline validity hint) above a `ConcatDashboard`, with the raw text log demoted to a collapsible "Show raw log" checkbox (the same furniture as `analyze/log_pane.py`'s log panel, started closed rather than open — see §6.1). Emits `runRequested` / `openInReviewRequested`. Below the equation row a pair of radio buttons chooses where the result goes — `ConcatModeNew` ("Create a new dataset in the destination folder", the default) or `ConcatModeInPlace` ("Add dataset 2 to dataset 1 in place") — with a hint beneath. The in-place button is enabled only when `in_place.in_place_refusal` returns `""` for the two dataset fields, re-asked on every field change (through the same remembered pair reading as the gap preview); otherwise the hint shows the reason. Choosing it disables the destination field, which then plays no part in Run's readiness. `set_in_place` (for a queued job) checks the button even where the gate would not offer it, so a queued in-place job can never quietly become a new-dataset run; the run then refuses with the reason. Beneath the choice, `ConcatUndoAppend` ("Undo the unfinished addition…") is shown only while either picked dataset's `in/` holds in-place journals, and emits `undoAppendRequested(root)`. Then `ConcatGapField`, a line edit pre-filled from `default_gap` with a label naming the source and a preview of dataset 2's resulting timepoint labels; an unreadable gap blocks Run. |
 | `controller.py` | `ConcatenateController` — wires the page to the worker (passing `page.in_place()`), drives the dashboard's per-well and per-run state at each signal, distinguishes a cancelled run from a failed one, and confirms before resuming into a destination with leftovers from an interrupted attempt — a question an in-place run never asks, so `_on_run` launches it directly. The queue spec carries `in_place`, and `show_job` restores it. `_on_undo_append_requested` is the confirmed undo described under *Adding in place*. |
 | `dashboard.py` | `ConcatDashboard`, built on `widgets/plate_progress.py::PlateProgress` (shared with Analyze's `RunDashboard` — see §7). Two independent state axes: **per well** (`pending`/`merging`/`merged`/`warned` — image data survived on one side with no matching measurements CSV) and **per run**, a phase rail (Validate → Merge → Verify → Finalize) with a terminal Done/Failed/Cancelled outcome painted on the headline. The per-run axis exists because `apply._verify` and the cell-override carry-over run *after* every well already shows green — without it, a verification failure would leave the plate looking like a complete success. Every well's terminal states carry a marker glyph too, not just its colour — `merged` gets `✓`, `warned` gets `!` — so state is legible without relying on distinguishing success-green from accent-blue by colour alone. A well still `merging` carries no glyph: it is drawn as a progress dial, and a glyph would sit in the middle of exactly the area the dial fills. `set_done(summary, *, tooltip=None)` shows a caller-shortened headline (via `core.dataset_paths.shorten_headline`, stripping the destination path down to its basename) while the full original text — the one still written to the log — survives as the headline's own tooltip. |
@@ -11538,10 +11538,14 @@ the archive's length; the bytes from the central directory to the end
 (kilobytes, about 100 bytes per member); every old member's offset with a
 SHA-256 over their local headers; and the writer's identity (below). Once the
 append has been fsynced the journal is published again with the archive's new
-size and modification time. Undoing first proves the bytes below the saved
-tail are still the ones journalled — the new size and time when they were
-recorded, and the local-header hash at the old offsets either way — and
-refuses, changing nothing and keeping the journal, when they are not: another
+size and a SHA-256 of its new end (central directory to end of file,
+kilobytes) — content, not modification time, because a copy that does not keep
+times, a sync client or a coarser-time volume changes the time and nothing
+else, and a time check refused such an archive for ever. Undoing first proves
+the bytes below the saved tail are still the ones journalled — the new size and
+end hash when they were recorded, and the local-header hash at the old offsets
+either way — and refuses, changing nothing and keeping the journal, when they
+are not: another
 writer may have rewritten the archive whole since (Analyze folding a loose
 image into it does), and the old tail written into that file reported
 "restored" over an archive that no longer read. Then it writes the tail back
@@ -11561,38 +11565,56 @@ record, or a cancel restores every archive byte for byte and the record, and
 the log lists what was restored — a plate holding the new timepoint in some
 wells only is not a state worth leaving. A failed undo is reported beside the
 original error, whatever ended the run (a cancel included), and the journals
-are kept. The provenance line is written after the commit, so failing to write
+are kept. When any archive cannot be restored, the preserved files are left as
+they are too, so the acquisition record never goes back to describing less than
+the archives still hold. The provenance line is written after the commit, so failing to write
 it is a note in the log, not a failed run.
 
-*Recovery* (`zip_append.recover`) runs where a dataset is opened to be read
-or changed in place: the Concatenate worker (both datasets);
+*Recovery* (`zip_append.recover`) runs where the app opens a dataset to read
+or change it in place: the Concatenate worker (both datasets, raw or analysed);
 `PipelineRunner._run_pipeline_thread`, on the form's input path **before**
 `resolve_dirs` — whose loose-image fold rewrites `in/<WELL>.zip` whole — and
 again on the resolved folder (`zip_append.recover_paths`, lines prefixed
 `[recover]`; a blocked or refused recovery fails the run); and Review's
 `load_controller.load_path` (logged at WARNING; a failure is logged and the
-load continues). The other Datasets tools do not undo anything: every one that
-opens an existing dataset goes through `dataset_paths.resolve_dataset`, which
-refuses — read-only, so it is safe from a page preview — while `in/` holds
-journals (`refuse_unfinished_append`), and Import Loose's in-place mode refuses
-the same way; the importers that write new datasets read source files, not an
-existing `in/`. A run journal present means roll everything back; per-archive
+load continues). Review's undo stays on the GUI thread on purpose: the load
+around it is synchronous there and reads far more, and a worker would let the
+load read archives the undo is still rewriting. The other Datasets tools do not
+undo anything. Subset, Merge Plates and Validate open an analysed dataset
+through `dataset_paths.resolve_dataset`, which refuses — read-only, so it is
+safe from a page preview — while `in/` holds journals
+(`refuse_unfinished_append`); Import Loose's in-place mode refuses the same way;
+Concatenate's raw path (`raw_compute.raw_paths`) does not refuse, because its
+worker recovers both datasets before planning; and the importers that write new
+datasets read source files, not an existing `in/`. The pipeline's own command
+line (`process_microscopy.main`) runs no recovery and refuses an input folder
+holding journals (`zip_append.refuse_if_pending`), naming them. A run journal present means roll everything back; per-archive
 journals without one belong to a committed run and are only removed. Recovery
 claims the folder in the in-process registry for its whole length, so no append
 or second recovery starts in it meanwhile. It leaves alone a run this process
-holds, one recorded on another computer, and one whose process is still alive,
-and says which. "Another computer" is judged by a machine id (`/etc/machine-id`,
-the macOS platform UUID, the Windows `MachineGuid`) when both sides have one,
-because macOS changes `gethostname()` with the network; "alive" means the pid
-exists *and* started when the journal says it did (Linux `/proc`, `ps`
-elsewhere), so a recycled pid is a dead run. Windows records no start time, so
-there a live recycled pid still blocks. For what remains — a computer that is
-gone, a start time that cannot be compared — the Concatenate page shows
-"Undo the unfinished addition…" while either picked dataset holds journals;
-`ConcatenateController` asks once, runs an ordinary recovery, and only if that
-is blocked asks again, naming why, before `recover(…, force=True)`. Forcing
-skips the judgement about the owner, never the checks that the archive is still
-the one journalled.
+holds, one recorded on another computer, one whose process is still alive, and
+an unreadable run journal younger than two minutes with no archive journal yet
+(an append in another process may be writing it: the exclusive-create fallback
+opens the file before writing it), and says which. "Another computer": a
+different machine id (`/etc/machine-id`, the macOS platform UUID, the Windows
+`MachineGuid`), or — except on a Mac, whose platform UUID is its own while its
+hostname follows the network — a different hostname, because Linux VM templates
+and un-sysprepped Windows images share one machine id. "Alive": the pid exists,
+unless its start time differs from the recorded one *and* both tokens come from
+a comparable source (the Linux tick count, or `ps` read with `LC_ALL=C`,
+`TZ=UTC0`); a mismatch between anything else, or a start time that cannot be
+read (Windows), counts as alive. For what remains — a computer that is gone, a
+start time that cannot be compared, an archive changed since — the Concatenate
+page shows "Undo the unfinished addition…" while either picked dataset holds
+journals. `ConcatenateController` runs each step on `UndoAppendWorker`, off the
+UI thread, after asking: an ordinary recovery; if that is blocked, a second
+question naming why before `recover(…, force=True)`; if the undo is *refused*
+as unsafe, a last question offering `recover(…, keep=True)`, which restores
+nothing, leaves every archive and preserved file as it is, removes the
+journals, and logs what each archive now holds — exactly as before, or with
+the members added since the addition began, named — and whether the record
+changed. Forcing skips only the judgement about the owner; it never skips the
+checks that the archive is still the one journalled.
 
 *Re-runs and sources.* `plan_wells` refuses before anything is written when a
 shifted name is already in the archive — a second run against an analysed
@@ -11600,7 +11622,10 @@ dataset 1, whose sidecar has not moved on — or an image's CRC and size are
 already in that well — a second run against a raw dataset 1, whose last
 timepoint has moved on, so the names are new and only the contents repeat. A
 folder well's files are read for their CRC and size at planning, since a folder
-stores none. It names the first five collisions and counts the rest. Dataset 2
+stores none; the log names each folder well as it is read and a Stop ends the
+pass between files, before anything is written. Writing then reads them a
+second time — planning has to know the checksums before it can refuse — and
+verification uses the planned values rather than a third read. It names the first five collisions and counts the rest. Dataset 2
 is never modified: the log ends with every source file whose contents were
 appended and verified, one line per well (a folder well lists each file), and
 dataset 2's acquisition record, so the user can delete them by hand. An

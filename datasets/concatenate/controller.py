@@ -18,16 +18,18 @@ from core.safe import swallowed
 from datasets.core.dataset_paths import shorten_headline
 from datasets.concatenate.concatenate_compute import destination_has_marker
 from datasets.concatenate.view import ConcatenatePage
-from datasets.concatenate.worker import ConcatenateWorker
+from datasets.concatenate.worker import ConcatenateWorker, UndoAppendWorker
 from datasets.concatenate.raw_compute import is_raw_dataset
 from datasets.core.tool_controller import DestinationToolController
-from util.zip_append import AppendJournalError, recover
 
 
 class ConcatenateController(DestinationToolController):
     """Behaviour for the Concatenate Datasets feature."""
 
     _shutdown_label = "concatenate"
+    # Declared on the class as well as set in __init__: _teardown reads it on
+    # app close, and must not fail on a controller whose undo never ran.
+    _undo_worker: UndoAppendWorker | None = None
     _destination_has_marker = staticmethod(destination_has_marker)
 
 
@@ -43,6 +45,8 @@ class ConcatenateController(DestinationToolController):
         self._on_add_to_queue = on_add_to_queue
         self._worker: ConcatenateWorker | None = None
         self._last_result: tuple[bool, str, str] = (False, "", "")
+        self._undo_worker: UndoAppendWorker | None = None
+        self._undo_root, self._undo_mode = "", "undo"
 
         self.page = ConcatenatePage()
         self.page.runRequested.connect(self._on_run)
@@ -89,42 +93,77 @@ class ConcatenateController(DestinationToolController):
     def _on_undo_append_requested(self, root: str) -> None:
         """Undo an unfinished in-place addition in *root*, after the user confirms.
 
-        A first, ordinary undo leaves alone a run that may still be going (on
-        another computer, or in a live process). Only then, and only after a
-        second confirmation that names what was found, is it undone anyway —
-        the one way out for a run whose computer is gone or whose process id
-        the system has given to something else.
+        Three steps, each asked before it is taken, and each run off the UI
+        thread (:class:`~datasets.concatenate.worker.UndoAppendWorker`; an undo
+        reads every member's local header). First an ordinary undo, which
+        leaves alone a run that may still be going. If that is blocked — a run
+        recorded on another computer or by a live process — a second question
+        names why before it is undone anyway. If the undo is *refused* because
+        an archive is no longer the one journalled, the last question offers to
+        keep the archives as they are and discard the notes, and the log then
+        says what each archive holds.
         """
+        if self.is_busy() or self._undo_busy() or not root:
+            return
+        if self._ask("Undo the unfinished addition?",
+                     f"{root} holds an in-place addition that did not finish.\n\nUndoing it "
+                     "puts every archive it touched back exactly as it was before. Continue?"):
+            self._start_undo(root, "undo")
+
+    def _ask(self, title: str, text: str) -> bool:
         from PySide6.QtWidgets import QMessageBox
 
-        if self.is_busy() or not root:
-            return
-        yes_no = QMessageBox.Yes | QMessageBox.No
-        if QMessageBox.question(
-                self.page, "Undo the unfinished addition?",
-                f"{root} holds an in-place addition that did not finish.\n\nUndoing it puts "
-                "every archive it touched back exactly as it was before. Continue?",
-                yes_no, QMessageBox.No) != QMessageBox.Yes:
-            return
-        in_dir = Path(root) / "in"
-        try:
-            result = recover(in_dir)
-            if result.blocked:
-                if QMessageBox.question(
-                        self.page, "Undo it anyway?",
-                        f"{result.blocked}\n\nUndo it anyway? Only do this if no other "
-                        "computer or program is still adding to this dataset.",
-                        yes_no, QMessageBox.No) != QMessageBox.Yes:
-                    return
-                result = recover(in_dir, force=True)
-        except AppendJournalError as exc:
-            self.page.append_log(f"✗ {exc}")
+        return QMessageBox.question(self.page, title, text, QMessageBox.Yes | QMessageBox.No,
+                                    QMessageBox.No) == QMessageBox.Yes
+
+    def _undo_busy(self) -> bool:
+        return self._undo_worker is not None and self._undo_worker.isRunning()
+
+    def _start_undo(self, root: str, mode: str) -> None:
+        self._undo_root, self._undo_mode = root, mode
+        worker = UndoAppendWorker(root, mode)
+        # A bound method of this (GUI-thread) object, so the connection is
+        # queued back onto the UI thread.
+        worker.done.connect(self._on_undo_done)
+        self._undo_worker = worker
+        self.page.set_undo_busy(True)
+        worker.start()
+
+    def _on_undo_done(self, kind: str, payload) -> None:
+        root, mode = self._undo_root, self._undo_mode
+        self.page.set_undo_busy(False)
+        name = Path(root).name
+        if kind == "refused":
+            self.page.append_log(f"✗ {payload}")
+            if mode != "keep" and self._ask(
+                    "Keep the archives as they are?",
+                    f"{payload}\n\nKeep every archive exactly as it is now and discard the "
+                    "unfinished addition's notes? The log will say which wells hold images added "
+                    "since the addition began."):
+                self._start_undo(root, "keep")
+                return
         else:
-            for line in result.lines:
-                self.page.append_log(f"Recovery ({Path(root).name}): {line}")
-            if result.blocked:
-                self.page.append_log(f"✗ {result.blocked}")
+            for line in payload.lines:
+                self.page.append_log(f"Recovery ({name}): {line}")
+            if payload.blocked and mode == "undo" and self._ask(
+                    "Undo it anyway?",
+                    f"{payload.blocked}\n\nUndo it anyway? Only do this if no other computer or "
+                    "program is still adding to this dataset."):
+                self._start_undo(root, "force")
+                return
+            if payload.blocked:
+                self.page.append_log(f"✗ {payload.blocked}")
+            if mode == "keep":
+                self.page.append_log(
+                    f"Recovery ({name}): Analyze checks the acquisition record against these "
+                    "archives before it runs and names any well they disagree on.")
         self.page.datasets_changed_on_disk()
+
+    def _teardown(self) -> None:
+        # The undo worker is this tool's second thread; an app closing under it
+        # must not tear the page down while it is still reporting.
+        if self._undo_busy():
+            self._undo_worker.wait(5000)
 
     # ── job queue ────────────────────────────────────────────────────────────
     def collect_spec(self) -> dict:

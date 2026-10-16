@@ -345,3 +345,22 @@ def test_a_spilled_well_holds_its_montages_on_disk_and_measures_the_same(tmp_pat
         assert Path(montage.image.filename).parent == tmp_path / "spill"
         np.testing.assert_array_equal(montage.image, held.located[tp].montage.image)
     assert spilled.sites == held.sites and spilled.cells == held.cells
+
+
+@pytest.mark.parametrize("diameter_um, finding", [
+    (100.0, None),                                                     # the plate's own: nothing to say
+    (140.0, "The fitted nanowells measure 99.7 um across but the plate format sets 140 um"),
+    (150.0, "No nanowell was fitted, so only the pitch could be checked"),   # past the fit's 30 %: none fitted
+])
+def test_the_format_s_diameter_is_checked_against_the_nanowells_fitted_at_full_resolution(diameter_um, finding):
+    """Roll-up review X25: the format check's diameter half never ran, because locating has no fitted nanowells.
+    It runs on the sites measuring fits at full resolution, and a finding is written on the timepoint."""
+    from tests._nanowell_run_fixture import build_well
+
+    rendered, record = build_well()
+    settings = nr.NanowellSettings("custom", custom=(172.0, diameter_um))
+    outcome = nr.run_well("A01", record, ["T0"], lambda tp, tile: rendered.images.get(tile), settings,
+                          segmenter=threshold_segmenter())
+    notes = outcome.timepoints["T0"]["notes"]
+    format_notes = [n for n in notes if "plate format" in n or "No nanowell was fitted" in n]
+    assert [n[:len(finding)] for n in format_notes] == ([] if finding is None else [finding])

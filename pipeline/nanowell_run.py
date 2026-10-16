@@ -510,6 +510,8 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     that is not ``ok`` (no origin) is measured on the sites actually detected, with no address.
     """
     from pipeline import nanowell_measure as nm
+    from pipeline.nanowell_detect import FITTED, MIN_REFINE_RADIUS_PX
+    from pipeline.nanowell_sites import check_format
     from pipeline.tile_grid import ownership_report
 
     px, montage = located.pixel_size_um, located.montage
@@ -526,6 +528,16 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     fused = set(report.fused_indices)
     out = Measured(located.timepoint)
     geoms, by_tile = _owned_geometries(located, images, settings, centres, report)
+    # The format check's second half, which needs fitted nanowells and so could not run while locating (the montage
+    # is too coarse to fit them): the sites fitted here at full resolution against the setting's diameter. A
+    # finding, not a refusal, because no real plate has yet calibrated it (roll-up review X25).
+    fmt = check_format(located.pitch_um or settings.pitch_um, settings.diameter_um,
+                       [g.radius_um for g in geoms.values() if g.geometry == FITTED])
+    fine_enough = settings.diameter_um / 2 / px >= MIN_REFINE_RADIUS_PX
+    # A fit is kept only within 30 % of the setting's radius, so a setting far off fits nothing at all: at a pixel
+    # size that could fit, no fitted site is itself the finding.
+    if fmt.status == "format_mismatch" or (fmt.ok is None and geoms and fine_enough):
+        out.notes.append(fmt.reason)
     visibility, coverage = _visibility_and_coverage(located, geoms, array_radius_um)
     template, empties = _pooled_template(located, images, settings, geoms, by_tile, visibility, coverage,
                                          earliest_template)

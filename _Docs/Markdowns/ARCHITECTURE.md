@@ -8759,7 +8759,10 @@ fitted nanowells more than 25 % off the setting's diameter are a mismatch. Passi
 test alone proves little (a setting too small for the array passes it), so with no fitted
 nanowell the answer is `unverified` (`ok` is `None`), never `ok`; an unreadable pitch is
 unverified too. A 100 um array read with the 50 um setting fits no site and is unverified:
-only the 50 um array with the 100 um setting is reported as a mismatch.
+only the 50 um array with the 100 um setting is reported as a mismatch. The run asks it twice: while locating
+with the pitch alone (a mismatch refuses the timepoint), and in `measure_timepoint` with the sites fitted at full
+resolution, where a mismatch — or, at a pixel size that could fit, no fitted site at all — is written as a note
+on the timepoint rather than a refusal, until real plates have calibrated it.
 
 **What is and is not established.** All of this is checked on tiles rendered by
 `tests/_nanowell_synth.render_tiles` at both plate formats (100 um, pitch 172 um; 50 um,

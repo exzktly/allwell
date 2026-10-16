@@ -217,3 +217,30 @@ def test_a_nanowell_with_no_owner_tile_says_so_rather_than_blaming_the_archive(t
     metrics["owner"] = np.nan                                       # a fused site: the pipeline gives no owner
     crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
     assert crop.note == "from the montage: the nanowell has no owner tile (it is fused or shared)"
+
+
+def test_a_capture_repaints_the_class_medians_in_their_publication_shades():
+    """Roll-up review X14: the thick medians kept their screen shades in a publication capture, where the 3+
+    median nearly vanished on white. They are paired like the thin lines, so the capture's repaint reaches them."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.colors import to_hex
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.renderer import _OCCUPANCY_INDEX, render_trajectories
+    from ui.theme import Colors, CPub
+    from widgets.plot_card import repaint_theme_pairs
+
+    times = np.array([0.0, 5.0])
+    panel = vc.TrajectoryPanel("A01", times, ["0h", "5h"], [((0, 0), "3+", np.array([3.0, 4.0]))],
+                               {"3+": np.array([3.0, 4.0])}, 0)
+    fig = Figure()
+    render_trajectories(fig, [panel], label="Cell count")
+    ax = fig.axes[0]
+    median = next(c for c in ax.collections if c.get_label() == "3+ at baseline")
+    screen, publication = Colors.occupancy_ramp[_OCCUPANCY_INDEX["3+"]], CPub.occupancy_ramp[_OCCUPANCY_INDEX["3+"]]
+    assert to_hex(screen) != to_hex(publication)
+    repaint_theme_pairs(ax, "screen")
+    assert to_hex(median.get_edgecolor()[0]) == to_hex(screen)
+    repaint_theme_pairs(ax, "publication")
+    assert to_hex(median.get_edgecolor()[0]) == to_hex(publication)

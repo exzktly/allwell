@@ -537,9 +537,14 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
             theme_paired_colours(coll, screen=("none", screen[1]), publication=("none", publication[1]))
             ax.autoscale_view()
         for cls, median in panel.class_medians.items():
+            # A paired collection, like the thin lines, so a capture repaints it: drawn as a plain line it kept its
+            # screen shade on publication white, where the 3+ median nearly vanished (roll-up review X14).
             screen, publication = _occupancy_colours([cls])
-            colour = (publication if _is_publication(ax) else screen)[1][0]
-            ax.plot(panel.times, median, color=colour, linewidth=2.4, zorder=4, label=f"{cls} at baseline")
+            colour = (publication if _is_publication(ax) else screen)[1]
+            thick = LineCollection([np.column_stack([panel.times, median])], colors=colour, linewidths=2.4,
+                                   zorder=4, label=f"{cls} at baseline")
+            ax.add_collection(thick)
+            theme_paired_colours(thick, screen=("none", screen[1]), publication=("none", publication[1]))
         ax.set_xticks(panel.times)
         ax.set_xticklabels(panel.labels, fontsize=7, rotation=0)
         _ink(ax.set_title(panel.well, fontsize=9, loc="left", color=ink))

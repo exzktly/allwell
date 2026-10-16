@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from review.core.ui_helpers import EmptyReason
 
+from domain.nanowell_roster import mixed_rules_note
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
@@ -308,6 +309,14 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     (tracker I9), which the Distribution view states the fraction responding at.
     """
     wells = [w for members in groups.values() for w in members]
+    # Wells whose rosters two versions decided differently count their rim differently; the figure says so (X35a-R4).
+    mixed = mixed_rules_note({w: data.roster_rules.get(w) for w in wells if w in getattr(data, "roster_rules", {})})
+    note = " ".join(filter(None, [note, f"{mixed}." if mixed else ""]))
+    # A well analysed again when a timepoint was added holds rewritten earlier rows; the figure says so (X35a-R8).
+    again = sorted(w for w in set(wells) if w in getattr(data, "reanalysed", {}))
+    if again:
+        note = " ".join(filter(None, [note, f"{', '.join(again)}: analysed again over every timepoint when a timepoint "
+                                            "was added, so their earlier timepoints' numbers were rewritten."]))
     if view == "array_map":
         model = vc.map_model(metrics, data, well, well_timepoint, metric_column(metric, channel))
         if model is None:

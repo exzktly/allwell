@@ -20,6 +20,7 @@ import json
 import zipfile
 from pathlib import Path
 
+from domain.nanowell_roster import mixed_rules_note, roster_rule
 from pipeline.incremental_keys import fov_keys_from_member_names
 
 NANOWELL_DIRNAME = "nanowells"
@@ -182,6 +183,31 @@ def carried_nanowell_block(block):
     return {k: v for k, v in block.items() if k != "reanchor"}
 
 
+def well_roster_rules(out_dir) -> dict:
+    """``well -> roster rule`` of every grid record in *out_dir*'s ``nanowells/`` (``domain.nanowell_roster``)."""
+    folder = nanowell_dir(out_dir)
+    rules = {}
+    for grid_path in sorted(folder.glob("*_grid.json")) if folder.is_dir() else ():
+        grid, problem = _read_json(grid_path)
+        if not problem and isinstance(grid, dict):
+            rules[grid_path.name[: -len("_grid.json")]] = roster_rule(grid.get("array_radius"))
+    return rules
+
+
+def well_reanalysed(out_dir) -> dict:
+    """``well -> why`` for every well whose grid record says an incremental run analysed it again over every
+    timepoint (``array_radius.reanalysed_because``, tracker X35a-R8)."""
+    folder = nanowell_dir(out_dir)
+    out = {}
+    for grid_path in sorted(folder.glob("*_grid.json")) if folder.is_dir() else ():
+        grid, problem = _read_json(grid_path)
+        reason = ((grid.get("array_radius") or {}).get("reanalysed_because")
+                  if not problem and isinstance(grid, dict) else None)
+        if reason:
+            out[grid_path.name[: -len("_grid.json")]] = reason
+    return out
+
+
 def nanowell_block_conflict(info1: dict, info2: dict) -> str | None:
     """Why two datasets' nanowell analyses cannot share one plate, or ``None`` when they can.
 
@@ -265,6 +291,13 @@ def nanowell_findings(paths, in_zips: dict, schema, sep: str) -> list[tuple[str,
                 findings.append(("warning", "nanowell_timepoint_missing", f"{well}: input timepoint {tp!r} was never analysed"))
             for tp in sorted(set(blocks) - archive):
                 findings.append(("error", "nanowell_timepoint_unknown", f"{well}: the tables name timepoint {tp!r}, which the input archive does not hold"))
+    note = mixed_rules_note(well_roster_rules(paths.out_dir))
+    if note:
+        findings.append(("warning", "nanowell_roster_rules_mixed", note))
     if not findings:
         findings.append(("info", "nanowell_present", "Nanowell tables match the grid record and the input archives"))
+    # A well an incremental run analysed again over every timepoint has rewritten rows for its earlier timepoints
+    # (tracker X35a-R8): numbers taken from it before then are not the ones it holds now.
+    for well, reason in well_reanalysed(paths.out_dir).items():
+        findings.append(("info", "nanowell_reanalysed", f"{well}: {reason}"))
     return findings

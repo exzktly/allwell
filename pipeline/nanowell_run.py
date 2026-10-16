@@ -733,6 +733,7 @@ class WellOutcome:
     located: dict = field(default_factory=dict)          # timepoint -> Located (not written; the end-of-run pass reads it)
     notes: list = field(default_factory=list)
     earliest_template: tuple | None = None               # (timepoint, Template): the first own template in time
+    roster_change: str = ""                              # a kept roster the new evidence changes (X35a-R1): why
 
 
 _DRIFT_NOTE = "The empty-nanowell template departs from the earliest timepoint's"
@@ -1128,12 +1129,165 @@ def _settle_inferred(outcome, timepoints, anchored, unaddressed, fixed_roster, r
             [tp for tp in timepoints if tp in unaddressed or tp in ambiguous], reference_tp, shifts)
 
 
-def own_array_model(located: Located) -> tuple[float | None, frozenset | None]:
-    """``(radius, roster)`` a single timepoint is measured against on its own (Test detection): an inferred array's
-    own sites (none without an origin), otherwise its boundary's radius."""
+#: The roster rule a default (hexagonal lattice in a circle) well's grid record names when it keeps its roster as a
+#: set of addresses (tracker X35a). A record without one was analysed with the disk rule — every site within the
+#: shared radius plus a quarter pitch — and keeps it.
+ROSTER_RULE_EVIDENCE = "evidence"
+
+
+@dataclass
+class CircleEvidence:
+    """What a default well's timepoints show about which lattice sites its circle holds (tracker X35a)."""
+    roster: frozenset                                   # the sites the evidence supports
+    own: dict                                           # timepoint -> the sites its own evidence supports
+    misanchored: dict                                   # timepoint -> (dq, dr): its nanowells sit that step off
+
+
+def _misanchored(detected: dict, kept=()) -> dict:
+    """``timepoint -> step`` for each timepoint whose detected sites match the other timepoints' better moved by one
+    lattice step than where they are: its origin is a step off (review X35a-R2). A timepoint whose sites the others
+    do not overlap better anywhere is not listed. With two timepoints a step apart, both are listed: which of them
+    is wrong cannot be told. *kept* are the sites an earlier run's kept timepoints detected: the timepoints of an
+    incremental run are judged against them too, and they are never listed themselves (review X35a-R7)."""
+    steps = [(dq, dr) for dq in (-1, 0, 1) for dr in (-1, 0, 1)]
+    out = {}
+    for tp, mine in detected.items():
+        others = set(kept).union(*(d for t, d in detected.items() if t != tp))
+        if not others:
+            continue
+        overlap = {s: len({(q + s[0], r + s[1]) for q, r in mine} & others) for s in steps}
+        best = max(steps, key=lambda s: (overlap[s], s == (0, 0)))
+        if best != (0, 0) and overlap[best] > overlap[(0, 0)]:
+            out[tp] = best
+    return out
+
+
+def _evidence_roster(located: dict, anchored, radius_um: float, settings: NanowellSettings,
+                     kept: dict | None = None) -> CircleEvidence:
+    """The sites of a circular array the evidence supports (tracker X35a), and each timepoint's own share of it.
+
+    The disk rule, every site within the shared radius plus a quarter pitch, added a ring the plate does not have
+    (18 sites on a rendered 265-site array, every one written ``occluded``) and, where the fitted circle ran through
+    the midpoints of a hexagonal outline, left out six detected nanowells at its corners (a 61-site 50 um array). No
+    tolerance on the radius separates the two: a drawn site of an array the image cuts lay 0.24 pitch beyond the
+    fitted radius, a phantom 0.15 beyond it on another plate. So a site belongs to the array when it lies a quarter
+    pitch inside the circle; or a nanowell was detected there at some anchored timepoint (within a pitch of the
+    rim); or it lies within the old quarter pitch of the rim and no anchored timepoint imaged its whole disk, so
+    nothing could have shown it absent. A site within that band whose whole disk was imaged and where no nanowell was
+    ever detected is floor, and is not in the roster. The first anchored timepoint's lattice measures the distances.
+
+    A timepoint whose detections sit a lattice step from the other timepoints' (:func:`_misanchored`) is anchored a
+    step off, and its detections decide nothing: taken at face value one such timepoint put 17 rows of floor into
+    every timepoint of a well (review X35a-R2). *kept* is an earlier run's evidence for the timepoints it kept
+    (``{"detected": sites, "imaged": sites}``, from its rows), so that an incremental run decides the roster a run
+    over every timepoint would (review X35a-R1).
+    """
+    from pipeline.nanowell_lattice import _disk_covered, roster as disk_roster
+    from pipeline.nanowell_lattice import TileRectangle
+
+    first = located[anchored[0]]
+    pitch = float(first.fit.pitch)
+    candidates = disk_roster(first.fit, first.origin_montage, radius_um + 0.75 * pitch)
+    basis = np.column_stack((first.fit.a1, first.fit.a2))
+    distance = {a: float(np.linalg.norm(basis @ np.asarray(a, dtype=float))) for a in candidates}
+    found = {tp: {(e.q, e.r) for e in located[tp].indexed if e.q is not None} for tp in anchored}
+    kept = kept or {}
+    misanchored = _misanchored(found, kept.get("detected", ())) if len(anchored) > 1 or kept.get("detected") else {}
+    band = {a for a in candidates if radius_um - pitch / 4 < distance[a] <= radius_um + pitch / 4}
+    imaged = {tp: set() for tp in anchored}
+    for tp in anchored:
+        loc = located[tp]
+        tiles = [TileRectangle(p.tile_id, loc.positions[p.tile_id][0], loc.positions[p.tile_id][1],
+                               loc.positions[p.tile_id][0] + p.width_um, loc.positions[p.tile_id][1] + p.height_um)
+                 for p in loc.plan.placements]
+        tp_basis = np.column_stack((loc.fit.a1, loc.fit.a2))
+        origin = np.asarray(loc.origin_montage) + np.asarray(loc.montage.origin_um)
+        for a in band:
+            x, y = origin + tp_basis @ np.asarray(a, dtype=float)
+            if _disk_covered(x, y, settings.diameter_um / 2, tiles):
+                imaged[tp].add(a)
+    # Under the evidence rule a band site is left out of a roster only when its whole disk was seen empty, and the
+    # rows an earlier run kept exist only for its roster's sites, so a band site absent from the kept roster was seen
+    # whole: without this, a new timepoint that does not image it whole put it back, and every incremental run of the
+    # well re-analysed it to the same roster with a reason that said it had grown (review X35a-R6).
+    kept_out = band - set(map(tuple, kept["roster"])) if kept.get("roster") is not None else set()
+
+    def supported(detected, seen_whole):
+        return frozenset(a for a in candidates
+                         if distance[a] <= radius_um - pitch / 4
+                         or (a in detected and distance[a] <= radius_um + pitch)
+                         or (a in band and a not in seen_whole))
+
+    trusted = [tp for tp in anchored if tp not in misanchored]
+    detected = set(kept.get("detected", ())).union(*(found[tp] for tp in trusted))
+    seen_whole = set(kept.get("imaged", ())).union(kept_out, *(imaged[tp] for tp in trusted))
+    return CircleEvidence(supported(detected, seen_whole), {tp: supported(found[tp], imaged[tp]) for tp in anchored},
+                          misanchored)
+
+
+def _circle_roster(outcome, anchored, radius_um, settings, fixed_roster, fixed_radius_um, kept=None):
+    """``(roster, own, reference)`` of a default well (tracker X35a): a kept set of addresses; or, for a well first
+    analysed before sets were kept (a radius and no roster), ``(None, None, None)`` — the disk rule it was analysed
+    with, so its new timepoints get the same roster as its old ones; or, for a fresh well, the sites the evidence
+    supports. A set is recorded in ``outcome.radius`` with its rule.
+
+    *own* is what each anchored timepoint's own evidence supports when one of them is anchored a step off (it is
+    then a ``roster_mismatch`` against *reference*, the first that is not, and says why); otherwise the roster for
+    each, since a rim nanowell a bubble hides at one timepoint is still that timepoint's (review X35a-R2). With a
+    kept roster and *kept* evidence, the evidence over the kept and the new timepoints is compared with the kept
+    roster, and a difference is put in ``outcome.roster_change`` for the caller to re-run the well over every
+    timepoint: an incremental run must give the roster a run over all of them would (review X35a-R1)."""
+    if fixed_roster:
+        roster = frozenset(tuple(map(int, a)) for a in fixed_roster)
+        evidence = None
+        if kept is not None and anchored:
+            evidence = _evidence_roster(outcome.located, anchored, radius_um, settings, {**kept, "roster": roster})
+            added, removed = evidence.roster - roster, roster - evidence.roster
+            if added or removed:
+                outcome.roster_change = (f"the new timepoints' evidence adds {len(added)} nanowell(s) to the roster the "
+                                         f"earlier run kept and removes {len(removed)}")
+    elif fixed_radius_um is None and anchored:
+        evidence = _evidence_roster(outcome.located, anchored, radius_um, settings)
+        roster = evidence.roster
+    else:
+        return None, None, None
+    outcome.radius.update(roster=[list(a) for a in sorted(roster)], roster_rule=ROSTER_RULE_EVIDENCE)
+    if evidence is None or not evidence.misanchored:
+        return roster, {tp: roster for tp in anchored}, None
+    for tp, step in evidence.misanchored.items():
+        outcome.located[tp].notes.append(
+            f"Its nanowells sit {step} lattice steps from the other timepoints': its origin is probably wrong, so its "
+            "addresses may name neighbouring nanowells, and its detections were not used to decide the well's rim")
+    # Against the first that is not off; in an incremental run, the earlier run's reference (None here).
+    reference = None if fixed_roster else next((tp for tp in anchored if tp not in evidence.misanchored), None)
+    return roster, {tp: (evidence.own[tp] if tp in evidence.misanchored else roster) for tp in anchored}, reference
+
+
+def _checkpoint_key(outcome, tp, located, radius_um, roster, settings, shifts) -> dict:
+    """What a timepoint's checkpoint must match to be taken back: everything its rows depend on beyond the settings
+    the store is keyed on — the radius, the record, how it was located, and the roster: for an inferred well with the
+    step its addresses were moved by and the diameter (X35-R1, R5, R14); for a default well with its rule, so a
+    disk-rule checkpoint is never taken back into an evidence-rule well (X35a)."""
+    key = {"radius_um": radius_um, "record_digest": outcome.timepoints[tp]["record_digest"],
+           "located": [located.status, located.origin_method]}
+    if roster is not None and settings.infer:
+        key.update(roster=outcome.radius["roster"], origin_shift=list(shifts.get(tp, (0, 0))),
+                   diameter_used_um=outcome.radius["diameter_used_um"])
+    elif roster is not None:
+        key.update(roster=outcome.radius["roster"], roster_rule=ROSTER_RULE_EVIDENCE)
+    return key
+
+
+def own_array_model(located: Located, settings: NanowellSettings | None = None) -> tuple[float | None, frozenset | None]:
+    """``(radius, roster)`` a single timepoint is measured against on its own (Test detection), as a run would: an
+    inferred array's own sites (none without an origin), otherwise its boundary's radius and, when it is anchored
+    and *settings* are given, the sites the evidence supports (:func:`_evidence_roster`)."""
     if located.array_sites is not None:
         return None, (_own_roster(located) if located.origin_montage is not None else frozenset())
-    return located.boundary["radius_um"], None
+    radius = located.boundary["radius_um"]
+    if settings is None or located.origin_montage is None:
+        return radius, None
+    return radius, _evidence_roster({located.timepoint: located}, [located.timepoint], radius, settings).roster
 
 
 def _consistency(located: dict, anchored, radius_um: float | None, reference: dict | None,
@@ -1177,7 +1331,8 @@ def _spill_montage(montage, folder: Path, stem: str):
 def run_well(well: str, record: dict, timepoints, load_phase, settings: NanowellSettings, *,
              segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
              expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None,
-             reference: dict | None = None, earliest_template=None, spill_dir=None, fixed_roster=None) -> WellOutcome:
+             reference: dict | None = None, earliest_template=None, spill_dir=None, fixed_roster=None,
+             kept_evidence: dict | None = None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -1196,7 +1351,9 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     holds them all at once (~32 MB a timepoint at the 4096-pixel cap; roll-up review X23). Spilled, each is a
     read-only memory map of a file there, which the caller removes with the rest of its scratch. *fixed_roster* is
     the earlier run's shared roster of an inferred array that is not a circle (``[[q, r], ...]``), the counterpart of
-    *fixed_radius_um* (tracker X35).
+    *fixed_radius_um* (tracker X35). *kept_evidence* is the evidence an earlier run's kept timepoints left about a
+    default well's rim (``{"detected": sites, "imaged": sites}``): when the new timepoints change the roster it implies,
+    ``outcome.roster_change`` says how, and the caller re-runs the well over every timepoint (tracker X35a-R1).
     """
     outcome = WellOutcome(well)
     timepoints = list(timepoints)
@@ -1236,6 +1393,9 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
                 outcome.timepoints[tp].update(status=NO_LATTICE, reason="No timepoint fitted an array boundary, so "
                                                                        "no roster radius could be shared")
             return outcome
+        roster, own, circle_reference = _circle_roster(outcome, anchored, radius_um, settings, fixed_roster,
+                                                       fixed_radius_um, kept_evidence)
+        reference_tp = circle_reference or reference_tp
 
     consistency = _consistency(outcome.located, anchored, radius_um, reference, own, reference_tp,
                                frozenset(map(tuple, fixed_roster)) if fixed_roster and own is not None else None)
@@ -1246,11 +1406,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     measurable = set(anchored) | set(unaddressed)
     for tp in [t for t in timepoints if t in measurable]:          # in time, so "earliest" means it
         located = outcome.located[tp]
-        key = {"radius_um": radius_um, "record_digest": outcome.timepoints[tp]["record_digest"],
-               "located": [located.status, located.origin_method]}
-        if roster is not None:                  # the roster, and the step the addresses were moved by (X35-R1)
-            key.update(roster=outcome.radius["roster"], origin_shift=list(shifts.get(tp, (0, 0))),
-                       diameter_used_um=outcome.radius["diameter_used_um"])
+        key = _checkpoint_key(outcome, tp, located, radius_um, roster, settings, shifts)
         measured = checkpoint.load(tp, key) if checkpoint is not None else None
         if measured is None:
             images = _images_for(record, well, tp, load_phase)

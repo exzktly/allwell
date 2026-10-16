@@ -3,6 +3,7 @@ V6, V7a), on a real nanowell run's output where the convention or the files matt
 
 from __future__ import annotations
 
+import json
 import math
 import shutil
 import zipfile
@@ -300,3 +301,33 @@ def test_each_timepoint_is_laid_out_on_the_lattice_its_own_grid_record_names(tmp
         model = vc.map_model(metrics, data, "A01", tp, "n")
         at = {site[1:]: (x, y) for site, x, y in zip(model.sites, model.x, model.y)}
         assert at[(1, 1)] == pytest.approx(expected), tp
+
+
+def test_a_figure_of_wells_whose_rosters_two_versions_decided_says_so(tmp_path):
+    """Tracker X35a-R4: Review counts each well's rim as its own rule did; a figure drawing both kinds names them."""
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import controller
+
+    rows = [_row("t_c", 0, 0, n=1, c=0.1), _row("t_c", 1, 0, n=3, c=0.1)]
+    data = load_nanowell_data(_dataset(tmp_path, {"A01": rows, "B01": rows}, starts={"t_c": STARTS["t_c"]}))
+    for well, block in (("A01", {"radius_um": 900.0}), ("B01", {"radius_um": 900.0, "roster": [[0, 0], [1, 0]],
+                                                                  "roster_rule": "evidence",
+                                                                  "reanalysed_because": "a new timepoint"})):
+        path = data.out_dir / "nanowells" / f"{well}_grid.json"
+        grid = json.loads(path.read_text())
+        grid["array_radius"] = block
+        path.write_text(json.dumps(grid))
+    data = load_nanowell_data(data.out_dir)
+    assert data.roster_rules == {"A01": "disk", "B01": "evidence"}
+    notes = []
+    real = controller.render_position
+    controller.render_position = lambda fig, series, **k: notes.append(k.get("note"))
+    try:
+        controller.draw_view(Figure(), "position", site_metrics(data), data, groups={"g": ["A01", "B01"]},
+                             metric="n", channel=None, axis="groups", timepoint="t_c", control="", baseline="",
+                             cohort=False, well="A01", well_timepoint="t_c")
+    finally:
+        controller.render_position = real
+    assert "Wells A01 keep an earlier version's nanowell roster" in notes[0]
+    assert "B01: analysed again over every timepoint when a timepoint was added" in notes[0]       # X35a-R8

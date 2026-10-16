@@ -1,5 +1,6 @@
 """The (well, timepoint) task body on rendered tiles, against the array that was drawn."""
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -424,3 +425,332 @@ def test_a_plate_is_located_at_its_own_pitch_and_pixel_size(pitch_um, diameter_u
         addressed += 1
         wrong += (entry.q, entry.r) != truth[tuple(sites[np.argmin(np.linalg.norm(sites - point, axis=1))])]
     assert wrong == 0 and addressed >= 0.9 * len(located.indexed)
+
+
+# ── tracker X35a: the circle's roster holds the drawn sites and no others ────
+def _x34_plate(pitch_um, diameter_um, px):
+    from tests._nanowell_run_fixture import record_for
+    from tests._nanowell_synth import TilePlan, render_tiles
+
+    plan = TilePlan(2, 2, (900, 900), 0.1, px)
+    rendered = render_tiles(plan, pitch_um=pitch_um, diameter_um=diameter_um,
+                            radius_um=0.26 * (plan.step_um[0] + plan.extent_um[0]), rotation_deg=7.0,
+                            noise_sigma=0.05, blur_px=1.0, seed=1)
+    return rendered, record_for(rendered)
+
+
+@pytest.mark.parametrize("make, settings", [
+    (lambda: build_well(), SETTINGS),                                         # 283 rows by the disk rule
+    (lambda: build_well(rotation=13.0, seed=3), SETTINGS),
+    (lambda: build_well(rotation=-20.0, seed=3), SETTINGS),
+    (lambda: build_well(array_shift_um=(1500.0, 0.0), radius_fraction=0.3), SETTINGS),   # cut by the image
+    (lambda: _x34_plate(143.0, 50.0, 1.3), nr.NanowellSettings("50um")),       # disk rule lost 6 detected corners
+    (lambda: _x34_plate(120.0, 70.0, 1.3), nr.NanowellSettings("custom", custom=(120.0, 70.0))),
+    (lambda: _x34_plate(300.0, 200.0, 2.0), nr.NanowellSettings("custom", custom=(300.0, 200.0))),
+], ids=["fixture", "rot13", "rot-20", "clipped", "50um-1.3", "custom-120-1.3", "custom-300-2.0"])
+def test_a_circular_array_s_roster_is_every_drawn_site_and_no_other(make, settings):
+    """Tracker X35a. The disk rule (the shared radius plus a quarter pitch) wrote 18 rows of floor beyond the rim of the
+    265-site fixture, every one ``occluded``, and on the 50 um plate left out six corner nanowells it had detected.
+    No tolerance on the radius separates the two (a drawn site of the cut array lies 0.24 pitch beyond the fitted
+    radius, a phantom elsewhere 0.15), so the rim is decided by evidence: detected, or never wholly imaged."""
+    rendered, record = make()
+    outcome = nr.run_well("A01", record, ["T0"], _loader(rendered), settings, segmenter=threshold_segmenter())
+    assert outcome.timepoints["T0"]["status"] == nr.OK
+    assert {(r["nw_q"], r["nw_r"]) for r in outcome.sites} == set(rendered.array.addresses)
+    assert outcome.radius["roster_rule"] == nr.ROSTER_RULE_EVIDENCE
+    assert sorted(map(tuple, outcome.radius["roster"])) == sorted(rendered.array.addresses)
+
+
+def _plate_of(tmp_path, items, record):
+    """``plate/in`` holding one well archive of every ``(token, rendered)`` in *items*, and *record*."""
+    import zipfile
+
+    from tifffile import imwrite
+
+    from util.acquisition_record import write_record_file
+
+    plate = tmp_path / "plate"
+    (plate / "in").mkdir(parents=True, exist_ok=True)
+    tif = tmp_path / "frame.tif"
+    with zipfile.ZipFile(plate / "in" / "A01.zip", "w") as zf:
+        for token, rendered in items:
+            for fov, image in rendered.images.items():
+                for channel, frame in (("PHASE", image), ("GFP", image * 0 + 10.0)):
+                    imwrite(str(tif), frame.astype("float32"))
+                    zf.write(tif, f"exp_{channel}_A01_{fov}_{token}.tif")
+    write_record_file(plate / "in" / "acquisition.json", record)
+    return plate
+
+
+def test_a_well_analysed_with_the_disk_rule_keeps_it_for_its_new_timepoints(tmp_path, monkeypatch):
+    """An incremental run of a dataset analysed before X35a (its record holds a radius and no roster) addresses the new
+    timepoint onto the roster its old timepoints have — the disk rule's 283 sites — not a different count; a fresh run
+    of the same plate writes 265 at both."""
+    from tests.test_nanowell_cli import _rows, _run_main
+
+    first, record = build_well(timepoint="0h")
+    second, later = build_well(rotation=9.0, array_shift_um=(120.0, -80.0), seed=2, timepoint="24h")
+    plate = _plate_of(tmp_path, [("0h", first)], record)
+    with monkeypatch.context() as old_code:                 # the disk rule, as the code before X35a ran it
+        old_code.setattr(nr, "_circle_roster", lambda *a, **k: (None, None, None))
+        out = _run_main(monkeypatch, plate, "--nanowell_format", "100um")
+    assert "roster" not in json.loads((out / "nanowells" / "A01_grid.json").read_text())["array_radius"]
+    record["timepoints"].update(later["timepoints"])
+    record["tiles"] += later["tiles"]
+    _plate_of(tmp_path, [("0h", first), ("24h", second)], record)
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    rows = _rows(out, "A01.csv")
+    assert [sum(r["timepoint"] == tp for r in rows) for tp in ("0h", "24h")] == [283, 283]
+    assert "roster_rule" not in json.loads((out / "nanowells" / "A01_grid.json").read_text())["array_radius"]
+    fresh = _run_main(monkeypatch, _plate_of(tmp_path / "fresh", [("0h", first), ("24h", second)], record),
+                      "--nanowell_format", "100um")
+    assert [sum(r["timepoint"] == tp for r in _rows(fresh, "A01.csv")) for tp in ("0h", "24h")] == [265, 265]
+
+
+class _Checkpoints:
+    """A checkpoint store that gives a timepoint back only under the key it was saved with, as the real one does."""
+
+    def __init__(self):
+        self.saved = {}
+
+    def save(self, tp, key, measured):
+        self.saved[tp] = (json.dumps(key, sort_keys=True, default=str), measured)
+
+    def load(self, tp, key):
+        stored = self.saved.get(tp)
+        return stored[1] if stored and stored[0] == json.dumps(key, sort_keys=True, default=str) else None
+
+
+def test_a_disk_rule_checkpoint_is_not_taken_back_into_an_evidence_rule_well():
+    """X35a's reuse key: a timepoint measured under the disk rule (killed before X35a, resumed after) has the same
+    radius and record digest, and must not come back with its 283 rows into a well whose roster is 265."""
+    rendered, record = build_well()
+    checkpoints = _Checkpoints()
+    run = lambda: nr.run_well("A01", record, ["T0"], _loader(rendered), SETTINGS,     # noqa: E731
+                              segmenter=threshold_segmenter(), checkpoint=checkpoints)
+    with pytest.MonkeyPatch.context() as old_code:
+        old_code.setattr(nr, "_circle_roster", lambda *a, **k: (None, None, None))
+        assert len(run().sites) == 283
+    assert len(run().sites) == 265
+
+
+def test_a_checkpoint_of_a_timepoint_measured_under_another_registration_step_is_not_taken_back():
+    """Tracker X35-R5. A resumed inferred well whose registration step for a timepoint differs from the one it was
+    checkpointed under (the reference timepoint's evidence changed between kill and resume) has the same radius,
+    roster and record digest; the step alone tells the stale measurement apart, so it is in the key."""
+    from tests.test_nanowell_infer import INFER, _SQUARE, _corner, _timepoints
+
+    clean, _ = build_well(rotation=-15.0, timepoint="T0", seed=1, **_SQUARE)
+    record, sources = _timepoints(_corner(clean))
+    load = lambda tp, tile: sources[tp].images.get(tile)                                 # noqa: E731
+    checkpoints = _Checkpoints()
+    first = nr.run_well("A01", record, list(sources), load, INFER, segmenter=threshold_segmenter(),
+                        checkpoint=checkpoints)
+    assert first.timepoints["T1"]["origin_shift"] == [-1, -1]
+    key, measured = checkpoints.saved["T1"]
+    # The key that timepoint was checkpointed under when its step was (0, 0): everything the same but the step, where
+    # the key carries one (a key without it cannot tell the two apart, which is the defect this pins).
+    stale = json.loads(key)
+    if "origin_shift" in stale:
+        stale["origin_shift"] = [0, 0]
+    marker = nr.Measured("T1", sites=[{"timepoint": "T1", "nw_q": 99, "nw_r": 99}], template=measured.template)
+    checkpoints.saved["T1"] = (json.dumps(stale, sort_keys=True, default=str), marker)
+    again = nr.run_well("A01", record, list(sources), load, INFER, segmenter=threshold_segmenter(),
+                        checkpoint=checkpoints)
+    assert (99, 99) not in {(r["nw_q"], r["nw_r"]) for r in again.sites if r["timepoint"] == "T1"}
+
+
+# ── review X35a-R1..R3: the rim decided over every timepoint, whichever run sees it ─
+def _rim(rendered, n=6):
+    """The *n* drawn sites farthest from the array's centre."""
+    basis = np.column_stack((rendered.array.a1, rendered.array.a2))
+    return sorted(rendered.array.roster, key=lambda a: -np.linalg.norm(basis @ np.asarray(a, float)))[:n]
+
+
+def _rim_dark_well():
+    """T0 with its six outermost nanowells dark (a bubble along the rim), T1 the plate clean: ``(record, sources)``."""
+    probe, _ = build_well(rotation=7.0, timepoint="T0")
+    first, record = build_well(rotation=7.0, timepoint="T0", cells=10, dark_sites=_rim(probe))
+    second, later = build_well(rotation=9.0, timepoint="T1", seed=2, cells=10)
+    record["timepoints"].update(later["timepoints"])
+    record["tiles"] += later["tiles"]
+    return record, {"T0": first, "T1": second}, _rim(probe)
+
+
+def test_a_rim_nanowell_hidden_at_one_timepoint_and_seen_at_another_is_in_the_roster():
+    """X35a-R3: every earlier case was one timepoint, so the union of detections over timepoints was untested."""
+    record, sources, rim = _rim_dark_well()
+    outcome = nr.run_well("A01", record, ["T0", "T1"], lambda tp, tile: sources[tp].images.get(tile), SETTINGS,
+                          segmenter=threshold_segmenter())
+    drawn = set(sources["T0"].array.addresses)
+    assert sorted(map(tuple, outcome.radius["roster"])) == sorted(drawn)
+    rows = {(r["timepoint"], r["nw_q"], r["nw_r"]): r for r in outcome.sites}
+    assert all(rows[("T0", *a)]["state"] == "occluded" and rows[("T1", *a)]["detected"] for a in rim)
+
+
+def test_an_incremental_run_gives_the_rim_a_run_over_every_timepoint_gives(tmp_path, monkeypatch):
+    """X35a-R1: T0 alone (rim dark) then T1 added incrementally kept T0's 259-site roster for T1, silently different
+    from the full run's 265. The new timepoint's evidence changes the kept roster, so the well is analysed again over
+    every timepoint, and its record says why."""
+    from tests.test_nanowell_cli import _rows, _run_main
+
+    record, sources, rim = _rim_dark_well()
+    tokens = {"T0": "0h", "T1": "24h"}
+    for block in record["tiles"]:
+        block["timepoint"] = tokens[block["timepoint"]]
+    record["timepoints"] = {tokens[k]: v for k, v in record["timepoints"].items()}
+    first_only = {"timepoints": {"0h": record["timepoints"]["0h"]}, **{k: v for k, v in record.items()
+                                                                        if k not in ("timepoints", "tiles")},
+                  "tiles": [t for t in record["tiles"] if t["timepoint"] == "0h"]}
+    plate = _plate_of(tmp_path, [("0h", sources["T0"])], first_only)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um")
+    assert len(json.loads((out / "nanowells" / "A01_grid.json").read_text())["array_radius"]["roster"]) == 259
+    _plate_of(tmp_path, [("0h", sources["T0"]), ("24h", sources["T1"])], record)
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    full = _run_main(monkeypatch, _plate_of(tmp_path / "full", [("0h", sources["T0"]), ("24h", sources["T1"])],
+                                            record), "--nanowell_format", "100um")
+    grid = json.loads((out / "nanowells" / "A01_grid.json").read_text())
+    full_grid = json.loads((full / "nanowells" / "A01_grid.json").read_text())
+    assert grid["array_radius"]["roster"] == full_grid["array_radius"]["roster"]
+    assert len(grid["array_radius"]["roster"]) == 265 and "6 nanowell(s) added, 0 removed" in grid["array_radius"]["reanalysed_because"]
+    pick = lambda rows: sorted((r["timepoint"], r["nw_q"], r["nw_r"], r["state"]) for r in rows)  # noqa: E731
+    assert pick(_rows(out, "A01.csv")) == pick(_rows(full, "A01.csv"))
+
+
+def test_a_timepoint_anchored_a_step_off_neither_widens_the_rim_nor_passes_as_consistent(monkeypatch):
+    """X35a-R2: T1's origin moved one step (as a wrong fiducial would). Taken at face value its detections put 17 rows
+    of floor into every timepoint and every timepoint read consistent, because each was compared on the shared roster."""
+    from pipeline.nanowell_lattice import index_points
+
+    a, record = build_well(rotation=7.0, timepoint="T0", cells=5)
+    b, later = build_well(rotation=9.0, timepoint="T1", seed=2, cells=5)
+    c, third = build_well(rotation=9.0, timepoint="T2", seed=3, array_shift_um=(500.0, 0.0), cells=5)
+    for extra in (later, third):
+        record["timepoints"].update(extra["timepoints"])
+        record["tiles"] += extra["tiles"]
+    images = {"T0": a.images, "T1": b.images, "T2": c.images}
+    real = nr.locate_timepoint
+
+    def a_step_off(tp, *args, **kwargs):
+        located = real(tp, *args, **kwargs)
+        if tp == "T1" and located.status == nr.OK:
+            located.origin_montage = tuple(np.asarray(located.origin_montage) + np.asarray(located.fit.a1))
+            located.indexed = index_points(located.detected_common - np.asarray(located.montage.origin_um),
+                                           located.fit, located.origin_montage)
+        return located
+
+    monkeypatch.setattr(nr, "locate_timepoint", a_step_off)
+    outcome = nr.run_well("A01", record, ["T0", "T1", "T2"], lambda tp, tile: images[tp].get(tile), SETTINGS,
+                          segmenter=threshold_segmenter())
+    assert sorted(map(tuple, outcome.radius["roster"])) == sorted(a.array.addresses)
+    assert [outcome.timepoints[tp]["consistency"] for tp in ("T0", "T1", "T2")] == [
+        "consistent", "roster_mismatch", "consistent"]
+    assert any("lattice steps from the other timepoints" in n for n in outcome.timepoints["T1"]["notes"])
+
+
+# ── review X35a-R6..R9: re-analysis only when the roster really changes, and said where it is seen ─
+_CLIPPED_RIM = [dict(rotation=7.0, timepoint=tp, seed=seed, cells=10, radius_fraction=0.47, array_shift_um=shift)
+                for tp, seed, shift in (("T0", 1, (-120.0, 0.0)), ("T1", 2, (250.0, 0.0)), ("T2", 3, (250.0, 0.0)))]
+
+
+def test_a_timepoint_added_to_a_clipped_rim_well_is_analysed_alone_unless_the_roster_really_changes(
+        tmp_path, monkeypatch):
+    """X35a-R6. The rim is cut by the image's edge and the plate moves between timepoints. A band site a kept
+    timepoint saw whole and empty has no row, so the incremental estimate put it back whenever a new timepoint did not
+    image it whole, and every run re-analysed the well to the same roster with a reason saying it had grown. Now:
+    T0 alone keeps 890 sites; adding T1 really removes one (T1 sees it empty), so the well is analysed again and the
+    reason says 1 removed, 0 added; adding T2 changes nothing, so only T2 is located."""
+    from tests.test_nanowell_cli import _run_main
+
+    located = []
+    real = nr.locate_timepoint
+    monkeypatch.setattr(nr, "locate_timepoint", lambda tp, *a, **k: (located.append(tp), real(tp, *a, **k))[1])
+    built = [build_well(**spec) for spec in _CLIPPED_RIM]
+    record = None
+    for _rendered, rec in built:
+        if record is None:
+            record = json.loads(json.dumps(rec))
+        else:
+            record["timepoints"].update(rec["timepoints"])
+            record["tiles"] += rec["tiles"]
+    items = [(spec["timepoint"], rendered) for spec, (rendered, _rec) in zip(_CLIPPED_RIM, built)]
+
+    def upto(n):
+        keep = {tp for tp, _ in items[:n]}
+        return {**record, "timepoints": {k: v for k, v in record["timepoints"].items() if k in keep},
+                "tiles": [t for t in record["tiles"] if t["timepoint"] in keep]}
+
+    plate = _plate_of(tmp_path, items[:1], upto(1))
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um")
+    grid = lambda: json.loads((out / "nanowells" / "A01_grid.json").read_text())["array_radius"]  # noqa: E731
+    assert len(grid()["roster"]) == 890
+    located.clear()
+    from pipeline import nanowell_task as nt
+
+    warned = []
+    monkeypatch.setattr(nt.log, "warning", lambda message, *args: warned.append(message % args))
+    _plate_of(tmp_path, items[:2], upto(2))
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    assert located == ["T1", "T0", "T1"] and len(grid()["roster"]) == 889
+    assert "0 nanowell(s) added, 1 removed" in grid()["reanalysed_because"]
+    assert any("every timepoint was analysed again" in w for w in warned)       # said as a warning in the run log
+    located.clear()
+    _plate_of(tmp_path, items, upto(3))
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    assert located == ["T2"] and len(grid()["roster"]) == 889
+
+
+def test_a_new_timepoint_anchored_a_step_off_is_named_without_re_analysing_the_well(tmp_path, monkeypatch):
+    """X35a-R7. Kept T0 and T2; T1 added incrementally with its origin a step off. Judged only among the run's own
+    timepoints (one), it was caught only by a full re-analysis whose reason said 17 nanowells had been added. Judged
+    against the kept detections, it is named and its detections decide nothing."""
+    from pipeline import nanowell_task as nt
+    from pipeline.nanowell_lattice import index_points
+
+    specs = [dict(rotation=7.0, timepoint="T0", cells=5), dict(rotation=9.0, timepoint="T1", seed=2, cells=5),
+             dict(rotation=9.0, timepoint="T2", seed=3, array_shift_um=(500.0, 0.0), cells=5)]
+    images, record = {}, None
+    for spec in specs:
+        rendered, rec = build_well(**spec)
+        images[spec["timepoint"]] = rendered.images
+        if record is None:
+            record = rec
+        else:
+            record["timepoints"].update(rec["timepoints"])
+            record["tiles"] += rec["tiles"]
+    real = nr.locate_timepoint
+
+    def a_step_off(tp, *args, **kwargs):
+        located = real(tp, *args, **kwargs)
+        if tp == "T1" and located.status == nr.OK:
+            located.origin_montage = tuple(np.asarray(located.origin_montage) + np.asarray(located.fit.a1))
+            located.indexed = index_points(located.detected_common - np.asarray(located.montage.origin_um),
+                                           located.fit, located.origin_montage)
+        return located
+
+    monkeypatch.setattr(nr, "locate_timepoint", a_step_off)
+    run = lambda todo, **k: nr.run_well("A01", record, todo, lambda tp, tile: images[tp].get(tile), SETTINGS,  # noqa: E731
+                                        segmenter=threshold_segmenter(), **k)
+    first = run(["T0", "T2"])
+    nt.write_sites_csv(tmp_path / "sites.csv", first.sites, [])
+    kept = nt._kept_evidence({"grid": {"array_radius": first.radius}, "sites": nt._read_rows(tmp_path / "sites.csv")})
+    block = first.timepoints["T0"]
+    reference = {"timepoint": "T0", "pitch_um": block["pitch_um"], "angle_deg": block["angle_deg"],
+                 "roster_size": block["roster_size"]}
+    added = run(["T1"], fixed_radius_um=first.radius["radius_um"], fixed_roster=first.radius["roster"],
+                kept_evidence=kept, reference=reference)
+    assert added.roster_change == ""
+    assert added.timepoints["T1"]["consistency"] == "roster_mismatch"
+    assert any("lattice steps from the other timepoints" in n for n in added.timepoints["T1"]["notes"])
+
+
+def test_a_kept_timepoint_flagged_a_roster_mismatch_says_nothing_about_the_rim():
+    """X35a-R9: its rows' addresses may name its neighbours' sites, so they are not read as evidence."""
+    from pipeline import nanowell_task as nt
+
+    rows = [{"timepoint": "T0", "nw_q": "3", "nw_r": "0", "detected": "True", "imaged_fraction": "1.0",
+             "consistency": "consistent"},
+            {"timepoint": "T1", "nw_q": "4", "nw_r": "0", "detected": "True", "imaged_fraction": "1.0",
+             "consistency": "roster_mismatch"}]
+    kept = nt._kept_evidence({"grid": {"array_radius": {"roster_rule": "evidence"}}, "sites": rows})
+    assert kept == {"detected": {(3, 0)}, "imaged": {(3, 0)}}

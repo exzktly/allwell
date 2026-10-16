@@ -122,13 +122,18 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
     px = located.pixel_size_um
     try:
         segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)
-        radius, own = nr.own_array_model(located)
+        radius, own = nr.own_array_model(located, settings)
         measured = nr.measure_timepoint(located, images, settings, radius, roster=own, segmenter=segment)
     except Exception as exc:          # the location above is still worth showing; the reason goes with it (X27)
         log.warning("Test detection: measuring %s %s failed", well, timepoint, exc_info=True)
         result.notes = [f"Measuring failed ({type(exc).__name__}: {exc}); the lattice and addresses above stand."]
         return result
     result.notes = list(measured.notes)
+    if not settings.infer:
+        # What one timepoint shows of the rim, not what a run will keep (tracker X35a-R5): a run decides it over
+        # every timepoint, and a dataset analysed before keeps the roster it was analysed with.
+        result.notes.append("The nanowells at the rim are the ones this timepoint's image supports; a run decides them "
+                            "over all of the well's timepoints, and adding to an analysed dataset keeps its roster")
     for row in measured.sites:
         q, r = row["nw_q"], row["nw_r"]
         result.sites.append({**row, "address": None if q is None else f"{q},{r}"})

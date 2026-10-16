@@ -199,3 +199,54 @@ def test_a_re_run_of_a_merged_well_keeps_its_plate(tmp_path):
     path.write_text(json.dumps({"scheme_version": 1, "well": "C03", "plate": "dataset 2: two", "timepoints": {}}))
     nt.write_grid_json(path, "C03", nr.WellOutcome("C03"), nr.NanowellSettings("100um"))
     assert json.loads(path.read_text())["plate"] == "dataset 2: two"
+
+
+def _set_rule(root: Path, well: str, array_radius: dict) -> None:
+    path = root / "out" / "nanowells" / f"{well}_grid.json"
+    grid = json.loads(path.read_text())
+    grid["array_radius"] = array_radius
+    path.write_text(json.dumps(grid))
+
+
+_DISK = {"radius_um": 1200.0, "status": "shared"}
+_EVIDENCE = {"radius_um": 1200.0, "status": "shared", "roster": [[0, 0]], "roster_rule": "evidence"}
+
+
+def test_merge_plates_names_wells_whose_rosters_two_versions_decided(tmp_path):
+    """Tracker X35a-R4: an old-rule plate merged with an evidence-rule one counts its rim differently. Each well's rows
+    are right under its own rule, so the merge goes on, and its note names the wells of each rule."""
+    one = _dataset(tmp_path / "one", wells=("A01",))
+    two = _dataset(tmp_path / "two", wells=("B01",))
+    _set_rule(one, "A01", _DISK)
+    _set_rule(two, "B01", _EVIDENCE)
+    plan = build_plate_merge_plan(one, two, tmp_path / "dest")
+    assert "one/A01 keep an earlier version's nanowell roster" in (plan.blocks_warning or "")
+    assert "two/B01 the current one" in plan.blocks_warning
+    _set_rule(one, "A01", _EVIDENCE)
+    assert build_plate_merge_plan(one, two, tmp_path / "dest2").blocks_warning is None
+
+
+def test_validate_names_a_dataset_whose_wells_mix_roster_rules(tmp_path):
+    from datasets.core.dataset_paths import DatasetPaths
+    from datasets.core.nanowell_tables import nanowell_findings
+
+    root = _dataset(tmp_path / "mixed", wells=("A01", "B01"))
+    _set_rule(root, "A01", _DISK)
+    _set_rule(root, "B01", _EVIDENCE)
+    paths = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
+    findings = nanowell_findings(paths, {}, ["experiment", "channel", "well", "fov", "timepoint"], "_")
+    assert [f[1] for f in findings if f[0] == "warning"] == ["nanowell_roster_rules_mixed"]
+    assert "A01 keep an earlier version's" in next(f[2] for f in findings if f[1] == "nanowell_roster_rules_mixed")
+
+
+def test_validate_says_which_wells_were_analysed_again_over_every_timepoint(tmp_path):
+    """Tracker X35a-R8: re-analysis rewrites a well's earlier rows, which Validate names."""
+    from datasets.core.dataset_paths import DatasetPaths
+    from datasets.core.nanowell_tables import nanowell_findings
+
+    root = _dataset(tmp_path / "again", wells=("A01",))
+    _set_rule(root, "A01", {**_EVIDENCE, "reanalysed_because": "a new timepoint changed the well's roster"})
+    paths = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
+    found = [f for f in nanowell_findings(paths, {}, ["experiment", "channel", "well", "fov", "timepoint"], "_")
+             if f[1] == "nanowell_reanalysed"]
+    assert found == [("info", "nanowell_reanalysed", "A01: a new timepoint changed the well's roster")]

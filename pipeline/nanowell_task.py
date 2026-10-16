@@ -63,6 +63,44 @@ def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:
     return block.get("radius_um"), (block.get("roster") or None)      # empty: the earlier run anchored nothing
 
 
+def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
+                    template_path, staging_dir, settings_key, scratch_dir, expected_shape):
+    """``run_well`` over *todo* on what an earlier run kept (*prior*, or ``None``): ``(outcome, fixed radius,
+    fixed roster, kept template)``. *expected_shape* is a described grid's shape: a well short of a whole row or
+    column is incomplete, which a record's positions alone could not show."""
+    fixed, fixed_roster = _prior_array(prior)
+    saved = nm.load_template(template_path) if prior else None
+    outcome = nr.run_well(well_label, record, todo, load_phase, settings, segmenter=segmenter, channels=channels,
+                          fixed_radius_um=fixed, fixed_roster=fixed_roster, plate_rigid=plate_rigid,
+                          reference=_reference_of(prior), kept_evidence=_kept_evidence(prior),
+                          checkpoint=None if staging_dir is None else TimepointCheckpoints(staging_dir, settings_key),
+                          earliest_template=None if saved is None else saved[0],
+                          spill_dir=Path(scratch_dir) / ".montages",     # removed with the scratch (X23)
+                          expected_shape=expected_shape)
+    return outcome, fixed, fixed_roster, saved
+
+
+def _kept_evidence(prior: dict | None) -> dict | None:
+    """What an earlier run's kept rows show about a default well's rim (tracker X35a-R1): the sites where a nanowell
+    was detected at some kept timepoint, and those whose whole disk a kept timepoint imaged. ``None`` without an
+    earlier run, or for a well its run kept no roster for (the disk rule, or an inferred well's own)."""
+    if prior is None or prior["grid"].get("array_radius", {}).get("roster_rule") != "evidence":
+        return None
+    detected, imaged = set(), set()
+    for row in prior["sites"]:
+        # A kept timepoint flagged a roster mismatch may be anchored a step off (review X35a-R2): its rows' addresses
+        # name its neighbours' sites, so what they say was detected or imaged is said of the wrong nanowells.
+        if not str(row.get("nw_q") or "").strip() or row.get("consistency") == "roster_mismatch":
+            continue
+        address = (int(float(row["nw_q"])), int(float(row["nw_r"])))
+        if str(row.get("detected")).strip().lower() == "true":
+            detected.add(address)
+        fraction = str(row.get("imaged_fraction") or "").strip()      # blank: nothing recorded about imaging
+        if fraction and float(fraction) >= 0.999:
+            imaged.add(address)
+    return {"detected": detected, "imaged": imaged}
+
+
 def timepoint_order(record: dict, well: str) -> list[str]:
     """This well's timepoints in recorded time (hours when the key reads as one, else the key itself)."""
     from util.timepoint import parse_hours
@@ -368,6 +406,19 @@ def update_montage_archive(out_zip: Path, staging: Path, well_label: str, recomp
             compress_images_to_zip(staging, out_zip)
 
 
+def _reanalysis_reason(kept_radius: dict, radius: dict) -> str:
+    """Why a well was analysed again over every timepoint, measured on the re-analysis's own roster.
+
+    The count compares the roster the earlier run kept with the one the full re-analysis settled on, not with the
+    incremental pass's estimate, so the grid record states what the rewrite actually changed (tracker X35a-R6).
+    """
+    kept = {tuple(map(int, a)) for a in kept_radius.get("roster") or ()}
+    now = {tuple(map(int, a)) for a in radius.get("roster") or ()}
+    return (f"a new timepoint changed the well's roster ({len(now - kept)} nanowell(s) added, "
+            f"{len(kept - now)} removed), so every timepoint was analysed again and the earlier timepoints' rows "
+            "rewritten")
+
+
 def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
                      csv_prefix, schema, sep, *, grouper, parse, extract, scratch_dir, write_csv, segmenter=None,
                      incremental=False, prior_dir=None, settings_key="", staging_dir=None, plate_rigid=None):
@@ -404,8 +455,14 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     if not todo:
         log.info("Well %s — up to date (no new timepoints).", well_label)
         return [], []
-    wanted = {Path(p).name for (tp, _), (nuclear, fluors) in index.items() if tp in todo for p in [nuclear, *fluors]}
-    extract(zip_path, scratch_dir, members_to_extract=wanted & set(needed))
+
+    def run(prior, todo):
+        wanted = {Path(p).name for (tp, _), (nuclear, fluors) in index.items() if tp in todo
+                  for p in [nuclear, *fluors]}
+        extract(zip_path, scratch_dir, members_to_extract=wanted & set(needed))
+        return _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
+                               Path(prior_dir or output_dir) / NANOWELL_DIR / template_path.name, staging_dir,
+                               settings_key, scratch_dir, tuple(pattern["grid"]) if described else None)
 
     def load_phase(tp, tile) -> np.ndarray | None:
         found = index.get((tp, tile))
@@ -420,18 +477,18 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         return load
 
     channels = {t: channel_loader(k) for k, t in enumerate(fluor_tokens)}
-    fixed, fixed_roster = _prior_array(prior)
     template_path = output_dir / NANOWELL_DIR / f"{well_label}{TEMPLATE_SUFFIX}"
-    saved = nm.load_template(Path(prior_dir or output_dir) / NANOWELL_DIR / template_path.name) if prior else None
-    outcome = nr.run_well(well_label, record, todo, load_phase, settings, segmenter=segmenter, channels=channels,
-                          fixed_radius_um=fixed, fixed_roster=fixed_roster, plate_rigid=plate_rigid,
-                          reference=_reference_of(prior),
-                          checkpoint=None if staging_dir is None else TimepointCheckpoints(staging_dir, settings_key),
-                          earliest_template=None if saved is None else saved[0],
-                          spill_dir=Path(scratch_dir) / ".montages",     # removed with the scratch (X23)
-                          # A described grid states its shape, so a well short of a whole row or column is
-                          # incomplete; a record's positions alone could not show the line that is missing.
-                          expected_shape=tuple(pattern["grid"]) if described else None)
+    outcome, fixed, fixed_roster, saved = run(prior, todo)
+    if prior is not None and outcome.roster_change:
+        # An incremental run must give the roster a run over every timepoint would (tracker X35a-R1): a rim nanowell
+        # hidden at the kept timepoints and seen at a new one belongs to all of them. So the well is analysed again
+        # from the start, and its grid record says why.
+        kept_radius = prior["grid"]["array_radius"]
+        prior, todo = None, list(timepoints)
+        outcome, fixed, fixed_roster, saved = run(prior, todo)
+        reason = _reanalysis_reason(kept_radius, outcome.radius)
+        outcome.radius["reanalysed_because"] = reason
+        log.warning("Well %s — %s.", well_label, reason)
     px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)

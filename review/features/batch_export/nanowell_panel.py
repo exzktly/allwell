@@ -214,7 +214,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
         data_dir = self._ctx.state.dataset.data_dir
         st = self._ctx.state.feature_slice("nanowell")
         data = getattr(st, "data", None)
-        if data is None or getattr(st, "loaded_for", (None,))[0] != str(data_dir or ""):
+        loaded_for = getattr(st, "loaded_for", None) or (None,)      # None until the page has loaded (X16)
+        if data is None or loaded_for[0] != str(data_dir or ""):
             try:
                 data = _load_nanowell_data(Path(data_dir)) if data_dir else None
             except (ValueError, OSError) as exc:            # NanowellSchemeError is a ValueError

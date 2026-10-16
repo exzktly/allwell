@@ -166,3 +166,20 @@ def test_unreadable_nanowell_tables_are_refused_with_the_reason(panel, monkeypat
     monkeypatch.setattr(QMessageBox, "warning", lambda _parent, title, text: shown.append((title, text)))
     assert p._load("earliest") is None
     assert shown and "scheme_version 9" in shown[0][1]
+
+
+def test_tables_loaded_by_load_into_are_reused_by_the_batch_run(panel, monkeypatch):
+    """Roll-up review X16: ``load_into`` left ``loaded_for`` as ``None``, and the batch run indexed it. It records
+    what it loaded, as the page's own load does, and the batch run reuses those tables instead of reading again."""
+    from review.features.batch_export import nanowell_panel
+    from review.features.nanowell import controller
+
+    p, ctx = panel
+    st = ctx.state.feature_slice("nanowell")
+    controller.load_into(st, ctx.state.dataset.data_dir)
+    assert st.loaded_for == (str(ctx.state.dataset.data_dir), "earliest")
+    monkeypatch.setattr(nanowell_panel, "_load_nanowell_data", lambda _path: pytest.fail("read the tables again"))
+    data, _metrics = p._load("earliest")
+    assert data is st.data
+    controller.set_baseline(st, "first_measurable")
+    assert st.loaded_for == (str(ctx.state.dataset.data_dir), "first_measurable")

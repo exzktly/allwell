@@ -48,6 +48,7 @@ def load_into(state, data_dir) -> None:
         log.warning("Nanowells: %s", problem)
     state.data = data
     state.metrics = site_metrics(data, state.baseline)
+    state.loaded_for = (str(data_dir), state.baseline)     # what the page's own load records (roll-up review X16)
 
 
 def set_baseline(state, baseline: str) -> None:
@@ -55,6 +56,8 @@ def set_baseline(state, baseline: str) -> None:
     state.baseline = baseline
     if state.data is not None:
         state.metrics = site_metrics(state.data, baseline)
+        if state.loaded_for is not None:
+            state.loaded_for = (state.loaded_for[0], baseline)
 
 
 def replicate_groups(ctx, wells) -> dict:

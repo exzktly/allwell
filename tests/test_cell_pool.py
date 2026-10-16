@@ -191,3 +191,24 @@ def test_the_numpy_backend_can_be_forced(monkeypatch):
     assert cell_pool.backend_name() == "numpy"
     with CellPool(["v"]) as pool:
         assert pool.backend == "numpy"
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_box_counts_are_the_scatter_gates_own_comparisons(backend):
+    """The gate share a figure prints, counted in the pool, equals counting the
+    same cells with the scatter's ``_in_gate`` — edges inclusive, per timepoint."""
+    from review.features.scatter.gating import _in_gate
+
+    pool, truth = _fill(backend)
+    with pool:
+        for group in truth:
+            v, w, tp = (np.asarray(truth[group][k]) for k in ("v", "w", "tp"))
+            # Edges placed exactly on cell values, so inclusive and exclusive differ.
+            box = {"x0": float(np.sort(v)[len(v) // 4]), "x1": float(np.sort(v)[3 * len(v) // 4]),
+                   "y0": float(np.sort(w)[len(w) // 5]), "y1": float(np.sort(w)[-1])}
+            assert pool.count_box("v", "w", box, group) == int(_in_gate(v, w, box).sum())
+            for t in (0.0, 24.0):
+                assert pool.count_box("v", "w", box, group, tps=[t]) == int(_in_gate(v[tp == t], w[tp == t], box).sum())
+                assert pool.count_at(group, [t]) == int((tp == t).sum())
+            assert pool.distinct("tp", group).tolist() == sorted(set(truth[group]["tp"]))
+            assert pool.count_box("v", "w", box, group, tps=[]) == 0

@@ -397,7 +397,7 @@ def test_a_well_with_nothing_in_the_gate_still_counts_in_the_denominator():
     percentage's denominator. Two wells, one with 100 of 1000 inside and one
     with none, read 10.0% instead of 5.0%: the exact number the denominator
     exists to produce."""
-    src = (REPO_ROOT / "review" / "features" / "scatter" / "collect.py").read_text()
+    src = (REPO_ROOT / "review" / "features" / "scatter" / "_cells.py").read_text()
     assert "if not ungated.any():" in src, (
         "the collector still drops a well that has nothing inside the gate")
 

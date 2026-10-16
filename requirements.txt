@@ -168,6 +168,27 @@ umap-learn==0.5.5
 # installed alongside numpy 1.24.4 and pandas 2.2.3 with the fast lane green.
 pyarrow==22.0.0
 
+# ── Per-cell pool for large selections (Review-side only) ────────────────────
+# review/data/cell_pool.py holds a selection's included cells under a memory
+# limit with a spill directory, so the per-cell views (Scatter, Distribution,
+# the bar chart's beeswarm and violin, Cell Gating's CDFs) can state counts,
+# medians and gate percentages over every cell and draw a stated sample, at any
+# selection size. Measured on 26.5M included cells (24 wells of 1.1M): loading
+# them and answering a sample, a 2D density and pooled quantiles took 6.2 s at a
+# 1.4 GiB process peak under a 512 MB limit; pooling the same values in numpy
+# grows with the selection (about 1.7 GB of values at 96 wells).
+#
+# OPTIONAL at runtime, like pyarrow: without it the pool holds numpy arrays,
+# which is what the views held before, so a partial environment loses the
+# memory bound and nothing else. NOT in requirements-remote.txt — a Review-side
+# read only.
+#
+# Its cost, measured: the cp311 manylinux wheel is 20 MB compressed and 60 MiB
+# installed. It declares no Requires-Dist, so it cannot move numpy or pandas;
+# installed alongside numpy 1.24.4 and pandas 2.2.3. Pinned to the version
+# measured in tracker Q6.
+duckdb==1.1.3
+
 # ── macOS native clipboard (Copy SVG) ────────────────────────────────────────
 # Qt's QMimeData cannot register a payload under a raw macOS UTI, so Copy SVG
 # would only ever paste raster into Illustrator. pyobjc lets us write

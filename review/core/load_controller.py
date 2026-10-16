@@ -130,6 +130,7 @@ def load_path(ctx, path: Path) -> None:
         QMessageBox.critical(app, "Not a directory", f"Expected a directory:\n{path}")
         return
     app._cleanup_tmp()
+    _recover_in_place_append(path)
     # Visible "Opening dataset…" guard so a slow-network open never looks frozen.
     _make_opening_dialog(ctx, "Opening dataset…")
     try:
@@ -156,6 +157,34 @@ def load_path(ctx, path: Path) -> None:
         _close_opening_dialog(ctx)
     _remember_if_it_loaded(ctx, path)
     _prune_frame_cache(ctx, path)
+
+
+def _recover_in_place_append(path: Path) -> None:
+    """Undo an in-place append (Concatenate) a crash left unfinished, before any archive is read.
+
+    Opening the dataset is the moment its archives are first read, and an
+    append interrupted mid-member leaves an archive with no central directory
+    at all. The undo restores each one byte for byte from its journal
+    (:mod:`util.zip_append`); what it did, or why it left a still-running
+    append alone, is logged at WARNING so it reaches the log drawer. A failure
+    is logged rather than raised: the load goes on and reports whatever it
+    cannot read in its own words.
+    """
+    from util.zip_append import recover
+
+    if (path / "in").is_dir():
+        in_dir = path / "in"
+    elif path.name.lower() == "out" and (path.parent / "in").is_dir():
+        in_dir = path.parent / "in"
+    else:
+        return
+    logger = logging.getLogger("review")
+    with swallow(f"undoing an unfinished in-place append in {in_dir}", level=logging.WARNING):
+        result = recover(in_dir)
+        for line in result.lines:
+            logger.warning("Recovery (%s): %s", path.name, line)
+        if result.blocked:
+            logger.warning(result.blocked)
 
 
 def _remember_if_it_loaded(ctx, path: Path) -> None:

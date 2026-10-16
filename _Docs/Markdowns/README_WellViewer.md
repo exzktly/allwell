@@ -6500,7 +6500,15 @@ How it works:
    dataset) or no results at all (a raw dataset); **Destination** must be a
    new, empty folder, different from both datasets. Both originals are left
    untouched either way.
-2. Check the **Gap** field. It is the time between dataset 1's *last*
+2. Choose where the result goes. **Create a new dataset in the destination
+   folder** (the default) writes a complete new dataset and leaves both
+   originals as they are. **Add dataset 2 to dataset 1 in place** adds dataset
+   2's images to dataset 1 itself and copies nothing — see
+   [Adding a timepoint in place](#adding-a-timepoint-in-place) below. The
+   destination field is greyed out in that mode, since nothing is written there.
+   If the two datasets can't be combined that way, the option is greyed out and
+   the reason is shown beneath it.
+3. Check the **Gap** field. It is the time between dataset 1's *last*
    timepoint and dataset 2's *first*, written like `24h`, `90m`, `1.5d`, `1d 6h 30m` or a
    bare number of hours (a comma works as the decimal point, `1,5`). Anything
    that could be read two ways, such as `6h30`, `12:30`, `1d6` or `1,500`, is
@@ -6516,7 +6524,7 @@ How it works:
    (or a minute), the page shows both numbers and goes with yours. Underneath,
    the page lists dataset 2's resulting timepoint labels, updating as you type,
    so you can see the result before anything is copied.
-3. Once both folders are picked, a status panel appears below showing a
+4. Once both folders are picked, a status panel appears below showing a
    "Ready — N well(s)" plate preview of what the merge will actually touch —
    before you've pressed anything. Press **Concatenate** and that same plate
    starts colouring per well as the merge progresses (grey → amber "merging"
@@ -6525,7 +6533,7 @@ How it works:
    phase rail (Validate → Merge → Verify → Finalize) and an overall progress
    bar. The full text log is still there if you want it — tick **Show raw
    log** to reveal it below the plate.
-4. On success, click **Open merged dataset in Review** to load the result
+5. On success, click **Open merged dataset in Review** to load the result
    straight into Review (now the page's highlighted default action, in place
    of Concatenate, until you change one of the source folders again).
 
@@ -6625,7 +6633,53 @@ the rest of the plate at the same time, run
 [Validate & Repair](#validate--repair-dataset), which reports the same thing as
 a finding rather than stopping at the first one.
 
-**If a run is interrupted** (the app is closed, the machine loses power, the
+#### Adding a timepoint in place
+
+For an experiment that is still running — a new timepoint converted every day,
+say — writing a fresh copy of the whole plate for each new timepoint quickly
+costs more disk and time than the imaging itself (at 60 wells, 25 tiles and
+3–4 channels, twenty timepoints would mean several terabytes of copying).
+**Add dataset 2 to dataset 1 in place** avoids that: dataset 2's images are
+added to dataset 1's own per-well archives (`in/<WELL>.zip`), under their
+shifted timepoint names, and nothing that is already there is moved, copied or
+rewritten.
+
+- **When it is offered.** Dataset 2 must be a raw dataset (converted images,
+  not yet analysed). Dataset 1 can be raw or analysed. Dataset 1's wells must
+  be zip archives, not folders. If dataset 1 has an acquisition record
+  (`in/acquisition.json`), dataset 2 needs one too, because the record must
+  keep describing every image dataset 1 holds. When any of this is not true the
+  option is greyed out and the page says why.
+- **What changes.** Only dataset 1's `in/` folder: each well's archive gains
+  dataset 2's images, a well only dataset 2 has gets a new archive, and the
+  acquisition record gains dataset 2's timepoints. An analysed dataset 1's
+  results (`out/`) are left exactly as they are. Then run **Analyze** on dataset
+  1 with **Incremental** ticked: only the new timepoint is processed, and its
+  rows are added to each well's measurements and nanowell tables.
+- **Dataset 2 is left where it is.** Nothing in it is changed or deleted. The
+  end of the run log lists every one of dataset 2's files that was added and
+  checked, well by well, so you can delete them yourself once you are happy.
+  Operating-system clutter in its archives (`.DS_Store`, `._` files) is not
+  copied across.
+- **Every image is checked.** Each added image is read back from dataset 1's
+  archive and compared with dataset 2's original before the run counts as done.
+- **All or nothing.** If anything goes wrong — a full disk, an image that does
+  not check out, a press of Stop — every archive the run had touched is put
+  back exactly as it was, byte for byte, along with the acquisition record, and
+  the log says what was restored. Dataset 1 never ends up with the new
+  timepoint in some wells only. Before each archive is touched, a small hidden
+  file beside it (`.<WELL>.zip.aw-append-journal`, a few kilobytes) records how
+  to undo the change, and `in/.aw-append-run.json` marks the run as unfinished.
+- **After a crash.** If the app or the machine stops in the middle, the next
+  time the dataset is opened — in Review, by an Analyze run, or by Concatenate —
+  the unfinished addition is undone first and the log says so. Then run the
+  addition again. If the addition is still running in another window, or was
+  started on another computer, it is left alone and you are told.
+- **Adding the same data twice is refused.** If dataset 2's images (by name, or
+  by content) are already in dataset 1, nothing is added and the message names
+  the files, so a second press of Concatenate cannot duplicate a timepoint.
+
+**If a new-dataset run is interrupted** (the app is closed, the machine loses power, the
 disk fills up) partway through, just point Concatenate at the same three
 folders and press Concatenate again. The app can tell an interrupted attempt
 apart from a folder you've already finished into or one holding unrelated

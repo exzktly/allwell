@@ -82,6 +82,7 @@ from services.remote_run_state import (
     _RemoteRun,
     _canonical_well_from_path,
 )
+from services.remote_log_adapter import LogFnLogger as _LogFnLogger
 from services.remote_staging import input_well_containers
 from services.remote_fetch_nanowells import fetch_nanowell_tables
 from services.remote_wire import (
@@ -346,32 +347,6 @@ def run_client_side_completeness_check(
     except Exception as exc:
         log(f"[remote] completeness check failed: {exc}\n")
         return {}
-
-
-
-class _LogFnLogger:
-    """Adapts the remote runner's ``log(text)`` sink to a logger-shaped object.
-
-    ``record_run_check`` writes through ``logging``-style calls because it is
-    normally driven from inside the pipeline; here the destination is the GUI's
-    line stream, which takes whole lines with a trailing newline.
-    """
-
-    def __init__(self, log_fn):
-        self._log = log_fn
-
-    def _emit(self, prefix, msg, args):
-        text = (msg % args) if args else str(msg)
-        self._log(f"{prefix}{text}\n")
-
-    def info(self, msg, *args):
-        self._emit("[remote] ", msg, args)
-
-    def warning(self, msg, *args):
-        self._emit("[remote] ", msg, args)
-
-    def error(self, msg, *args):
-        self._emit("[remote] ", msg, args)
 
 
 

@@ -272,7 +272,10 @@ and says how many it anchored and how many remain unaddressed.
 `--incremental` adds only new timepoints (onto the same set of nanowells); a changed setting or a changed tile
 record recomputes the timepoint. An incremental nanowell run is refused on a remote host for now — the remote
 would analyse the new timepoints without the earlier ones — so run it on this computer, or run the remote plate
-in full. A remote nanowell run keeps every well's files on the remote until the run ends, because the
+in full. The same holds when the app would make the run incremental on its own — a plate with an unfinished
+earlier run: the run is refused before anything is sent, and Force runs the plate in full. Wells already
+brought home from an earlier remote run are analysed again with the rest. Test detection is not affected: it
+runs on this computer. A remote nanowell run keeps every well's files on the remote until the run ends, because the
 end-of-run re-anchoring may re-run a well, and then brings the final tables home with the re-anchored wells.
 
 **Datasets tools and nanowell results.** *Subset* carries the nanowell tables of the wells and timepoints it

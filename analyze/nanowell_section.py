@@ -239,7 +239,7 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_scan_cb.setCurrentIndex(max(scan, 0))
         self._refresh_nanowell_custom()
 
-    def _nanowell_validation_error(self, *, check_input: bool) -> str | None:
+    def _nanowell_validation_error(self, *, check_input: bool, for_run: bool = True) -> str | None:
         """What stops a nanowell run before it starts, or ``None``: bad fields, no Phase channel, no record, no tiles.
 
         The checks that read the input (the acquisition record, the tiles, the overlap) need a folder that
@@ -250,7 +250,8 @@ class AnalyzeNanowellSectionMixin:
         if not nanowell_enabled(opts):
             return None
         problems = nanowell_option_errors(opts, need_phase=not self._auto_detect_on())
-        if self._remote_cb.currentData() is not None and self._incremental_cb.isChecked():
+        # Only for a run: Test detection runs on this computer whatever host the run would go to (X30).
+        if for_run and self._remote_cb.currentData() is not None and self._incremental_cb.isChecked():
             from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL
 
             problems.append(NANOWELL_REMOTE_INCREMENTAL_REFUSAL)

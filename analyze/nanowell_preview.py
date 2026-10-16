@@ -274,7 +274,7 @@ class NanowellPreviewWindow(QWidget):
         except ValueError as exc:
             self._summary.setText(f"The preview could not start: {exc}")
             return
-        problem = self._tab._nanowell_validation_error(check_input=False)
+        problem = self._tab._nanowell_validation_error(check_input=False, for_run=False)
         if problem:
             self._summary.setText(f"The preview could not start: {problem}")
             return
@@ -397,7 +397,7 @@ def _archive_timepoints(path: Path, tab) -> list[str]:
 
 def open_preview(tab) -> NanowellPreviewWindow | None:
     """Open (or raise) the Test detection window for *tab*'s input; say why not on the section's status line."""
-    problems = tab._nanowell_validation_error(check_input=False)
+    problems = tab._nanowell_validation_error(check_input=False, for_run=False)
     if problems:
         tab._nanowell_status.setText(problems)
         return None

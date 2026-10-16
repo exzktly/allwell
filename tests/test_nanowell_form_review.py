@@ -172,3 +172,14 @@ def test_the_phase_channel_is_demanded_only_when_nothing_will_detect_it(tab):
     assert tab._nanowell_validation_error(check_input=False) is None            # detection names the channels at run time
     tab._auto_detect_cb.setChecked(False)
     assert "Phase channel" in tab._nanowell_validation_error(check_input=False)
+
+
+def test_test_detection_opens_with_a_remote_and_incremental_chosen(tab, tmp_path):
+    """Roll-up review X30: Test detection runs on this computer, so the refusal of a remote incremental *run* does
+    not stop it. The run itself is still refused (``test_nanowell_form_grid``)."""
+    root, _ = _plate(tmp_path)
+    tab._remote_cb.addItem("bench-box", userData="bench-box")
+    tab._remote_cb.setCurrentIndex(tab._remote_cb.findData("bench-box"))
+    tab._incremental_cb.setChecked(True)
+    window = _open(tab, root)
+    assert window is not None and window.isVisible()

@@ -137,15 +137,27 @@ class _Verifier:
         self.pulled.append((src, str(dest)))
 
 
+def _grid(folder, well, methods):
+    folder.mkdir(exist_ok=True)
+    (folder / f"{well}_grid.json").write_text(json.dumps(
+        {"well": well, "timepoints": {f"{i}h": {"status": "ok", "origin_method": m} for i, m in enumerate(methods)}}))
+
+
 def test_verification_pulls_the_final_tables_and_every_re_anchored_well_again(tmp_path):
-    _sidecar(tmp_path, nanowell={"reanchor": {"anchored": ["B02/24h", "A01/24h", "A01/48h"], "remaining": {}}})
+    """Every well the re-anchoring re-ran, in any batch (roll-up review X32): read from the grid records, which
+    each well keeps, not from the sidecar summary, which each batch of a batched run writes over the last."""
+    _sidecar(tmp_path, nanowell={"reanchor": {"anchored": ["B02/24h"], "remaining": {}}})   # the last batch's
+    folder = tmp_path / "nanowells"
+    _grid(folder, "A01", ["fiducial", "plate_rigid"])          # an earlier batch's re-anchored well
+    _grid(folder, "B02", ["plate_rigid"])
+    _grid(folder, "C03", ["fiducial", "array_centre"])         # anchored on its own: not re-run
     verifier, lines = _Verifier(tmp_path), []
     pull_nanowell_results(verifier, log=lines.append)
     assert verifier.pulled == [
-        ("gpu:/r/out/nanowells/", str(tmp_path / "nanowells")),
+        ("gpu:/r/out/nanowells/", str(folder)),
         ("gpu:/r/out/A01_out.zip", str(tmp_path / "A01_out.zip")), ("gpu:/r/out/*_A01.csv.gz", str(tmp_path)),
         ("gpu:/r/out/B02_out.zip", str(tmp_path / "B02_out.zip")), ("gpu:/r/out/*_B02.csv.gz", str(tmp_path))]
-    assert reanchored_wells(tmp_path / "pipeline_info.json") == ["A01", "B02"]
+    assert reanchored_wells(folder) == ["A01", "B02"]
     plain = _Verifier(tmp_path, nanowell=False)
     pull_nanowell_results(plain, log=lines.append)
     assert plain.pulled == []

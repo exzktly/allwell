@@ -462,7 +462,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
 
 def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
                  csv_prefix, schema, sep, settings_key, *, grouper, parse, segmenter=None, incremental=False,
-                 incremental_prior_dir=None, plate_rigid=None, scratch=None, staging=None):
+                 incremental_prior_dir=None, plate_rigid=None, scratch=None, staging=None, reanchoring=False):
     """The whole lifecycle of one zipped well in nanowell mode (what ``process_well_zip_task`` does otherwise).
 
     Extract to *scratch*, run, write the three tables and the montage archive, record completeness (in
@@ -502,7 +502,12 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
         record_well_settings(output_dir, well_label, settings_key)
         # "— done." exactly as a field-mode well says it: the remote Fetcher and Analyze's progress count a well
         # finished by that marker (``services/remote_wire._RE_WELL_DONE``), and a variant fetched nothing in-stream.
-        log.info("Well %s — done. %d timepoint(s), %d without rows.", well_label, total, len(failed))
+        # A re-anchoring re-run says something else: the well finished once already, and a second "done" read as a
+        # repeated completion (roll-up review X31). Its results are pulled at verification from the grid records.
+        if reanchoring:
+            log.info("Well %s — re-anchored. %d timepoint(s), %d without rows.", well_label, total, len(failed))
+        else:
+            log.info("Well %s — done. %d timepoint(s), %d without rows.", well_label, total, len(failed))
         return records, failed
     finally:
         if owned:
@@ -668,7 +673,7 @@ def reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token,
         try:
             run_zip_task(well, zips[well], output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
                          csv_prefix, schema, sep, settings_key, grouper=grouper, parse=parse, segmenter=segmenter,
-                         incremental=True, incremental_prior_dir=output_dir, plate_rigid=by_tp)
+                         incremental=True, incremental_prior_dir=output_dir, plate_rigid=by_tp, reanchoring=True)
         except Exception as exc:          # one well's re-run must not cost the rest, or the finished run's records
             log.error("Well %s — re-anchoring failed (%s: %s); its timepoints stay unaddressed.", well,
                       type(exc).__name__, exc, exc_info=True)
@@ -684,8 +689,8 @@ def reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token,
                 anchored.append(f"{well}/{tp}")
             else:
                 remaining[f"{well}/{tp}"] = reasons.get((well, tp)) or block.get("reason", "")
-    # The wells the plate fit could see. A batched remote run re-anchors each batch over that batch's wells
-    # alone, so the record says how much of the plate the fit had (roll-up review X19).
+    # The wells whose grid records the plate fit read: every well in the output folder, which in a batched remote
+    # run is this batch's and every earlier batch's. Only this run's wells can be re-run (X19, X32).
     return {"anchored": sorted(anchored), "remaining": remaining, "wells_considered": sorted(grids)}
 
 
@@ -702,8 +707,8 @@ def nanowell_endgame(options, output_dir, well_zips, shared_kwargs_template, nuc
         summary = {"anchored": [], "remaining": {}, "error": f"{type(exc).__name__}: {exc}"}
     if summary["anchored"] or summary["remaining"]:
         log.info("Re-anchoring: %d (well, timepoint) anchored from the plate, %d still unaddressed; the plate fit "
-                 "used the %d well(s) of this run.", len(summary["anchored"]), len(summary["remaining"]),
-                 len(summary.get("wells_considered", ())))
+                 "read the grid records of %d well(s) in the output folder.", len(summary["anchored"]),
+                 len(summary["remaining"]), len(summary.get("wells_considered", ())))
         for key, why in summary["remaining"].items():
             log.warning("Unaddressed %s: %s", key, why)
     _record_reanchor(Path(output_dir) / "pipeline_info.json", summary)

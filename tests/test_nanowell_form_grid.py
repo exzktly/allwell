@@ -4,6 +4,8 @@ that reads the input, and a sidecar restoring them."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -173,3 +175,76 @@ def test_test_detection_without_a_record_places_the_tiles_from_the_grid(tab, qtb
     qtbot.waitUntil(lambda: window._result is not None, timeout=120000)
     assert window._result.status == "ok" and window._result.tile_count == 4
     window.close()
+
+
+def test_a_remote_nanowell_run_the_app_makes_incremental_is_refused_before_launch(tab, tmp_path, monkeypatch):  # noqa: F811
+    """Roll-up review X29: with Incremental unticked, ``resume_aware_spec`` turns the run incremental on a plate with
+    an unfinished run. The form's own check had passed by then, so the run reached the remote and was refused there
+    with "untick Incremental". ``start_run`` now refuses it from the options the run will really use."""
+    import services.remote_config as remote_config
+    from services.remote_run_state import NANOWELL_REMOTE_RESUME_REFUSAL
+
+    root, _ = _plate(tmp_path)
+    _use_nanowell_schema(tab)
+    tab._input_edit.setText(str(root))
+    tab._nanowell_cb.setChecked(True)
+    assert not tab._incremental_cb.isChecked()
+    tab._remote_cb.addItem("bench-box", userData="bench-box")
+    tab._remote_cb.setCurrentIndex(tab._remote_cb.findData("bench-box"))
+    monkeypatch.setattr(remote_config, "get_remote", lambda name: object())
+    monkeypatch.setattr(tab, "_input_has_unfinished_work", lambda raw: "an unfinished run")
+    class Launched(Exception):
+        """The run got as far as the running UI state: past every refusal."""
+
+    def launch(**_kwargs):
+        raise Launched
+
+    monkeypatch.setattr(tab, "_set_running_ui_state", launch)
+    assert tab.start_run(tab._collect_run_spec()) == NANOWELL_REMOTE_RESUME_REFUSAL
+
+
+def test_the_runner_refuses_an_incremental_nanowell_run_before_staging_anything(monkeypatch, tmp_path):
+    """Roll-up review X29: the run record's refusal comes at the end of ``RemoteRunner._prepare_run``, after the
+    remote output was cleared. The runner now refuses first, before staging, through the real remote branch."""
+    import threading
+    from types import SimpleNamespace
+
+    import services.pipeline_runner as pr
+    from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL
+
+    monkeypatch.setattr(pr, "recover_finished_outputs",
+                        lambda *a, **k: SimpleNamespace(ok=True, pulled=[], still_missing=[]))
+    monkeypatch.setattr(pr, "stage_local_zips", lambda *a, **k: pytest.fail("staged before refusing"))
+    runner = pr.PipelineRunner.__new__(pr.PipelineRunner)
+    events = []
+    runner._remote_runner = SimpleNamespace(spawn=lambda *a, **k: pytest.fail("spawned before refusing"))
+    runner._output_filter = "full"
+    runner._remote = SimpleNamespace(name="bench-box")
+    runner._stop_requested = threading.Event()
+    runner._enqueue = events.append
+    runner._enqueue_error = lambda text: events.append(("error", text))
+    runner._enqueue_stopped = lambda **k: events.append(("stopped", k))
+    argv = ["--input_dir", "in", "--output_dir", "out", "--nanowell_format", "100um", "--incremental"]
+    runner._run_pipeline_remote(tmp_path / "in", tmp_path / "out", argv, {"incremental": True})
+    assert ("error", f"Failed to run pipeline remotely: {NANOWELL_REMOTE_INCREMENTAL_REFUSAL}\n") in events
+
+
+def test_recovering_a_remote_nanowell_plate_does_not_make_the_run_incremental(monkeypatch):
+    """Roll-up review X29, the runner's half: wells recovered from an earlier remote run made staging incremental,
+    which a remote nanowell run refuses. A nanowell run recomputes them instead; any other run still reuses them."""
+    import threading
+    from types import SimpleNamespace
+
+    import services.pipeline_runner as pr
+
+    monkeypatch.setattr(pr, "recover_finished_outputs",
+                        lambda *a, **k: SimpleNamespace(ok=True, pulled=["A01"], still_missing=[]))
+    runner = pr.PipelineRunner.__new__(pr.PipelineRunner)
+    lines = []
+    runner._remote_runner, runner._output_filter = None, "full"
+    runner._stop_requested = threading.Event()
+    runner._enqueue = lines.append
+    plain = ["--input_dir", "in", "--output_dir", "out"]
+    assert runner._recover_remote_outputs(Path("out"), plain + ["--nanowell_format", "100um"], {}) is False
+    assert any("cannot resume on a remote host" in line[1] for line in lines)
+    assert runner._recover_remote_outputs(Path("out"), plain, {})          # the pulled wells: incremental

@@ -35,7 +35,7 @@ class NoNanowellSection:
     def _nanowell_option_values(self) -> dict:
         return {}
 
-    def _nanowell_validation_error(self, *, check_input: bool) -> str | None:
+    def _nanowell_validation_error(self, *, check_input: bool, for_run: bool = True) -> str | None:
         return None
 
     def _apply_nanowell_settings(self, d: dict) -> None:

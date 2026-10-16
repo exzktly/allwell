@@ -8941,9 +8941,10 @@ plain. `nanowells/<well>.csv` and `nanowells/<well>_grid.json` hold the site row
 record (they live in a subdirectory because Review loads every top-level `*.csv` as a cell table).
 `<well>_out.zip` holds one montage PNG per located timepoint (role `montage` in `ROLE_CATALOG`).
 `pipeline_info.json` gains a `nanowell` block (settings, conventions, scheme version, and the end-of-run
-re-anchoring summary: `anchored`, `remaining` with each reason, and `wells_considered`, the wells the plate
-fit could see — a batched remote run re-anchors each batch over its own wells, and nothing yet fits the whole
-plate after the last batch) and an `acquisition` block (pixel and tile size per timepoint).
+re-anchoring summary: `anchored`, `remaining` with each reason, and `wells_considered`, the wells whose grid
+records the plate fit read — every well in the output folder, which in a batched remote run is this batch's and
+every earlier batch's, though only this run's wells can be re-run) and an `acquisition` block (pixel and tile
+size per timepoint). A re-run by the re-anchoring logs `Well X — re-anchored.`, not a second `— done.`.
 
 **Incremental, resume, completeness.** The done unit is a timepoint whose grid status is `ok` under the same
 settings (every `nanowell_*` option is in `util.settings_digest.KEYED_ON`, and is digested only on a run with
@@ -9004,7 +9005,8 @@ Fetcher and Analyze's progress count. The run record knows it is a nanowell run 
 (`_RemoteRun.nanowell`), and three things follow. Nothing of a well is deleted from the remote mid-run
 (`well_files_to_delete`), because the end-of-run re-anchoring re-runs some wells from their input archives and
 earlier output. At verification the whole `nanowells/` directory and every re-anchored well's CSV and
-`<well>_out.zip` (named by the sidecar's `nanowell.reanchor.anchored`) are pulled again
+`<well>_out.zip` are pulled again — the wells with a timepoint anchored `plate_rigid` in their pulled grid
+records, not the sidecar's summary, which each batch of a batched run writes over the last —
 (`pull_nanowell_results`). A well whose sites table or grid record did not arrive fails verification
 (`missing_nanowell_tables`), which keeps the remote copy. An incremental nanowell run is refused on a remote host,
 in Analyze and as a backstop in the run record (`NANOWELL_REMOTE_INCREMENTAL_REFUSAL`): the remote would analyse

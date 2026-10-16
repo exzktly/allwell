@@ -68,11 +68,28 @@ def _canonical_well_from_path(stem: str) -> str | None:
 
 
 #: Said by Analyze and by the run record alike, so the two refusals cannot drift.
+NANOWELL_REMOTE_RESUME_REFUSAL = (
+    "This plate has results from an earlier run that did not finish, so this run would add to them incrementally, "
+    "and a nanowell run cannot do that on a remote host yet. Tick Force to analyse the plate again in full on the "
+    "remote, or run it on this computer.")
+
 NANOWELL_REMOTE_INCREMENTAL_REFUSAL = (
     "An incremental nanowell run cannot run on a remote host yet: the remote would analyse the new timepoints "
     "without the earlier ones' roster and template, and its tables would replace yours. Run it incrementally "
     "on this computer, or run the remote plate in full (untick Incremental).")
 
+
+
+def refuse_remote_nanowell_incremental(argv) -> None:
+    """Raise when *argv* is an incremental nanowell run bound for a remote host.
+
+    Called by the runner before anything is staged or sent, rather than only when the run record is built at the
+    end of ``RemoteRunner._prepare_run`` (which still refuses too): by then the remote output had been cleared for a
+    run that could not start (roll-up review X29).
+    """
+    argv = list(argv)
+    if "--nanowell_format" in argv and "--incremental" in argv:
+        raise ValueError(NANOWELL_REMOTE_INCREMENTAL_REFUSAL)
 
 @dataclass
 class _RemoteRun:

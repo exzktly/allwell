@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import sys
 import zipfile
 
@@ -123,6 +124,19 @@ def _write_plate(tmp_path):
     return plate, truth
 
 
+class _ListHandler(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.INFO)
+        self.lines = []
+
+    def emit(self, record):
+        self.lines.append(record.getMessage())
+
+
+#: Every log line of the fixture's run, for what Analyze would read from it.
+_RUN_LOG = _ListHandler()
+
+
 @pytest.fixture(scope="module")
 def reanchored(tmp_path_factory):
     tmp_path = tmp_path_factory.mktemp("reanchor")
@@ -154,6 +168,10 @@ def reanchored(tmp_path_factory):
     for obj, name, value in patches:
         setattr(obj, name, value)
     argv = sys.argv
+    task_log = logging.getLogger("allwell.nanowell")            # pipeline/nanowell_task.py's logger
+    task_log.addHandler(_RUN_LOG)
+    level = task_log.level
+    task_log.setLevel(logging.INFO)
     try:
         sys.argv = ["process_microscopy.py", "--input_dir", str(plate / "in"), "--output_dir", str(plate / "out"),
                     "--phase_token", "PHASE", "--fluor_tokens", "GFP", "--filename_schema",
@@ -161,6 +179,8 @@ def reanchored(tmp_path_factory):
                     "--flatfield", "none", "--no_auto_threshold", "--no_run_check", "--nanowell_format", "100um"]
         pm.main()
     finally:
+        task_log.removeHandler(_RUN_LOG)
+        task_log.setLevel(level)
         sys.argv = argv
         for obj, name, value in originals:
             setattr(obj, name, value)
@@ -197,3 +217,16 @@ def test_the_summary_says_how_many_were_anchored_and_how_many_remain(reanchored)
     assert info["nanowell"]["reanchor"] == {"anchored": ["B02/24h"], "remaining": {}, "wells_considered": wells}
     other = json.loads((out / "nanowells" / "A01_grid.json").read_text())
     assert other["timepoints"]["24h"]["origin_method"] == "fiducial"        # untouched wells keep their own anchor
+
+
+def test_a_re_anchored_well_finishes_once_in_the_progress_count(reanchored):
+    """Roll-up review X31: the re-anchoring re-run logged "— done." a second time, which Analyze's progress reads
+    as a repeated completion and warns about on every run that re-anchors. It says "— re-anchored." instead."""
+    from services.pipeline_runner import ProgressTracker
+
+    finished = [line.split(".")[0] for line in _RUN_LOG.lines
+                if line.startswith(("Well B02 — done.", "Well B02 — re-anchored."))]
+    assert finished == ["Well B02 — done", "Well B02 — re-anchored"]
+    tracker = ProgressTracker()
+    events = [event for line in _RUN_LOG.lines for event in tracker.parse(line)]
+    assert [e for e in events if e[0] == "well_repeat"] == [] and tracker.well_repeats == 0

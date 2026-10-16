@@ -59,15 +59,23 @@ def well_files_to_delete(run, well: str) -> list[str]:
     return [f"{rin}/{well}.zip", f"{rout}/{well}_out.zip", f"{rout}/*_{well}.csv", f"{rout}/*_{well}.csv.gz"]
 
 
-def reanchored_wells(info_path) -> list[str]:
-    """The wells the end-of-run re-anchoring re-ran, from the sidecar's ``nanowell.reanchor.anchored``
-    (``"A01/24h"`` entries)."""
-    try:
-        info = json.loads(Path(info_path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    anchored = ((info.get("nanowell") or {}).get("reanchor") or {}).get("anchored") or []
-    return sorted({str(entry).split("/", 1)[0] for entry in anchored if str(entry)})
+def reanchored_wells(nanowell_dir) -> list[str]:
+    """The wells the end-of-run re-anchoring re-ran: those with a timepoint whose origin came from the plate's
+    rigid motion (``origin_method == "plate_rigid"``), read from the grid records just pulled.
+
+    Not from the sidecar's ``nanowell.reanchor`` summary: a batched run writes that once per batch, each over the
+    last, so it names only the last batch's wells (roll-up review X32). The grid records carry it per well.
+    """
+    wells = set()
+    for path in Path(nanowell_dir).glob("*_grid.json"):
+        try:
+            grid = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        blocks = (grid.get("timepoints") or {}).values() if isinstance(grid, dict) else ()
+        if any(isinstance(b, dict) and b.get("origin_method") == "plate_rigid" for b in blocks):
+            wells.add(str(grid.get("well") or path.name[: -len("_grid.json")]))
+    return sorted(wells)
 
 
 def pull_nanowell_results(verifier, *, log) -> None:
@@ -80,7 +88,7 @@ def pull_nanowell_results(verifier, *, log) -> None:
         return
     remote, local = f"{verifier.host.ssh_alias}:{run.remote_output_dir}", Path(run.local_output_dir)
     verifier._rsync_optional(f"{remote}/{NANOWELL_DIR}/", local / NANOWELL_DIR, log_fn=log)
-    for well in reanchored_wells(local / "pipeline_info.json"):
+    for well in reanchored_wells(local / NANOWELL_DIR):
         verifier._rsync_optional(f"{remote}/{well}_out.zip", local / f"{well}_out.zip", log_fn=log)
         verifier._rsync_optional(f"{remote}/*_{well}.csv.gz", local, log_fn=log)
         retire_superseded_csvs([str(p) for p in local.glob(f"*_{well}.csv.gz")], local)

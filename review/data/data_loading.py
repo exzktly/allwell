@@ -588,7 +588,16 @@ def record_fov_verdict(ctx, label: str, df) -> None:
     warning existed, was tested, and could not fire. Any future path that
     builds a frame calls this too, or it inherits the same silence.
     """
-    verdict = check_fov_labels(df)
+    record_fov_integrity(ctx, label, check_fov_labels(df))
+
+
+def record_fov_integrity(ctx, label: str, verdict) -> None:
+    """Store a well's FOV-label verdict, and warn when the labels cannot be trusted.
+
+    The half of :func:`record_fov_verdict` that does not need the rows: a well
+    opened from its summary (``review/data/well_summary.py``) carries the
+    verdict computed when the summary was.
+    """
     ctx.state.dataset.fov_integrity[label] = verdict
     if not verdict.trusted:
         _logger.warning(

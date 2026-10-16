@@ -39,8 +39,9 @@ _HELD_ONLY_READERS: dict[str, str] = {
         "and pinned (the gating projector). Statistics used it to read rows and now reads through `rows`, "
         "because a cache-only read of an evicted well answered None."),
     "review/data/focus_gate.py::dataset_has_focus_column": (
-        "Whether the dataset carries the focus column: any held frame answers it, since the column is written "
-        "for every row of a run or for none, and an empty cache answers None (unknown), never 'no'."),
+        "Whether the dataset carries the focus column: every well's summary answers it; without summaries any "
+        "held frame does, since the column is written for every row of a run or for none, and an empty cache "
+        "answers None (unknown), never 'no'."),
     "review/features/image_browser/playground/controller.py::_focus_caveats": (
         "The same question as dataset_has_focus_column, asked of any held frame; nothing held says nothing."),
     "review/features/spatial/collect.py::_sample_loaded_df": (
@@ -57,16 +58,19 @@ _HELD_ONLY_READERS: dict[str, str] = {
         "Replaces a HELD well's frame after the smFISH write-back rewrote its CSV. An evicted well needs "
         "nothing: its next read sees the new file, whose fingerprint invalidates the Parquet cache."),
     "review/core/dataset_state.py::begin_load": "Clears the cache on a dataset swap.",
+    "review/core/channel_state_controller.py::_sample_frame": (
+        "Channel detection reads column names and the first row's channel token, shared by every well of a run: "
+        "a held well answers it without a read, and with none held the first well is read through get_rows."),
+    "review/core/load_controller.py::_open_wells": (
+        "Reads the cache's eviction count and description to stop loading rows once the plate stops fitting."),
     "review/core/channel_state_controller.py::set_active_metric": (
         "Checks the first held frame for the new metric's column and clears the cache when it is missing (a "
         "stale cache). Any held well answers that; with none held there is nothing stale to clear."),
     "review/persistence/reset_scopes.py::clear_curation": "Clears the cache so frames reload without overrides.",
     "review/persistence/reset_scopes.py::_clear_gating": "Clears the cache so frames reload ungated.",
-    # Owed by tracker M4, which moves each of these to the per-well summaries. Listed so this guard can land
-    # with M3; M4 removes them, and the liveness test below fails if it does not.
-    "review/core/dataset_state.py::rebuild_timepoints": "OWED (tracker M4): the plate's timepoints, from the held frames.",
-    "review/core/dataset_state.py::rebuild_fovs": "OWED (tracker M4): the plate's FOVs, from the held frames.",
-    "review/data/dataset_dims.py::cache_column_tokens": "OWED (tracker M4): timepoint/FOV options, from the held frames.",
+    "review/core/dataset_state.py::well_summaries": (
+        "Summarises a held frame for a well that has no stored summary — a supplement to the summaries, which "
+        "cover every opened well, never a substitute for them."),
     "review/runtime_app.py::_invalidate_dataset_cache": "Clears the cache.",
 }
 

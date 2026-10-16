@@ -89,22 +89,18 @@ def channel_options(ctx) -> list[str]:
 
 
 def cache_column_tokens(ctx, column: str) -> list[str]:
-    """Unique normalised tokens from ``column`` across every cached DataFrame.
+    """Unique normalised ``fov`` or ``timepoint`` tokens across every well.
 
-    ``ctx.state.dataset.cache`` values are DataFrames since the pandas migration; iterating
-    one with ``for row in df`` yields *column names*, not rows. Pull the column
-    out vectorised instead — and skip frames that don't carry it at all.
+    From the per-well summaries (``DatasetState.well_summaries``), not the row
+    cache: the cache is bounded and holds the wells that fit, so the options it
+    offered depended on what happened to be in memory. Tokens keep the order the
+    wells and their rows present them, as the scan of the cached frames did.
     """
-    seen: list[str] = []
-    cache = ctx.state.dataset.cache or {}
-    for df in cache.values():
-        if df is None or column not in getattr(df, "columns", ()):
-            continue
-        for val in df[column].dropna().unique():
-            tok = norm_token(val)
-            if tok and tok not in seen:
-                seen.append(tok)
-    return seen
+    seen: dict[str, None] = {}
+    for summary in ctx.state.dataset.well_summaries():
+        for tok in summary.tokens(column):
+            seen.setdefault(tok, None)
+    return list(seen)
 
 
 def timepoint_options(ctx) -> list[str]:

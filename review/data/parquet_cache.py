@@ -79,6 +79,9 @@ _logger = logging.getLogger("review.parquet_cache")
 #: ``startswith(".")`` filter would catch if the cache were ever flattened.
 CACHE_DIRNAME = ".aw_parquet"
 
+#: The per-well summaries (``review/data/well_summary.py``) live in the same directory.
+_SUMMARY_SUFFIX = ".summary.json"
+
 #: Parquet key-value metadata key holding the source CSV's fingerprint.
 _FINGERPRINT_KEY = b"aw_source_fingerprint"
 
@@ -169,8 +172,12 @@ def source_fingerprint(csv_path: Path) -> str | None:
     return f"{st.st_size}:{st.st_mtime_ns}:v{PARSER_VERSION}"
 
 
-def read_cached(csv_path: Path) -> pd.DataFrame | None:
+def read_cached(csv_path: Path, columns: list[str] | None = None) -> pd.DataFrame | None:
     """The cached frame for *csv_path*, or ``None`` for a miss of any kind.
+
+    *columns* reads only those (the ones the file has; absent names are
+    skipped). Only for a consumer that never puts the frame in the row cache —
+    see "Whole frames for the row cache" below; ``well_summary`` is the one.
 
     A miss is never an error: no engine, no cache file, a fingerprint that does
     not match the CSV beside it, or a file that will not parse all mean the same
@@ -178,18 +185,17 @@ def read_cached(csv_path: Path) -> pd.DataFrame | None:
     it is logged at debug because a corrupt cache repairs itself on the next
     write.
 
-    **Whole frames only, deliberately.** Parquet is columnar and a subset read
-    is the larger win — six of thirty-seven columns measured 7 ms against 51 ms
-    on a 120,000-row well — but there is nowhere to put a partial frame. The row
-    cache (``ctx.state.dataset.cache``) holds one frame per well and fifty-six
-    ``get_rows`` call sites read whatever column they need from it; a projected
-    frame in there answers a later caller's column with a ``KeyError`` at best
-    and a silently-empty plot at worst, which is §7's shortfall that looks like
-    a result. No read path in the app bypasses that cache, so no caller can take
-    a subset safely today, and a ``columns`` parameter with no caller is a seam
-    for an implementation that has not arrived. It comes back when a consumer
-    exists that does not populate the row cache — the query layer a DuckDB
-    engine would need is the obvious one.
+    **Whole frames for the row cache, deliberately.** Parquet is columnar and a
+    subset read is the larger win — six of thirty-seven columns measured 7 ms
+    against 51 ms on a 120,000-row well — but the row cache
+    (``ctx.state.dataset.cache``) has nowhere to put a partial frame. It holds
+    one frame per well and every ``get_rows`` caller reads whatever column it
+    needs from it; a partial frame there answers a later caller's column with a
+    ``KeyError`` at best and a silently-empty plot at worst, and the verdict
+    projectors fail open on a missing input column, so a QC metric left out
+    would read as every cell passing. So ``read_well_frame`` never passes
+    *columns*. The per-well summaries (``review/data/well_summary.py``) do: they
+    read the few columns a dataset's open needs and never enter the row cache.
     """
     pq = _pyarrow()
     if pq is None:
@@ -204,6 +210,9 @@ def read_cached(csv_path: Path) -> pd.DataFrame | None:
         meta = pq.read_schema(path).metadata or {}
         if meta.get(_FINGERPRINT_KEY, b"").decode() != want:
             return None  # the CSV was rewritten; the cache describes the old one
+        if columns is not None:
+            present = set(pq.read_schema(path).names)
+            return pq.read_table(path, columns=[c for c in columns if c in present]).to_pandas()
         return pq.read_table(path).to_pandas()
     except Exception as exc:  # noqa: BLE001 - any unreadable cache is just a miss
         _logger.debug("parquet cache unreadable for %s (%s); parsing the CSV",
@@ -308,6 +317,7 @@ def prune(csv_dir) -> int:
 
     * a ``<well>.parquet`` whose ``<well>.csv`` is gone — the well was renamed
       or deleted, and nothing will ever read or overwrite that entry again;
+    * a ``<well>.summary.json`` (``review/data/well_summary.py``) in the same case;
     * a ``__aw_tmp_*`` staging file, left by a process killed between the write
       and the ``os.replace``. Every one of them is dead by definition: a live
       write holds its own name and replaces it within milliseconds, and a
@@ -334,7 +344,10 @@ def prune(csv_dir) -> int:
                 continue
             orphan = (entry.name.startswith("__aw_tmp_")
                       or (entry.suffix == ".parquet"
-                          and existing_csv(Path(csv_dir) / f"{entry.stem}.csv") is None))
+                          and existing_csv(Path(csv_dir) / f"{entry.stem}.csv") is None)
+                      or (entry.name.endswith(_SUMMARY_SUFFIX)
+                          and existing_csv(Path(csv_dir) / f"{entry.name[:-len(_SUMMARY_SUFFIX)]}.csv")
+                          is None))
             if not orphan:
                 continue
             with swallow(f"remove the orphaned cache file {entry.name}"):

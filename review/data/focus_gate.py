@@ -224,6 +224,11 @@ def dataset_has_focus_column(ctx) -> bool | None:
     """
     from pipeline.field_quality_record import FOCUS_COLUMN
 
+    # Every well's columns are in its summary, held or not; a dataset opened
+    # without summaries (a test seeding frames) answers from the held frames.
+    summaries = getattr(ctx.state.dataset, "summaries", None) or {}
+    if summaries:
+        return any(FOCUS_COLUMN in s.columns for s in summaries.values())
     cache = getattr(ctx.state.dataset, "cache", None) or {}
     frames = [df for df in cache.values() if df is not None and len(df)]
     if not frames:

@@ -34,6 +34,7 @@ from review.data.data_loading import (
 
 if TYPE_CHECKING:  # pragma: no cover
     from review.core.dataset_state import DatasetState
+    from review.data.well_summary import WellSummary
 
 
 class WellRepository:
@@ -59,6 +60,37 @@ class WellRepository:
         time, which is what a first pass over a new dataset needs.
         """
         return load_and_project(self._ctx, label, path)
+
+    def open_well(self, label: str, path: Path, *, load_rows: bool) -> WellSummary:
+        """Register *label*'s CSV for an opening dataset and record its summary.
+
+        What the dataset loader calls for every well. With *load_rows* the well's
+        frame is read into the row cache as :meth:`load_well` does — the loader
+        asks for that while the plate still fits the row-cache budget, so a plate
+        that fits opens exactly as it always did — and its summary is taken from
+        that frame when none is stored. Without it, nothing is read but the
+        summary (``review/data/well_summary.py``): the stored one, else a column
+        read of the Parquet cache, else a parse. Either way the FOV-label verdict
+        is recorded, and the well's rows are one ``get_rows`` away.
+        """
+        from review.data.data_loading import record_fov_integrity
+        from review.data.parquet_cache import source_fingerprint
+        from review.data.well_summary import read_summary, summarize_frame, well_summary, write_summary
+
+        dataset = self.dataset
+        dataset.well_paths[label] = path
+        if load_rows:
+            summary = read_summary(path)
+            fingerprint = source_fingerprint(path)
+            frame = load_and_project(self._ctx, label, path)
+            if summary is None:
+                summary = summarize_frame(frame)
+                write_summary(path, summary, fingerprint)
+        else:
+            summary = well_summary(path)
+            record_fov_integrity(self._ctx, label, summary.fov_verdict)
+        dataset.summaries[label] = summary
+        return summary
 
     def rows(self, label: str) -> pd.DataFrame:
         """The measurement frame for well *label*, loading + projecting lazily

@@ -5,14 +5,18 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from services.remote_fetch_nanowells import fetch_nanowell_tables, is_nanowell_run
+import pytest
+
+from services.remote_fetch_nanowells import (
+    fetch_nanowell_tables, missing_nanowell_tables, pull_nanowell_results, reanchored_wells, well_files_to_delete,
+)
 
 
 class _Fetcher:
     """Records what it was asked to list and pull; the remote holds only the names in ``remote``."""
 
-    def __init__(self, local, remote):
-        self.run = SimpleNamespace(local_output_dir=local, remote_output_dir="/scratch/out")
+    def __init__(self, local, remote, *, nanowell=True):
+        self.run = SimpleNamespace(local_output_dir=local, remote_output_dir="/scratch/out", nanowell=nanowell)
         self.host = SimpleNamespace(ssh_alias="gpu")
         self.remote, self.listed, self.pulled = set(remote), [], []
 
@@ -41,10 +45,10 @@ def test_the_tables_and_the_template_are_pulled_by_exact_name_into_the_nanowells
 
 
 def test_a_run_that_is_not_in_nanowell_mode_costs_no_remote_call(tmp_path):
-    _sidecar(tmp_path, execution_options={})
-    fetcher = _Fetcher(tmp_path, {"A01.csv"})
+    # The run's own argv decides, not the local sidecar, which may be an earlier run's of the same folder.
+    _sidecar(tmp_path, nanowell={"scheme_version": 1})
+    fetcher = _Fetcher(tmp_path, {"A01.csv"}, nanowell=False)
     assert fetch_nanowell_tables(fetcher, "A01") == 0 and fetcher.listed == [] and not (tmp_path / "nanowells").exists()
-    assert not is_nanowell_run(tmp_path / "missing")                      # no sidecar yet: not known to be nanowell
 
 
 def test_a_table_the_remote_lacks_is_not_invented(tmp_path):
@@ -70,9 +74,12 @@ def test_fetching_a_well_through_the_fetcher_brings_its_tables(tmp_path, monkeyp
     out.mkdir()
     _sidecar(out, nanowell={"scheme_version": 1})
     run = _RemoteRun(run_id="r", cache_key="k", remote_input_dir="/r/in", remote_output_dir="/r/out",
-                     remote_pidfile="/r/pid", local_output_dir=out, local_input_mode=LocalInputMode.ZIP)
+                     remote_pidfile="/r/pid", local_output_dir=out, local_input_mode=LocalInputMode.ZIP,
+                     nanowell=True)
     with patch.object(Fetcher, "_loop", lambda self: None):
-        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL, log_fn=lambda _m: None)
+        # Batched mode's Fetcher, the one that deletes a well's remote files once it is fetched.
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL, log_fn=lambda _m: None,
+                          delete_after_download=True)
 
     def fake_rsync(self, argv):
         with zipfile.ZipFile(argv[-1], "w") as zf:
@@ -93,10 +100,94 @@ def test_fetching_a_well_through_the_fetcher_brings_its_tables(tmp_path, monkeyp
     monkeypatch.setattr(Fetcher, "_already_local", lambda self, w: None)
     monkeypatch.setattr(Fetcher, "_list_remote_glob", fake_list)
     monkeypatch.setattr(Fetcher, "_pull_listed", fake_pull)
-    monkeypatch.setattr(Fetcher, "_delete_well_files_on_remote", lambda self, w: None)
+    deleted = []
+    import services.remote_fetch as _rf
+
+    monkeypatch.setattr(_rf, "delete_remote_paths", lambda host, paths, **k: deleted.append(list(paths)))
     monkeypatch.setattr(Fetcher, "_pull_settings_marker", lambda self, w: None)
+    # main's remote CSV compression is an ssh call of its own; stubbed with the rest of the transport.
+    import services.remote_fetch as remote_fetch
+
+    monkeypatch.setattr(remote_fetch, "compress_remote_csvs", lambda *a, **k: None)
     try:
         fetcher._fetch_one("A01")
     finally:
         fetcher.cancel()
     assert sorted(p.name for p in (out / "nanowells").iterdir()) == ["A01.csv", "A01_grid.json", "A01_template.npz"]
+    assert deleted == []                      # the re-anchoring may re-run A01 from what is on the remote (X2)
+
+
+# ── the end-of-run re-anchoring revisits wells already fetched (roll-up review X2) ──
+def test_a_nanowell_run_deletes_nothing_of_a_well_mid_run():
+    """The end-of-run re-anchoring re-runs a well from its input archive and earlier output, so neither may go."""
+    plain = SimpleNamespace(nanowell=False, remote_input_dir="/r/in", remote_output_dir="/r/out")
+    assert well_files_to_delete(plain, "A01") == [
+        "/r/in/A01.zip", "/r/out/A01_out.zip", "/r/out/*_A01.csv", "/r/out/*_A01.csv.gz"]
+    assert well_files_to_delete(SimpleNamespace(nanowell=True, remote_input_dir="/r/in",
+                                                remote_output_dir="/r/out"), "A01") == []
+
+
+class _Verifier:
+    def __init__(self, local, *, nanowell=True):
+        self._run = SimpleNamespace(local_output_dir=local, remote_output_dir="/r/out", nanowell=nanowell)
+        self.host = SimpleNamespace(ssh_alias="gpu")
+        self.pulled = []
+
+    def _rsync_optional(self, src, dest, *, log_fn, absent_note=""):
+        self.pulled.append((src, str(dest)))
+
+
+def test_verification_pulls_the_final_tables_and_every_re_anchored_well_again(tmp_path):
+    _sidecar(tmp_path, nanowell={"reanchor": {"anchored": ["B02/24h", "A01/24h", "A01/48h"], "remaining": {}}})
+    verifier, lines = _Verifier(tmp_path), []
+    pull_nanowell_results(verifier, log=lines.append)
+    assert verifier.pulled == [
+        ("gpu:/r/out/nanowells/", str(tmp_path / "nanowells")),
+        ("gpu:/r/out/A01_out.zip", str(tmp_path / "A01_out.zip")), ("gpu:/r/out/*_A01.csv.gz", str(tmp_path)),
+        ("gpu:/r/out/B02_out.zip", str(tmp_path / "B02_out.zip")), ("gpu:/r/out/*_B02.csv.gz", str(tmp_path))]
+    assert reanchored_wells(tmp_path / "pipeline_info.json") == ["A01", "B02"]
+    plain = _Verifier(tmp_path, nanowell=False)
+    pull_nanowell_results(plain, log=lines.append)
+    assert plain.pulled == []
+
+
+def test_a_well_whose_tables_did_not_arrive_fails_verification(tmp_path):
+    run = SimpleNamespace(local_output_dir=tmp_path, nanowell=True)
+    (tmp_path / "nanowells").mkdir()
+    (tmp_path / "nanowells" / "A01.csv").write_text("x")
+    assert missing_nanowell_tables(run, "A01") == ["missing nanowells/A01_grid.json for A01"]
+    assert missing_nanowell_tables(SimpleNamespace(local_output_dir=tmp_path, nanowell=False), "A01") == []
+
+
+def test_a_remote_incremental_nanowell_run_is_refused():
+    """The remote would analyse the new timepoints without the earlier ones and its tables would replace the
+    local ones (roll-up review X3)."""
+    from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL, _RemoteRun
+    from services.remote_runner import LocalInputMode
+
+    args = dict(run_id="r", cache_key="k", remote_input_dir="/r/in", remote_output_dir="/r/out", remote_pidfile="p",
+                local_output_dir="/tmp/x", local_input_mode=LocalInputMode.ZIP)
+    _RemoteRun(**args, nanowell=True)
+    _RemoteRun(**args, incremental=True)
+    with pytest.raises(ValueError, match="An incremental nanowell run cannot run on a remote host yet"):
+        _RemoteRun(**args, nanowell=True, incremental=True)
+    assert NANOWELL_REMOTE_INCREMENTAL_REFUSAL.endswith("(untick Incremental).")
+
+
+def test_a_nanowell_well_s_completion_line_is_the_one_the_fetcher_and_the_progress_count_read(tmp_path, monkeypatch,
+                                                                                               caplog):
+    """The marker, from a real run: a variant spelling fetched no nanowell well as it finished."""
+    import logging
+
+    from services.pipeline_runner import _RE_WELL_DONE_ID
+    from services.remote_wire import _RE_WELL_DONE
+    from tests._nanowell_run_fixture import build_well
+    from tests.test_nanowell_cli import _run_main, _write_plate
+
+    rendered, record = build_well(timepoint="0h")
+    plate = _write_plate(tmp_path, rendered, record)
+    with caplog.at_level(logging.INFO):
+        _run_main(monkeypatch, plate, "--nanowell_format", "100um")
+    done = [r.getMessage() for r in caplog.records if "done" in r.getMessage() and "A01" in r.getMessage()]
+    assert done and _RE_WELL_DONE.search(done[0]).group("well") == "A01"
+    assert _RE_WELL_DONE_ID.search(done[0]).group(1) == "A01"

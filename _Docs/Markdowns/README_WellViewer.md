@@ -266,7 +266,10 @@ edge), the end of the run addresses it from the plate's other wells, which move 
 and says how many it anchored and how many remain unaddressed.
 
 `--incremental` adds only new timepoints (onto the same set of nanowells); a changed setting or a changed tile
-record recomputes the timepoint.
+record recomputes the timepoint. An incremental nanowell run is refused on a remote host for now — the remote
+would analyse the new timepoints without the earlier ones — so run it on this computer, or run the remote plate
+in full. A remote nanowell run keeps every well's files on the remote until the run ends, because the
+end-of-run re-anchoring may re-run a well, and then brings the final tables home with the re-anchored wells.
 
 **Datasets tools and nanowell results.** *Subset* carries the nanowell tables of the wells and timepoints it
 keeps; it refuses a selection of fields, because a well's nanowell results are measured over all of its tiles

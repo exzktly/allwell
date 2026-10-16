@@ -6,8 +6,16 @@ registration, lattice and status of every timepoint); without them the run's rea
 worker host and the fetched dataset has cells with no sites. They are separate from the cell CSV
 because Review loads every top-level ``*.csv`` as a well's cell table.
 
-This lives in its own module because ``remote_fetch.py`` has three lines of headroom: the hook there is
-one call, and everything else is here.
+**A nanowell run's wells are not finished when they say so.** The end-of-run re-anchoring
+(``pipeline.nanowell_task.reanchor_plate``) re-runs the (well, timepoint)s the rest of the plate can address,
+incrementally, from the well's input archive and its earlier output. So nothing of a well is deleted from the
+remote as it is fetched (:func:`well_files_to_delete`), and at verification the whole ``nanowells/`` directory
+and every re-anchored well's CSV and ``<well>_out.zip`` are pulled again (:func:`pull_nanowell_results`). A well
+whose tables did not arrive fails verification (:func:`missing_nanowell_tables`), which keeps the remote copy.
+Remote disk for a nanowell run therefore peaks at the whole run's output, not one well's.
+
+This lives in its own module because ``remote_fetch.py`` is line-budgeted: the hooks there are single calls,
+and everything else is here.
 """
 
 from __future__ import annotations
@@ -16,15 +24,6 @@ import json
 from pathlib import Path
 
 NANOWELL_DIR = "nanowells"
-
-
-def is_nanowell_run(local_output_dir) -> bool:
-    """Whether this run's sidecar (fetched early, before any well) records nanowell settings."""
-    try:
-        info = json.loads((Path(local_output_dir) / "pipeline_info.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    return isinstance(info, dict) and "nanowell" in info
 
 
 def fetch_nanowell_tables(fetcher, well: str) -> int:
@@ -37,7 +36,7 @@ def fetch_nanowell_tables(fetcher, well: str) -> int:
     A no-op for a run that is not in nanowell mode.
     """
     run = fetcher.run
-    if not is_nanowell_run(run.local_output_dir):
+    if not run.nanowell:
         return 0
     dest = Path(run.local_output_dir) / NANOWELL_DIR
     pulled = 0
@@ -49,3 +48,49 @@ def fetch_nanowell_tables(fetcher, well: str) -> int:
             dest.mkdir(parents=True, exist_ok=True)
             pulled += fetcher._pull_listed(host, files, dest)
     return pulled
+
+
+def well_files_to_delete(run, well: str) -> list[str]:
+    """The remote files of *well* the Fetcher may delete once it is fetched: none for a nanowell run, whose
+    re-anchoring may re-run the well from them; ``verify_and_cleanup`` removes the run directory at the end."""
+    if run.nanowell:
+        return []
+    rin, rout = run.remote_input_dir, run.remote_output_dir
+    return [f"{rin}/{well}.zip", f"{rout}/{well}_out.zip", f"{rout}/*_{well}.csv", f"{rout}/*_{well}.csv.gz"]
+
+
+def reanchored_wells(info_path) -> list[str]:
+    """The wells the end-of-run re-anchoring re-ran, from the sidecar's ``nanowell.reanchor.anchored``
+    (``"A01/24h"`` entries)."""
+    try:
+        info = json.loads(Path(info_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    anchored = ((info.get("nanowell") or {}).get("reanchor") or {}).get("anchored") or []
+    return sorted({str(entry).split("/", 1)[0] for entry in anchored if str(entry)})
+
+
+def pull_nanowell_results(verifier, *, log) -> None:
+    """At verification, for a nanowell run: the whole ``nanowells/`` directory as the run left it, then the cell
+    CSV and ``<well>_out.zip`` of every well the re-anchoring re-ran (fetched once already, before it did)."""
+    from services.remote_csv import retire_superseded_csvs
+
+    run = verifier._run
+    if run is None or not run.nanowell:
+        return
+    remote, local = f"{verifier.host.ssh_alias}:{run.remote_output_dir}", Path(run.local_output_dir)
+    verifier._rsync_optional(f"{remote}/{NANOWELL_DIR}/", local / NANOWELL_DIR, log_fn=log)
+    for well in reanchored_wells(local / "pipeline_info.json"):
+        verifier._rsync_optional(f"{remote}/{well}_out.zip", local / f"{well}_out.zip", log_fn=log)
+        verifier._rsync_optional(f"{remote}/*_{well}.csv.gz", local, log_fn=log)
+        retire_superseded_csvs([str(p) for p in local.glob(f"*_{well}.csv.gz")], local)
+        log(f"[remote] {well}: pulled again after the end-of-run re-anchoring re-ran it.\n")
+
+
+def missing_nanowell_tables(run, well: str) -> list[str]:
+    """What verification counts missing for *well* of a nanowell run: its sites table or its grid record."""
+    if not run.nanowell:
+        return []
+    folder = Path(run.local_output_dir) / NANOWELL_DIR
+    return [f"missing {NANOWELL_DIR}/{name} for {well}" for name in (f"{well}.csv", f"{well}_grid.json")
+            if not (folder / name).is_file()]

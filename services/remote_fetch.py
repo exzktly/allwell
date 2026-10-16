@@ -84,7 +84,8 @@ from services.remote_run_state import (
 )
 from services.remote_log_adapter import LogFnLogger as _LogFnLogger
 from services.remote_staging import input_well_containers
-from services.remote_fetch_nanowells import fetch_nanowell_tables
+from services.remote_fetch_nanowells import (
+    fetch_nanowell_tables, missing_nanowell_tables, pull_nanowell_results, well_files_to_delete)
 from services.remote_wire import (
     TRANSIENT_PREFIX,
     _BREADCRUMB_INTERVAL_S,
@@ -1104,11 +1105,9 @@ class Fetcher:
         """rm the remote input + output zips + per-well CSVs for ``well`` once
         its download is safe — bounds peak remote disk to about one well's
         output. Non-fatal; ``verify_and_cleanup`` is the backstop."""
-        rin, rout = self.run.remote_input_dir, self.run.remote_output_dir
-        delete_remote_paths(
-            self.host, [f"{rin}/{well}.zip", f"{rout}/{well}_out.zip",
-                        f"{rout}/*_{well}.csv", f"{rout}/*_{well}.csv.gz"],
-            what=f"per-well files of {well}", log_fn=self._log)
+        paths = well_files_to_delete(self.run, well)      # none for a nanowell run: see remote_fetch_nanowells
+        if paths:
+            delete_remote_paths(self.host, paths, what=f"per-well files of {well}", log_fn=self._log)
 
     def _merge_fetched_csvs(self, tmp_csv_dir: Path) -> None:
         """Merge each partial per-well CSV pulled into *tmp_csv_dir* into the
@@ -1558,6 +1557,7 @@ class FetchedOutputVerifier:
                         "FOV-group fails, so a clean run has none.",
         )
 
+        pull_nanowell_results(self, log=log)      # the final tables and the re-anchored wells, for a nanowell run
         # The fetched pipeline_info.json reflects only the (partial) input the
         # remote saw — for an incremental run that's just the uploaded new-FOV
         # members, so its available_timepoints/available_fovs miss the rest of
@@ -1968,6 +1968,7 @@ class FetchedOutputVerifier:
                     missing.append(
                         f"{well}_out.zip was not replaced (same size and "
                         f"timestamp as before the run)")
+            missing.extend(missing_nanowell_tables(run, well))
         if missing:
             for m in missing[:10]:
                 log(f"[remote] verify: {m}\n")

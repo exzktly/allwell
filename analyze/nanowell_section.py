@@ -242,6 +242,10 @@ class AnalyzeNanowellSectionMixin:
         if not nanowell_enabled(opts):
             return None
         problems = nanowell_option_errors(opts, need_phase=not self._auto_detect_on())
+        if self._remote_cb.currentData() is not None and self._incremental_cb.isChecked():
+            from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL
+
+            problems.append(NANOWELL_REMOTE_INCREMENTAL_REFUSAL)
         if not problems and check_input:
             from analyze.nanowell_preflight import nanowell_input_report
 

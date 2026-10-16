@@ -111,6 +111,24 @@ def test_a_hidden_custom_number_does_not_refuse_a_known_format():
     assert not any("diameter" in e or "pitch" in e for e in errors)
 
 
+def test_an_incremental_nanowell_run_on_a_remote_host_is_refused(tab, refused, tmp_path):  # noqa: F811
+    """Refused in the form, before anything is staged (roll-up review X3); the run record refuses it as well."""
+    from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL
+
+    root, _ = _plate(tmp_path)
+    _use_nanowell_schema(tab)
+    tab._input_edit.setText(str(root))
+    tab._nanowell_cb.setChecked(True)
+    tab._incremental_cb.setChecked(True)
+    assert tab._validate_run_request() is not None                   # on this computer: fine
+    tab._remote_cb.addItem("bench-box", userData="bench-box")
+    tab._remote_cb.setCurrentIndex(tab._remote_cb.findData("bench-box"))
+    assert tab._validate_run_request() is None
+    assert NANOWELL_REMOTE_INCREMENTAL_REFUSAL in refused[-1][1]
+    tab._incremental_cb.setChecked(False)
+    assert tab._validate_run_request() is not None                   # the remote plate in full: fine
+
+
 def test_a_partial_grid_is_refused_with_what_it_lacks(tab, refused, tmp_path):  # noqa: F811
     _use_nanowell_schema(tab)
     tab._input_edit.setText(str(tmp_path))

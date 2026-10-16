@@ -8973,7 +8973,18 @@ read by the analysis (`check_orientation`'s `square_to_axis_deg`, `site_state`'s
 validated and keyed.
 
 **Remote and Datasets tools.** The acquisition record already travels with the upload; the fetch brings
-`nanowells/<well>.csv` and `_grid.json` back (`services/remote_fetch_nanowells`). In
+`nanowells/<well>.csv`, `_grid.json` and the template back as each well finishes (`services/remote_fetch_nanowells`).
+A nanowell well announces itself with the same `Well X — done.` marker a field-mode well does, which is what the
+Fetcher and Analyze's progress count. The run record knows it is a nanowell run from its argv
+(`_RemoteRun.nanowell`), and three things follow. Nothing of a well is deleted from the remote mid-run
+(`well_files_to_delete`), because the end-of-run re-anchoring re-runs some wells from their input archives and
+earlier output. At verification the whole `nanowells/` directory and every re-anchored well's CSV and
+`<well>_out.zip` (named by the sidecar's `nanowell.reanchor.anchored`) are pulled again
+(`pull_nanowell_results`). A well whose sites table or grid record did not arrive fails verification
+(`missing_nanowell_tables`), which keeps the remote copy. An incremental nanowell run is refused on a remote host,
+in Analyze and as a backstop in the run record (`NANOWELL_REMOTE_INCREMENTAL_REFUSAL`): the remote would analyse
+only the new timepoints, without the earlier ones' roster and template, and its tables would replace the local
+ones. In
 `datasets/core/nanowell_tables`, `carry_nanowell_tables` copies a dataset's tables through a well map (canonical
 wells, so an unpadded `A1_grid.json` is found) and an optional timepoint predicate, rewriting the grid
 record's `well` and keeping the sites table and the grid record to the same timepoints; a well left with no

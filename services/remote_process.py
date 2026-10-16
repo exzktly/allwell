@@ -521,7 +521,7 @@ class _BatchedRemoteProcess:
             local_input_dir=_local_input_dir_from_argv(pipeline_argv),
             output_filter=output_filter,
             incremental=zipped.incremental,
-            force=_force, force_wells=_forced_wells,
+            force=_force, force_wells=_forced_wells, nanowell="--nanowell_format" in pipeline_argv,
             pre_run_artifacts=_snapshot_local_artifacts(local_output_dir),
         )
         # Batched runs record their address too. Without this a plate run in

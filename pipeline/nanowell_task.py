@@ -499,7 +499,9 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
                           groups_covered=sum(1 for b in grid["timepoints"].values() if b.get("status") == nr.OK),
                           failed=failed)
         record_well_settings(output_dir, well_label, settings_key)
-        log.info("Well %s — done (%d timepoint(s), %d without rows).", well_label, total, len(failed))
+        # "— done." exactly as a field-mode well says it: the remote Fetcher and Analyze's progress count a well
+        # finished by that marker (``services/remote_wire._RE_WELL_DONE``), and a variant fetched nothing in-stream.
+        log.info("Well %s — done. %d timepoint(s), %d without rows.", well_label, total, len(failed))
         return records, failed
     finally:
         if owned:

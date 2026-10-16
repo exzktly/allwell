@@ -67,6 +67,13 @@ def _canonical_well_from_path(stem: str) -> str | None:
 
 
 
+#: Said by Analyze and by the run record alike, so the two refusals cannot drift.
+NANOWELL_REMOTE_INCREMENTAL_REFUSAL = (
+    "An incremental nanowell run cannot run on a remote host yet: the remote would analyse the new timepoints "
+    "without the earlier ones' roster and template, and its tables would replace yours. Run it incrementally "
+    "on this computer, or run the remote plate in full (untick Incremental).")
+
+
 @dataclass
 class _RemoteRun:
     """Internal handle: everything one in-flight run needs to track."""
@@ -106,6 +113,17 @@ class _RemoteRun:
     # skip a well the user asked to have replaced.
     force: bool = False
     force_wells: frozenset[str] = frozenset()
+    #: A nanowell run (``--nanowell_format`` on its argv). Its wells are revisited by the end-of-run re-anchoring,
+    #: which re-runs some of them from their input archives and earlier output, so nothing of a well is deleted
+    #: from the remote mid-run and the final tables are pulled at verification (``remote_fetch_nanowells``).
+    nanowell: bool = False
+
+    def __post_init__(self) -> None:
+        # A remote incremental run uploads only the new fields and analyses them alone, without the earlier
+        # timepoints' roster, template or grid; a nanowell well would come back as only its new timepoints and
+        # replace the local tables. Refused here as the backstop; Analyze refuses it before anything is staged.
+        if self.nanowell and self.incremental:
+            raise ValueError(NANOWELL_REMOTE_INCREMENTAL_REFUSAL)
     # Pre-run fingerprint of the local output artefacts, ``path -> (size,
     # mtime_ns)``. Verify compares against it so a run that was told to replace
     # a well's output has to prove it did, rather than proving the old file is

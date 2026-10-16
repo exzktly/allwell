@@ -48,7 +48,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from util.aw_safe import swallow
-from util.zip_write import atomic_zip
+from util.zip_write import atomic_zip, fsync_path
 from datasets.core.dataset_paths import DatasetPaths
 from datasets.core.zip_passthrough import copy_member_raw, member_is_raw_copyable
 
@@ -353,6 +353,7 @@ def copy_container_members(
     rename: MemberRename,
     *,
     progress: MemberProgress | None = None,
+    durable: bool = False,
 ) -> tuple[frozenset[str], frozenset[str]]:
     """Publish *dest* from *sources*, keeping and naming members by *rename*.
 
@@ -376,6 +377,11 @@ def copy_container_members(
     whole-file copy, or a filter that kept nothing). Either way the pass
     closes out its slice of the caller's :class:`WellFraction`, so one
     container is one slice whichever tier serves it.
+
+    *durable* keeps :func:`util.zip_write.atomic_zip`'s fsyncs. Off for a copy
+    into a new folder (the source is still on disk and the tool's marker says
+    to redo it); on for an archive created inside an in-place append, which is
+    committed with the run and has no source copy to redo it from.
 
     See the module docstring for the three tiers and why they exist.
     """
@@ -403,6 +409,9 @@ def copy_container_members(
             # moves the file whole. The comment below says nothing here is
             # written straight to the destination; this is what makes that true.
             publish_container(sources[0], dest)
+            if durable:
+                fsync_path(dest)
+                fsync_path(dest.parent)
             _close_progress(progress)
             return frozenset(written), frozenset()
 
@@ -428,7 +437,7 @@ def copy_container_members(
         total = len(planned)
         with atomic_zip(
             dest, compression=zipfile.ZIP_DEFLATED, compresslevel=1,
-            durable=False,
+            durable=durable,
         ) as archive:
             for done, (source_archive, entry, dest_name) in enumerate(planned, start=1):
                 if source_archive is None:

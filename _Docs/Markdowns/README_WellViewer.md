@@ -6673,8 +6673,21 @@ rewritten.
 - **After a crash.** If the app or the machine stops in the middle, the next
   time the dataset is opened — in Review, by an Analyze run, or by Concatenate —
   the unfinished addition is undone first and the log says so. Then run the
-  addition again. If the addition is still running in another window, or was
-  started on another computer, it is left alone and you are told.
+  addition again. Subset, Merge Plates, Validate and Import Loose refuse the
+  dataset until that has happened, so none of them can copy a half-added
+  timepoint. If the addition is still running in another window, or was started
+  on another computer, it is left alone and you are told. When you know it is
+  not running any more — that computer is gone, say — pick the dataset in
+  Concatenate and press **Undo the unfinished addition…**; you are asked to
+  confirm, and asked again, with the reason, before anything recorded as still
+  running is undone.
+- **It never undoes over a changed archive.** If something else has rewritten
+  a well's archive since the addition stopped, the undo refuses rather than
+  damage it, keeps its notes beside the archive, and says which archive to
+  check.
+- **The saving is on your own disk.** Remote Analyze runs still upload a
+  well's whole archive again after it grows, because the remote copy is
+  recognised by the archive's size and date (tracker row M24).
 - **Adding the same data twice is refused.** If dataset 2's images (by name, or
   by content) are already in dataset 1, nothing is added and the message names
   the files, so a second press of Concatenate cannot duplicate a timepoint.

@@ -10,6 +10,7 @@ builder (CLAUDE.md §3).
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 from PySide6.QtCore import QObject
 
@@ -20,6 +21,7 @@ from datasets.concatenate.view import ConcatenatePage
 from datasets.concatenate.worker import ConcatenateWorker
 from datasets.concatenate.raw_compute import is_raw_dataset
 from datasets.core.tool_controller import DestinationToolController
+from util.zip_append import AppendJournalError, recover
 
 
 class ConcatenateController(DestinationToolController):
@@ -46,6 +48,7 @@ class ConcatenateController(DestinationToolController):
         self.page.runRequested.connect(self._on_run)
         self.page.queueRequested.connect(self._on_queue_requested)
         self.page.openInReviewRequested.connect(self._on_open_in_review_requested)
+        self.page.undoAppendRequested.connect(self._on_undo_append_requested)
 
     # ── run ──────────────────────────────────────────────────────────────────
     def _launch(self) -> None:
@@ -82,6 +85,46 @@ class ConcatenateController(DestinationToolController):
             self._launch()
             return
         super()._on_run()
+
+    def _on_undo_append_requested(self, root: str) -> None:
+        """Undo an unfinished in-place addition in *root*, after the user confirms.
+
+        A first, ordinary undo leaves alone a run that may still be going (on
+        another computer, or in a live process). Only then, and only after a
+        second confirmation that names what was found, is it undone anyway —
+        the one way out for a run whose computer is gone or whose process id
+        the system has given to something else.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        if self.is_busy() or not root:
+            return
+        yes_no = QMessageBox.Yes | QMessageBox.No
+        if QMessageBox.question(
+                self.page, "Undo the unfinished addition?",
+                f"{root} holds an in-place addition that did not finish.\n\nUndoing it puts "
+                "every archive it touched back exactly as it was before. Continue?",
+                yes_no, QMessageBox.No) != QMessageBox.Yes:
+            return
+        in_dir = Path(root) / "in"
+        try:
+            result = recover(in_dir)
+            if result.blocked:
+                if QMessageBox.question(
+                        self.page, "Undo it anyway?",
+                        f"{result.blocked}\n\nUndo it anyway? Only do this if no other "
+                        "computer or program is still adding to this dataset.",
+                        yes_no, QMessageBox.No) != QMessageBox.Yes:
+                    return
+                result = recover(in_dir, force=True)
+        except AppendJournalError as exc:
+            self.page.append_log(f"✗ {exc}")
+        else:
+            for line in result.lines:
+                self.page.append_log(f"Recovery ({Path(root).name}): {line}")
+            if result.blocked:
+                self.page.append_log(f"✗ {result.blocked}")
+        self.page.datasets_changed_on_disk()
 
     # ── job queue ────────────────────────────────────────────────────────────
     def collect_spec(self) -> dict:

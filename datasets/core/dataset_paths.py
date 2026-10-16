@@ -29,6 +29,7 @@ from util.aw_safe import swallow
 from util.csv_gz import csv_stem, glob_csvs
 from util.image_exts import is_run_input_member
 from util.well_token import canonical_well_label
+from util.zip_append import pending_journals
 from types import SimpleNamespace
 
 
@@ -103,7 +104,27 @@ def resolve_dataset(root: Path | str, *, label: str) -> DatasetPaths:
             f"{label} ({root}) is not a dataset — it needs both an 'in' and an "
             "'out' folder."
         )
+    refuse_unfinished_append(in_dir, label=label, error_cls=DatasetPathsError)
     return DatasetPaths(root=root, in_dir=in_dir, out_dir=out_dir)
+
+
+def refuse_unfinished_append(in_dir: Path, *, label: str, error_cls: type[Exception]) -> None:
+    """Raise *error_cls* while *in_dir* holds an in-place append's journals.
+
+    Every Datasets tool that opens an existing dataset comes through
+    :func:`resolve_dataset`, and a journal there means an append into its
+    archives may not have committed: Subset or Merge Plates would copy a
+    partial timepoint into a new dataset, and Validate would report on it.
+    Read-only on purpose — this runs from page previews on the GUI thread too —
+    so it names the journals and the places that undo them
+    (:func:`util.zip_append.recover`) rather than undoing anything itself.
+    """
+    pending = pending_journals(in_dir)
+    if pending:
+        raise error_cls(
+            f"{label} ({in_dir.parent}) holds an unfinished in-place addition "
+            f"({', '.join(p.name for p in pending[:3])}). Open it in Review, run Analyze on it, "
+            "or use Concatenate's \"Undo the unfinished addition\" to undo it first.")
 
 
 def read_info(paths: DatasetPaths, *, label: str) -> dict:

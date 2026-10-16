@@ -8872,41 +8872,59 @@ the setting) to fitting, ownership, the margin's default and the template. The f
 nanowell as wide as the pitch is, for an inferred geometry, a note: the plate was measured, and the format is a
 statement to check, not a reason to write nothing.
 
-The roster of an inferred array is a set of addresses, and every anchored timepoint's addresses are first put in
-one frame (`_register_to_reference`). A timepoint anchored on its own middle site (`array_centre`) names its sites
-from that middle, and a bubble or an edge that cuts its outline short moves the middle by a step, which would name
-every nanowell by its neighbour's address and join the wrong nanowells over time. Its own sites are therefore
-overlaid on the reference — the earlier run's kept roster, else the anchored timepoint that saw the most sites
-among those anchored on the central square or the plate, else among all — by the whole lattice step within three
-either way that matches the most sites, and its origin moves by it (`origin_shift` and `origin_registered_to` in
-the grid record, a note on the timepoint, and the step in the checkpoint key). When two steps match equally many
-sites — an array that lost a whole edge row fits inside the reference's from either edge, and nothing in the sites
-says which edge it lost — the timepoint is `unaddressed` with that reason, measured on the wells it saw, rather
-than addressed by a guess; the end-of-run pass may still anchor it from the plate. A timepoint anchored on the
-square or the plate is never moved. Before that, a timepoint whose lattice kind is not the well's (the most common
-among its timepoints, the earliest's on a tie) is refused as `lattice_kind_mismatch`, which writes no rows: a
-hexagonal and a square address cannot name one nanowell. The well's roster is then every address any anchored
-timepoint holds (`_shared_roster`): nanowells do not appear, and a bubble hides them, so a site seen as a nanowell
-at any timepoint is one at all of them, and is written as `occluded` where it is hidden — a majority dropped an
-edge row hidden at two timepoints of three. A timepoint whose own set differs from the roster by more than two
-sites or 2 % is `roster_disagrees`, and the consistency check compares each timepoint's own set, not the shared
-roster, so such a timepoint is a `roster_mismatch`. The grid record keeps the roster as `array_radius.roster`
-(with `radius_um: null`, and `shape` the outline or `mixed`), which an incremental or re-anchoring run keeps as
-`run_well(fixed_roster=…)`; an empty one (an earlier run that anchored nothing) is not kept. A polygon array has no
-bubble mask: the mask is the lattice signal's absence inside a circle, visibility already reads a hidden nanowell
-as occluded from its brightness, and no rendered case shows the mask changing a polygon's states. On a square
-lattice `nw_ring` is `max(|q|, |r|)` (`lattice_ring`), the rings `util/nanowell_address.py` labels, and
-`lattice_kind` in each timepoint's grid record says which lattice its addresses are on.
+The roster of an inferred array is a set of addresses, and the anchored timepoints' addresses are first put in
+one frame (`_register_to_reference`). Only a polygon anchored on its own middle site (`array_centre`) can need it:
+that middle is the mean of the sites it saw, and a bubble or an edge that cuts its outline short moves it by a
+step, which would name every nanowell by its neighbour's address and join the wrong nanowells over time. A circle's
+centre is fitted to its rim, and the central square or the plate is evidence of its own, so neither is moved; a
+disagreement with one is a roster mismatch. Each such polygon is put in the reference's frame from the rows its lit
+sites span along each row direction (q and r, and q + r on a hexagonal lattice), counting only rows that hold at
+least three sites so a speck beside the array does not widen it (`_step_onto`): where both span the same number of
+rows, their first rows are the same row and the step follows, and the origin moves by it (`origin_shift` and
+`origin_registered_to` in the grid record, a note, and the step in the checkpoint key). Where the spans differ, one
+of the two lost an edge row and nothing in the sites says which edge — a step chosen by overlap broke that tie by
+whichever edge the reference happened to lose, the wrong way in about half of such wells — so the timepoint is
+`unaddressed` with that reason and measured on the wells it saw; the end-of-run pass can still anchor it from the
+plate, when at least three other wells were anchored on their own evidence at both timepoints. The reference is the
+earlier run's kept roster, else a timepoint anchored on a circle, the square or the plate, else the polygon spanning
+the most rows (nanowells do not appear, so the widest saw most of the array, even when a majority lost a row), then
+the one whose width most others share, the one that saw most sites, and the earliest.
+
+Before that, a timepoint whose lattice kind is not the well's is refused as `lattice_kind_mismatch`, which writes no
+rows: a hexagonal and a square address cannot name one nanowell. The well's kind is the kept run's on an
+incremental run (its first kept timepoint's `lattice_kind`, carried by `nanowell_task._reference_of`), else the most
+common among the timepoints, the earliest's on a tie. The well's roster (`_shared_roster`) is the kept run's on an
+incremental run, one timepoint's own array when it is the only one, and otherwise the sites the timepoints support
+together (`_agreed_sites`): a site at least two timepoints' own arrays hold (a site under a bubble at one, an
+unimaged rim site of a circle), or one lit at a single timepoint that belongs to a lattice-connected group of at
+least three sites lit there touching those — an edge row a bubble hid at the others, which is then written as
+`occluded` where hidden. Anything else one timepoint alone proposed is left out and named in a note on that
+timepoint: a single bright speck on the lattice beside the array once added ten sites to every timepoint for good. A
+timepoint whose own set differs from the roster by more than two sites or 2 % is `roster_disagrees`, and the
+consistency check compares each timepoint's own set with that of the timepoint nearest the roster, so such a
+timepoint is a `roster_mismatch`. The grid record keeps the roster as `array_radius.roster` (with `radius_um:
+null`, `shape` the outline or `mixed`, and `diameter_used_um`), which an incremental or re-anchoring run keeps as
+`run_well(fixed_roster=…)`; an empty one (an earlier run that anchored nothing) is not kept. The diameter the
+sites are measured at is chosen once for the well (`_settle_diameter`): the kept run's, else the setting's unless
+the median of the timepoints' measured diameters is more than 25 % off it, then that median — chosen per timepoint
+it flipped between 125 and 100 µm within one well. A polygon array has no bubble mask: the mask is the lattice
+signal's absence inside a circle, visibility already reads a hidden nanowell as occluded from its brightness, and
+no rendered case shows the mask changing a polygon's states. On a square lattice `nw_ring` is `max(|q|, |r|)`
+(`lattice_ring`), the rings `util/nanowell_address.py` labels, and `lattice_kind` in each timepoint's grid record
+says which lattice its addresses are on.
 
 What this establishes, and what it does not: on rendered tiles (`tests/test_nanowell_infer.py`) square and
 hexagonal lattices at several rotations and seeds, circular and square outlines, single tiles and 2 × 2 montages
 at 4.3 and 2.0 µm per pixel, wells drawn dark, an array the image cuts, a gain step, falling illumination, small
-arrays on a noisy floor, a corner hidden at two timepoints of three, an edge row hidden the same way, a plate of
-another format and timepoints of different lattice kinds each give the result the test states, and through
+arrays on a noisy floor, a corner hidden at two timepoints of three, an edge row hidden the same way (with and
+without the reference losing sites of its own), a speck beside the array at one timepoint, a plate of another
+format, timepoints of different lattice kinds (incremental too) and a diameter at the 25 % line each give the
+result the test states, and through
 `process_microscopy.main` a square array is addressed end to end and kept by an incremental run
 (`tests/test_nanowell_cli.py`). Within 2.5 spacings of a gain step the bright side sets the split and dim wells
 there are reported missing; a well on a circle's rim never seen at any timepoint leaves the roster; a timepoint
-whose outline lost a whole edge row is unaddressed unless the central square or the plate anchors it. The
+whose outline lost a whole edge row is unaddressed unless the central square or the plate anchors it; a speck
+forming a lit group of three or more touching the array at one timepoint would be kept as an edge. The
 thresholds are synthetic choices: real phase images (tracker Q7) decide whether they hold. The hexagonal lattice
 in a circle stays the default, and its own roster (`roster`, the shared radius plus a quarter pitch) holds a ring
 of sites beyond a circular array's rim — 18 on a rendered 265-site array, each written as `occluded` (tracker

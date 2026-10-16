@@ -143,6 +143,7 @@ class Located:
     array_sites: np.ndarray | None = None
     array_shape: str | None = None                        # "circle" or "polygon"
     diameter_um: float | None = None                      # inferred only: the diameter sites are measured at
+    array_found: np.ndarray | None = None                 # inferred only: per array site, a light nanowell was found
     notes: list = field(default_factory=list)             # findings of the locating stage that are not refusals
 
 
@@ -361,6 +362,7 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         "radius_um": detection.boundary_radius_um}
     if settings.infer:
         located.array_sites, located.array_shape = inferred.roster_um, inferred.shape
+        located.array_found = np.asarray(inferred.found, dtype=bool)
         located.notes = list(seed["geometry"]["notes"])
     if resolved.status != "anchored":
         located.status, located.reason = UNADDRESSED, resolved.reason
@@ -842,23 +844,26 @@ _ROSTER_TOLERANCE = (2, 0.02)
 _REGISTER_REACH = 3
 
 
-def _refuse_other_kinds(outcome, candidates) -> list:
-    """Timepoints whose inferred lattice kind is not the well's, refused with the reason (review X35-R4).
+def _refuse_other_kinds(outcome, candidates, kept_kind: str | None = None) -> list:
+    """Timepoints whose inferred lattice kind is not the well's, refused with the reason (review X35-R4, R13).
 
-    The well's kind is the most common among *candidates* (the earliest's on a tie): a hexagonal and a square
-    address cannot name the same nanowell, so a timepoint of the other kind can neither join the vote on the
-    roster nor be joined to the others over time. Returns the timepoints refused."""
+    The well's kind is *kept_kind* when an earlier run kept timepoints of it (an incremental run joins them by
+    address, so they decide), else the most common among *candidates*, the earliest's on a tie: a hexagonal and
+    a square address cannot name the same nanowell, so a timepoint of the other kind can neither join the vote on
+    the roster nor be joined to the others over time. Returns the timepoints refused."""
     from collections import Counter
 
     kinds = {tp: outcome.located[tp].fit.kind for tp in candidates}
     counts = Counter(kinds.values())
-    if len(counts) < 2:
+    if kept_kind is None and len(counts) < 2:
         return []
-    well_kind = next(kinds[tp] for tp in candidates if counts[kinds[tp]] == max(counts.values()))
+    well_kind = kept_kind or next(kinds[tp] for tp in candidates if counts[kinds[tp]] == max(counts.values()))
     refused = [tp for tp in candidates if kinds[tp] != well_kind]
     for tp in refused:
-        reason = (f"Its nanowells fit a {kinds[tp]} lattice, the well's other timepoints ({counts[well_kind]} of "
-                  f"{len(candidates)}) a {well_kind} one: its addresses could not be joined with theirs")
+        others = ("the timepoints the earlier run kept" if kept_kind else
+                  f"the well's other timepoints ({counts[well_kind]} of {len(candidates)})")
+        reason = (f"Its nanowells fit a {kinds[tp]} lattice, {others} a {well_kind} one: its addresses could not "
+                  "be joined with theirs")
         outcome.located[tp].status, outcome.located[tp].reason = LATTICE_KIND_MISMATCH, reason
         outcome.timepoints[tp].update(status=LATTICE_KIND_MISMATCH, reason=reason)
     return refused
@@ -879,71 +884,182 @@ def _shift_origin(located: Located, shift, onto: str) -> None:
                          "image's edge cut its outline short)")
 
 
+def _lit(located: Located) -> frozenset:
+    """The addresses of an anchored timepoint's sites where a whole light nanowell was found, relative to its origin."""
+    from pipeline.nanowell_lattice import index_points
+
+    sites = np.asarray(located.array_sites)[np.asarray(located.array_found, dtype=bool)]
+    if not len(sites):
+        return frozenset()
+    return frozenset((p.q, p.r) for p in index_points(sites, located.fit, located.origin_montage) if not p.outlier)
+
+
+def _axes(kind: str):
+    """The lattice's row directions as functions of an address: two on a square lattice, three on a hexagonal one."""
+    axes = [("q", lambda a: a[0]), ("r", lambda a: a[1])]
+    return axes + [("q+r", lambda a: a[0] + a[1])] if kind == "hex" else axes
+
+
+def _spans(sites, kind: str) -> tuple:
+    """``(first, last)`` row of *sites* along each of the lattice's row directions, counting only rows that hold at
+    least ``_MIN_EDGE_GROUP`` sites: a bright speck beside the array is a row of one, and must not decide where the
+    array ends (review X35-R12)."""
+    from collections import Counter
+
+    out = []
+    for _name, f in _axes(kind):
+        counts = Counter(f(a) for a in sites)
+        rows = [v for v, n in counts.items() if n >= _MIN_EDGE_GROUP] or list(counts)
+        out.append((min(rows), max(rows)))
+    return tuple(out)
+
+
+def _step_onto(own, reference, kind: str) -> tuple[tuple[int, int] | None, str]:
+    """The step that puts *own* in *reference*'s frame, and ``""``; or ``None`` and why it cannot be told.
+
+    A step is determined along a row direction only where both arrays span the same number of rows: then their
+    first rows are the same row. Where the spans differ, one of the two lost a whole edge row (or saw one the other
+    did not), nothing in the sites says which edge, and a step chosen by overlap breaks the tie by whichever edge
+    the reference happened to lose — the wrong way in about half of such wells (review X35-R11)."""
+    mine, theirs = _spans(own, kind), _spans(reference, kind)
+    for (name, _f), (a0, a1), (b0, b1) in zip(_axes(kind), mine, theirs):
+        if a1 - a0 != b1 - b0:
+            return None, (f"its array spans {a1 - a0 + 1} rows along {name} and the reference's {b1 - b0 + 1}: one of "
+                          "them lost or gained an edge row, and which edge cannot be told")
+    step = (theirs[0][0] - mine[0][0], theirs[1][0] - mine[1][0])
+    if kind == "hex" and theirs[2][0] - mine[2][0] != step[0] + step[1]:
+        return None, "its rows along q, r and q+r do not agree on one step"
+    if max(abs(step[0]), abs(step[1])) > _REGISTER_REACH:
+        return None, f"the step its rows imply, {step}, is more than {_REGISTER_REACH} rows"
+    return step, ""
+
+
 def _register_to_reference(located: dict, anchored, fixed_roster) -> tuple[str | None, dict, dict]:
-    """Put every anchored timepoint's addresses in one frame (review X35-R1).
+    """Put every anchored timepoint's addresses in one frame (review X35-R1, X35-R11).
 
     Returns ``(reference, shifts, ambiguous)``: the reference timepoint, the step each moved timepoint was moved by,
     and the reason for each timepoint whose step cannot be told.
 
-    A timepoint anchored on its own array's middle site (``array_centre``) names its sites from that middle, and a
-    bubble or an edge cutting its outline short moves the middle by a step: its addresses would then name its
-    neighbours' nanowells, and the well's trajectories would join the wrong ones. So each such timepoint's own
-    sites are overlaid on the reference's by the whole lattice step (within ``_REGISTER_REACH``) that matches the
-    most sites, the smallest such step on a tie, and its origin moves by it. The reference is the earlier run's
-    *fixed_roster* (``None`` is returned for it), else the anchored timepoint that saw the most sites among those
-    anchored on evidence that does not depend on the outline (the central square, the plate), else among all.
-    A timepoint anchored on such evidence is never moved: a disagreement with it is a real one, and is reported as
-    a roster mismatch. When two steps match equally many sites the step cannot be told — an array that lost a whole
-    edge row fits inside the reference's one row from either edge, and nothing in the sites says which edge it lost
-    — so that timepoint is not addressed rather than addressed by a guess (the rest of the plate may still anchor
-    it at the end of the run)."""
-    own = {tp: _own_roster(located[tp]) for tp in anchored}
+    Only a polygon anchored on its own middle site (``array_centre``) can need moving: that middle is the mean of
+    the sites it saw, and a bubble or an edge cutting its outline short moves it by a step, so its addresses would
+    name its neighbours' nanowells and the trajectories would join the wrong ones. A circle's centre is fitted to
+    its rim and does not move that way, and the central square or the plate is evidence of its own; neither is
+    moved, and a disagreement with one is reported as a roster mismatch. Each polygon is put in the reference's
+    frame by :func:`_step_onto`, from the rows its lit sites span; where that cannot be told it is not addressed
+    rather than addressed by a guess, and the end-of-run pass may still anchor it from the plate. The reference is
+    the earlier run's *fixed_roster* (``None`` is returned for it), else an anchored timepoint that is not such a
+    polygon, else the polygon that spans the most rows — rows count only with ``_MIN_EDGE_GROUP`` sites, so a speck
+    beside the array does not widen it, and nanowells do not appear, so the widest saw the most of the array; when
+    a majority lost a row it is still the one that did not that sets the frame — then the one whose width the most
+    others share, the one that saw the most sites, and the earliest."""
+    lit = {tp: _lit(located[tp]) for tp in anchored}
+    movable = [tp for tp in anchored if located[tp].origin_method == "array_centre"
+               and located[tp].array_shape == "polygon" and lit[tp]]
+    kind = next((located[tp].fit.kind for tp in anchored), "hex")
     if fixed_roster:
-        reference, onto = frozenset(tuple(map(int, a)) for a in fixed_roster), "the earlier run's roster"
-        reference_tp = None
+        reference, onto, reference_tp = frozenset(tuple(map(int, a)) for a in fixed_roster), "the earlier run's roster", None
     elif anchored:
-        pool = [tp for tp in anchored if located[tp].origin_method != "array_centre"] or list(anchored)
-        reference_tp = max(pool, key=lambda tp: (len(own[tp]), -anchored.index(tp)))
-        reference, onto = own[reference_tp], reference_tp
+        fixed_frames = [tp for tp in anchored if tp not in movable and lit[tp]]
+        widths = {tp: tuple(b - a for a, b in _spans(lit[tp], kind)) for tp in movable}
+        agreement = {tp: sum(widths[o] == widths[tp] for o in movable) for tp in movable}
+        reference_tp = (max(fixed_frames, key=lambda tp: (len(lit[tp]), -anchored.index(tp))) if fixed_frames else
+                        max(movable, key=lambda tp: (sum(widths[tp]), agreement[tp], len(lit[tp]),
+                                                     -anchored.index(tp))) if movable
+                        else None)
+        if reference_tp is None:
+            return None, {}, {}
+        reference, onto = lit[reference_tp], reference_tp
     else:
         return None, {}, {}
-    steps = sorted(((dq, dr) for dq in range(-_REGISTER_REACH, _REGISTER_REACH + 1)
-                    for dr in range(-_REGISTER_REACH, _REGISTER_REACH + 1)),
-                   key=lambda t: (abs(t[0]) + abs(t[1]), t))
     shifts, ambiguous = {}, {}
-    for tp in anchored:
-        if tp == reference_tp or located[tp].origin_method != "array_centre":
+    for tp in movable:
+        if tp == reference_tp:
             continue
-        overlap = {t: len({(q + t[0], r + t[1]) for q, r in own[tp]} & reference) for t in steps}
-        best = max(overlap.values())
-        ties = [t for t in steps if overlap[t] == best]
-        if len(ties) > 1:
-            ambiguous[tp] = (f"Its array's {len(own[tp])} sites fit {onto}'s {len(reference)} equally well moved by "
-                             f"{' or '.join(str(t) for t in ties[:3])} lattice steps: its outline lost sites at an "
-                             "edge, and which edge cannot be told, so its addresses would be a guess")
-        elif ties[0] != (0, 0):
-            _shift_origin(located[tp], ties[0], onto)
-            shifts[tp] = ties[0]
+        step, why = _step_onto(lit[tp], reference, kind)
+        if step is None:
+            ambiguous[tp] = f"Its addresses cannot be put in {onto}'s frame: {why}, so they would be a guess"
+        elif step != (0, 0):
+            _shift_origin(located[tp], step, onto)
+            shifts[tp] = step
     return reference_tp, shifts, ambiguous
 
 
+def _neighbours(kind: str):
+    return ((1, 0), (-1, 0), (0, 1), (0, -1)) + (((1, -1), (-1, 1)) if kind == "hex" else ())
+
+
+def _groups(sites, kind: str) -> list[set]:
+    """Lattice-connected groups of *sites* (neighbours one step apart)."""
+    left, out = set(sites), []
+    while left:
+        group, todo = set(), [left.pop()]
+        while todo:
+            a = todo.pop()
+            group.add(a)
+            for dq, dr in _neighbours(kind):
+                b = (a[0] + dq, a[1] + dr)
+                if b in left:
+                    left.discard(b)
+                    todo.append(b)
+        out.append(group)
+    return out
+
+
+#: Sites lit at one timepoint only join the roster as a lattice-connected group of at least this many touching the
+#: sites the timepoints agree on: a whole edge row a bubble hid elsewhere, not a bright speck off the array.
+_MIN_EDGE_GROUP = 3
+
+
+def _agreed_sites(located: dict, anchored, own: dict, kind: str) -> tuple[frozenset, dict]:
+    """The roster several timepoints support (review X35-R12), and per timepoint the sites it alone proposed.
+
+    A site is in it when at least two timepoints' own arrays hold it (an unimaged rim site of a circle, a site
+    under a bubble at one of them), or when it was lit at one timepoint and belongs to a group of at least
+    ``_MIN_EDGE_GROUP`` connected sites lit there that touches the agreed ones (an edge row a bubble hid at the
+    others: a nanowell does not appear, but a bright speck can). Anything else one timepoint alone proposed is left
+    out and named on that timepoint, so a single false positive cannot add sites to every timepoint for good."""
+    from collections import Counter
+
+    held = Counter(a for sites in own.values() for a in sites)
+    agreed = {a for a, n in held.items() if n >= 2}
+    lit = {tp: _lit(located[tp]) for tp in anchored}
+    seen_once = Counter(a for sites in lit.values() for a in sites)
+    once = {a for a, n in seen_once.items() if n == 1} - agreed
+    for group in _groups(once, kind):
+        touches = any((a[0] + dq, a[1] + dr) in agreed for a in group for dq, dr in _neighbours(kind))
+        if len(group) >= _MIN_EDGE_GROUP and touches:
+            agreed |= group
+    agreed = frozenset(agreed)
+    return agreed, {tp: own[tp] - agreed for tp in anchored}
+
+
 def _shared_roster(located: dict, anchored, fixed_roster) -> tuple[frozenset, dict, dict]:
-    """One roster for an inferred array (tracker X35): every address any anchored timepoint's own array holds, once
-    they are in one frame (:func:`_register_to_reference`), or the earlier run's *fixed_roster*, so an incremental
-    run adds a timepoint to the same roster. Every timepoint's, not a majority's: nanowells do not appear, and a
-    bubble hides them, so a site seen as a nanowell at any timepoint is one at all of them — a majority dropped an
-    edge row hidden at two of three timepoints, so it was never written as occluded (review X35-R1). Returns the
-    roster, the block the grid record keeps (``array_radius``, with no radius: a set of sites, not a disk about the
-    origin, because a disk's tolerance adds sites the plate does not have and fits no other outline), and each
-    anchored timepoint's own address set (what the consistency check compares)."""
+    """One roster for an inferred array (tracker X35), once every anchored timepoint is in one frame
+    (:func:`_register_to_reference`): the earlier run's *fixed_roster*, so an incremental run adds a timepoint to the
+    same roster; one timepoint's own array when it is the only one; otherwise the sites the timepoints support
+    together (:func:`_agreed_sites`) — a site hidden at most timepoints but seen at one is kept and written as
+    occluded where hidden, and a site only one timepoint proposed without such support is named there and left
+    out. Returns the roster, the block the grid record keeps (``array_radius``, with no radius: a set of sites,
+    not a disk about the origin, because a disk's tolerance adds sites the plate does not have and fits no other
+    outline), and each anchored timepoint's own address set (what the consistency check compares)."""
     own = {tp: _own_roster(located[tp]) for tp in anchored}
     # An empty one is an earlier run that anchored nothing (a well re-anchored from the rest of the plate): it
     # shared no roster, so this run's anchored timepoints decide one rather than measuring none.
     if fixed_roster:
         shared, status = frozenset(tuple(map(int, a)) for a in fixed_roster), "shared"
+    elif len(anchored) == 1:
+        shared, status = own[anchored[0]], "shared"
+    elif anchored:
+        shared, alone = _agreed_sites(located, anchored, own, located[anchored[0]].fit.kind)
+        status = "shared"
+        for tp, extra in alone.items():
+            if extra:
+                located[tp].notes.append(
+                    f"{len(extra)} site(s) only this timepoint's array held, which no other timepoint supports, are "
+                    f"not in the well's roster (a bright speck off the array, or a misread edge): "
+                    f"{', '.join(str(a) for a in sorted(extra)[:6])}{' …' if len(extra) > 6 else ''}")
     else:
-        shared = frozenset().union(*own.values()) if own else frozenset()
-        status = "shared" if own else "no_anchored_timepoint"
+        shared, status = frozenset(), "no_anchored_timepoint"
     differences = {tp: len(sites ^ shared) for tp, sites in own.items()}
     limit = max(_ROSTER_TOLERANCE[0], _ROSTER_TOLERANCE[1] * len(shared))
     flags = {tp: ("roster_disagrees" if n > limit else None) for tp, n in differences.items()}
@@ -955,11 +1071,47 @@ def _shared_roster(located: dict, anchored, fixed_roster) -> tuple[frozenset, di
                     "deviations_um": {}, "flags": flags}, own
 
 
-def _settle_inferred(outcome, timepoints, anchored, unaddressed, fixed_roster):
-    """Before an inferred well's roster is shared (review X35-R1, R4): refuse timepoints of another lattice kind,
-    put the anchored ones in one frame, and unaddress those whose frame cannot be told. Returns the anchored and
-    unaddressed timepoints that remain, the registration's reference and the steps applied."""
-    refused = _refuse_other_kinds(outcome, anchored + unaddressed)
+def _settle_diameter(outcome, measurable, settings: NanowellSettings, reference: dict | None) -> float:
+    """One diameter for the whole well's sites (review X35-R14): the earlier run's when it kept timepoints, else
+    the setting's unless the median of the timepoints' measured diameters disagrees with it beyond
+    ``DIAMETER_AGREEMENT``, then that median. Chosen per timepoint it flipped within a well (125 um at some
+    timepoints, the setting's 100 at others), so ownership, margins and templates differed between them and the
+    template-drift check compared nanowells of different sizes. Applied to every *measurable* timepoint, whose note
+    says so; the per-timepoint comparison stays in its grid record."""
+    from pipeline.nanowell_infer import DIAMETER_AGREEMENT, compare_given
+
+    checks = [outcome.timepoints[tp].get("geometry", {}).get("diameter_check") or {} for tp in measurable]
+    measured = [c["measured_um"] for c in checks if c.get("measured_um")]
+    kept = (reference or {}).get("diameter_used_um")
+    consequence = "nanowells are fitted, owned and measured at the measured diameter"
+    note = ""
+    if kept:
+        used = float(kept)
+        if used != settings.diameter_um:
+            note = f"Nanowells are fitted, owned and measured at {used:.1f} um, the diameter the earlier run kept"
+    elif measured:
+        check = compare_given(float(np.median(measured)), settings.diameter_um, DIAMETER_AGREEMENT,
+                              "nanowell diameter (median over the well's timepoints)", consequence)
+        used, note = (settings.diameter_um, "") if check["agrees"] is not False else (check["measured_um"], check["note"])
+    else:
+        used = settings.diameter_um
+    for tp in measurable:
+        located = outcome.located[tp]
+        located.notes = [n for n in located.notes if not n.startswith("The measured nanowell diameter")]
+        located.notes += [note] if note else []
+        located.diameter_um = used
+        outcome.timepoints[tp].setdefault("geometry", {})["diameter_used_um"] = used
+    return used
+
+
+def _settle_inferred(outcome, timepoints, anchored, unaddressed, fixed_roster, reference=None):
+    """Before an inferred well's roster is shared (review X35-R1, R4, R11, R13): refuse timepoints of another
+    lattice kind than the well's (an earlier run's kept kind included), put the anchored polygons in one frame, and
+    unaddress those whose frame cannot be told — measured on the wells they saw, with no address. Such a timepoint
+    can still be anchored at the end of the run from the plate, but only when at least three other wells were
+    anchored on their own evidence at both timepoints. Returns the anchored and unaddressed timepoints that remain,
+    the registration's reference and the steps applied."""
+    refused = _refuse_other_kinds(outcome, anchored + unaddressed, (reference or {}).get("lattice_kind"))
     anchored = [tp for tp in anchored if tp not in refused]
     unaddressed = [tp for tp in unaddressed if tp not in refused]
     reference_tp, shifts, ambiguous = _register_to_reference(outcome.located, anchored, fixed_roster)
@@ -1065,8 +1217,12 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     shifts: dict = {}
     if settings.infer and fixed_radius_um is None:
         anchored, unaddressed, reference_tp, shifts = _settle_inferred(outcome, timepoints, anchored, unaddressed,
-                                                                       fixed_roster)
+                                                                       fixed_roster, reference)
         roster, outcome.radius, own = _shared_roster(outcome.located, anchored, fixed_roster)
+        if anchored:          # consistency is judged against the timepoint that saw the well's roster most nearly
+            differences = outcome.radius["roster_differences"]
+            reference_tp = min(anchored, key=lambda tp: (differences[tp], anchored.index(tp)))
+        outcome.radius["diameter_used_um"] = _settle_diameter(outcome, anchored + unaddressed, settings, reference)
         radius_um = None
     else:
         shared = _shared_radius(outcome.located, anchored + unaddressed, settings, fixed_radius_um)
@@ -1093,7 +1249,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         key = {"radius_um": radius_um, "record_digest": outcome.timepoints[tp]["record_digest"],
                "located": [located.status, located.origin_method]}
         if roster is not None:                  # the roster, and the step the addresses were moved by (X35-R1)
-            key.update(roster=outcome.radius["roster"], origin_shift=list(shifts.get(tp, (0, 0))))
+            key.update(roster=outcome.radius["roster"], origin_shift=list(shifts.get(tp, (0, 0))),
+                       diameter_used_um=outcome.radius["diameter_used_um"])
         measured = checkpoint.load(tp, key) if checkpoint is not None else None
         if measured is None:
             images = _images_for(record, well, tp, load_phase)

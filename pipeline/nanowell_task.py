@@ -315,8 +315,11 @@ def _reference_of(prior: dict | None) -> dict | None:
     for tp in sorted(prior["kept"], key=lambda t: prior["order"].get(t, 0)):
         block = blocks[tp]
         if all(block.get(k) is not None for k in ("pitch_um", "angle_deg", "roster_size")):
+            # An inferred well's kept lattice kind and diameter too: the new timepoints are refused if of another
+            # kind, and measured at the same diameter (review X35-R13, R14).
             return {"timepoint": tp, "pitch_um": block["pitch_um"], "angle_deg": block["angle_deg"],
-                    "roster_size": block["roster_size"]}
+                    "roster_size": block["roster_size"], "lattice_kind": block.get("lattice_kind"),
+                    "diameter_used_um": (block.get("geometry") or {}).get("diameter_used_um")}
     return None
 
 

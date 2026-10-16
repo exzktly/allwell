@@ -430,12 +430,14 @@ def test_a_well_s_montages_are_spilled_into_its_scratch_and_go_with_it(tmp_path,
 
 
 # ── an inferred geometry (tracker X35) ───────────────────────────────────────
-def _square_plate(tmp_path, timepoints=("0h",)):
+def _square_plate(tmp_path, timepoints=("0h",), lattices=None):
     """A square lattice in a square array, turned 12 degrees, with no central square, one 900 px tile a timepoint;
-    the second timepoint is the plate put back shifted and turned a little."""
+    the second timepoint is the plate put back shifted and turned a little. *lattices* gives each timepoint's
+    lattice instead (a plate that cannot exist, to test the refusal of one)."""
     record, items = None, []
     for k, token in enumerate(timepoints):
-        rendered, rec = build_well(rows=1, cols=1, tile=(900, 900), timepoint=token, seed=1 + k, lattice="square",
+        rendered, rec = build_well(rows=1, cols=1, tile=(900, 900), timepoint=token, seed=1 + k,
+                                   lattice=(lattices or {}).get(token, "square"),
                                    array_shape="square", rotation=12.0 + 2 * k, radius_fraction=0.3,
                                    square_centre=False, array_shift_um=(60.0 * k, -40.0 * k))
         if record is None:
@@ -498,3 +500,17 @@ def test_an_incremental_inferred_run_adds_the_new_timepoint_to_the_kept_roster(t
     assert by_tp["0h"] == by_tp["24h"] and len(by_tp["0h"]) == len(first)
     grid = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())
     assert grid["array_radius"]["roster"] == first and grid["timepoints"]["24h"]["status"] == "ok"
+
+
+def test_an_incremental_timepoint_of_another_lattice_kind_than_the_kept_ones_is_refused(tmp_path, monkeypatch):
+    """Review X35-R13, through the task: the kept run's lattice kind reaches the vote (``_reference_of``)."""
+    plate, _ = _square_plate(tmp_path, lattices={"0h": "hex"})
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--nanowell_geometry", "infer")
+    assert json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())["timepoints"]["0h"]["lattice_kind"] == "hex"
+    plate2, _ = _square_plate(tmp_path / "second", timepoints=("0h", "24h"), lattices={"0h": "hex"})
+    (plate / "in" / f"{WELL}.zip").write_bytes((plate2 / "in" / f"{WELL}.zip").read_bytes())
+    (plate / "in" / "acquisition.json").write_bytes((plate2 / "in" / "acquisition.json").read_bytes())
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--nanowell_geometry", "infer", "--incremental")
+    block = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())["timepoints"]["24h"]
+    assert block["status"] == "lattice_kind_mismatch" and "the earlier run kept a hex one" in block["reason"]
+    assert not [r for r in _rows(out, f"{WELL}.csv") if r["timepoint"] == "24h"]

@@ -25,6 +25,8 @@ from tests._repo_scan import parse_source, python_sources, rel
 _HELD_ONLY_READERS: dict[str, str] = {
     "review/data/data_loading.py::get_rows": "The lazy read itself: a held frame is returned, a missing one loaded.",
     "review/data/data_loading.py::load_and_project": "Stores the frame it has just read, pins and re-measures it.",
+    "review/data/data_loading.py::_read_making_room": (
+        "On a MemoryError, releases the held frames for one retry and names what was held in the error."),
     "review/data/data_loading.py::held_wells_note": "Counts the held wells, to say when a readout covers only them.",
     "review/data/cache_projectors.py::drop_verdict_column": (
         "A projector walk: a verdict switched off is dropped from the held frames, and an evicted frame is "

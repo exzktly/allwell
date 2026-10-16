@@ -1286,6 +1286,35 @@ Answers are written into the row. Rows that depend on an answer say so.
 
 ---
 
+### Section X — The roll-up's adversarial review
+
+Four reviewers read the whole stack against `main` after the roll-up (`claude/nanowell-rollup` at e7756f5c), one
+per area. Each finding is a row here before any code changes; a row closes with the test that pins it, watched
+failing without the fix. Reviewer A (`pipeline/`) is folded in when it reports.
+
+| # | Item | Place | State | Evidence |
+|---|---|---|---|---|
+| X1 | High (D1). The guard family was red: `services/remote_fetch.py` 2,053 lines against a budget of 2,052 after the merge of `main` | `services/remote_fetch.py` | `done` | The log adapter moved to `services/remote_log_adapter.py`; budget lowered to 2,028. `test_monolith_budgets.py::test_remote_fetch_line_budget` failed before, passes after |
+| X2 | High (C1). A nanowell well's completion line (`Well X — done (N timepoint(s), …)`) does not match the `done.` marker the remote Fetcher and Analyze's progress read, so no nanowell well is fetched as it finishes; the end-of-run retry pulls CSVs and zips but never `nanowells/`, verification does not check it, and cleanup deletes the remote copy. Local runs never count nanowell wells done either | `pipeline/nanowell_task.py`, `services/remote_fetch.py`, `services/remote_wire.py`, `services/pipeline_runner.py` | `todo` | |
+| X3 | High (C2). A remote incremental nanowell run analyses only the new timepoints on the remote (the prior grid and template are not uploaded) and the fetch overwrites the local tables with them, losing every earlier timepoint | `services/remote_runner.py`, `services/remote_fetch_nanowells.py` | `todo` | |
+| X4 | High (B1). The Nanowells page chooses its wells with its own rule instead of `plot_group_well_lists`, so with a group-by variable or all groups hidden it draws a different set of wells from every other tab | `review/features/nanowell/controller.py` (`active_wells`) | `todo` | |
+| X5 | Medium (C3). Four nanowell options with non-None parser defaults enter the settings digest of every run, so every plate recorded under `main` reads as recorded under other settings and an incremental or skip check re-runs it | `util/settings_digest.py` | `todo` | |
+| X6 | Medium (C4). `test_remote_fetch_nanowells.py::test_fetching_a_well_through_the_fetcher_brings_its_tables` spawns `ssh` through `main`'s new `compress_remote_csvs` seam and fails in the fast lane | `tests/test_remote_fetch_nanowells.py` | `todo` | |
+| X7 | Medium (D2). Restoring a sidecar or editing a queued job while nanowell mode is on puts back the wrong segmentation method: `segmentation_method` is restored before the nanowell section, whose switch-off then overwrites it | `analyze/pinfo.py`, `analyze/nanowell_section.py` | `todo` | |
+| X8 | Medium (D3). The pre-flight lists wells with `glob("*.zip")` where the run uses `find_well_zips`: a `._A01.zip` sidecar refuses a run the pipeline would carry out, and `A01.ZIP` reads as no archives; Test detection's well list has the same glob and does not canonicalise | `analyze/nanowell_preflight.py`, `analyze/nanowell_preview.py` | `todo` | |
+| X9 | Medium (B2). The replicate-mode plate roster lacks Nanowells: in replicate mode its plate is painted empty while the figure draws the visible sets, and a click cannot toggle a solo well | `review/core/selection_controller.py` (`_EXTRA_REP_MIRROR_TABS`) | `todo` | |
+| X10 | Medium (B3). Editing a replicate group leaves the Nanowells figure stale: group edits fan out to named tabs and registered scopes, and Nanowells is in neither | `review/core/selection_controller.py` (`rebuild_all`) | `todo` | |
+| X11 | Medium (B4). The Distribution footer keeps only its first five lines, so "N more panel(s) not drawn" and other owed sentences can be cut | `review/features/nanowell/renderer.py` | `todo` | |
+| X12 | Medium (B5). *Save nanowell data* labels the export with `state.baseline` while `state.metrics` may still be the previous baseline's | `review/features/nanowell/controller.py` (`export_long_csv`, `export_page_csv`) | `todo` | |
+| X13 | Medium (C5). Concatenate (analysed + raw) drops dataset 1's acquisition record when dataset 2 has none, leaving a destination whose nanowell tables cannot be extended and whose sidecar disagrees with its (absent) record | `datasets/concatenate/` | `todo` | |
+| X14 | Low–Medium (B6). Trajectories' class-median lines keep their screen colours in a publication capture; the 3+ median is near-invisible on white | `review/features/nanowell/renderer.py` | `todo` | |
+| X15 | Low (D4, C6). The sites table is accepted as `.csv.gz` in two functions and read only as `.csv` in their siblings and in Review; no writer gzips it | `datasets/core/nanowell_tables.py` | `todo` | |
+| X16 | Low (B7). `controller.load_into` / `set_baseline` are reached only by tests and leave `loaded_for` unset, which the batch panel's `_load` would trip on | `review/features/nanowell/controller.py` | `todo` | |
+| X17 | Low (B8). On *Along x: Wells* with no timepoint chosen, the combo names the dataset's latest timepoint while the figure draws the selected groups' latest | `review/features/nanowell/controller.py` (`shown_timepoint`) | `todo` | |
+| X18 | Low (C7). Merge Plates' refusal of differing per-timepoint clocks happens at execute, not at plan, so the preview shows a merge as fine that then fails | `datasets/merge_plates/` | `todo` | |
+| X19 | Low (C8). Batched remote mode runs the end-of-run re-anchoring once per batch, each over only that batch's wells | `pipeline/nanowell_task.py` (`reanchor_plate`), batched remote | `todo` | |
+| X20 | Low (D note). The CLI accepts a non-finite `--nanowell_cell_diameter_um` / `--nanowell_margin_um` that the form refuses | `pipeline/cli_args.py` | `todo` | |
+
 ## 6. What would make this plan wrong
 
 Each of these, if it turns out true, changes a section rather than a row.

@@ -47,6 +47,8 @@ from services import remote_config
 from services import ssh_key_setup
 from services.subprocess_kill import signal_subprocess
 from services.remote_srun_retry import stray_words_message
+from services.scheduler_probe import ProbeRun
+from analyze.scheduler_test_dialog import SchedulerTestDialog
 from services.subprocess_text import TEXT_UTF8
 from ui import theme
 
@@ -358,6 +360,13 @@ class RemoteFormDialog(QDialog):
         # programmatic setText, so no feedback loop).
         self._compute_launcher_edit.textEdited.connect(self._on_launcher_edited)
         launcher_row.addWidget(self._compute_launcher_edit, 1)
+        self._test_sched_btn = QPushButton("Test", self._scheduled_box)
+        self._test_sched_btn.setProperty("variant", "secondary")
+        self._test_sched_btn.setToolTip(
+            "Send a short job through this command the way a run is sent, and "
+            "report the node it got: CPUs, GPUs, and whether Cellpose can use them.")
+        self._test_sched_btn.clicked.connect(self._open_scheduler_test)
+        launcher_row.addWidget(self._test_sched_btn)
         sched_layout.addLayout(launcher_row)
 
         # Optional override for where jupyterhub_config.py lives on the remote
@@ -590,6 +599,23 @@ class RemoteFormDialog(QDialog):
         if self._compute_loc_combo.currentData() == "scheduled":
             return stray_words_message(self._compute_launcher_edit.text())
         return None
+
+    def _open_scheduler_test(self) -> None:
+        """Run the scheduler command as it stands in the form, saved or not."""
+        error = self.form_error()
+        if not error and not self._ssh_alias_edit.text().strip():
+            error = "Set an SSH alias first."
+        if error:
+            self._test_result_lbl.setText(f"✗ {error}")
+            return
+        host = self.result_host()
+        try:
+            probe = ProbeRun(host)
+        except ValueError as exc:
+            self._test_result_lbl.setText(f"✗ {exc}")
+            return
+        self._scheduler_test = SchedulerTestDialog(self, probe, host.name or host.ssh_alias)
+        self._scheduler_test.show()
 
     def result_host(self) -> RemoteHost:
         """Build a ``RemoteHost`` from the current form state.

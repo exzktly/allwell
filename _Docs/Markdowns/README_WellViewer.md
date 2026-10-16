@@ -1181,6 +1181,16 @@ login node is the one thing the setting exists to avoid, so the form refuses it
 and says so. Switch **Run compute** back to *On the remote machine itself* if
 that is what you meant.
 
+**Test** next to *Scheduler command* checks the command before you spend a
+run on it. It sends a short job the way a run is sent — through the scheduler
+command as it stands in the form, saved or not, into the host's conda
+environment — and reports what the job found on its node: which node and Slurm
+job, how many of the node's CPUs it was given, the GPUs it can see, whether
+Torch can use them, and the Cellpose version. A job given one core of a bigger
+node, a GPU node whose Torch is a CPU-only build, or a missing Torch is called
+out with what to change. A node that has to start can take several minutes;
+closing the window cancels the job.
+
 **Fetch** next to *Compute profile* reads the cluster's JupyterHub
 configuration and lists the compute options its web page offers; picking one
 fills in the scheduler command. The command is built the way JupyterHub builds

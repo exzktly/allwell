@@ -117,6 +117,8 @@ def _dot_units(ax, fig) -> tuple[float, float]:
 def _y_limits(model: DistributionModel, panel) -> tuple[float, float]:
     values = np.concatenate([s.values for s in panel.swarms] or [np.zeros(0)])
     stats = [v for st in panel.stats for v in (st.ci_low, st.ci_high, st.centre) if math.isfinite(v)]
+    if model.responding_above is not None and math.isfinite(model.responding_above):
+        stats.append(model.responding_above)          # the cut stays in view, or the line would not be seen
     every = np.concatenate([values, np.asarray(stats, dtype=float)])
     if not len(every):
         return 0.0, 1.0
@@ -168,6 +170,10 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks) -> tuple[int, int]:
     xs_all = [t[0] for t in panel.ticks] or [0.0]
     ax.set_xlim(min(xs_all) - 0.6, max(xs_all) + 0.6)
     ax.set_ylim(*_y_limits(model, panel))
+    if model.responding_above is not None and math.isfinite(model.responding_above):
+        # The cut the fraction responding is counted above (tracker I9), in the muted ink behind the dots.
+        _ink(ax.axhline(model.responding_above, color=muted, lw=0.8, ls="--", zorder=0.5, gid="nw-responding"),
+             muted=True)
     ax.set_xticks([t[0] for t in panel.ticks])
     ax.set_xticklabels([t[1] for t in panel.ticks], fontsize=8)
     dot_w, dot_h = _dot_units(ax, fig)

@@ -35,6 +35,8 @@ def panel(qtbot, run_with_a_cell, tmp_path):  # noqa: F811
     for i in range(p._metric_list.count()):
         item = p._metric_list.item(i)
         item.setCheckState(Qt.Checked if item.data(Qt.UserRole) in ("n", "c") else Qt.Unchecked)
+    p._threshold_edits["n"].setText("2")             # every ticked metric needs its cut (tracker I9)
+    p._threshold_edits["c"].setText("0.15")
     return p, ctx
 
 
@@ -70,11 +72,13 @@ def test_each_metric_is_the_page_s_figure_of_the_group_and_the_csv_holds_the_pag
         ("distribution", "n", {"A01": ["A01"]}, ["B07"]), ("distribution", "c", {"A01": ["A01"]}, ["B07"])]
     rows = list(csv.DictReader((out / "nanowell_Drug_A_summary.csv").open()))
     data = load_nanowell_data(ctx.state.dataset.data_dir)
-    expected = wells_summary(site_metrics(data, "earliest"), ["A01"], "n", channels=data.channels)
+    expected = wells_summary(site_metrics(data, "earliest"), ["A01"], "n", channels=data.channels,
+                             responding_above=2.0)
     n_rows = [r for r in rows if r["metric"] == "n"]
-    assert [(r["well"], r["timepoint"], int(r["n_sites"]), int(r["n_used"]), float(r["median"])) for r in n_rows] == [
-        (w, t, s, u, m) for w, t, s, u, m in expected[["well", "timepoint", "n_sites", "n_used", "median"]]
-        .itertuples(index=False)]
+    assert [(r["well"], r["timepoint"], int(r["n_sites"]), int(r["n_used"]), float(r["median"]),
+             float(r["fraction_responding"]), r["responding_above"]) for r in n_rows] == [
+        (w, t, s, u, m, f, "2.0") for w, t, s, u, m, f in
+        expected[["well", "timepoint", "n_sites", "n_used", "median", "fraction_responding"]].itertuples(index=False)]
     assert {r["metric"] for r in rows if r["well"] == "A01"} == {"n", "c"}
     assert [r["note"] for r in rows if r["well"] == "B07"] == ["no nanowell table"]
 

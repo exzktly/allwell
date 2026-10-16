@@ -4393,6 +4393,12 @@ use them.
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
   measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
   the footer gives the cohort's size.
+- **Responding above** (on *Distribution*) — the number a nanowell's value must be above to count as
+  responding, for the metric shown. Set one for each metric you use (a fold change, a count, a confluence, an
+  intensity); each is remembered separately, and a channel's brightness separately from another's. The figure
+  draws it as a dashed line and states each group's fraction responding — the mean of its wells' fractions —
+  at the latest timepoint, or at the timepoint drawn along wells. With the field empty no fraction is
+  computed, and the footer says so: there is no default.
 - **Well** and the **Timepoint** slider (on *Array map* and *Array QC*) — the one well drawn, from the wells
   selected, and its timepoint; these views start at the well's first timepoint. One timepoint is shared by
   every view, so a timepoint chosen on one carries to the next wherever it exists.
@@ -5205,11 +5211,15 @@ figure and an empty file.
 (Distribution, Array map, Trajectories or Position), tick the **Metrics**, and
 set **Along x**, **Baseline**, **Timepoint** (Latest, Earliest or one of the
 dataset's) and **Fixed cohort** as on the page — each greyed where it does not
-reach the view. Each group writes one figure per metric, drawn exactly as the
+reach the view. **Responding above** asks for a number for each ticked metric,
+filled in from the page's where you set one there, and the run will not start
+while any is empty. Each group writes one figure per metric, drawn exactly as the
 page draws it (the Array map, which shows one well, writes one figure per well),
 and one summary CSV: for each metric, well and timepoint the median, quartiles,
-fraction responding and occupied, the nanowells used, and those excluded by
-reason. A group's replicate sets are drawn as sets and its single wells on their
+the fraction responding above that metric's number (and the number itself),
+the fraction occupied, the nanowells used, and those excluded by reason. A metric
+drawn as Cell count because the channel has no site intensities carries no
+fraction responding, since its number was set for the other metric. A group's replicate sets are drawn as sets and its single wells on their
 own, as on the page. A well of the group with no nanowell table is named on the
 figure and gets its own row in the CSV; a group with none at all is skipped and
 the run says so. Saved Plots records made by this mode restore the Nanowells page

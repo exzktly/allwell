@@ -9109,15 +9109,32 @@ and `views_compute.trajectory_panels(cohort=…)` all apply it, so the beeswarm,
 medians follow the same nanowells.
 
 **Summaries** (`summary_compute`). `well_summary` describes one well per timepoint: median, interquartile
-range, fraction responding (above 1 for a fold change, above 0 for a log₂ fold change, undefined for a
-measurement; a nanowell seeded later has no count fold change, so it is excluded by name on `count_fc` and
-counted on `log2_count_fc`), occupancy classes as ordinals with "3+" at 3, fraction occupied over nanowells with a count, and the nanowells used and excluded by reason.
+range, fraction responding — the share of the nanowells used whose value is strictly above
+`responding_above`, the cut the user set for that metric, and undefined when none is set (there is no default:
+a fold change of 1 is "any growth at all", and a count, a confluence or an intensity has no natural cut; a
+nanowell seeded later has no count fold change, so it is excluded by name on `count_fc` and counted on
+`log2_count_fc`) — occupancy classes as ordinals with "3+" at 3, fraction occupied over nanowells with a count, and the nanowells used and excluded by reason.
 `group_summary` takes that table, one row per well, so a nanowell cannot be counted as a replicate: a
 group's centre is the mean of its wells' medians, its interval a 95% Student-t interval over wells, a member well with no row at a timepoint named in
-`wells_without_value`, and
+`wells_without_value`, its fraction responding the mean of its wells' fractions (each well once, like the centre), and
 versus-control is the centre over the control group's centre computed the same way (the difference, on the
 log₂ metric). `controller.replicate_groups` takes the groups from `review.domain.plot_members.plot_replicate_sets`,
 as every plot tab does, with each well in no set standing alone.
+
+**The responding cut** (`state.NanowellState.thresholds`). One number per metrics column — `n`,
+`confluence_fc`, `brightness_fc_GFP` — so a cut chosen for one metric, or for one channel's brightness, is never
+applied to another. The page's *Responding above* field (shown on Distribution) edits the cut for the column the
+page draws now (`controller.drawn_metric_column`, the shared channel applied); `set_responding_above` clears it
+on an empty field and puts the field back on text that is not a number, rather than clearing a cut by accident.
+`draw_view(responding_above=…)` hands it to `distribution_model`, which keeps it on the model with each group's
+fraction (`model.responding`: over time, at the group's latest timepoint; along wells, at the timepoint drawn);
+`responding_note` writes the footer sentence, and the renderer draws the cut as a dashed line in the muted ink,
+kept inside the y-limits so it is always seen. Without a cut the footer says no fraction is computed. The cuts
+persist with the page's configuration and in Saved Plots. Batch Export's Nanowells mode asks for a cut per
+ticked metric (`_rebuild_thresholds`, seeded from the page's cut on the shared channel whenever a field is empty,
+including each time the panel is shown) and refuses to run while any is missing; the summary CSV carries the cut
+in a `responding_above` column. When a ticked metric is drawn as another (a channel metric with no channel), the
+cut is not applied to the substitute, whose rows then carry no fraction.
 
 **Export** (`controller.export_long_csv`) writes `series_compute.long_format` plus the time source and the
 baseline, one row per nanowell and timepoint, through a temporary file.

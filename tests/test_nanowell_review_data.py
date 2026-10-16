@@ -239,7 +239,7 @@ def test_a_nanowell_occluded_at_the_earliest_timepoint_has_a_fold_change_only_fr
 
 # ── D5: per well ─────────────────────────────────────────────────────────────
 def test_a_well_summary_counts_every_nanowell_as_used_or_excluded_by_reason(metrics):
-    summary = well_summary(metrics, "count_fc", ["GFP"]).set_index("timepoint")
+    summary = well_summary(metrics, "count_fc", ["GFP"], responding_above=1.0).set_index("timepoint")
     late = summary.loc["t_b"]
     assert (late["n_sites"], late["n_used"], late["excluded"]) == (2, 1, {"seeded later": 1})
     occluded = summary.loc["t_a"]
@@ -435,7 +435,7 @@ def test_occupancy_class_summaries_count_three_and_more_as_three(tmp_path):
 
 
 def test_a_nanowell_seeded_later_responds_on_the_log_fold_change_and_is_excluded_by_name_on_the_ratio(metrics):
-    late = well_summary(metrics, "log2_count_fc").set_index("timepoint").loc["t_a"]
+    late = well_summary(metrics, "log2_count_fc", responding_above=0.0).set_index("timepoint").loc["t_a"]
     assert (late["n_used"], late["fraction_responding"]) == (1, 1.0)            # (1,0): 0 → 3 cells
     assert well_summary(metrics, "count_fc").set_index("timepoint").loc["t_a", "excluded"]["seeded later"] == 1
 

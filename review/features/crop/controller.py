@@ -23,6 +23,7 @@ from review.core.frame_scope import (
 )
 from core.safe import swallowed
 from review.data.cache_projectors import project_verdict_column
+from review.data.data_loading import held_wells_note
 
 # The three ``DatasetState`` fields the crop scope is spread over, in the order
 # the popover stacks them. One list so the view, the persistence block and the
@@ -178,12 +179,15 @@ def set_crop_region(ctx, region: CropRegion | None) -> None:
     ctx.notify.set_status(
         f"Crop region set ({where}{scoped}): excluded {removed:,} of "
         f"{total_incl:,} otherwise-included cell(s) across {n_wells} loaded "
-        f"well(s).{warning}"
+        f"well(s){held_wells_note(ctx)}.{warning}"
     )
 
 
 def _crop_effect_counts(ctx):
     """Aggregate the crop's effect across the currently-cached wells.
+
+    The held wells, which on a plate larger than the row-cache budget are not all
+    of them; the status lines say so through ``data_loading.held_wells_note``.
 
     Returns ``(removed, otherwise_included, has_centroids, n_wells)`` — the same
     semantics as :func:`region.crop_effect_for_df`, summed over loaded wells
@@ -251,7 +255,8 @@ def _on_crop_scope_changed(ctx) -> None:
     # numbers from reading as a contradiction of the scope the button states.
     ctx.notify.set_status(
         f"Crop scope updated: now excluding {removed:,} of {total_incl:,} "
-        f"otherwise-included cell(s) across {n_wells} loaded well(s).{warning}"
+        f"otherwise-included cell(s) across {n_wells} loaded well(s)"
+        f"{held_wells_note(ctx)}.{warning}"
     )
 
 

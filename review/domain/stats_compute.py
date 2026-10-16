@@ -92,14 +92,18 @@ def _norm_fov(df: pd.DataFrame) -> np.ndarray:
 
 
 def _safe_rows(ctx, lbl):
-    """The well's raw DataFrame from the loaded-row cache, or None when the
-    backend exposes only pre-aggregated points (the pure-logic MockApp seeds no
-    cache). Reads via the row repository (``rows_or_none`` = cache-only, no lazy
-    load) — the same cache the row service fills, so a real app has the frame
-    here. The MockApp builds ``AppState`` directly (no ``ViewerContext``), so its
-    ``repo`` is ``None`` → ``None``, matching the old empty-cache behaviour (B3)."""
+    """The well's raw DataFrame, or None when the backend exposes only
+    pre-aggregated points (the pure-logic MockApp builds ``AppState`` directly,
+    with no ``ViewerContext``, so its ``repo`` is ``None``).
+
+    Through ``repo.rows`` — the lazy read — and not the cache-only
+    ``rows_or_none`` it used to take. The row cache is bounded
+    (``review/data/row_cache.py``), so a well can be evicted between the
+    aggregation that drew its mean and this read; a cache-only lookup then
+    answered ``None`` and the median and mean-of-all beside that mean became
+    NaN, reported as "not computed" for a well that had rows all along."""
     repo = ctx.state.repo
-    return repo.rows_or_none(lbl) if repo is not None else None
+    return repo.rows(lbl) if repo is not None else None
 
 
 def _point_at(pts, target_t) -> tuple | None:

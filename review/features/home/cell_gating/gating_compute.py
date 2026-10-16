@@ -268,16 +268,22 @@ def apply_gating_to_cache(ctx, label: str | None = None) -> None:
     nothing, as no pass did. No ``rows_version`` bump: on the load path the
     frame is new and has no memoized aggregate (``cache_projectors`` says why).
     """
+    if label is None:
+        # The walk over every held frame is the gating pass's own job, and it
+        # has already written them: ``recompute_qc_all`` re-runs every registered
+        # projector with no label on each QC edit, and re-gating every held well
+        # there would cost a full gating pass per keystroke to rewrite the same
+        # values. Only a frame read from disk lacks the columns.
+        return
     config = getattr(getattr(ctx.state, "cell_gating", None), "applied_gating", None)
     if not config:
         return
-    cache = ctx.state.dataset.cache
-    labels = [label] if label is not None else list(cache.keys())
-    for lbl in labels:
-        frame = cache.get(lbl)
-        if frame is None or frame.empty:
-            continue
-        apply_fluor_gating(frame, **config)
+    # Cache-only: a projector writes onto the frame being loaded, which
+    # ``load_and_project`` has stored (and pinned) before calling it.
+    frame = ctx.state.repo.rows_or_none(label)
+    if frame is None or frame.empty:
+        return
+    apply_fluor_gating(frame, **config)
 
 
 # ── ThreshFracOn optimizer numeric core ──────────────────────────────────────

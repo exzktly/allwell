@@ -553,6 +553,25 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     return frame
 
 
+def held_wells_note(ctx) -> str:
+    """``""`` when every well of the dataset is in the row cache, else a clause
+    saying how many are — for a count taken over the held frames.
+
+    The live readouts (the QC row's "flagged", the crop's status line, Cell
+    Gating's "Included for analysis") are recomputed on every edit, so they count
+    the frames in memory rather than reading every well from disk each time. On a
+    plate that fits the row-cache budget that is the plate; on one that does not
+    it is part of it, and a count over part of a plate printed like a count over
+    all of it is the silent shortfall CLAUDE.md §7 forbids.
+    """
+    dataset = ctx.state.dataset
+    total = len(dataset.well_paths)
+    held = sum(1 for label in dataset.cache.keys() if label in dataset.well_paths)
+    if total == 0 or held >= total:
+        return ""
+    return f" — counted over {held} of {total} wells in memory"
+
+
 def record_fov_verdict(ctx, label: str, df) -> None:
     """Judge one well's ``fov`` column and store the verdict.
 

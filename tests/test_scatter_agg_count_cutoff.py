@@ -88,7 +88,7 @@ def _ctx(label_to_df, *, thresh_frac_on=None, thresh_count_on=None,
         ),
         selection=SimpleNamespace(selected_wells=list(label_to_df), selections=[]),
         plot=SimpleNamespace(use_sem=False, use_fov_replicates=False),
-        repo=SimpleNamespace(rows_or_none=cache.get),
+        repo=SimpleNamespace(rows_or_none=cache.get, rows=cache.get),
     )
     # ``aggregate.well`` is the pure-logic MockApp's precomputed-points delegate;
     # None takes the production DataFrame path, which is what we are measuring.

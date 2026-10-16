@@ -110,19 +110,31 @@ class WellVerdict:
         return "; ".join(self.reasons)
 
 
-def score_well(well: str, focus_values, *, cut: float | None = None,
-               flagged_fields: int = 0, flagged_note: str = "") -> WellVerdict:
-    """The composite for one well.
+@dataclass(frozen=True)
+class FocusTally:
+    """What the composite reads from one well's focus column, and nothing else.
+
+    Four numbers stand in for a million values, which is what lets the plate's
+    verdicts be remembered per well (``data/plate_scan.py``) instead of every
+    well's focus column being held at once to score the plate. ``soft`` is
+    counted against the *cut* the tally was taken for, so a tally is only valid
+    for that cut.
+    """
+
+    total: int = 0
+    unmeasurable: int = 0
+    measurable: int = 0
+    median: float | None = None
+    soft: int = 0
+
+
+def tally_focus(focus_values, cut: float | None = None) -> FocusTally:
+    """One well's :class:`FocusTally` against *cut*.
 
     *focus_values* is that well's per-cell focus column as an iterable of
     floats and ``None``s — ``None`` for a cell whose outline could not be
     measured, which is a different fact from a cell measured and found soft
     and is counted as such throughout.
-
-    *cut* is the user's threshold. Without one the focus reasons cannot be
-    evaluated at all and are not: a well is then surfaced only by its flagged
-    fields and by how much of it is unmeasurable, both of which stand on their
-    own. Inventing a cut here is the thing §D.2d measured and refused.
     """
     # Materialised ONCE. The first version filtered the iterable and then
     # called ``len(list(...))`` on it again: handed a generator -- which this
@@ -137,13 +149,34 @@ def score_well(well: str, focus_values, *, cut: float | None = None,
     unmeasurable = total - len(vals)
     median = _median(vals) if vals else None
     soft = sum(1 for v in vals if cut is not None and v < cut)
+    return FocusTally(total=total, unmeasurable=unmeasurable, measurable=len(vals),
+                      median=median, soft=soft)
 
+
+def score_well(well: str, focus_values, *, cut: float | None = None,
+               flagged_fields: int = 0, flagged_note: str = "") -> WellVerdict:
+    """The composite for one well, from its focus values (see :func:`tally_focus`).
+
+    *cut* is the user's threshold. Without one the focus reasons cannot be
+    evaluated at all and are not: a well is then surfaced only by its flagged
+    fields and by how much of it is unmeasurable, both of which stand on their
+    own. Inventing a cut here is the thing §D.2d measured and refused.
+    """
+    return score_tally(well, tally_focus(focus_values, cut), cut=cut,
+                       flagged_fields=flagged_fields, flagged_note=flagged_note)
+
+
+def score_tally(well: str, tally: FocusTally, *, cut: float | None = None,
+                flagged_fields: int = 0, flagged_note: str = "") -> WellVerdict:
+    """The composite for one well, from a :class:`FocusTally` taken at *cut*."""
+    total, unmeasurable, measurable = tally.total, tally.unmeasurable, tally.measurable
+    median, soft = tally.median, tally.soft
     reasons: list[str] = []
     if flagged_fields:
         noun = "field" if flagged_fields == 1 else "fields"
         reasons.append(flagged_note or
                        f"{flagged_fields} {noun} flagged by the run")
-    if cut is not None and vals and soft / len(vals) > SOFT_FRACTION:
+    if cut is not None and measurable and soft / measurable > SOFT_FRACTION:
         # **One rule, two sentences.** These were two branches, and the first
         # was strictly dominated by the second: ``median < cut`` means more
         # than half the cells are below it, which always exceeds a
@@ -155,13 +188,13 @@ def score_well(well: str, focus_values, *, cut: float | None = None,
         # because "the whole well is soft" and "a third of it is" send a
         # reader to different places and the number alone does not distinguish
         # them.
-        share = soft / len(vals)
+        share = soft / measurable
         if median is not None and median < cut:
             reasons.append(f"the whole well is soft — median focus "
                            f"{median:.3g}, below {cut:g} "
-                           f"({soft:,} of {len(vals):,} cells, {share:.0%})")
+                           f"({soft:,} of {measurable:,} cells, {share:.0%})")
         else:
-            reasons.append(f"{soft:,} of {len(vals):,} cells below {cut:g} "
+            reasons.append(f"{soft:,} of {measurable:,} cells below {cut:g} "
                            f"({share:.0%})")
     if total and unmeasurable / total > UNMEASURABLE_FRACTION:
         reasons.append(f"{unmeasurable:,} of {total:,} cells carry no focus "
@@ -188,13 +221,21 @@ def score_plate(per_well_focus: dict, *, cut: float | None = None,
     verdict — it is exactly the well a user has not opened yet, and leaving it
     out would make the marker depend on what happens to be in memory.
     """
+    return score_plate_tallies(
+        {well: tally_focus(values or (), cut) for well, values in (per_well_focus or {}).items()},
+        cut=cut, flagged=flagged)
+
+
+def score_plate_tallies(per_well_tally: dict, *, cut: float | None = None,
+                        flagged: dict | None = None) -> dict:
+    """:func:`score_plate` from per-well :class:`FocusTally` values taken at *cut*."""
     flagged = flagged or {}
-    wells = sorted(set(per_well_focus or {}) | set(flagged))
+    wells = sorted(set(per_well_tally or {}) | set(flagged))
     out: dict[str, WellVerdict] = {}
     for well in wells:
         count, note = flagged.get(well) or (0, "")
-        out[well] = score_well(
-            well, (per_well_focus or {}).get(well) or (),
+        out[well] = score_tally(
+            well, (per_well_tally or {}).get(well) or FocusTally(),
             cut=cut, flagged_fields=int(count), flagged_note=note)
     return out
 

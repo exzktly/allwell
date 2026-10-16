@@ -116,7 +116,7 @@ def _fake_app(cache, pipeline_info=None, params=None):
     from review.core.qc_state import QcState
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(cache=cache, pipeline_info=pipeline_info),
+        dataset=SimpleNamespace(cache=cache, well_paths=dict.fromkeys(cache), pipeline_info=pipeline_info),
         qc=QcState(params=params))
     # The QC projectors take ``ctx`` (R1); a minimal ctx over the same state.
     app._ctx = SimpleNamespace(state=app._app_state, app=app)
@@ -191,7 +191,7 @@ def test_qc_gate_row_exposes_circularity_inputs(qtbot):
     from review.core.qc_state import QcState
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(data_dir=None, cache={}, pipeline_info={}),
+        dataset=SimpleNamespace(data_dir=None, cache={}, well_paths={}, pipeline_info={}),
         qc=QcState(params=QCParams(enabled=True, min_circularity=0.5, max_circularity=0.95)))
     # qc_gate_refresh_widgets reads the params through get_qc_params(ctx); the
     # builder registers its widget handles through ctx.widgets (which also stamp
@@ -235,7 +235,7 @@ def test_qc_gate_row_gives_each_quantity_its_own_row(qtbot):
 
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(data_dir=None, cache={}, pipeline_info={}),
+        dataset=SimpleNamespace(data_dir=None, cache={}, well_paths={}, pipeline_info={}),
         qc=QcState(params=QCParams(enabled=True)))
     app._ctx = SimpleNamespace(
         state=app._app_state, app=app, widgets=WidgetRegistry(app),

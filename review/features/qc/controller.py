@@ -168,8 +168,10 @@ def _repaint_quality_markers(ctx) -> None:
 
 
 def qc_excluded_count(ctx, labels=None, params: QCParams | None = None) -> tuple[int, int]:
-    """``(n_excluded, n_total)`` across the given wells (default: all cached) —
-    powers the live readout in the QC view. Counts only QC failures, independent
+    """``(n_excluded, n_total)`` across the given wells (default: the wells the
+    row cache holds, which on a plate larger than its budget is not every well —
+    the readout appends ``data_loading.held_wells_note`` to say so) — powers the
+    live readout in the QC view. Counts only QC failures, independent
     of manual exclusions. Pass ``params`` to preview a candidate threshold set
     without committing it.
 

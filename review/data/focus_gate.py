@@ -54,6 +54,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from review.data.data_loading import get_rows
+from review.data.plate_scan import every_well
 from review.data.cache_projectors import (
     drop_verdict_column, project_verdict_column,
 )
@@ -183,7 +185,11 @@ def focus_counts(df, params) -> tuple[int, int, int]:
 
 
 def plate_focus_counts(ctx) -> tuple[int, int, int]:
-    """``(soft, unmeasurable, total)`` summed over every cached well.
+    """``(soft, unmeasurable, total)`` summed over every well of the plate.
+
+    Every well, not every held one — the panel says "across the plate", and the
+    row cache is bounded — read one at a time and remembered per well
+    (``plate_scan``) until the rows, the verdicts or *params* change.
 
     Counted against the **current** cut whether or not the gate is switched
     on, because the panel reports what a cut would do before it is applied —
@@ -191,11 +197,10 @@ def plate_focus_counts(ctx) -> tuple[int, int, int]:
     after the fact.
     """
     params = focus_params(ctx)
-    cache = getattr(ctx.state.dataset, "cache", None) or {}
     soft = unmeasurable = total = 0
-    for df in cache.values():
-        s, u, t = focus_counts(df, params)
-        soft += s
+    for s_, u, t in every_well(ctx, "focus_counts", params,
+                               lambda df: focus_counts(df, params)).values():
+        soft += s_
         unmeasurable += u
         total += t
     return (soft, unmeasurable, total)
@@ -415,27 +420,29 @@ def focus_gate_can_apply(ctx) -> bool:
     return soft > 0
 
 
-def per_well_focus(ctx) -> dict[str, list]:
-    """``{well: its per-cell focus values}`` from the row cache.
+def per_well_focus_tallies(ctx, cut: float | None) -> dict:
+    """``{well: FocusTally}`` against *cut*, for every well of the plate.
 
-    ``None`` is kept in place for a cell with no value, because the composite
-    counts those apart from the soft ones and cannot do that from a list they
-    have been dropped from. A well with no column contributes an empty list
-    rather than being omitted, so "measured and empty" and "never measured"
-    stay distinguishable one layer up.
+    A tally — four numbers — rather than the well's focus values: holding every
+    well's per-cell column at once to score the plate is what the bounded row
+    cache exists to prevent, and the composite reads nothing else. Each well is
+    read through ``get_rows`` and its tally remembered (``plate_scan``).
+
+    The composite's shares are shares **of the cells being analysed**; see
+    :func:`candidate_rows` for why counting every row marked every well of a
+    debris-heavy plate. A well with no focus column tallies as empty, so
+    "measured and empty" and "never measured" stay distinguishable one layer up
+    exactly as an empty value list did.
     """
-    cache = getattr(ctx.state.dataset, "cache", None) or {}
-    out: dict[str, list] = {}
-    for label, df in cache.items():
-        # The composite's shares are shares **of the cells being analysed**;
-        # see :func:`candidate_rows` for why counting every row marked every
-        # well of a debris-heavy plate.
+    from review.domain.well_composite import tally_focus
+
+    def _tally(df):
         vals = focus_values(candidate_rows(df))
         if vals is None:
-            out[label] = []
-            continue
-        out[label] = [None if v != v else float(v) for v in vals]
-    return out
+            return tally_focus((), cut)
+        return tally_focus([None if v != v else float(v) for v in vals], cut)
+
+    return every_well(ctx, "focus_tally", cut, _tally)
 
 
 def wells_needing_review(ctx) -> dict[str, str]:
@@ -448,14 +455,14 @@ def wells_needing_review(ctx) -> dict[str, str]:
     nothing about a dataset — this is the adapter that reads them.
     """
     from review.data.field_quality_cache import flagged_detail_by_well
-    from review.domain.well_composite import score_plate
+    from review.domain.well_composite import score_plate_tallies
     from review.domain.well_composite import (
         wells_needing_review as _needing,
     )
 
     params = focus_params(ctx)
     cut = None if params is None else params.focus_min
-    return _needing(score_plate(per_well_focus(ctx), cut=cut,
+    return _needing(score_plate_tallies(per_well_focus_tallies(ctx, cut), cut=cut,
                                 flagged=flagged_detail_by_well(ctx)))
 
 
@@ -481,8 +488,9 @@ def well_focus_distribution(ctx, well: str):
 
     params = focus_params(ctx)
     cut = None if params is None else params.focus_min
-    cache = getattr(ctx.state.dataset, "cache", None) or {}
-    df = cache.get(well)
+    # Read through ``get_rows``, not looked up in the cache: the cache is
+    # bounded, and an evicted well is not a well with no measurements.
+    df = get_rows(ctx, well) if well in ctx.state.dataset.well_paths else None
     if df is None or len(df) == 0:
         # NOT ``NO_CELLS``: that refusal is worded for one frame ("segment it
         # first"), and the remedy here is different -- this well has no rows

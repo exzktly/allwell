@@ -146,12 +146,15 @@ def test_an_empty_frame_reports_nothing_rather_than_raising():
 # ── the plate, through a ctx ────────────────────────────────────────────────
 
 class _Ctx:
-    """The two attributes this layer reads, and nothing else."""
+    """The attributes this layer reads, and nothing else: the wells the dataset
+    has (the plate counts read every one, held or not), their frames, and the
+    QC parameters."""
 
     def __init__(self, cache, params=None):
         self.state = type("S", (), {})()
         self.state.dataset = type("D", (), {})()
         self.state.dataset.cache = cache
+        self.state.dataset.well_paths = dict.fromkeys(cache)
         self.state.qc = type("Q", (), {})()
         self.state.qc.params = params
 
@@ -438,6 +441,7 @@ def _live_ctx(cache, params, pipeline_info=None):
     st = AppState()
     attach_feature_state(st)
     st.dataset.cache = cache
+    st.dataset.well_paths.update(dict.fromkeys(cache))
     st.dataset.pipeline_info = pipeline_info or {}
     st.dataset.fov_integrity = {k: True for k in cache}
     st.qc.params = params
@@ -618,22 +622,26 @@ def test_the_marker_does_not_wait_for_the_gate_to_be_switched_on():
 
 
 def test_the_unmeasurable_reach_the_composite_as_missing_rather_than_zero():
-    """``per_well_focus`` keeps a NaN as ``None``. Excludes the adapter that
-    drops them (the composite could then not count them) and the one that
-    coerces them to 0.0 (every plate with small nuclei reads as soft)."""
-    from review.data.focus_gate import per_well_focus
+    """A NaN is counted as unmeasurable, apart from the soft. Excludes the
+    adapter that drops them (the composite could then not count them) and the
+    one that coerces them to 0.0 (every plate with small nuclei reads as soft):
+    the first would tally 2 cells in total, the second 2 soft."""
+    from review.data.focus_gate import per_well_focus_tallies
+    from review.domain.well_composite import FocusTally
 
     ctx = _live_ctx({"A01": _frame([0.30, None, 0.02])}, QCParams())
-    assert per_well_focus(ctx) == {"A01": [0.30, None, 0.02]}
+    assert per_well_focus_tallies(ctx, 0.10) == {
+        "A01": FocusTally(total=3, unmeasurable=1, measurable=2, median=0.16, soft=1)}
 
 
 def test_a_well_with_no_column_reaches_the_composite_as_empty():
     """Not omitted: "measured and empty" and "never measured" stay
     distinguishable one layer up."""
-    from review.data.focus_gate import per_well_focus
+    from review.data.focus_gate import per_well_focus_tallies
+    from review.domain.well_composite import FocusTally
 
     plain = pd.DataFrame({"nucleus_id": [1], "area_px": [50]})
-    assert per_well_focus(_live_ctx({"A01": plain}, QCParams())) == {"A01": []}
+    assert per_well_focus_tallies(_live_ctx({"A01": plain}, QCParams()), 0.10) == {"A01": FocusTally()}
 
 
 # ── the absolute-value guard ────────────────────────────────────────────────
@@ -829,7 +837,7 @@ def test_the_well_curve_is_drawn_over_the_analysed_cells():
 
     df = _frame_with_debris(kept=[0.30, 0.31], debris=[0.01, 0.01, 0.01])
     ctx = SimpleNamespace(state=SimpleNamespace(
-        dataset=SimpleNamespace(cache={"A01": df}, pipeline_info={}),
+        dataset=SimpleNamespace(cache={"A01": df}, well_paths={"A01": None}, pipeline_info={}),
         qc=SimpleNamespace(params=_params(focus_min=0.10))))
     dist = well_focus_distribution(ctx, "A01")
     assert dist.values == (0.30, 0.31), dist.values

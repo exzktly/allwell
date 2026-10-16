@@ -47,7 +47,7 @@ from review.core.plot_orchestrator import redraw_app
 from core.safe import swallowed
 from review.core.selection_controller import invalidate_stats_cache
 from review.data.curation import apply_curation_to_cache
-from review.data.data_loading import get_rows
+from review.data.data_loading import get_rows, held_wells_note
 from review.domain.gating_state import (
     default_thresh_count_on, default_thresh_frac_on, fluor_gate_for,
     resolve_gate_key,
@@ -611,6 +611,10 @@ def cell_gating_refresh_included_count(ctx, *, pending: bool = False,
                                        failed: bool = False) -> None:
     """Repaint the tab's "Included for analysis" line from the row cache.
 
+    Counted over the held frames, which on a plate larger than the row-cache
+    budget are not every well; the line then says how many it covers
+    (``data_loading.held_wells_note``).
+
     Recomputed rather than fed from ``GatingWorker``'s own tally, for two
     reasons. The worker does not always run — a dataset whose gates are all at
     their defaults skips the pass entirely on load (see
@@ -630,8 +634,8 @@ def cell_gating_refresh_included_count(ctx, *, pending: bool = False,
     frames = list((ctx.state.dataset.cache or {}).values())
     included, total, qc_failed = inclusion_counts(frames)
     ctx.runtime.cell_gating.last_counts = (included, total, qc_failed)
-    lbl.setText(format_inclusion_counts(
-        included, total, qc_failed, pending=pending, failed=failed))
+    text = format_inclusion_counts(included, total, qc_failed, pending=pending, failed=failed)
+    lbl.setText(text + held_wells_note(ctx) if text else text)
 
     # The same population, broken down by the layer that removed each cell. One
     # aggregate number says a gate did something; it cannot say which gate.

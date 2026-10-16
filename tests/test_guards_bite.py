@@ -5206,3 +5206,34 @@ def test_spawn_group_guard_clears_a_spawn_with_both_groups(tmp_path, monkeypatch
     good = _write(tmp_path, "good_spawn.py", SPAWN_SANCTIONED[shape])
     assert _run_scan(monkeypatch, "tests.test_spawned_processes_lead_their_own_group",
                      "test_a_new_session_comes_with_a_new_windows_group", [good]) is None
+
+
+# ── the bounded row cache's readers (tests/test_row_cache_readers.py) ────────
+#
+# The attribute spelling is the one the first roster was built from; the
+# ``getattr`` spelling is the one it missed — ten readers, among them the plate
+# map's quality markers and the Spatial tab, that only that second spelling
+# reached.
+ROW_CACHE_READER_VIOLATIONS = {
+    "attribute": "def plate_total(ctx):\n    return sum(len(df) for df in ctx.state.dataset.cache.values())\n",
+    "getattr": "def plate_total(ctx):\n"
+               "    cache = getattr(ctx.state.dataset, 'cache', None) or {}\n"
+               "    return sum(len(df) for df in cache.values())\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(ROW_CACHE_READER_VIOLATIONS))
+def test_row_cache_reader_guard_catches_an_unlisted_reader(tmp_path, monkeypatch, shape):
+    path = _write(tmp_path, "reader.py", ROW_CACHE_READER_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_row_cache_readers",
+                    "test_every_reader_of_the_row_cache_is_on_the_roster", [path])
+    assert exc is not None and "reader.py::plate_total" in str(exc)
+
+
+def test_row_cache_reader_guard_clears_a_read_through_get_rows(tmp_path, monkeypatch):
+    path = _write(tmp_path, "reader.py",
+                  "def plate_total(ctx):\n"
+                  "    return sum(len(get_rows(ctx, w)) for w in ctx.state.dataset.well_paths)\n"
+                  "def other(ctx):\n    return ctx.state.stats_cache.cache\n")
+    assert _run_scan(monkeypatch, "tests.test_row_cache_readers",
+                     "test_every_reader_of_the_row_cache_is_on_the_roster", [path]) is None

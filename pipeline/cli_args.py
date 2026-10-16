@@ -538,8 +538,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help=("A nanowell visible in less than this share (0 to 1) is occluded and carries no cell count "
                          "or confluence, only its state."))
     p.add_argument("--nanowell_clipped_below", type=float, default=0.5,
-                   help=("A nanowell imaged in less than this share (0 to 1) of its disk, at the edge of the "
-                         "tiles, the array or the well, is clipped and carries no cell count or confluence."))
+                   help=("A nanowell imaged in less than this share (0 to 1) of its disk, because the edge of the "
+                         "tiles cuts it, is clipped and carries no cell count or confluence."))
 
     return p
 

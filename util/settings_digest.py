@@ -115,8 +115,7 @@ KEYED_ON: dict[str, str] = {
                                    "of a turn off, so which timepoints are addressed at all",
     "nanowell_occluded_below":     "the visibility under which a nanowell carries no count, so "
                                    "which sites have a number at all",
-    "nanowell_clipped_below":      "the same for a nanowell cut by the edge of the tiles, the "
-                                   "array or the well",
+    "nanowell_clipped_below":      "the same for a nanowell cut by the edge of the tiles",
     "nanowell_diameter_um":        "a custom format's nanowell diameter, which every site is found "
                                    "and measured with",
     "nanowell_pitch_um":           "a custom format's lattice pitch, which every site is addressed with",

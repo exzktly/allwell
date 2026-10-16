@@ -34,8 +34,8 @@ _FIELDS = (
     ("nanowell_occluded_below", "Occlusion threshold", "_nanowell_occluded_edit",
      "A nanowell visible in less than this share (0 to 1) is occluded, and carries its state but no cell count."),
     ("nanowell_clipped_below", "Clipping threshold", "_nanowell_clipped_edit",
-     "A nanowell imaged in less than this share (0 to 1) of its disk, at the edge of the tiles, the array or the "
-     "well, is clipped, and carries its state but no cell count."),
+     "A nanowell imaged in less than this share (0 to 1) of its disk, because the edge of the tiles cuts it, is "
+     "clipped, and carries its state but no cell count."),
 )
 
 

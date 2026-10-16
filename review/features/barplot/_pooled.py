@@ -44,7 +44,10 @@ from review.domain import fold_change as _fc
 BAR_CELL_MAX_POINTS = 5_000
 
 #: Above this many rows a column's cells are pooled in DuckDB, under its memory
-#: limit; at or below it, in numpy — a million values is 8 MB.
+#: limit; at or below it, in numpy. A numpy pool keeps six arrays per row (the
+#: value and its sequence, group, well, row and timepoint), measured at about
+#: 38 MiB per million rows, so the renderers hold one column's pool at a time
+#: (:func:`release_previous`).
 BAR_CELL_DUCKDB_ROWS = 1_000_000
 
 
@@ -187,6 +190,19 @@ def sampled_note(columns) -> str:
 
 #: Tag on the sampled-figure note, so a test (and a redraw) can find it.
 SAMPLED_NOTE_TAG = "_aw_bar_cells_sampled_note"
+
+
+def release_previous(columns) -> None:
+    """Close the last column's pool before the next column is read.
+
+    A column's pool is only read inside its own iteration (its mean or median),
+    so holding every column's until the figure is finished would cost the sum of
+    them: 96 columns of just under a million cells would be about 3.6 GiB of
+    numpy. :func:`finish_columns` still closes the last, and a closed pool's
+    column still says it was sampled.
+    """
+    if columns:
+        columns[-1].close()
 
 
 def finish_columns(ax, columns) -> None:

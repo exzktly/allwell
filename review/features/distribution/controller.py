@@ -522,6 +522,12 @@ def _state_every_value(parts, exact) -> None:
     _move("cmaxes", lambda e: (e.hi, e.hi))
     # The bar is vertical: same x at both ends, from every value's min to max.
     _move("cbars", lambda e: (e.lo, e.hi))
+    # ``set_segments`` leaves the axes' data limits at the sample's range, so a
+    # heavy tail's true maximum would be drawn above the top of the figure.
+    ax = next((c.axes for c in parts.values() if hasattr(c, "axes") and c.axes is not None), None)
+    if ax is not None:
+        ax.update_datalim([(i + 1, y) for i, e in enumerate(exact) if e is not None for y in (e.lo, e.hi)])
+        ax.autoscale_view()
 
 
 def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False, exact=None) -> None:

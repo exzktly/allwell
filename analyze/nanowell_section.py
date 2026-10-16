@@ -114,6 +114,9 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_geometry_cb = QComboBox(row)
         for value, label in GEOMETRY_CHOICES:
             self._nanowell_geometry_cb.addItem(label, userData=value)
+        # As the scan combo: sized to a short prefix, so the longest label does not widen the narrow sidebar.
+        self._nanowell_geometry_cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._nanowell_geometry_cb.setMinimumContentsLength(12)
         row.layout().addWidget(self._nanowell_geometry_cb)
         row.layout().addStretch(1)
         self._nanowell_field_rows.append(row.parentWidget())

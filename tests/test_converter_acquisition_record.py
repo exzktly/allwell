@@ -247,7 +247,8 @@ def rendered_well():
 
 
 def test_the_analyze_pre_flight_asks_for_the_grid_a_stage_only_record_cannot_replace(tmp_path, rendered_well):
-    from analyze.nanowell_preflight import nanowell_input_report
+    # The pre-flight ships with the Nanowells feature (profiles/full.toml); a build without it has nothing to ask.
+    nanowell_input_report = pytest.importorskip("analyze.nanowell_preflight").nanowell_input_report
 
     rendered, _record, _truth = rendered_well
     plate = _convert_rendered_well(tmp_path, rendered)

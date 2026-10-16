@@ -244,6 +244,7 @@ allwell/
 │   │   │                          --only_wells run announces itself with
 │   │   └── slurm_job.py        ← the run's Slurm job as none / queued / open, folded
 │   │                              from the run's events, and the indicator's tooltip
+│   ├── nanowell_hook.py        ← picks the section or a stand-in by the build's profile
 │   ├── nanowell_section.py     ← the Nanowells section: mode, plate format, the numeric
 │   │                              fields, Test detection, and the run validation
 │   ├── nanowell_preflight.py   ← what is checkable before a nanowell run without reading an
@@ -8958,7 +8959,15 @@ motion (`fit_plate_rigid`), and the well's origin at the reference carried throu
 stage position for every tile (otherwise the reason is recorded) and treats the stage and image axes as
 parallel. Only those wells' rows for those timepoints are rewritten.
 
-**The Analyze form.** The Nanowells section (`analyze/nanowell_section.py`, folded by default) holds the mode
+**The Analyze form.** The section ships with the removable Nanowells feature: `profiles/full.toml` lists
+`analyze/nanowell_section.py`, `nanowell_preview.py`, `nanowell_preflight.py` and `domain/nanowell_fields.py` under
+it beside Review's page, and the form reaches them only through `analyze/nanowell_hook.py`, which picks the real
+mixin or `NoNanowellSection` (builds nothing, no options, no validation, no restore) by the profile and by whether
+the module imports; `domain/fields.py` imports the field rules the same guarded way. An absent `nanowell_format`
+already means the mode off to every reader, so the stripped form's argv is the one it had before the section
+existed (`tests/test_nanowell_removable.py`). The pipeline's nanowell mode and the Datasets tools' table carrying
+stay in every build: Qt-free, sent to remote hosts, and what keeps a dataset with nanowell tables whole. The
+Nanowells section (`analyze/nanowell_section.py`, folded by default) holds the mode
 checkbox, the plate format, the cell diameter, the margin, the square's edge angle and the occlusion and
 clipping thresholds; a blank number sends no flag and the pipeline's default applies. Its option keys are
 the pipeline's destinations (`nanowell_format` and so on), so a job's `opts`, the argv, and a sidecar's

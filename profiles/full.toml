@@ -39,8 +39,15 @@ tests = ["tests/test_spatial_*.py"]
 
 [[feature]]
 name = "Nanowells"
-paths = ["review/features/nanowell", "review/persistence/nanowell.py"]
-tests = ["tests/test_nanowell_review_*.py", "tests/test_nanowell_page*.py"]
+# Review's page, and Analyze's section with its Test detection window, pre-flight and field rules. The form
+# reaches the section only through analyze/nanowell_hook.py, which stands in nothing when these are gone. The
+# pipeline's nanowell mode (pipeline/nanowell_*.py, tile_*.py) and the Datasets tools' table carrying stay in
+# every build: they are Qt-free, run on remote hosts from the upload manifest, and keep a dataset that holds
+# nanowell tables whole when a build without the page copies it.
+paths = ["review/features/nanowell", "review/persistence/nanowell.py",
+         "analyze/nanowell_section.py", "analyze/nanowell_preview.py", "analyze/nanowell_preflight.py",
+         "analyze/domain/nanowell_fields.py"]
+tests = ["tests/test_nanowell_review_*.py", "tests/test_nanowell_page*.py", "tests/test_nanowell_form*.py"]
 
 [[feature]]
 name = "smFISH"

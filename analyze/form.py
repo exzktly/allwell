@@ -32,7 +32,7 @@ from analyze.domain.fields import (  # noqa: F401 — re-exported for analyze.ta
     _numeric_option_errors,
 )
 from analyze.pinfo import AnalyzePipelineInfoMixin
-from analyze.nanowell_section import AnalyzeNanowellSectionMixin
+from analyze.nanowell_hook import nanowell_section_mixin
 from analyze.qc_section import AnalyzeQCSectionMixin
 from analyze.schema_section import AnalyzeSchemaSectionMixin
 from analyze.seg_params import AnalyzeSegParamsMixin
@@ -53,6 +53,10 @@ from pipeline.capacity import ALLOW_LOW_DISK_HELP
 # ---------------------------------------------------------------------------
 from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP  # noqa: F401 (re-export)
 from util.well_token import canonical_well_label, is_valid_well_name
+
+
+#: The nanowell section, or a stand-in that is nothing, by the build's profile (``analyze.nanowell_hook``).
+AnalyzeNanowellSectionMixin = nanowell_section_mixin()
 
 
 class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,

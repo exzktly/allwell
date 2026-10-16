@@ -248,6 +248,38 @@ def apply_fluor_gating(
     return well_included
 
 
+def apply_gating_to_cache(ctx, label: str | None = None) -> None:
+    """Re-apply the last gating pass to cached frame(s) — the gating projector.
+
+    Gating used to be written onto the cached frames once, by ``GatingWorker``,
+    and never again. That was sound while the row cache held every well for the
+    whole session. It is bounded now (``review/data/row_cache.py``), so a well
+    gated by the pass can be evicted and read back from disk — and without this
+    it came back with the CSV's ``Included`` and no ``Gate_Pass`` / ``Gate_On``,
+    so every plot counted its ungated cells with nothing to say so.
+
+    Registered as a cache projector *before* curation, matching the pass: the
+    worker writes these columns and then re-applies the user's per-cell
+    overrides on top, and the projector registry runs curation next.
+
+    Applies ``ctx.state.cell_gating.applied_gating`` — the configuration the
+    last pass applied — rather than the live settings, so a reloaded well agrees
+    with the wells the pass wrote. ``None`` (no pass on this dataset) writes
+    nothing, as no pass did. No ``rows_version`` bump: on the load path the
+    frame is new and has no memoized aggregate (``cache_projectors`` says why).
+    """
+    config = getattr(getattr(ctx.state, "cell_gating", None), "applied_gating", None)
+    if not config:
+        return
+    cache = ctx.state.dataset.cache
+    labels = [label] if label is not None else list(cache.keys())
+    for lbl in labels:
+        frame = cache.get(lbl)
+        if frame is None or frame.empty:
+            continue
+        apply_fluor_gating(frame, **config)
+
+
 # ── ThreshFracOn optimizer numeric core ──────────────────────────────────────
 #
 # The sweep primitives and the relative-gap objective live in

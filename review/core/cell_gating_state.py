@@ -71,3 +71,12 @@ class CellGatingState:
     use_scatter_thresh: bool = False
     gating_choices: set[str] | None = None
     thresh_choices: set[str] | None = None
+    #: The configuration the last gating pass applied (``GatingWorker``), as the
+    #: keyword arguments of ``gating_compute.apply_fluor_gating``; ``None`` until a
+    #: pass has run on this dataset. The row cache is bounded, so a well can be
+    #: evicted after the pass wrote its inclusion columns and read again from
+    #: disk — the gating projector re-applies exactly this to it, which is what
+    #: keeps a reloaded well from silently counting every cell. A snapshot rather
+    #: than the live settings, so a reloaded well agrees with the wells the pass
+    #: wrote even while an edit's own pass is still pending.
+    applied_gating: dict | None = None

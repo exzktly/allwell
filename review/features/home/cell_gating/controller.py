@@ -91,6 +91,28 @@ _THRESH_EDIT_W = 90
 logger = logging.getLogger("review.gating_worker")
 
 
+def gating_pass_config(ctx) -> dict:
+    """What a gating pass applies, as ``apply_fluor_gating``'s keyword arguments."""
+    return {
+        # Cell-area gating is retired here — it now lives in the QC layer
+        # (QC_Pass at the df_included_mask chokepoint). This pass gates on
+        # fluorescence only; QC composes with its Included result downstream.
+        "fluor_gates": get_all_fluor_gates(ctx),
+        # "Use scatter gates" mode replaces the per-channel FluorGating: the
+        # filtering gate selected on the Cell Gating tab — a single named gate,
+        # or the union of all gates — defines the Included population instead of
+        # the intensity floors.
+        "use_scatter": bool(ctx.state.cell_gating.use_scatter_gates),
+        "gating_gates": cell_gating_selected_scatter_gates(ctx, "gating"),
+        # Thresholding has its OWN gate selection (independent of the gating
+        # layer): cells inside its gate(s) define the "on" population for
+        # fraction-on (Gate_On column).
+        "use_thresh": bool(ctx.state.cell_gating.use_scatter_thresh),
+        "thresh_gates": cell_gating_selected_scatter_gates(ctx, "thresh"),
+        "ratios": ctx.state.channel.ratio_index or {},
+    }
+
+
 class GatingWorker(QThread):
     """Apply cell-gating thresholds to every cached well row off the GUI thread.
 
@@ -127,22 +149,12 @@ class GatingWorker(QThread):
 
     def _run_inner(self) -> None:
         debug = _debug_flags.cell_gating_debug_enabled()
-        # Cell-area gating is retired here — it now lives in the QC layer
-        # (QC_Pass at the df_included_mask chokepoint). This worker gates on
-        # fluorescence only; QC composes with its Included result downstream.
-        fluor_gates = get_all_fluor_gates(self._ctx)
-        # "Use scatter gates" mode replaces the per-channel FluorGating: the
-        # filtering gate selected on the Cell Gating tab — a single named gate,
-        # or the union of all gates — defines the Included population instead of
-        # the intensity floors.
-        use_scatter = bool(self._ctx.state.cell_gating.use_scatter_gates)
-        # Thresholding has its OWN gate selection (independent of the gating
-        # layer): cells inside its gate(s) define the "on" population for
-        # fraction-on (Gate_On column).
-        use_thresh = bool(self._ctx.state.cell_gating.use_scatter_thresh)
-        gating_gates = cell_gating_selected_scatter_gates(self._ctx, "gating")
-        thresh_gates = cell_gating_selected_scatter_gates(self._ctx, "thresh")
-        ratios = self._ctx.state.channel.ratio_index or {}
+        config = gating_pass_config(self._ctx)
+        fluor_gates = config["fluor_gates"]
+        # Recorded before the first well is written, so a well evicted and
+        # re-read at any point during or after this pass is gated the same way
+        # by the projector (``gating_compute.apply_gating_to_cache``).
+        self._ctx.state.cell_gating.applied_gating = config
         labels = list(self._ctx.state.dataset.well_paths)
         total = len(labels)
 
@@ -177,15 +189,7 @@ class GatingWorker(QThread):
             # (audit A3) — it writes Included / Gate_Pass / Gate_On and returns
             # the included count. Pure (df + gate config in), so it's unit-tested
             # without a GUI fixture.
-            well_included = apply_fluor_gating(
-                df,
-                fluor_gates=fluor_gates,
-                use_scatter=use_scatter,
-                gating_gates=gating_gates,
-                use_thresh=use_thresh,
-                thresh_gates=thresh_gates,
-                ratios=ratios,
-            )
+            well_included = apply_fluor_gating(df, **config)
 
             # This well's inclusion columns just changed, so any memoized
             # aggregation of it must decline. Bumped per well rather than once

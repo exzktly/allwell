@@ -242,6 +242,9 @@ def _reset_gating_state(ctx) -> None:
     cg.use_scatter_thresh = False
     cg.gating_choices = None
     cg.thresh_choices = None
+    # The previous dataset's pass; the new one's projector must apply nothing
+    # until a pass runs on it.
+    cg.applied_gating = None
     # The gate *values* leak the same way as the scatter-gate config: the
     # cell_gating loader merges them in additively and early-returns for a
     # dataset with no gating block, so a stale fluor gate / ThreshFracOn would

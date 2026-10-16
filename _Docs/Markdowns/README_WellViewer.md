@@ -406,8 +406,9 @@ A common end-to-end run, from raw images to plots, takes five clicks:
    nuclear/fluorescent/phase role per channel). Because the filled-in fields
    otherwise look exactly like ones you typed, two places say what happened: the
    status line under the run controls names the channels it found and which one
-   it gave the segmentation role, and a readout under the Filename Schema
-   control says what layout was detected and **how many of the sampled filenames
+   it gave the segmentation role, and a readout at the top of the Filename
+   Schema section, directly under the **Detect from filenames** button, says
+   what layout was detected and **how many of the sampled filenames
    actually match it**. When some do not, it names them and says why — for
    example *"1 of the 25 filenames sampled does not fit this layout:
    Exp01_GFP_ZZ9_f0_t0 — position 3 is 'ZZ9', not a well"*. A name whose **well**
@@ -418,10 +419,13 @@ A common end-to-end run, from raw images to plots, takes five clicks:
    hundred names, not the whole plate. Channels are listed in filename order,
    which is usually alphabetical rather than the order they were acquired in.
 
-   **Detect from filenames** re-runs that scan on demand. Use it after typing
+   **Detect from filenames**, the first row of the Filename Schema section,
+   re-runs that scan on demand and fills the separator, position and schema
+   rows beneath it. Use it after typing
    over the guess, after fixing the separator by hand, or after pointing the
    input field at a different folder without going through the browser. If
-   nothing can be detected it says so in amber and leaves your settings alone —
+   nothing can be detected it says so in amber and leaves the settings below
+   it alone —
    it never overwrites a schema with a worse guess. The same button is on the
    Datasets pane's **Zip Loose Folder** page, which asks the same question about
    the same filenames; that page needs only the well position, so it will accept
@@ -450,7 +454,10 @@ editable directly; the **Position** dropdowns above it are the same value seen
 the other way round, and the two follow each other — pick a field and the
 string rewrites, type a string and the dropdowns reset. When you pick an input
 folder All-Well guesses this schema (and the separator) from a sample of the
-filenames and fills it in — a starting point you can correct, not a lock.
+filenames and fills it in — a starting point you can correct, not a lock. The
+**Detect from filenames** button above the separator asks for that guess again;
+the button, the separator box, the dropdowns and the schema string all start at
+one left edge.
 
 The Datasets pane's [Zip Loose Folder](#zip-loose-folder) tool asks for the
 schema with this same control, since the archives it builds are what Analyze

@@ -163,3 +163,108 @@ def test_a_shortfall_reaches_the_run_dashboard_too(qapp, tmp_path):
     tab._schema_picker.detectButton().click()
 
     assert seen and seen[-1].get("shortfall") == 1
+
+
+# ── where the button sits ────────────────────────────────────────────────────
+# Measured on the real hosts, laid out and shown, because the order is the
+# behaviour: a layout index can say the button was added first while a host's
+# own chrome puts it somewhere else, and only geometry says where it is drawn.
+
+def _origin_in(widget, ancestor):
+    from PySide6.QtCore import QPoint
+    return widget.mapTo(ancestor, QPoint(0, 0))
+
+
+def _shown(qapp, widget, width):
+    widget.resize(width, 1400)
+    widget.show()
+    for _ in range(5):
+        qapp.processEvents()
+
+
+def _assert_detect_heads_the_picker(picker):
+    """The button is above every row it fills and starts where they start."""
+    button = picker.detectButton()
+    assert button is not None and button.isVisibleTo(picker)
+    top = _origin_in(button, picker)
+    rows = [picker.separator_edit, *picker.combos, picker.schema_edit]
+    below = [_origin_in(w, picker).y() for w in rows]
+    assert top.y() < min(below), (
+        f"Detect is drawn at y={top.y()}, not above the schema rows at {below}")
+    field_x = _origin_in(picker.schema_edit, picker).x()
+    assert top.x() == field_x, (
+        f"Detect starts at x={top.x()}, the schema field at x={field_x}: "
+        f"the button and the rows it fills should share one left edge")
+
+
+def test_detect_is_the_first_row_of_the_analyze_schema_section(qapp, tmp_path):
+    """Excludes the button at the foot of the section, where it sat beneath
+    every row it rewrites — and where its own refusal had to say "above"."""
+    _plate(tmp_path / "ds" / "in")
+    tab = _tab()
+    _shown(qapp, tab, 900)
+    picker = tab._schema_picker
+    _assert_detect_heads_the_picker(picker)
+
+    # Still the button that works from up there.
+    picker.setSchema("well:channel:ignore:ignore:ignore")
+    tab._input_edit.setText(str(tmp_path / "ds"))
+    picker.detectButton().click()
+    assert picker.schema() == "experiment:channel:well:fov:timepoint"
+
+
+def test_detect_is_the_first_row_of_the_zip_loose_folder_page(qapp, tmp_path):
+    """The wide host: the plain row factory, on a full-width page.
+
+    Excludes, besides the button at the foot, the schema string that floated
+    to the middle of a wide page once its width cap bound — ~440px right of
+    the button and every other row, so "aligned with the schema field" had no
+    single edge to mean.
+    """
+    from datasets.import_loose.view import ImportLoosePage
+
+    src = tmp_path / "loose"
+    src.mkdir()
+    for w in ("A01", "A02"):
+        for c in ("DAPI", "GFP"):
+            (src / f"exp_{c}_{w}_f0_t0.tif").write_bytes(b"")
+    page = ImportLoosePage()
+    _shown(qapp, page, 1440)
+    picker = page._schema_picker
+    _assert_detect_heads_the_picker(picker)
+    # Anchored left by a spacer, not by an alignment flag, which would also
+    # shrink the field to its minimum: it still grows to its cap here.
+    from widgets.schema_picker import _SCHEMA_EDIT_MAX_W
+    assert picker.schema_edit.width() == _SCHEMA_EDIT_MAX_W, picker.schema_edit.width()
+
+    picker.setSchema("well:channel:ignore:ignore:ignore")
+    page._src_field.set_path(str(src))
+    picker.detectButton().click()
+    assert picker.schema() == "experiment:channel:well:fov:timepoint"
+
+
+def test_a_refusal_points_at_the_settings_where_they_are(qapp, tmp_path):
+    """The refusal names a direction; it must be the direction the rows are in.
+
+    The readout sits under the button, so every setting it leaves alone is
+    beneath it — a refusal saying "above" pointed at the section's heading.
+    """
+    src = tmp_path / "ds" / "in"
+    src.mkdir(parents=True)
+    for i in range(6):
+        (src / f"scan{i}.tif").write_bytes(b"")
+    tab = _tab()
+    _shown(qapp, tab, 900)
+    picker = tab._schema_picker
+    tab._input_edit.setText(str(tmp_path / "ds"))
+    picker.detectButton().click()
+    for _ in range(5):
+        qapp.processEvents()
+
+    note = picker.detectionNoteText()
+    assert "your settings below are unchanged" in note, note
+    note_lbl = picker._detect_note_lbl
+    assert note_lbl.isVisibleTo(picker)
+    note_bottom = _origin_in(note_lbl, picker).y() + note_lbl.height()
+    assert note_bottom <= _origin_in(picker.separator_edit, picker).y(), (
+        "the refusal says 'below', so the settings must be drawn below it")

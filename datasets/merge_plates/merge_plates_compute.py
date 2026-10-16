@@ -30,6 +30,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+from util.acquisition_record import AcquisitionRecordError, merge_plate_records, read_record
 from util.timepoint import parse_hours, sort_key as tp_sort_key
 from util.well_token import canonical_well_label
 from domain.image_identity import PipelineSchema, load_schema
@@ -505,6 +506,12 @@ def build_plate_merge_plan(
     nanowells = _merge_nanowell_blocks(merged_info, info1, info2, ds1, ds2)
     if nanowells:
         blocks_warning = f"{blocks_warning} {nanowells}" if blocks_warning else nanowells
+    # The acquisition records are merged at execute; anything that refuses them refuses the plan, so the preview
+    # never shows as fine a merge that then fails (two plates' clocks for one timepoint, say; roll-up review X18).
+    try:
+        merge_plate_records(read_record(ds1.root), read_record(ds2.root), resolved_map)
+    except AcquisitionRecordError as error:
+        raise MergePlatesError(str(error)) from error
 
     return PlateMergePlan(
         ds1=ds1, ds2=ds2, dest=dest,

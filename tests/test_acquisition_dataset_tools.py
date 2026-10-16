@@ -1,5 +1,7 @@
 """Acquisition metadata follows actual Datasets-tool output identities."""
 
+import pytest
+
 from datasets.subset.apply import execute_plan
 from datasets.subset.subset_compute import SubsetFilter, build_subset_plan
 from datasets.validate.validate_compute import build_report
@@ -56,14 +58,15 @@ def test_merge_plates_remaps_record_wells_and_refuses_conflicting_starts(tmp_pat
     merge(plan)
     assert {tile['well'] for tile in read_record(target)['tiles']} == {'A01', 'B02', 'C01', 'D02'}
     assert read_record(target)['source_files'] == ['dataset1/source.czi', 'dataset2/source.czi']
+    refused = tmp_path / 'refused'
+    stale = build_plate_merge_plan(first, second, refused, well_map={'A01': 'C01', 'B02': 'D02'})
     record['timepoints']['0h']['started_at'] = '2024-06-12T09:00:00'
     write_record(second, record)
-    refused = tmp_path / 'refused'
-    plan = build_plate_merge_plan(first, second, refused, well_map={'A01': 'C01', 'B02': 'D02'})
-    error = None
-    try:
-        merge(plan)
-    except MergePlatesError as caught:
-        error = caught
-    assert error is not None and '0h' in str(error) and 'started_at' in str(error)
+    # Refused when the plan is built, so the preview never shows the merge as fine (roll-up review X18) ...
+    with pytest.raises(MergePlatesError, match="started_at") as at_plan:
+        build_plate_merge_plan(first, second, refused, well_map={'A01': 'C01', 'B02': 'D02'})
+    assert '0h' in str(at_plan.value)
+    # ... and still at execute, for a plan built before a record changed under it.
+    with pytest.raises(MergePlatesError, match="started_at"):
+        merge(stale)
     assert not refused.exists()

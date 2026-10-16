@@ -6709,7 +6709,10 @@ It refuses when the two datasets weren't analysed the same way (same checks
 Concatenate applies), when a remap target isn't a valid 96-well position, when a
 remap would push a well past the edge of the plate, or when either dataset
 spells one well two ways (see
-[Concatenate datasets](#concatenate-datasets)). Timepoints
+[Concatenate datasets](#concatenate-datasets)), or when their acquisition
+records cannot be merged — only one dataset has one, or the two disagree about a
+timepoint's start or calibration. All of these are found when you choose the
+datasets, before anything is written. Timepoints
 differing between the two plates is only a warning, not a refusal — the
 merged plate is legitimately ragged in that case, and plots will show gaps
 for the combinations one plate doesn't have.
